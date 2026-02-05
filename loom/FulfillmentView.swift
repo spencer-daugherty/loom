@@ -49,6 +49,7 @@ struct PassionsSectionView: View {
                     .foregroundColor(.black)
                 Text("Passions")
                     .font(.headline)
+                    .foregroundColor(.black)
             }
             
             List {
@@ -187,6 +188,9 @@ struct FulfillmentView: View {
                     }
                 }
             }
+            .onChange(of: focusedField) { _, new in
+                commitInlineExcluding(new)
+            }
         }
     }
 
@@ -209,6 +213,32 @@ struct FulfillmentView: View {
             isAddingFocus = false
         }
         if isAddingResource {
+            let trimmed = newResourceText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { addResource(text: trimmed, record: record) }
+            newResourceText = ""
+            isAddingResource = false
+        }
+    }
+    
+    private func commitInlineExcluding(_ keepOpen: Field?) {
+        guard let openID = expandedCardID,
+              let cat = categories.first(where: { $0.id == openID })
+        else { return }
+        let record = getOrCreateFulfillment(category: cat.title)
+
+        if isAddingRole && keepOpen != .role {
+            let trimmed = newRoleText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { addRole(text: trimmed, record: record) }
+            newRoleText = ""
+            isAddingRole = false
+        }
+        if isAddingFocus && keepOpen != .focus {
+            let trimmed = newFocusText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { addFocus(text: trimmed, record: record) }
+            newFocusText = ""
+            isAddingFocus = false
+        }
+        if isAddingResource && keepOpen != .resource {
             let trimmed = newResourceText.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty { addResource(text: trimmed, record: record) }
             newResourceText = ""
@@ -250,7 +280,9 @@ struct FulfillmentView: View {
 
             if isExpanded {
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("Vision").font(.headline)
+                    Text("Vision")
+                        .font(.headline)
+                        .foregroundColor(.black)
                     TextField(
                         "Fit, strong, flexible and CALM",
                         text: Binding(
@@ -261,7 +293,9 @@ struct FulfillmentView: View {
                     .textFieldStyle(.roundedBorder)
                     .focused($focusedField, equals: .vision)
 
-                    Text("Purpose").font(.headline)
+                    Text("Purpose")
+                        .font(.headline)
+                        .foregroundColor(.black)
                     TextEditor(
                         text: Binding(
                             get: { record.category_purpose },
@@ -272,7 +306,9 @@ struct FulfillmentView: View {
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.4)))
                     .focused($focusedField, equals: .purpose)
 
-                    Text("Roles").font(.headline)
+                    Text("Roles")
+                        .font(.headline)
+                        .foregroundColor(.black)
                     List {
                         ForEach(getRoles(for: record), id: \.id) { r in
                             Text(r.role)
@@ -288,6 +324,7 @@ struct FulfillmentView: View {
                             HStack {
                                 TextField("H2O lover", text: $newRoleText)
                                     .submitLabel(.done)
+                                    .focused($focusedField, equals: .role)
                                     .onSubmit {
                                         addRole(text: newRoleText, record: record)
                                         newRoleText = ""
@@ -302,7 +339,7 @@ struct FulfillmentView: View {
                             HStack {
                                 Button("Add Role") {
                                     withAnimation { isAddingRole = true }
-                                    focusedField = .role
+                                    DispatchQueue.main.async { focusedField = .role }
                                 }
                                 .foregroundColor(.blue)
                                 Spacer()
@@ -316,7 +353,9 @@ struct FulfillmentView: View {
                     .environment(\.editMode, .constant(.active))
                     .frame(height: CGFloat(getRoles(for: record).count + (isAddingRole ? 1 : 1)) * estimatedListRowHeight())
 
-                    Text("Three-to-Thrive").font(.headline)
+                    Text("Three-to-Thrive")
+                        .font(.headline)
+                        .foregroundColor(.black)
                     List {
                         ForEach(getFoci(for: record), id: \.id) { f in
                             Text(f.activity)
@@ -332,6 +371,7 @@ struct FulfillmentView: View {
                             HStack {
                                 TextField("yoga classes", text: $newFocusText)
                                     .submitLabel(.done)
+                                    .focused($focusedField, equals: .focus)
                                     .onSubmit {
                                         addFocus(text: newFocusText, record: record)
                                         newFocusText = ""
@@ -346,7 +386,7 @@ struct FulfillmentView: View {
                             HStack {
                                 Button("Add Focus") {
                                     withAnimation { isAddingFocus = true }
-                                    focusedField = .focus
+                                    DispatchQueue.main.async { focusedField = .focus }
                                 }
                                 .foregroundColor(.blue)
                                 Spacer()
@@ -360,7 +400,9 @@ struct FulfillmentView: View {
                     .environment(\.editMode, .constant(.active))
                     .frame(height: CGFloat(getFoci(for: record).count + (isAddingFocus ? 1 : 1)) * estimatedListRowHeight())
 
-                    Text("Resources").font(.headline)
+                    Text("Resources")
+                        .font(.headline)
+                        .foregroundColor(.black)
                     List {
                         ForEach(getResources(for: record), id: \.id) { res in
                             Text(res.resource)
@@ -376,6 +418,7 @@ struct FulfillmentView: View {
                             HStack {
                                 TextField("great gym nearby", text: $newResourceText)
                                     .submitLabel(.done)
+                                    .focused($focusedField, equals: .resource)
                                     .onSubmit {
                                         addResource(text: newResourceText, record: record)
                                         newResourceText = ""
@@ -390,7 +433,7 @@ struct FulfillmentView: View {
                             HStack {
                                 Button("Add Resource") {
                                     withAnimation { isAddingResource = true }
-                                    focusedField = .resource
+                                    DispatchQueue.main.async { focusedField = .resource }
                                 }
                                 .foregroundColor(.blue)
                                 Spacer()
