@@ -1,32 +1,34 @@
-//
-//  loomApp.swift
-//  loom
-//
-//  Created by Spencer Daugherty on 4/28/25.
-//
-
 import SwiftUI
 import SwiftData
 
 @main
 struct loomApp: App {
-    var sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            Item.self,
-        ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-
-        do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
-        } catch {
-            fatalError("Could not create ModelContainer: \(error)")
-        }
-    }()
-
     var body: some Scene {
         WindowGroup {
             ContentView()
         }
-        .modelContainer(sharedModelContainer)
+        // Now register ALL of your @Model types:
+        .modelContainer(
+            for: [
+                DrivingForce.self,
+                DrivingForceArchive.self,
+                Passion.self,
+                PassionArchive.self,
+                PassionFulfillmentJoin.self,
+                PassionFulfillmentJoinArchive.self,
+                Fulfillment.self,
+                FulfillmentArchive.self,
+                FulfillmentRoles.self,
+                FulfillmentRolesArchive.self,
+                FulfillmentFocus.self,
+                FulfillmentFocusArchive.self,
+                FulfillmentResources.self,
+                FulfillmentResourcesArchive.self,
+                Outcomes.self,
+                OutcomesArchive.self,
+                OutcomesMeasure.self,
+                OutcomesMeasureArchive.self,
+            ]
+        )
     }
 }

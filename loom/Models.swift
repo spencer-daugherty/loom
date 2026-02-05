@@ -26,22 +26,24 @@ final class DrivingForceArchive {
   @Attribute(.unique) var id: UUID
   var visionSnapshot: String
   var purposeSnapshot: String
+  var updatedAt: Date
   var archivedAt: Date
 
   init(
     id: UUID = .init(),
     visionSnapshot: String = "",
     purposeSnapshot: String = "",
+    updatedAt: Date = .init(),
     archivedAt: Date = .init()
   ) {
-    self.id               = id
-    self.visionSnapshot   = visionSnapshot
-    self.purposeSnapshot  = purposeSnapshot
-    self.archivedAt       = archivedAt
+    self.id              = id
+    self.visionSnapshot  = visionSnapshot
+    self.purposeSnapshot = purposeSnapshot
+    self.updatedAt       = updatedAt
+    self.archivedAt      = archivedAt
   }
 }
 
-// ——— NEW: Passions model ———
 @Model
 final class Passion {
   @Attribute(.unique) var passion_id: UUID
@@ -63,13 +65,13 @@ final class Passion {
   }
 }
 
-// ——— NEW: PassionArchive model ———
 @Model
 final class PassionArchive {
   @Attribute(.unique) var id: UUID
   var date: Date
   var emotion: String
   var passionSnapshot: String
+  var updatedAt: Date
   var archivedAt: Date
 
   init(
@@ -77,12 +79,393 @@ final class PassionArchive {
     date: Date,
     emotion: String,
     passionSnapshot: String,
+    updatedAt: Date = .init(),
     archivedAt: Date = .init()
   ) {
     self.id              = id
     self.date            = date
     self.emotion         = emotion
     self.passionSnapshot = passionSnapshot
+    self.updatedAt       = updatedAt
     self.archivedAt      = archivedAt
   }
+}
+
+@Model
+final class PassionFulfillmentJoin {
+  @Attribute(.unique) var id: UUID
+  var passion_id: UUID
+  var category_id: UUID
+
+  init(
+    id: UUID = UUID(),          // ← default here
+    passion_id: UUID,
+    category_id: UUID
+  ) {
+    self.id          = id
+    self.passion_id  = passion_id
+    self.category_id = category_id
+  }
+}
+
+@Model
+final class PassionFulfillmentJoinArchive {
+  @Attribute(.unique) var id: UUID
+  var passion_id: UUID
+  var category_id: UUID
+  var updatedAt: Date
+  var archivedAt: Date
+
+  init(
+    id: UUID = .init(),
+    passion_id: UUID,
+    category_id: UUID,
+    updatedAt: Date = .init(),
+    archivedAt: Date = .init()
+  ) {
+    self.id = id
+    self.passion_id = passion_id
+    self.category_id = category_id
+    self.updatedAt = updatedAt
+    self.archivedAt = archivedAt
+  }
+}
+
+@Model
+final class Fulfillment {
+  @Attribute(.unique) var category_id: UUID
+  var updatedAt: Date
+  var category: String
+  var category_identitiy: String
+  var category_vision: String
+  var category_purpose: String
+
+  init(
+    category_id: UUID = .init(),
+    updatedAt: Date = .init(),
+    category: String = "",
+    category_identitiy: String = "",
+    category_vision: String = "",
+    category_purpose: String = ""
+  ) {
+    self.category_id = category_id
+    self.updatedAt = updatedAt
+    self.category = category
+    self.category_identitiy = category_identitiy
+    self.category_vision = category_vision
+    self.category_purpose = category_purpose
+  }
+}
+
+@Model
+final class FulfillmentArchive {
+  @Attribute(.unique) var id: UUID
+  var category_id: UUID
+  var updatedAt: Date
+  var category: String
+  var category_identitiy: String
+  var category_vision: String
+  var category_purpose: String
+  var archivedAt: Date
+
+  init(
+    id: UUID = .init(),
+    category_id: UUID,
+    updatedAt: Date = .init(),
+    category: String = "",
+    category_identitiy: String = "",
+    category_vision: String = "",
+    category_purpose: String = "",
+    archivedAt: Date = .init()
+  ) {
+    self.id = id
+    self.category_id = category_id
+    self.updatedAt = updatedAt
+    self.category = category
+    self.category_identitiy = category_identitiy
+    self.category_vision = category_vision
+    self.category_purpose = category_purpose
+    self.archivedAt = archivedAt
+  }
+}
+
+@Model
+final class FulfillmentRoles {
+  @Attribute(.unique) var id: UUID
+  var category_id: UUID
+  var updatedAt: Date
+  var role: String
+  var rank: Int
+
+  init(
+    id: UUID = .init(),
+    category_id: UUID,
+    updatedAt: Date = .init(),
+    role: String = "",
+    rank: Int = 0
+  ) {
+    self.id = id
+    self.category_id = category_id
+    self.updatedAt = updatedAt
+    self.role = role
+    self.rank = rank
+  }
+}
+
+@Model
+final class FulfillmentRolesArchive {
+  @Attribute(.unique) var id: UUID
+  var category_id: UUID
+  var updatedAt: Date
+  var role: String
+  var rank: Int
+  var archivedAt: Date
+
+  init(
+    id: UUID = .init(),
+    category_id: UUID,
+    updatedAt: Date = .init(),
+    role: String = "",
+    rank: Int = 0,
+    archivedAt: Date = .init()
+  ) {
+    self.id = id
+    self.category_id = category_id
+    self.updatedAt = updatedAt
+    self.role = role
+    self.rank = rank
+    self.archivedAt = archivedAt
+  }
+}
+
+@Model
+final class FulfillmentFocus {
+  @Attribute(.unique) var id: UUID
+  var category_id: UUID
+  var updatedAt: Date
+  var activity: String
+  var rank: Int
+
+  init(
+    id: UUID = .init(),
+    category_id: UUID,
+    updatedAt: Date = .init(),
+    activity: String = "",
+    rank: Int = 0
+  ) {
+    self.id = id
+    self.category_id = category_id
+    self.updatedAt = updatedAt
+    self.activity = activity
+    self.rank = rank
+  }
+}
+
+@Model
+final class FulfillmentFocusArchive {
+  @Attribute(.unique) var id: UUID
+  var category_id: UUID
+  var updatedAt: Date
+  var activity: String
+  var rank: Int
+  var archivedAt: Date
+
+  init(
+    id: UUID = .init(),
+    category_id: UUID,
+    updatedAt: Date = .init(),
+    activity: String = "",
+    rank: Int = 0,
+    archivedAt: Date = .init()
+  ) {
+    self.id = id
+    self.category_id = category_id
+    self.updatedAt = updatedAt
+    self.activity = activity
+    self.rank = rank
+    self.archivedAt = archivedAt
+  }
+}
+
+@Model
+final class FulfillmentResources {
+  @Attribute(.unique) var id: UUID
+  var category_id: UUID
+  var updatedAt: Date
+  var resource: String
+  var rank: Int
+
+  init(
+    id: UUID = .init(),
+    category_id: UUID,
+    updatedAt: Date = .init(),
+    resource: String = "",
+    rank: Int = 0
+  ) {
+    self.id = id
+    self.category_id = category_id
+    self.updatedAt = updatedAt
+    self.resource = resource
+    self.rank = rank
+  }
+}
+
+@Model
+final class FulfillmentResourcesArchive {
+  @Attribute(.unique) var id: UUID
+  var category_id: UUID
+  var updatedAt: Date
+  var resource: String
+  var rank: Int
+  var archivedAt: Date
+
+  init(
+    id: UUID = .init(),
+    category_id: UUID,
+    updatedAt: Date = .init(),
+    resource: String = "",
+    rank: Int = 0,
+    archivedAt: Date = .init()
+  ) {
+    self.id = id
+    self.category_id = category_id
+    self.updatedAt = updatedAt
+    self.resource = resource
+    self.rank = rank
+    self.archivedAt = archivedAt
+  }
+}
+
+@Model
+final class Outcomes {
+    @Attribute(.unique) var outcome_id: UUID
+    var category: String
+    var updatedAt: Date
+    var outcome: String
+    var reasons: String
+    var start: Date
+    var end: Date
+    var rank: Int
+    var format: String?
+
+    init(
+        outcome_id: UUID = .init(),
+        category: String,
+        updatedAt: Date = .now,
+        outcome: String,
+        reasons: String,
+        start: Date,
+        end: Date,
+        rank: Int,
+        format: String? = nil
+    ) {
+        self.outcome_id = outcome_id
+        self.category = category
+        self.updatedAt = updatedAt
+        self.outcome = outcome
+        self.reasons = reasons
+        self.start = start
+        self.end = end
+        self.rank = rank
+        self.format = format
+    }
+}
+
+@Model
+final class OutcomesArchive {
+    @Attribute(.unique) var outcome_id: UUID
+    var category: String
+    var updatedAt: Date
+    var outcome: String
+    var reasons: String
+    var start: Date
+    var end: Date
+    var rank: Int
+    var archivedAt: Date
+    var format: String?
+
+    init(
+        outcome_id: UUID,
+        category: String,
+        updatedAt: Date,
+        outcome: String,
+        reasons: String,
+        start: Date,
+        end: Date,
+        rank: Int,
+        archivedAt: Date = .now,
+        format: String? = nil
+    ) {
+        self.outcome_id = outcome_id
+        self.category = category
+        self.updatedAt = updatedAt
+        self.outcome = outcome
+        self.reasons = reasons
+        self.start = start
+        self.end = end
+        self.rank = rank
+        self.archivedAt = archivedAt
+        self.format = format
+    }
+}
+
+@Model
+final class OutcomesMeasure {
+    @Attribute(.unique) var outcome_id: UUID
+    var measure: Double
+    var measuredAt: Date
+    var measure_amt: Double
+    var measure_updated: Date
+    var direction: String?
+    var format: String?
+
+    init(
+        outcome_id: UUID,
+        measure: Double,
+        measuredAt: Date = .now,
+        measure_amt: Double,
+        measure_updated: Date = .now,
+        direction: String? = nil,
+        format: String? = nil
+    ) {
+        self.outcome_id = outcome_id
+        self.measure = measure
+        self.measuredAt = measuredAt
+        self.measure_amt = measure_amt
+        self.measure_updated = measure_updated
+        self.direction = direction
+        self.format = format
+    }
+}
+
+@Model
+final class OutcomesMeasureArchive {
+    @Attribute(.unique) var outcome_id: UUID
+    var measure: Double
+    var measuredAt: Date
+    var measure_amt: Double
+    var measure_updated: Date
+    var archivedAt: Date
+    var direction: String?
+    var format: String?
+
+    init(
+        outcome_id: UUID,
+        measure: Double,
+        measuredAt: Date,
+        measure_amt: Double,
+        measure_updated: Date,
+        archivedAt: Date = .now,
+        direction: String? = nil,
+        format: String? = nil
+    ) {
+        self.outcome_id = outcome_id
+        self.measure = measure
+        self.measuredAt = measuredAt
+        self.measure_amt = measure_amt
+        self.measure_updated = measure_updated
+        self.archivedAt = archivedAt
+        self.direction = direction
+        self.format = format
+    }
 }
