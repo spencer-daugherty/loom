@@ -24,6 +24,7 @@ struct ContentView: View {
     @State private var pressedEmotion: String? = nil
     @State private var pressedOutcome: Outcomes? = nil
     @State private var showVisionPurposePopup: Bool = false
+    @State private var pressedCategoryTitle: String? = nil
     @Environment(\.colorScheme) private var colorScheme
     @Namespace private var graphNamespace
     @State private var showSplash: Bool = true
@@ -96,6 +97,23 @@ struct ContentView: View {
                     .transition(.scale(scale: 0.9).combined(with: .opacity))
                     .zIndex(1)
                     .animation(.spring(response: 0.3, dampingFraction: 0.85), value: pressedOutcome)
+                }
+                else if let category = pressedCategoryTitle {
+                    CategoryFulfillmentPopupOverlay(
+                        category: category,
+                        tint: categoryBackgroundColor(for: category),
+                        titleColor: categoryTextColor(for: category),
+                        vision: recordForCategory(category)?.category_vision ?? "",
+                        purpose: recordForCategory(category)?.category_purpose ?? "",
+                        roles: rolesForCategory(category).map { $0.role },
+                        foci: fociForCategory(category).map { $0.activity },
+                        resources: resourcesForCategory(category).map { $0.resource },
+                        passions: passionsForCategory(category)
+                    )
+                    .allowsHitTesting(false)
+                    .transition(.scale(scale: 0.9).combined(with: .opacity))
+                    .zIndex(1)
+                    .animation(.spring(response: 0.3, dampingFraction: 0.85), value: pressedCategoryTitle)
                 }
             }
         }
@@ -199,6 +217,35 @@ struct ContentView: View {
         passions.filter { $0.emotion == emotionKey }
     }
     
+    private func recordForCategory(_ categoryTitle: String) -> Fulfillment? {
+        fulfillments.first { $0.category == categoryTitle }
+    }
+
+    private func rolesForCategory(_ categoryTitle: String) -> [FulfillmentRoles] {
+        guard let rec = recordForCategory(categoryTitle) else { return [] }
+        return roles.filter { $0.category_id == rec.category_id }
+            .sorted { $0.rank < $1.rank }
+    }
+
+    private func fociForCategory(_ categoryTitle: String) -> [FulfillmentFocus] {
+        guard let rec = recordForCategory(categoryTitle) else { return [] }
+        return foci.filter { $0.category_id == rec.category_id }
+            .sorted { $0.rank < $1.rank }
+    }
+
+    private func resourcesForCategory(_ categoryTitle: String) -> [FulfillmentResources] {
+        guard let rec = recordForCategory(categoryTitle) else { return [] }
+        return resources.filter { $0.category_id == rec.category_id }
+            .sorted { $0.rank < $1.rank }
+    }
+
+    private func passionsForCategory(_ categoryTitle: String) -> [Passion] {
+        guard let rec = recordForCategory(categoryTitle) else { return [] }
+        let ids = passionJoins.filter { $0.category_id == rec.category_id }.map { $0.passion_id }
+        let idSet = Set(ids)
+        return passions.filter { idSet.contains($0.passion_id) }
+    }
+
     private func usagePoints(for emotionLabel: String) -> Int {
         let key = emotionKey(for: emotionLabel)
         let ids = Set(passions.filter { $0.emotion == key }.map { $0.passion_id })
@@ -509,6 +556,24 @@ struct ContentView: View {
                             Text(metric.0)
                                 .foregroundColor(metric.1)
                                 .fontWeight(.bold)
+                                .contentShape(Rectangle())
+                                .pressHighlight(pressedCategoryTitle == metric.0, cornerRadius: 6, inset: 2)
+                                .onLongPressGesture(
+                                    minimumDuration: 0.5,
+                                    maximumDistance: 50,
+                                    pressing: { isPressing in
+                                        if !isPressing {
+                                            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                                                pressedCategoryTitle = nil
+                                            }
+                                        }
+                                    },
+                                    perform: {
+                                        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                                            pressedCategoryTitle = metric.0
+                                        }
+                                    }
+                                )
                         }
                     }
                     .font(.subheadline)
@@ -981,6 +1046,112 @@ struct OutcomePopupOverlay: View {
         }
         .padding(16)
         .background(.regularMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .shadow(color: Color.black.opacity(0.2), radius: 10, x: 0, y: 6)
+        .padding()
+    }
+}
+
+struct CategoryFulfillmentPopupOverlay: View {
+    let category: String
+    let tint: Color
+    let titleColor: Color
+    let vision: String
+    let purpose: String
+    let roles: [String]
+    let foci: [String]
+    let resources: [String]
+    let passions: [Passion]
+
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.headline)
+            .fontWeight(.bold)
+            .foregroundColor(.black)
+    }
+
+    private func bulletList(_ items: [String]) -> some View {
+        Group {
+            if items.isEmpty {
+                Text("No items yet")
+                    .foregroundColor(.black)
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(items, id: \.self) { item in
+                        Text("• \(item)")
+                            .foregroundColor(.black)
+                    }
+                }
+            }
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(category)
+                .font(.headline)
+                .fontWeight(.semibold)
+                .foregroundColor(titleColor)
+
+            // Vision
+            sectionHeader("Vision")
+            if vision.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text("+ Add Vision")
+                    .foregroundColor(.black)
+            } else {
+                Text(vision)
+                    .foregroundColor(.black)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            // Purpose
+            sectionHeader("Purpose")
+            if purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text("+ Add Purpose")
+                    .foregroundColor(.black)
+            } else {
+                Text(purpose)
+                    .foregroundColor(.black)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            // Roles
+            sectionHeader("Roles")
+            bulletList(roles)
+
+            // Three-to-Thrive
+            sectionHeader("Three-to-Thrive")
+            bulletList(foci)
+
+            // Resources
+            sectionHeader("Resources")
+            bulletList(resources)
+
+            // Passions
+            sectionHeader("Passions")
+            Group {
+                if passions.isEmpty {
+                    Text("No items yet")
+                        .foregroundColor(.black)
+                } else {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(passions, id: \.passion_id) { p in
+                            Text("• \(p.emotion.capitalized): \(p.passion)")
+                                .foregroundColor(.black)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .background(
+            ZStack {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(tint.opacity(0.35))
+            }
+        )
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .shadow(color: Color.black.opacity(0.2), radius: 10, x: 0, y: 6)
         .padding()
