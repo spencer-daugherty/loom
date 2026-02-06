@@ -364,7 +364,10 @@ struct ContentView: View {
                 }
                 .buttonStyle(.plain)
 
-                Button(action: {}) {
+                NavigationLink {
+                    // No active plan (hardcoded): present PlanView
+                    PlanView()
+                } label: {
                     Image(systemName: "play.fill")
                         .font(.title)
                         .foregroundColor(Color(.systemBackground))
@@ -372,6 +375,7 @@ struct ContentView: View {
                         .background(Color.accentColor)
                         .clipShape(Circle())
                 }
+                .buttonStyle(.plain)
             }
             .padding(.horizontal)
             .padding(.top, 8)
