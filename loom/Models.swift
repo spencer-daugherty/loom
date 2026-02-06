@@ -469,3 +469,73 @@ final class OutcomesMeasureArchive {
         self.format = format
     }
 }
+// MARK: - WeeklyMindsetEntry
+
+enum WeeklyMindsetEntry {
+  /// Returns the start of the week (in the user's current calendar) for the given date.
+  static func weekStart(for date: Date, calendar: Calendar = .current) -> Date {
+    calendar.dateInterval(of: .weekOfYear, for: date)?.start ?? date
+  }
+
+  @Model
+  final class Fields {
+    @Attribute(.unique) var id: UUID
+    var createdAt: Date
+    var weekStart: Date
+    var morningPowerQuestion: String
+    var gratitude: String
+    var incantation: String
+
+    init(
+      id: UUID = .init(),
+      createdAt: Date = .now,
+      morningPowerQuestion: String = "",
+      gratitude: String = "",
+      incantation: String = ""
+    ) {
+      self.id = id
+      self.createdAt = createdAt
+      // Normalize weekStart from createdAt using helper
+      self.weekStart = WeeklyMindsetEntry.weekStart(for: createdAt)
+      self.morningPowerQuestion = morningPowerQuestion
+      self.gratitude = gratitude
+      self.incantation = incantation
+    }
+  }
+}
+
+// MARK: - ActivePlanState (Singleton)
+@Model
+final class ActivePlanState {
+  @Attribute(.unique) var id: UUID
+  var isActive: Bool
+  var activatedAt: Date?
+  var weekStart: Date?
+
+  init(
+    id: UUID = .init(),
+    isActive: Bool = false,
+    activatedAt: Date? = nil,
+    weekStart: Date? = nil
+  ) {
+    self.id = id
+    self.isActive = isActive
+    self.activatedAt = activatedAt
+    self.weekStart = weekStart
+  }
+}
+
+extension ActivePlanState {
+  /// Fetches the singleton ActivePlanState if it exists, otherwise creates, inserts, and returns a new one.
+  static func fetchOrCreate(in context: ModelContext) -> ActivePlanState {
+    if let existing = try? context.fetch(FetchDescriptor<ActivePlanState>()), let first = existing.first {
+      return first
+    } else {
+      let state = ActivePlanState()
+      context.insert(state)
+      try? context.save()
+      return state
+    }
+  }
+}
+

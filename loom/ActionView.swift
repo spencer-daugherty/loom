@@ -3,6 +3,7 @@ import SwiftUI
 struct ActionView: View {
     var body: some View {
         VStack(spacing: 16) {
+            Text("ActionView loaded").font(.caption).foregroundColor(.secondary)
             Text("ActionView")
                 .font(.largeTitle)
                 .bold()

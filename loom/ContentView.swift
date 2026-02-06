@@ -28,6 +28,18 @@ struct ContentView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Namespace private var graphNamespace
     @State private var showSplash: Bool = true
+    @Environment(\.modelContext) private var modelContext
+
+    // *** Temporary flag for routing; replace with model-derived state later
+    @State private var isActivePlan: Bool = false
+    @State private var navPath: [PlayDestination] = []
+    @State private var playSheetDestination: PlayDestination? = nil
+
+    private enum PlayDestination: String, Identifiable, Hashable {
+        case plan
+        case action
+        var id: String { rawValue }
+    }
     
     private func daysUntil(_ endDate: Date) -> Int {
         let calendar = Calendar.current
@@ -36,7 +48,7 @@ struct ContentView: View {
     }
     
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navPath) {
             ZStack {
                 // Background
                 Color(.systemGroupedBackground)
@@ -117,7 +129,31 @@ struct ContentView: View {
                 }
             }
         }
+        .navigationDestination(for: ContentView.PlayDestination.self) { destination in
+            switch destination {
+            case .plan:
+                PlanView()
+            case .action:
+                ActionView()
+            }
+        }
+        .sheet(item: $playSheetDestination) { destination in
+            switch destination {
+            case .plan:
+                PlanView()
+            case .action:
+                ActionView()
+            }
+        }
         .onAppear {
+            // Ensure ActionPlan is active
+            let state = ActivePlanState.fetchOrCreate(in: modelContext)
+            if !state.isActive {
+                state.isActive = true
+                state.activatedAt = Date()
+                state.weekStart = WeeklyMindsetEntry.weekStart(for: Date())
+                try? modelContext.save()
+            }
             // Ensure splash shows for at least 1 second
             DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
                 withAnimation(.easeInOut(duration: 0.6)) {
@@ -364,10 +400,9 @@ struct ContentView: View {
                 }
                 .buttonStyle(.plain)
 
-                NavigationLink {
-                    // No active plan (hardcoded): present PlanView
-                    PlanView()
-                } label: {
+                Button(action: {
+                    playSheetDestination = isActivePlan ? .action : .plan
+                }) {
                     Image(systemName: "play.fill")
                         .font(.title)
                         .foregroundColor(Color(.systemBackground))
@@ -1198,4 +1233,5 @@ extension View {
         }
     }
 }
+
 

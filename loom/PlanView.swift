@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 
 /// Step 1 of a multi-step flow.
 /// UI-only: Three one-line text fields with a bottom-pinned "Next" button.
@@ -6,6 +7,9 @@ struct PlanView: View {
     @State private var morningPowerQuestion: String = ""
     @State private var gratefulFor: String = ""
     @State private var incantation: String = ""
+    
+    @Environment(\.modelContext) private var modelContext
+    @State private var navigateToStep2: Bool = false
 
     private var isNextDisabled: Bool {
         morningPowerQuestion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
@@ -15,6 +19,7 @@ struct PlanView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
+            Text("PlanView loaded").font(.caption).foregroundColor(.secondary)
             // Morning Power Question
             VStack(alignment: .leading, spacing: 8) {
                 Text("Morning Power Question")
@@ -53,7 +58,25 @@ struct PlanView: View {
 
             Spacer(minLength: 0)
 
-            Button(action: {}) {
+            // Hidden navigation link to push Step 2 after saving
+            NavigationLink(destination: PlanStepTwoView(), isActive: $navigateToStep2) {
+                EmptyView()
+            }
+            .hidden()
+
+            Button(action: {
+                // Compute weekStart for current date via helper (derived from createdAt)
+                let now = Date()
+                let entry = WeeklyMindsetEntry.Fields(
+                    createdAt: now,
+                    morningPowerQuestion: morningPowerQuestion.trimmingCharacters(in: .whitespacesAndNewlines),
+                    gratitude: gratefulFor.trimmingCharacters(in: .whitespacesAndNewlines),
+                    incantation: incantation.trimmingCharacters(in: .whitespacesAndNewlines)
+                )
+                modelContext.insert(entry)
+                try? modelContext.save()
+                navigateToStep2 = true
+            }) {
                 Text("Next")
                     .frame(maxWidth: .infinity)
             }
@@ -62,6 +85,17 @@ struct PlanView: View {
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+}
+
+struct PlanStepTwoView: View {
+    var body: some View {
+        VStack {
+            Text("Step 2 coming soon")
+                .font(.title2)
+                .padding()
+        }
+        .navigationTitle("Step 2")
     }
 }
 

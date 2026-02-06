@@ -28,6 +28,8 @@ struct loomApp: App {
                 OutcomesArchive.self,
                 OutcomesMeasure.self,
                 OutcomesMeasureArchive.self,
+                WeeklyMindsetEntry.Fields.self,
+                ActivePlanState.self,
             ]
         )
     }
