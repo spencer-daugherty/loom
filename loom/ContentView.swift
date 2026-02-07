@@ -29,7 +29,7 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
 
     // *** Temporary flag for routing; replace with model-derived state later
-    @State private var isActivePlan: Bool = false
+    @State private var isActivePlan: Bool = true
     @State private var navPath: [PlayDestination] = []
     @State private var playSheetDestination: PlayDestination? = nil
 
@@ -401,7 +401,7 @@ struct ContentView: View {
                 Button(action: {
                     playSheetDestination = isActivePlan ? .action : .plan
                 }) {
-                    Image(systemName: "play.fill")
+                    Image(systemName: isActivePlan ? "forward.fill" : "play.fill")
                         .font(.title)
                         .foregroundColor(Color(.systemBackground))
                         .frame(width: 60, height: 60)
