@@ -10,6 +10,8 @@ struct PlanView: View {
     
     @Environment(\.modelContext) private var modelContext
     @State private var navigateToStep2: Bool = false
+    @FocusState private var focusedField: Field?
+    private enum Field: Hashable { case morning, grateful, incantation }
 
     private var isNextDisabled: Bool {
         morningPowerQuestion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
@@ -19,7 +21,6 @@ struct PlanView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
-            Text("PlanView loaded").font(.caption).foregroundColor(.secondary)
             // Morning Power Question
             VStack(alignment: .leading, spacing: 8) {
                 Text("Morning Power Question")
@@ -31,7 +32,13 @@ struct PlanView: View {
                     .textFieldStyle(.roundedBorder)
                     .textInputAutocapitalization(.sentences)
                     .disableAutocorrection(false)
+                    .submitLabel(.next)
+                    .focused($focusedField, equals: .morning)
+                    .onSubmit {
+                        focusedField = .grateful
+                    }
             }
+            .padding(.top, 16)
 
             // Grateful For
             VStack(alignment: .leading, spacing: 8) {
@@ -41,6 +48,11 @@ struct PlanView: View {
                     .textFieldStyle(.roundedBorder)
                     .textInputAutocapitalization(.sentences)
                     .disableAutocorrection(false)
+                    .submitLabel(.next)
+                    .focused($focusedField, equals: .grateful)
+                    .onSubmit {
+                        focusedField = .incantation
+                    }
             }
 
             // Incantation
@@ -54,6 +66,11 @@ struct PlanView: View {
                     .textFieldStyle(.roundedBorder)
                     .textInputAutocapitalization(.sentences)
                     .disableAutocorrection(false)
+                    .submitLabel(.done)
+                    .focused($focusedField, equals: .incantation)
+                    .onSubmit {
+                        focusedField = nil
+                    }
             }
 
             Spacer(minLength: 0)
@@ -85,6 +102,12 @@ struct PlanView: View {
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .onAppear {
+            // Automatically focus the first field and show the keyboard when the view appears
+            DispatchQueue.main.async {
+                focusedField = .morning
+            }
+        }
     }
 }
 

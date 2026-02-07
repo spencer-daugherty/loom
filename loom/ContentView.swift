@@ -17,8 +17,6 @@ private struct DarkModeInvertImage: ViewModifier {
     }
 }
 
-
-
 struct ContentView: View {
     @State private var isPresentingCaptureView = false
     @State private var pressedEmotion: String? = nil
