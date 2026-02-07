@@ -29,7 +29,7 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
 
     // *** Temporary flag for routing; replace with model-derived state later
-    @State private var isActivePlan: Bool = true
+    @State private var isActivePlan: Bool = false
     @State private var navPath: [PlayDestination] = []
     @State private var playSheetDestination: PlayDestination? = nil
 

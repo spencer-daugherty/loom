@@ -70,16 +70,23 @@ struct PlanView: View {
                     .textFieldStyle(.roundedBorder)
                     .submitLabel(.done)
                     .focused($focusedField, equals: .incantation)
-                    .onSubmit { focusedField = nil }
+                    .onSubmit {
+                        if isNextDisabled { return }
+                        let now = Date()
+                        let entry = WeeklyMindsetEntry.Fields(
+                            createdAt: now,
+                            morningPowerQuestion: morningPowerQuestion.trimmingCharacters(in: .whitespacesAndNewlines),
+                            gratitude: gratefulFor.trimmingCharacters(in: .whitespacesAndNewlines),
+                            incantation: incantation.trimmingCharacters(in: .whitespacesAndNewlines)
+                        )
+                        modelContext.insert(entry)
+                        try? modelContext.save()
+                        navigateToStep2 = true
+                    }
             }
 
             Spacer(minLength: 0)
 
-            // Hidden navigation link to Step 2
-            NavigationLink(destination: PlanStepTwoView(), isActive: $navigateToStep2) {
-                EmptyView()
-            }
-            .hidden()
 
             VStack(spacing: 8) {
                 // NEXT BUTTON
@@ -120,6 +127,9 @@ struct PlanView: View {
         .safeAreaPadding(.top)
         .safeAreaPadding(.bottom)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .fullScreenCover(isPresented: $navigateToStep2) {
+            PlanStepTwoView()
+        }
         .onAppear {
             DispatchQueue.main.async {
                 focusedField = .morning
@@ -129,12 +139,45 @@ struct PlanView: View {
 }
 
 struct PlanStepTwoView: View {
+    @Environment(\.dismiss) private var dismiss
+
     var body: some View {
         VStack {
             Text("Step 2 coming soon")
                 .font(.title2)
                 .padding()
+
+            Spacer()
+
+            HStack(spacing: 12) {
+                // Back button styled like Close on previous screen
+                Button {
+                    // Return to Step 1 (PlanView) by dismissing the modal sheet
+                    dismiss()
+                } label: {
+                    Text("Back")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .foregroundColor(.black)
+                }
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color(.systemGray5))
+                )
+
+                // Next button styled like Next on previous screen
+                Button {
+                    // Continue forward from Step 2 (placeholder action)
+                } label: {
+                    Text("Next")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            .padding(.horizontal)
+            .padding(.bottom)
         }
+        .safeAreaPadding()
         .navigationTitle("Step 2")
     }
 }
