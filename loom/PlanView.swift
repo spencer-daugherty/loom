@@ -23,13 +23,21 @@ struct PlanView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
+            
+            // Top Title
+            Text("Weekly Planning")
+                .font(.largeTitle)
+                .fontWeight(.bold)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.top, 8)
 
             // Morning Power Question
             VStack(alignment: .leading, spacing: 8) {
                 Text("Morning Power Question")
                     .font(.headline)
                 Text("What am I happy about in life right now?")
-                    .font(.footnote)
+                    .font(.subheadline)
+                    .italic()
                     .foregroundColor(.secondary)
                 TextField("My dreams, aspirations, and goals", text: $morningPowerQuestion)
                     .textFieldStyle(.roundedBorder)
@@ -55,7 +63,8 @@ struct PlanView: View {
                 Text("Incantation")
                     .font(.headline)
                 Text("What’s a simple phrase to set your mindset?")
-                    .font(.footnote)
+                    .font(.subheadline)
+                    .italic()
                     .foregroundColor(.secondary)
                 TextField("Where I focus improves", text: $incantation)
                     .textFieldStyle(.roundedBorder)
