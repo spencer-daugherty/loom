@@ -9,6 +9,9 @@ struct ActionView: View {
             Text("Placeholder — coming soon")
                 .foregroundColor(.secondary)
         }
+        .padding(.horizontal)
+        .safeAreaPadding(.top)
+        .safeAreaPadding(.bottom)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemBackground))
     }

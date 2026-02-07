@@ -135,7 +135,7 @@ struct ContentView: View {
                 ActionView()
             }
         }
-        .sheet(item: $playSheetDestination) { destination in
+        .fullScreenCover(item: $playSheetDestination) { destination in
             switch destination {
             case .plan:
                 PlanView()

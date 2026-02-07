@@ -2,13 +2,15 @@ import SwiftUI
 import SwiftData
 
 /// Step 1 of a multi-step flow.
-/// UI-only: Three one-line text fields with a bottom-pinned "Next" button.
+/// UI-only: Three one-line text fields with a bottom-pinned "Next" + "Close" button.
 struct PlanView: View {
     @State private var morningPowerQuestion: String = ""
     @State private var gratefulFor: String = ""
     @State private var incantation: String = ""
     
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+
     @State private var navigateToStep2: Bool = false
     @FocusState private var focusedField: Field?
     private enum Field: Hashable { case morning, grateful, incantation }
@@ -21,6 +23,7 @@ struct PlanView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
+
             // Morning Power Question
             VStack(alignment: .leading, spacing: 8) {
                 Text("Morning Power Question")
@@ -30,13 +33,9 @@ struct PlanView: View {
                     .foregroundColor(.secondary)
                 TextField("My dreams, aspirations, and goals", text: $morningPowerQuestion)
                     .textFieldStyle(.roundedBorder)
-                    .textInputAutocapitalization(.sentences)
-                    .disableAutocorrection(false)
                     .submitLabel(.next)
                     .focused($focusedField, equals: .morning)
-                    .onSubmit {
-                        focusedField = .grateful
-                    }
+                    .onSubmit { focusedField = .grateful }
             }
             .padding(.top, 16)
 
@@ -46,13 +45,9 @@ struct PlanView: View {
                     .font(.headline)
                 TextField("Health", text: $gratefulFor)
                     .textFieldStyle(.roundedBorder)
-                    .textInputAutocapitalization(.sentences)
-                    .disableAutocorrection(false)
                     .submitLabel(.next)
                     .focused($focusedField, equals: .grateful)
-                    .onSubmit {
-                        focusedField = .incantation
-                    }
+                    .onSubmit { focusedField = .incantation }
             }
 
             // Incantation
@@ -64,46 +59,59 @@ struct PlanView: View {
                     .foregroundColor(.secondary)
                 TextField("Where I focus improves", text: $incantation)
                     .textFieldStyle(.roundedBorder)
-                    .textInputAutocapitalization(.sentences)
-                    .disableAutocorrection(false)
                     .submitLabel(.done)
                     .focused($focusedField, equals: .incantation)
-                    .onSubmit {
-                        focusedField = nil
-                    }
+                    .onSubmit { focusedField = nil }
             }
 
             Spacer(minLength: 0)
 
-            // Hidden navigation link to push Step 2 after saving
+            // Hidden navigation link to Step 2
             NavigationLink(destination: PlanStepTwoView(), isActive: $navigateToStep2) {
                 EmptyView()
             }
             .hidden()
 
-            Button(action: {
-                // Compute weekStart for current date via helper (derived from createdAt)
-                let now = Date()
-                let entry = WeeklyMindsetEntry.Fields(
-                    createdAt: now,
-                    morningPowerQuestion: morningPowerQuestion.trimmingCharacters(in: .whitespacesAndNewlines),
-                    gratitude: gratefulFor.trimmingCharacters(in: .whitespacesAndNewlines),
-                    incantation: incantation.trimmingCharacters(in: .whitespacesAndNewlines)
+            VStack(spacing: 8) {
+                // NEXT BUTTON
+                Button {
+                    let now = Date()
+                    let entry = WeeklyMindsetEntry.Fields(
+                        createdAt: now,
+                        morningPowerQuestion: morningPowerQuestion.trimmingCharacters(in: .whitespacesAndNewlines),
+                        gratitude: gratefulFor.trimmingCharacters(in: .whitespacesAndNewlines),
+                        incantation: incantation.trimmingCharacters(in: .whitespacesAndNewlines)
+                    )
+                    modelContext.insert(entry)
+                    try? modelContext.save()
+                    navigateToStep2 = true
+                } label: {
+                    Text("Next")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(isNextDisabled)
+
+                // CLOSE BUTTON
+                Button {
+                    dismiss()
+                } label: {
+                    Text("Close")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .foregroundColor(.black)
+                }
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color(.systemGray5))
                 )
-                modelContext.insert(entry)
-                try? modelContext.save()
-                navigateToStep2 = true
-            }) {
-                Text("Next")
-                    .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(isNextDisabled)
         }
-        .padding()
+        .padding(.horizontal)
+        .safeAreaPadding(.top)
+        .safeAreaPadding(.bottom)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear {
-            // Automatically focus the first field and show the keyboard when the view appears
             DispatchQueue.main.async {
                 focusedField = .morning
             }
