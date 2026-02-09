@@ -51,15 +51,6 @@ struct CaptureView: View {
                     .toggleStyle(.automatic)
                     .labelsHidden()
                     .frame(width: 60)
-                    .overlay(GeometryReader { geo in
-                        let size = geo.size
-                        Image(systemName: "ghost")
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(width: 22, height: 22)
-                            .foregroundStyle(isGhostOn ? Color.accentColor : Color.secondary)
-                            .position(x: size.width - 22, y: size.height / 2)
-                    })
                 }
                 .padding([.horizontal, .top])
                 .padding(.bottom, 12)
