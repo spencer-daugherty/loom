@@ -44,6 +44,7 @@ struct CaptureView: View {
                         .padding(12)
                         .background(Color(.secondarySystemBackground))
                         .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .layoutPriority(1)
                         .frame(maxWidth: .infinity)
                     Toggle(isOn: $isGhostOn) {
                         EmptyView()
@@ -51,6 +52,10 @@ struct CaptureView: View {
                     .toggleStyle(.automatic)
                     .labelsHidden()
                     .frame(width: 60)
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
                 }
                 .padding([.horizontal, .top])
                 .padding(.bottom, 12)
@@ -70,4 +75,3 @@ struct CaptureView: View {
         items.remove(atOffsets: offsets)
     }
 }
-
