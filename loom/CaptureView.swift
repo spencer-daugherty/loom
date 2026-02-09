@@ -71,7 +71,7 @@ struct CaptureView: View {
     private func addItem() {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        items.append(trimmed)
+        items.insert(trimmed, at: 0)
         input = ""
         isInputFocused = true
     }
