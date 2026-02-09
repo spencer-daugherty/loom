@@ -3,6 +3,7 @@ import SwiftUI
 struct CaptureView: View {
     @State private var input: String = ""
     @State private var items: [String] = []
+    @State private var isGhostOn: Bool = false
     @FocusState private var isInputFocused: Bool
 
     var body: some View {
@@ -33,7 +34,7 @@ struct CaptureView: View {
                 }
             }
             .safeAreaInset(edge: .bottom) {
-                HStack {
+                HStack(spacing: 12) {
                     TextField("Enter new item…", text: $input)
                         .textInputAutocapitalization(.none)
                         .autocorrectionDisabled(true)
@@ -44,6 +45,21 @@ struct CaptureView: View {
                         .background(Color(.secondarySystemBackground))
                         .clipShape(RoundedRectangle(cornerRadius: 10))
                         .frame(maxWidth: .infinity)
+                    Toggle(isOn: $isGhostOn) {
+                        EmptyView()
+                    }
+                    .toggleStyle(.automatic)
+                    .labelsHidden()
+                    .frame(width: 60)
+                    .overlay(GeometryReader { geo in
+                        let size = geo.size
+                        Image(systemName: "ghost")
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 22, height: 22)
+                            .foregroundStyle(isGhostOn ? Color.accentColor : Color.secondary)
+                            .position(x: size.width - 22, y: size.height / 2)
+                    })
                 }
                 .padding([.horizontal, .top])
                 .padding(.bottom, 12)
