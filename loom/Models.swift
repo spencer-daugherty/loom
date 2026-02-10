@@ -469,6 +469,7 @@ final class OutcomesMeasureArchive {
         self.format = format
     }
 }
+
 // MARK: - WeeklyMindsetEntry
 
 enum WeeklyMindsetEntry {
@@ -569,5 +570,95 @@ final class RollingCaptureItem {
     self.unhideDate = unhideDate
     self.unhiddenAt = unhiddenAt
   }
+}
+
+// MARK: - NEW: Planned chunks (Step 3 -> Step 4 persistence)
+/// A persisted chunk created in Plan Step 3 for a given plan week.
+@Model
+final class PlannedChunk {
+    @Attribute(.unique) var id: UUID
+
+    /// Which plan week this chunk belongs to (week start).
+    var weekStart: Date
+
+    /// Chunk index as displayed in Step 3 (0-based).
+    var chunkIndex: Int
+
+    /// Selected label/category (copied at time of planning).
+    var labelId: UUID
+    var label: String
+    var categoryId: UUID
+    var category: String
+
+    var updatedAt: Date
+
+    /// Unique key to ensure only 1 chunk per (weekStart, chunkIndex) if you recreate the plan.
+    @Attribute(.unique) var weekChunkKey: String
+
+    init(
+        id: UUID = .init(),
+        weekStart: Date,
+        chunkIndex: Int,
+        labelId: UUID,
+        label: String,
+        categoryId: UUID,
+        category: String,
+        updatedAt: Date = .now
+    ) {
+        self.id = id
+        self.weekStart = weekStart
+        self.chunkIndex = chunkIndex
+        self.labelId = labelId
+        self.label = label
+        self.categoryId = categoryId
+        self.category = category
+        self.updatedAt = updatedAt
+
+        let dayKey = PlannedChunk.dayKey(from: weekStart)
+        self.weekChunkKey = "\(dayKey)|\(chunkIndex)"
+    }
+
+    private static func dayKey(from date: Date) -> String {
+        let cal = Calendar.current
+        let comps = cal.dateComponents([.year, .month, .day], from: date)
+        let y = comps.year ?? 0
+        let m = comps.month ?? 0
+        let d = comps.day ?? 0
+        return String(format: "%04d-%02d-%02d", y, m, d)
+    }
+}
+
+/// A persisted action assigned into a chunk during planning (text-only; no ghost metadata).
+@Model
+final class PlannedChunkAction {
+    @Attribute(.unique) var id: UUID
+
+    var weekStart: Date
+    var chunkIndex: Int
+
+    /// Denormalized reference: which PlannedChunk this action belongs to.
+    var plannedChunkId: UUID
+
+    var text: String
+    var sortOrder: Int
+    var createdAt: Date
+
+    init(
+        id: UUID = .init(),
+        weekStart: Date,
+        chunkIndex: Int,
+        plannedChunkId: UUID,
+        text: String,
+        sortOrder: Int,
+        createdAt: Date = .now
+    ) {
+        self.id = id
+        self.weekStart = weekStart
+        self.chunkIndex = chunkIndex
+        self.plannedChunkId = plannedChunkId
+        self.text = text
+        self.sortOrder = sortOrder
+        self.createdAt = createdAt
+    }
 }
 

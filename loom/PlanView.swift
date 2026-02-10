@@ -72,16 +72,7 @@ struct PlanView: View {
                     .focused($focusedField, equals: .incantation)
                     .onSubmit {
                         if isNextDisabled { return }
-                        let now = Date()
-                        let entry = WeeklyMindsetEntry.Fields(
-                            createdAt: now,
-                            morningPowerQuestion: morningPowerQuestion.trimmingCharacters(in: .whitespacesAndNewlines),
-                            gratitude: gratefulFor.trimmingCharacters(in: .whitespacesAndNewlines),
-                            incantation: incantation.trimmingCharacters(in: .whitespacesAndNewlines)
-                        )
-                        modelContext.insert(entry)
-                        try? modelContext.save()
-                        navigateToStep2 = true
+                        saveStepOneAndAdvance()
                     }
             }
 
@@ -89,7 +80,6 @@ struct PlanView: View {
 
             // Bottom buttons side-by-side (like Step 2)
             HStack(spacing: 12) {
-                // CLOSE BUTTON
                 Button {
                     dismiss()
                 } label: {
@@ -103,18 +93,8 @@ struct PlanView: View {
                         .fill(Color(.systemGray5))
                 )
 
-                // NEXT BUTTON
                 Button {
-                    let now = Date()
-                    let entry = WeeklyMindsetEntry.Fields(
-                        createdAt: now,
-                        morningPowerQuestion: morningPowerQuestion.trimmingCharacters(in: .whitespacesAndNewlines),
-                        gratitude: gratefulFor.trimmingCharacters(in: .whitespacesAndNewlines),
-                        incantation: incantation.trimmingCharacters(in: .whitespacesAndNewlines)
-                    )
-                    modelContext.insert(entry)
-                    try? modelContext.save()
-                    navigateToStep2 = true
+                    saveStepOneAndAdvance()
                 } label: {
                     Text("Next")
                         .frame(maxWidth: .infinity)
@@ -135,6 +115,19 @@ struct PlanView: View {
                 focusedField = .morning
             }
         }
+    }
+
+    private func saveStepOneAndAdvance() {
+        let now = Date()
+        let entry = WeeklyMindsetEntry.Fields(
+            createdAt: now,
+            morningPowerQuestion: morningPowerQuestion.trimmingCharacters(in: .whitespacesAndNewlines),
+            gratitude: gratefulFor.trimmingCharacters(in: .whitespacesAndNewlines),
+            incantation: incantation.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+        modelContext.insert(entry)
+        try? modelContext.save()
+        navigateToStep2 = true
     }
 }
 
@@ -159,10 +152,6 @@ struct PlanStepTwoView: View {
     private let hiddenUntilLaterIconName = "clock.arrow.trianglehead.clockwise.rotate.90.path.dotted"
 
     private var displayItems: [RollingCaptureItem] {
-        // Requirements:
-        // - When showHidden OFF: show only non-ghost, newest first.
-        // - When showHidden ON (only on this page): show in-session items first (new, non-ghost),
-        //   then ghosts, then pre-session non-ghost items; newest first within each group.
         if !showHidden {
             return allItems
                 .filter { !$0.isGhost }
@@ -173,7 +162,6 @@ struct PlanStepTwoView: View {
             let lhsIsBaseline = baselineItemIDs.contains(lhs.id)
             let rhsIsBaseline = baselineItemIDs.contains(rhs.id)
 
-            // Group rank: 0 = in-session (non-ghost), 1 = ghosts, 2 = baseline non-ghost
             func rank(_ item: RollingCaptureItem, isBaseline: Bool) -> Int {
                 if !isBaseline, !item.isGhost { return 0 }
                 if item.isGhost { return 1 }
@@ -190,14 +178,13 @@ struct PlanStepTwoView: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            // Title
             Text("Capture")
                 .font(.largeTitle)
                 .fontWeight(.bold)
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.top, 8)
 
-            // Brainstorm info row (with Show more / Show less)
+            // Brainstorm info row
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: "info.circle")
                     .foregroundStyle(.secondary)
@@ -219,7 +206,6 @@ struct PlanStepTwoView: View {
                         }
                         .font(.subheadline)
                     } else {
-                        // Collapsed view: one line feel + trailing "Show more"
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
                             (
                                 Text("Brainstorm: ")
@@ -244,7 +230,7 @@ struct PlanStepTwoView: View {
             }
             .padding(.horizontal)
 
-            // Toggle row (inline, above list)
+            // Toggle row
             HStack(spacing: 10) {
                 Toggle(isOn: $showHidden) {
                     EmptyView()
@@ -264,14 +250,9 @@ struct PlanStepTwoView: View {
             }
             .padding(.horizontal)
 
-            // List
             List {
                 ForEach(displayItems) { item in
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        // Icon rules:
-                        // - Existing before session: plus.viewfinder
-                        // - If ghost + showHidden ON: hidden icon
-                        // - For items created in-session: no icon (and Step 2 cannot create ghosts)
                         if baselineItemIDs.contains(item.id) {
                             Image(systemName: "plus.viewfinder")
                                 .foregroundStyle(.secondary)
@@ -287,14 +268,12 @@ struct PlanStepTwoView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
                     .overlay {
-                        // Optional: match CaptureView’s ghost styling when ghosts are shown
                         if item.isGhost {
                             RoundedRectangle(cornerRadius: 8)
                                 .stroke(style: StrokeStyle(lineWidth: 2, dash: [6]))
                                 .foregroundStyle(.blue)
                         }
                     }
-                    // Symmetric spacing above/below each row box (so the divider gap matches)
                     .padding(.vertical, 4)
                     .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                 }
@@ -303,7 +282,6 @@ struct PlanStepTwoView: View {
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
 
-            // Bottom input (sticky keyboard)
             HStack(spacing: 12) {
                 TextField("Add an action…", text: $input)
                     .textInputAutocapitalization(.none)
@@ -324,11 +302,8 @@ struct PlanStepTwoView: View {
             .padding(.horizontal, 24)
             .padding(.top, 4)
 
-            // Bottom Back/Next buttons (keep as-is stylistically)
             HStack(spacing: 12) {
-                // Back button styled like Close on previous screen
                 Button {
-                    // Return to Step 1 (PlanView) by dismissing the modal sheet
                     dismiss()
                 } label: {
                     Text("Back")
@@ -341,7 +316,6 @@ struct PlanStepTwoView: View {
                         .fill(Color(.systemGray5))
                 )
 
-                // Next button styled like Next on previous screen
                 Button {
                     navigateToStep3 = true
                 } label: {
@@ -358,7 +332,6 @@ struct PlanStepTwoView: View {
             PlanStepThreeView()
         }
         .onAppear {
-            // Capture baseline IDs once per presentation.
             if baselineItemIDs.isEmpty {
                 baselineItemIDs = Set(allItems.map(\.id))
             }
@@ -413,30 +386,37 @@ struct PlanStepThreeView: View {
     @Query(sort: \RollingCaptureItem.createdAt, order: .reverse)
     private var allItems: [RollingCaptureItem]
 
-    // NEW: seeded labels for picker (default source)
     @Query(sort: \PlanLabel.category, order: .forward)
     private var allPlanLabels: [PlanLabel]
 
-    // NEW: persisted selections for this week
     @Query(sort: \PlanChunkSelection.updatedAt, order: .reverse)
     private var allChunkSelections: [PlanChunkSelection]
+
+    // Clear any existing plan for the week before writing a new one
+    @Query(sort: \PlannedChunk.updatedAt, order: .reverse)
+    private var plannedChunks: [PlannedChunk]
+
+    @Query(sort: \PlannedChunkAction.createdAt, order: .reverse)
+    private var plannedActions: [PlannedChunkAction]
 
     @State private var showHidden: Bool = false
     @State private var isCategorizeExpanded: Bool = false
 
-    // Pool + chunked items are UI-only for now.
     @State private var poolItemIDs: [UUID] = []
     @State private var chunks: [ChunkContainerState] = []
+
+    // Step 3 baseline snapshot (used for "Refresh" visibility)
+    @State private var baselineShowHidden: Bool = false
+    @State private var baselinePoolItemIDs: [UUID] = []
+    @State private var baselineChunks: [ChunkContainerState] = []
 
     private let hiddenUntilLaterIconName = "clock.arrow.trianglehead.clockwise.rotate.90.path.dotted"
     private let maxChunks = 5
 
-    // NEW: Week scope for persistence (matches Step 1 + ActivePlanState convention)
     private var currentWeekStart: Date {
         WeeklyMindsetEntry.weekStart(for: Date())
     }
 
-    // Only default labels for now (as requested)
     private var defaultLabels: [PlanLabel] {
         allPlanLabels
             .filter { $0.source == "default" }
@@ -446,15 +426,10 @@ struct PlanStepThreeView: View {
             }
     }
 
-    /// All labelIds currently selected across chunks (for uniqueness).
     private var selectedLabelIDs: Set<UUID> {
         Set(chunks.compactMap(\.selectionLabelId))
     }
 
-    /// Category -> labels that are available to pick for `chunkIndex`.
-    /// Rule:
-    /// - hide labels already selected in *other* chunks
-    /// - but keep this chunk's current selection visible so the menu doesn't "lose" it
     private func labelsByCategory(for chunkIndex: Int) -> [(category: String, labels: [PlanLabel])] {
         let currentSelection = chunks.indices.contains(chunkIndex) ? chunks[chunkIndex].selectionLabelId : nil
 
@@ -467,8 +442,27 @@ struct PlanStepThreeView: View {
         return grouped.keys.sorted().map { key in
             (category: key, labels: grouped[key]!.sorted { $0.label < $1.label })
         }
-        // Optional: hide empty categories (already implied because we only build from grouped keys)
     }
+
+    /// Indices of chunks that have >= 3 actions.
+    private var qualifyingChunkIndices: [Int] {
+        chunks.indices.filter { chunks[$0].itemIDs.count >= 3 }
+    }
+
+    /// Step 3 Next enabled rule.
+    private var isStep3NextEnabled: Bool {
+        let qualifying = qualifyingChunkIndices
+        guard qualifying.count >= 2 else { return false }
+        return qualifying.allSatisfy { chunks[$0].selectionLabelId != nil }
+    }
+
+    private var isRefreshVisible: Bool {
+        showHidden != baselineShowHidden ||
+        poolItemIDs != baselinePoolItemIDs ||
+        chunks != baselineChunks
+    }
+
+    @State private var navigateToStep4: Bool = false
 
     var body: some View {
         VStack(spacing: 12) {
@@ -478,7 +472,7 @@ struct PlanStepThreeView: View {
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.top, 8)
 
-            // Categorize info row (with show more/less)
+            // Categorize info row
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: "info.circle")
                     .foregroundStyle(.secondary)
@@ -520,7 +514,7 @@ struct PlanStepThreeView: View {
             }
             .padding(.horizontal)
 
-            // Toggle row (same as step 2)
+            // Toggle row
             HStack(spacing: 10) {
                 Toggle(isOn: $showHidden) { EmptyView() }
                     .labelsHidden()
@@ -538,7 +532,7 @@ struct PlanStepThreeView: View {
             }
             .padding(.horizontal)
 
-            // Top list (pool)
+            // Pool
             List {
                 ForEach(poolItems) { item in
                     rowView(
@@ -548,14 +542,11 @@ struct PlanStepThreeView: View {
                         dragPayload: DragPayload(itemID: item.id)
                     )
                     .contentShape(Rectangle())
-                    // IMPORTANT: make the ROW itself a drop target.
-                    // This is what allows dragging items out of a chunk and dropping “onto the pool list”.
                     .dropDestination(for: DragPayload.self) { payloads, _ in
                         guard let payload = payloads.first else { return false }
                         moveItemToPool(payload.itemID)
                         return true
                     }
-                    // Match Step 2: symmetric space between the rounded box and list separators
                     .padding(.vertical, 4)
                     .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                 }
@@ -564,19 +555,16 @@ struct PlanStepThreeView: View {
             .listRowSpacing(4)
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
-            // Allow dropping back into pool (drop on empty space below rows too)
             .dropDestination(for: DragPayload.self) { payloads, _ in
                 guard let payload = payloads.first else { return false }
                 moveItemToPool(payload.itemID)
                 return true
             }
-            // Fix: when toggle changes, ensure pool contains the newly-visible items (ghosts)
             .onChange(of: showHidden) { _, _ in
                 syncPoolWithVisibility()
             }
 
-            // Chunk containers
-            // Move "+ Add Chunk" INTO this List as the last row, so it scrolls with the chunks.
+            // Chunks
             List {
                 ForEach(Array(chunks.enumerated()), id: \.element.id) { index, _ in
                     chunkContainerView(chunkIndex: index)
@@ -584,7 +572,6 @@ struct PlanStepThreeView: View {
                         .listRowSeparator(.hidden)
                 }
 
-                // Add Chunk row (hide once max reached)
                 if chunks.count < maxChunks {
                     addChunkRow
                         .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
@@ -594,21 +581,22 @@ struct PlanStepThreeView: View {
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
 
-            if canRefresh {
+            // Refresh button (small text, no shape; only visible if modified)
+            if isRefreshVisible {
                 Button {
-                    resetStepThree()
+                    refreshStep3()
                 } label: {
                     Text("Refresh")
-                        .font(.subheadline)
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .center)
-                        .padding(.vertical, 2)
+                        .padding(.top, 2)
                 }
                 .buttonStyle(.plain)
-                .padding(.horizontal)
+                .padding(.bottom, 2)
             }
 
-            // Back/Next buttons
+            // Back/Next
             HStack(spacing: 12) {
                 Button {
                     dismiss()
@@ -624,22 +612,24 @@ struct PlanStepThreeView: View {
                 )
 
                 Button {
-                    // Step 4 placeholder
+                    persistStep3PlanAndAdvance()
                 } label: {
                     Text("Next")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(!isStep3NextEnabled)
             }
             .padding(.horizontal)
             .padding(.bottom, 2)
         }
         .safeAreaPadding()
+        .fullScreenCover(isPresented: $navigateToStep4) {
+            PlanStepFourView()
+        }
         .onAppear {
-            // Seed default picker data once.
             PlanLabelSeeder.seedDefaultsIfNeeded(in: modelContext)
 
-            // Initialize pool and chunks once per presentation.
             if chunks.isEmpty {
                 chunks = [
                     ChunkContainerState(isLocked: true),
@@ -649,49 +639,25 @@ struct PlanStepThreeView: View {
             if poolItemIDs.isEmpty {
                 poolItemIDs = initialPoolIDs
             } else {
-                // In case items changed since previous appearance (e.g. Step 2 added items)
                 syncPoolWithVisibility()
             }
 
-            // Load persisted selections into the chunk UI state (category/label display).
-            hydrateChunkSelectionsFromStore()
+            // Capture baseline after we've initialized state.
+            if baselineChunks.isEmpty && baselinePoolItemIDs.isEmpty {
+                baselineShowHidden = showHidden
+                baselinePoolItemIDs = poolItemIDs
+                baselineChunks = chunks
+            }
+
+            // IMPORTANT: Do not hydrate from stored selections on appear.
+            // Step 3 should not store anything until "Next", and Refresh should return to "Select…".
         }
-        // Also keep pool in sync if the underlying SwiftData query changes.
         .onChange(of: allItems.map(\.id)) { _, _ in
             syncPoolWithVisibility()
         }
     }
 
-    private var canRefresh: Bool {
-        if showHidden { return true }
-        if isCategorizeExpanded { return true }
-        if chunks.count != 2 { return true }
-        if chunks.contains(where: { !$0.itemIDs.isEmpty }) { return true }
-        if chunks.contains(where: { $0.selectionLabelId != nil || $0.selectionCategoryId != nil }) { return true }
-        if poolItemIDs != initialPoolIDs { return true }
-        return false
-    }
-
-    private func resetStepThree() {
-        // "Start over" resets Step 3 UI-only state back to initial defaults.
-        showHidden = false
-        isCategorizeExpanded = false
-
-        chunks = [
-            ChunkContainerState(isLocked: true),
-            ChunkContainerState(isLocked: true),
-        ]
-
-        // Rebuild pool from scratch using the same initial-load logic.
-        poolItemIDs = initialPoolIDs
-
-        // Note: We are NOT deleting persisted selections on refresh;
-        // refresh is intended as UI reset. If you want it to also wipe persistence,
-        // we can add that explicitly.
-        hydrateChunkSelectionsFromStore()
-    }
-
-    // MARK: - Add Chunk row (boxed, whole box tappable)
+    // MARK: - Add Chunk row
 
     private var addChunkRow: some View {
         Button {
@@ -704,9 +670,9 @@ struct PlanStepThreeView: View {
                     .font(.headline)
             }
             .frame(maxWidth: .infinity, minHeight: 48)
-            .contentShape(Rectangle()) // ensures full interior is tappable
+            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain) // keep our custom box styling
+        .buttonStyle(.plain)
         .background(
             RoundedRectangle(cornerRadius: 12)
                 .fill(Color(.secondarySystemBackground))
@@ -752,16 +718,13 @@ struct PlanStepThreeView: View {
             Text(text)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            // Only the HANDLE is draggable, not the entire row.
-            // This prevents the chunk/category container from feeling draggable.
             Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
                 .foregroundStyle(.secondary)
                 .accessibilityLabel("Drag")
-                .contentShape(Rectangle()) // make the handle easier to grab
+                .contentShape(Rectangle())
                 .padding(.leading, 4)
                 .if(isDraggable && dragPayload != nil, transform: { view in
                     view.draggable(dragPayload!) {
-                        // Explicit preview so the system doesn't snapshot the whole chunk container.
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
                             Text(text)
                                 .lineLimit(1)
@@ -772,7 +735,7 @@ struct PlanStepThreeView: View {
                         }
                         .padding(8)
                         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
-                        .frame(maxWidth: 320) // keep preview compact
+                        .frame(maxWidth: 320)
                     }
                 })
         }
@@ -796,17 +759,12 @@ struct PlanStepThreeView: View {
         let canDeleteThisChunk = canDeleteChunk(at: chunkIndex)
 
         VStack(spacing: 10) {
-            // Header:
-            // - "Actions Related To:" left aligned
-            // - Picker immediately after with minimal spacing (left aligned)
-            // - Spacer pushes delete button to far right
             HStack(alignment: .center, spacing: 6) {
                 Text("Actions Related To:")
                     .font(.caption)
                     .fontWeight(.bold)
                     .foregroundStyle(.secondary)
 
-                // Picker now removes labels already chosen in other chunks.
                 Picker(
                     "",
                     selection: Binding(
@@ -847,7 +805,6 @@ struct PlanStepThreeView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            // Items inside chunk
             VStack(spacing: 0) {
                 if chunk.itemIDs.isEmpty {
                     Text("Drag actions here")
@@ -864,10 +821,6 @@ struct PlanStepThreeView: View {
                             dragPayload: DragPayload(itemID: item.id)
                         )
                         .contentShape(Rectangle())
-                        // IMPORTANT: make each ROW inside the chunk a drop target.
-                        // This is what enables:
-                        // - dragging an item OUT of this chunk and INTO another chunk
-                        // - dragging an item OUT and back to the pool
                         .dropDestination(for: DragPayload.self) { payloads, _ in
                             guard let payload = payloads.first else { return false }
                             moveItem(payload.itemID, toChunkAt: chunkIndex)
@@ -883,7 +836,6 @@ struct PlanStepThreeView: View {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.25), lineWidth: 1)
         )
-        // Chunk container remains a DROP TARGET too (drop onto empty space / below rows).
         .dropDestination(for: DragPayload.self) { payloads, _ in
             guard let payload = payloads.first else { return false }
             moveItem(payload.itemID, toChunkAt: chunkIndex)
@@ -897,24 +849,7 @@ struct PlanStepThreeView: View {
         return ids.compactMap { byID[$0] }
     }
 
-    // MARK: - NEW: Persisted picker selection
-
-    private func hydrateChunkSelectionsFromStore() {
-        // Pull all saved selections for current week, keyed by chunkIndex.
-        let selectionsForWeek = allChunkSelections.filter {
-            Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart)
-        }
-        let byIndex = Dictionary(uniqueKeysWithValues: selectionsForWeek.map { ($0.chunkIndex, $0) })
-
-        for i in chunks.indices {
-            if let rec = byIndex[i] {
-                chunks[i].selectionLabelId = rec.labelId
-                chunks[i].selectionLabel = rec.label
-                chunks[i].selectionCategoryId = rec.categoryId
-                chunks[i].selectionCategory = rec.category
-            }
-        }
-    }
+    // MARK: - Picker behavior (NO persistence until Next)
 
     private func setChunkSelection(chunkIndex: Int, toLabelId newLabelId: UUID?) {
         chunks[chunkIndex].selectionLabelId = newLabelId
@@ -923,105 +858,138 @@ struct PlanStepThreeView: View {
             chunks[chunkIndex].selectionLabel = nil
             chunks[chunkIndex].selectionCategoryId = nil
             chunks[chunkIndex].selectionCategory = nil
-            upsertChunkSelectionRecord(chunkIndex: chunkIndex, label: nil)
             return
         }
 
         guard let selected = defaultLabels.first(where: { $0.labelId == newLabelId }) else {
-            // If seed list is missing for some reason, still clear persisted selection safely.
             chunks[chunkIndex].selectionLabel = nil
             chunks[chunkIndex].selectionCategoryId = nil
             chunks[chunkIndex].selectionCategory = nil
-            upsertChunkSelectionRecord(chunkIndex: chunkIndex, label: nil)
             return
         }
 
-        // Store display strings + IDs on the UI state.
         chunks[chunkIndex].selectionLabel = selected.label
         chunks[chunkIndex].selectionCategoryId = selected.categoryId
         chunks[chunkIndex].selectionCategory = selected.category
-
-        // Persist selection for this week + chunk.
-        upsertChunkSelectionRecord(chunkIndex: chunkIndex, label: selected)
     }
 
-    private func upsertChunkSelectionRecord(chunkIndex: Int, label: PlanLabel?) {
-        // Find existing for this week/chunk
-        let existing = allChunkSelections.first(where: {
-            $0.chunkIndex == chunkIndex &&
-            Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart)
-        })
+    // MARK: - Step 3 "Refresh"
 
-        if let existing {
-            existing.labelId = label?.labelId
-            existing.label = label?.label
-            existing.categoryId = label?.categoryId
-            existing.category = label?.category
-            existing.updatedAt = .now
-        } else {
-            let rec = PlanChunkSelection(
+    private func refreshStep3() {
+        // Reset ALL UI state back to default:
+        // - Move all visible items back into pool
+        // - Clear chunks (actions)
+        // - Reset pickers to "Select…"
+        for i in chunks.indices {
+            chunks[i].itemIDs = []
+            chunks[i].selectionLabelId = nil
+            chunks[i].selectionLabel = nil
+            chunks[i].selectionCategoryId = nil
+            chunks[i].selectionCategory = nil
+        }
+
+        poolItemIDs = initialPoolIDs
+        syncPoolWithVisibility()
+    }
+
+    // MARK: - Step 3 "Next" = save plan + advance
+    //
+    // IMPORTANT changes vs previous behavior:
+    // - Do NOT delete RollingCaptureItem objects. That deletion was causing "empty chunks"
+    //   when returning from Step 4, and it also removed items from Capture.
+    // - Do NOT persist PlanChunkSelection on picker change. If you still want persisted picker
+    //   state in the future, it should be written here (on Next) instead.
+
+    private func persistStep3PlanAndAdvance() {
+        guard isStep3NextEnabled else { return }
+
+        let captureByID = Dictionary(uniqueKeysWithValues: allItems.map { ($0.id, $0) })
+
+        // If the user goes back and re-plans the same week, wipe prior persisted plan for this week first.
+        for action in plannedActions where Calendar.current.isDate(action.weekStart, inSameDayAs: currentWeekStart) {
+            modelContext.delete(action)
+        }
+        for chunk in plannedChunks where Calendar.current.isDate(chunk.weekStart, inSameDayAs: currentWeekStart) {
+            modelContext.delete(chunk)
+        }
+
+        // Also remove any previously stored picker selections for this week (since we aren't using them anymore).
+        for sel in allChunkSelections where Calendar.current.isDate(sel.weekStart, inSameDayAs: currentWeekStart) {
+            modelContext.delete(sel)
+        }
+
+        // Persist chunks (only those with actions, and they must be labeled to persist)
+        for (chunkIndex, chunkState) in chunks.enumerated() where !chunkState.itemIDs.isEmpty {
+            guard let labelId = chunkState.selectionLabelId else { continue }
+
+            let plannedChunk = PlannedChunk(
                 weekStart: currentWeekStart,
                 chunkIndex: chunkIndex,
-                labelId: label?.labelId,
-                label: label?.label,
-                categoryId: label?.categoryId,
-                category: label?.category,
+                labelId: labelId,
+                label: chunkState.selectionLabel ?? "",
+                categoryId: chunkState.selectionCategoryId ?? UUID(),
+                category: chunkState.selectionCategory ?? "",
                 updatedAt: .now
             )
-            modelContext.insert(rec)
+            modelContext.insert(plannedChunk)
+
+            for (order, itemID) in chunkState.itemIDs.enumerated() {
+                guard let item = captureByID[itemID] else { continue }
+
+                let planned = PlannedChunkAction(
+                    weekStart: currentWeekStart,
+                    chunkIndex: chunkIndex,
+                    plannedChunkId: plannedChunk.id,
+                    text: item.text,
+                    sortOrder: order,
+                    createdAt: .now
+                )
+                modelContext.insert(planned)
+            }
         }
 
         try? modelContext.save()
+        navigateToStep4 = true
     }
 
     // MARK: - Drag/drop moves
 
     private func moveItem(_ itemID: UUID, toChunkAt chunkIndex: Int) {
-        // Remove from pool if present.
         if let idx = poolItemIDs.firstIndex(of: itemID) {
             poolItemIDs.remove(at: idx)
         }
 
-        // Remove from any other chunk.
         for i in chunks.indices {
             if let existingIndex = chunks[i].itemIDs.firstIndex(of: itemID) {
                 chunks[i].itemIDs.remove(at: existingIndex)
             }
         }
 
-        // Add to target chunk (append)
         if !chunks[chunkIndex].itemIDs.contains(itemID) {
             chunks[chunkIndex].itemIDs.append(itemID)
         }
     }
 
     private func moveItemToPool(_ itemID: UUID) {
-        // Remove from any chunk.
         for i in chunks.indices {
             if let existingIndex = chunks[i].itemIDs.firstIndex(of: itemID) {
                 chunks[i].itemIDs.remove(at: existingIndex)
             }
         }
 
-        // Add back to pool (top)
         if !poolItemIDs.contains(itemID) {
             poolItemIDs.insert(itemID, at: 0)
         }
     }
 
-    // MARK: - Pool sync (fix showHidden toggle not revealing ghosts)
+    // MARK: - Pool sync
 
     private func syncPoolWithVisibility() {
-        // Keep chunk membership, but ensure pool is a valid subset of currently-visible items.
         let visibleIDSet = Set(visibleItems.map(\.id))
-
-        // Anything already chunked should stay out of the pool.
         let chunkedIDs = Set(chunks.flatMap(\.itemIDs))
 
-        // Filter pool to what's still visible and not chunked.
         poolItemIDs = poolItemIDs.filter { visibleIDSet.contains($0) && !chunkedIDs.contains($0) }
 
-        // Add any newly-visible items that aren't in pool and aren't chunked (prepend newest-ish by visibleItems order).
         let poolSet = Set(poolItemIDs)
         let toAdd = visibleItems
             .map(\.id)
@@ -1040,18 +1008,735 @@ struct PlanStepThreeView: View {
     }
 
     private func canDeleteChunk(at index: Int) -> Bool {
-        // First two cannot be deleted.
         guard index >= 2 else { return false }
-        // Only deletable if empty.
         return chunks[index].itemIDs.isEmpty
     }
 
     private func deleteChunkContainerIfAllowed(at index: Int) {
         guard canDeleteChunk(at: index) else { return }
         chunks.remove(at: index)
-        // Note: we do not delete persisted PlanChunkSelection here because chunkIndex mapping
-        // could be ambiguous after deletions. If you want deletions to also remove persistence,
-        // we can implement a reindexing scheme.
+    }
+}
+
+// MARK: - Step 4
+
+struct PlanStepFourView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.colorScheme) private var colorScheme
+
+    @State private var isShowingInstructions: Bool = false
+
+    // Planned plan (from Step 3)
+    @Query(sort: \PlannedChunk.chunkIndex, order: .forward)
+    private var allPlannedChunks: [PlannedChunk]
+
+    @Query(sort: \PlannedChunkAction.sortOrder, order: .forward)
+    private var allPlannedActions: [PlannedChunkAction]
+
+    // Data for pickers
+    @Query(sort: \Outcomes.rank, order: .forward)
+    private var outcomes: [Outcomes]
+
+    @Query(sort: \Fulfillment.updatedAt, order: .reverse)
+    private var fulfillments: [Fulfillment]
+
+    @Query(sort: \FulfillmentRoles.rank, order: .forward)
+    private var roles: [FulfillmentRoles]
+
+    // UI-only Step 4 state, keyed by PlannedChunk.id
+    @State private var resultTextByChunk: [UUID: String] = [:]
+    @State private var purposeTextByChunk: [UUID: String] = [:]
+    @State private var selectedOutcomeIDsByChunk: [UUID: [UUID]] = [:]
+    @State private var selectedRoleIDByChunk: [UUID: UUID?] = [:]
+
+    // Sheets
+    @State private var outcomeSheetChunkID: UUID? = nil
+    @State private var roleSheetChunkID: UUID? = nil
+
+    private let targetIconName = "scope" // closest "target" icon used in app
+
+    private var currentWeekStart: Date {
+        WeeklyMindsetEntry.weekStart(for: Date())
+    }
+
+    private var plannedChunksForWeek: [PlannedChunk] {
+        allPlannedChunks
+            .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) }
+            .sorted { $0.chunkIndex < $1.chunkIndex }
+    }
+
+    private var plannedActionsForWeek: [PlannedChunkAction] {
+        allPlannedActions
+            .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) }
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Text("Plan")
+                .font(.largeTitle)
+                .fontWeight(.bold)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.top, 8)
+
+            instructionsRow
+                .padding(.horizontal)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    if plannedChunksForWeek.isEmpty {
+                        Text("No chunks yet.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.top, 24)
+                    } else {
+                        ForEach(plannedChunksForWeek) { chunk in
+                            chunkCard(chunk)
+                        }
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.bottom, 12)
+            }
+
+            HStack(spacing: 12) {
+                Button {
+                    dismiss()
+                } label: {
+                    Text("Back")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .foregroundColor(.black)
+                }
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color(.systemGray5))
+                )
+            }
+            .padding(.horizontal)
+            .padding(.bottom, 2)
+        }
+        .safeAreaPadding()
+        .sheet(isPresented: $isShowingInstructions) {
+            StepFourInstructionsPopup()
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $outcomeSheetChunkID) { chunkID in
+            OutcomePickerSheet(
+                title: "Connect Outcome(s)",
+                outcomes: outcomes,
+                selectedIDs: Binding(
+                    get: { selectedOutcomeIDsByChunk[chunkID] ?? [] },
+                    set: { newValue in
+                        selectedOutcomeIDsByChunk[chunkID] = Array(newValue.prefix(3))
+                    }
+                ),
+                maxSelection: 3
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $roleSheetChunkID) { chunkID in
+            let chunk = plannedChunksForWeek.first(where: { $0.id == chunkID })
+            RolePickerSheet(
+                title: "Connect Role",
+                roles: rolesForPlannedChunk(chunk),
+                selectedRoleID: Binding(
+                    get: { selectedRoleIDByChunk[chunkID] ?? nil },
+                    set: { newValue in
+                        selectedRoleIDByChunk[chunkID] = newValue
+                    }
+                )
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
+        .onAppear {
+            // Seed default blank strings for stable TextField bindings
+            for chunk in plannedChunksForWeek {
+                if resultTextByChunk[chunk.id] == nil { resultTextByChunk[chunk.id] = "" }
+                if purposeTextByChunk[chunk.id] == nil { purposeTextByChunk[chunk.id] = "" }
+                if selectedOutcomeIDsByChunk[chunk.id] == nil { selectedOutcomeIDsByChunk[chunk.id] = [] }
+                if selectedRoleIDByChunk[chunk.id] == nil { selectedRoleIDByChunk[chunk.id] = nil }
+            }
+        }
+    }
+
+    private var instructionsRow: some View {
+        Button {
+            isShowingInstructions = true
+        } label: {
+            HStack(alignment: .center, spacing: 10) {
+                Spacer(minLength: 0)
+
+                Image(systemName: "info.circle")
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+
+                Text("Instructions")
+                    .fontWeight(.bold)
+                    .foregroundStyle(.secondary)
+                    .font(.subheadline)
+
+                Text("Tap to read")
+                    .foregroundStyle(.secondary)
+                    .font(.subheadline)
+
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Card
+
+    @ViewBuilder
+    private func chunkCard(_ chunk: PlannedChunk) -> some View {
+        let chunkID = chunk.id
+        let actions = actionsForChunk(chunk)
+
+        VStack(alignment: .leading, spacing: 12) {
+
+            // Header: Actions Related To + label RIGHT-aligned
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("Actions Related To:")
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .foregroundStyle(.secondary)
+
+                Spacer(minLength: 0)
+
+                Text(chunk.label)
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .lineLimit(1)
+            }
+
+            Divider().opacity(0.4)
+
+            // RESULT header row
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("RESULT")
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                Text("What do I want?")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            // Result input box
+            PlanTextEntryBox(
+                placeholder: "Stand out as a rising star in our department and get the next promotion!",
+                text: Binding(
+                    get: { resultTextByChunk[chunkID] ?? "" },
+                    set: { resultTextByChunk[chunkID] = $0 }
+                )
+            )
+
+            // Connect Outcome(s) button row
+            Button {
+                outcomeSheetChunkID = chunkID
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: targetIconName)
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.secondary)
+
+                    Text("Connect Outcome(s)")
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+
+                    Spacer(minLength: 0)
+
+                    Text("optional")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(10)
+                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(
+                            colorScheme == .dark ? Color.white.opacity(0.18) : Color.black.opacity(0.15),
+                            lineWidth: 1
+                        )
+                )
+            }
+            .buttonStyle(.plain)
+
+            // Selected outcomes list
+            let selectedOutcomes = outcomesForChunk(chunk)
+            if !selectedOutcomes.isEmpty {
+                VStack(spacing: 8) {
+                    ForEach(selectedOutcomes, id: \.outcome_id) { outcome in
+                        HStack(spacing: 10) {
+                            Image(systemName: targetIconName)
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(.secondary)
+
+                            Text(outcome.outcome)
+                                .font(.subheadline)
+                                .foregroundStyle(.primary)
+                                .lineLimit(2)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+
+                            Button {
+                                removeOutcome(outcome, from: chunk)
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 18, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Remove outcome")
+                        }
+                        .padding(10)
+                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(
+                                    colorScheme == .dark ? Color.white.opacity(0.18) : Color.black.opacity(0.15),
+                                    lineWidth: 1
+                                )
+                        )
+                    }
+                }
+            }
+
+            Divider().opacity(0.4)
+
+            // PURPOSE header row
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("PURPOSE")
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                Text("Why do I want it?")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            // Connect Role button row (NO "optional" text)
+            Button {
+                roleSheetChunkID = chunkID
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "trophy")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.secondary)
+
+                    Text("Connect Role")
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+
+                    Spacer(minLength: 0)
+
+                    if let selectedRoleName = selectedRoleName(for: chunk) {
+                        Text(selectedRoleName)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(10)
+                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(
+                            colorScheme == .dark ? Color.white.opacity(0.18) : Color.black.opacity(0.15),
+                            lineWidth: 1
+                        )
+                )
+            }
+            .buttonStyle(.plain)
+
+            // Purpose input box:
+            // - Placeholder is your custom text.
+            // - If 1 outcome selected, suggest outcome.reasons.
+            // - Else, suggest category_purpose.
+            let purposeSuggestion = suggestedPurpose(for: chunk)
+            PlanTextEntryBox(
+                placeholder: purposeSuggestion.isEmpty
+                    ? "Earn more income FASTER so I can invest for our future"
+                    : purposeSuggestion,
+                text: Binding(
+                    get: { purposeTextByChunk[chunkID] ?? "" },
+                    set: { purposeTextByChunk[chunkID] = $0 }
+                )
+            )
+
+            Divider().opacity(0.4)
+
+            // ACTIONS header row (styled like RESULT/PURPOSE)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("ACTIONS")
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+            }
+
+            // Actions list
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(actions) { action in
+                    Text("• \(action.text)")
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+        .padding(12)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(
+                    colorScheme == .dark ? Color.white.opacity(0.18) : Color.black.opacity(0.12),
+                    lineWidth: 1
+                )
+        )
+    }
+
+    // MARK: - Derived helpers
+
+    private func actionsForChunk(_ chunk: PlannedChunk) -> [PlannedChunkAction] {
+        plannedActionsForWeek
+            .filter { $0.plannedChunkId == chunk.id }
+            .sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    private func fulfillmentForCategoryName(_ category: String) -> Fulfillment? {
+        fulfillments.first { $0.category == category }
+    }
+
+    private func rolesForCategoryID(_ categoryId: UUID?) -> [FulfillmentRoles] {
+        guard let categoryId else { return [] }
+        return roles
+            .filter { $0.category_id == categoryId }
+            .sorted { $0.rank < $1.rank }
+    }
+
+    /// Fix for "no roles found":
+    /// PlannedChunk.categoryId comes from PlanLabelSeeder.categoryIDs (stable UUIDs),
+    /// but Fulfillment.category_id is generated per-record, so they won't match.
+    /// Instead, map by category NAME to the Fulfillment record, then filter roles by that record's category_id.
+    private func rolesForPlannedChunk(_ chunk: PlannedChunk?) -> [FulfillmentRoles] {
+        guard let chunk else { return [] }
+        guard let fulfillment = fulfillmentForCategoryName(chunk.category) else {
+            return []
+        }
+        return rolesForCategoryID(fulfillment.category_id)
+    }
+
+    private func outcomesForChunk(_ chunk: PlannedChunk) -> [Outcomes] {
+        let ids = selectedOutcomeIDsByChunk[chunk.id] ?? []
+        guard !ids.isEmpty else { return [] }
+
+        let byID = Dictionary(uniqueKeysWithValues: outcomes.map { ($0.outcome_id, $0) })
+        return ids.compactMap { byID[$0] }
+    }
+
+    private func removeOutcome(_ outcome: Outcomes, from chunk: PlannedChunk) {
+        let chunkID = chunk.id
+        var ids = selectedOutcomeIDsByChunk[chunkID] ?? []
+        ids.removeAll { $0 == outcome.outcome_id }
+        selectedOutcomeIDsByChunk[chunkID] = ids
+    }
+
+    private func suggestedPurpose(for chunk: PlannedChunk) -> String {
+        let selectedOutcomes = outcomesForChunk(chunk)
+        if selectedOutcomes.count == 1 {
+            return selectedOutcomes[0].reasons.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        // Same mismatch fix as roles: find Fulfillment by category name.
+        if let f = fulfillmentForCategoryName(chunk.category) {
+            return f.category_purpose.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        return ""
+    }
+
+    private func selectedRoleName(for chunk: PlannedChunk) -> String? {
+        guard let picked = (selectedRoleIDByChunk[chunk.id] ?? nil) else { return nil }
+        return roles.first(where: { $0.id == picked })?.role
+    }
+}
+
+private struct StepFourInstructionsPopup: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+
+                    // Result
+                    Group {
+                        (
+                            Text("Result: ")
+                                .fontWeight(.bold)
+                            + Text("What do I want?")
+                                .italic()
+                                .underline()
+                        )
+                        .font(.body)
+
+                        Text("What’s the most important result or outcome you want to have happen today? What are you really committed to achieving?")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Divider().padding(.vertical, 2)
+
+                    // Purpose
+                    Group {
+                        (
+                            Text("Purpose: ")
+                                .fontWeight(.bold)
+                            + Text("Why do I want it?")
+                                .italic()
+                                .underline()
+                        )
+                        .font(.body)
+
+                        Text("Why do you want to do this? What’s your real purpose? How will it make you feel to achieve your result? What will it give you? What will it give your family?")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Image(systemName: "trophy")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(.secondary)
+
+                        Text("This connects what you do now to fulfillment via your roles in a category of improvement.")
+                            .font(.subheadline)
+                            .fontWeight(.bold)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.top, 2)
+
+                    Divider().padding(.vertical, 2)
+
+                    // Actions
+                    Group {
+                        (
+                            Text("Actions: ")
+                                .fontWeight(.bold)
+                            + Text("How can I best achieve it now?")
+                                .italic()
+                                .underline()
+                        )
+                        .font(.body)
+
+                        Text("What specific actions can you take in order to achieve your result? What are the elements of your plan - both things you already captured as well as any new ideas that you come up with - that will help you achieve your result?")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+                .padding()
+            }
+            .navigationTitle("Instructions")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Step 4 supporting views (UI-only)
+
+private struct PlanTextEntryBox: View {
+    let placeholder: String
+    @Binding var text: String
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(placeholder)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+            }
+
+            TextEditor(text: $text)
+                .font(.subheadline)
+                .scrollContentBackground(.hidden)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .frame(minHeight: 44)
+        }
+        .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(
+                    colorScheme == .dark ? Color.white.opacity(0.22) : Color.black.opacity(0.18),
+                    lineWidth: 1
+                )
+        )
+    }
+}
+
+private struct OutcomePickerSheet: View {
+    let title: String
+    let outcomes: [Outcomes]
+    @Binding var selectedIDs: [UUID]
+    let maxSelection: Int
+
+    @Environment(\.dismiss) private var dismiss
+
+    private func isSelected(_ id: UUID) -> Bool {
+        selectedIDs.contains(id)
+    }
+
+    private func toggle(_ id: UUID) {
+        if let idx = selectedIDs.firstIndex(of: id) {
+            selectedIDs.remove(at: idx)
+        } else {
+            guard selectedIDs.count < maxSelection else { return }
+            selectedIDs.append(id)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Text("Select up to \(maxSelection).")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
+                ForEach(outcomes) { outcome in
+                    Button {
+                        toggle(outcome.outcome_id)
+                    } label: {
+                        HStack(spacing: 10) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(outcome.outcome)
+                                    .foregroundStyle(.primary)
+                                    .font(.body)
+                                    .lineLimit(2)
+
+                                if !outcome.reasons.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                    Text(outcome.reasons)
+                                        .foregroundStyle(.secondary)
+                                        .font(.caption)
+                                        .lineLimit(2)
+                                }
+                            }
+
+                            Spacer()
+
+                            if isSelected(outcome.outcome_id) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(.blue)
+                            } else if selectedIDs.count >= maxSelection {
+                                Image(systemName: "circle")
+                                    .foregroundStyle(.secondary.opacity(0.4))
+                            } else {
+                                Image(systemName: "circle")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!isSelected(outcome.outcome_id) && selectedIDs.count >= maxSelection)
+                }
+            }
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+private struct RolePickerSheet: View {
+    let title: String
+    let roles: [FulfillmentRoles]
+    @Binding var selectedRoleID: UUID?
+
+    @Environment(\.dismiss) private var dismiss
+
+    private func isSelected(_ id: UUID) -> Bool { selectedRoleID == id }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if roles.isEmpty {
+                    Text("No roles found for this category yet.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(roles) { role in
+                        Button {
+                            if isSelected(role.id) {
+                                selectedRoleID = nil
+                            } else {
+                                selectedRoleID = role.id
+                            }
+                        } label: {
+                            HStack {
+                                Text(role.role)
+                                    .foregroundStyle(.primary)
+
+                                Spacer()
+
+                                if isSelected(role.id) {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(.blue)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
     }
 }
 
@@ -1064,12 +1749,10 @@ private struct DragPayload: Codable, Hashable, Transferable {
     }
 }
 
-// UPDATED: ChunkContainerState now stores persisted selection fields (still UI struct).
 private struct ChunkContainerState: Identifiable, Hashable {
     var id: UUID = .init()
     var isLocked: Bool
 
-    // NEW: persisted selection fields (what user picks)
     var selectionLabelId: UUID? = nil
     var selectionLabel: String? = nil
     var selectionCategoryId: UUID? = nil
@@ -1099,3 +1782,6 @@ private extension View {
     }
 }
 
+extension UUID: @retroactive Identifiable {
+    public var id: UUID { self }
+}

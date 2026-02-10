@@ -33,6 +33,10 @@ struct loomApp: App {
                 RollingCaptureItem.self,
                 PlanLabel.self,
                 PlanChunkSelection.self,
+
+                // NEW
+                PlannedChunk.self,
+                PlannedChunkAction.self,
             ]
         )
     }
