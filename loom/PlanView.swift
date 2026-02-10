@@ -1071,6 +1071,38 @@ struct PlanStepFourView: View {
             .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) }
     }
 
+    // MARK: - Cross-chunk uniqueness (Outcomes + Roles)
+
+    private func selectedOutcomeIDs(excludingChunk chunkID: UUID?) -> Set<UUID> {
+        var result = Set<UUID>()
+        for (id, ids) in selectedOutcomeIDsByChunk where id != chunkID {
+            result.formUnion(ids)
+        }
+        return result
+    }
+
+    private func availableOutcomes(forChunk chunkID: UUID) -> [Outcomes] {
+        let takenByOtherChunks = selectedOutcomeIDs(excludingChunk: chunkID)
+        return outcomes.filter { !takenByOtherChunks.contains($0.outcome_id) }
+    }
+
+    private func selectedRoleIDs(excludingChunk chunkID: UUID?) -> Set<UUID> {
+        var result = Set<UUID>()
+        for (id, roleID) in selectedRoleIDByChunk where id != chunkID {
+            if let roleID { result.insert(roleID) }
+        }
+        return result
+    }
+
+    private func availableRoles(forChunk chunk: PlannedChunk?) -> [FulfillmentRoles] {
+        guard let chunk else { return [] }
+
+        // Roles are already limited to the chunk's category; then we remove roles used by other chunks.
+        let rolesInCategory = rolesForPlannedChunk(chunk)
+        let takenByOtherChunks = selectedRoleIDs(excludingChunk: chunk.id)
+        return rolesInCategory.filter { !takenByOtherChunks.contains($0.id) }
+    }
+
     var body: some View {
         VStack(spacing: 12) {
             Text("Plan")
@@ -1126,7 +1158,7 @@ struct PlanStepFourView: View {
         .sheet(item: $outcomeSheetChunkID) { chunkID in
             OutcomePickerSheet(
                 title: "Connect Outcome(s)",
-                outcomes: outcomes,
+                outcomes: availableOutcomes(forChunk: chunkID),
                 selectedIDs: Binding(
                     get: { selectedOutcomeIDsByChunk[chunkID] ?? [] },
                     set: { newValue in
@@ -1142,7 +1174,7 @@ struct PlanStepFourView: View {
             let chunk = plannedChunksForWeek.first(where: { $0.id == chunkID })
             RolePickerSheet(
                 title: "Connect Role",
-                roles: rolesForPlannedChunk(chunk),
+                roles: availableRoles(forChunk: chunk),
                 selectedRoleID: Binding(
                     get: { selectedRoleIDByChunk[chunkID] ?? nil },
                     set: { newValue in
@@ -1233,9 +1265,9 @@ struct PlanStepFourView: View {
                     .foregroundStyle(.secondary)
             }
 
-            // Result input box
-            PlanTextEntryBox(
-                placeholder: "Stand out as a rising star in our department and get the next promotion!",
+            // Result input box (placeholder cleared)
+            PlanSingleLineEntryBox(
+                placeholder: "",
                 text: Binding(
                     get: { resultTextByChunk[chunkID] ?? "" },
                     set: { resultTextByChunk[chunkID] = $0 }
@@ -1370,15 +1402,9 @@ struct PlanStepFourView: View {
             }
             .buttonStyle(.plain)
 
-            // Purpose input box:
-            // - Placeholder is your custom text.
-            // - If 1 outcome selected, suggest outcome.reasons.
-            // - Else, suggest category_purpose.
-            let purposeSuggestion = suggestedPurpose(for: chunk)
-            PlanTextEntryBox(
-                placeholder: purposeSuggestion.isEmpty
-                    ? "Earn more income FASTER so I can invest for our future"
-                    : purposeSuggestion,
+            // Purpose input box (placeholder cleared)
+            PlanSingleLineEntryBox(
+                placeholder: "",
                 text: Binding(
                     get: { purposeTextByChunk[chunkID] ?? "" },
                     set: { purposeTextByChunk[chunkID] = $0 }
@@ -1387,7 +1413,7 @@ struct PlanStepFourView: View {
 
             Divider().opacity(0.4)
 
-            // ACTIONS header row (styled like RESULT/PURPOSE)
+            // ACTIONS header row
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("ACTIONS")
                     .font(.caption)
@@ -1437,10 +1463,6 @@ struct PlanStepFourView: View {
             .sorted { $0.rank < $1.rank }
     }
 
-    /// Fix for "no roles found":
-    /// PlannedChunk.categoryId comes from PlanLabelSeeder.categoryIDs (stable UUIDs),
-    /// but Fulfillment.category_id is generated per-record, so they won't match.
-    /// Instead, map by category NAME to the Fulfillment record, then filter roles by that record's category_id.
     private func rolesForPlannedChunk(_ chunk: PlannedChunk?) -> [FulfillmentRoles] {
         guard let chunk else { return [] }
         guard let fulfillment = fulfillmentForCategoryName(chunk.category) else {
@@ -1470,7 +1492,6 @@ struct PlanStepFourView: View {
             return selectedOutcomes[0].reasons.trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
-        // Same mismatch fix as roles: find Fulfillment by category name.
         if let f = fulfillmentForCategoryName(chunk.category) {
             return f.category_purpose.trimmingCharacters(in: .whitespacesAndNewlines)
         }
@@ -1574,37 +1595,27 @@ private struct StepFourInstructionsPopup: View {
 
 // MARK: - Step 4 supporting views (UI-only)
 
-private struct PlanTextEntryBox: View {
+private struct PlanSingleLineEntryBox: View {
     let placeholder: String
     @Binding var text: String
 
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text(placeholder)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-            }
-
-            TextEditor(text: $text)
-                .font(.subheadline)
-                .scrollContentBackground(.hidden)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
-                .frame(minHeight: 44)
-        }
-        .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(
-                    colorScheme == .dark ? Color.white.opacity(0.22) : Color.black.opacity(0.18),
-                    lineWidth: 1
-                )
-        )
+        TextField(placeholder, text: $text)
+            .font(.subheadline)
+            .textInputAutocapitalization(.sentences)
+            .autocorrectionDisabled(false)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 10))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(
+                        colorScheme == .dark ? Color.white.opacity(0.22) : Color.black.opacity(0.18),
+                        lineWidth: 1
+                    )
+            )
     }
 }
 
