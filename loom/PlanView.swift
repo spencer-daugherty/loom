@@ -23,15 +23,12 @@ struct PlanView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
-            
-            // Top Title
             Text("Weekly Planning")
                 .font(.largeTitle)
                 .fontWeight(.bold)
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.top, 8)
 
-            // Morning Power Question
             VStack(alignment: .leading, spacing: 8) {
                 Text("Morning Power Question")
                     .font(.headline)
@@ -47,7 +44,6 @@ struct PlanView: View {
             }
             .padding(.top, 16)
 
-            // Grateful For
             VStack(alignment: .leading, spacing: 8) {
                 Text("What am I grateful for?")
                     .font(.headline)
@@ -58,7 +54,6 @@ struct PlanView: View {
                     .onSubmit { focusedField = .incantation }
             }
 
-            // Incantation
             VStack(alignment: .leading, spacing: 8) {
                 Text("Incantation")
                     .font(.headline)
@@ -78,7 +73,6 @@ struct PlanView: View {
 
             Spacer(minLength: 0)
 
-            // Bottom buttons side-by-side (like Step 2)
             HStack(spacing: 12) {
                 Button {
                     dismiss()
@@ -107,8 +101,9 @@ struct PlanView: View {
         .safeAreaPadding(.top)
         .safeAreaPadding(.bottom)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // IMPORTANT: keep only ONE modal host; navigate steps *inside* that host.
         .fullScreenCover(isPresented: $navigateToStep2) {
-            PlanStepTwoView()
+            PlanFlowHostView()
         }
         .onAppear {
             DispatchQueue.main.async {
@@ -131,7 +126,38 @@ struct PlanView: View {
     }
 }
 
+// MARK: - Single modal host for steps 2–4 (prevents stacked fullScreenCover text input bugs)
+
+private struct PlanFlowHostView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var step: Int = 2
+
+    var body: some View {
+        ZStack {
+            switch step {
+            case 2:
+                PlanStepTwoView(onBack: { dismiss() }, onNext: { step = 3 })
+            case 3:
+                PlanStepThreeView(onBack: { step = 2 }, onNext: { step = 4 })
+            default:
+                PlanStepFourView(onBack: { step = 3 })
+            }
+        }
+    }
+}
+
+// MARK: - Step 2
+
 struct PlanStepTwoView: View {
+    let onBack: (() -> Void)?
+    let onNext: (() -> Void)?
+
+    init(onBack: (() -> Void)? = nil, onNext: (() -> Void)? = nil) {
+        self.onBack = onBack
+        self.onNext = onNext
+    }
+
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var colorScheme
@@ -143,11 +169,8 @@ struct PlanStepTwoView: View {
     @State private var showHidden: Bool = false
     @FocusState private var isInputFocused: Bool
 
-    /// Baseline set captured on appear; used to apply `plus.viewfinder` only to “existing before session” items.
     @State private var baselineItemIDs: Set<UUID> = []
-
     @State private var isBrainstormExpanded: Bool = false
-    @State private var navigateToStep3: Bool = false
 
     private let hiddenUntilLaterIconName = "clock.arrow.trianglehead.clockwise.rotate.90.path.dotted"
 
@@ -184,7 +207,6 @@ struct PlanStepTwoView: View {
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.top, 8)
 
-            // Brainstorm info row
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: "info.circle")
                     .foregroundStyle(.secondary)
@@ -201,10 +223,8 @@ struct PlanStepTwoView: View {
                         .font(.subheadline)
                         .fixedSize(horizontal: false, vertical: true)
 
-                        Button("Show less") {
-                            isBrainstormExpanded = false
-                        }
-                        .font(.subheadline)
+                        Button("Show less") { isBrainstormExpanded = false }
+                            .font(.subheadline)
                     } else {
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
                             (
@@ -217,11 +237,9 @@ struct PlanStepTwoView: View {
                             .lineLimit(1)
                             .truncationMode(.tail)
 
-                            Button("Show more") {
-                                isBrainstormExpanded = true
-                            }
-                            .font(.subheadline)
-                            .layoutPriority(1)
+                            Button("Show more") { isBrainstormExpanded = true }
+                                .font(.subheadline)
+                                .layoutPriority(1)
                         }
                     }
                 }
@@ -230,12 +248,9 @@ struct PlanStepTwoView: View {
             }
             .padding(.horizontal)
 
-            // Toggle row
             HStack(spacing: 10) {
-                Toggle(isOn: $showHidden) {
-                    EmptyView()
-                }
-                .labelsHidden()
+                Toggle(isOn: $showHidden) { EmptyView() }
+                    .labelsHidden()
 
                 Image(systemName: hiddenUntilLaterIconName)
                     .font(.system(size: 18, weight: .semibold))
@@ -304,7 +319,7 @@ struct PlanStepTwoView: View {
 
             HStack(spacing: 12) {
                 Button {
-                    dismiss()
+                    if let onBack { onBack() } else { dismiss() }
                 } label: {
                     Text("Back")
                         .frame(maxWidth: .infinity)
@@ -317,7 +332,7 @@ struct PlanStepTwoView: View {
                 )
 
                 Button {
-                    navigateToStep3 = true
+                    if let onNext { onNext() }
                 } label: {
                     Text("Next")
                         .frame(maxWidth: .infinity)
@@ -328,14 +343,10 @@ struct PlanStepTwoView: View {
             .padding(.bottom, 2)
         }
         .safeAreaPadding()
-        .fullScreenCover(isPresented: $navigateToStep3) {
-            PlanStepThreeView()
-        }
         .onAppear {
             if baselineItemIDs.isEmpty {
                 baselineItemIDs = Set(allItems.map(\.id))
             }
-
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 isInputFocused = true
             }
@@ -379,6 +390,14 @@ struct PlanStepTwoView: View {
 // MARK: - Step 3
 
 struct PlanStepThreeView: View {
+    let onBack: (() -> Void)?
+    let onNext: (() -> Void)?
+
+    init(onBack: (() -> Void)? = nil, onNext: (() -> Void)? = nil) {
+        self.onBack = onBack
+        self.onNext = onNext
+    }
+
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var colorScheme
@@ -392,7 +411,6 @@ struct PlanStepThreeView: View {
     @Query(sort: \PlanChunkSelection.updatedAt, order: .reverse)
     private var allChunkSelections: [PlanChunkSelection]
 
-    // Clear any existing plan for the week before writing a new one
     @Query(sort: \PlannedChunk.updatedAt, order: .reverse)
     private var plannedChunks: [PlannedChunk]
 
@@ -405,7 +423,6 @@ struct PlanStepThreeView: View {
     @State private var poolItemIDs: [UUID] = []
     @State private var chunks: [ChunkContainerState] = []
 
-    // Step 3 baseline snapshot (used for "Refresh" visibility)
     @State private var baselineShowHidden: Bool = false
     @State private var baselinePoolItemIDs: [UUID] = []
     @State private var baselineChunks: [ChunkContainerState] = []
@@ -444,12 +461,10 @@ struct PlanStepThreeView: View {
         }
     }
 
-    /// Indices of chunks that have >= 3 actions.
     private var qualifyingChunkIndices: [Int] {
         chunks.indices.filter { chunks[$0].itemIDs.count >= 3 }
     }
 
-    /// Step 3 Next enabled rule.
     private var isStep3NextEnabled: Bool {
         let qualifying = qualifyingChunkIndices
         guard qualifying.count >= 2 else { return false }
@@ -462,7 +477,12 @@ struct PlanStepThreeView: View {
         chunks != baselineChunks
     }
 
-    @State private var navigateToStep4: Bool = false
+    private func chunkLightFillColor(categoryName: String?) -> Color {
+        guard let categoryName else {
+            return Color(.secondarySystemBackground)
+        }
+        return FulfillmentCategoryColors.lightColor(for: categoryName)
+    }
 
     var body: some View {
         VStack(spacing: 12) {
@@ -472,7 +492,6 @@ struct PlanStepThreeView: View {
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.top, 8)
 
-            // Categorize info row
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: "info.circle")
                     .foregroundStyle(.secondary)
@@ -514,7 +533,6 @@ struct PlanStepThreeView: View {
             }
             .padding(.horizontal)
 
-            // Toggle row
             HStack(spacing: 10) {
                 Toggle(isOn: $showHidden) { EmptyView() }
                     .labelsHidden()
@@ -532,7 +550,6 @@ struct PlanStepThreeView: View {
             }
             .padding(.horizontal)
 
-            // Pool
             List {
                 ForEach(poolItems) { item in
                     rowView(
@@ -564,7 +581,6 @@ struct PlanStepThreeView: View {
                 syncPoolWithVisibility()
             }
 
-            // Chunks
             List {
                 ForEach(Array(chunks.enumerated()), id: \.element.id) { index, _ in
                     chunkContainerView(chunkIndex: index)
@@ -581,11 +597,8 @@ struct PlanStepThreeView: View {
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
 
-            // Refresh button (small text, no shape; only visible if modified)
             if isRefreshVisible {
-                Button {
-                    refreshStep3()
-                } label: {
+                Button { refreshStep3() } label: {
                     Text("Refresh")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -596,10 +609,9 @@ struct PlanStepThreeView: View {
                 .padding(.bottom, 2)
             }
 
-            // Back/Next
             HStack(spacing: 12) {
                 Button {
-                    dismiss()
+                    if let onBack { onBack() } else { dismiss() }
                 } label: {
                     Text("Back")
                         .frame(maxWidth: .infinity)
@@ -612,7 +624,8 @@ struct PlanStepThreeView: View {
                 )
 
                 Button {
-                    persistStep3PlanAndAdvance()
+                    persistStep3Plan()
+                    if let onNext { onNext() }
                 } label: {
                     Text("Next")
                         .frame(maxWidth: .infinity)
@@ -624,9 +637,6 @@ struct PlanStepThreeView: View {
             .padding(.bottom, 2)
         }
         .safeAreaPadding()
-        .fullScreenCover(isPresented: $navigateToStep4) {
-            PlanStepFourView()
-        }
         .onAppear {
             PlanLabelSeeder.seedDefaultsIfNeeded(in: modelContext)
 
@@ -642,22 +652,16 @@ struct PlanStepThreeView: View {
                 syncPoolWithVisibility()
             }
 
-            // Capture baseline after we've initialized state.
             if baselineChunks.isEmpty && baselinePoolItemIDs.isEmpty {
                 baselineShowHidden = showHidden
                 baselinePoolItemIDs = poolItemIDs
                 baselineChunks = chunks
             }
-
-            // IMPORTANT: Do not hydrate from stored selections on appear.
-            // Step 3 should not store anything until "Next", and Refresh should return to "Select…".
         }
         .onChange(of: allItems.map(\.id)) { _, _ in
             syncPoolWithVisibility()
         }
     }
-
-    // MARK: - Add Chunk row
 
     private var addChunkRow: some View {
         Button {
@@ -686,8 +690,6 @@ struct PlanStepThreeView: View {
         )
     }
 
-    // MARK: - Derived data
-
     private var visibleItems: [RollingCaptureItem] {
         let base = showHidden ? allItems : allItems.filter { !$0.isGhost }
         return base.sorted {
@@ -704,8 +706,6 @@ struct PlanStepThreeView: View {
         let byID = Dictionary(uniqueKeysWithValues: visibleItems.map { ($0.id, $0) })
         return poolItemIDs.compactMap { byID[$0] }
     }
-
-    // MARK: - UI pieces
 
     @ViewBuilder
     private func rowView(
@@ -757,6 +757,8 @@ struct PlanStepThreeView: View {
         let chunk = chunks[chunkIndex]
         let showDeleteX = chunkIndex >= 2
         let canDeleteThisChunk = canDeleteChunk(at: chunkIndex)
+
+        let fill = chunkLightFillColor(categoryName: chunk.selectionCategory)
 
         VStack(spacing: 10) {
             HStack(alignment: .center, spacing: 6) {
@@ -834,7 +836,11 @@ struct PlanStepThreeView: View {
         .frame(maxWidth: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.25), lineWidth: 1)
+                .fill(fill)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.18), lineWidth: 1)
         )
         .dropDestination(for: DragPayload.self) { payloads, _ in
             guard let payload = payloads.first else { return false }
@@ -848,8 +854,6 @@ struct PlanStepThreeView: View {
         let byID = Dictionary(uniqueKeysWithValues: visibleItems.map { ($0.id, $0) })
         return ids.compactMap { byID[$0] }
     }
-
-    // MARK: - Picker behavior (NO persistence until Next)
 
     private func setChunkSelection(chunkIndex: Int, toLabelId newLabelId: UUID?) {
         chunks[chunkIndex].selectionLabelId = newLabelId
@@ -873,13 +877,7 @@ struct PlanStepThreeView: View {
         chunks[chunkIndex].selectionCategory = selected.category
     }
 
-    // MARK: - Step 3 "Refresh"
-
     private func refreshStep3() {
-        // Reset ALL UI state back to default:
-        // - Move all visible items back into pool
-        // - Clear chunks (actions)
-        // - Reset pickers to "Select…"
         for i in chunks.indices {
             chunks[i].itemIDs = []
             chunks[i].selectionLabelId = nil
@@ -892,33 +890,22 @@ struct PlanStepThreeView: View {
         syncPoolWithVisibility()
     }
 
-    // MARK: - Step 3 "Next" = save plan + advance
-    //
-    // IMPORTANT changes vs previous behavior:
-    // - Do NOT delete RollingCaptureItem objects. That deletion was causing "empty chunks"
-    //   when returning from Step 4, and it also removed items from Capture.
-    // - Do NOT persist PlanChunkSelection on picker change. If you still want persisted picker
-    //   state in the future, it should be written here (on Next) instead.
-
-    private func persistStep3PlanAndAdvance() {
+    // Split: Step 3 "Next" should persist; navigation is controlled by host.
+    private func persistStep3Plan() {
         guard isStep3NextEnabled else { return }
 
         let captureByID = Dictionary(uniqueKeysWithValues: allItems.map { ($0.id, $0) })
 
-        // If the user goes back and re-plans the same week, wipe prior persisted plan for this week first.
         for action in plannedActions where Calendar.current.isDate(action.weekStart, inSameDayAs: currentWeekStart) {
             modelContext.delete(action)
         }
         for chunk in plannedChunks where Calendar.current.isDate(chunk.weekStart, inSameDayAs: currentWeekStart) {
             modelContext.delete(chunk)
         }
-
-        // Also remove any previously stored picker selections for this week (since we aren't using them anymore).
         for sel in allChunkSelections where Calendar.current.isDate(sel.weekStart, inSameDayAs: currentWeekStart) {
             modelContext.delete(sel)
         }
 
-        // Persist chunks (only those with actions, and they must be labeled to persist)
         for (chunkIndex, chunkState) in chunks.enumerated() where !chunkState.itemIDs.isEmpty {
             guard let labelId = chunkState.selectionLabelId else { continue }
 
@@ -949,10 +936,7 @@ struct PlanStepThreeView: View {
         }
 
         try? modelContext.save()
-        navigateToStep4 = true
     }
-
-    // MARK: - Drag/drop moves
 
     private func moveItem(_ itemID: UUID, toChunkAt chunkIndex: Int) {
         if let idx = poolItemIDs.firstIndex(of: itemID) {
@@ -982,8 +966,6 @@ struct PlanStepThreeView: View {
         }
     }
 
-    // MARK: - Pool sync
-
     private func syncPoolWithVisibility() {
         let visibleIDSet = Set(visibleItems.map(\.id))
         let chunkedIDs = Set(chunks.flatMap(\.itemIDs))
@@ -999,8 +981,6 @@ struct PlanStepThreeView: View {
             poolItemIDs.insert(contentsOf: toAdd, at: 0)
         }
     }
-
-    // MARK: - Chunk management
 
     private func addChunkContainer() {
         guard chunks.count < maxChunks else { return }
@@ -1021,20 +1001,24 @@ struct PlanStepThreeView: View {
 // MARK: - Step 4
 
 struct PlanStepFourView: View {
+    let onBack: (() -> Void)?
+
+    init(onBack: (() -> Void)? = nil) {
+        self.onBack = onBack
+    }
+
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var isShowingInstructions: Bool = false
 
-    // Planned plan (from Step 3)
     @Query(sort: \PlannedChunk.chunkIndex, order: .forward)
     private var allPlannedChunks: [PlannedChunk]
 
     @Query(sort: \PlannedChunkAction.sortOrder, order: .forward)
     private var allPlannedActions: [PlannedChunkAction]
 
-    // Data for pickers
     @Query(sort: \Outcomes.rank, order: .forward)
     private var outcomes: [Outcomes]
 
@@ -1044,17 +1028,23 @@ struct PlanStepFourView: View {
     @Query(sort: \FulfillmentRoles.rank, order: .forward)
     private var roles: [FulfillmentRoles]
 
-    // UI-only Step 4 state, keyed by PlannedChunk.id
-    @State private var resultTextByChunk: [UUID: String] = [:]
-    @State private var purposeTextByChunk: [UUID: String] = [:]
     @State private var selectedOutcomeIDsByChunk: [UUID: [UUID]] = [:]
     @State private var selectedRoleIDByChunk: [UUID: UUID?] = [:]
 
-    // Sheets
-    @State private var outcomeSheetChunkID: UUID? = nil
-    @State private var roleSheetChunkID: UUID? = nil
+    @State private var resultTextByChunk: [UUID: String] = [:]
+    @State private var roleTextByChunk: [UUID: String] = [:]
 
-    private let targetIconName = "scope" // closest "target" icon used in app
+    @FocusState private var focusedField: Step4FocusField?
+    private enum Step4FocusField: Hashable {
+        case result(UUID)
+        case roleNote(UUID)
+    }
+
+    private struct SheetChunkID: Identifiable, Hashable { let id: UUID }
+    @State private var outcomeSheetChunkID: SheetChunkID? = nil
+    @State private var roleSheetChunkID: SheetChunkID? = nil
+
+    private let targetIconName = "scope"
 
     private var currentWeekStart: Date {
         WeeklyMindsetEntry.weekStart(for: Date())
@@ -1070,8 +1060,6 @@ struct PlanStepFourView: View {
         allPlannedActions
             .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) }
     }
-
-    // MARK: - Cross-chunk uniqueness (Outcomes + Roles)
 
     private func selectedOutcomeIDs(excludingChunk chunkID: UUID?) -> Set<UUID> {
         var result = Set<UUID>()
@@ -1096,11 +1084,13 @@ struct PlanStepFourView: View {
 
     private func availableRoles(forChunk chunk: PlannedChunk?) -> [FulfillmentRoles] {
         guard let chunk else { return [] }
-
-        // Roles are already limited to the chunk's category; then we remove roles used by other chunks.
         let rolesInCategory = rolesForPlannedChunk(chunk)
         let takenByOtherChunks = selectedRoleIDs(excludingChunk: chunk.id)
         return rolesInCategory.filter { !takenByOtherChunks.contains($0.id) }
+    }
+
+    private func chunkLightFillColor(for chunk: PlannedChunk) -> Color {
+        FulfillmentCategoryColors.lightColor(for: chunk.category)
     }
 
     var body: some View {
@@ -1134,7 +1124,7 @@ struct PlanStepFourView: View {
 
             HStack(spacing: 12) {
                 Button {
-                    dismiss()
+                    if let onBack { onBack() } else { dismiss() }
                 } label: {
                     Text("Back")
                         .frame(maxWidth: .infinity)
@@ -1150,19 +1140,25 @@ struct PlanStepFourView: View {
             .padding(.bottom, 2)
         }
         .safeAreaPadding()
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { focusedField = nil }
+            }
+        }
         .sheet(isPresented: $isShowingInstructions) {
             StepFourInstructionsPopup()
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
-        .sheet(item: $outcomeSheetChunkID) { chunkID in
+        .sheet(item: $outcomeSheetChunkID) { wrapper in
             OutcomePickerSheet(
                 title: "Connect Outcome(s)",
-                outcomes: availableOutcomes(forChunk: chunkID),
+                outcomes: availableOutcomes(forChunk: wrapper.id),
                 selectedIDs: Binding(
-                    get: { selectedOutcomeIDsByChunk[chunkID] ?? [] },
+                    get: { selectedOutcomeIDsByChunk[wrapper.id] ?? [] },
                     set: { newValue in
-                        selectedOutcomeIDsByChunk[chunkID] = Array(newValue.prefix(3))
+                        selectedOutcomeIDsByChunk[wrapper.id] = Array(newValue.prefix(3))
                     }
                 ),
                 maxSelection: 3
@@ -1170,15 +1166,15 @@ struct PlanStepFourView: View {
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
         }
-        .sheet(item: $roleSheetChunkID) { chunkID in
-            let chunk = plannedChunksForWeek.first(where: { $0.id == chunkID })
+        .sheet(item: $roleSheetChunkID) { wrapper in
+            let chunk = plannedChunksForWeek.first(where: { $0.id == wrapper.id })
             RolePickerSheet(
                 title: "Connect Role",
                 roles: availableRoles(forChunk: chunk),
                 selectedRoleID: Binding(
-                    get: { selectedRoleIDByChunk[chunkID] ?? nil },
+                    get: { selectedRoleIDByChunk[wrapper.id] ?? nil },
                     set: { newValue in
-                        selectedRoleIDByChunk[chunkID] = newValue
+                        selectedRoleIDByChunk[wrapper.id] = newValue
                     }
                 )
             )
@@ -1186,36 +1182,29 @@ struct PlanStepFourView: View {
             .presentationDragIndicator(.visible)
         }
         .onAppear {
-            // Seed default blank strings for stable TextField bindings
             for chunk in plannedChunksForWeek {
-                if resultTextByChunk[chunk.id] == nil { resultTextByChunk[chunk.id] = "" }
-                if purposeTextByChunk[chunk.id] == nil { purposeTextByChunk[chunk.id] = "" }
                 if selectedOutcomeIDsByChunk[chunk.id] == nil { selectedOutcomeIDsByChunk[chunk.id] = [] }
                 if selectedRoleIDByChunk[chunk.id] == nil { selectedRoleIDByChunk[chunk.id] = nil }
+                if resultTextByChunk[chunk.id] == nil { resultTextByChunk[chunk.id] = "" }
+                if roleTextByChunk[chunk.id] == nil { roleTextByChunk[chunk.id] = "" }
             }
         }
     }
 
     private var instructionsRow: some View {
-        Button {
-            isShowingInstructions = true
-        } label: {
+        Button { isShowingInstructions = true } label: {
             HStack(alignment: .center, spacing: 10) {
                 Spacer(minLength: 0)
-
                 Image(systemName: "info.circle")
                     .foregroundStyle(.secondary)
                     .accessibilityHidden(true)
-
                 Text("Instructions")
                     .fontWeight(.bold)
                     .foregroundStyle(.secondary)
                     .font(.subheadline)
-
                 Text("Tap to read")
                     .foregroundStyle(.secondary)
                     .font(.subheadline)
-
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity)
@@ -1224,16 +1213,23 @@ struct PlanStepFourView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: - Card
-
     @ViewBuilder
     private func chunkCard(_ chunk: PlannedChunk) -> some View {
         let chunkID = chunk.id
         let actions = actionsForChunk(chunk)
+        let fill = chunkLightFillColor(for: chunk)
+
+        let resultBinding = Binding<String>(
+            get: { resultTextByChunk[chunkID] ?? "" },
+            set: { resultTextByChunk[chunkID] = $0 }
+        )
+
+        let roleNoteBinding = Binding<String>(
+            get: { roleTextByChunk[chunkID] ?? "" },
+            set: { roleTextByChunk[chunkID] = $0 }
+        )
 
         VStack(alignment: .leading, spacing: 12) {
-
-            // Header: Actions Related To + label RIGHT-aligned
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("Actions Related To:")
                     .font(.caption)
@@ -1251,48 +1247,36 @@ struct PlanStepFourView: View {
 
             Divider().opacity(0.4)
 
-            // RESULT header row
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("RESULT")
                     .font(.caption)
                     .fontWeight(.bold)
                     .foregroundStyle(.secondary)
-
                 Spacer()
-
                 Text("What do I want?")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
 
-            // Result input box (placeholder cleared)
-            PlanSingleLineEntryBox(
-                placeholder: "",
-                text: Binding(
-                    get: { resultTextByChunk[chunkID] ?? "" },
-                    set: { resultTextByChunk[chunkID] = $0 }
-                )
-            )
+            TextField("Type your result…", text: resultBinding)
+                .textFieldStyle(.roundedBorder)
+                .focused($focusedField, equals: .result(chunkID))
+                .submitLabel(.done)
 
-            // Connect Outcome(s) button row
             Button {
-                outcomeSheetChunkID = chunkID
+                outcomeSheetChunkID = SheetChunkID(id: chunkID)
             } label: {
                 HStack(spacing: 10) {
                     Image(systemName: targetIconName)
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(.secondary)
-
                     Text("Connect Outcome(s)")
                         .font(.subheadline)
                         .foregroundStyle(.primary)
-
                     Spacer(minLength: 0)
-
                     Text("optional")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-
                     Image(systemName: "chevron.right")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(.secondary)
@@ -1309,7 +1293,6 @@ struct PlanStepFourView: View {
             }
             .buttonStyle(.plain)
 
-            // Selected outcomes list
             let selectedOutcomes = outcomesForChunk(chunk)
             if !selectedOutcomes.isEmpty {
                 VStack(spacing: 8) {
@@ -1350,23 +1333,19 @@ struct PlanStepFourView: View {
 
             Divider().opacity(0.4)
 
-            // PURPOSE header row
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("PURPOSE")
                     .font(.caption)
                     .fontWeight(.bold)
                     .foregroundStyle(.secondary)
-
                 Spacer()
-
                 Text("Why do I want it?")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
 
-            // Connect Role button row (NO "optional" text)
             Button {
-                roleSheetChunkID = chunkID
+                roleSheetChunkID = SheetChunkID(id: chunkID)
             } label: {
                 HStack(spacing: 10) {
                     Image(systemName: "trophy")
@@ -1402,28 +1381,21 @@ struct PlanStepFourView: View {
             }
             .buttonStyle(.plain)
 
-            // Purpose input box (placeholder cleared)
-            PlanSingleLineEntryBox(
-                placeholder: "",
-                text: Binding(
-                    get: { purposeTextByChunk[chunkID] ?? "" },
-                    set: { purposeTextByChunk[chunkID] = $0 }
-                )
-            )
+            TextField("Type a role note…", text: roleNoteBinding)
+                .textFieldStyle(.roundedBorder)
+                .focused($focusedField, equals: .roleNote(chunkID))
+                .submitLabel(.done)
 
             Divider().opacity(0.4)
 
-            // ACTIONS header row
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("ACTIONS")
                     .font(.caption)
                     .fontWeight(.bold)
                     .foregroundStyle(.secondary)
-
                 Spacer()
             }
 
-            // Actions list
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(actions) { action in
                     Text("• \(action.text)")
@@ -1434,7 +1406,7 @@ struct PlanStepFourView: View {
             }
         }
         .padding(12)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+        .background(fill, in: RoundedRectangle(cornerRadius: 14))
         .overlay(
             RoundedRectangle(cornerRadius: 14)
                 .stroke(
@@ -1443,8 +1415,6 @@ struct PlanStepFourView: View {
                 )
         )
     }
-
-    // MARK: - Derived helpers
 
     private func actionsForChunk(_ chunk: PlannedChunk) -> [PlannedChunkAction] {
         plannedActionsForWeek
@@ -1465,9 +1435,7 @@ struct PlanStepFourView: View {
 
     private func rolesForPlannedChunk(_ chunk: PlannedChunk?) -> [FulfillmentRoles] {
         guard let chunk else { return [] }
-        guard let fulfillment = fulfillmentForCategoryName(chunk.category) else {
-            return []
-        }
+        guard let fulfillment = fulfillmentForCategoryName(chunk.category) else { return [] }
         return rolesForCategoryID(fulfillment.category_id)
     }
 
@@ -1486,19 +1454,6 @@ struct PlanStepFourView: View {
         selectedOutcomeIDsByChunk[chunkID] = ids
     }
 
-    private func suggestedPurpose(for chunk: PlannedChunk) -> String {
-        let selectedOutcomes = outcomesForChunk(chunk)
-        if selectedOutcomes.count == 1 {
-            return selectedOutcomes[0].reasons.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-
-        if let f = fulfillmentForCategoryName(chunk.category) {
-            return f.category_purpose.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-
-        return ""
-    }
-
     private func selectedRoleName(for chunk: PlannedChunk) -> String? {
         guard let picked = (selectedRoleIDByChunk[chunk.id] ?? nil) else { return nil }
         return roles.first(where: { $0.id == picked })?.role
@@ -1507,22 +1462,13 @@ struct PlanStepFourView: View {
 
 private struct StepFourInstructionsPopup: View {
     @Environment(\.dismiss) private var dismiss
-
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-
-                    // Result
                     Group {
-                        (
-                            Text("Result: ")
-                                .fontWeight(.bold)
-                            + Text("What do I want?")
-                                .italic()
-                                .underline()
-                        )
-                        .font(.body)
+                        (Text("Result: ").fontWeight(.bold) + Text("What do I want?").italic().underline())
+                            .font(.body)
 
                         Text("What’s the most important result or outcome you want to have happen today? What are you really committed to achieving?")
                             .font(.subheadline)
@@ -1531,16 +1477,9 @@ private struct StepFourInstructionsPopup: View {
 
                     Divider().padding(.vertical, 2)
 
-                    // Purpose
                     Group {
-                        (
-                            Text("Purpose: ")
-                                .fontWeight(.bold)
-                            + Text("Why do I want it?")
-                                .italic()
-                                .underline()
-                        )
-                        .font(.body)
+                        (Text("Purpose: ").fontWeight(.bold) + Text("Why do I want it?").italic().underline())
+                            .font(.body)
 
                         Text("Why do you want to do this? What’s your real purpose? How will it make you feel to achieve your result? What will it give you? What will it give your family?")
                             .font(.subheadline)
@@ -1562,16 +1501,9 @@ private struct StepFourInstructionsPopup: View {
 
                     Divider().padding(.vertical, 2)
 
-                    // Actions
                     Group {
-                        (
-                            Text("Actions: ")
-                                .fontWeight(.bold)
-                            + Text("How can I best achieve it now?")
-                                .italic()
-                                .underline()
-                        )
-                        .font(.body)
+                        (Text("Actions: ").fontWeight(.bold) + Text("How can I best achieve it now?").italic().underline())
+                            .font(.body)
 
                         Text("What specific actions can you take in order to achieve your result? What are the elements of your plan - both things you already captured as well as any new ideas that you come up with - that will help you achieve your result?")
                             .font(.subheadline)
@@ -1593,32 +1525,6 @@ private struct StepFourInstructionsPopup: View {
     }
 }
 
-// MARK: - Step 4 supporting views (UI-only)
-
-private struct PlanSingleLineEntryBox: View {
-    let placeholder: String
-    @Binding var text: String
-
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        TextField(placeholder, text: $text)
-            .font(.subheadline)
-            .textInputAutocapitalization(.sentences)
-            .autocorrectionDisabled(false)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 10))
-            .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(
-                        colorScheme == .dark ? Color.white.opacity(0.22) : Color.black.opacity(0.18),
-                        lineWidth: 1
-                    )
-            )
-    }
-}
-
 private struct OutcomePickerSheet: View {
     let title: String
     let outcomes: [Outcomes]
@@ -1627,9 +1533,7 @@ private struct OutcomePickerSheet: View {
 
     @Environment(\.dismiss) private var dismiss
 
-    private func isSelected(_ id: UUID) -> Bool {
-        selectedIDs.contains(id)
-    }
+    private func isSelected(_ id: UUID) -> Bool { selectedIDs.contains(id) }
 
     private func toggle(_ id: UUID) {
         if let idx = selectedIDs.firstIndex(of: id) {
@@ -1717,21 +1621,15 @@ private struct RolePickerSheet: View {
                 } else {
                     ForEach(roles) { role in
                         Button {
-                            if isSelected(role.id) {
-                                selectedRoleID = nil
-                            } else {
-                                selectedRoleID = role.id
-                            }
+                            selectedRoleID = isSelected(role.id) ? nil : role.id
                         } label: {
                             HStack {
                                 Text(role.role)
                                     .foregroundStyle(.primary)
-
                                 Spacer()
-
                                 if isSelected(role.id) {
                                     Image(systemName: "checkmark.circle.fill")
-                                        .foregroundStyle(.blue)
+                                        .foregroundColor(.blue)
                                 }
                             }
                             .contentShape(Rectangle())
@@ -1750,8 +1648,6 @@ private struct RolePickerSheet: View {
         }
     }
 }
-
-// MARK: - Step 3 supporting types (UI-only)
 
 private struct DragPayload: Codable, Hashable, Transferable {
     let itemID: UUID
@@ -1781,7 +1677,6 @@ private struct ChunkContainerState: Identifiable, Hashable {
     PlanView()
 }
 
-// MARK: - tiny helper
 private extension View {
     @ViewBuilder
     func `if`<Content: View>(_ condition: Bool, transform: (Self) -> Content) -> some View {
@@ -1793,6 +1688,24 @@ private extension View {
     }
 }
 
-extension UUID: @retroactive Identifiable {
-    public var id: UUID { self }
+private enum FulfillmentCategoryColors {
+    private static let lightBlue = Color(red: 0.70, green: 0.85, blue: 1.00)
+    private static let lightIndigo = Color(red: 0.80, green: 0.80, blue: 0.95)
+    private static let lightGreen = Color(red: 0.80, green: 1.00, blue: 0.80)
+    private static let lightPurple = Color(red: 0.90, green: 0.80, blue: 0.90)
+    private static let lightRed = Color(red: 1.00, green: 0.80, blue: 0.80)
+    private static let lightOrange = Color(red: 1.00, green: 0.90, blue: 0.70)
+
+    static func lightColor(for categoryTitle: String) -> Color {
+        switch categoryTitle {
+        case "Career & Business": return lightBlue
+        case "Leadership & Impact": return lightIndigo
+        case "Wealth & Lifestyle": return lightGreen
+        case "Mind & Meaning": return lightPurple
+        case "Love & Relationships": return lightRed
+        case "Health & Vitality": return lightOrange
+        default: return Color.gray.opacity(0.1)
+        }
+    }
 }
+
