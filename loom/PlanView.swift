@@ -495,48 +495,72 @@ struct PlanStepThreeView: View {
             // Top list (pool)
             List {
                 ForEach(poolItems) { item in
-                    rowView(text: item.text, showGhostOutline: item.isGhost)
-                        .contentShape(Rectangle())
-                        .draggable(DragPayload(itemID: item.id))
-                        .dropDestination(for: DragPayload.self) { _, _ in
-                            // no-op for row itself; pool list is handled by outer dropDestination below
-                            false
-                        }
-                        .listRowSeparator(.visible)
+                    rowView(
+                        text: item.text,
+                        showGhostOutline: item.isGhost,
+                        isDraggable: true,
+                        dragPayload: DragPayload(itemID: item.id)
+                    )
+                    .contentShape(Rectangle())
+                    // IMPORTANT: make the ROW itself a drop target.
+                    // This is what allows dragging items out of a chunk and dropping “onto the pool list”.
+                    .dropDestination(for: DragPayload.self) { payloads, _ in
+                        guard let payload = payloads.first else { return false }
+                        moveItemToPool(payload.itemID)
+                        return true
+                    }
+                    // Match Step 2: symmetric space between the rounded box and list separators
+                    .padding(.vertical, 4)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                 }
+                .listRowSeparator(.visible)
             }
+            .listRowSpacing(4)
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
-            // Allow dropping back into pool
+            // Allow dropping back into pool (drop on empty space below rows too)
             .dropDestination(for: DragPayload.self) { payloads, _ in
                 guard let payload = payloads.first else { return false }
                 moveItemToPool(payload.itemID)
                 return true
             }
+            // Fix: when toggle changes, ensure pool contains the newly-visible items (ghosts)
+            .onChange(of: showHidden) { _, _ in
+                syncPoolWithVisibility()
+            }
 
             // Chunk containers
+            // Move "+ Add Chunk" INTO this List as the last row, so it scrolls with the chunks.
             List {
-                ForEach(Array(chunks.enumerated()), id: \.element.id) { index, chunk in
+                ForEach(Array(chunks.enumerated()), id: \.element.id) { index, _ in
                     chunkContainerView(chunkIndex: index)
                         .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                         .listRowSeparator(.hidden)
                 }
-                .onDelete(perform: deleteChunkContainers)
+
+                // Add Chunk row (hide once max reached)
+                if chunks.count < maxChunks {
+                    addChunkRow
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        .listRowSeparator(.hidden)
+                }
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
 
-            // Add Chunk button
-            Button {
-                addChunkContainer()
-            } label: {
-                Label("Add Chunk", systemImage: "plus")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity, alignment: .center)
+            if canRefresh {
+                Button {
+                    resetStepThree()
+                } label: {
+                    Text("Refresh")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, 2)
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal)
             }
-            .buttonStyle(.plain)
-            .padding(.horizontal)
-            .padding(.top, 4)
 
             // Back/Next buttons
             HStack(spacing: 12) {
@@ -575,8 +599,68 @@ struct PlanStepThreeView: View {
             }
             if poolItemIDs.isEmpty {
                 poolItemIDs = initialPoolIDs
+            } else {
+                // In case items changed since previous appearance (e.g. Step 2 added items)
+                syncPoolWithVisibility()
             }
         }
+        // Also keep pool in sync if the underlying SwiftData query changes.
+        .onChange(of: allItems.map(\.id)) { _, _ in
+            syncPoolWithVisibility()
+        }
+    }
+
+    private var canRefresh: Bool {
+        if showHidden { return true }
+        if isCategorizeExpanded { return true }
+        if chunks.count != 2 { return true }
+        if chunks.contains(where: { !$0.itemIDs.isEmpty }) { return true }
+        if chunks.contains(where: { $0.category != nil }) { return true }
+        if poolItemIDs != initialPoolIDs { return true }
+        return false
+    }
+
+    private func resetStepThree() {
+        // "Start over" resets Step 3 UI-only state back to initial defaults.
+        showHidden = false
+        isCategorizeExpanded = false
+
+        chunks = [
+            ChunkContainerState(isLocked: true),
+            ChunkContainerState(isLocked: true),
+        ]
+
+        // Rebuild pool from scratch using the same initial-load logic.
+        poolItemIDs = initialPoolIDs
+    }
+
+    // MARK: - Add Chunk row (boxed, whole box tappable)
+
+    private var addChunkRow: some View {
+        Button {
+            addChunkContainer()
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "plus")
+                    .font(.system(size: 16, weight: .bold))
+                Text("Add Chunk")
+                    .font(.headline)
+            }
+            .frame(maxWidth: .infinity, minHeight: 48)
+            .contentShape(Rectangle()) // ensures full interior is tappable
+        }
+        .buttonStyle(.plain) // keep our custom box styling
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(
+                    colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.25),
+                    lineWidth: 1
+                )
+        )
     }
 
     // MARK: - Derived data
@@ -601,14 +685,39 @@ struct PlanStepThreeView: View {
     // MARK: - UI pieces
 
     @ViewBuilder
-    private func rowView(text: String, showGhostOutline: Bool) -> some View {
+    private func rowView(
+        text: String,
+        showGhostOutline: Bool,
+        isDraggable: Bool,
+        dragPayload: DragPayload?
+    ) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(text)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            Image(systemName: "line.3.horizontal")
+            // Only the HANDLE is draggable, not the entire row.
+            // This prevents the chunk/category container from feeling draggable.
+            Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
                 .foregroundStyle(.secondary)
                 .accessibilityLabel("Drag")
+                .contentShape(Rectangle()) // make the handle easier to grab
+                .padding(.leading, 4)
+                .if(isDraggable && dragPayload != nil, transform: { view in
+                    view.draggable(dragPayload!) {
+                        // Explicit preview so the system doesn't snapshot the whole chunk container.
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(text)
+                                .lineLimit(1)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+
+                            Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(8)
+                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+                        .frame(maxWidth: 320) // keep preview compact
+                    }
+                })
         }
         .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -620,21 +729,25 @@ struct PlanStepThreeView: View {
                     .foregroundStyle(.blue)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 2)
     }
 
     @ViewBuilder
     private func chunkContainerView(chunkIndex: Int) -> some View {
         let chunk = chunks[chunkIndex]
+        let showDeleteX = chunkIndex >= 2
+        let canDeleteThisChunk = canDeleteChunk(at: chunkIndex)
 
         VStack(spacing: 10) {
-            // Header with centered title + picker
-            VStack(spacing: 6) {
+            // Header:
+            // - "Actions Related To:" left aligned
+            // - Picker immediately after with minimal spacing (left aligned)
+            // - Spacer pushes delete button to far right
+            HStack(alignment: .center, spacing: 6) {
                 Text("Actions Related To:")
                     .font(.caption)
                     .fontWeight(.bold)
                     .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .center)
 
                 Picker(
                     "",
@@ -653,8 +766,24 @@ struct PlanStepThreeView: View {
                     }
                 }
                 .pickerStyle(.menu)
+
+                Spacer(minLength: 0)
+
+                if showDeleteX {
+                    Button {
+                        deleteChunkContainerIfAllowed(at: chunkIndex)
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .opacity(canDeleteThisChunk ? 1.0 : 0.35)
+                            .accessibilityLabel("Delete chunk")
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canDeleteThisChunk)
+                }
             }
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             // Items inside chunk
             VStack(spacing: 0) {
@@ -666,8 +795,22 @@ struct PlanStepThreeView: View {
                         .frame(maxWidth: .infinity)
                 } else {
                     ForEach(chunkItems(for: chunkIndex)) { item in
-                        rowView(text: item.text, showGhostOutline: item.isGhost)
-                            .draggable(DragPayload(itemID: item.id))
+                        rowView(
+                            text: item.text,
+                            showGhostOutline: item.isGhost,
+                            isDraggable: true,
+                            dragPayload: DragPayload(itemID: item.id)
+                        )
+                        .contentShape(Rectangle())
+                        // IMPORTANT: make each ROW inside the chunk a drop target.
+                        // This is what enables:
+                        // - dragging an item OUT of this chunk and INTO another chunk
+                        // - dragging an item OUT and back to the pool
+                        .dropDestination(for: DragPayload.self) { payloads, _ in
+                            guard let payload = payloads.first else { return false }
+                            moveItem(payload.itemID, toChunkAt: chunkIndex)
+                            return true
+                        }
                     }
                 }
             }
@@ -678,18 +821,11 @@ struct PlanStepThreeView: View {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.25), lineWidth: 1)
         )
+        // Chunk container remains a DROP TARGET too (drop onto empty space / below rows).
         .dropDestination(for: DragPayload.self) { payloads, _ in
             guard let payload = payloads.first else { return false }
             moveItem(payload.itemID, toChunkAt: chunkIndex)
             return true
-        }
-        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            Button(role: .destructive) {
-                deleteChunkContainerIfAllowed(at: chunkIndex)
-            } label: {
-                Text("Delete")
-            }
-            .disabled(!canDeleteChunk(at: chunkIndex))
         }
     }
 
@@ -750,6 +886,29 @@ struct PlanStepThreeView: View {
         }
     }
 
+    // MARK: - Pool sync (fix showHidden toggle not revealing ghosts)
+
+    private func syncPoolWithVisibility() {
+        // Keep chunk membership, but ensure pool is a valid subset of currently-visible items.
+        let visibleIDSet = Set(visibleItems.map(\.id))
+
+        // Anything already chunked should stay out of the pool.
+        let chunkedIDs = Set(chunks.flatMap(\.itemIDs))
+
+        // Filter pool to what's still visible and not chunked.
+        poolItemIDs = poolItemIDs.filter { visibleIDSet.contains($0) && !chunkedIDs.contains($0) }
+
+        // Add any newly-visible items that aren't in pool and aren't chunked (prepend newest-ish by visibleItems order).
+        let poolSet = Set(poolItemIDs)
+        let toAdd = visibleItems
+            .map(\.id)
+            .filter { !poolSet.contains($0) && !chunkedIDs.contains($0) }
+
+        if !toAdd.isEmpty {
+            poolItemIDs.insert(contentsOf: toAdd, at: 0)
+        }
+    }
+
     // MARK: - Chunk management
 
     private func addChunkContainer() {
@@ -767,13 +926,6 @@ struct PlanStepThreeView: View {
     private func deleteChunkContainerIfAllowed(at index: Int) {
         guard canDeleteChunk(at: index) else { return }
         chunks.remove(at: index)
-    }
-
-    private func deleteChunkContainers(at offsets: IndexSet) {
-        // Support swipe delete from List editing gestures; apply the same rules.
-        for index in offsets.sorted(by: >) {
-            deleteChunkContainerIfAllowed(at: index)
-        }
     }
 }
 
@@ -817,3 +969,16 @@ private struct ChunkContainerState: Identifiable, Hashable {
 #Preview {
     PlanView()
 }
+
+// MARK: - tiny helper
+private extension View {
+    @ViewBuilder
+    func `if`<Content: View>(_ condition: Bool, transform: (Self) -> Content) -> some View {
+        if condition {
+            transform(self)
+        } else {
+            self
+        }
+    }
+}
+
