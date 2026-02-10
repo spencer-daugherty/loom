@@ -382,13 +382,13 @@ struct ContentView: View {
                             .shadow(color: Color.primary.opacity(colorScheme == .dark ? 0.2 : 0.08), radius: 8, x: 0, y: 2)
                             .overlay(
                                 HStack {
-                                    Image(systemName: "plus")
+                                    Image(systemName: "plus.viewfinder")
                                         .foregroundColor(.accentColor)
                                         .padding(.leading, 16)
-                                        .scaleEffect(1.2)
+                                        .scaleEffect(1.6)
                                     Text("Capture Action")
                                         .foregroundColor(.primary)
-                                        .padding(.leading, 8)
+                                        .padding(.leading, 12)
                                     Spacer()
                                 }
                             )
