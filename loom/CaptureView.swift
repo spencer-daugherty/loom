@@ -8,6 +8,13 @@ private struct CaptureItem: Identifiable, Equatable {
     let unhideDate: Date?
 }
 
+private struct PopoverHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 struct CaptureView: View {
     @State private var input: String = ""
     @State private var items: [CaptureItem] = []
@@ -18,6 +25,7 @@ struct CaptureView: View {
     @State private var selectedUnhideDate: Date? = nil
     @State private var isDatePickerPresented: Bool = false
     @State private var datePickerTempDate: Date = Calendar.current.date(byAdding: .day, value: 7, to: Date())!
+    @State private var popoverDetentHeight: CGFloat = 520
 
     private var displayItems: [CaptureItem] {
         let base = isGhostOn ? items : items.filter { !$0.isGhost }
@@ -153,23 +161,51 @@ struct CaptureView: View {
                                     }
                                 }
                                 .popover(isPresented: $isDatePickerPresented) {
-                                    VStack(alignment: .leading, spacing: 12) {
-                                        DatePicker(
-                                            "Hide Action Until",
-                                            selection: $datePickerTempDate,
-                                            in: earliestUnhideDate...,
-                                            displayedComponents: .date
-                                        )
-                                        .datePickerStyle(.graphical)
-                                        HStack {
-                                            Spacer()
-                                            Button("Set Date") {
-                                                selectedUnhideDate = datePickerTempDate
-                                                isDatePickerPresented = false
+                                    VStack(spacing: 0) {
+
+                                        VStack(alignment: .leading, spacing: 0) {
+                                            DatePicker(
+                                                "Hide Action Until",
+                                                selection: $datePickerTempDate,
+                                                in: earliestUnhideDate...,
+                                                displayedComponents: .date
+                                            )
+                                            .datePickerStyle(.graphical)
+                                            .padding(.bottom, 0)
+
+                                            HStack {
+                                                Spacer(minLength: 0)
+                                                Button(action: {
+                                                    selectedUnhideDate = datePickerTempDate
+                                                    isDatePickerPresented = false
+                                                }) {
+                                                    Text("Set Date")
+                                                        .font(.headline)
+                                                        .foregroundStyle(Color.white)
+                                                        .padding(.horizontal, 16)
+                                                        .padding(.vertical, 10)
+                                                        .background(Color.blue)
+                                                        .clipShape(Capsule())
+                                                }
                                             }
+                                            .padding(.top, -8)
                                         }
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 0)
                                     }
-                                    .padding()
+                                    .padding(.bottom, 8)
+                                    .background(
+                                        GeometryReader { proxy in
+                                            Color.clear
+                                                .preference(key: PopoverHeightPreferenceKey.self, value: proxy.size.height)
+                                        }
+                                    )
+                                    .onPreferenceChange(PopoverHeightPreferenceKey.self) { h in
+                                        // Add a small safety inset and enforce a reasonable minimum to avoid layout issues
+                                        popoverDetentHeight = max(520, h + 24)
+                                    }
+                                    .presentationDetents([.height(popoverDetentHeight)])
+                                    .presentationDragIndicator(.visible)
                                 }
                             }
                             .padding(.horizontal)
