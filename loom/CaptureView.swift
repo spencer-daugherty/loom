@@ -1,12 +1,5 @@
 import SwiftUI
-
-private struct CaptureItem: Identifiable, Equatable {
-    let id = UUID()
-    let text: String
-    let isGhost: Bool
-    let createdAt: Date
-    let unhideDate: Date?
-}
+import SwiftData
 
 private struct PopoverHeightPreferenceKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
@@ -16,19 +9,25 @@ private struct PopoverHeightPreferenceKey: PreferenceKey {
 }
 
 struct CaptureView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
+
+    @Query(sort: \RollingCaptureItem.createdAt, order: .reverse)
+    private var allItems: [RollingCaptureItem]
+
     @State private var input: String = ""
-    @State private var items: [CaptureItem] = []
     @State private var isGhostOn: Bool = false
     @FocusState private var isInputFocused: Bool
-    @Environment(\.colorScheme) private var colorScheme
-    
+
     @State private var selectedUnhideDate: Date? = nil
     @State private var isDatePickerPresented: Bool = false
     @State private var datePickerTempDate: Date = Calendar.current.date(byAdding: .day, value: 7, to: Date())!
     @State private var popoverDetentHeight: CGFloat = 520
 
-    private var displayItems: [CaptureItem] {
-        let base = isGhostOn ? items : items.filter { !$0.isGhost }
+    private var displayItems: [RollingCaptureItem] {
+        // After auto-unhide runs, anything due will have isGhost=false, so filtering is straightforward.
+        let base = isGhostOn ? allItems : allItems.filter { !$0.isGhost }
         return base.sorted {
             if $0.isGhost != $1.isGhost { return $0.isGhost && !$1.isGhost }
             return $0.createdAt > $1.createdAt
@@ -36,7 +35,7 @@ struct CaptureView: View {
     }
 
     private var earliestUnhideDate: Date { Calendar.current.date(byAdding: .day, value: 7, to: Date())! }
-    
+
     private func formatShortDate(_ date: Date) -> String {
         let cal = Calendar.current
         let nowYear = cal.component(.year, from: Date())
@@ -56,14 +55,20 @@ struct CaptureView: View {
             ZStack {
                 (colorScheme == .dark ? Color(.systemGroupedBackground) : Color.white).ignoresSafeArea()
                 VStack(spacing: 12) {
-                    // List of items
                     List {
                         ForEach(displayItems) { item in
                             HStack(alignment: .firstTextBaseline, spacing: 8) {
                                 Text(item.text)
                                     .frame(maxWidth: .infinity, alignment: .leading)
-                                if let d = item.unhideDate {
+
+                                // Show unhide history if present (matches your existing “Unhidden …” UI).
+                                if let d = item.unhiddenAt {
                                     Text("Unhidden " + formatShortDate(d))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                } else if item.isGhost, let scheduled = item.unhideDate {
+                                    // Optional: If you prefer not to show this, remove it.
+                                    Text("Hidden until " + formatShortDate(scheduled))
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -91,28 +96,33 @@ struct CaptureView: View {
                 .navigationTitle("Rolling Capture")
                 .navigationBarTitleDisplayMode(.inline)
                 .onAppear {
+                    runAutoUnhideIfNeeded()
+
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                         isInputFocused = true
                     }
                 }
-                .onChange(of: isInputFocused) { oldValue, newValue in
+                .onChange(of: scenePhase) { _, newPhase in
+                    // Ensures items unhide when app comes back to foreground.
+                    if newPhase == .active {
+                        runAutoUnhideIfNeeded()
+                    }
+                }
+                .onChange(of: isInputFocused) { _, newValue in
                     if newValue == false {
-                        // If the date picker popover is open, don't force focus back yet
                         if isDatePickerPresented { return }
                         DispatchQueue.main.async {
                             isInputFocused = true
                         }
                     }
                 }
-                .onChange(of: isGhostOn) { oldValue, newValue in
+                .onChange(of: isGhostOn) { _, newValue in
                     if newValue == false { selectedUnhideDate = nil }
                 }
-                .onChange(of: isDatePickerPresented) { oldValue, newValue in
+                .onChange(of: isDatePickerPresented) { _, newValue in
                     if newValue {
-                        // Ensure keyboard is dismissed when popover opens
                         isInputFocused = false
                     } else {
-                        // Restore keyboard shortly after the popover closes to avoid timing issues
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                             isInputFocused = true
                         }
@@ -129,7 +139,6 @@ struct CaptureView: View {
                                     } else {
                                         datePickerTempDate = earliestUnhideDate
                                     }
-                                    // Dismiss keyboard when presenting the date picker
                                     DispatchQueue.main.async {
                                         isInputFocused = false
                                     }
@@ -201,7 +210,6 @@ struct CaptureView: View {
                                         }
                                     )
                                     .onPreferenceChange(PopoverHeightPreferenceKey.self) { h in
-                                        // Add a small safety inset and enforce a reasonable minimum to avoid layout issues
                                         popoverDetentHeight = max(520, h + 24)
                                     }
                                     .presentationDetents([.height(popoverDetentHeight)])
@@ -210,6 +218,7 @@ struct CaptureView: View {
                             }
                             .padding(.horizontal)
                         }
+
                         HStack(spacing: 12) {
                             TextField("Add an action…", text: $input)
                                 .textInputAutocapitalization(.none)
@@ -226,12 +235,14 @@ struct CaptureView: View {
                                 )
                                 .layoutPriority(1)
                                 .frame(maxWidth: .infinity)
+
                             Toggle(isOn: $isGhostOn) {
                                 EmptyView()
                             }
                             .toggleStyle(.automatic)
                             .labelsHidden()
                             .frame(width: 60)
+
                             Image(systemName: "clock.arrow.trianglehead.clockwise.rotate.90.path.dotted")
                                 .font(.system(size: 24, weight: .semibold))
                                 .foregroundStyle(isGhostOn ? .blue : .secondary)
@@ -249,30 +260,56 @@ struct CaptureView: View {
     private func addItem() {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+
         if isGhostOn && selectedUnhideDate == nil {
-            // Prompt for a date if missing and prevent adding
             datePickerTempDate = earliestUnhideDate
             isDatePickerPresented = true
             return
         }
-        let newItem = CaptureItem(
+
+        let newItem = RollingCaptureItem(
             text: trimmed,
             isGhost: isGhostOn,
-            createdAt: Date(),
-            unhideDate: selectedUnhideDate
+            createdAt: .now,
+            unhideDate: selectedUnhideDate,
+            unhiddenAt: nil
         )
-        items.append(newItem)
+        modelContext.insert(newItem)
+        try? modelContext.save()
 
-        // ---- NEW: reset the pill to a fresh state (clear the selected date)
         selectedUnhideDate = nil
         datePickerTempDate = earliestUnhideDate
-        // keep isGhostOn as-is (toggle remains on if the user wants to add more ghosted items)
 
         input = ""
         isInputFocused = true
     }
+
     private func deleteItems(at offsets: IndexSet) {
-        let idsToDelete = offsets.map { displayItems[$0].id }
-        items.removeAll { idsToDelete.contains($0.id) }
+        for offset in offsets {
+            let item = displayItems[offset]
+            modelContext.delete(item)
+        }
+        try? modelContext.save()
+    }
+
+    private func runAutoUnhideIfNeeded() {
+        // Define "today" as start-of-day so “<= today” is stable and matches the UI's date-only picker.
+        let today = Calendar.current.startOfDay(for: .now)
+
+        let dueGhosts = allItems.filter { item in
+            guard item.isGhost, let d = item.unhideDate else { return false }
+            return Calendar.current.startOfDay(for: d) <= today
+        }
+
+        guard !dueGhosts.isEmpty else { return }
+
+        for item in dueGhosts {
+            item.isGhost = false
+            item.unhiddenAt = item.unhideDate ?? .now
+            // Clear schedule now that it’s visible.
+            item.unhideDate = nil
+        }
+
+        try? modelContext.save()
     }
 }

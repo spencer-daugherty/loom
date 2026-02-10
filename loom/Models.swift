@@ -539,3 +539,35 @@ extension ActivePlanState {
   }
 }
 
+// MARK: - Rolling Capture
+@Model
+final class RollingCaptureItem {
+  @Attribute(.unique) var id: UUID
+  var text: String
+  var isGhost: Bool
+  var createdAt: Date
+
+  /// When this ghost item should become visible.
+  /// (Used only while `isGhost == true`.)
+  var unhideDate: Date?
+
+  /// Optional: record of when the item was unghosted (so UI can display “Unhidden …”).
+  var unhiddenAt: Date?
+
+  init(
+    id: UUID = .init(),
+    text: String,
+    isGhost: Bool,
+    createdAt: Date = .now,
+    unhideDate: Date? = nil,
+    unhiddenAt: Date? = nil
+  ) {
+    self.id = id
+    self.text = text
+    self.isGhost = isGhost
+    self.createdAt = createdAt
+    self.unhideDate = unhideDate
+    self.unhiddenAt = unhiddenAt
+  }
+}
+
