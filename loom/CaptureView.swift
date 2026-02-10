@@ -52,9 +52,9 @@ struct CaptureView: View {
                     .toggleStyle(.automatic)
                     .labelsHidden()
                     .frame(width: 60)
-                    Image(systemName: "play.fill")
+                    Image(systemName: "clock.arrow.trianglehead.clockwise.rotate.90.path.dotted")
                         .font(.system(size: 24, weight: .semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(isGhostOn ? .blue : .secondary)
                         .accessibilityHidden(true)
                 }
                 .padding([.horizontal, .top])
@@ -75,3 +75,4 @@ struct CaptureView: View {
         items.remove(atOffsets: offsets)
     }
 }
+
