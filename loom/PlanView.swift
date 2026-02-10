@@ -413,6 +413,14 @@ struct PlanStepThreeView: View {
     @Query(sort: \RollingCaptureItem.createdAt, order: .reverse)
     private var allItems: [RollingCaptureItem]
 
+    // NEW: seeded labels for picker (default source)
+    @Query(sort: \PlanLabel.category, order: .forward)
+    private var allPlanLabels: [PlanLabel]
+
+    // NEW: persisted selections for this week
+    @Query(sort: \PlanChunkSelection.updatedAt, order: .reverse)
+    private var allChunkSelections: [PlanChunkSelection]
+
     @State private var showHidden: Bool = false
     @State private var isCategorizeExpanded: Bool = false
 
@@ -422,7 +430,45 @@ struct PlanStepThreeView: View {
 
     private let hiddenUntilLaterIconName = "clock.arrow.trianglehead.clockwise.rotate.90.path.dotted"
     private let maxChunks = 5
-    private let categories: [ChunkCategory] = [.social, .career, .administrative]
+
+    // NEW: Week scope for persistence (matches Step 1 + ActivePlanState convention)
+    private var currentWeekStart: Date {
+        WeeklyMindsetEntry.weekStart(for: Date())
+    }
+
+    // Only default labels for now (as requested)
+    private var defaultLabels: [PlanLabel] {
+        allPlanLabels
+            .filter { $0.source == "default" }
+            .sorted {
+                if $0.category != $1.category { return $0.category < $1.category }
+                return $0.label < $1.label
+            }
+    }
+
+    /// All labelIds currently selected across chunks (for uniqueness).
+    private var selectedLabelIDs: Set<UUID> {
+        Set(chunks.compactMap(\.selectionLabelId))
+    }
+
+    /// Category -> labels that are available to pick for `chunkIndex`.
+    /// Rule:
+    /// - hide labels already selected in *other* chunks
+    /// - but keep this chunk's current selection visible so the menu doesn't "lose" it
+    private func labelsByCategory(for chunkIndex: Int) -> [(category: String, labels: [PlanLabel])] {
+        let currentSelection = chunks.indices.contains(chunkIndex) ? chunks[chunkIndex].selectionLabelId : nil
+
+        let available = defaultLabels.filter { label in
+            if let currentSelection, label.labelId == currentSelection { return true }
+            return !selectedLabelIDs.contains(label.labelId)
+        }
+
+        let grouped = Dictionary(grouping: available, by: \.category)
+        return grouped.keys.sorted().map { key in
+            (category: key, labels: grouped[key]!.sorted { $0.label < $1.label })
+        }
+        // Optional: hide empty categories (already implied because we only build from grouped keys)
+    }
 
     var body: some View {
         VStack(spacing: 12) {
@@ -590,6 +636,9 @@ struct PlanStepThreeView: View {
         }
         .safeAreaPadding()
         .onAppear {
+            // Seed default picker data once.
+            PlanLabelSeeder.seedDefaultsIfNeeded(in: modelContext)
+
             // Initialize pool and chunks once per presentation.
             if chunks.isEmpty {
                 chunks = [
@@ -603,6 +652,9 @@ struct PlanStepThreeView: View {
                 // In case items changed since previous appearance (e.g. Step 2 added items)
                 syncPoolWithVisibility()
             }
+
+            // Load persisted selections into the chunk UI state (category/label display).
+            hydrateChunkSelectionsFromStore()
         }
         // Also keep pool in sync if the underlying SwiftData query changes.
         .onChange(of: allItems.map(\.id)) { _, _ in
@@ -615,7 +667,7 @@ struct PlanStepThreeView: View {
         if isCategorizeExpanded { return true }
         if chunks.count != 2 { return true }
         if chunks.contains(where: { !$0.itemIDs.isEmpty }) { return true }
-        if chunks.contains(where: { $0.category != nil }) { return true }
+        if chunks.contains(where: { $0.selectionLabelId != nil || $0.selectionCategoryId != nil }) { return true }
         if poolItemIDs != initialPoolIDs { return true }
         return false
     }
@@ -632,6 +684,11 @@ struct PlanStepThreeView: View {
 
         // Rebuild pool from scratch using the same initial-load logic.
         poolItemIDs = initialPoolIDs
+
+        // Note: We are NOT deleting persisted selections on refresh;
+        // refresh is intended as UI reset. If you want it to also wipe persistence,
+        // we can add that explicitly.
+        hydrateChunkSelectionsFromStore()
     }
 
     // MARK: - Add Chunk row (boxed, whole box tappable)
@@ -749,20 +806,25 @@ struct PlanStepThreeView: View {
                     .fontWeight(.bold)
                     .foregroundStyle(.secondary)
 
+                // Picker now removes labels already chosen in other chunks.
                 Picker(
                     "",
                     selection: Binding(
-                        get: { chunks[chunkIndex].category },
+                        get: { chunks[chunkIndex].selectionLabelId },
                         set: { newValue in
-                            setChunkCategory(chunkIndex: chunkIndex, to: newValue)
+                            setChunkSelection(chunkIndex: chunkIndex, toLabelId: newValue)
                         }
                     )
                 ) {
-                    Text("Select…").tag(ChunkCategory?.none)
-                    ForEach(categories) { cat in
-                        Text(cat.displayName)
-                            .tag(Optional(cat))
-                            .disabled(isCategoryTaken(cat, excluding: chunkIndex))
+                    Text("Select…").tag(UUID?.none)
+
+                    ForEach(labelsByCategory(for: chunkIndex), id: \.category) { section in
+                        Section(section.category) {
+                            ForEach(section.labels, id: \.labelId) { label in
+                                Text(label.label)
+                                    .tag(Optional(label.labelId))
+                            }
+                        }
                     }
                 }
                 .pickerStyle(.menu)
@@ -835,20 +897,81 @@ struct PlanStepThreeView: View {
         return ids.compactMap { byID[$0] }
     }
 
-    // MARK: - Category selection rules
+    // MARK: - NEW: Persisted picker selection
 
-    private func isCategoryTaken(_ category: ChunkCategory, excluding index: Int) -> Bool {
-        chunks.enumerated().contains { i, c in
-            i != index && c.category == category
+    private func hydrateChunkSelectionsFromStore() {
+        // Pull all saved selections for current week, keyed by chunkIndex.
+        let selectionsForWeek = allChunkSelections.filter {
+            Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart)
+        }
+        let byIndex = Dictionary(uniqueKeysWithValues: selectionsForWeek.map { ($0.chunkIndex, $0) })
+
+        for i in chunks.indices {
+            if let rec = byIndex[i] {
+                chunks[i].selectionLabelId = rec.labelId
+                chunks[i].selectionLabel = rec.label
+                chunks[i].selectionCategoryId = rec.categoryId
+                chunks[i].selectionCategory = rec.category
+            }
         }
     }
 
-    private func setChunkCategory(chunkIndex: Int, to newValue: ChunkCategory?) {
-        // Enforce uniqueness (ignore attempt if already taken elsewhere).
-        if let newValue, isCategoryTaken(newValue, excluding: chunkIndex) {
+    private func setChunkSelection(chunkIndex: Int, toLabelId newLabelId: UUID?) {
+        chunks[chunkIndex].selectionLabelId = newLabelId
+
+        guard let newLabelId else {
+            chunks[chunkIndex].selectionLabel = nil
+            chunks[chunkIndex].selectionCategoryId = nil
+            chunks[chunkIndex].selectionCategory = nil
+            upsertChunkSelectionRecord(chunkIndex: chunkIndex, label: nil)
             return
         }
-        chunks[chunkIndex].category = newValue
+
+        guard let selected = defaultLabels.first(where: { $0.labelId == newLabelId }) else {
+            // If seed list is missing for some reason, still clear persisted selection safely.
+            chunks[chunkIndex].selectionLabel = nil
+            chunks[chunkIndex].selectionCategoryId = nil
+            chunks[chunkIndex].selectionCategory = nil
+            upsertChunkSelectionRecord(chunkIndex: chunkIndex, label: nil)
+            return
+        }
+
+        // Store display strings + IDs on the UI state.
+        chunks[chunkIndex].selectionLabel = selected.label
+        chunks[chunkIndex].selectionCategoryId = selected.categoryId
+        chunks[chunkIndex].selectionCategory = selected.category
+
+        // Persist selection for this week + chunk.
+        upsertChunkSelectionRecord(chunkIndex: chunkIndex, label: selected)
+    }
+
+    private func upsertChunkSelectionRecord(chunkIndex: Int, label: PlanLabel?) {
+        // Find existing for this week/chunk
+        let existing = allChunkSelections.first(where: {
+            $0.chunkIndex == chunkIndex &&
+            Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart)
+        })
+
+        if let existing {
+            existing.labelId = label?.labelId
+            existing.label = label?.label
+            existing.categoryId = label?.categoryId
+            existing.category = label?.category
+            existing.updatedAt = .now
+        } else {
+            let rec = PlanChunkSelection(
+                weekStart: currentWeekStart,
+                chunkIndex: chunkIndex,
+                labelId: label?.labelId,
+                label: label?.label,
+                categoryId: label?.categoryId,
+                category: label?.category,
+                updatedAt: .now
+            )
+            modelContext.insert(rec)
+        }
+
+        try? modelContext.save()
     }
 
     // MARK: - Drag/drop moves
@@ -926,6 +1049,9 @@ struct PlanStepThreeView: View {
     private func deleteChunkContainerIfAllowed(at index: Int) {
         guard canDeleteChunk(at: index) else { return }
         chunks.remove(at: index)
+        // Note: we do not delete persisted PlanChunkSelection here because chunkIndex mapping
+        // could be ambiguous after deletions. If you want deletions to also remove persistence,
+        // we can implement a reindexing scheme.
     }
 }
 
@@ -938,26 +1064,17 @@ private struct DragPayload: Codable, Hashable, Transferable {
     }
 }
 
-private enum ChunkCategory: String, CaseIterable, Identifiable {
-    case social
-    case career
-    case administrative
-
-    var id: String { rawValue }
-
-    var displayName: String {
-        switch self {
-        case .social: return "Social"
-        case .career: return "Career"
-        case .administrative: return "Administrative"
-        }
-    }
-}
-
+// UPDATED: ChunkContainerState now stores persisted selection fields (still UI struct).
 private struct ChunkContainerState: Identifiable, Hashable {
     var id: UUID = .init()
     var isLocked: Bool
-    var category: ChunkCategory? = nil
+
+    // NEW: persisted selection fields (what user picks)
+    var selectionLabelId: UUID? = nil
+    var selectionLabel: String? = nil
+    var selectionCategoryId: UUID? = nil
+    var selectionCategory: String? = nil
+
     var itemIDs: [UUID] = []
 
     init(id: UUID = .init(), isLocked: Bool) {

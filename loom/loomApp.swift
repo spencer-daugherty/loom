@@ -31,6 +31,8 @@ struct loomApp: App {
                 WeeklyMindsetEntry.Fields.self,
                 ActivePlanState.self,
                 RollingCaptureItem.self,
+                PlanLabel.self,
+                PlanChunkSelection.self,
             ]
         )
     }
