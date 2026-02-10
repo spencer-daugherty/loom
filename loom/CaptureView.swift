@@ -262,6 +262,12 @@ struct CaptureView: View {
             unhideDate: selectedUnhideDate
         )
         items.append(newItem)
+
+        // ---- NEW: reset the pill to a fresh state (clear the selected date)
+        selectedUnhideDate = nil
+        datePickerTempDate = earliestUnhideDate
+        // keep isGhostOn as-is (toggle remains on if the user wants to add more ghosted items)
+
         input = ""
         isInputFocused = true
     }
@@ -270,4 +276,3 @@ struct CaptureView: View {
         items.removeAll { idsToDelete.contains($0.id) }
     }
 }
-
