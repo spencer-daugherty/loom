@@ -128,6 +128,12 @@ struct CaptureView: View {
                                         (selectedUnhideDate != nil ? Color.blue : Color(.secondarySystemBackground))
                                     )
                                     .clipShape(Capsule())
+                                    .overlay {
+                                        if selectedUnhideDate == nil {
+                                            Capsule()
+                                                .stroke(colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.3), lineWidth: 1)
+                                        }
+                                    }
                                 }
                                 .popover(isPresented: $isDatePickerPresented) {
                                     VStack(alignment: .leading, spacing: 12) {
@@ -161,6 +167,10 @@ struct CaptureView: View {
                                 .padding(12)
                                 .background(Color(.secondarySystemBackground))
                                 .clipShape(RoundedRectangle(cornerRadius: 10))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .stroke(colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.3), lineWidth: 1)
+                                )
                                 .layoutPriority(1)
                                 .frame(maxWidth: .infinity)
                             Toggle(isOn: $isGhostOn) {
