@@ -89,6 +89,8 @@ struct CaptureView: View {
                 }
                 .onChange(of: isInputFocused) { oldValue, newValue in
                     if newValue == false {
+                        // If the date picker popover is open, don't force focus back yet
+                        if isDatePickerPresented { return }
                         DispatchQueue.main.async {
                             isInputFocused = true
                         }
@@ -96,6 +98,17 @@ struct CaptureView: View {
                 }
                 .onChange(of: isGhostOn) { oldValue, newValue in
                     if newValue == false { selectedUnhideDate = nil }
+                }
+                .onChange(of: isDatePickerPresented) { oldValue, newValue in
+                    if newValue {
+                        // Ensure keyboard is dismissed when popover opens
+                        isInputFocused = false
+                    } else {
+                        // Restore keyboard shortly after the popover closes to avoid timing issues
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            isInputFocused = true
+                        }
+                    }
                 }
                 .safeAreaInset(edge: .bottom) {
                     VStack(alignment: .trailing, spacing: 8) {
@@ -107,6 +120,10 @@ struct CaptureView: View {
                                         datePickerTempDate = existing
                                     } else {
                                         datePickerTempDate = earliestUnhideDate
+                                    }
+                                    // Dismiss keyboard when presenting the date picker
+                                    DispatchQueue.main.async {
+                                        isInputFocused = false
                                     }
                                     isDatePickerPresented = true
                                 }) {
