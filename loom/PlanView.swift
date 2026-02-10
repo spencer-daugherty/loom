@@ -87,8 +87,22 @@ struct PlanView: View {
 
             Spacer(minLength: 0)
 
+            // Bottom buttons side-by-side (like Step 2)
+            HStack(spacing: 12) {
+                // CLOSE BUTTON
+                Button {
+                    dismiss()
+                } label: {
+                    Text("Close")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .foregroundColor(.black)
+                }
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color(.systemGray5))
+                )
 
-            VStack(spacing: 8) {
                 // NEXT BUTTON
                 Button {
                     let now = Date()
@@ -107,20 +121,6 @@ struct PlanView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(isNextDisabled)
-
-                // CLOSE BUTTON
-                Button {
-                    dismiss()
-                } label: {
-                    Text("Close")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .foregroundColor(.black)
-                }
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color(.systemGray5))
-                )
             }
         }
         .padding(.horizontal)
