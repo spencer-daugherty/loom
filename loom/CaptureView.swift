@@ -211,7 +211,7 @@ struct CaptureView: View {
                             .padding(.horizontal)
                         }
                         HStack(spacing: 12) {
-                            TextField("Enter new item…", text: $input)
+                            TextField("Add an action…", text: $input)
                                 .textInputAutocapitalization(.none)
                                 .autocorrectionDisabled(true)
                                 .focused($isInputFocused)
