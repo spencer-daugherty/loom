@@ -13,6 +13,7 @@ struct CaptureView: View {
     @State private var items: [CaptureItem] = []
     @State private var isGhostOn: Bool = false
     @FocusState private var isInputFocused: Bool
+    @Environment(\.colorScheme) private var colorScheme
     
     @State private var selectedUnhideDate: Date? = nil
     @State private var isDatePickerPresented: Bool = false
@@ -44,132 +45,139 @@ struct CaptureView: View {
 
     var body: some View {
         NavigationView {
-            VStack(spacing: 12) {
-                // List of items
-                List {
-                    ForEach(displayItems) { item in
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text(item.text)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            if let d = item.unhideDate {
-                                Text("Unhidden " + formatShortDate(d))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+            ZStack {
+                (colorScheme == .dark ? Color(.systemGroupedBackground) : Color.white).ignoresSafeArea()
+                VStack(spacing: 12) {
+                    // List of items
+                    List {
+                        ForEach(displayItems) { item in
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Text(item.text)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                if let d = item.unhideDate {
+                                    Text("Unhidden " + formatShortDate(d))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
-                        }
-                        .padding(8)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
-                        .overlay {
-                            if item.isGhost {
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(style: StrokeStyle(lineWidth: 2, dash: [6]))
-                                    .foregroundStyle(.blue)
+                            .padding(8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+                            .overlay {
+                                if item.isGhost {
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(style: StrokeStyle(lineWidth: 2, dash: [6]))
+                                        .foregroundStyle(.blue)
+                                }
                             }
+                            .padding(.vertical, 1)
+                            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                         }
-                        .padding(.vertical, 1)
-                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                        .onDelete(perform: deleteItems)
                     }
-                    .onDelete(perform: deleteItems)
+                    .listRowSpacing(4)
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
                 }
-                .listRowSpacing(4)
-                .listStyle(.plain)
-            }
-            .padding()
-            .navigationTitle("Rolling Capture")
-            .navigationBarTitleDisplayMode(.inline)
-            .onAppear {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    isInputFocused = true
-                }
-            }
-            .onChange(of: isInputFocused) { oldValue, newValue in
-                if newValue == false {
-                    DispatchQueue.main.async {
+                .background(Color.clear)
+                .navigationTitle("Rolling Capture")
+                .navigationBarTitleDisplayMode(.inline)
+                .onAppear {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                         isInputFocused = true
                     }
                 }
-            }
-            .onChange(of: isGhostOn) { oldValue, newValue in
-                if newValue == false { selectedUnhideDate = nil }
-            }
-            .safeAreaInset(edge: .bottom) {
-                VStack(alignment: .trailing, spacing: 4) {
-                    if isGhostOn && !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        HStack {
-                            Spacer()
-                            Button(action: {
-                                if let existing = selectedUnhideDate {
-                                    datePickerTempDate = existing
-                                } else {
-                                    datePickerTempDate = earliestUnhideDate
-                                }
-                                isDatePickerPresented = true
-                            }) {
-                                HStack(spacing: 6) {
-                                    Text(
-                                        selectedUnhideDate != nil
-                                        ? "Hide Action Until " + formatShortDate(selectedUnhideDate!)
-                                        : "Hide Action Until"
+                .onChange(of: isInputFocused) { oldValue, newValue in
+                    if newValue == false {
+                        DispatchQueue.main.async {
+                            isInputFocused = true
+                        }
+                    }
+                }
+                .onChange(of: isGhostOn) { oldValue, newValue in
+                    if newValue == false { selectedUnhideDate = nil }
+                }
+                .safeAreaInset(edge: .bottom) {
+                    VStack(alignment: .trailing, spacing: 8) {
+                        if isGhostOn && !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            HStack {
+                                Spacer()
+                                Button(action: {
+                                    if let existing = selectedUnhideDate {
+                                        datePickerTempDate = existing
+                                    } else {
+                                        datePickerTempDate = earliestUnhideDate
+                                    }
+                                    isDatePickerPresented = true
+                                }) {
+                                    HStack(spacing: 6) {
+                                        Text(
+                                            selectedUnhideDate != nil
+                                            ? "Hide Action Until " + formatShortDate(selectedUnhideDate!)
+                                            : "Hide Action Until"
+                                        )
+                                        .font(.subheadline)
+                                        .foregroundStyle(selectedUnhideDate != nil ? Color.white : Color.primary)
+                                        Image(systemName: "chevron.down")
+                                            .font(.subheadline.weight(.semibold))
+                                            .foregroundStyle(selectedUnhideDate != nil ? Color.white : Color.secondary)
+                                    }
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(
+                                        (selectedUnhideDate != nil ? Color.blue : Color(.secondarySystemBackground))
                                     )
-                                    .font(.subheadline)
-                                    .foregroundStyle(.primary)
-                                    Image(systemName: "chevron.down")
-                                        .font(.subheadline.weight(.semibold))
-                                        .foregroundStyle(.secondary)
+                                    .clipShape(Capsule())
                                 }
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 8)
-                                .background(Color(.secondarySystemBackground))
-                                .clipShape(Capsule())
-                            }
-                            .popover(isPresented: $isDatePickerPresented) {
-                                VStack(alignment: .leading, spacing: 12) {
-                                    DatePicker(
-                                        "Hide Action Until",
-                                        selection: $datePickerTempDate,
-                                        in: earliestUnhideDate...,
-                                        displayedComponents: .date
-                                    )
-                                    .datePickerStyle(.graphical)
-                                    HStack {
-                                        Spacer()
-                                        Button("Set Date") {
-                                            selectedUnhideDate = datePickerTempDate
-                                            isDatePickerPresented = false
+                                .popover(isPresented: $isDatePickerPresented) {
+                                    VStack(alignment: .leading, spacing: 12) {
+                                        DatePicker(
+                                            "Hide Action Until",
+                                            selection: $datePickerTempDate,
+                                            in: earliestUnhideDate...,
+                                            displayedComponents: .date
+                                        )
+                                        .datePickerStyle(.graphical)
+                                        HStack {
+                                            Spacer()
+                                            Button("Set Date") {
+                                                selectedUnhideDate = datePickerTempDate
+                                                isDatePickerPresented = false
+                                            }
                                         }
                                     }
+                                    .padding()
                                 }
-                                .padding()
                             }
+                            .padding(.horizontal)
                         }
-                        .padding(.horizontal)
-                    }
-                    HStack(spacing: 12) {
-                        TextField("Enter new item…", text: $input)
-                            .textInputAutocapitalization(.none)
-                            .autocorrectionDisabled(true)
-                            .focused($isInputFocused)
-                            .submitLabel(.done)
-                            .onSubmit(addItem)
-                            .padding(12)
-                            .background(Color(.secondarySystemBackground))
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                            .layoutPriority(1)
-                            .frame(maxWidth: .infinity)
-                        Toggle(isOn: $isGhostOn) {
-                            EmptyView()
+                        HStack(spacing: 12) {
+                            TextField("Enter new item…", text: $input)
+                                .textInputAutocapitalization(.none)
+                                .autocorrectionDisabled(true)
+                                .focused($isInputFocused)
+                                .submitLabel(.done)
+                                .onSubmit(addItem)
+                                .padding(12)
+                                .background(Color(.secondarySystemBackground))
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                                .layoutPriority(1)
+                                .frame(maxWidth: .infinity)
+                            Toggle(isOn: $isGhostOn) {
+                                EmptyView()
+                            }
+                            .toggleStyle(.automatic)
+                            .labelsHidden()
+                            .frame(width: 60)
+                            Image(systemName: "clock.arrow.trianglehead.clockwise.rotate.90.path.dotted")
+                                .font(.system(size: 24, weight: .semibold))
+                                .foregroundStyle(isGhostOn ? .blue : .secondary)
+                                .accessibilityHidden(true)
                         }
-                        .toggleStyle(.automatic)
-                        .labelsHidden()
-                        .frame(width: 60)
-                        Image(systemName: "clock.arrow.trianglehead.clockwise.rotate.90.path.dotted")
-                            .font(.system(size: 24, weight: .semibold))
-                            .foregroundStyle(isGhostOn ? .blue : .secondary)
-                            .accessibilityHidden(true)
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 24)
                     }
-                    .padding([.horizontal, .top])
-                    .padding(.bottom, 12)
+                    .ignoresSafeArea(edges: .bottom)
                 }
             }
         }
