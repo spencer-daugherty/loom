@@ -434,6 +434,8 @@ struct PlanStepThreeView: View {
     @State private var baselinePoolItemIDs: [UUID] = []
     @State private var baselineChunks: [ChunkContainerState] = []
 
+    @State private var isHydratingFromStorage: Bool = false
+
     private let hiddenUntilLaterIconName = "clock.arrow.trianglehead.clockwise.rotate.90.path.dotted"
     private let maxChunks = 5
 
@@ -569,6 +571,7 @@ struct PlanStepThreeView: View {
                     .dropDestination(for: DragPayload.self) { payloads, _ in
                         guard let payload = payloads.first else { return false }
                         moveItemToPool(payload.itemID)
+                        persistStep3Plan()
                         return true
                     }
                     .padding(.vertical, 4)
@@ -584,10 +587,12 @@ struct PlanStepThreeView: View {
             .dropDestination(for: DragPayload.self) { payloads, _ in
                 guard let payload = payloads.first else { return false }
                 moveItemToPool(payload.itemID)
+                persistStep3Plan()
                 return true
             }
             .onChange(of: showHidden) { _, _ in
                 syncPoolWithVisibility()
+                persistStep3Plan()
             }
 
             List {
@@ -636,7 +641,7 @@ struct PlanStepThreeView: View {
                 )
 
                 Button {
-                    persistStep3Plan()
+                    // State is already persisted continuously; Next just advances.
                     if let onNext { onNext() }
                 } label: {
                     Text("Next")
@@ -661,11 +666,8 @@ struct PlanStepThreeView: View {
                     ChunkContainerState(isLocked: true),
                 ]
             }
-            if poolItemIDs.isEmpty {
-                poolItemIDs = initialPoolIDs
-            } else {
-                syncPoolWithVisibility()
-            }
+
+            hydrateStep3FromStorageOrInitialize()
 
             if baselineChunks.isEmpty && baselinePoolItemIDs.isEmpty {
                 baselineShowHidden = showHidden
@@ -675,12 +677,14 @@ struct PlanStepThreeView: View {
         }
         .onChange(of: allItems.map(\.id)) { _, _ in
             syncPoolWithVisibility()
+            persistStep3Plan()
         }
     }
 
     private var addChunkRow: some View {
         Button {
             addChunkContainer()
+            persistStep3Plan()
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "plus")
@@ -788,6 +792,7 @@ struct PlanStepThreeView: View {
                         get: { chunks[chunkIndex].selectionLabelId },
                         set: { newValue in
                             setChunkSelection(chunkIndex: chunkIndex, toLabelId: newValue)
+                            persistStep3Plan()
                         }
                     )
                 ) {
@@ -809,6 +814,7 @@ struct PlanStepThreeView: View {
                 if showDeleteX {
                     Button {
                         deleteChunkContainerIfAllowed(at: chunkIndex)
+                        persistStep3Plan()
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 18, weight: .semibold))
@@ -841,6 +847,7 @@ struct PlanStepThreeView: View {
                         .dropDestination(for: DragPayload.self) { payloads, _ in
                             guard let payload = payloads.first else { return false }
                             moveItem(payload.itemID, toChunkAt: chunkIndex)
+                            persistStep3Plan()
                             return true
                         }
                     }
@@ -860,6 +867,7 @@ struct PlanStepThreeView: View {
         .dropDestination(for: DragPayload.self) { payloads, _ in
             guard let payload = payloads.first else { return false }
             moveItem(payload.itemID, toChunkAt: chunkIndex)
+            persistStep3Plan()
             return true
         }
     }
@@ -893,24 +901,42 @@ struct PlanStepThreeView: View {
     }
 
     private func refreshStep3() {
-        for i in chunks.indices {
-            chunks[i].itemIDs = []
-            chunks[i].selectionLabelId = nil
-            chunks[i].selectionLabel = nil
-            chunks[i].selectionCategoryId = nil
-            chunks[i].selectionCategory = nil
+        // 1) Clear UI state
+        isHydratingFromStorage = true
+        defer { isHydratingFromStorage = false }
+
+        showHidden = false
+
+        if chunks.isEmpty {
+            chunks = [
+                ChunkContainerState(isLocked: true),
+                ChunkContainerState(isLocked: true),
+            ]
+        } else {
+            chunks = [
+                ChunkContainerState(isLocked: true),
+                ChunkContainerState(isLocked: true),
+            ]
         }
 
-        poolItemIDs = initialPoolIDs
-        syncPoolWithVisibility()
+        poolItemIDs = allItems
+            .filter { !$0.isGhost } // because showHidden just got set to false
+            .sorted { $0.createdAt > $1.createdAt }
+            .map(\.id)
+
+        // 2) Clear persisted state for this week (Step 4 reads these)
+        clearPersistedPlanForCurrentWeek()
+
+        // 3) Persist the "fresh" state (so if you exit & come back, it's still fresh)
+        persistStep3Plan()
+
+        // 4) Reset baselines so Refresh button hides immediately
+        baselineShowHidden = showHidden
+        baselinePoolItemIDs = poolItemIDs
+        baselineChunks = chunks
     }
 
-    // Split: Step 3 "Next" should persist; navigation is controlled by host.
-    private func persistStep3Plan() {
-        guard isStep3NextEnabled else { return }
-
-        let captureByID = Dictionary(uniqueKeysWithValues: allItems.map { ($0.id, $0) })
-
+    private func clearPersistedPlanForCurrentWeek() {
         for action in plannedActions where Calendar.current.isDate(action.weekStart, inSameDayAs: currentWeekStart) {
             modelContext.delete(action)
         }
@@ -920,8 +946,144 @@ struct PlanStepThreeView: View {
         for sel in allChunkSelections where Calendar.current.isDate(sel.weekStart, inSameDayAs: currentWeekStart) {
             modelContext.delete(sel)
         }
+        try? modelContext.save()
+    }
 
+    /// Hydrate Step 3 UI state from SwiftData (the same models Step 4 uses) if present.
+    /// Otherwise initialize "from scratch" and persist once.
+    private func hydrateStep3FromStorageOrInitialize() {
+        // Only hydrate once per appearance when our local state isn't already set.
+        // If this view is recreated, @State resets and we rehydrate.
+        guard poolItemIDs.isEmpty else { return }
+
+        isHydratingFromStorage = true
+        defer { isHydratingFromStorage = false }
+
+        // Pull persisted planned chunks/actions for THIS week.
+        let persistedChunks = plannedChunks
+            .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) }
+            .sorted { $0.chunkIndex < $1.chunkIndex }
+
+        let persistedActions = plannedActions
+            .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) }
+
+        let persistedSelections = allChunkSelections
+            .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) }
+            .sorted { $0.chunkIndex < $1.chunkIndex }
+
+        // If nothing persisted yet, start from scratch and persist.
+        if persistedChunks.isEmpty && persistedActions.isEmpty && persistedSelections.isEmpty {
+            // ensure default 2 locked chunks exist
+            if chunks.isEmpty {
+                chunks = [
+                    ChunkContainerState(isLocked: true),
+                    ChunkContainerState(isLocked: true),
+                ]
+            } else if chunks.count < 2 {
+                chunks = [
+                    ChunkContainerState(isLocked: true),
+                    ChunkContainerState(isLocked: true),
+                ]
+            }
+
+            poolItemIDs = initialPoolIDs
+            syncPoolWithVisibility()
+
+            persistStep3Plan()
+
+            baselineShowHidden = showHidden
+            baselinePoolItemIDs = poolItemIDs
+            baselineChunks = chunks
+            return
+        }
+
+        // Ensure we have at least enough containers to represent persisted chunk indices.
+        let maxIndex = persistedChunks.map(\.chunkIndex).max() ?? 1
+        let desiredCount = min(maxChunks, max(2, maxIndex + 1))
+
+        chunks = (0..<desiredCount).map { idx in
+            // locked first two, user-added after
+            ChunkContainerState(isLocked: idx < 2)
+        }
+
+        // Apply label selections from persisted selections first (preferred, since it's explicit).
+        // Fall back to PlannedChunk label info if selection rows are missing.
+        for sel in persistedSelections {
+            guard sel.chunkIndex >= 0, sel.chunkIndex < chunks.count else { continue }
+            chunks[sel.chunkIndex].selectionLabelId = sel.labelId
+            chunks[sel.chunkIndex].selectionLabel = sel.label
+            chunks[sel.chunkIndex].selectionCategoryId = sel.categoryId
+            chunks[sel.chunkIndex].selectionCategory = sel.category
+        }
+
+        for pc in persistedChunks {
+            guard pc.chunkIndex >= 0, pc.chunkIndex < chunks.count else { continue }
+
+            // Only fill in if not already present from PlanChunkSelection.
+            if chunks[pc.chunkIndex].selectionLabelId == nil {
+                chunks[pc.chunkIndex].selectionLabelId = pc.labelId
+                chunks[pc.chunkIndex].selectionLabel = pc.label
+                chunks[pc.chunkIndex].selectionCategoryId = pc.categoryId
+                chunks[pc.chunkIndex].selectionCategory = pc.category
+            }
+
+            // Reconstruct itemIDs ordering from PlannedChunkAction sortOrder.
+            let ordered = persistedActions
+                .filter { $0.plannedChunkId == pc.id }
+                .sorted { $0.sortOrder < $1.sortOrder }
+                .compactMap { action in
+                    // Map by TEXT back to a RollingCaptureItem.id.
+                    // NOTE: PlannedChunkAction currently stores only `text`, not capture item ID.
+                    // We map to the most recent matching RollingCaptureItem.text.
+                    // If duplicates exist, this may pick the wrong one.
+                    visibleItems.first(where: { $0.text == action.text })?.id
+                }
+
+            chunks[pc.chunkIndex].itemIDs = ordered
+        }
+
+        // Recreate pool: everything visible not already chunked, stable order using initialPoolIDs.
+        syncPoolWithVisibility()
+
+        baselineShowHidden = showHidden
+        baselinePoolItemIDs = poolItemIDs
+        baselineChunks = chunks
+    }
+
+    /// Persist Step 3 continuously into the same data Step 4 reads:
+    /// - PlannedChunk / PlannedChunkAction (actions assigned to chunks)
+    /// - PlanChunkSelection (label/category selection per chunk)
+    ///
+    /// Called after every interaction (drag/drop, picker changes, add/delete chunk, showHidden changes).
+    private func persistStep3Plan() {
+        guard !isHydratingFromStorage else { return }
+
+        let captureByID = Dictionary(uniqueKeysWithValues: allItems.map { ($0.id, $0) })
+
+        // Wipe current week's records and rebuild from UI state.
+        // (Simple + robust for small datasets. If this grows, we can diff-update.)
+        clearPersistedPlanForCurrentWeek()
+
+        // Persist selections for all displayed chunk indices (even empty ones),
+        // so returning restores the picker selections even before the chunk qualifies.
+        for (chunkIndex, chunkState) in chunks.enumerated() {
+            let sel = PlanChunkSelection(
+                weekStart: currentWeekStart,
+                chunkIndex: chunkIndex,
+                labelId: chunkState.selectionLabelId,
+                label: chunkState.selectionLabel,
+                categoryId: chunkState.selectionCategoryId,
+                category: chunkState.selectionCategory,
+                updatedAt: .now
+            )
+            modelContext.insert(sel)
+        }
+
+        // Persist planned chunks/actions (only for chunks that have items, like before).
         for (chunkIndex, chunkState) in chunks.enumerated() where !chunkState.itemIDs.isEmpty {
+            // If no label is selected yet, we still persist the actions into a chunk record.
+            // But PlannedChunk requires a labelId, categoryId, etc. in your current model.
+            // So we only persist PlannedChunk/Action when a label is selected.
             guard let labelId = chunkState.selectionLabelId else { continue }
 
             let plannedChunk = PlannedChunk(
@@ -994,6 +1156,11 @@ struct PlanStepThreeView: View {
 
         if !toAdd.isEmpty {
             poolItemIDs.insert(contentsOf: toAdd, at: 0)
+        }
+
+        // If pool is still empty (first load), initialize deterministically.
+        if poolItemIDs.isEmpty {
+            poolItemIDs = initialPoolIDs.filter { !chunkedIDs.contains($0) }
         }
     }
 
