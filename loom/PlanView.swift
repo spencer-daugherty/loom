@@ -246,7 +246,6 @@ struct PlanStepTwoView: View {
 
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal)
 
             HStack(spacing: 10) {
                 Toggle(isOn: $showHidden) { EmptyView() }
@@ -263,8 +262,12 @@ struct PlanStepTwoView: View {
 
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal)
 
+            // IMPORTANT:
+            // To match Step 1 width, avoid stacking horizontal padding on:
+            // - List
+            // - List rows
+            // Keep the "page" padding only on the outer VStack (below).
             List {
                 ForEach(displayItems) { item in
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -290,15 +293,12 @@ struct PlanStepTwoView: View {
                         }
                     }
                     .padding(.vertical, 4)
-                    // Match step 1 page width (remove extra-wide list row insets)
                     .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                 }
                 .onDelete(perform: deleteItems)
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
-            // keep list content aligned with step 1 margins
-            .padding(.horizontal)
 
             HStack(spacing: 12) {
                 TextField("Add an action…", text: $input)
@@ -317,8 +317,6 @@ struct PlanStepTwoView: View {
                     .layoutPriority(1)
                     .frame(maxWidth: .infinity)
             }
-            // Match step 1 margins (was 24)
-            .padding(.horizontal)
             .padding(.top, 4)
 
             HStack(spacing: 12) {
@@ -343,10 +341,9 @@ struct PlanStepTwoView: View {
                 }
                 .buttonStyle(.borderedProminent)
             }
-            .padding(.horizontal)
             .padding(.bottom, 2)
         }
-        // Match step 1: keep top/bottom safe area padding, but not extra horizontal safe-area padding.
+        // Single "page width" padding (match Step 1)
         .padding(.horizontal)
         .safeAreaPadding(.top)
         .safeAreaPadding(.bottom)
@@ -520,13 +517,6 @@ struct PlanStepThreeView: View {
         // missing *text* as needing refresh. This keeps behavior intuitive.
         let plannedTextSet = Set(weekActions.map(\.text))
         let visibleCaptureItems = (showHidden ? allItems : allItems.filter { !$0.isGhost })
-        let visibleCaptureTextSet = Set(visibleCaptureItems.map(\.text))
-
-        if !visibleCaptureTextSet.isSubset(of: plannedTextSet.union(visibleCaptureTextSet.intersection(plannedTextSet))) {
-            // The above line is intentionally conservative; simplest approach:
-            // "if there exists any visible capture text not in plannedTextSet -> refresh"
-            // We'll implement that directly for clarity:
-        }
 
         if visibleCaptureItems.contains(where: { !plannedTextSet.contains($0.text) }) {
             return true
@@ -602,7 +592,6 @@ struct PlanStepThreeView: View {
 
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal)
 
             HStack(spacing: 10) {
                 Toggle(
@@ -633,8 +622,8 @@ struct PlanStepThreeView: View {
 
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal)
 
+            // Pool list (keep width consistent with Step 1 by avoiding extra horizontal padding here)
             List {
                 ForEach(poolItems) { item in
                     rowView(
@@ -654,7 +643,6 @@ struct PlanStepThreeView: View {
                         return true
                     }
                     .padding(.vertical, 4)
-                    // Match step 1 page width
                     .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                 }
                 .listRowSeparator(.visible)
@@ -662,7 +650,6 @@ struct PlanStepThreeView: View {
             .listRowSpacing(4)
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
-            .padding(.horizontal)
             .dropDestination(for: DragPayload.self) { payloads, _ in
                 guard let payload = payloads.first else { return false }
                 moveItemToPool(payload.itemID)
@@ -681,24 +668,22 @@ struct PlanStepThreeView: View {
                 persistStep3Plan()
             }
 
+            // Chunk containers list (no extra horizontal padding here)
             List {
                 ForEach(Array(chunks.enumerated()), id: \.element.id) { index, _ in
                     chunkContainerView(chunkIndex: index)
-                        // Match step 1 page width
                         .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
                         .listRowSeparator(.hidden)
                 }
 
                 if chunks.count < maxChunks {
                     addChunkRow
-                        // Match step 1 page width
                         .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
                         .listRowSeparator(.hidden)
                 }
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
-            .padding(.horizontal)
 
             if isRefreshVisible {
                 Button { refreshStep3() } label: {
@@ -736,10 +721,9 @@ struct PlanStepThreeView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(!isStep3NextEnabled)
             }
-            .padding(.horizontal)
             .padding(.bottom, 2)
         }
-        // Match step 1: horizontal padding + top/bottom safe area padding
+        // Single "page width" padding (match Step 1)
         .padding(.horizontal)
         .safeAreaPadding(.top)
         .safeAreaPadding(.bottom)
@@ -1432,7 +1416,6 @@ struct PlanStepFourView: View {
                 .padding(.top, 8)
 
             instructionsRow
-                .padding(.horizontal)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
@@ -1448,8 +1431,6 @@ struct PlanStepFourView: View {
                         }
                     }
                 }
-                // Match step 1 margins (already on this internal container)
-                .padding(.horizontal)
                 .padding(.bottom, 12)
             }
 
@@ -1467,10 +1448,9 @@ struct PlanStepFourView: View {
                         .fill(Color(.systemGray5))
                 )
             }
-            .padding(.horizontal)
             .padding(.bottom, 2)
         }
-        // Match step 1: horizontal padding + top/bottom safe area padding
+        // Single "page width" padding (match Step 1)
         .padding(.horizontal)
         .safeAreaPadding(.top)
         .safeAreaPadding(.bottom)
