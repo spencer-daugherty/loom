@@ -10,6 +10,7 @@ struct PlanView: View {
     
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
 
     @State private var navigateToStep2: Bool = false
     @FocusState private var focusedField: Field?
@@ -19,6 +20,10 @@ struct PlanView: View {
         morningPowerQuestion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
         gratefulFor.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
         incantation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var secondaryButtonTextColor: Color {
+        colorScheme == .dark ? Color(.secondaryLabel) : .black
     }
 
     var body: some View {
@@ -80,7 +85,7 @@ struct PlanView: View {
                     Text("Close")
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
-                        .foregroundColor(.black)
+                        .foregroundStyle(secondaryButtonTextColor)
                 }
                 .background(
                     RoundedRectangle(cornerRadius: 8)
@@ -173,6 +178,10 @@ struct PlanStepTwoView: View {
     @State private var isBrainstormExpanded: Bool = false
 
     private let hiddenUntilLaterIconName = "clock.arrow.trianglehead.clockwise.rotate.90.path.dotted"
+
+    private var secondaryButtonTextColor: Color {
+        colorScheme == .dark ? Color(.secondaryLabel) : .black
+    }
 
     private var displayItems: [RollingCaptureItem] {
         if !showHidden {
@@ -326,7 +335,7 @@ struct PlanStepTwoView: View {
                     Text("Back")
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
-                        .foregroundColor(.black)
+                        .foregroundStyle(secondaryButtonTextColor)
                 }
                 .background(
                     RoundedRectangle(cornerRadius: 8)
@@ -437,6 +446,10 @@ struct PlanStepThreeView: View {
 
     private let hiddenUntilLaterIconName = "clock.arrow.trianglehead.clockwise.rotate.90.path.dotted"
     private let maxChunks = 5
+
+    private var secondaryButtonTextColor: Color {
+        colorScheme == .dark ? Color(.secondaryLabel) : .black
+    }
 
     private var currentWeekStart: Date {
         WeeklyMindsetEntry.weekStart(for: Date())
@@ -704,7 +717,7 @@ struct PlanStepThreeView: View {
                     Text("Back")
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
-                        .foregroundColor(.black)
+                        .foregroundStyle(secondaryButtonTextColor)
                 }
                 .background(
                     RoundedRectangle(cornerRadius: 8)
@@ -890,7 +903,9 @@ struct PlanStepThreeView: View {
                 Text("Actions Related To:")
                     .font(.caption)
                     .fontWeight(.bold)
-                    .foregroundStyle(.secondary)
+                    // If dark mode + label selected (tinted background),
+                    // force this label to the same darker color it has in light mode.
+                    .foregroundStyle((colorScheme == .dark && chunk.selectionLabelId != nil) ? Color.black : Color.secondary)
 
                 Picker(
                     "",
@@ -1360,6 +1375,10 @@ struct PlanStepFourView: View {
 
     private let targetIconName = "scope"
 
+    private var secondaryButtonTextColor: Color {
+        colorScheme == .dark ? Color(.secondaryLabel) : .black
+    }
+
     private var currentWeekStart: Date {
         WeeklyMindsetEntry.weekStart(for: Date())
     }
@@ -1441,7 +1460,7 @@ struct PlanStepFourView: View {
                     Text("Back")
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
-                        .foregroundColor(.black)
+                        .foregroundStyle(secondaryButtonTextColor)
                 }
                 .background(
                     RoundedRectangle(cornerRadius: 8)
@@ -1522,6 +1541,8 @@ struct PlanStepFourView: View {
         .buttonStyle(.plain)
     }
 
+    // MARK: - FIX: break up the huge SwiftUI expression into a subview (prevents type-check timeout)
+
     @ViewBuilder
     private func chunkCard(_ chunk: PlannedChunk) -> some View {
         let chunkID = chunk.id
@@ -1538,58 +1559,151 @@ struct PlanStepFourView: View {
             set: { roleTextByChunk[chunkID] = $0 }
         )
 
-        VStack(alignment: .leading, spacing: 12) {
+        let selectedOutcomeIDsBinding = Binding<[UUID]>(
+            get: { selectedOutcomeIDsByChunk[chunkID] ?? [] },
+            set: { selectedOutcomeIDsByChunk[chunkID] = Array($0.prefix(3)) }
+        )
+
+        let selectedRoleIDBinding = Binding<UUID?>(
+            get: { selectedRoleIDByChunk[chunkID] ?? nil },
+            set: { selectedRoleIDByChunk[chunkID] = $0 }
+        )
+
+        ChunkCardView(
+            chunk: chunk,
+            actions: actions,
+            outcomes: outcomes,
+            roles: roles,
+            colorScheme: colorScheme,
+            targetIconName: targetIconName,
+            fill: fill,
+            resultText: resultBinding,
+            roleNoteText: roleNoteBinding,
+            selectedOutcomeIDs: selectedOutcomeIDsBinding,
+            selectedRoleID: selectedRoleIDBinding,
+            onOpenOutcomes: { outcomeSheetChunkID = SheetChunkID(id: chunkID) },
+            onOpenRoles: { roleSheetChunkID = SheetChunkID(id: chunkID) },
+            onRemoveOutcome: { outcomeID in
+                var ids = selectedOutcomeIDsByChunk[chunkID] ?? []
+                ids.removeAll { $0 == outcomeID }
+                selectedOutcomeIDsByChunk[chunkID] = ids
+            }
+        )
+    }
+
+    private struct ChunkCardView: View {
+        let chunk: PlannedChunk
+        let actions: [PlannedChunkAction]
+        let outcomes: [Outcomes]
+        let roles: [FulfillmentRoles]
+        let colorScheme: ColorScheme
+        let targetIconName: String
+        let fill: Color
+
+        @Binding var resultText: String
+        @Binding var roleNoteText: String
+        @Binding var selectedOutcomeIDs: [UUID]
+        @Binding var selectedRoleID: UUID?
+
+        let onOpenOutcomes: () -> Void
+        let onOpenRoles: () -> Void
+        let onRemoveOutcome: (UUID) -> Void
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 12) {
+                headerRow
+
+                Divider().opacity(0.4)
+
+                resultSection
+
+                outcomesConnectRow
+
+                let selectedOutcomes = resolvedSelectedOutcomes
+                if !selectedOutcomes.isEmpty {
+                    selectedOutcomesList(selectedOutcomes)
+                }
+
+                Divider().opacity(0.4)
+
+                purposeSection
+
+                roleConnectRow
+
+                TextField("Earn more income FASTER for a better future!", text: $roleNoteText)
+                    .textFieldStyle(.roundedBorder)
+                    .submitLabel(.done)
+                    .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
+
+                Divider().opacity(0.4)
+
+                actionsSection
+            }
+            .padding(12)
+            .background(fill, in: RoundedRectangle(cornerRadius: 14))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(
+                        colorScheme == .dark ? Color.white.opacity(0.18) : Color.black.opacity(0.12),
+                        lineWidth: 1
+                    )
+            )
+        }
+
+        private var headerRow: some View {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("actions related to:")
                     .font(.caption)
                     .fontWeight(.regular)
-                    .foregroundStyle(.black)
+                    .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
 
                 Spacer(minLength: 0)
 
                 Text(chunk.label)
                     .font(.subheadline)
                     .fontWeight(.semibold)
-                    .foregroundStyle(.black)
+                    .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
                     .frame(maxWidth: .infinity, alignment: .trailing)
                     .lineLimit(1)
             }
+        }
 
-            Divider().opacity(0.4)
+        private var resultSection: some View {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("RESULT")
+                        .font(.caption)
+                        .fontWeight(.bold)
+                        .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
+                    Spacer()
+                    Text("What do I want?")
+                        .font(.subheadline)
+                        .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
+                }
 
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("RESULT")
-                    .font(.caption)
-                    .fontWeight(.bold)
-                    .foregroundStyle(.black)
-                Spacer()
-                Text("What do I want?")
-                    .font(.subheadline)
-                    .foregroundStyle(.black)
+                TextField("Stand out as a rising star and get a raise!", text: $resultText)
+                    .textFieldStyle(.roundedBorder)
+                    .submitLabel(.done)
+                    .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
             }
+        }
 
-            TextField("Stand out as a rising star and get a raise!", text: resultBinding)
-                .textFieldStyle(.roundedBorder)
-                .focused($focusedField, equals: .result(chunkID))
-                .submitLabel(.done)
-
-            Button {
-                outcomeSheetChunkID = SheetChunkID(id: chunkID)
-            } label: {
+        private var outcomesConnectRow: some View {
+            Button(action: onOpenOutcomes) {
                 HStack(spacing: 10) {
                     Image(systemName: targetIconName)
                         .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(.black)
+                        .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
                     Text("Connect Outcome(s)")
                         .font(.subheadline)
-                        .foregroundStyle(.black)
+                        .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
                     Spacer(minLength: 0)
                     Text("optional")
                         .font(.caption)
-                        .foregroundStyle(.black)
+                        .foregroundStyle(colorScheme == .dark ? Color.secondary : Color.black)
                     Image(systemName: "chevron.right")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.black)
+                        .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
                 }
                 .padding(10)
                 .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
@@ -1602,82 +1716,81 @@ struct PlanStepFourView: View {
                 )
             }
             .buttonStyle(.plain)
+        }
 
-            let selectedOutcomes = outcomesForChunk(chunk)
-            if !selectedOutcomes.isEmpty {
-                VStack(spacing: 8) {
-                    ForEach(selectedOutcomes, id: \.outcome_id) { outcome in
-                        HStack(spacing: 10) {
-                            Image(systemName: targetIconName)
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(.black)
+        private func selectedOutcomesList(_ selectedOutcomes: [Outcomes]) -> some View {
+            VStack(spacing: 8) {
+                ForEach(selectedOutcomes, id: \.outcome_id) { outcome in
+                    HStack(spacing: 10) {
+                        Image(systemName: targetIconName)
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
 
-                            Text(outcome.outcome)
-                                .font(.subheadline)
-                                .foregroundStyle(.black)
-                                .lineLimit(2)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                        Text(outcome.outcome)
+                            .font(.subheadline)
+                            .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
+                            .lineLimit(2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
 
-                            Button {
-                                removeOutcome(outcome, from: chunk)
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .font(.system(size: 18, weight: .semibold))
-                                    .foregroundStyle(.black)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Remove outcome")
+                        Button {
+                            onRemoveOutcome(outcome.outcome_id)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
                         }
-                        .padding(10)
-                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .stroke(
-                                    colorScheme == .dark ? Color.white.opacity(0.18) : Color.black.opacity(0.15),
-                                    lineWidth: 1
-                                )
-                        )
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Remove outcome")
                     }
+                    .padding(10)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(
+                                colorScheme == .dark ? Color.white.opacity(0.18) : Color.black.opacity(0.15),
+                                lineWidth: 1
+                            )
+                    )
                 }
             }
+        }
 
-            Divider().opacity(0.4)
-
+        private var purposeSection: some View {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("PURPOSE")
                     .font(.caption)
                     .fontWeight(.bold)
-                    .foregroundStyle(.black)
+                    .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
                 Spacer()
                 Text("Why do I want it?")
                     .font(.subheadline)
-                    .foregroundStyle(.black)
+                    .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
             }
+        }
 
-            Button {
-                roleSheetChunkID = SheetChunkID(id: chunkID)
-            } label: {
+        private var roleConnectRow: some View {
+            Button(action: onOpenRoles) {
                 HStack(spacing: 10) {
                     Image(systemName: "trophy")
                         .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(.black)
+                        .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
 
                     Text("Connect Role")
                         .font(.subheadline)
-                        .foregroundStyle(.black)
+                        .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
 
                     Spacer(minLength: 0)
 
-                    if let selectedRoleName = selectedRoleName(for: chunk) {
+                    if let selectedRoleName {
                         Text(selectedRoleName)
                             .font(.caption)
-                            .foregroundStyle(.black)
+                            .foregroundStyle(colorScheme == .dark ? Color.secondary : Color.black)
                             .lineLimit(1)
                     }
 
                     Image(systemName: "chevron.right")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.black)
+                        .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
                 }
                 .padding(10)
                 .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
@@ -1690,40 +1803,39 @@ struct PlanStepFourView: View {
                 )
             }
             .buttonStyle(.plain)
+        }
 
-            TextField("Earn more income FASTER for a better future!", text: roleNoteBinding)
-                .textFieldStyle(.roundedBorder)
-                .focused($focusedField, equals: .roleNote(chunkID))
-                .submitLabel(.done)
-
-            Divider().opacity(0.4)
-
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("ACTIONS")
-                    .font(.caption)
-                    .fontWeight(.bold)
-                    .foregroundStyle(.black)
-                Spacer()
-            }
-
+        private var actionsSection: some View {
             VStack(alignment: .leading, spacing: 8) {
-                ForEach(actions) { action in
-                    Text("• \(action.text)")
-                        .font(.subheadline)
-                        .foregroundStyle(.black)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("ACTIONS")
+                        .font(.caption)
+                        .fontWeight(.bold)
+                        .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
+                    Spacer()
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(actions) { action in
+                        Text("• \(action.text)")
+                            .font(.subheadline)
+                            .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
             }
         }
-        .padding(12)
-        .background(fill, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(
-                    colorScheme == .dark ? Color.white.opacity(0.18) : Color.black.opacity(0.12),
-                    lineWidth: 1
-                )
-        )
+
+        private var resolvedSelectedOutcomes: [Outcomes] {
+            guard !selectedOutcomeIDs.isEmpty else { return [] }
+            let byID = Dictionary(uniqueKeysWithValues: outcomes.map { ($0.outcome_id, $0) })
+            return selectedOutcomeIDs.compactMap { byID[$0] }
+        }
+
+        private var selectedRoleName: String? {
+            guard let selectedRoleID else { return nil }
+            return roles.first(where: { $0.id == selectedRoleID })?.role
+        }
     }
 
     private func actionsForChunk(_ chunk: PlannedChunk) -> [PlannedChunkAction] {
@@ -1748,26 +1860,6 @@ struct PlanStepFourView: View {
         guard let fulfillment = fulfillmentForCategoryName(chunk.category) else { return [] }
         return rolesForCategoryID(fulfillment.category_id)
     }
-
-    private func outcomesForChunk(_ chunk: PlannedChunk) -> [Outcomes] {
-        let ids = selectedOutcomeIDsByChunk[chunk.id] ?? []
-        guard !ids.isEmpty else { return [] }
-
-        let byID = Dictionary(uniqueKeysWithValues: outcomes.map { ($0.outcome_id, $0) })
-        return ids.compactMap { byID[$0] }
-    }
-
-    private func removeOutcome(_ outcome: Outcomes, from chunk: PlannedChunk) {
-        let chunkID = chunk.id
-        var ids = selectedOutcomeIDsByChunk[chunkID] ?? []
-        ids.removeAll { $0 == outcome.outcome_id }
-        selectedOutcomeIDsByChunk[chunkID] = ids
-    }
-
-    private func selectedRoleName(for chunk: PlannedChunk) -> String? {
-        guard let picked = (selectedRoleIDByChunk[chunk.id] ?? nil) else { return nil }
-        return roles.first(where: { $0.id == picked })?.role
-    }
 }
 
 private struct StepFourInstructionsPopup: View {
@@ -1791,7 +1883,7 @@ private struct StepFourInstructionsPopup: View {
                         (Text("Purpose: ").fontWeight(.bold) + Text("Why do I want it?").italic().underline())
                             .font(.body)
 
-                        Text("Why do you want to do this? What’s your real purpose? How will it make you feel to achieve your result? What will it give you? What will it give your family?")
+                        Text("Why do you want to do this? What’s your real purpose? How will it make you feel to achieve your result? What will it give you? What will it give you? What will it give your family?")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
