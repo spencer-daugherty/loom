@@ -362,7 +362,7 @@ struct PlanStepTwoView: View {
                     Text("Back")
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
-                        .foregroundStyle(secondaryButtonTextColor)
+                        .foregroundStyle(colorScheme == .dark ? Color(.secondaryLabel) : .black)
                 }
                 .background(
                     RoundedRectangle(cornerRadius: 8)
@@ -427,8 +427,7 @@ struct PlanStepTwoView: View {
 }
 
 // MARK: - Step 3
-
-// (PlanStepThreeView unchanged)
+// (unchanged from your current file)
 struct PlanStepThreeView: View {
     let onBack: (() -> Void)?
     let onNext: (() -> Void)?
@@ -1293,8 +1292,7 @@ struct PlanStepThreeView: View {
 }
 
 // MARK: - Step 4
-
-// (PlanStepFourView unchanged)
+// (unchanged from your current file)
 struct PlanStepFourView: View {
     let onBack: (() -> Void)?
     let onNext: (() -> Void)?
@@ -1706,8 +1704,6 @@ struct PlanStepFourView: View {
             )
         }
 
-        @FocusState private var focusedField: Step4FocusField?
-
         private var headerRow: some View {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("actions related to:")
@@ -2069,12 +2065,23 @@ struct PlanStepFiveView: View {
     @Query(sort: \PlannedChunkActionDefineState.updatedAt, order: .reverse)
     private var defineStates: [PlannedChunkActionDefineState]
 
-    @Query(sort: \PlannedChunkActionLeverageItem.createdAt, order: .forward)
-    private var leverageItems: [PlannedChunkActionLeverageItem]
+    // NEW universal catalogs + selections
+    @Query(sort: \LeverageResource.createdAt, order: .forward)
+    private var leverageCatalog: [LeverageResource]
 
-    @Query(sort: \PlannedChunkActionSensitivityPlace.createdAt, order: .forward)
-    private var sensitivityPlaces: [PlannedChunkActionSensitivityPlace]
+    @Query(sort: \PlannedChunkActionLeverageSelection.updatedAt, order: .reverse)
+    private var leverageSelections: [PlannedChunkActionLeverageSelection]
 
+    @Query(sort: \SensitivityPlaceCatalogItem.createdAt, order: .forward)
+    private var placesCatalog: [SensitivityPlaceCatalogItem]
+
+    @Query(sort: \PlannedChunkActionSensitivityPlaceLink.createdAt, order: .forward)
+    private var placeLinks: [PlannedChunkActionSensitivityPlaceLink]
+
+    @Query(sort: \PlannedChunkActionNote.updatedAt, order: .reverse)
+    private var notes: [PlannedChunkActionNote]
+
+    // Attachments (link/file list)
     @Query(sort: \PlannedChunkActionAttachment.createdAt, order: .forward)
     private var attachments: [PlannedChunkActionAttachment]
 
@@ -2177,18 +2184,10 @@ struct PlanStepFiveView: View {
         }
         .sheet(item: $clockSheetActionID) { wrapper in
             TimeEstimateSheet(
-                title: "Estimate time to complete action",
                 currentMinutes: defineState(forActionId: wrapper.id)?.timeEstimateMinutes,
                 onSelect: { minutes in
                     upsertDefineState(forActionId: wrapper.id) { st in
                         st.timeEstimateMinutes = minutes
-                        st.updatedAt = .now
-                    }
-                    scheduleStep5Autosave()
-                },
-                onClear: {
-                    upsertDefineState(forActionId: wrapper.id) { st in
-                        st.timeEstimateMinutes = nil
                         st.updatedAt = .now
                     }
                     scheduleStep5Autosave()
@@ -2199,28 +2198,52 @@ struct PlanStepFiveView: View {
         }
         .sheet(item: $leverageSheetActionID) { wrapper in
             LeverageSheet(
-                title: "Leverage action to someone or something else",
                 actionId: wrapper.id,
                 weekStart: currentWeekStart,
-                leverageItems: leverageItemsForAction(wrapper.id),
+                leverageCatalog: leverageCatalog,
+                selectedResourceId: currentLeverageSelectionResourceId(forActionId: wrapper.id),
                 onAdd: { kind, value in
                     let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !trimmed.isEmpty else { return }
-                    let item = PlannedChunkActionLeverageItem(
-                        weekStart: currentWeekStart,
-                        plannedChunkActionId: wrapper.id,
-                        kindRaw: kind.rawValue,
-                        value: trimmed,
-                        createdAt: .now
-                    )
-                    modelContext.insert(item)
+
+                    // Upsert (by normalized key) to keep catalog universal and deduped.
+                    let key = "\(kind.rawValue.lowercased())|\(trimmed.lowercased())"
+                    if let existing = leverageCatalog.first(where: { $0.kindValueKey == key }) {
+                        // no-op
+                        _ = existing
+                    } else {
+                        let item = LeverageResource(kindRaw: kind.rawValue, value: trimmed)
+                        modelContext.insert(item)
+                    }
                     try? modelContext.save()
                 },
-                onDelete: { ids in
-                    for it in leverageItems where ids.contains(it.id) {
+                onDeleteCatalogItems: { ids in
+                    for it in leverageCatalog where ids.contains(it.id) {
+                        // Delete selections pointing to this resource
+                        for sel in leverageSelections where sel.resourceId == it.id {
+                            sel.resourceId = nil
+                            sel.updatedAt = .now
+                        }
                         modelContext.delete(it)
                     }
                     try? modelContext.save()
+                    scheduleStep5Autosave()
+                },
+                onSelectResource: { resourceId in
+                    upsertLeverageSelection(forActionId: wrapper.id) { sel in
+                        sel.resourceId = resourceId
+                        sel.updatedAt = .now
+                    }
+                    try? modelContext.save()
+                    scheduleStep5Autosave()
+                },
+                onClearSelection: {
+                    upsertLeverageSelection(forActionId: wrapper.id) { sel in
+                        sel.resourceId = nil
+                        sel.updatedAt = .now
+                    }
+                    try? modelContext.save()
+                    scheduleStep5Autosave()
                 }
             )
             .presentationDetents([.medium, .large])
@@ -2228,46 +2251,49 @@ struct PlanStepFiveView: View {
         }
         .sheet(item: $sensitivitySheetActionID) { wrapper in
             SensitivitySheet(
-                title: "Add sensitivity",
-                state: Binding(
+                weekStart: currentWeekStart,
+                actionId: wrapper.id,
+                defineState: Binding(
                     get: { defineState(forActionId: wrapper.id) ?? makeBlankDefineState(actionId: wrapper.id) },
                     set: { newValue in
-                        // Copy fields back into persisted row
                         upsertDefineState(forActionId: wrapper.id) { st in
                             st.sensitiveMorning = newValue.sensitiveMorning
                             st.sensitiveAfternoon = newValue.sensitiveAfternoon
                             st.sensitiveEvening = newValue.sensitiveEvening
                             st.updatedAt = .now
                         }
+                        try? modelContext.save()
                         scheduleStep5Autosave()
                     }
                 ),
-                places: sensitivityPlacesForAction(wrapper.id),
-                onAddPlace: { place in
+                placesCatalog: placesCatalog,
+                selectedPlaceIDs: Set(selectedPlaceIds(forActionId: wrapper.id)),
+                onAddPlaceToCatalog: { place in
                     let trimmed = place.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !trimmed.isEmpty else { return }
-                    let p = PlannedChunkActionSensitivityPlace(
-                        weekStart: currentWeekStart,
-                        plannedChunkActionId: wrapper.id,
-                        place: trimmed,
-                        createdAt: .now
-                    )
-                    modelContext.insert(p)
-                    try? modelContext.save()
-                },
-                onUpdatePlace: { id, newPlace in
-                    let trimmed = newPlace.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !trimmed.isEmpty else { return }
-                    if let p = sensitivityPlaces.first(where: { $0.id == id }) {
-                        p.place = trimmed
+
+                    let key = trimmed.lowercased()
+                    if placesCatalog.contains(where: { $0.normalizedKey == key }) {
+                        return
                     }
+                    modelContext.insert(SensitivityPlaceCatalogItem(place: trimmed))
                     try? modelContext.save()
                 },
-                onDeletePlaces: { ids in
-                    for p in sensitivityPlaces where ids.contains(p.id) {
+                onDeleteCatalogPlaces: { ids in
+                    for p in placesCatalog where ids.contains(p.id) {
+                        // Remove links pointing to this place.
+                        for link in placeLinks where link.placeId == p.id {
+                            modelContext.delete(link)
+                        }
                         modelContext.delete(p)
                     }
                     try? modelContext.save()
+                    scheduleStep5Autosave()
+                },
+                onTogglePlaceSelected: { placeId in
+                    togglePlaceSelection(actionId: wrapper.id, placeId: placeId)
+                    try? modelContext.save()
+                    scheduleStep5Autosave()
                 }
             )
             .presentationDetents([.medium, .large])
@@ -2275,10 +2301,24 @@ struct PlanStepFiveView: View {
         }
         .sheet(item: $attachmentsSheetActionID) { wrapper in
             AttachmentsSheet(
-                title: "Attachments",
                 weekStart: currentWeekStart,
                 actionId: wrapper.id,
                 attachments: attachmentsForAction(wrapper.id),
+                noteText: Binding(
+                    get: { noteText(forActionId: wrapper.id) },
+                    set: { newValue in
+                        upsertNote(forActionId: wrapper.id) { n in
+                            n.noteText = newValue
+                            n.updatedAt = .now
+                        }
+                        scheduleStep5Autosave()
+                    }
+                ),
+                onSaveNote: {
+                    // note is already written-through by binding; we just flush now.
+                    try? modelContext.save()
+                    scheduleStep5Autosave()
+                },
                 onAddLink: { urlString in
                     let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !trimmed.isEmpty else { return }
@@ -2287,29 +2327,13 @@ struct PlanStepFiveView: View {
                         plannedChunkActionId: wrapper.id,
                         kindRaw: ActionAttachmentKind.link.rawValue,
                         urlString: trimmed,
-                        noteText: nil,
                         fileName: nil,
                         fileBookmarkData: nil,
                         createdAt: .now
                     )
                     modelContext.insert(att)
                     try? modelContext.save()
-                },
-                onAddNote: { note in
-                    let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !trimmed.isEmpty else { return }
-                    let att = PlannedChunkActionAttachment(
-                        weekStart: currentWeekStart,
-                        plannedChunkActionId: wrapper.id,
-                        kindRaw: ActionAttachmentKind.note.rawValue,
-                        urlString: nil,
-                        noteText: trimmed,
-                        fileName: nil,
-                        fileBookmarkData: nil,
-                        createdAt: .now
-                    )
-                    modelContext.insert(att)
-                    try? modelContext.save()
+                    scheduleStep5Autosave()
                 },
                 onAddFile: { url, bookmarkData, fileName in
                     let att = PlannedChunkActionAttachment(
@@ -2317,19 +2341,20 @@ struct PlanStepFiveView: View {
                         plannedChunkActionId: wrapper.id,
                         kindRaw: ActionAttachmentKind.file.rawValue,
                         urlString: nil,
-                        noteText: nil,
                         fileName: fileName,
                         fileBookmarkData: bookmarkData,
                         createdAt: .now
                     )
                     modelContext.insert(att)
                     try? modelContext.save()
+                    scheduleStep5Autosave()
                 },
-                onDelete: { ids in
-                    for a in attachments where ids.contains(a.id) {
+                onDeleteAttachment: { attId in
+                    if let a = attachments.first(where: { $0.id == attId }) {
                         modelContext.delete(a)
+                        try? modelContext.save()
+                        scheduleStep5Autosave()
                     }
-                    try? modelContext.save()
                 }
             )
             .presentationDetents([.medium, .large])
@@ -2337,16 +2362,21 @@ struct PlanStepFiveView: View {
         }
         .onAppear {
             hydrateLocalActions()
-            // Ensure define-state rows exist for all visible actions (prevents nil churn)
             ensureDefineStatesExistForWeek()
+            ensureLeverageSelectionRowsExistForWeek()
+            ensureNoteRowsExistForWeek()
         }
         .onChange(of: plannedChunksForWeek.map(\.id)) { _, _ in
             hydrateLocalActions()
             ensureDefineStatesExistForWeek()
+            ensureLeverageSelectionRowsExistForWeek()
+            ensureNoteRowsExistForWeek()
         }
         .onChange(of: allPlannedActions.map(\.id)) { _, _ in
             hydrateLocalActions()
             ensureDefineStatesExistForWeek()
+            ensureLeverageSelectionRowsExistForWeek()
+            ensureNoteRowsExistForWeek()
         }
         .onDisappear {
             step5AutosaveTask?.cancel()
@@ -2418,16 +2448,13 @@ struct PlanStepFiveView: View {
                 defineState(forActionId: actionId)
             },
             hasLeverage: { actionId in
-                !leverageItemsForAction(actionId).isEmpty
+                currentLeverageSelectionResourceId(forActionId: actionId) != nil
             },
             hasSensitivity: { actionId in
-                let st = defineState(forActionId: actionId)
-                let hasTimeOfDay = (st?.sensitiveMorning ?? false) || (st?.sensitiveAfternoon ?? false) || (st?.sensitiveEvening ?? false)
-                let hasPlaces = !sensitivityPlacesForAction(actionId).isEmpty
-                return hasTimeOfDay || hasPlaces
+                hasAnySensitivity(actionId: actionId)
             },
             hasAttachments: { actionId in
-                !attachmentsForAction(actionId).isEmpty
+                hasAnyAttachments(actionId: actionId)
             },
             onToggleMust: { actionId, isOn in
                 upsertDefineState(forActionId: actionId) { st in
@@ -2657,6 +2684,7 @@ struct PlanStepFiveView: View {
                             DefineActionRow(
                                 text: action.text,
                                 accent: accent,
+                                colorScheme: colorScheme,
                                 rank: action.sortOrder + 1,
                                 isMust: isMust,
                                 timeMinutes: timeMinutes,
@@ -2691,6 +2719,7 @@ struct PlanStepFiveView: View {
         private struct DefineActionRow: View {
             let text: String
             let accent: Color
+            let colorScheme: ColorScheme
             let rank: Int
 
             let isMust: Bool
@@ -2708,6 +2737,11 @@ struct PlanStepFiveView: View {
 
             private let iconScale: CGFloat = 1.5
 
+            private var actionTextColor: Color {
+                // Requested: lighter in dark mode
+                colorScheme == .dark ? Color.white.opacity(0.85) : .black
+            }
+
             var body: some View {
                 HStack(alignment: .center, spacing: 10) {
                     VStack(alignment: .leading, spacing: 10) {
@@ -2716,9 +2750,10 @@ struct PlanStepFiveView: View {
                                 .font(.subheadline)
                                 .fontWeight(.bold)
                                 .foregroundStyle(.black.opacity(0.55))
+
                             Text(text)
                                 .font(.subheadline)
-                                .foregroundStyle(.black)
+                                .foregroundStyle(actionTextColor)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
 
@@ -2828,7 +2863,7 @@ struct PlanStepFiveView: View {
 
                 withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.88, blendDuration: 0.12)) {
                     let moved = localActions.remove(at: fromIndex)
-                    let dest = (toIndex > fromIndex) ? toIndex : toIndex
+                    let dest = toIndex
                     localActions.insert(moved, at: dest)
                 }
             }
@@ -2868,9 +2903,9 @@ struct PlanStepFiveView: View {
             rank: 0,
             isMust: false,
             timeEstimateMinutes: nil,
-            sensitiveMorning: false,
-            sensitiveAfternoon: false,
-            sensitiveEvening: false,
+            sensitiveMorning: true,
+            sensitiveAfternoon: true,
+            sensitiveEvening: true,
             updatedAt: .now
         )
     }
@@ -2883,6 +2918,7 @@ struct PlanStepFiveView: View {
             mutate(st)
             modelContext.insert(st)
         }
+        try? modelContext.save()
     }
 
     private func ensureDefineStatesExistForWeek() {
@@ -2900,9 +2936,9 @@ struct PlanStepFiveView: View {
                     rank: action.sortOrder,
                     isMust: false,
                     timeEstimateMinutes: nil,
-                    sensitiveMorning: false,
-                    sensitiveAfternoon: false,
-                    sensitiveEvening: false,
+                    sensitiveMorning: true,
+                    sensitiveAfternoon: true,
+                    sensitiveEvening: true,
                     updatedAt: .now
                 )
                 modelContext.insert(st)
@@ -2911,22 +2947,133 @@ struct PlanStepFiveView: View {
         try? modelContext.save()
     }
 
-    private func leverageItemsForAction(_ actionId: UUID) -> [PlannedChunkActionLeverageItem] {
-        leverageItems
-            .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) && $0.plannedChunkActionId == actionId }
-            .sorted { $0.createdAt < $1.createdAt }
+    private func upsertLeverageSelection(forActionId actionId: UUID, mutate: (PlannedChunkActionLeverageSelection) -> Void) {
+        if let existing = leverageSelections.first(where: {
+            Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) && $0.plannedChunkActionId == actionId
+        }) {
+            mutate(existing)
+        } else {
+            let sel = PlannedChunkActionLeverageSelection(
+                weekStart: currentWeekStart,
+                plannedChunkActionId: actionId,
+                resourceId: nil,
+                updatedAt: .now
+            )
+            mutate(sel)
+            modelContext.insert(sel)
+        }
+        try? modelContext.save()
     }
 
-    private func sensitivityPlacesForAction(_ actionId: UUID) -> [PlannedChunkActionSensitivityPlace] {
-        sensitivityPlaces
+    private func ensureLeverageSelectionRowsExistForWeek() {
+        let week = currentWeekStart
+        let actions = plannedActionsForWeek()
+        for action in actions {
+            let exists = leverageSelections.contains { sel in
+                Calendar.current.isDate(sel.weekStart, inSameDayAs: week) && sel.plannedChunkActionId == action.id
+            }
+            if !exists {
+                modelContext.insert(PlannedChunkActionLeverageSelection(
+                    weekStart: week,
+                    plannedChunkActionId: action.id,
+                    resourceId: nil,
+                    updatedAt: .now
+                ))
+            }
+        }
+        try? modelContext.save()
+    }
+
+    private func currentLeverageSelectionResourceId(forActionId actionId: UUID) -> UUID? {
+        leverageSelections.first(where: {
+            Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) && $0.plannedChunkActionId == actionId
+        })?.resourceId
+    }
+
+    private func selectedPlaceIds(forActionId actionId: UUID) -> [UUID] {
+        placeLinks
             .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) && $0.plannedChunkActionId == actionId }
-            .sorted { $0.createdAt < $1.createdAt }
+            .map(\.placeId)
+    }
+
+    private func togglePlaceSelection(actionId: UUID, placeId: UUID) {
+        let week = currentWeekStart
+        if let existing = placeLinks.first(where: {
+            Calendar.current.isDate($0.weekStart, inSameDayAs: week) &&
+            $0.plannedChunkActionId == actionId &&
+            $0.placeId == placeId
+        }) {
+            modelContext.delete(existing)
+        } else {
+            modelContext.insert(PlannedChunkActionSensitivityPlaceLink(
+                weekStart: week,
+                plannedChunkActionId: actionId,
+                placeId: placeId,
+                createdAt: .now
+            ))
+        }
+    }
+
+    private func noteText(forActionId actionId: UUID) -> String {
+        notes.first(where: {
+            Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) && $0.plannedChunkActionId == actionId
+        })?.noteText ?? ""
+    }
+
+    private func upsertNote(forActionId actionId: UUID, mutate: (PlannedChunkActionNote) -> Void) {
+        if let existing = notes.first(where: {
+            Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) && $0.plannedChunkActionId == actionId
+        }) {
+            mutate(existing)
+        } else {
+            let n = PlannedChunkActionNote(
+                weekStart: currentWeekStart,
+                plannedChunkActionId: actionId,
+                noteText: "",
+                updatedAt: .now
+            )
+            mutate(n)
+            modelContext.insert(n)
+        }
+        try? modelContext.save()
+    }
+
+    private func ensureNoteRowsExistForWeek() {
+        let week = currentWeekStart
+        let actions = plannedActionsForWeek()
+        for action in actions {
+            let exists = notes.contains { n in
+                Calendar.current.isDate(n.weekStart, inSameDayAs: week) && n.plannedChunkActionId == action.id
+            }
+            if !exists {
+                modelContext.insert(PlannedChunkActionNote(
+                    weekStart: week,
+                    plannedChunkActionId: action.id,
+                    noteText: "",
+                    updatedAt: .now
+                ))
+            }
+        }
+        try? modelContext.save()
     }
 
     private func attachmentsForAction(_ actionId: UUID) -> [PlannedChunkActionAttachment] {
         attachments
             .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) && $0.plannedChunkActionId == actionId }
             .sorted { $0.createdAt < $1.createdAt }
+    }
+
+    private func hasAnyAttachments(actionId: UUID) -> Bool {
+        let hasList = !attachmentsForAction(actionId).isEmpty
+        let hasNote = !noteText(forActionId: actionId).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return hasList || hasNote
+    }
+
+    private func hasAnySensitivity(actionId: UUID) -> Bool {
+        let st = defineState(forActionId: actionId)
+        let isDefaultAllOn = (st?.sensitiveMorning ?? true) && (st?.sensitiveAfternoon ?? true) && (st?.sensitiveEvening ?? true)
+        let hasPlaces = !selectedPlaceIds(forActionId: actionId).isEmpty
+        return !isDefaultAllOn || hasPlaces
     }
 
     private func hydrateLocalActions() {
@@ -2967,10 +3114,8 @@ struct PlanStepFiveView: View {
 // MARK: - Step 5 sheets
 
 private struct TimeEstimateSheet: View {
-    let title: String
     let currentMinutes: Int?
     let onSelect: (Int) -> Void
-    let onClear: () -> Void
 
     @Environment(\.dismiss) private var dismiss
 
@@ -2981,60 +3126,63 @@ private struct TimeEstimateSheet: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 16) {
-                Text(title)
+                Text("Estimate time to complete action")
                     .font(.headline)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .multilineTextAlignment(.center)
 
                 Picker("Minutes", selection: $selection) {
                     ForEach(options, id: \.self) { m in
-                        Text("\(m) minutes").tag(m)
+                        Text("\(m) min").tag(m)
                     }
                 }
                 .pickerStyle(.wheel)
                 .frame(height: 160)
 
-                HStack(spacing: 12) {
-                    Button("Clear") {
-                        onClear()
-                        dismiss()
-                    }
-                    .frame(maxWidth: .infinity)
-
-                    Button("Set") {
-                        onSelect(selection)
-                        dismiss()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .frame(maxWidth: .infinity)
+                Button("Set") {
+                    onSelect(selection)
+                    dismiss()
                 }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .frame(maxWidth: .infinity)
             }
             .padding()
             .onAppear {
                 selection = currentMinutes ?? 15
             }
-            .navigationTitle(" ")
+            .navigationTitle("Duration")
             .navigationBarTitleDisplayMode(.inline)
         }
     }
 }
 
 private struct LeverageSheet: View {
-    let title: String
     let actionId: UUID
     let weekStart: Date
-    let leverageItems: [PlannedChunkActionLeverageItem]
+    let leverageCatalog: [LeverageResource]
+    let selectedResourceId: UUID?
+
     let onAdd: (ActionLeverageKind, String) -> Void
-    let onDelete: (Set<UUID>) -> Void
+    let onDeleteCatalogItems: (Set<UUID>) -> Void
+    let onSelectResource: (UUID?) -> Void
+    let onClearSelection: () -> Void
 
     @Environment(\.dismiss) private var dismiss
 
     @State private var kind: ActionLeverageKind = .person
     @State private var value: String = ""
-    @State private var selectedToDelete: Set<UUID> = []
+    @State private var localSelection: UUID? = nil
 
     var body: some View {
         NavigationStack {
             List {
+                Section {
+                    Text("Leverage action to someone or something else")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section {
                     Picker("Type", selection: $kind) {
                         ForEach(ActionLeverageKind.allCases) { k in
@@ -3054,36 +3202,44 @@ private struct LeverageSheet: View {
                         .buttonStyle(.borderedProminent)
                         .disabled(value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
-                } header: {
-                    Text(title)
                 }
 
-                Section("Added") {
-                    if leverageItems.isEmpty {
+                Section("Resources") {
+                    if filteredCatalog.isEmpty {
                         Text("None yet.")
                             .foregroundStyle(.secondary)
                     } else {
-                        ForEach(leverageItems) { item in
-                            HStack {
-                                Text(item.kind == .person ? "Person" : "Tool")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .frame(width: 60, alignment: .leading)
-
-                                Text(item.value)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                                if selectedToDelete.contains(item.id) {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundStyle(.blue)
-                                }
-                            }
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                if selectedToDelete.contains(item.id) {
-                                    selectedToDelete.remove(item.id)
+                        ForEach(filteredCatalog) { item in
+                            Button {
+                                // single selection
+                                if localSelection == item.id {
+                                    localSelection = nil
                                 } else {
-                                    selectedToDelete.insert(item.id)
+                                    localSelection = item.id
+                                }
+                            } label: {
+                                HStack {
+                                    Text(item.kind == .person ? "Person" : "Tool")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .frame(width: 60, alignment: .leading)
+
+                                    Text(item.value)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                                    if localSelection == item.id {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .foregroundStyle(.blue)
+                                    }
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .swipeActions(edge: .trailing) {
+                                Button(role: .destructive) {
+                                    onDeleteCatalogItems([item.id])
+                                } label: {
+                                    Text("Delete")
                                 }
                             }
                         }
@@ -3094,45 +3250,59 @@ private struct LeverageSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
+                    Button("Clear") {
+                        localSelection = nil
+                        onClearSelection()
+                        dismiss()
+                    }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Delete") {
-                        onDelete(selectedToDelete)
-                        selectedToDelete.removeAll()
+                    Button("Done") {
+                        onSelectResource(localSelection)
+                        dismiss()
                     }
-                    .disabled(selectedToDelete.isEmpty)
                 }
             }
+            .onAppear {
+                localSelection = selectedResourceId
+            }
         }
+    }
+
+    private var filteredCatalog: [LeverageResource] {
+        leverageCatalog
+            .sorted { $0.createdAt < $1.createdAt }
     }
 }
 
 private struct SensitivitySheet: View {
-    let title: String
-    @Binding var state: PlannedChunkActionDefineState
+    let weekStart: Date
+    let actionId: UUID
 
-    let places: [PlannedChunkActionSensitivityPlace]
-    let onAddPlace: (String) -> Void
-    let onUpdatePlace: (UUID, String) -> Void
-    let onDeletePlaces: (Set<UUID>) -> Void
+    @Binding var defineState: PlannedChunkActionDefineState
+
+    let placesCatalog: [SensitivityPlaceCatalogItem]
+    let selectedPlaceIDs: Set<UUID>
+
+    let onAddPlaceToCatalog: (String) -> Void
+    let onDeleteCatalogPlaces: (Set<UUID>) -> Void
+    let onTogglePlaceSelected: (UUID) -> Void
 
     @Environment(\.dismiss) private var dismiss
 
     @State private var newPlace: String = ""
-    @State private var selectedToDelete: Set<UUID> = []
-    @State private var editingPlaceID: UUID? = nil
-    @State private var editingText: String = ""
 
     var body: some View {
         NavigationStack {
             List {
-                Section {
-                    Toggle("Morning", isOn: Binding(get: { state.sensitiveMorning }, set: { state.sensitiveMorning = $0 }))
-                    Toggle("Afternoon", isOn: Binding(get: { state.sensitiveAfternoon }, set: { state.sensitiveAfternoon = $0 }))
-                    Toggle("Evening", isOn: Binding(get: { state.sensitiveEvening }, set: { state.sensitiveEvening = $0 }))
-                } header: {
-                    Text(title)
+                Section("Time of Day") {
+                    Toggle("Morning", isOn: bindingForTimeOfDay(\.sensitiveMorning))
+                    Toggle("Afternoon", isOn: bindingForTimeOfDay(\.sensitiveAfternoon))
+                    Toggle("Evening", isOn: bindingForTimeOfDay(\.sensitiveEvening))
+
+                    Text("Default is all on. Keep at least one time selected.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 Section("Places") {
@@ -3140,131 +3310,142 @@ private struct SensitivitySheet: View {
                         TextField("Add place…", text: $newPlace)
                             .textFieldStyle(.roundedBorder)
                         Button("Add") {
-                            onAddPlace(newPlace)
+                            onAddPlaceToCatalog(newPlace)
                             newPlace = ""
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(newPlace.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
 
-                    if places.isEmpty {
+                    if placesCatalog.isEmpty {
                         Text("No places yet.")
                             .foregroundStyle(.secondary)
                     } else {
-                        ForEach(places) { p in
-                            HStack {
-                                if editingPlaceID == p.id {
-                                    TextField("Place", text: $editingText)
-                                        .textFieldStyle(.roundedBorder)
-                                    Button("Save") {
-                                        onUpdatePlace(p.id, editingText)
-                                        editingPlaceID = nil
-                                        editingText = ""
-                                    }
-                                    .buttonStyle(.borderedProminent)
-                                } else {
+                        ForEach(placesCatalog) { p in
+                            Button {
+                                onTogglePlaceSelected(p.id)
+                            } label: {
+                                HStack {
                                     Text(p.place)
                                         .frame(maxWidth: .infinity, alignment: .leading)
 
-                                    Button("Edit") {
-                                        editingPlaceID = p.id
-                                        editingText = p.place
+                                    if selectedPlaceIDs.contains(p.id) {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .foregroundStyle(.blue)
                                     }
-                                    .font(.caption)
                                 }
-
-                                if selectedToDelete.contains(p.id) {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundStyle(.blue)
-                                }
+                                .contentShape(Rectangle())
                             }
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                if selectedToDelete.contains(p.id) {
-                                    selectedToDelete.remove(p.id)
-                                } else {
-                                    selectedToDelete.insert(p.id)
+                            .buttonStyle(.plain)
+                            .swipeActions(edge: .trailing) {
+                                Button(role: .destructive) {
+                                    onDeleteCatalogPlaces([p.id])
+                                } label: {
+                                    Text("Delete")
                                 }
                             }
                         }
                     }
                 }
             }
-            .navigationTitle("Sensitivity")
+            .navigationTitle("Time of Day")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
-                }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Delete") {
-                        onDeletePlaces(selectedToDelete)
-                        selectedToDelete.removeAll()
-                    }
-                    .disabled(selectedToDelete.isEmpty)
+                    Button("Done") { dismiss() }
                 }
             }
         }
+        .onAppear {
+            // Ensure default all-on if a blank state slipped through.
+            if defineState.sensitiveMorning == false &&
+                defineState.sensitiveAfternoon == false &&
+                defineState.sensitiveEvening == false {
+                defineState.sensitiveMorning = true
+                defineState.sensitiveAfternoon = true
+                defineState.sensitiveEvening = true
+            }
+        }
+    }
+
+    private func bindingForTimeOfDay(_ keyPath: WritableKeyPath<PlannedChunkActionDefineState, Bool>) -> Binding<Bool> {
+        Binding(
+            get: { defineState[keyPath: keyPath] },
+            set: { newValue in
+                // rule: allow up to 2 toggled off (i.e. at least 1 remains ON)
+                let current = (
+                    morning: defineState.sensitiveMorning,
+                    afternoon: defineState.sensitiveAfternoon,
+                    evening: defineState.sensitiveEvening
+                )
+
+                var proposed = current
+                if keyPath == \.sensitiveMorning { proposed.morning = newValue }
+                if keyPath == \.sensitiveAfternoon { proposed.afternoon = newValue }
+                if keyPath == \.sensitiveEvening { proposed.evening = newValue }
+
+                let onCount = [proposed.morning, proposed.afternoon, proposed.evening].filter { $0 }.count
+                guard onCount >= 1 else {
+                    // prevent all-off
+                    return
+                }
+
+                defineState[keyPath: keyPath] = newValue
+            }
+        )
     }
 }
 
 private struct AttachmentsSheet: View {
-    let title: String
     let weekStart: Date
     let actionId: UUID
     let attachments: [PlannedChunkActionAttachment]
 
+    @Binding var noteText: String
+    let onSaveNote: () -> Void
+
     let onAddLink: (String) -> Void
-    let onAddNote: (String) -> Void
     let onAddFile: (URL, Data, String) -> Void
-    let onDelete: (Set<UUID>) -> Void
+    let onDeleteAttachment: (UUID) -> Void
 
     @Environment(\.dismiss) private var dismiss
 
     @State private var linkText: String = ""
-    @State private var noteText: String = ""
-    @State private var selectedToDelete: Set<UUID> = []
-
     @State private var isFileImporterPresented: Bool = false
 
     var body: some View {
         NavigationStack {
             List {
-                Section(title) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack(spacing: 10) {
-                            TextField("Add link…", text: $linkText)
-                                .textFieldStyle(.roundedBorder)
-                            Button("Add") {
-                                onAddLink(linkText)
-                                linkText = ""
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(linkText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Section("Attachments") {
+                    HStack(spacing: 10) {
+                        TextField("Add link…", text: $linkText)
+                            .textFieldStyle(.roundedBorder)
+                        Button("Add") {
+                            onAddLink(linkText)
+                            linkText = ""
                         }
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Add note")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            TextEditor(text: $noteText)
-                                .frame(height: 90)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .stroke(Color.secondary.opacity(0.25))
-                                )
-                            Button("Add Note") {
-                                onAddNote(noteText)
-                                noteText = ""
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        }
-
-                        Button("Attach file…") {
-                            isFileImporterPresented = true
-                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(linkText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
+
+                    Button("Attach file…") {
+                        isFileImporterPresented = true
+                    }
+                }
+
+                Section("Notes") {
+                    TextEditor(text: $noteText)
+                        .frame(height: 120)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.secondary.opacity(0.25))
+                        )
+
+                    Button("Save") {
+                        onSaveNote()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
 
                 Section("Added") {
@@ -3284,18 +3465,12 @@ private struct AttachmentsSheet: View {
                                         .fixedSize(horizontal: false, vertical: true)
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
-
-                                if selectedToDelete.contains(a.id) {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundStyle(.blue)
-                                }
                             }
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                if selectedToDelete.contains(a.id) {
-                                    selectedToDelete.remove(a.id)
-                                } else {
-                                    selectedToDelete.insert(a.id)
+                            .swipeActions(edge: .trailing) {
+                                Button(role: .destructive) {
+                                    onDeleteAttachment(a.id)
+                                } label: {
+                                    Text("Delete")
                                 }
                             }
                         }
@@ -3311,9 +3486,6 @@ private struct AttachmentsSheet: View {
                 case .success(let urls):
                     guard let url = urls.first else { return }
                     do {
-                        // macOS: security-scoped bookmarks are available; iOS/iPadOS: use minimal bookmark.
-                        // NOTE: if you need long-term access on iOS, consider copying the file into your sandbox
-                        // and storing that URL instead of relying on bookmarks.
                         #if os(macOS)
                         let bookmark = try url.bookmarkData(
                             options: .withSecurityScope,
@@ -3338,15 +3510,8 @@ private struct AttachmentsSheet: View {
             .navigationTitle("Attachments")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
-                }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Delete") {
-                        onDelete(selectedToDelete)
-                        selectedToDelete.removeAll()
-                    }
-                    .disabled(selectedToDelete.isEmpty)
+                    Button("Done") { dismiss() }
                 }
             }
         }
@@ -3365,8 +3530,7 @@ private struct AttachmentsSheet: View {
         case .link:
             return a.urlString ?? "(link)"
         case .note:
-            let t = a.noteText ?? ""
-            return t.isEmpty ? "(note)" : t
+            return "(note)"
         case .file:
             return a.fileName ?? "(file)"
         }

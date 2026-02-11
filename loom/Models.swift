@@ -791,9 +791,9 @@ final class PlannedChunkActionDefineState {
         rank: Int = 0,
         isMust: Bool = false,
         timeEstimateMinutes: Int? = nil,
-        sensitiveMorning: Bool = false,
-        sensitiveAfternoon: Bool = false,
-        sensitiveEvening: Bool = false,
+        sensitiveMorning: Bool = true,
+        sensitiveAfternoon: Bool = true,
+        sensitiveEvening: Bool = true,
         updatedAt: Date = .now
     ) {
         self.id = id
@@ -835,7 +835,224 @@ enum ActionLeverageKind: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-/// Many leverage entries per action (person/tool + value).
+enum ActionAttachmentKind: String, Codable, CaseIterable, Identifiable {
+    case link
+    case note
+    case file
+
+    var id: String { rawValue }
+}
+
+/// Universal leverage resource catalog (shared across all actions).
+@Model
+final class LeverageResource {
+    @Attribute(.unique) var id: UUID
+    var kindRaw: String
+    var value: String
+    var createdAt: Date
+    @Attribute(.unique) var kindValueKey: String
+
+    init(
+        id: UUID = .init(),
+        kindRaw: String,
+        value: String,
+        createdAt: Date = .now
+    ) {
+        self.id = id
+        self.kindRaw = kindRaw
+        self.value = value
+        self.createdAt = createdAt
+        self.kindValueKey = "\(kindRaw.lowercased())|\(value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())"
+    }
+
+    var kind: ActionLeverageKind {
+        get { ActionLeverageKind(rawValue: kindRaw) ?? .person }
+        set { kindRaw = newValue.rawValue }
+    }
+}
+
+/// One leverage selection per action per week (optional).
+@Model
+final class PlannedChunkActionLeverageSelection {
+    @Attribute(.unique) var id: UUID
+    var weekStart: Date
+    var plannedChunkActionId: UUID
+    var resourceId: UUID?
+    var updatedAt: Date
+
+    @Attribute(.unique) var weekActionKey: String
+
+    init(
+        id: UUID = .init(),
+        weekStart: Date,
+        plannedChunkActionId: UUID,
+        resourceId: UUID? = nil,
+        updatedAt: Date = .now
+    ) {
+        self.id = id
+        self.weekStart = weekStart
+        self.plannedChunkActionId = plannedChunkActionId
+        self.resourceId = resourceId
+        self.updatedAt = updatedAt
+
+        let dayKey = PlannedChunkActionLeverageSelection.dayKey(from: weekStart)
+        self.weekActionKey = "\(dayKey)|\(plannedChunkActionId.uuidString)"
+    }
+
+    private static func dayKey(from date: Date) -> String {
+        let cal = Calendar.current
+        let comps = cal.dateComponents([.year, .month, .day], from: date)
+        let y = comps.year ?? 0
+        let m = comps.month ?? 0
+        let d = comps.day ?? 0
+        return String(format: "%04d-%02d-%02d", y, m, d)
+    }
+}
+
+/// Universal places catalog (shared across all actions).
+@Model
+final class SensitivityPlaceCatalogItem {
+    @Attribute(.unique) var id: UUID
+    var place: String
+    var createdAt: Date
+    @Attribute(.unique) var normalizedKey: String
+
+    init(
+        id: UUID = .init(),
+        place: String,
+        createdAt: Date = .now
+    ) {
+        self.id = id
+        self.place = place
+        self.createdAt = createdAt
+        self.normalizedKey = place.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+}
+
+/// Many selected places per action per week.
+@Model
+final class PlannedChunkActionSensitivityPlaceLink {
+    @Attribute(.unique) var id: UUID
+    var weekStart: Date
+    var plannedChunkActionId: UUID
+    var placeId: UUID
+    var createdAt: Date
+
+    @Attribute(.unique) var weekActionPlaceKey: String
+
+    init(
+        id: UUID = .init(),
+        weekStart: Date,
+        plannedChunkActionId: UUID,
+        placeId: UUID,
+        createdAt: Date = .now
+    ) {
+        self.id = id
+        self.weekStart = weekStart
+        self.plannedChunkActionId = plannedChunkActionId
+        self.placeId = placeId
+        self.createdAt = createdAt
+
+        let dayKey = PlannedChunkActionSensitivityPlaceLink.dayKey(from: weekStart)
+        self.weekActionPlaceKey = "\(dayKey)|\(plannedChunkActionId.uuidString)|\(placeId.uuidString)"
+    }
+
+    private static func dayKey(from date: Date) -> String {
+        let cal = Calendar.current
+        let comps = cal.dateComponents([.year, .month, .day], from: date)
+        let y = comps.year ?? 0
+        let m = comps.month ?? 0
+        let d = comps.day ?? 0
+        return String(format: "%04d-%02d-%02d", y, m, d)
+    }
+}
+
+/// Attachments per action.
+/// - link: store urlString
+/// - file: store security-scoped bookmark + filename
+@Model
+final class PlannedChunkActionAttachment {
+    @Attribute(.unique) var id: UUID
+
+    var weekStart: Date
+    var plannedChunkActionId: UUID
+
+    var kindRaw: String
+
+    /// Used for link
+    var urlString: String?
+
+    /// Used for file
+    var fileName: String?
+    var fileBookmarkData: Data?
+
+    var createdAt: Date
+
+    init(
+        id: UUID = .init(),
+        weekStart: Date,
+        plannedChunkActionId: UUID,
+        kindRaw: String,
+        urlString: String? = nil,
+        fileName: String? = nil,
+        fileBookmarkData: Data? = nil,
+        createdAt: Date = .now
+    ) {
+        self.id = id
+        self.weekStart = weekStart
+        self.plannedChunkActionId = plannedChunkActionId
+        self.kindRaw = kindRaw
+        self.urlString = urlString
+        self.fileName = fileName
+        self.fileBookmarkData = fileBookmarkData
+        self.createdAt = createdAt
+    }
+
+    var kind: ActionAttachmentKind {
+        get { ActionAttachmentKind(rawValue: kindRaw) ?? .link }
+        set { kindRaw = newValue.rawValue }
+    }
+}
+
+/// Single notes field per action per week (stored as text, shown in TextEditor).
+@Model
+final class PlannedChunkActionNote {
+    @Attribute(.unique) var id: UUID
+    var weekStart: Date
+    var plannedChunkActionId: UUID
+    var noteText: String
+    var updatedAt: Date
+    @Attribute(.unique) var weekActionKey: String
+
+    init(
+        id: UUID = .init(),
+        weekStart: Date,
+        plannedChunkActionId: UUID,
+        noteText: String = "",
+        updatedAt: Date = .now
+    ) {
+        self.id = id
+        self.weekStart = weekStart
+        self.plannedChunkActionId = plannedChunkActionId
+        self.noteText = noteText
+        self.updatedAt = updatedAt
+
+        let dayKey = PlannedChunkActionNote.dayKey(from: weekStart)
+        self.weekActionKey = "\(dayKey)|\(plannedChunkActionId.uuidString)"
+    }
+
+    private static func dayKey(from date: Date) -> String {
+        let cal = Calendar.current
+        let comps = cal.dateComponents([.year, .month, .day], from: date)
+        let y = comps.year ?? 0
+        let m = comps.month ?? 0
+        let d = comps.day ?? 0
+        return String(format: "%04d-%02d-%02d", y, m, d)
+    }
+}
+
+/// (Legacy) Many leverage entries per action (person/tool + value).
+/// NOTE: Kept for migration/compatibility; Step 5 UI no longer uses this.
 @Model
 final class PlannedChunkActionLeverageItem {
     @Attribute(.unique) var id: UUID
@@ -871,7 +1088,8 @@ final class PlannedChunkActionLeverageItem {
     }
 }
 
-/// Sensitivity places per action (editable list).
+/// (Legacy) Sensitivity places per action (editable list).
+/// NOTE: Kept for migration/compatibility; Step 5 UI no longer uses this.
 @Model
 final class PlannedChunkActionSensitivityPlace {
     @Attribute(.unique) var id: UUID
@@ -894,67 +1112,6 @@ final class PlannedChunkActionSensitivityPlace {
         self.plannedChunkActionId = plannedChunkActionId
         self.place = place
         self.createdAt = createdAt
-    }
-}
-
-enum ActionAttachmentKind: String, Codable, CaseIterable, Identifiable {
-    case link
-    case note
-    case file
-
-    var id: String { rawValue }
-}
-
-/// Attachments per action.
-/// - link: store urlString
-/// - note: store noteText
-/// - file: store security-scoped bookmark + filename
-@Model
-final class PlannedChunkActionAttachment {
-    @Attribute(.unique) var id: UUID
-
-    var weekStart: Date
-    var plannedChunkActionId: UUID
-
-    var kindRaw: String
-
-    /// Used for link
-    var urlString: String?
-
-    /// Used for note
-    var noteText: String?
-
-    /// Used for file
-    var fileName: String?
-    var fileBookmarkData: Data?
-
-    var createdAt: Date
-
-    init(
-        id: UUID = .init(),
-        weekStart: Date,
-        plannedChunkActionId: UUID,
-        kindRaw: String,
-        urlString: String? = nil,
-        noteText: String? = nil,
-        fileName: String? = nil,
-        fileBookmarkData: Data? = nil,
-        createdAt: Date = .now
-    ) {
-        self.id = id
-        self.weekStart = weekStart
-        self.plannedChunkActionId = plannedChunkActionId
-        self.kindRaw = kindRaw
-        self.urlString = urlString
-        self.noteText = noteText
-        self.fileName = fileName
-        self.fileBookmarkData = fileBookmarkData
-        self.createdAt = createdAt
-    }
-
-    var kind: ActionAttachmentKind {
-        get { ActionAttachmentKind(rawValue: kindRaw) ?? .link }
-        set { kindRaw = newValue.rawValue }
     }
 }
 

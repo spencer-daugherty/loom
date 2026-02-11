@@ -41,9 +41,20 @@ struct loomApp: App {
 
                 // Step 5 persistence
                 PlannedChunkActionDefineState.self,
+
+                // NEW Step 5 universal + links
+                LeverageResource.self,
+                PlannedChunkActionLeverageSelection.self,
+                SensitivityPlaceCatalogItem.self,
+                PlannedChunkActionSensitivityPlaceLink.self,
+                PlannedChunkActionNote.self,
+
+                // Step 5 attachments (link/file only now)
+                PlannedChunkActionAttachment.self,
+
+                // Legacy (kept)
                 PlannedChunkActionLeverageItem.self,
                 PlannedChunkActionSensitivityPlace.self,
-                PlannedChunkActionAttachment.self,
             ]
         )
     }
