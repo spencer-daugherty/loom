@@ -290,12 +290,15 @@ struct PlanStepTwoView: View {
                         }
                     }
                     .padding(.vertical, 4)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                    // Match step 1 page width (remove extra-wide list row insets)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                 }
                 .onDelete(perform: deleteItems)
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
+            // keep list content aligned with step 1 margins
+            .padding(.horizontal)
 
             HStack(spacing: 12) {
                 TextField("Add an action…", text: $input)
@@ -314,7 +317,8 @@ struct PlanStepTwoView: View {
                     .layoutPriority(1)
                     .frame(maxWidth: .infinity)
             }
-            .padding(.horizontal, 24)
+            // Match step 1 margins (was 24)
+            .padding(.horizontal)
             .padding(.top, 4)
 
             HStack(spacing: 12) {
@@ -342,7 +346,10 @@ struct PlanStepTwoView: View {
             .padding(.horizontal)
             .padding(.bottom, 2)
         }
-        .safeAreaPadding()
+        // Match step 1: keep top/bottom safe area padding, but not extra horizontal safe-area padding.
+        .padding(.horizontal)
+        .safeAreaPadding(.top)
+        .safeAreaPadding(.bottom)
         .onAppear {
             if baselineItemIDs.isEmpty {
                 baselineItemIDs = Set(allItems.map(\.id))
@@ -565,13 +572,15 @@ struct PlanStepThreeView: View {
                         return true
                     }
                     .padding(.vertical, 4)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                    // Match step 1 page width
+                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                 }
                 .listRowSeparator(.visible)
             }
             .listRowSpacing(4)
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
+            .padding(.horizontal)
             .dropDestination(for: DragPayload.self) { payloads, _ in
                 guard let payload = payloads.first else { return false }
                 moveItemToPool(payload.itemID)
@@ -584,18 +593,21 @@ struct PlanStepThreeView: View {
             List {
                 ForEach(Array(chunks.enumerated()), id: \.element.id) { index, _ in
                     chunkContainerView(chunkIndex: index)
-                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        // Match step 1 page width
+                        .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
                         .listRowSeparator(.hidden)
                 }
 
                 if chunks.count < maxChunks {
                     addChunkRow
-                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        // Match step 1 page width
+                        .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
                         .listRowSeparator(.hidden)
                 }
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
+            .padding(.horizontal)
 
             if isRefreshVisible {
                 Button { refreshStep3() } label: {
@@ -636,7 +648,10 @@ struct PlanStepThreeView: View {
             .padding(.horizontal)
             .padding(.bottom, 2)
         }
-        .safeAreaPadding()
+        // Match step 1: horizontal padding + top/bottom safe area padding
+        .padding(.horizontal)
+        .safeAreaPadding(.top)
+        .safeAreaPadding(.bottom)
         .onAppear {
             PlanLabelSeeder.seedDefaultsIfNeeded(in: modelContext)
 
@@ -1118,6 +1133,7 @@ struct PlanStepFourView: View {
                         }
                     }
                 }
+                // Match step 1 margins (already on this internal container)
                 .padding(.horizontal)
                 .padding(.bottom, 12)
             }
@@ -1139,13 +1155,11 @@ struct PlanStepFourView: View {
             .padding(.horizontal)
             .padding(.bottom, 2)
         }
-        .safeAreaPadding()
-        .toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button("Done") { focusedField = nil }
-            }
-        }
+        // Match step 1: horizontal padding + top/bottom safe area padding
+        .padding(.horizontal)
+        .safeAreaPadding(.top)
+        .safeAreaPadding(.bottom)
+        // Removed the keyboard "Done" toolbar entirely
         .sheet(isPresented: $isShowingInstructions) {
             StepFourInstructionsPopup()
                 .presentationDetents([.medium, .large])
@@ -1258,7 +1272,7 @@ struct PlanStepFourView: View {
                     .foregroundStyle(.secondary)
             }
 
-            TextField("Type your result…", text: resultBinding)
+            TextField("Stand out as a rising star and get a raise!", text: resultBinding)
                 .textFieldStyle(.roundedBorder)
                 .focused($focusedField, equals: .result(chunkID))
                 .submitLabel(.done)
@@ -1381,7 +1395,7 @@ struct PlanStepFourView: View {
             }
             .buttonStyle(.plain)
 
-            TextField("Type a role note…", text: roleNoteBinding)
+            TextField("Earn more income FASTER for a better future!", text: roleNoteBinding)
                 .textFieldStyle(.roundedBorder)
                 .focused($focusedField, equals: .roleNote(chunkID))
                 .submitLabel(.done)
