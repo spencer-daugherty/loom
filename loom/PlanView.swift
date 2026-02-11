@@ -486,6 +486,19 @@ struct PlanStepThreeView: View {
         chunks != baselineChunks
     }
 
+    /// True if ANY chunk currently contains ANY ghost/hidden action.
+    /// When this is true, Step 3 must force `showHidden = true` and prevent toggling it off.
+    private var hasHiddenActionInAnyChunk: Bool {
+        guard !chunks.isEmpty else { return false }
+
+        let ghostIDs = Set(allItems.filter(\.isGhost).map(\.id))
+        guard !ghostIDs.isEmpty else { return false }
+
+        return chunks.contains { chunk in
+            chunk.itemIDs.contains { ghostIDs.contains($0) }
+        }
+    }
+
     private func chunkLightFillColor(categoryName: String?) -> Color {
         guard let categoryName else {
             return Color(.secondarySystemBackground)
@@ -543,8 +556,22 @@ struct PlanStepThreeView: View {
             .padding(.horizontal)
 
             HStack(spacing: 10) {
-                Toggle(isOn: $showHidden) { EmptyView() }
-                    .labelsHidden()
+                Toggle(
+                    isOn: Binding(
+                        get: { showHidden },
+                        set: { newValue in
+                            // If a hidden action is currently inside any chunk,
+                            // this toggle is "fixed on".
+                            if hasHiddenActionInAnyChunk && newValue == false {
+                                showHidden = true
+                                return
+                            }
+                            showHidden = newValue
+                        }
+                    )
+                ) { EmptyView() }
+                .labelsHidden()
+                .disabled(hasHiddenActionInAnyChunk)
 
                 Image(systemName: hiddenUntilLaterIconName)
                     .font(.system(size: 18, weight: .semibold))
@@ -571,6 +598,9 @@ struct PlanStepThreeView: View {
                     .dropDestination(for: DragPayload.self) { payloads, _ in
                         guard let payload = payloads.first else { return false }
                         moveItemToPool(payload.itemID)
+
+                        enforceShowHiddenIfNeeded()
+
                         persistStep3Plan()
                         return true
                     }
@@ -587,10 +617,17 @@ struct PlanStepThreeView: View {
             .dropDestination(for: DragPayload.self) { payloads, _ in
                 guard let payload = payloads.first else { return false }
                 moveItemToPool(payload.itemID)
+
+                enforceShowHiddenIfNeeded()
+
                 persistStep3Plan()
                 return true
             }
             .onChange(of: showHidden) { _, _ in
+                // User can only change this if no hidden action is in a chunk.
+                // But also guard against other state changes.
+                enforceShowHiddenIfNeeded()
+
                 syncPoolWithVisibility()
                 persistStep3Plan()
             }
@@ -669,6 +706,9 @@ struct PlanStepThreeView: View {
 
             hydrateStep3FromStorageOrInitialize()
 
+            // If we hydrated a hidden action into a chunk, force showHidden on.
+            enforceShowHiddenIfNeeded()
+
             if baselineChunks.isEmpty && baselinePoolItemIDs.isEmpty {
                 baselineShowHidden = showHidden
                 baselinePoolItemIDs = poolItemIDs
@@ -676,6 +716,14 @@ struct PlanStepThreeView: View {
             }
         }
         .onChange(of: allItems.map(\.id)) { _, _ in
+            enforceShowHiddenIfNeeded()
+            syncPoolWithVisibility()
+            persistStep3Plan()
+        }
+        .onChange(of: allItems.map(\.isGhost)) { _, _ in
+            // If an item becomes ghost/unghosted while on this screen,
+            // keep the toggle consistent.
+            enforceShowHiddenIfNeeded()
             syncPoolWithVisibility()
             persistStep3Plan()
         }
@@ -724,6 +772,17 @@ struct PlanStepThreeView: View {
     private var poolItems: [RollingCaptureItem] {
         let byID = Dictionary(uniqueKeysWithValues: visibleItems.map { ($0.id, $0) })
         return poolItemIDs.compactMap { byID[$0] }
+    }
+
+    /// Forces the "Show Actions Hidden..." toggle ON if any chunk currently contains a hidden action.
+    /// This is the single enforcement point used by:
+    /// - hydration (returning to screen)
+    /// - drag/drop interactions
+    /// - toggle changes
+    private func enforceShowHiddenIfNeeded() {
+        if hasHiddenActionInAnyChunk && showHidden == false {
+            showHidden = true
+        }
     }
 
     @ViewBuilder
@@ -847,6 +906,9 @@ struct PlanStepThreeView: View {
                         .dropDestination(for: DragPayload.self) { payloads, _ in
                             guard let payload = payloads.first else { return false }
                             moveItem(payload.itemID, toChunkAt: chunkIndex)
+
+                            enforceShowHiddenIfNeeded()
+
                             persistStep3Plan()
                             return true
                         }
@@ -867,6 +929,9 @@ struct PlanStepThreeView: View {
         .dropDestination(for: DragPayload.self) { payloads, _ in
             guard let payload = payloads.first else { return false }
             moveItem(payload.itemID, toChunkAt: chunkIndex)
+
+            enforceShowHiddenIfNeeded()
+
             persistStep3Plan()
             return true
         }
@@ -995,6 +1060,28 @@ struct PlanStepThreeView: View {
             baselinePoolItemIDs = poolItemIDs
             baselineChunks = chunks
             return
+        }
+
+        // IMPORTANT:
+        // If any persisted chunk contains an action that maps back to a ghost RollingCaptureItem,
+        // force showHidden on BEFORE we finish hydration (so those IDs can resolve into `visibleItems`).
+        let ghostTextSetForWeek: Set<String> = {
+            let chunkIDs = Set(persistedChunks.map(\.id))
+            let texts = persistedActions
+                .filter { chunkIDs.contains($0.plannedChunkId) }
+                .map(\.text)
+            return Set(texts)
+        }()
+
+        if !ghostTextSetForWeek.isEmpty {
+            // Best-effort because PlannedChunkAction is text-only.
+            // If there are duplicates, we treat it as hidden if ANY matching capture item is ghost.
+            let hasGhostInPersistedPlan = allItems.contains { item in
+                item.isGhost && ghostTextSetForWeek.contains(item.text)
+            }
+            if hasGhostInPersistedPlan {
+                showHidden = true
+            }
         }
 
         // Ensure we have at least enough containers to represent persisted chunk indices.
