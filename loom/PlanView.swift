@@ -2061,7 +2061,7 @@ struct PlanStepFourView: View {
     }
 }
 
-// MARK: - Step 5 (updated)
+// MARK: - Step 5 (Define)
 
 struct PlanStepFiveView: View {
     let onBack: (() -> Void)?
@@ -2071,12 +2071,55 @@ struct PlanStepFiveView: View {
     }
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var isShowingInstructions: Bool = false
 
+    // Data needed for "Define"
+    @Query(sort: \PlannedChunk.chunkIndex, order: .forward)
+    private var allPlannedChunks: [PlannedChunk]
+
+    @Query(sort: \PlannedChunkAction.sortOrder, order: .forward)
+    private var allPlannedActions: [PlannedChunkAction]
+
+    @Query(sort: \PlannedChunkStepFourState.updatedAt, order: .reverse)
+    private var stepFourStates: [PlannedChunkStepFourState]
+
+    @Query(sort: \PlannedChunkOutcomeLink.createdAt, order: .forward)
+    private var outcomeLinks: [PlannedChunkOutcomeLink]
+
+    @Query(sort: \Outcomes.rank, order: .forward)
+    private var outcomes: [Outcomes]
+
+    @Query(sort: \FulfillmentRoles.rank, order: .forward)
+    private var roles: [FulfillmentRoles]
+
     private var secondaryButtonTextColor: Color {
         colorScheme == .dark ? Color(.secondaryLabel) : .black
+    }
+
+    private var currentWeekStart: Date {
+        WeeklyMindsetEntry.weekStart(for: Date())
+    }
+
+    private var plannedChunksForWeek: [PlannedChunk] {
+        allPlannedChunks
+            .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) }
+            .sorted { $0.chunkIndex < $1.chunkIndex }
+    }
+
+    private var stepFourStatesForWeekByChunkID: [UUID: PlannedChunkStepFourState] {
+        let week = stepFourStates.filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) }
+        return Dictionary(uniqueKeysWithValues: week.map { ($0.plannedChunkId, $0) })
+    }
+
+    private var outcomeIDsByChunkID: [UUID: [UUID]] {
+        let week = outcomeLinks.filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) }
+        let grouped = Dictionary(grouping: week, by: \.plannedChunkId)
+        return grouped.mapValues { links in
+            Array(links.map(\.outcomeId).prefix(3))
+        }
     }
 
     var body: some View {
@@ -2089,11 +2132,22 @@ struct PlanStepFiveView: View {
 
             instructionsRow
 
-            Text("Placeholder page for Step 5.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.top, 24)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    if plannedChunksForWeek.isEmpty {
+                        Text("No chunks yet.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.top, 24)
+                    } else {
+                        ForEach(plannedChunksForWeek) { chunk in
+                            defineChunkCard(chunk)
+                        }
+                    }
+                }
+                .padding(.bottom, 12)
+            }
 
             Spacer(minLength: 0)
 
@@ -2145,7 +2199,304 @@ struct PlanStepFiveView: View {
         }
         .buttonStyle(.plain)
     }
+
+    private func defineChunkCard(_ chunk: PlannedChunk) -> some View {
+        let fill = FulfillmentCategoryColors.lightColor(for: chunk.category)
+
+        let step4 = stepFourStatesForWeekByChunkID[chunk.id]
+        let resultText = step4?.resultText ?? ""
+        // NOTE: Step 4 does not persist a separate "purpose" field. This uses roleNoteText as the purpose text.
+        let purposeText = step4?.roleNoteText ?? ""
+
+        let roleName: String = {
+            guard let rid = step4?.connectedRoleId else { return "" }
+            return roles.first(where: { $0.id == rid })?.role ?? ""
+        }()
+
+        let selectedOutcomeIDs = outcomeIDsByChunkID[chunk.id] ?? []
+        let outcomesForChunk: [Outcomes] = {
+            guard !selectedOutcomeIDs.isEmpty else { return [] }
+            let byID = Dictionary(uniqueKeysWithValues: outcomes.map { ($0.outcome_id, $0) })
+            return selectedOutcomeIDs.compactMap { byID[$0] }
+        }()
+
+        // Use query-backed actions; these are the persisted Step 3 actions.
+        let actions = allPlannedActions
+            .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) && $0.plannedChunkId == chunk.id }
+            .sorted { $0.sortOrder < $1.sortOrder }
+
+        return DefineChunkCardView(
+            fill: fill,
+            colorScheme: colorScheme,
+            resultText: resultText,
+            selectedOutcomes: outcomesForChunk,
+            roleName: roleName,
+            purposeText: purposeText,
+            actions: actions,
+            onMoveActions: { from, to in
+                moveActions(in: chunk, from: from, to: to)
+            }
+        )
+    }
+
+    private func moveActions(in chunk: PlannedChunk, from offsets: IndexSet, to destination: Int) {
+        var list = allPlannedActions
+            .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) && $0.plannedChunkId == chunk.id }
+            .sorted { $0.sortOrder < $1.sortOrder }
+
+        list.move(fromOffsets: offsets, toOffset: destination)
+
+        for (idx, action) in list.enumerated() {
+            if action.sortOrder != idx {
+                action.sortOrder = idx
+            }
+        }
+        try? modelContext.save()
+    }
+
+    private struct DefineChunkCardView: View {
+        let fill: Color
+        let colorScheme: ColorScheme
+
+        let resultText: String
+        let selectedOutcomes: [Outcomes]
+
+        let roleName: String
+        let purposeText: String
+
+        let actions: [PlannedChunkAction]
+        let onMoveActions: (IndexSet, Int) -> Void
+
+        private var forcedDarkTextColor: Color { .black }
+        private let targetIconName = "scope"
+
+        // “Make both smaller by 25%”
+        private let pillScale: CGFloat = 0.75
+
+        // For drag/drop reorder within this card
+        @State private var draggedActionID: UUID? = nil
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 12) {
+                resultSection
+
+                if !selectedOutcomes.isEmpty {
+                    selectedOutcomesPillsSmall(selectedOutcomes)
+                }
+
+                Divider().opacity(0.4)
+
+                purposeSection
+
+                if !roleName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    rolePillSmall(roleName)
+                }
+
+                if !purposeText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(purposeText)
+                        .font(.subheadline)
+                        .foregroundStyle(forcedDarkTextColor)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text("—")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
+                Divider().opacity(0.4)
+
+                actionsSection
+            }
+            .padding(12)
+            .background(fill, in: RoundedRectangle(cornerRadius: 14))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(
+                        colorScheme == .dark ? Color.white.opacity(0.18) : Color.black.opacity(0.12),
+                        lineWidth: 1
+                    )
+            )
+        }
+
+        private var resultSection: some View {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("RESULT")
+                        .font(.caption)
+                        .fontWeight(.bold)
+                        .foregroundStyle(forcedDarkTextColor)
+                    Spacer()
+                    Text("What do I want?")
+                        .font(.subheadline)
+                        .foregroundStyle(forcedDarkTextColor)
+                }
+
+                Text(resultText.isEmpty ? "—" : resultText)
+                    .font(.subheadline)
+                    .foregroundStyle(resultText.isEmpty ? .secondary : forcedDarkTextColor)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+
+        private func selectedOutcomesPillsSmall(_ selectedOutcomes: [Outcomes]) -> some View {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(selectedOutcomes, id: \.outcome_id) { outcome in
+                    pillSmall(iconSystemName: targetIconName, text: outcome.outcome)
+                }
+            }
+        }
+
+        private var purposeSection: some View {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("PURPOSE")
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .foregroundStyle(forcedDarkTextColor)
+                Spacer()
+                Text("Why do I want it?")
+                    .font(.subheadline)
+                    .foregroundStyle(forcedDarkTextColor)
+            }
+        }
+
+        private func rolePillSmall(_ role: String) -> some View {
+            pillSmall(iconSystemName: "trophy", text: role)
+        }
+
+        private func pillSmall(iconSystemName: String, text: String) -> some View {
+            HStack(spacing: 10 * pillScale) {
+                Image(systemName: iconSystemName)
+                    .font(.system(size: 16 * pillScale, weight: .semibold))
+                    .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
+
+                Text(text)
+                    .font(.system(size: 15 * pillScale, weight: .regular))
+                    .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: true, vertical: true)
+            }
+            .padding(.vertical, 8 * pillScale)
+            .padding(.horizontal, 12 * pillScale)
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10 * pillScale))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10 * pillScale)
+                    .stroke(
+                        colorScheme == .dark ? Color.white.opacity(0.18) : Color.black.opacity(0.15),
+                        lineWidth: 1
+                    )
+            )
+            .fixedSize(horizontal: true, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+
+        private var actionsSection: some View {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("ACTIONS")
+                        .font(.caption)
+                        .fontWeight(.bold)
+                        .foregroundStyle(forcedDarkTextColor)
+                    Spacer()
+                    Text("Drag to reorder")
+                        .font(.subheadline)
+                        .foregroundStyle(forcedDarkTextColor)
+                }
+
+                if actions.isEmpty {
+                    Text("No actions yet.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 4)
+                } else {
+                    VStack(spacing: 8) {
+                        ForEach(actions) { action in
+                            DefineActionRow(text: action.text)
+                                .onDrag {
+                                    draggedActionID = action.id
+                                    return NSItemProvider(object: action.id.uuidString as NSString)
+                                }
+                                .onDrop(of: [.text], delegate: ActionDropDelegate(
+                                    targetID: action.id,
+                                    draggedID: $draggedActionID,
+                                    actions: actions,
+                                    onMove: onMoveActions
+                                ))
+                        }
+                    }
+                }
+            }
+        }
+
+        private struct DefineActionRow: View {
+            let text: String
+
+            var body: some View {
+                HStack(alignment: .top, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(text)
+                            .font(.subheadline)
+                            .foregroundStyle(.black)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        HStack(spacing: 14) {
+                            Image(systemName: "star")
+                            Image(systemName: "clock")
+                            Image(systemName: "person")
+                            Image(systemName: "gearshape")
+                            Image(systemName: "paperclip")
+                        }
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color(.systemGray))
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 2)
+                }
+                .padding(10)
+                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Color.black.opacity(0.12), lineWidth: 1)
+                )
+            }
+        }
+
+        private struct ActionDropDelegate: DropDelegate {
+            let targetID: UUID
+            @Binding var draggedID: UUID?
+            let actions: [PlannedChunkAction]
+            let onMove: (IndexSet, Int) -> Void
+
+            func dropEntered(info: DropInfo) {
+                guard let draggedID, draggedID != targetID else { return }
+
+                guard
+                    let fromIndex = actions.firstIndex(where: { $0.id == draggedID }),
+                    let toIndex = actions.firstIndex(where: { $0.id == targetID })
+                else { return }
+
+                // Move as user drags over rows.
+                let destination = (toIndex > fromIndex) ? (toIndex + 1) : toIndex
+                onMove(IndexSet(integer: fromIndex), destination)
+            }
+
+            func performDrop(info: DropInfo) -> Bool {
+                draggedID = nil
+                return true
+            }
+
+            func dropUpdated(info: DropInfo) -> DropProposal? {
+                DropProposal(operation: .move)
+            }
+        }
+    }
 }
+
+// MARK: - Step 4/5 instructions + sheets + helpers
 
 private struct StepFourInstructionsPopup: View {
     @Environment(\.dismiss) private var dismiss
