@@ -1362,10 +1362,12 @@ struct PlanStepFourView: View {
 
     @State private var resultTextByChunk: [UUID: String] = [:]
     @State private var roleTextByChunk: [UUID: String] = [:]
+    @State private var purposeTextByChunk: [UUID: String] = [:]
 
     @FocusState private var focusedField: Step4FocusField?
     private enum Step4FocusField: Hashable {
         case result(UUID)
+        case purpose(UUID)
         case roleNote(UUID)
     }
 
@@ -1514,6 +1516,7 @@ struct PlanStepFourView: View {
                 if selectedOutcomeIDsByChunk[chunk.id] == nil { selectedOutcomeIDsByChunk[chunk.id] = [] }
                 if selectedRoleIDByChunk[chunk.id] == nil { selectedRoleIDByChunk[chunk.id] = nil }
                 if resultTextByChunk[chunk.id] == nil { resultTextByChunk[chunk.id] = "" }
+                if purposeTextByChunk[chunk.id] == nil { purposeTextByChunk[chunk.id] = "" }
                 if roleTextByChunk[chunk.id] == nil { roleTextByChunk[chunk.id] = "" }
             }
         }
@@ -1554,6 +1557,12 @@ struct PlanStepFourView: View {
             set: { resultTextByChunk[chunkID] = $0 }
         )
 
+        // PURPOSE editor is removed, but we keep the state so this file compiles without refactoring other code.
+        let purposeBinding = Binding<String>(
+            get: { purposeTextByChunk[chunkID] ?? "" },
+            set: { purposeTextByChunk[chunkID] = $0 }
+        )
+
         let roleNoteBinding = Binding<String>(
             get: { roleTextByChunk[chunkID] ?? "" },
             set: { roleTextByChunk[chunkID] = $0 }
@@ -1569,6 +1578,18 @@ struct PlanStepFourView: View {
             set: { selectedRoleIDByChunk[chunkID] = $0 }
         )
 
+        let fulfillmentPurposeText = fulfillmentForCategoryName(chunk.category)?.category_purpose ?? ""
+        let canPasteCategoryPurpose = !fulfillmentPurposeText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
+        // If there is exactly 1 outcome connected for this chunk, allow pasting its "reasons".
+        let selectedOutcomeIDs = selectedOutcomeIDsByChunk[chunkID] ?? []
+        let singleOutcome: Outcomes? = {
+            guard selectedOutcomeIDs.count == 1, let onlyID = selectedOutcomeIDs.first else { return nil }
+            return outcomes.first(where: { $0.outcome_id == onlyID })
+        }()
+        let outcomeReasonText = singleOutcome?.reasons ?? ""
+        let canPasteOutcomeReason = !outcomeReasonText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
         ChunkCardView(
             chunk: chunk,
             actions: actions,
@@ -1578,9 +1599,22 @@ struct PlanStepFourView: View {
             targetIconName: targetIconName,
             fill: fill,
             resultText: resultBinding,
+            purposeText: purposeBinding,
             roleNoteText: roleNoteBinding,
             selectedOutcomeIDs: selectedOutcomeIDsBinding,
             selectedRoleID: selectedRoleIDBinding,
+            pasteFromCategoryTitle: chunk.category,
+            canPasteCategoryPurpose: canPasteCategoryPurpose,
+            onPasteCategoryPurpose: {
+                // Paste into the role note text field (below Connect Role).
+                roleTextByChunk[chunkID] = fulfillmentPurposeText
+            },
+            shouldShowOutcomeReasonPaste: (singleOutcome != nil),
+            canPasteOutcomeReason: canPasteOutcomeReason,
+            onPasteOutcomeReason: {
+                // Override whatever is currently there, even if Category Purpose was just pasted.
+                roleTextByChunk[chunkID] = outcomeReasonText
+            },
             onOpenOutcomes: { outcomeSheetChunkID = SheetChunkID(id: chunkID) },
             onOpenRoles: { roleSheetChunkID = SheetChunkID(id: chunkID) },
             onRemoveOutcome: { outcomeID in
@@ -1601,9 +1635,18 @@ struct PlanStepFourView: View {
         let fill: Color
 
         @Binding var resultText: String
+        @Binding var purposeText: String
         @Binding var roleNoteText: String
         @Binding var selectedOutcomeIDs: [UUID]
         @Binding var selectedRoleID: UUID?
+
+        let pasteFromCategoryTitle: String
+        let canPasteCategoryPurpose: Bool
+        let onPasteCategoryPurpose: () -> Void
+
+        let shouldShowOutcomeReasonPaste: Bool
+        let canPasteOutcomeReason: Bool
+        let onPasteOutcomeReason: () -> Void
 
         let onOpenOutcomes: () -> Void
         let onOpenRoles: () -> Void
@@ -1629,6 +1672,8 @@ struct PlanStepFourView: View {
 
                 Divider().opacity(0.4)
 
+                // PURPOSE editor removed entirely per request.
+                // (We still keep the label, since it's part of the step flow UI.)
                 purposeSection
 
                 roleConnectRow
@@ -1637,6 +1682,8 @@ struct PlanStepFourView: View {
                     .textFieldStyle(.roundedBorder)
                     .submitLabel(.done)
                     .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
+
+                pasteFromRow
 
                 Divider().opacity(0.4)
 
@@ -1652,6 +1699,8 @@ struct PlanStepFourView: View {
                     )
             )
         }
+
+        @FocusState private var focusedField: Step4FocusField?
 
         private var headerRow: some View {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -1771,6 +1820,41 @@ struct PlanStepFourView: View {
             }
         }
 
+        private var pasteFromRow: some View {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                // CHANGED: force this to always be light grey (not affected by dark mode).
+                Text("paste from:")
+                    .font(.caption2)
+                    .foregroundStyle(Color(UIColor.lightGray))
+
+                Button {
+                    onPasteCategoryPurpose()
+                } label: {
+                    Text("\(pasteFromCategoryTitle) Purpose")
+                        .font(.caption2)
+                        .underline()
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(canPasteCategoryPurpose ? .blue : .secondary.opacity(0.6))
+                .disabled(!canPasteCategoryPurpose)
+
+                if shouldShowOutcomeReasonPaste {
+                    Button {
+                        onPasteOutcomeReason()
+                    } label: {
+                        Text("Outcome Reason")
+                            .font(.caption2)
+                            .underline()
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(canPasteOutcomeReason ? .blue : .secondary.opacity(0.6))
+                    .disabled(!canPasteOutcomeReason)
+                }
+
+                Spacer(minLength: 0)
+            }
+        }
+
         private var roleConnectRow: some View {
             Button(action: onOpenRoles) {
                 HStack(spacing: 10) {
@@ -1816,6 +1900,9 @@ struct PlanStepFourView: View {
                         .fontWeight(.bold)
                         .foregroundStyle(forcedDarkTextColor)
                     Spacer()
+                    Text("How can I best acheive it now?")
+                        .font(.subheadline)
+                        .foregroundStyle(forcedDarkTextColor)
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
