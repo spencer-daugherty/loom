@@ -1609,6 +1609,9 @@ struct PlanStepFourView: View {
         let onOpenRoles: () -> Void
         let onRemoveOutcome: (UUID) -> Void
 
+        // Only these Step 4 texts should remain "light-mode dark" even in dark mode.
+        private var forcedDarkTextColor: Color { .black }
+
         var body: some View {
             VStack(alignment: .leading, spacing: 12) {
                 headerRow
@@ -1655,14 +1658,14 @@ struct PlanStepFourView: View {
                 Text("actions related to:")
                     .font(.caption)
                     .fontWeight(.regular)
-                    .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
+                    .foregroundStyle(forcedDarkTextColor)
 
                 Spacer(minLength: 0)
 
                 Text(chunk.label)
                     .font(.subheadline)
                     .fontWeight(.semibold)
-                    .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
+                    .foregroundStyle(forcedDarkTextColor)
                     .frame(maxWidth: .infinity, alignment: .trailing)
                     .lineLimit(1)
             }
@@ -1674,11 +1677,11 @@ struct PlanStepFourView: View {
                     Text("RESULT")
                         .font(.caption)
                         .fontWeight(.bold)
-                        .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
+                        .foregroundStyle(forcedDarkTextColor)
                     Spacer()
                     Text("What do I want?")
                         .font(.subheadline)
-                        .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
+                        .foregroundStyle(forcedDarkTextColor)
                 }
 
                 TextField("Stand out as a rising star and get a raise!", text: $resultText)
@@ -1760,11 +1763,11 @@ struct PlanStepFourView: View {
                 Text("PURPOSE")
                     .font(.caption)
                     .fontWeight(.bold)
-                    .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
+                    .foregroundStyle(forcedDarkTextColor)
                 Spacer()
                 Text("Why do I want it?")
                     .font(.subheadline)
-                    .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
+                    .foregroundStyle(forcedDarkTextColor)
             }
         }
 
@@ -1811,7 +1814,7 @@ struct PlanStepFourView: View {
                     Text("ACTIONS")
                         .font(.caption)
                         .fontWeight(.bold)
-                        .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
+                        .foregroundStyle(forcedDarkTextColor)
                     Spacer()
                 }
 
@@ -1819,7 +1822,7 @@ struct PlanStepFourView: View {
                     ForEach(actions) { action in
                         Text("• \(action.text)")
                             .font(.subheadline)
-                            .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
+                            .foregroundStyle(forcedDarkTextColor)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
