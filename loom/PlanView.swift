@@ -2085,6 +2085,10 @@ struct PlanStepFiveView: View {
     @Query(sort: \PlannedChunkActionAttachment.createdAt, order: .forward)
     private var attachments: [PlannedChunkActionAttachment]
 
+    // Active state (Start button)
+    @Query(sort: \ActivePlanState.id, order: .forward)
+    private var activePlanStates: [ActivePlanState]
+
     // UI sheets
     private struct SheetActionID: Identifiable, Hashable { let id: UUID }
     @State private var clockSheetActionID: SheetActionID? = nil
@@ -2098,6 +2102,9 @@ struct PlanStepFiveView: View {
 
     // Debounced autosave
     @State private var step5AutosaveTask: Task<Void, Never>? = nil
+
+    // “Try start without durations” feedback
+    @State private var shouldHighlightMissingDurations: Bool = false
 
     private var secondaryButtonTextColor: Color {
         colorScheme == .dark ? Color(.secondaryLabel) : .black
@@ -2123,6 +2130,14 @@ struct PlanStepFiveView: View {
         let grouped = Dictionary(grouping: week, by: \.plannedChunkId)
         return grouped.mapValues { links in
             Array(links.map(\.outcomeId).prefix(3))
+        }
+    }
+
+    private var isStep5StartEnabled: Bool {
+        let actions = plannedActionsForWeek()
+        guard !actions.isEmpty else { return false }
+        return actions.allSatisfy { action in
+            (defineState(forActionId: action.id)?.timeEstimateMinutes) != nil
         }
     }
 
@@ -2170,6 +2185,19 @@ struct PlanStepFiveView: View {
                     RoundedRectangle(cornerRadius: 8)
                         .fill(Color(.systemGray5))
                 )
+
+                Button {
+                    if isStep5StartEnabled {
+                        startPlan()
+                    } else {
+                        triggerMissingDurationsFeedback()
+                    }
+                } label: {
+                    Text("Start")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(plannedActionsForWeek().isEmpty)
             }
             .padding(.bottom, 2)
         }
@@ -2198,8 +2226,6 @@ struct PlanStepFiveView: View {
         }
         .sheet(item: $leverageSheetActionID) { wrapper in
             LeverageSheet(
-                actionId: wrapper.id,
-                weekStart: currentWeekStart,
                 leverageCatalog: leverageCatalog,
                 selectedResourceId: currentLeverageSelectionResourceId(forActionId: wrapper.id),
                 onAdd: { kind, value in
@@ -2209,7 +2235,6 @@ struct PlanStepFiveView: View {
                     // Upsert (by normalized key) to keep catalog universal and deduped.
                     let key = "\(kind.rawValue.lowercased())|\(trimmed.lowercased())"
                     if let existing = leverageCatalog.first(where: { $0.kindValueKey == key }) {
-                        // no-op
                         _ = existing
                     } else {
                         let item = LeverageResource(kindRaw: kind.rawValue, value: trimmed)
@@ -2236,14 +2261,6 @@ struct PlanStepFiveView: View {
                     }
                     try? modelContext.save()
                     scheduleStep5Autosave()
-                },
-                onClearSelection: {
-                    upsertLeverageSelection(forActionId: wrapper.id) { sel in
-                        sel.resourceId = nil
-                        sel.updatedAt = .now
-                    }
-                    try? modelContext.save()
-                    scheduleStep5Autosave()
                 }
             )
             .presentationDetents([.medium, .large])
@@ -2251,8 +2268,6 @@ struct PlanStepFiveView: View {
         }
         .sheet(item: $sensitivitySheetActionID) { wrapper in
             SensitivitySheet(
-                weekStart: currentWeekStart,
-                actionId: wrapper.id,
                 defineState: Binding(
                     get: { defineState(forActionId: wrapper.id) ?? makeBlankDefineState(actionId: wrapper.id) },
                     set: { newValue in
@@ -2301,8 +2316,6 @@ struct PlanStepFiveView: View {
         }
         .sheet(item: $attachmentsSheetActionID) { wrapper in
             AttachmentsSheet(
-                weekStart: currentWeekStart,
-                actionId: wrapper.id,
                 attachments: attachmentsForAction(wrapper.id),
                 noteText: Binding(
                     get: { noteText(forActionId: wrapper.id) },
@@ -2315,7 +2328,6 @@ struct PlanStepFiveView: View {
                     }
                 ),
                 onSaveNote: {
-                    // note is already written-through by binding; we just flush now.
                     try? modelContext.save()
                     scheduleStep5Autosave()
                 },
@@ -2456,6 +2468,7 @@ struct PlanStepFiveView: View {
             hasAttachments: { actionId in
                 hasAnyAttachments(actionId: actionId)
             },
+            shouldHighlightMissingDurations: shouldHighlightMissingDurations,
             onToggleMust: { actionId, isOn in
                 upsertDefineState(forActionId: actionId) { st in
                     st.isMust = isOn
@@ -2523,6 +2536,8 @@ struct PlanStepFiveView: View {
         let hasLeverage: (UUID) -> Bool
         let hasSensitivity: (UUID) -> Bool
         let hasAttachments: (UUID) -> Bool
+
+        let shouldHighlightMissingDurations: Bool
 
         let onToggleMust: (UUID, Bool) -> Void
         let onOpenClock: (UUID) -> Void
@@ -2680,17 +2695,18 @@ struct PlanStepFiveView: View {
                             let state = defineStateForAction(action.id)
                             let isMust = state?.isMust ?? false
                             let timeMinutes = state?.timeEstimateMinutes
+                            let isMissingDuration = (timeMinutes == nil)
 
                             DefineActionRow(
                                 text: action.text,
                                 accent: accent,
                                 colorScheme: colorScheme,
-                                rank: action.sortOrder + 1,
                                 isMust: isMust,
                                 timeMinutes: timeMinutes,
                                 hasLeverage: hasLeverage(action.id),
                                 hasSensitivity: hasSensitivity(action.id),
                                 hasAttachments: hasAttachments(action.id),
+                                shouldHighlightMissingDuration: shouldHighlightMissingDurations && isMissingDuration,
                                 onToggleMust: { onToggleMust(action.id, !isMust) },
                                 onTapClock: { onOpenClock(action.id) },
                                 onTapPerson: { onOpenLeverage(action.id) },
@@ -2720,7 +2736,6 @@ struct PlanStepFiveView: View {
             let text: String
             let accent: Color
             let colorScheme: ColorScheme
-            let rank: Int
 
             let isMust: Bool
             let timeMinutes: Int?
@@ -2728,6 +2743,8 @@ struct PlanStepFiveView: View {
             let hasLeverage: Bool
             let hasSensitivity: Bool
             let hasAttachments: Bool
+
+            let shouldHighlightMissingDuration: Bool
 
             let onToggleMust: () -> Void
             let onTapClock: () -> Void
@@ -2738,54 +2755,52 @@ struct PlanStepFiveView: View {
             private let iconScale: CGFloat = 1.5
 
             private var actionTextColor: Color {
-                // Requested: lighter in dark mode
                 colorScheme == .dark ? Color.white.opacity(0.85) : .black
             }
 
             var body: some View {
                 HStack(alignment: .center, spacing: 10) {
                     VStack(alignment: .leading, spacing: 10) {
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text("\(rank).")
-                                .font(.subheadline)
-                                .fontWeight(.bold)
-                                .foregroundStyle(.black.opacity(0.55))
-
-                            Text(text)
-                                .font(.subheadline)
-                                .foregroundStyle(actionTextColor)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
+                        // Removed number prefix (1., 2., ...)
+                        Text(text)
+                            .font(.subheadline)
+                            .foregroundStyle(actionTextColor)
+                            .fixedSize(horizontal: false, vertical: true)
 
                         HStack(spacing: 18) {
                             iconButton(
                                 systemName: isMust ? "star.square.fill" : "star.square",
                                 isOn: isMust,
-                                onTap: onToggleMust
+                                onTap: onToggleMust,
+                                overrideColor: nil
                             )
 
                             clockButton(
-                                isOn: timeMinutes != nil,
                                 minutes: timeMinutes,
-                                onTap: onTapClock
+                                onTap: onTapClock,
+                                shouldHighlightMissingDuration: shouldHighlightMissingDuration,
+                                accent: accent
                             )
 
                             iconButton(
                                 systemName: hasLeverage ? "person.fill" : "person",
                                 isOn: hasLeverage,
-                                onTap: onTapPerson
+                                onTap: onTapPerson,
+                                overrideColor: nil
                             )
 
                             iconButton(
                                 systemName: hasSensitivity ? "gearshape.fill" : "gearshape",
                                 isOn: hasSensitivity,
-                                onTap: onTapGear
+                                onTap: onTapGear,
+                                overrideColor: nil
                             )
 
                             iconButton(
                                 systemName: hasAttachments ? "paperclip.circle.fill" : "paperclip",
                                 isOn: hasAttachments,
-                                onTap: onTapPaperclip
+                                onTap: onTapPaperclip,
+                                overrideColor: nil
                             )
                         }
                         .font(.system(size: 14 * iconScale, weight: .semibold))
@@ -2806,14 +2821,19 @@ struct PlanStepFiveView: View {
                 )
             }
 
-            private func iconButton(systemName: String, isOn: Bool, onTap: @escaping () -> Void) -> some View {
+            private func iconButton(
+                systemName: String,
+                isOn: Bool,
+                onTap: @escaping () -> Void,
+                overrideColor: Color?
+            ) -> some View {
                 Button {
                     withAnimation(.easeInOut(duration: 0.14)) {
                         onTap()
                     }
                 } label: {
                     Image(systemName: systemName)
-                        .foregroundStyle(isOn ? accent : Color(.systemGray))
+                        .foregroundStyle(overrideColor ?? (isOn ? accent : Color(.systemGray)))
                         .frame(width: 26, height: 26)
                         .contentShape(Rectangle())
                         .accessibilityLabel(systemName)
@@ -2821,15 +2841,28 @@ struct PlanStepFiveView: View {
                 .buttonStyle(.plain)
             }
 
-            private func clockButton(isOn: Bool, minutes: Int?, onTap: @escaping () -> Void) -> some View {
-                Button {
+            private func clockButton(
+                minutes: Int?,
+                onTap: @escaping () -> Void,
+                shouldHighlightMissingDuration: Bool,
+                accent: Color
+            ) -> some View {
+                let isOn = (minutes != nil)
+                let baseClockName = isOn ? "clock.fill" : "clock"
+                let clockColor: Color = {
+                    if isOn { return accent }
+                    if shouldHighlightMissingDuration { return .red }
+                    return Color(.systemGray)
+                }()
+
+                return Button {
                     withAnimation(.easeInOut(duration: 0.14)) {
                         onTap()
                     }
                 } label: {
                     HStack(spacing: 6) {
-                        Image(systemName: isOn ? "clock.fill" : "clock")
-                            .foregroundStyle(isOn ? accent : Color(.systemGray))
+                        Image(systemName: baseClockName)
+                            .foregroundStyle(clockColor)
                             .frame(width: 26, height: 26)
 
                         if let minutes {
@@ -3109,6 +3142,27 @@ struct PlanStepFiveView: View {
 
         try? modelContext.save()
     }
+
+    private func triggerMissingDurationsFeedback() {
+        shouldHighlightMissingDurations = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            shouldHighlightMissingDurations = false
+        }
+    }
+
+    private func startPlan() {
+        step5AutosaveTask?.cancel()
+        persistStep5ForWeekNow()
+
+        // Ensure ActivePlanState exists and is active for this week.
+        let state = ActivePlanState.fetchOrCreate(in: modelContext)
+        state.isActive = true
+        state.activatedAt = .now
+        state.weekStart = currentWeekStart
+        try? modelContext.save()
+
+        dismiss()
+    }
 }
 
 // MARK: - Step 5 sheets
@@ -3126,14 +3180,16 @@ private struct TimeEstimateSheet: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 16) {
-                Text("Estimate time to complete action")
-                    .font(.headline)
+                Text("Estimate minutes to complete action")
+                    .font(.subheadline)
+                    .fontWeight(.regular)
+                    .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .multilineTextAlignment(.center)
 
                 Picker("Minutes", selection: $selection) {
                     ForEach(options, id: \.self) { m in
-                        Text("\(m) min").tag(m)
+                        Text("\(m)").tag(m)
                     }
                 }
                 .pickerStyle(.wheel)
@@ -3158,21 +3214,20 @@ private struct TimeEstimateSheet: View {
 }
 
 private struct LeverageSheet: View {
-    let actionId: UUID
-    let weekStart: Date
     let leverageCatalog: [LeverageResource]
     let selectedResourceId: UUID?
 
     let onAdd: (ActionLeverageKind, String) -> Void
     let onDeleteCatalogItems: (Set<UUID>) -> Void
     let onSelectResource: (UUID?) -> Void
-    let onClearSelection: () -> Void
 
     @Environment(\.dismiss) private var dismiss
 
+    @State private var localSelection: UUID? = nil
+
+    @State private var isAddResourcesPresented: Bool = false
     @State private var kind: ActionLeverageKind = .person
     @State private var value: String = ""
-    @State private var localSelection: UUID? = nil
 
     var body: some View {
         NavigationStack {
@@ -3180,31 +3235,22 @@ private struct LeverageSheet: View {
                 Section {
                     Text("Leverage action to someone or something else")
                         .font(.subheadline)
+                        .fontWeight(.regular)
                         .foregroundStyle(.secondary)
                 }
 
-                Section {
-                    Picker("Type", selection: $kind) {
-                        ForEach(ActionLeverageKind.allCases) { k in
-                            Text(k.title).tag(k)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-
-                    HStack(spacing: 10) {
-                        TextField(kind == .person ? "Add person…" : "Add tool…", text: $value)
-                            .textFieldStyle(.roundedBorder)
-
-                        Button("Add") {
-                            onAdd(kind, value)
-                            value = ""
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    }
-                }
-
                 Section("Resources") {
+                    Button {
+                        isAddResourcesPresented = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "plus")
+                            Text("Add Resources")
+                            Spacer()
+                        }
+                        .contentShape(Rectangle())
+                    }
+
                     if filteredCatalog.isEmpty {
                         Text("None yet.")
                             .foregroundStyle(.secondary)
@@ -3249,13 +3295,6 @@ private struct LeverageSheet: View {
             .navigationTitle("Leverage")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Clear") {
-                        localSelection = nil
-                        onClearSelection()
-                        dismiss()
-                    }
-                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
                         onSelectResource(localSelection)
@@ -3265,6 +3304,43 @@ private struct LeverageSheet: View {
             }
             .onAppear {
                 localSelection = selectedResourceId
+            }
+            .sheet(isPresented: $isAddResourcesPresented) {
+                NavigationStack {
+                    VStack(spacing: 14) {
+                        Picker("Type", selection: $kind) {
+                            ForEach(ActionLeverageKind.allCases) { k in
+                                Text(k.title).tag(k)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+
+                        HStack(spacing: 10) {
+                            TextField(kind == .person ? "Add person…" : "Add tool…", text: $value)
+                                .textFieldStyle(.roundedBorder)
+
+                            Button("Add") {
+                                onAdd(kind, value)
+                                value = ""
+                                isAddResourcesPresented = false
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
+
+                        Spacer(minLength: 0)
+                    }
+                    .padding()
+                    .navigationTitle("Add Resources")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancel") { isAddResourcesPresented = false }
+                        }
+                    }
+                }
+                .presentationDetents([.height(220)])
+                .presentationDragIndicator(.visible)
             }
         }
     }
@@ -3276,9 +3352,6 @@ private struct LeverageSheet: View {
 }
 
 private struct SensitivitySheet: View {
-    let weekStart: Date
-    let actionId: UUID
-
     @Binding var defineState: PlannedChunkActionDefineState
 
     let placesCatalog: [SensitivityPlaceCatalogItem]
@@ -3299,24 +3372,9 @@ private struct SensitivitySheet: View {
                     Toggle("Morning", isOn: bindingForTimeOfDay(\.sensitiveMorning))
                     Toggle("Afternoon", isOn: bindingForTimeOfDay(\.sensitiveAfternoon))
                     Toggle("Evening", isOn: bindingForTimeOfDay(\.sensitiveEvening))
-
-                    Text("Default is all on. Keep at least one time selected.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
 
                 Section("Places") {
-                    HStack(spacing: 10) {
-                        TextField("Add place…", text: $newPlace)
-                            .textFieldStyle(.roundedBorder)
-                        Button("Add") {
-                            onAddPlaceToCatalog(newPlace)
-                            newPlace = ""
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(newPlace.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    }
-
                     if placesCatalog.isEmpty {
                         Text("No places yet.")
                             .foregroundStyle(.secondary)
@@ -3346,9 +3404,21 @@ private struct SensitivitySheet: View {
                             }
                         }
                     }
+
+                    // Moved “Add place…” to bottom
+                    HStack(spacing: 10) {
+                        TextField("Add place…", text: $newPlace)
+                            .textFieldStyle(.roundedBorder)
+                        Button("Add") {
+                            onAddPlaceToCatalog(newPlace)
+                            newPlace = ""
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(newPlace.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
                 }
             }
-            .navigationTitle("Time of Day")
+            .navigationTitle("Sensitivities")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -3397,8 +3467,6 @@ private struct SensitivitySheet: View {
 }
 
 private struct AttachmentsSheet: View {
-    let weekStart: Date
-    let actionId: UUID
     let attachments: [PlannedChunkActionAttachment]
 
     @Binding var noteText: String
@@ -3416,23 +3484,7 @@ private struct AttachmentsSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("Attachments") {
-                    HStack(spacing: 10) {
-                        TextField("Add link…", text: $linkText)
-                            .textFieldStyle(.roundedBorder)
-                        Button("Add") {
-                            onAddLink(linkText)
-                            linkText = ""
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(linkText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    }
-
-                    Button("Attach file…") {
-                        isFileImporterPresented = true
-                    }
-                }
-
+                // Notes stays near top
                 Section("Notes") {
                     TextEditor(text: $noteText)
                         .frame(height: 120)
@@ -3448,7 +3500,8 @@ private struct AttachmentsSheet: View {
                     .disabled(noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
 
-                Section("Added") {
+                // Renamed from “Added” -> “Attached”
+                Section("Attached") {
                     if attachments.isEmpty {
                         Text("No attachments yet.")
                             .foregroundStyle(.secondary)
@@ -3474,6 +3527,24 @@ private struct AttachmentsSheet: View {
                                 }
                             }
                         }
+                    }
+                }
+
+                // Moved to bottom; renamed to “Files and Links”
+                Section("Files and Links") {
+                    HStack(spacing: 10) {
+                        TextField("Add link…", text: $linkText)
+                            .textFieldStyle(.roundedBorder)
+                        Button("Add") {
+                            onAddLink(linkText)
+                            linkText = ""
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(linkText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+
+                    Button("Attach file…") {
+                        isFileImporterPresented = true
                     }
                 }
             }

@@ -28,8 +28,10 @@ struct ContentView: View {
     @State private var showSplash: Bool = true
     @Environment(\.modelContext) private var modelContext
 
-    // *** Temporary flag for routing; replace with model-derived state later
-    @State private var isActivePlan: Bool = false
+    // Model-derived state
+    @Query(sort: \ActivePlanState.id, order: .forward)
+    private var activePlanStates: [ActivePlanState]
+
     @State private var navPath: [PlayDestination] = []
     @State private var playSheetDestination: PlayDestination? = nil
 
@@ -37,6 +39,10 @@ struct ContentView: View {
         case plan
         case action
         var id: String { rawValue }
+    }
+
+    private var isActivePlan: Bool {
+        activePlanStates.first?.isActive ?? false
     }
     
     private func daysUntil(_ endDate: Date) -> Int {
@@ -144,14 +150,9 @@ struct ContentView: View {
             }
         }
         .onAppear {
-            // Ensure ActionPlan is active
-            let state = ActivePlanState.fetchOrCreate(in: modelContext)
-            if !state.isActive {
-                state.isActive = true
-                state.activatedAt = Date()
-                state.weekStart = WeeklyMindsetEntry.weekStart(for: Date())
-                try? modelContext.save()
-            }
+            // Ensure singleton exists, but DO NOT auto-activate.
+            _ = ActivePlanState.fetchOrCreate(in: modelContext)
+
             // Ensure splash shows for at least 1 second
             DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
                 withAnimation(.easeInOut(duration: 0.6)) {
@@ -364,7 +365,6 @@ struct ContentView: View {
                 .resizable()
                 .scaledToFit()
                 .frame(height: 40)
-                // .padding(.top, 25) // Added thin padding above logo
                 .modifier(DarkModeInvertImage())
         }
     }
@@ -1231,5 +1231,4 @@ extension View {
         }
     }
 }
-
 
