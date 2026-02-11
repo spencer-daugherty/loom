@@ -430,6 +430,8 @@ struct PlanStepThreeView: View {
     @State private var poolItemIDs: [UUID] = []
     @State private var chunks: [ChunkContainerState] = []
 
+    // Baselines used solely for the "Refresh" button.
+    // These MUST represent the "fresh/auto-generated from capture list" state, not the hydrated state.
     @State private var baselineShowHidden: Bool = false
     @State private var baselinePoolItemIDs: [UUID] = []
     @State private var baselineChunks: [ChunkContainerState] = []
@@ -481,9 +483,56 @@ struct PlanStepThreeView: View {
     }
 
     private var isRefreshVisible: Bool {
+        // Show refresh if:
+        // 1) user changed state vs the last "fresh baseline", OR
+        // 2) the capture list has drifted since the plan was last persisted (common when you leave and come back).
         showHidden != baselineShowHidden ||
         poolItemIDs != baselinePoolItemIDs ||
-        chunks != baselineChunks
+        chunks != baselineChunks ||
+        isPersistedPlanOutOfSyncWithCapture
+    }
+
+    /// When true, indicates the persisted plan for this week can't fully map back to the current capture list.
+    /// (Most commonly: new capture items were added since planning, or planned actions no longer exist in capture.)
+    ///
+    /// This is what makes Refresh show immediately when you return to Step 3.
+    private var isPersistedPlanOutOfSyncWithCapture: Bool {
+        // If we have no plan persisted for this week, nothing to refresh.
+        let weekChunks = plannedChunks.filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) }
+        let weekActions = plannedActions.filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) }
+        let weekSelections = allChunkSelections.filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) }
+
+        if weekChunks.isEmpty && weekActions.isEmpty && weekSelections.isEmpty {
+            return false
+        }
+
+        // Step 3 persistence is text-based for actions, so we can only best-effort match by text.
+        // If any planned action's text doesn't exist in current capture, we're out of sync.
+        let captureTextSet = Set(allItems.map(\.text))
+        if weekActions.contains(where: { !captureTextSet.contains($0.text) }) {
+            return true
+        }
+
+        // If there are visible capture items that aren't represented anywhere in the persisted plan,
+        // we consider that "needs refresh" because Step 3's "fresh" state would include them in the pool.
+        //
+        // Note: because persistence is text-based, duplicates are ambiguous. We intentionally treat any
+        // missing *text* as needing refresh. This keeps behavior intuitive.
+        let plannedTextSet = Set(weekActions.map(\.text))
+        let visibleCaptureItems = (showHidden ? allItems : allItems.filter { !$0.isGhost })
+        let visibleCaptureTextSet = Set(visibleCaptureItems.map(\.text))
+
+        if !visibleCaptureTextSet.isSubset(of: plannedTextSet.union(visibleCaptureTextSet.intersection(plannedTextSet))) {
+            // The above line is intentionally conservative; simplest approach:
+            // "if there exists any visible capture text not in plannedTextSet -> refresh"
+            // We'll implement that directly for clarity:
+        }
+
+        if visibleCaptureItems.contains(where: { !plannedTextSet.contains($0.text) }) {
+            return true
+        }
+
+        return false
     }
 
     /// True if ANY chunk currently contains ANY ghost/hidden action.
@@ -709,10 +758,24 @@ struct PlanStepThreeView: View {
             // If we hydrated a hidden action into a chunk, force showHidden on.
             enforceShowHiddenIfNeeded()
 
+            // IMPORTANT CHANGE:
+            // Do NOT set baselines here to the hydrated state.
+            // Baselines represent the "fresh" state and are set by `refreshStep3()` and by the
+            // "no persisted plan" initialization path only.
+            //
+            // However, if there is truly no persisted state for the week, we want baseline == current
+            // so refresh stays hidden until user changes something.
             if baselineChunks.isEmpty && baselinePoolItemIDs.isEmpty {
-                baselineShowHidden = showHidden
-                baselinePoolItemIDs = poolItemIDs
-                baselineChunks = chunks
+                let weekChunks = plannedChunks.filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) }
+                let weekActions = plannedActions.filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) }
+                let weekSelections = allChunkSelections.filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) }
+
+                let hasAnyPersisted = !(weekChunks.isEmpty && weekActions.isEmpty && weekSelections.isEmpty)
+                if !hasAnyPersisted {
+                    baselineShowHidden = showHidden
+                    baselinePoolItemIDs = poolItemIDs
+                    baselineChunks = chunks
+                }
             }
         }
         .onChange(of: allItems.map(\.id)) { _, _ in
@@ -1056,6 +1119,7 @@ struct PlanStepThreeView: View {
 
             persistStep3Plan()
 
+            // For the "no persisted plan" case, baseline == current is correct.
             baselineShowHidden = showHidden
             baselinePoolItemIDs = poolItemIDs
             baselineChunks = chunks
@@ -1131,10 +1195,7 @@ struct PlanStepThreeView: View {
 
         // Recreate pool: everything visible not already chunked, stable order using initialPoolIDs.
         syncPoolWithVisibility()
-
-        baselineShowHidden = showHidden
-        baselinePoolItemIDs = poolItemIDs
-        baselineChunks = chunks
+        // IMPORTANT: do NOT set baselines here (see comment in onAppear).
     }
 
     /// Persist Step 3 continuously into the same data Step 4 reads:
