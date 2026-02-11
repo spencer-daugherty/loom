@@ -7,7 +7,6 @@ struct loomApp: App {
         WindowGroup {
             ContentView()
         }
-        // Now register ALL of your @Model types:
         .modelContainer(
             for: [
                 DrivingForce.self,
@@ -33,10 +32,12 @@ struct loomApp: App {
                 RollingCaptureItem.self,
                 PlanLabel.self,
                 PlanChunkSelection.self,
-
-                // NEW
                 PlannedChunk.self,
                 PlannedChunkAction.self,
+
+                // NEW: Step 4 persistence
+                PlannedChunkStepFourState.self,
+                PlannedChunkOutcomeLink.self,
             ]
         )
     }

@@ -505,6 +505,99 @@ enum WeeklyMindsetEntry {
   }
 }
 
+// MARK: - Step 4 storage
+
+/// Stores the user's Step 4 inputs per week + planned chunk.
+@Model
+final class PlannedChunkStepFourState {
+    @Attribute(.unique) var id: UUID
+
+    var weekStart: Date
+    var plannedChunkId: UUID
+
+    var resultText: String
+    var roleNoteText: String
+
+    /// Connected role for the chunk (FulfillmentRoles.id)
+    var connectedRoleId: UUID?
+
+    var updatedAt: Date
+
+    /// Unique key to ensure only 1 row per (weekStart, plannedChunkId)
+    @Attribute(.unique) var weekPlannedChunkKey: String
+
+    init(
+        id: UUID = .init(),
+        weekStart: Date,
+        plannedChunkId: UUID,
+        resultText: String = "",
+        roleNoteText: String = "",
+        connectedRoleId: UUID? = nil,
+        updatedAt: Date = .now
+    ) {
+        self.id = id
+        self.weekStart = weekStart
+        self.plannedChunkId = plannedChunkId
+        self.resultText = resultText
+        self.roleNoteText = roleNoteText
+        self.connectedRoleId = connectedRoleId
+        self.updatedAt = updatedAt
+
+        let dayKey = PlannedChunkStepFourState.dayKey(from: weekStart)
+        self.weekPlannedChunkKey = "\(dayKey)|\(plannedChunkId.uuidString)"
+    }
+
+    private static func dayKey(from date: Date) -> String {
+        let cal = Calendar.current
+        let comps = cal.dateComponents([.year, .month, .day], from: date)
+        let y = comps.year ?? 0
+        let m = comps.month ?? 0
+        let d = comps.day ?? 0
+        return String(format: "%04d-%02d-%02d", y, m, d)
+    }
+}
+
+/// Stores up to 3 connected outcomes per chunk for Step 4.
+@Model
+final class PlannedChunkOutcomeLink {
+    @Attribute(.unique) var id: UUID
+
+    var weekStart: Date
+    var plannedChunkId: UUID
+    var outcomeId: UUID
+
+    var createdAt: Date
+
+    /// Unique key to ensure only 1 link per (weekStart, plannedChunkId, outcomeId)
+    @Attribute(.unique) var weekChunkOutcomeKey: String
+
+    init(
+        id: UUID = .init(),
+        weekStart: Date,
+        plannedChunkId: UUID,
+        outcomeId: UUID,
+        createdAt: Date = .now
+    ) {
+        self.id = id
+        self.weekStart = weekStart
+        self.plannedChunkId = plannedChunkId
+        self.outcomeId = outcomeId
+        self.createdAt = createdAt
+
+        let dayKey = PlannedChunkOutcomeLink.dayKey(from: weekStart)
+        self.weekChunkOutcomeKey = "\(dayKey)|\(plannedChunkId.uuidString)|\(outcomeId.uuidString)"
+    }
+
+    private static func dayKey(from date: Date) -> String {
+        let cal = Calendar.current
+        let comps = cal.dateComponents([.year, .month, .day], from: date)
+        let y = comps.year ?? 0
+        let m = comps.month ?? 0
+        let d = comps.day ?? 0
+        return String(format: "%04d-%02d-%02d", y, m, d)
+    }
+}
+
 // MARK: - ActivePlanState (Singleton)
 @Model
 final class ActivePlanState {
