@@ -2202,6 +2202,7 @@ struct PlanStepFiveView: View {
 
     private func defineChunkCard(_ chunk: PlannedChunk) -> some View {
         let fill = FulfillmentCategoryColors.lightColor(for: chunk.category)
+        let accent = FulfillmentCategoryColors.accentColor(for: chunk.category)
 
         let step4 = stepFourStatesForWeekByChunkID[chunk.id]
         let resultText = step4?.resultText ?? ""
@@ -2227,35 +2228,31 @@ struct PlanStepFiveView: View {
 
         return DefineChunkCardView(
             fill: fill,
+            accent: accent,
             colorScheme: colorScheme,
             resultText: resultText,
             selectedOutcomes: outcomesForChunk,
             roleName: roleName,
             purposeText: purposeText,
             actions: actions,
-            onMoveActions: { from, to in
-                moveActions(in: chunk, from: from, to: to)
+            onReorder: { newOrder in
+                applyReorder(newOrder)
             }
         )
-    }
 
-    private func moveActions(in chunk: PlannedChunk, from offsets: IndexSet, to destination: Int) {
-        var list = allPlannedActions
-            .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) && $0.plannedChunkId == chunk.id }
-            .sorted { $0.sortOrder < $1.sortOrder }
-
-        list.move(fromOffsets: offsets, toOffset: destination)
-
-        for (idx, action) in list.enumerated() {
-            if action.sortOrder != idx {
-                action.sortOrder = idx
+        func applyReorder(_ newOrder: [PlannedChunkAction]) {
+            for (idx, action) in newOrder.enumerated() {
+                if action.sortOrder != idx {
+                    action.sortOrder = idx
+                }
             }
+            try? modelContext.save()
         }
-        try? modelContext.save()
     }
 
     private struct DefineChunkCardView: View {
         let fill: Color
+        let accent: Color
         let colorScheme: ColorScheme
 
         let resultText: String
@@ -2265,7 +2262,7 @@ struct PlanStepFiveView: View {
         let purposeText: String
 
         let actions: [PlannedChunkAction]
-        let onMoveActions: (IndexSet, Int) -> Void
+        let onReorder: ([PlannedChunkAction]) -> Void
 
         private var forcedDarkTextColor: Color { .black }
         private let targetIconName = "scope"
@@ -2275,6 +2272,16 @@ struct PlanStepFiveView: View {
 
         // For drag/drop reorder within this card
         @State private var draggedActionID: UUID? = nil
+
+        // NEW: local animated list snapshot
+        @State private var localActions: [PlannedChunkAction] = []
+
+        // NEW: UI-only toggles per action row (not persisted yet)
+        @State private var mustIDs: Set<UUID> = []
+        @State private var clockIDs: Set<UUID> = []
+        @State private var personIDs: Set<UUID> = []
+        @State private var gearIDs: Set<UUID> = []
+        @State private var paperclipIDs: Set<UUID> = []
 
         var body: some View {
             VStack(alignment: .leading, spacing: 12) {
@@ -2316,6 +2323,13 @@ struct PlanStepFiveView: View {
                         lineWidth: 1
                     )
             )
+            .onAppear {
+                localActions = actions
+            }
+            .onChange(of: actions.map(\.id)) { _, _ in
+                // keep local in sync if underlying changes (week refresh, etc.)
+                localActions = actions
+            }
         }
 
         private var resultSection: some View {
@@ -2402,7 +2416,7 @@ struct PlanStepFiveView: View {
                         .foregroundStyle(forcedDarkTextColor)
                 }
 
-                if actions.isEmpty {
+                if localActions.isEmpty {
                     Text("No actions yet.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
@@ -2410,51 +2424,110 @@ struct PlanStepFiveView: View {
                         .padding(.vertical, 4)
                 } else {
                     VStack(spacing: 8) {
-                        ForEach(actions) { action in
-                            DefineActionRow(text: action.text)
-                                .onDrag {
-                                    draggedActionID = action.id
-                                    return NSItemProvider(object: action.id.uuidString as NSString)
+                        ForEach(localActions) { action in
+                            DefineActionRow(
+                                text: action.text,
+                                accent: accent,
+                                isMust: mustIDs.contains(action.id),
+                                isClock: clockIDs.contains(action.id),
+                                isPerson: personIDs.contains(action.id),
+                                isGear: gearIDs.contains(action.id),
+                                isPaperclip: paperclipIDs.contains(action.id),
+                                onToggleMust: { toggle(&mustIDs, action.id) },
+                                onToggleClock: { toggle(&clockIDs, action.id) },
+                                onTogglePerson: { toggle(&personIDs, action.id) },
+                                onToggleGear: { toggle(&gearIDs, action.id) },
+                                onTogglePaperclip: { toggle(&paperclipIDs, action.id) }
+                            )
+                            .onDrag {
+                                draggedActionID = action.id
+                                return NSItemProvider(object: action.id.uuidString as NSString)
+                            }
+                            .onDrop(of: [.text], delegate: AnimatedActionDropDelegate(
+                                targetID: action.id,
+                                draggedID: $draggedActionID,
+                                localActions: $localActions,
+                                onCommit: { final in
+                                    onReorder(final)
                                 }
-                                .onDrop(of: [.text], delegate: ActionDropDelegate(
-                                    targetID: action.id,
-                                    draggedID: $draggedActionID,
-                                    actions: actions,
-                                    onMove: onMoveActions
-                                ))
+                            ))
                         }
                     }
+                    .animation(.interactiveSpring(response: 0.28, dampingFraction: 0.88, blendDuration: 0.12), value: localActions)
                 }
             }
         }
 
+        private func toggle(_ set: inout Set<UUID>, _ id: UUID) {
+            if set.contains(id) { set.remove(id) } else { set.insert(id) }
+        }
+
         private struct DefineActionRow: View {
             let text: String
+            let accent: Color
+
+            let isMust: Bool
+            let isClock: Bool
+            let isPerson: Bool
+            let isGear: Bool
+            let isPaperclip: Bool
+
+            let onToggleMust: () -> Void
+            let onToggleClock: () -> Void
+            let onTogglePerson: () -> Void
+            let onToggleGear: () -> Void
+            let onTogglePaperclip: () -> Void
+
+            private let iconScale: CGFloat = 1.5
 
             var body: some View {
-                HStack(alignment: .top, spacing: 10) {
-                    VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .center, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 10) {
                         Text(text)
                             .font(.subheadline)
                             .foregroundStyle(.black)
                             .fixedSize(horizontal: false, vertical: true)
 
-                        HStack(spacing: 14) {
-                            Image(systemName: "star")
-                            Image(systemName: "clock")
-                            Image(systemName: "person")
-                            Image(systemName: "gearshape")
-                            Image(systemName: "paperclip")
+                        HStack(spacing: 18) {
+                            iconButton(
+                                systemName: isMust ? "star.square.fill" : "star.square",
+                                isOn: isMust,
+                                onTap: onToggleMust
+                            )
+
+                            iconButton(
+                                systemName: isClock ? "clock.fill" : "clock",
+                                isOn: isClock,
+                                onTap: onToggleClock
+                            )
+
+                            iconButton(
+                                systemName: isPerson ? "person.fill" : "person",
+                                isOn: isPerson,
+                                onTap: onTogglePerson
+                            )
+
+                            iconButton(
+                                systemName: isGear ? "gearshape.fill" : "gearshape",
+                                isOn: isGear,
+                                onTap: onToggleGear
+                            )
+
+                            iconButton(
+                                systemName: isPaperclip ? "paperclip.badge.ellipsis" : "paperclip",
+                                isOn: isPaperclip,
+                                onTap: onTogglePaperclip
+                            )
                         }
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Color(.systemGray))
+                        .font(.system(size: 14 * iconScale, weight: .semibold))
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                    Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
+                    Image(systemName: "chevron.up.chevron.down")
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(.secondary)
-                        .padding(.top, 2)
+                        .frame(width: 20, alignment: .center)
+                        .padding(.vertical, 6)
                 }
                 .padding(10)
                 .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
@@ -2463,34 +2536,57 @@ struct PlanStepFiveView: View {
                         .stroke(Color.black.opacity(0.12), lineWidth: 1)
                 )
             }
+
+            private func iconButton(systemName: String, isOn: Bool, onTap: @escaping () -> Void) -> some View {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.14)) {
+                        onTap()
+                    }
+                } label: {
+                    Image(systemName: systemName)
+                        .foregroundStyle(isOn ? accent : Color(.systemGray))
+                        .frame(width: 26, height: 26)
+                        .contentShape(Rectangle())
+                        .accessibilityLabel(systemName)
+                }
+                .buttonStyle(.plain)
+            }
         }
 
-        private struct ActionDropDelegate: DropDelegate {
+        private struct AnimatedActionDropDelegate: DropDelegate {
             let targetID: UUID
             @Binding var draggedID: UUID?
-            let actions: [PlannedChunkAction]
-            let onMove: (IndexSet, Int) -> Void
+            @Binding var localActions: [PlannedChunkAction]
+            let onCommit: ([PlannedChunkAction]) -> Void
 
             func dropEntered(info: DropInfo) {
                 guard let draggedID, draggedID != targetID else { return }
-
                 guard
-                    let fromIndex = actions.firstIndex(where: { $0.id == draggedID }),
-                    let toIndex = actions.firstIndex(where: { $0.id == targetID })
+                    let fromIndex = localActions.firstIndex(where: { $0.id == draggedID }),
+                    let toIndex = localActions.firstIndex(where: { $0.id == targetID })
                 else { return }
 
-                // Move as user drags over rows.
-                let destination = (toIndex > fromIndex) ? (toIndex + 1) : toIndex
-                onMove(IndexSet(integer: fromIndex), destination)
+                if fromIndex == toIndex { return }
+
+                withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.88, blendDuration: 0.12)) {
+                    let moved = localActions.remove(at: fromIndex)
+                    let dest = (toIndex > fromIndex) ? toIndex : toIndex
+                    localActions.insert(moved, at: dest)
+                }
             }
 
             func performDrop(info: DropInfo) -> Bool {
                 draggedID = nil
+                onCommit(localActions)
                 return true
             }
 
             func dropUpdated(info: DropInfo) -> DropProposal? {
                 DropProposal(operation: .move)
+            }
+
+            func dropExited(info: DropInfo) {
+                // no-op (keep current preview order)
             }
         }
     }
@@ -2838,6 +2934,19 @@ private enum FulfillmentCategoryColors {
         case "Love & Relationships": return lightRed
         case "Health & Vitality": return lightOrange
         default: return Color.gray.opacity(0.1)
+        }
+    }
+
+    // NEW: saturated/accent color used for Step 5 icon toggles.
+    static func accentColor(for categoryTitle: String) -> Color {
+        switch categoryTitle {
+        case "Career & Business": return .blue
+        case "Leadership & Impact": return .indigo
+        case "Wealth & Lifestyle": return .green
+        case "Mind & Meaning": return .purple
+        case "Love & Relationships": return .red
+        case "Health & Vitality": return .orange
+        default: return .accentColor
         }
     }
 }
