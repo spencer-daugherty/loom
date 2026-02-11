@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UniformTypeIdentifiers
 
 /// Step 1 of a multi-step flow.
 /// UI-only: Three one-line text fields with a bottom-pinned "Next" + "Close" button.
@@ -427,6 +428,7 @@ struct PlanStepTwoView: View {
 
 // MARK: - Step 3
 
+// (PlanStepThreeView unchanged)
 struct PlanStepThreeView: View {
     let onBack: (() -> Void)?
     let onNext: (() -> Void)?
@@ -1027,11 +1029,6 @@ struct PlanStepThreeView: View {
         baselineChunks = chunks
     }
 
-    /// Clears only Step 3's persisted records for the current week, while preserving `PlannedChunk` IDs
-    /// whenever possible (so Step 4 can keep referencing `plannedChunkId`).
-    ///
-    /// - Deletes: PlannedChunkAction (week), PlanChunkSelection (week)
-    /// - Adjusts/Deletes: PlannedChunk to match current indices (week) via `persistStep3Plan()`
     private func clearPersistedStep3PlanForCurrentWeek() {
         for action in plannedActions where Calendar.current.isDate(action.weekStart, inSameDayAs: currentWeekStart) {
             modelContext.delete(action)
@@ -1109,7 +1106,6 @@ struct PlanStepThreeView: View {
             chunks[sel.chunkIndex].selectionCategory = sel.category
         }
 
-        // Map persisted actions -> visible capture items by text
         for pc in persistedChunks {
             guard pc.chunkIndex >= 0, pc.chunkIndex < chunks.count else { continue }
 
@@ -1133,42 +1129,23 @@ struct PlanStepThreeView: View {
         syncPoolWithVisibility()
     }
 
-    /// Persist Step 3 in a way that:
-    /// - preserves existing PlannedChunk IDs for the week whenever possible
-    /// - supports "shift" semantics when a chunk is deleted (later chunks shift left)
-    ///
-    /// This fixes Step 4 "disappearing" because Step 4 references PlannedChunk.id.
     private func persistStep3Plan() {
         guard !isHydratingFromStorage else { return }
 
         let weekStart = currentWeekStart
         let captureByID = Dictionary(uniqueKeysWithValues: allItems.map { ($0.id, $0) })
 
-        // Fetch existing week chunks by ascending chunkIndex (these IDs should remain stable).
         let existingWeekChunks = plannedChunks
             .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: weekStart) }
             .sorted { $0.chunkIndex < $1.chunkIndex }
 
-        // We always rebuild selections + actions for the week.
         clearPersistedStep3PlanForCurrentWeek()
 
-        // Ensure we have PlannedChunk rows for indices 0..<chunks.count
-        // Preserve IDs by reusing the existing row at each index, if present.
         var weekChunksByIndex: [Int: PlannedChunk] = [:]
         for pc in existingWeekChunks {
             weekChunksByIndex[pc.chunkIndex] = pc
         }
 
-        // If user deleted a chunk and "shift" happened, we must:
-        // - reindex PlannedChunk objects in-place to 0..<chunks.count
-        // - delete any extra persisted chunks beyond new count
-        //
-        // We perform reindexing by:
-        // 1) taking existingWeekChunks in order
-        // 2) assigning them new indices sequentially (preserving IDs)
-        // 3) deleting leftover ones
-        //
-        // This matches "shift left" behavior.
         for (newIndex, pc) in existingWeekChunks.enumerated() {
             if newIndex < chunks.count {
                 if pc.chunkIndex != newIndex {
@@ -1178,15 +1155,12 @@ struct PlanStepThreeView: View {
                 }
                 weekChunksByIndex[newIndex] = pc
             } else {
-                // Any extra persisted chunk rows beyond the UI chunk count should be removed.
                 modelContext.delete(pc)
             }
         }
 
-        // If we don't have enough persisted chunks, create missing ones.
         if chunks.count > existingWeekChunks.count {
             for idx in existingWeekChunks.count..<chunks.count {
-                // Temporary filler values; will be overwritten below if selection exists.
                 let pc = PlannedChunk(
                     weekStart: weekStart,
                     chunkIndex: idx,
@@ -1201,7 +1175,6 @@ struct PlanStepThreeView: View {
             }
         }
 
-        // Persist selections (one per chunkIndex)
         for (chunkIndex, chunkState) in chunks.enumerated() {
             let sel = PlanChunkSelection(
                 weekStart: weekStart,
@@ -1215,7 +1188,6 @@ struct PlanStepThreeView: View {
             modelContext.insert(sel)
         }
 
-        // Update each PlannedChunk with the selected label/category (and then insert actions)
         for (chunkIndex, chunkState) in chunks.enumerated() where !chunkState.itemIDs.isEmpty {
             guard let plannedChunk = weekChunksByIndex[chunkIndex] else { continue }
             guard let labelId = chunkState.selectionLabelId else { continue }
@@ -1316,12 +1288,13 @@ struct PlanStepThreeView: View {
 
     private func deleteChunkContainerIfAllowed(at index: Int) {
         guard canDeleteChunk(at: index) else { return }
-        chunks.remove(at: index) // <-- shift happens naturally in UI state (indices collapse)
+        chunks.remove(at: index)
     }
 }
 
 // MARK: - Step 4
 
+// (PlanStepFourView unchanged)
 struct PlanStepFourView: View {
     let onBack: (() -> Void)?
     let onNext: (() -> Void)?
@@ -1960,8 +1933,6 @@ struct PlanStepFourView: View {
         }
     }
 
-    // MARK: Step 4 "routine" autosave (debounced)
-
     @State private var step4AutosaveTask: Task<Void, Never>? = nil
 
     private func scheduleStep4Autosave() {
@@ -2076,7 +2047,6 @@ struct PlanStepFiveView: View {
 
     @State private var isShowingInstructions: Bool = false
 
-    // Data needed for "Define"
     @Query(sort: \PlannedChunk.chunkIndex, order: .forward)
     private var allPlannedChunks: [PlannedChunk]
 
@@ -2094,6 +2064,33 @@ struct PlanStepFiveView: View {
 
     @Query(sort: \FulfillmentRoles.rank, order: .forward)
     private var roles: [FulfillmentRoles]
+
+    // Step 5 persisted data
+    @Query(sort: \PlannedChunkActionDefineState.updatedAt, order: .reverse)
+    private var defineStates: [PlannedChunkActionDefineState]
+
+    @Query(sort: \PlannedChunkActionLeverageItem.createdAt, order: .forward)
+    private var leverageItems: [PlannedChunkActionLeverageItem]
+
+    @Query(sort: \PlannedChunkActionSensitivityPlace.createdAt, order: .forward)
+    private var sensitivityPlaces: [PlannedChunkActionSensitivityPlace]
+
+    @Query(sort: \PlannedChunkActionAttachment.createdAt, order: .forward)
+    private var attachments: [PlannedChunkActionAttachment]
+
+    // UI sheets
+    private struct SheetActionID: Identifiable, Hashable { let id: UUID }
+    @State private var clockSheetActionID: SheetActionID? = nil
+    @State private var leverageSheetActionID: SheetActionID? = nil
+    @State private var sensitivitySheetActionID: SheetActionID? = nil
+    @State private var attachmentsSheetActionID: SheetActionID? = nil
+
+    // Local animated list snapshot per chunk
+    @State private var localActionsByChunkId: [UUID: [PlannedChunkAction]] = [:]
+    @State private var draggedActionID: UUID? = nil
+
+    // Debounced autosave
+    @State private var step5AutosaveTask: Task<Void, Never>? = nil
 
     private var secondaryButtonTextColor: Color {
         colorScheme == .dark ? Color(.secondaryLabel) : .black
@@ -2153,6 +2150,8 @@ struct PlanStepFiveView: View {
 
             HStack(spacing: 12) {
                 Button {
+                    step5AutosaveTask?.cancel()
+                    persistStep5ForWeekNow()
                     if let onBack { onBack() } else { dismiss() }
                 } label: {
                     Text("Back")
@@ -2175,6 +2174,183 @@ struct PlanStepFiveView: View {
             StepFiveInstructionsPopup()
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $clockSheetActionID) { wrapper in
+            TimeEstimateSheet(
+                title: "Estimate time to complete action",
+                currentMinutes: defineState(forActionId: wrapper.id)?.timeEstimateMinutes,
+                onSelect: { minutes in
+                    upsertDefineState(forActionId: wrapper.id) { st in
+                        st.timeEstimateMinutes = minutes
+                        st.updatedAt = .now
+                    }
+                    scheduleStep5Autosave()
+                },
+                onClear: {
+                    upsertDefineState(forActionId: wrapper.id) { st in
+                        st.timeEstimateMinutes = nil
+                        st.updatedAt = .now
+                    }
+                    scheduleStep5Autosave()
+                }
+            )
+            .presentationDetents([.height(340), .medium])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $leverageSheetActionID) { wrapper in
+            LeverageSheet(
+                title: "Leverage action to someone or something else",
+                actionId: wrapper.id,
+                weekStart: currentWeekStart,
+                leverageItems: leverageItemsForAction(wrapper.id),
+                onAdd: { kind, value in
+                    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !trimmed.isEmpty else { return }
+                    let item = PlannedChunkActionLeverageItem(
+                        weekStart: currentWeekStart,
+                        plannedChunkActionId: wrapper.id,
+                        kindRaw: kind.rawValue,
+                        value: trimmed,
+                        createdAt: .now
+                    )
+                    modelContext.insert(item)
+                    try? modelContext.save()
+                },
+                onDelete: { ids in
+                    for it in leverageItems where ids.contains(it.id) {
+                        modelContext.delete(it)
+                    }
+                    try? modelContext.save()
+                }
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $sensitivitySheetActionID) { wrapper in
+            SensitivitySheet(
+                title: "Add sensitivity",
+                state: Binding(
+                    get: { defineState(forActionId: wrapper.id) ?? makeBlankDefineState(actionId: wrapper.id) },
+                    set: { newValue in
+                        // Copy fields back into persisted row
+                        upsertDefineState(forActionId: wrapper.id) { st in
+                            st.sensitiveMorning = newValue.sensitiveMorning
+                            st.sensitiveAfternoon = newValue.sensitiveAfternoon
+                            st.sensitiveEvening = newValue.sensitiveEvening
+                            st.updatedAt = .now
+                        }
+                        scheduleStep5Autosave()
+                    }
+                ),
+                places: sensitivityPlacesForAction(wrapper.id),
+                onAddPlace: { place in
+                    let trimmed = place.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !trimmed.isEmpty else { return }
+                    let p = PlannedChunkActionSensitivityPlace(
+                        weekStart: currentWeekStart,
+                        plannedChunkActionId: wrapper.id,
+                        place: trimmed,
+                        createdAt: .now
+                    )
+                    modelContext.insert(p)
+                    try? modelContext.save()
+                },
+                onUpdatePlace: { id, newPlace in
+                    let trimmed = newPlace.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !trimmed.isEmpty else { return }
+                    if let p = sensitivityPlaces.first(where: { $0.id == id }) {
+                        p.place = trimmed
+                    }
+                    try? modelContext.save()
+                },
+                onDeletePlaces: { ids in
+                    for p in sensitivityPlaces where ids.contains(p.id) {
+                        modelContext.delete(p)
+                    }
+                    try? modelContext.save()
+                }
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $attachmentsSheetActionID) { wrapper in
+            AttachmentsSheet(
+                title: "Attachments",
+                weekStart: currentWeekStart,
+                actionId: wrapper.id,
+                attachments: attachmentsForAction(wrapper.id),
+                onAddLink: { urlString in
+                    let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !trimmed.isEmpty else { return }
+                    let att = PlannedChunkActionAttachment(
+                        weekStart: currentWeekStart,
+                        plannedChunkActionId: wrapper.id,
+                        kindRaw: ActionAttachmentKind.link.rawValue,
+                        urlString: trimmed,
+                        noteText: nil,
+                        fileName: nil,
+                        fileBookmarkData: nil,
+                        createdAt: .now
+                    )
+                    modelContext.insert(att)
+                    try? modelContext.save()
+                },
+                onAddNote: { note in
+                    let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !trimmed.isEmpty else { return }
+                    let att = PlannedChunkActionAttachment(
+                        weekStart: currentWeekStart,
+                        plannedChunkActionId: wrapper.id,
+                        kindRaw: ActionAttachmentKind.note.rawValue,
+                        urlString: nil,
+                        noteText: trimmed,
+                        fileName: nil,
+                        fileBookmarkData: nil,
+                        createdAt: .now
+                    )
+                    modelContext.insert(att)
+                    try? modelContext.save()
+                },
+                onAddFile: { url, bookmarkData, fileName in
+                    let att = PlannedChunkActionAttachment(
+                        weekStart: currentWeekStart,
+                        plannedChunkActionId: wrapper.id,
+                        kindRaw: ActionAttachmentKind.file.rawValue,
+                        urlString: nil,
+                        noteText: nil,
+                        fileName: fileName,
+                        fileBookmarkData: bookmarkData,
+                        createdAt: .now
+                    )
+                    modelContext.insert(att)
+                    try? modelContext.save()
+                },
+                onDelete: { ids in
+                    for a in attachments where ids.contains(a.id) {
+                        modelContext.delete(a)
+                    }
+                    try? modelContext.save()
+                }
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
+        .onAppear {
+            hydrateLocalActions()
+            // Ensure define-state rows exist for all visible actions (prevents nil churn)
+            ensureDefineStatesExistForWeek()
+        }
+        .onChange(of: plannedChunksForWeek.map(\.id)) { _, _ in
+            hydrateLocalActions()
+            ensureDefineStatesExistForWeek()
+        }
+        .onChange(of: allPlannedActions.map(\.id)) { _, _ in
+            hydrateLocalActions()
+            ensureDefineStatesExistForWeek()
+        }
+        .onDisappear {
+            step5AutosaveTask?.cancel()
+            persistStep5ForWeekNow()
         }
     }
 
@@ -2206,7 +2382,6 @@ struct PlanStepFiveView: View {
 
         let step4 = stepFourStatesForWeekByChunkID[chunk.id]
         let resultText = step4?.resultText ?? ""
-        // NOTE: Step 4 does not persist a separate "purpose" field. This uses roleNoteText as the purpose text.
         let purposeText = step4?.roleNoteText ?? ""
 
         let roleName: String = {
@@ -2221,7 +2396,6 @@ struct PlanStepFiveView: View {
             return selectedOutcomeIDs.compactMap { byID[$0] }
         }()
 
-        // Use query-backed actions; these are the persisted Step 3 actions.
         let actions = allPlannedActions
             .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) && $0.plannedChunkId == chunk.id }
             .sorted { $0.sortOrder < $1.sortOrder }
@@ -2235,20 +2409,72 @@ struct PlanStepFiveView: View {
             roleName: roleName,
             purposeText: purposeText,
             actions: actions,
-            onReorder: { newOrder in
+            localActions: Binding(
+                get: { localActionsByChunkId[chunk.id] ?? actions },
+                set: { localActionsByChunkId[chunk.id] = $0 }
+            ),
+            draggedActionID: $draggedActionID,
+            defineStateForAction: { actionId in
+                defineState(forActionId: actionId)
+            },
+            hasLeverage: { actionId in
+                !leverageItemsForAction(actionId).isEmpty
+            },
+            hasSensitivity: { actionId in
+                let st = defineState(forActionId: actionId)
+                let hasTimeOfDay = (st?.sensitiveMorning ?? false) || (st?.sensitiveAfternoon ?? false) || (st?.sensitiveEvening ?? false)
+                let hasPlaces = !sensitivityPlacesForAction(actionId).isEmpty
+                return hasTimeOfDay || hasPlaces
+            },
+            hasAttachments: { actionId in
+                !attachmentsForAction(actionId).isEmpty
+            },
+            onToggleMust: { actionId, isOn in
+                upsertDefineState(forActionId: actionId) { st in
+                    st.isMust = isOn
+                    st.updatedAt = .now
+                }
+                scheduleStep5Autosave()
+            },
+            onOpenClock: { actionId in
+                clockSheetActionID = SheetActionID(id: actionId)
+            },
+            onOpenLeverage: { actionId in
+                leverageSheetActionID = SheetActionID(id: actionId)
+            },
+            onOpenSensitivity: { actionId in
+                sensitivitySheetActionID = SheetActionID(id: actionId)
+            },
+            onOpenAttachments: { actionId in
+                attachmentsSheetActionID = SheetActionID(id: actionId)
+            },
+            onCommitReorder: { newOrder in
                 applyReorder(newOrder)
             }
         )
 
         func applyReorder(_ newOrder: [PlannedChunkAction]) {
+            // Persist action ordering
             for (idx, action) in newOrder.enumerated() {
                 if action.sortOrder != idx {
                     action.sortOrder = idx
                 }
             }
+
+            // Also sync Step 5 rank to match ordering
+            for (idx, action) in newOrder.enumerated() {
+                upsertDefineState(forActionId: action.id) { st in
+                    st.rank = idx
+                    st.updatedAt = .now
+                }
+            }
+
             try? modelContext.save()
+            scheduleStep5Autosave()
         }
     }
+
+    // MARK: - Define UI card
 
     private struct DefineChunkCardView: View {
         let fill: Color
@@ -2262,26 +2488,26 @@ struct PlanStepFiveView: View {
         let purposeText: String
 
         let actions: [PlannedChunkAction]
-        let onReorder: ([PlannedChunkAction]) -> Void
+
+        @Binding var localActions: [PlannedChunkAction]
+        @Binding var draggedActionID: UUID?
+
+        let defineStateForAction: (UUID) -> PlannedChunkActionDefineState?
+        let hasLeverage: (UUID) -> Bool
+        let hasSensitivity: (UUID) -> Bool
+        let hasAttachments: (UUID) -> Bool
+
+        let onToggleMust: (UUID, Bool) -> Void
+        let onOpenClock: (UUID) -> Void
+        let onOpenLeverage: (UUID) -> Void
+        let onOpenSensitivity: (UUID) -> Void
+        let onOpenAttachments: (UUID) -> Void
+
+        let onCommitReorder: ([PlannedChunkAction]) -> Void
 
         private var forcedDarkTextColor: Color { .black }
         private let targetIconName = "scope"
-
-        // “Make both smaller by 25%”
         private let pillScale: CGFloat = 0.75
-
-        // For drag/drop reorder within this card
-        @State private var draggedActionID: UUID? = nil
-
-        // NEW: local animated list snapshot
-        @State private var localActions: [PlannedChunkAction] = []
-
-        // NEW: UI-only toggles per action row (not persisted yet)
-        @State private var mustIDs: Set<UUID> = []
-        @State private var clockIDs: Set<UUID> = []
-        @State private var personIDs: Set<UUID> = []
-        @State private var gearIDs: Set<UUID> = []
-        @State private var paperclipIDs: Set<UUID> = []
 
         var body: some View {
             VStack(alignment: .leading, spacing: 12) {
@@ -2327,7 +2553,6 @@ struct PlanStepFiveView: View {
                 localActions = actions
             }
             .onChange(of: actions.map(\.id)) { _, _ in
-                // keep local in sync if underlying changes (week refresh, etc.)
                 localActions = actions
             }
         }
@@ -2425,19 +2650,24 @@ struct PlanStepFiveView: View {
                 } else {
                     VStack(spacing: 8) {
                         ForEach(localActions) { action in
+                            let state = defineStateForAction(action.id)
+                            let isMust = state?.isMust ?? false
+                            let timeMinutes = state?.timeEstimateMinutes
+
                             DefineActionRow(
                                 text: action.text,
                                 accent: accent,
-                                isMust: mustIDs.contains(action.id),
-                                isClock: clockIDs.contains(action.id),
-                                isPerson: personIDs.contains(action.id),
-                                isGear: gearIDs.contains(action.id),
-                                isPaperclip: paperclipIDs.contains(action.id),
-                                onToggleMust: { toggle(&mustIDs, action.id) },
-                                onToggleClock: { toggle(&clockIDs, action.id) },
-                                onTogglePerson: { toggle(&personIDs, action.id) },
-                                onToggleGear: { toggle(&gearIDs, action.id) },
-                                onTogglePaperclip: { toggle(&paperclipIDs, action.id) }
+                                rank: action.sortOrder + 1,
+                                isMust: isMust,
+                                timeMinutes: timeMinutes,
+                                hasLeverage: hasLeverage(action.id),
+                                hasSensitivity: hasSensitivity(action.id),
+                                hasAttachments: hasAttachments(action.id),
+                                onToggleMust: { onToggleMust(action.id, !isMust) },
+                                onTapClock: { onOpenClock(action.id) },
+                                onTapPerson: { onOpenLeverage(action.id) },
+                                onTapGear: { onOpenSensitivity(action.id) },
+                                onTapPaperclip: { onOpenAttachments(action.id) }
                             )
                             .onDrag {
                                 draggedActionID = action.id
@@ -2448,7 +2678,7 @@ struct PlanStepFiveView: View {
                                 draggedID: $draggedActionID,
                                 localActions: $localActions,
                                 onCommit: { final in
-                                    onReorder(final)
+                                    onCommitReorder(final)
                                 }
                             ))
                         }
@@ -2458,35 +2688,39 @@ struct PlanStepFiveView: View {
             }
         }
 
-        private func toggle(_ set: inout Set<UUID>, _ id: UUID) {
-            if set.contains(id) { set.remove(id) } else { set.insert(id) }
-        }
-
         private struct DefineActionRow: View {
             let text: String
             let accent: Color
+            let rank: Int
 
             let isMust: Bool
-            let isClock: Bool
-            let isPerson: Bool
-            let isGear: Bool
-            let isPaperclip: Bool
+            let timeMinutes: Int?
+
+            let hasLeverage: Bool
+            let hasSensitivity: Bool
+            let hasAttachments: Bool
 
             let onToggleMust: () -> Void
-            let onToggleClock: () -> Void
-            let onTogglePerson: () -> Void
-            let onToggleGear: () -> Void
-            let onTogglePaperclip: () -> Void
+            let onTapClock: () -> Void
+            let onTapPerson: () -> Void
+            let onTapGear: () -> Void
+            let onTapPaperclip: () -> Void
 
             private let iconScale: CGFloat = 1.5
 
             var body: some View {
                 HStack(alignment: .center, spacing: 10) {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text(text)
-                            .font(.subheadline)
-                            .foregroundStyle(.black)
-                            .fixedSize(horizontal: false, vertical: true)
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text("\(rank).")
+                                .font(.subheadline)
+                                .fontWeight(.bold)
+                                .foregroundStyle(.black.opacity(0.55))
+                            Text(text)
+                                .font(.subheadline)
+                                .foregroundStyle(.black)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
 
                         HStack(spacing: 18) {
                             iconButton(
@@ -2495,28 +2729,28 @@ struct PlanStepFiveView: View {
                                 onTap: onToggleMust
                             )
 
-                            iconButton(
-                                systemName: isClock ? "clock.fill" : "clock",
-                                isOn: isClock,
-                                onTap: onToggleClock
+                            clockButton(
+                                isOn: timeMinutes != nil,
+                                minutes: timeMinutes,
+                                onTap: onTapClock
                             )
 
                             iconButton(
-                                systemName: isPerson ? "person.fill" : "person",
-                                isOn: isPerson,
-                                onTap: onTogglePerson
+                                systemName: hasLeverage ? "person.fill" : "person",
+                                isOn: hasLeverage,
+                                onTap: onTapPerson
                             )
 
                             iconButton(
-                                systemName: isGear ? "gearshape.fill" : "gearshape",
-                                isOn: isGear,
-                                onTap: onToggleGear
+                                systemName: hasSensitivity ? "gearshape.fill" : "gearshape",
+                                isOn: hasSensitivity,
+                                onTap: onTapGear
                             )
 
                             iconButton(
-                                systemName: isPaperclip ? "paperclip.badge.ellipsis" : "paperclip",
-                                isOn: isPaperclip,
-                                onTap: onTogglePaperclip
+                                systemName: hasAttachments ? "paperclip.circle.fill" : "paperclip",
+                                isOn: hasAttachments,
+                                onTap: onTapPaperclip
                             )
                         }
                         .font(.system(size: 14 * iconScale, weight: .semibold))
@@ -2548,6 +2782,30 @@ struct PlanStepFiveView: View {
                         .frame(width: 26, height: 26)
                         .contentShape(Rectangle())
                         .accessibilityLabel(systemName)
+                }
+                .buttonStyle(.plain)
+            }
+
+            private func clockButton(isOn: Bool, minutes: Int?, onTap: @escaping () -> Void) -> some View {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.14)) {
+                        onTap()
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: isOn ? "clock.fill" : "clock")
+                            .foregroundStyle(isOn ? accent : Color(.systemGray))
+                            .frame(width: 26, height: 26)
+
+                        if let minutes {
+                            Text("\(minutes)m")
+                                .font(.subheadline)
+                                .fontWeight(.bold)
+                                .foregroundStyle(accent)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                    .accessibilityLabel("Estimate time")
                 }
                 .buttonStyle(.plain)
             }
@@ -2585,9 +2843,532 @@ struct PlanStepFiveView: View {
                 DropProposal(operation: .move)
             }
 
-            func dropExited(info: DropInfo) {
-                // no-op (keep current preview order)
+            func dropExited(info: DropInfo) { }
+        }
+    }
+
+    // MARK: - Step 5 persistence helpers
+
+    private func plannedActionsForWeek() -> [PlannedChunkAction] {
+        allPlannedActions
+            .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) }
+            .sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    private func defineState(forActionId actionId: UUID) -> PlannedChunkActionDefineState? {
+        defineStates.first { st in
+            Calendar.current.isDate(st.weekStart, inSameDayAs: currentWeekStart) && st.plannedChunkActionId == actionId
+        }
+    }
+
+    private func makeBlankDefineState(actionId: UUID) -> PlannedChunkActionDefineState {
+        PlannedChunkActionDefineState(
+            weekStart: currentWeekStart,
+            plannedChunkActionId: actionId,
+            rank: 0,
+            isMust: false,
+            timeEstimateMinutes: nil,
+            sensitiveMorning: false,
+            sensitiveAfternoon: false,
+            sensitiveEvening: false,
+            updatedAt: .now
+        )
+    }
+
+    private func upsertDefineState(forActionId actionId: UUID, mutate: (PlannedChunkActionDefineState) -> Void) {
+        if let existing = defineState(forActionId: actionId) {
+            mutate(existing)
+        } else {
+            let st = makeBlankDefineState(actionId: actionId)
+            mutate(st)
+            modelContext.insert(st)
+        }
+    }
+
+    private func ensureDefineStatesExistForWeek() {
+        let week = currentWeekStart
+        let actions = plannedActionsForWeek()
+
+        for action in actions {
+            let exists = defineStates.contains { st in
+                Calendar.current.isDate(st.weekStart, inSameDayAs: week) && st.plannedChunkActionId == action.id
             }
+            if !exists {
+                let st = PlannedChunkActionDefineState(
+                    weekStart: week,
+                    plannedChunkActionId: action.id,
+                    rank: action.sortOrder,
+                    isMust: false,
+                    timeEstimateMinutes: nil,
+                    sensitiveMorning: false,
+                    sensitiveAfternoon: false,
+                    sensitiveEvening: false,
+                    updatedAt: .now
+                )
+                modelContext.insert(st)
+            }
+        }
+        try? modelContext.save()
+    }
+
+    private func leverageItemsForAction(_ actionId: UUID) -> [PlannedChunkActionLeverageItem] {
+        leverageItems
+            .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) && $0.plannedChunkActionId == actionId }
+            .sorted { $0.createdAt < $1.createdAt }
+    }
+
+    private func sensitivityPlacesForAction(_ actionId: UUID) -> [PlannedChunkActionSensitivityPlace] {
+        sensitivityPlaces
+            .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) && $0.plannedChunkActionId == actionId }
+            .sorted { $0.createdAt < $1.createdAt }
+    }
+
+    private func attachmentsForAction(_ actionId: UUID) -> [PlannedChunkActionAttachment] {
+        attachments
+            .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) && $0.plannedChunkActionId == actionId }
+            .sorted { $0.createdAt < $1.createdAt }
+    }
+
+    private func hydrateLocalActions() {
+        for chunk in plannedChunksForWeek {
+            let actions = allPlannedActions
+                .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) && $0.plannedChunkId == chunk.id }
+                .sorted { $0.sortOrder < $1.sortOrder }
+            localActionsByChunkId[chunk.id] = actions
+        }
+    }
+
+    private func scheduleStep5Autosave() {
+        step5AutosaveTask?.cancel()
+        step5AutosaveTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            persistStep5ForWeekNow()
+        }
+    }
+
+    /// Step 5 persistence is mostly “already persisted” as the user acts (we insert/update models immediately).
+    /// This function ensures rank stays synced and we flush saves.
+    private func persistStep5ForWeekNow() {
+        let week = currentWeekStart
+
+        // Sync ranks from current persisted sortOrder
+        let actions = plannedActionsForWeek()
+        for action in actions {
+            upsertDefineState(forActionId: action.id) { st in
+                st.rank = action.sortOrder
+                st.updatedAt = .now
+            }
+        }
+
+        try? modelContext.save()
+    }
+}
+
+// MARK: - Step 5 sheets
+
+private struct TimeEstimateSheet: View {
+    let title: String
+    let currentMinutes: Int?
+    let onSelect: (Int) -> Void
+    let onClear: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    private let options: [Int] = [5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 240]
+
+    @State private var selection: Int = 15
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 16) {
+                Text(title)
+                    .font(.headline)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                Picker("Minutes", selection: $selection) {
+                    ForEach(options, id: \.self) { m in
+                        Text("\(m) minutes").tag(m)
+                    }
+                }
+                .pickerStyle(.wheel)
+                .frame(height: 160)
+
+                HStack(spacing: 12) {
+                    Button("Clear") {
+                        onClear()
+                        dismiss()
+                    }
+                    .frame(maxWidth: .infinity)
+
+                    Button("Set") {
+                        onSelect(selection)
+                        dismiss()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .frame(maxWidth: .infinity)
+                }
+            }
+            .padding()
+            .onAppear {
+                selection = currentMinutes ?? 15
+            }
+            .navigationTitle(" ")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+}
+
+private struct LeverageSheet: View {
+    let title: String
+    let actionId: UUID
+    let weekStart: Date
+    let leverageItems: [PlannedChunkActionLeverageItem]
+    let onAdd: (ActionLeverageKind, String) -> Void
+    let onDelete: (Set<UUID>) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var kind: ActionLeverageKind = .person
+    @State private var value: String = ""
+    @State private var selectedToDelete: Set<UUID> = []
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Picker("Type", selection: $kind) {
+                        ForEach(ActionLeverageKind.allCases) { k in
+                            Text(k.title).tag(k)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    HStack(spacing: 10) {
+                        TextField(kind == .person ? "Add person…" : "Add tool…", text: $value)
+                            .textFieldStyle(.roundedBorder)
+
+                        Button("Add") {
+                            onAdd(kind, value)
+                            value = ""
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                } header: {
+                    Text(title)
+                }
+
+                Section("Added") {
+                    if leverageItems.isEmpty {
+                        Text("None yet.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(leverageItems) { item in
+                            HStack {
+                                Text(item.kind == .person ? "Person" : "Tool")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 60, alignment: .leading)
+
+                                Text(item.value)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                                if selectedToDelete.contains(item.id) {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(.blue)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                if selectedToDelete.contains(item.id) {
+                                    selectedToDelete.remove(item.id)
+                                } else {
+                                    selectedToDelete.insert(item.id)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Leverage")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Delete") {
+                        onDelete(selectedToDelete)
+                        selectedToDelete.removeAll()
+                    }
+                    .disabled(selectedToDelete.isEmpty)
+                }
+            }
+        }
+    }
+}
+
+private struct SensitivitySheet: View {
+    let title: String
+    @Binding var state: PlannedChunkActionDefineState
+
+    let places: [PlannedChunkActionSensitivityPlace]
+    let onAddPlace: (String) -> Void
+    let onUpdatePlace: (UUID, String) -> Void
+    let onDeletePlaces: (Set<UUID>) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var newPlace: String = ""
+    @State private var selectedToDelete: Set<UUID> = []
+    @State private var editingPlaceID: UUID? = nil
+    @State private var editingText: String = ""
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Toggle("Morning", isOn: Binding(get: { state.sensitiveMorning }, set: { state.sensitiveMorning = $0 }))
+                    Toggle("Afternoon", isOn: Binding(get: { state.sensitiveAfternoon }, set: { state.sensitiveAfternoon = $0 }))
+                    Toggle("Evening", isOn: Binding(get: { state.sensitiveEvening }, set: { state.sensitiveEvening = $0 }))
+                } header: {
+                    Text(title)
+                }
+
+                Section("Places") {
+                    HStack(spacing: 10) {
+                        TextField("Add place…", text: $newPlace)
+                            .textFieldStyle(.roundedBorder)
+                        Button("Add") {
+                            onAddPlace(newPlace)
+                            newPlace = ""
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(newPlace.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+
+                    if places.isEmpty {
+                        Text("No places yet.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(places) { p in
+                            HStack {
+                                if editingPlaceID == p.id {
+                                    TextField("Place", text: $editingText)
+                                        .textFieldStyle(.roundedBorder)
+                                    Button("Save") {
+                                        onUpdatePlace(p.id, editingText)
+                                        editingPlaceID = nil
+                                        editingText = ""
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                } else {
+                                    Text(p.place)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                                    Button("Edit") {
+                                        editingPlaceID = p.id
+                                        editingText = p.place
+                                    }
+                                    .font(.caption)
+                                }
+
+                                if selectedToDelete.contains(p.id) {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(.blue)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                if selectedToDelete.contains(p.id) {
+                                    selectedToDelete.remove(p.id)
+                                } else {
+                                    selectedToDelete.insert(p.id)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Sensitivity")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Delete") {
+                        onDeletePlaces(selectedToDelete)
+                        selectedToDelete.removeAll()
+                    }
+                    .disabled(selectedToDelete.isEmpty)
+                }
+            }
+        }
+    }
+}
+
+private struct AttachmentsSheet: View {
+    let title: String
+    let weekStart: Date
+    let actionId: UUID
+    let attachments: [PlannedChunkActionAttachment]
+
+    let onAddLink: (String) -> Void
+    let onAddNote: (String) -> Void
+    let onAddFile: (URL, Data, String) -> Void
+    let onDelete: (Set<UUID>) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var linkText: String = ""
+    @State private var noteText: String = ""
+    @State private var selectedToDelete: Set<UUID> = []
+
+    @State private var isFileImporterPresented: Bool = false
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section(title) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 10) {
+                            TextField("Add link…", text: $linkText)
+                                .textFieldStyle(.roundedBorder)
+                            Button("Add") {
+                                onAddLink(linkText)
+                                linkText = ""
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(linkText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Add note")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            TextEditor(text: $noteText)
+                                .frame(height: 90)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(Color.secondary.opacity(0.25))
+                                )
+                            Button("Add Note") {
+                                onAddNote(noteText)
+                                noteText = ""
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
+
+                        Button("Attach file…") {
+                            isFileImporterPresented = true
+                        }
+                    }
+                }
+
+                Section("Added") {
+                    if attachments.isEmpty {
+                        Text("No attachments yet.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(attachments) { a in
+                            HStack(alignment: .top, spacing: 10) {
+                                Image(systemName: iconName(for: a))
+                                    .foregroundStyle(.secondary)
+
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(titleText(for: a))
+                                        .font(.subheadline)
+                                        .foregroundStyle(.primary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+
+                                if selectedToDelete.contains(a.id) {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(.blue)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                if selectedToDelete.contains(a.id) {
+                                    selectedToDelete.remove(a.id)
+                                } else {
+                                    selectedToDelete.insert(a.id)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .fileImporter(
+                isPresented: $isFileImporterPresented,
+                allowedContentTypes: [.item],
+                allowsMultipleSelection: false
+            ) { result in
+                switch result {
+                case .success(let urls):
+                    guard let url = urls.first else { return }
+                    do {
+                        // macOS: security-scoped bookmarks are available; iOS/iPadOS: use minimal bookmark.
+                        // NOTE: if you need long-term access on iOS, consider copying the file into your sandbox
+                        // and storing that URL instead of relying on bookmarks.
+                        #if os(macOS)
+                        let bookmark = try url.bookmarkData(
+                            options: .withSecurityScope,
+                            includingResourceValuesForKeys: nil,
+                            relativeTo: nil
+                        )
+                        #else
+                        let bookmark = try url.bookmarkData(
+                            options: .minimalBookmark,
+                            includingResourceValuesForKeys: nil,
+                            relativeTo: nil
+                        )
+                        #endif
+                        onAddFile(url, bookmark, url.lastPathComponent)
+                    } catch {
+                        // If bookmark fails, we avoid inserting a broken attachment.
+                    }
+                case .failure:
+                    break
+                }
+            }
+            .navigationTitle("Attachments")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Delete") {
+                        onDelete(selectedToDelete)
+                        selectedToDelete.removeAll()
+                    }
+                    .disabled(selectedToDelete.isEmpty)
+                }
+            }
+        }
+    }
+
+    private func iconName(for a: PlannedChunkActionAttachment) -> String {
+        switch a.kind {
+        case .link: return "link"
+        case .note: return "note.text"
+        case .file: return "doc"
+        }
+    }
+
+    private func titleText(for a: PlannedChunkActionAttachment) -> String {
+        switch a.kind {
+        case .link:
+            return a.urlString ?? "(link)"
+        case .note:
+            let t = a.noteText ?? ""
+            return t.isEmpty ? "(note)" : t
+        case .file:
+            return a.fileName ?? "(file)"
         }
     }
 }
@@ -2937,7 +3718,6 @@ private enum FulfillmentCategoryColors {
         }
     }
 
-    // NEW: saturated/accent color used for Step 5 icon toggles.
     static func accentColor(for categoryTitle: String) -> Color {
         switch categoryTitle {
         case "Career & Business": return .blue

@@ -35,9 +35,15 @@ struct loomApp: App {
                 PlannedChunk.self,
                 PlannedChunkAction.self,
 
-                // NEW: Step 4 persistence
+                // Step 4 persistence
                 PlannedChunkStepFourState.self,
                 PlannedChunkOutcomeLink.self,
+
+                // Step 5 persistence
+                PlannedChunkActionDefineState.self,
+                PlannedChunkActionLeverageItem.self,
+                PlannedChunkActionSensitivityPlace.self,
+                PlannedChunkActionAttachment.self,
             ]
         )
     }

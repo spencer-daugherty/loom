@@ -755,3 +755,206 @@ final class PlannedChunkAction {
     }
 }
 
+// MARK: - Step 5 (Define) persistence
+/// One row per (weekStart, PlannedChunkAction.id).
+/// Stores Step 5 metadata like must, time estimate, leverage, sensitivity, attachments.
+@Model
+final class PlannedChunkActionDefineState {
+    @Attribute(.unique) var id: UUID
+
+    var weekStart: Date
+    var plannedChunkActionId: UUID
+
+    /// Mirrors the action order (1-based or 0-based is up to you; we store 0-based to match sortOrder).
+    var rank: Int
+
+    /// “Must” / priority star.
+    var isMust: Bool
+
+    /// Optional time estimate in minutes.
+    var timeEstimateMinutes: Int?
+
+    /// Sensitivity: time-of-day flags
+    var sensitiveMorning: Bool
+    var sensitiveAfternoon: Bool
+    var sensitiveEvening: Bool
+
+    var updatedAt: Date
+
+    /// Unique key: "\(dayKey)|\(plannedChunkActionId)"
+    @Attribute(.unique) var weekActionKey: String
+
+    init(
+        id: UUID = .init(),
+        weekStart: Date,
+        plannedChunkActionId: UUID,
+        rank: Int = 0,
+        isMust: Bool = false,
+        timeEstimateMinutes: Int? = nil,
+        sensitiveMorning: Bool = false,
+        sensitiveAfternoon: Bool = false,
+        sensitiveEvening: Bool = false,
+        updatedAt: Date = .now
+    ) {
+        self.id = id
+        self.weekStart = weekStart
+        self.plannedChunkActionId = plannedChunkActionId
+        self.rank = rank
+        self.isMust = isMust
+        self.timeEstimateMinutes = timeEstimateMinutes
+        self.sensitiveMorning = sensitiveMorning
+        self.sensitiveAfternoon = sensitiveAfternoon
+        self.sensitiveEvening = sensitiveEvening
+        self.updatedAt = updatedAt
+
+        let dayKey = PlannedChunkActionDefineState.dayKey(from: weekStart)
+        self.weekActionKey = "\(dayKey)|\(plannedChunkActionId.uuidString)"
+    }
+
+    private static func dayKey(from date: Date) -> String {
+        let cal = Calendar.current
+        let comps = cal.dateComponents([.year, .month, .day], from: date)
+        let y = comps.year ?? 0
+        let m = comps.month ?? 0
+        let d = comps.day ?? 0
+        return String(format: "%04d-%02d-%02d", y, m, d)
+    }
+}
+
+enum ActionLeverageKind: String, Codable, CaseIterable, Identifiable {
+    case person
+    case tool
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .person: return "Person"
+        case .tool: return "Tool"
+        }
+    }
+}
+
+/// Many leverage entries per action (person/tool + value).
+@Model
+final class PlannedChunkActionLeverageItem {
+    @Attribute(.unique) var id: UUID
+
+    var weekStart: Date
+    var plannedChunkActionId: UUID
+
+    /// "person" or "tool"
+    var kindRaw: String
+    var value: String
+
+    var createdAt: Date
+
+    init(
+        id: UUID = .init(),
+        weekStart: Date,
+        plannedChunkActionId: UUID,
+        kindRaw: String,
+        value: String,
+        createdAt: Date = .now
+    ) {
+        self.id = id
+        self.weekStart = weekStart
+        self.plannedChunkActionId = plannedChunkActionId
+        self.kindRaw = kindRaw
+        self.value = value
+        self.createdAt = createdAt
+    }
+
+    var kind: ActionLeverageKind {
+        get { ActionLeverageKind(rawValue: kindRaw) ?? .person }
+        set { kindRaw = newValue.rawValue }
+    }
+}
+
+/// Sensitivity places per action (editable list).
+@Model
+final class PlannedChunkActionSensitivityPlace {
+    @Attribute(.unique) var id: UUID
+
+    var weekStart: Date
+    var plannedChunkActionId: UUID
+
+    var place: String
+    var createdAt: Date
+
+    init(
+        id: UUID = .init(),
+        weekStart: Date,
+        plannedChunkActionId: UUID,
+        place: String,
+        createdAt: Date = .now
+    ) {
+        self.id = id
+        self.weekStart = weekStart
+        self.plannedChunkActionId = plannedChunkActionId
+        self.place = place
+        self.createdAt = createdAt
+    }
+}
+
+enum ActionAttachmentKind: String, Codable, CaseIterable, Identifiable {
+    case link
+    case note
+    case file
+
+    var id: String { rawValue }
+}
+
+/// Attachments per action.
+/// - link: store urlString
+/// - note: store noteText
+/// - file: store security-scoped bookmark + filename
+@Model
+final class PlannedChunkActionAttachment {
+    @Attribute(.unique) var id: UUID
+
+    var weekStart: Date
+    var plannedChunkActionId: UUID
+
+    var kindRaw: String
+
+    /// Used for link
+    var urlString: String?
+
+    /// Used for note
+    var noteText: String?
+
+    /// Used for file
+    var fileName: String?
+    var fileBookmarkData: Data?
+
+    var createdAt: Date
+
+    init(
+        id: UUID = .init(),
+        weekStart: Date,
+        plannedChunkActionId: UUID,
+        kindRaw: String,
+        urlString: String? = nil,
+        noteText: String? = nil,
+        fileName: String? = nil,
+        fileBookmarkData: Data? = nil,
+        createdAt: Date = .now
+    ) {
+        self.id = id
+        self.weekStart = weekStart
+        self.plannedChunkActionId = plannedChunkActionId
+        self.kindRaw = kindRaw
+        self.urlString = urlString
+        self.noteText = noteText
+        self.fileName = fileName
+        self.fileBookmarkData = fileBookmarkData
+        self.createdAt = createdAt
+    }
+
+    var kind: ActionAttachmentKind {
+        get { ActionAttachmentKind(rawValue: kindRaw) ?? .link }
+        set { kindRaw = newValue.rawValue }
+    }
+}
+
