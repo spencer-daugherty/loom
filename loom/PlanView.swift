@@ -1540,16 +1540,17 @@ struct PlanStepFourView: View {
 
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("Actions Related To:")
+                Text("actions related to:")
                     .font(.caption)
-                    .fontWeight(.bold)
-                    .foregroundStyle(.secondary)
+                    .fontWeight(.regular)
+                    .foregroundStyle(.black)
 
                 Spacer(minLength: 0)
 
                 Text(chunk.label)
                     .font(.subheadline)
                     .fontWeight(.semibold)
+                    .foregroundStyle(.black)
                     .frame(maxWidth: .infinity, alignment: .trailing)
                     .lineLimit(1)
             }
@@ -1560,11 +1561,11 @@ struct PlanStepFourView: View {
                 Text("RESULT")
                     .font(.caption)
                     .fontWeight(.bold)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.black)
                 Spacer()
                 Text("What do I want?")
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.black)
             }
 
             TextField("Stand out as a rising star and get a raise!", text: resultBinding)
@@ -1578,17 +1579,17 @@ struct PlanStepFourView: View {
                 HStack(spacing: 10) {
                     Image(systemName: targetIconName)
                         .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.black)
                     Text("Connect Outcome(s)")
                         .font(.subheadline)
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(.black)
                     Spacer(minLength: 0)
                     Text("optional")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.black)
                     Image(systemName: "chevron.right")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.black)
                 }
                 .padding(10)
                 .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
@@ -1609,11 +1610,11 @@ struct PlanStepFourView: View {
                         HStack(spacing: 10) {
                             Image(systemName: targetIconName)
                                 .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(.black)
 
                             Text(outcome.outcome)
                                 .font(.subheadline)
-                                .foregroundStyle(.primary)
+                                .foregroundStyle(.black)
                                 .lineLimit(2)
                                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -1622,7 +1623,7 @@ struct PlanStepFourView: View {
                             } label: {
                                 Image(systemName: "xmark.circle.fill")
                                     .font(.system(size: 18, weight: .semibold))
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(.black)
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel("Remove outcome")
@@ -1646,11 +1647,11 @@ struct PlanStepFourView: View {
                 Text("PURPOSE")
                     .font(.caption)
                     .fontWeight(.bold)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.black)
                 Spacer()
                 Text("Why do I want it?")
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.black)
             }
 
             Button {
@@ -1659,24 +1660,24 @@ struct PlanStepFourView: View {
                 HStack(spacing: 10) {
                     Image(systemName: "trophy")
                         .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.black)
 
                     Text("Connect Role")
                         .font(.subheadline)
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(.black)
 
                     Spacer(minLength: 0)
 
                     if let selectedRoleName = selectedRoleName(for: chunk) {
                         Text(selectedRoleName)
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.black)
                             .lineLimit(1)
                     }
 
                     Image(systemName: "chevron.right")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.black)
                 }
                 .padding(10)
                 .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
@@ -1701,7 +1702,7 @@ struct PlanStepFourView: View {
                 Text("ACTIONS")
                     .font(.caption)
                     .fontWeight(.bold)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.black)
                 Spacer()
             }
 
@@ -1709,7 +1710,7 @@ struct PlanStepFourView: View {
                 ForEach(actions) { action in
                     Text("• \(action.text)")
                         .font(.subheadline)
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(.black)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
