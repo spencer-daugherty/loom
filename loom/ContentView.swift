@@ -149,6 +149,12 @@ struct ContentView: View {
                 ActionView()
             }
         }
+        .onChange(of: isActivePlan) { _, newValue in
+            // When Plan Step 5 activates the plan, automatically launch ActionView.
+            if newValue == true {
+                playSheetDestination = .action
+            }
+        }
         .onAppear {
             // Ensure singleton exists, but DO NOT auto-activate.
             _ = ActivePlanState.fetchOrCreate(in: modelContext)

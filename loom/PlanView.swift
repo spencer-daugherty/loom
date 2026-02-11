@@ -2085,10 +2085,6 @@ struct PlanStepFiveView: View {
     @Query(sort: \PlannedChunkActionAttachment.createdAt, order: .forward)
     private var attachments: [PlannedChunkActionAttachment]
 
-    // Active state (Start button)
-    @Query(sort: \ActivePlanState.id, order: .forward)
-    private var activePlanStates: [ActivePlanState]
-
     // UI sheets
     private struct SheetActionID: Identifiable, Hashable { let id: UUID }
     @State private var clockSheetActionID: SheetActionID? = nil
@@ -2105,6 +2101,12 @@ struct PlanStepFiveView: View {
 
     // “Try start without durations” feedback
     @State private var shouldHighlightMissingDurations: Bool = false
+
+    // Confirmation dialog for Start
+    @State private var isShowingStartConfirmation: Bool = false
+
+    // Robust "did anything change?" trigger for routine saving
+    @State private var step5ChangeTick: Int = 0
 
     private var secondaryButtonTextColor: Color {
         colorScheme == .dark ? Color(.secondaryLabel) : .black
@@ -2188,7 +2190,7 @@ struct PlanStepFiveView: View {
 
                 Button {
                     if isStep5StartEnabled {
-                        startPlan()
+                        isShowingStartConfirmation = true
                     } else {
                         triggerMissingDurationsFeedback()
                     }
@@ -2205,6 +2207,20 @@ struct PlanStepFiveView: View {
         .safeAreaPadding(.top)
         .safeAreaPadding(.bottom)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .confirmationDialog(
+            "Ready to Start?",
+            isPresented: $isShowingStartConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Start") {
+                confirmStartPlanAndDismiss()
+            }
+            Button("Return", role: .cancel) {
+                // stay on page
+            }
+        } message: {
+            Text("Make sure you've defined all of your actions.")
+        }
         .sheet(isPresented: $isShowingInstructions) {
             StepFiveInstructionsPopup()
                 .presentationDetents([.medium, .large])
@@ -2218,7 +2234,7 @@ struct PlanStepFiveView: View {
                         st.timeEstimateMinutes = minutes
                         st.updatedAt = .now
                     }
-                    scheduleStep5Autosave()
+                    markStep5DirtyAndAutosave()
                 }
             )
             .presentationDetents([.height(340), .medium])
@@ -2232,35 +2248,28 @@ struct PlanStepFiveView: View {
                     let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !trimmed.isEmpty else { return }
 
-                    // Upsert (by normalized key) to keep catalog universal and deduped.
                     let key = "\(kind.rawValue.lowercased())|\(trimmed.lowercased())"
-                    if let existing = leverageCatalog.first(where: { $0.kindValueKey == key }) {
-                        _ = existing
-                    } else {
-                        let item = LeverageResource(kindRaw: kind.rawValue, value: trimmed)
-                        modelContext.insert(item)
+                    if leverageCatalog.first(where: { $0.kindValueKey == key }) == nil {
+                        modelContext.insert(LeverageResource(kindRaw: kind.rawValue, value: trimmed))
                     }
-                    try? modelContext.save()
+                    markStep5DirtyAndAutosave()
                 },
                 onDeleteCatalogItems: { ids in
                     for it in leverageCatalog where ids.contains(it.id) {
-                        // Delete selections pointing to this resource
                         for sel in leverageSelections where sel.resourceId == it.id {
                             sel.resourceId = nil
                             sel.updatedAt = .now
                         }
                         modelContext.delete(it)
                     }
-                    try? modelContext.save()
-                    scheduleStep5Autosave()
+                    markStep5DirtyAndAutosave()
                 },
                 onSelectResource: { resourceId in
                     upsertLeverageSelection(forActionId: wrapper.id) { sel in
                         sel.resourceId = resourceId
                         sel.updatedAt = .now
                     }
-                    try? modelContext.save()
-                    scheduleStep5Autosave()
+                    markStep5DirtyAndAutosave()
                 }
             )
             .presentationDetents([.medium, .large])
@@ -2277,8 +2286,7 @@ struct PlanStepFiveView: View {
                             st.sensitiveEvening = newValue.sensitiveEvening
                             st.updatedAt = .now
                         }
-                        try? modelContext.save()
-                        scheduleStep5Autosave()
+                        markStep5DirtyAndAutosave()
                     }
                 ),
                 placesCatalog: placesCatalog,
@@ -2292,23 +2300,20 @@ struct PlanStepFiveView: View {
                         return
                     }
                     modelContext.insert(SensitivityPlaceCatalogItem(place: trimmed))
-                    try? modelContext.save()
+                    markStep5DirtyAndAutosave()
                 },
                 onDeleteCatalogPlaces: { ids in
                     for p in placesCatalog where ids.contains(p.id) {
-                        // Remove links pointing to this place.
                         for link in placeLinks where link.placeId == p.id {
                             modelContext.delete(link)
                         }
                         modelContext.delete(p)
                     }
-                    try? modelContext.save()
-                    scheduleStep5Autosave()
+                    markStep5DirtyAndAutosave()
                 },
                 onTogglePlaceSelected: { placeId in
                     togglePlaceSelection(actionId: wrapper.id, placeId: placeId)
-                    try? modelContext.save()
-                    scheduleStep5Autosave()
+                    markStep5DirtyAndAutosave()
                 }
             )
             .presentationDetents([.medium, .large])
@@ -2324,17 +2329,16 @@ struct PlanStepFiveView: View {
                             n.noteText = newValue
                             n.updatedAt = .now
                         }
-                        scheduleStep5Autosave()
+                        markStep5DirtyAndAutosave()
                     }
                 ),
                 onSaveNote: {
-                    try? modelContext.save()
-                    scheduleStep5Autosave()
+                    markStep5DirtyAndAutosave()
                 },
                 onAddLink: { urlString in
                     let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !trimmed.isEmpty else { return }
-                    let att = PlannedChunkActionAttachment(
+                    modelContext.insert(PlannedChunkActionAttachment(
                         weekStart: currentWeekStart,
                         plannedChunkActionId: wrapper.id,
                         kindRaw: ActionAttachmentKind.link.rawValue,
@@ -2342,13 +2346,11 @@ struct PlanStepFiveView: View {
                         fileName: nil,
                         fileBookmarkData: nil,
                         createdAt: .now
-                    )
-                    modelContext.insert(att)
-                    try? modelContext.save()
-                    scheduleStep5Autosave()
+                    ))
+                    markStep5DirtyAndAutosave()
                 },
-                onAddFile: { url, bookmarkData, fileName in
-                    let att = PlannedChunkActionAttachment(
+                onAddFile: { _, bookmarkData, fileName in
+                    modelContext.insert(PlannedChunkActionAttachment(
                         weekStart: currentWeekStart,
                         plannedChunkActionId: wrapper.id,
                         kindRaw: ActionAttachmentKind.file.rawValue,
@@ -2356,16 +2358,13 @@ struct PlanStepFiveView: View {
                         fileName: fileName,
                         fileBookmarkData: bookmarkData,
                         createdAt: .now
-                    )
-                    modelContext.insert(att)
-                    try? modelContext.save()
-                    scheduleStep5Autosave()
+                    ))
+                    markStep5DirtyAndAutosave()
                 },
                 onDeleteAttachment: { attId in
                     if let a = attachments.first(where: { $0.id == attId }) {
                         modelContext.delete(a)
-                        try? modelContext.save()
-                        scheduleStep5Autosave()
+                        markStep5DirtyAndAutosave()
                     }
                 }
             )
@@ -2390,7 +2389,12 @@ struct PlanStepFiveView: View {
             ensureLeverageSelectionRowsExistForWeek()
             ensureNoteRowsExistForWeek()
         }
+        // Central "routine save" trigger: any meaningful change bumps tick -> debounced save runs.
+        .onChange(of: step5ChangeTick) { _, _ in
+            scheduleStep5Autosave()
+        }
         .onDisappear {
+            // Flush any last ordering changes as you leave, so it round-trips exactly.
             step5AutosaveTask?.cancel()
             persistStep5ForWeekNow()
         }
@@ -2474,7 +2478,7 @@ struct PlanStepFiveView: View {
                     st.isMust = isOn
                     st.updatedAt = .now
                 }
-                scheduleStep5Autosave()
+                markStep5DirtyAndAutosave()
             },
             onOpenClock: { actionId in
                 clockSheetActionID = SheetActionID(id: actionId)
@@ -2488,12 +2492,16 @@ struct PlanStepFiveView: View {
             onOpenAttachments: { actionId in
                 attachmentsSheetActionID = SheetActionID(id: actionId)
             },
+            onLocalOrderChanged: { newOrder in
+                // Persist ordering continuously (debounced) so Step 5 round-trips.
+                applyOrderPersisting(newOrder)
+            },
             onCommitReorder: { newOrder in
-                applyReorder(newOrder)
+                applyOrderPersisting(newOrder)
             }
         )
 
-        func applyReorder(_ newOrder: [PlannedChunkAction]) {
+        func applyOrderPersisting(_ newOrder: [PlannedChunkAction]) {
             // Persist action ordering
             for (idx, action) in newOrder.enumerated() {
                 if action.sortOrder != idx {
@@ -2509,8 +2517,7 @@ struct PlanStepFiveView: View {
                 }
             }
 
-            try? modelContext.save()
-            scheduleStep5Autosave()
+            markStep5DirtyAndAutosave()
         }
     }
 
@@ -2545,6 +2552,10 @@ struct PlanStepFiveView: View {
         let onOpenSensitivity: (UUID) -> Void
         let onOpenAttachments: (UUID) -> Void
 
+        /// Called continuously as the local order changes (dragging).
+        let onLocalOrderChanged: ([PlannedChunkAction]) -> Void
+
+        /// Called after a drop finishes.
         let onCommitReorder: ([PlannedChunkAction]) -> Void
 
         private var forcedDarkTextColor: Color { .black }
@@ -2596,6 +2607,10 @@ struct PlanStepFiveView: View {
             }
             .onChange(of: actions.map(\.id)) { _, _ in
                 localActions = actions
+            }
+            // Persist as you drag so coming back is identical.
+            .onChange(of: localActions.map(\.id)) { _, _ in
+                onLocalOrderChanged(localActions)
             }
         }
 
@@ -2761,7 +2776,6 @@ struct PlanStepFiveView: View {
             var body: some View {
                 HStack(alignment: .center, spacing: 10) {
                     VStack(alignment: .leading, spacing: 10) {
-                        // Removed number prefix (1., 2., ...)
                         Text(text)
                             .font(.subheadline)
                             .foregroundStyle(actionTextColor)
@@ -2771,8 +2785,7 @@ struct PlanStepFiveView: View {
                             iconButton(
                                 systemName: isMust ? "star.square.fill" : "star.square",
                                 isOn: isMust,
-                                onTap: onToggleMust,
-                                overrideColor: nil
+                                onTap: onToggleMust
                             )
 
                             clockButton(
@@ -2785,22 +2798,19 @@ struct PlanStepFiveView: View {
                             iconButton(
                                 systemName: hasLeverage ? "person.fill" : "person",
                                 isOn: hasLeverage,
-                                onTap: onTapPerson,
-                                overrideColor: nil
+                                onTap: onTapPerson
                             )
 
                             iconButton(
                                 systemName: hasSensitivity ? "gearshape.fill" : "gearshape",
                                 isOn: hasSensitivity,
-                                onTap: onTapGear,
-                                overrideColor: nil
+                                onTap: onTapGear
                             )
 
                             iconButton(
                                 systemName: hasAttachments ? "paperclip.circle.fill" : "paperclip",
                                 isOn: hasAttachments,
-                                onTap: onTapPaperclip,
-                                overrideColor: nil
+                                onTap: onTapPaperclip
                             )
                         }
                         .font(.system(size: 14 * iconScale, weight: .semibold))
@@ -2821,19 +2831,14 @@ struct PlanStepFiveView: View {
                 )
             }
 
-            private func iconButton(
-                systemName: String,
-                isOn: Bool,
-                onTap: @escaping () -> Void,
-                overrideColor: Color?
-            ) -> some View {
+            private func iconButton(systemName: String, isOn: Bool, onTap: @escaping () -> Void) -> some View {
                 Button {
                     withAnimation(.easeInOut(duration: 0.14)) {
                         onTap()
                     }
                 } label: {
                     Image(systemName: systemName)
-                        .foregroundStyle(overrideColor ?? (isOn ? accent : Color(.systemGray)))
+                        .foregroundStyle(isOn ? accent : Color(.systemGray))
                         .frame(width: 26, height: 26)
                         .contentShape(Rectangle())
                         .accessibilityLabel(systemName)
@@ -2951,7 +2956,7 @@ struct PlanStepFiveView: View {
             mutate(st)
             modelContext.insert(st)
         }
-        try? modelContext.save()
+        // NOTE: No direct save here; we debounce saves centrally.
     }
 
     private func ensureDefineStatesExistForWeek() {
@@ -2963,7 +2968,7 @@ struct PlanStepFiveView: View {
                 Calendar.current.isDate(st.weekStart, inSameDayAs: week) && st.plannedChunkActionId == action.id
             }
             if !exists {
-                let st = PlannedChunkActionDefineState(
+                modelContext.insert(PlannedChunkActionDefineState(
                     weekStart: week,
                     plannedChunkActionId: action.id,
                     rank: action.sortOrder,
@@ -2973,11 +2978,10 @@ struct PlanStepFiveView: View {
                     sensitiveAfternoon: true,
                     sensitiveEvening: true,
                     updatedAt: .now
-                )
-                modelContext.insert(st)
+                ))
             }
         }
-        try? modelContext.save()
+        markStep5DirtyAndAutosave()
     }
 
     private func upsertLeverageSelection(forActionId actionId: UUID, mutate: (PlannedChunkActionLeverageSelection) -> Void) {
@@ -2995,7 +2999,7 @@ struct PlanStepFiveView: View {
             mutate(sel)
             modelContext.insert(sel)
         }
-        try? modelContext.save()
+        // NOTE: No direct save here; we debounce saves centrally.
     }
 
     private func ensureLeverageSelectionRowsExistForWeek() {
@@ -3014,7 +3018,7 @@ struct PlanStepFiveView: View {
                 ))
             }
         }
-        try? modelContext.save()
+        markStep5DirtyAndAutosave()
     }
 
     private func currentLeverageSelectionResourceId(forActionId actionId: UUID) -> UUID? {
@@ -3068,7 +3072,7 @@ struct PlanStepFiveView: View {
             mutate(n)
             modelContext.insert(n)
         }
-        try? modelContext.save()
+        // NOTE: No direct save here; we debounce saves centrally.
     }
 
     private func ensureNoteRowsExistForWeek() {
@@ -3087,7 +3091,7 @@ struct PlanStepFiveView: View {
                 ))
             }
         }
-        try? modelContext.save()
+        markStep5DirtyAndAutosave()
     }
 
     private func attachmentsForAction(_ actionId: UUID) -> [PlannedChunkActionAttachment] {
@@ -3118,6 +3122,10 @@ struct PlanStepFiveView: View {
         }
     }
 
+    private func markStep5DirtyAndAutosave() {
+        step5ChangeTick &+= 1
+    }
+
     private func scheduleStep5Autosave() {
         step5AutosaveTask?.cancel()
         step5AutosaveTask = Task { @MainActor in
@@ -3126,12 +3134,11 @@ struct PlanStepFiveView: View {
         }
     }
 
-    /// Step 5 persistence is mostly “already persisted” as the user acts (we insert/update models immediately).
-    /// This function ensures rank stays synced and we flush saves.
+    /// Routine Step 5 persistence:
+    /// - ensures rank mirrors current action sort order
+    /// - then performs a single SwiftData save
+    @MainActor
     private func persistStep5ForWeekNow() {
-        let week = currentWeekStart
-
-        // Sync ranks from current persisted sortOrder
         let actions = plannedActionsForWeek()
         for action in actions {
             upsertDefineState(forActionId: action.id) { st in
@@ -3139,7 +3146,6 @@ struct PlanStepFiveView: View {
                 st.updatedAt = .now
             }
         }
-
         try? modelContext.save()
     }
 
@@ -3150,11 +3156,10 @@ struct PlanStepFiveView: View {
         }
     }
 
-    private func startPlan() {
+    private func confirmStartPlanAndDismiss() {
         step5AutosaveTask?.cancel()
         persistStep5ForWeekNow()
 
-        // Ensure ActivePlanState exists and is active for this week.
         let state = ActivePlanState.fetchOrCreate(in: modelContext)
         state.isActive = true
         state.activatedAt = .now
@@ -3257,7 +3262,6 @@ private struct LeverageSheet: View {
                     } else {
                         ForEach(filteredCatalog) { item in
                             Button {
-                                // single selection
                                 if localSelection == item.id {
                                     localSelection = nil
                                 } else {
@@ -3346,8 +3350,7 @@ private struct LeverageSheet: View {
     }
 
     private var filteredCatalog: [LeverageResource] {
-        leverageCatalog
-            .sorted { $0.createdAt < $1.createdAt }
+        leverageCatalog.sorted { $0.createdAt < $1.createdAt }
     }
 }
 
@@ -3405,7 +3408,6 @@ private struct SensitivitySheet: View {
                         }
                     }
 
-                    // Moved “Add place…” to bottom
                     HStack(spacing: 10) {
                         TextField("Add place…", text: $newPlace)
                             .textFieldStyle(.roundedBorder)
@@ -3427,7 +3429,6 @@ private struct SensitivitySheet: View {
             }
         }
         .onAppear {
-            // Ensure default all-on if a blank state slipped through.
             if defineState.sensitiveMorning == false &&
                 defineState.sensitiveAfternoon == false &&
                 defineState.sensitiveEvening == false {
@@ -3442,7 +3443,6 @@ private struct SensitivitySheet: View {
         Binding(
             get: { defineState[keyPath: keyPath] },
             set: { newValue in
-                // rule: allow up to 2 toggled off (i.e. at least 1 remains ON)
                 let current = (
                     morning: defineState.sensitiveMorning,
                     afternoon: defineState.sensitiveAfternoon,
@@ -3455,10 +3455,7 @@ private struct SensitivitySheet: View {
                 if keyPath == \.sensitiveEvening { proposed.evening = newValue }
 
                 let onCount = [proposed.morning, proposed.afternoon, proposed.evening].filter { $0 }.count
-                guard onCount >= 1 else {
-                    // prevent all-off
-                    return
-                }
+                guard onCount >= 1 else { return }
 
                 defineState[keyPath: keyPath] = newValue
             }
@@ -3484,7 +3481,6 @@ private struct AttachmentsSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                // Notes stays near top
                 Section("Notes") {
                     TextEditor(text: $noteText)
                         .frame(height: 120)
@@ -3500,7 +3496,6 @@ private struct AttachmentsSheet: View {
                     .disabled(noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
 
-                // Renamed from “Added” -> “Attached”
                 Section("Attached") {
                     if attachments.isEmpty {
                         Text("No attachments yet.")
@@ -3530,7 +3525,6 @@ private struct AttachmentsSheet: View {
                     }
                 }
 
-                // Moved to bottom; renamed to “Files and Links”
                 Section("Files and Links") {
                     HStack(spacing: 10) {
                         TextField("Add link…", text: $linkText)
@@ -3572,7 +3566,7 @@ private struct AttachmentsSheet: View {
                         #endif
                         onAddFile(url, bookmark, url.lastPathComponent)
                     } catch {
-                        // If bookmark fails, we avoid inserting a broken attachment.
+                        // ignore
                     }
                 case .failure:
                     break
