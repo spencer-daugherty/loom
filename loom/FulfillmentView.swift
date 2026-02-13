@@ -135,6 +135,7 @@ struct FulfillmentView: View {
     @State private var newFocusText = ""
     @State private var isAddingResource = false
     @State private var newResourceText = ""
+    @State private var isShowingInstructions = false
     @FocusState private var focusedField: Field?
     private enum Field { case vision, purpose, role, focus, resource }
 
@@ -146,59 +147,75 @@ struct FulfillmentView: View {
     private let lightOrange = Color(red: 1.00, green: 0.90, blue: 0.70)
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                ZStack {
-                    if isAddingRole || isAddingFocus || isAddingResource {
-                        Color.clear
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                commitInlineIfNeeded()
-                                focusedField = nil
-                            }
-                    }
-
-                    VStack(spacing: 16) {
-                        ForEach(categories) { cat in
-                            card(
-                                id: cat.id,
-                                title: cat.title,
-                                iconName: batteryIconName(for: cat.title),
-                                color: cat.color,
-                                lightColor: lightColor(for: cat.id)
-                            )
+        ScrollView {
+            ZStack {
+                if isAddingRole || isAddingFocus || isAddingResource {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            commitInlineIfNeeded()
+                            focusedField = nil
                         }
-                        Spacer()
-                    }
-                    .padding()
                 }
+
+                VStack(spacing: 16) {
+                    ForEach(categories) { cat in
+                        card(
+                            id: cat.id,
+                            title: cat.title,
+                            iconName: batteryIconName(for: cat.title),
+                            color: cat.color,
+                            lightColor: lightColor(for: cat.id)
+                        )
+                    }
+                    Spacer()
+                }
+                .padding()
             }
-            .navigationTitle("Fulfillment")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
+        }
+        .navigationTitle("Fulfillment")
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    isShowingInstructions = true
+                } label: {
                     Image(systemName: "graduationcap")
                         .font(.title2)
                 }
+                .buttonStyle(.plain)
             }
-            .toolbar {
-                ToolbarItemGroup(placement: .keyboard) {
-                    if focusedField == .purpose {
-                        Spacer()
-                        Button("Done") { focusedField = nil }
-                    }
+            ToolbarItemGroup(placement: .keyboard) {
+                if focusedField == .purpose {
+                    Spacer(minLength: 0)
+                    Button("Done") { focusedField = nil }
                 }
             }
-            .onChange(of: focusedField) { _, new in
-                commitInlineExcluding(new)
+        }
+        .onChange(of: focusedField) { _, new in
+            commitInlineExcluding(new)
+        }
+        .task {
+            ensureCategoryRecordsExist()
+        }
+        .sheet(isPresented: $isShowingInstructions) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Instructions")
+                    .font(.headline)
+                Text("Placeholder instructions text for Fulfillment.")
+                    .font(.body)
+                Spacer(minLength: 0)
             }
+            .padding()
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
         }
     }
 
     private func commitInlineIfNeeded() {
         guard let openID = expandedCardID,
-              let cat = categories.first(where: { $0.id == openID })
+              let cat = categories.first(where: { $0.id == openID }),
+              let record = fulfillmentRecord(for: cat.title)
         else { return }
-        let record = getOrCreateFulfillment(category: cat.title)
 
         if isAddingRole {
             let trimmed = newRoleText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -222,9 +239,9 @@ struct FulfillmentView: View {
     
     private func commitInlineExcluding(_ keepOpen: Field?) {
         guard let openID = expandedCardID,
-              let cat = categories.first(where: { $0.id == openID })
+              let cat = categories.first(where: { $0.id == openID }),
+              let record = fulfillmentRecord(for: cat.title)
         else { return }
-        let record = getOrCreateFulfillment(category: cat.title)
 
         if isAddingRole && keepOpen != .role {
             let trimmed = newRoleText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -254,32 +271,32 @@ struct FulfillmentView: View {
         color: Color,
         lightColor: Color
     ) -> some View {
-        let record = getOrCreateFulfillment(category: title)
-        let isExpanded = (expandedCardID == id)
+        if let record = fulfillmentRecord(for: title) {
+            let isExpanded = (expandedCardID == id)
 
-        VStack(spacing: 0) {
-            HStack {
-                Image(systemName: iconName)
-                    .foregroundColor(.white)
-                Text(title)
-                    .font(.headline)
-                    .fontWeight(.black)
-                    .foregroundColor(.white)
-                Spacer()
-                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                    .foregroundColor(.white)
-            }
-            .padding()
-            .background(color)
-            .contentShape(Rectangle())
-            .onTapGesture {
-                withAnimation(.easeInOut) {
-                    expandedCardID = isExpanded ? nil : id
+            VStack(spacing: 0) {
+                HStack {
+                    Image(systemName: iconName)
+                        .foregroundColor(.white)
+                    Text(title)
+                        .font(.headline)
+                        .fontWeight(.black)
+                        .foregroundColor(.white)
+                    Spacer()
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .foregroundColor(.white)
                 }
-            }
+                .padding()
+                .background(color)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    withAnimation(.easeInOut) {
+                        expandedCardID = isExpanded ? nil : id
+                    }
+                }
 
-            if isExpanded {
-                VStack(alignment: .leading, spacing: 16) {
+                if isExpanded {
+                    VStack(alignment: .leading, spacing: 16) {
                     Text("Vision")
                         .font(.headline)
                         .foregroundColor(.black)
@@ -310,6 +327,7 @@ struct FulfillmentView: View {
                         .font(.headline)
                         .foregroundColor(.black)
                     List {
+                        let rolesForRecord = getRoles(for: record)
                         ForEach(getRoles(for: record), id: \.id) { r in
                             Text(r.role)
                         }
@@ -335,7 +353,7 @@ struct FulfillmentView: View {
                             }
                             .padding(.vertical, 4)
                             .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
-                        } else {
+                        } else if rolesForRecord.count < 3 {
                             HStack {
                                 Button("Add Role") {
                                     withAnimation { isAddingRole = true }
@@ -357,6 +375,7 @@ struct FulfillmentView: View {
                         .font(.headline)
                         .foregroundColor(.black)
                     List {
+                        let fociForRecord = getFoci(for: record)
                         ForEach(getFoci(for: record), id: \.id) { f in
                             Text(f.activity)
                         }
@@ -382,7 +401,7 @@ struct FulfillmentView: View {
                             }
                             .padding(.vertical, 4)
                             .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
-                        } else {
+                        } else if fociForRecord.count < 3 {
                             HStack {
                                 Button("Add Focus") {
                                     withAnimation { isAddingFocus = true }
@@ -448,20 +467,23 @@ struct FulfillmentView: View {
                     .frame(height: CGFloat(getResources(for: record).count + (isAddingResource ? 1 : 1)) * estimatedListRowHeight())
 
                     PassionsSectionView(record: record)
+                    }
+                    .padding()
+                    .background(lightColor)
                 }
-                .padding()
-                .background(lightColor)
             }
-        }
-        .onReceive(NotificationCenter.default.publisher(
-            for: UIResponder.keyboardWillShowNotification
-        )) { _ in
-            if expandedCardID == id {
-                expandedCardID = id
+            .onReceive(NotificationCenter.default.publisher(
+                for: UIResponder.keyboardWillShowNotification
+            )) { _ in
+                if expandedCardID == id {
+                    expandedCardID = id
+                }
             }
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .shadow(color: Color.black.opacity(0.1), radius: 6, x: 0, y: 3)
+        } else {
+            EmptyView()
         }
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: Color.black.opacity(0.1), radius: 6, x: 0, y: 3)
     }
 
     private func lightColor(for id: String) -> Color {
@@ -508,13 +530,19 @@ struct FulfillmentView: View {
 
     // MARK: - Data Helpers
 
-    private func getOrCreateFulfillment(category: String) -> Fulfillment {
-        if let existing = fulfillments.first(where: { $0.category == category }) {
-            return existing
-        } else {
-            let f = Fulfillment(category: category)
+    private func fulfillmentRecord(for category: String) -> Fulfillment? {
+        fulfillments.first(where: { $0.category == category })
+    }
+
+    private func ensureCategoryRecordsExist() {
+        var insertedAny = false
+        for cat in categories where fulfillmentRecord(for: cat.title) == nil {
+            let f = Fulfillment(category: cat.title)
             modelContext.insert(f)
-            return f
+            insertedAny = true
+        }
+        if insertedAny {
+            try? modelContext.save()
         }
     }
 
@@ -557,6 +585,7 @@ struct FulfillmentView: View {
 
     private func addRole(text: String, record: Fulfillment) {
         guard !text.isEmpty else { return }
+        guard getRoles(for: record).count < 3 else { return }
         let nextRank = (getRoles(for: record).map(\.rank).max() ?? 0) + 1
         let r = FulfillmentRoles(category_id: record.category_id, role: text, rank: nextRank)
         modelContext.insert(r)
@@ -632,6 +661,7 @@ struct FulfillmentView: View {
 
     private func addFocus(text: String, record: Fulfillment) {
         guard !text.isEmpty else { return }
+        guard getFoci(for: record).count < 3 else { return }
         let nextRank = (getFoci(for: record).map(\.rank).max() ?? 0) + 1
         let f = FulfillmentFocus(category_id: record.category_id, activity: text, rank: nextRank)
         modelContext.insert(f)
@@ -719,4 +749,3 @@ struct FulfillmentView: View {
         }
     }
 }
-

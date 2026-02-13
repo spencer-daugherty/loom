@@ -60,6 +60,7 @@ struct DrivingForceView: View {
     @State private var visionText: String = ""
     @State private var purposeText: String = ""
     @State private var addStates: [String: AddState] = [:]
+    @State private var isShowingInstructions: Bool = false
     @FocusState private var focusedField: Field?
     
     var body: some View {
@@ -119,8 +120,13 @@ struct DrivingForceView: View {
                 }
             }
             ToolbarItem(placement: .navigationBarTrailing) {
-                Image(systemName: "graduationcap")
-                    .font(.title2)
+                Button {
+                    isShowingInstructions = true
+                } label: {
+                    Image(systemName: "graduationcap")
+                        .font(.title2)
+                }
+                .buttonStyle(.plain)
             }
         }
         .navigationTitle("Driving Force")
@@ -138,8 +144,20 @@ struct DrivingForceView: View {
                 purposeText = existing.ultimatePurpose
             }
         }
+        .sheet(isPresented: $isShowingInstructions) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Instructions")
+                    .font(.headline)
+                Text("Placeholder instructions text for Driving Force.")
+                    .font(.body)
+                Spacer(minLength: 0)
+            }
+            .padding()
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
+        }
     }
-    
+
     private func textEditorSection(
         title: String,
         text: Binding<String>,

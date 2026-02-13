@@ -176,6 +176,7 @@ struct ContentView: View {
         .onAppear {
             // Ensure singleton exists, but DO NOT auto-activate.
             _ = ActivePlanState.fetchOrCreate(in: modelContext)
+            ensureFulfillmentCategoriesExist()
 
             // Ensure splash shows for at least 1 second
             DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
@@ -185,6 +186,25 @@ struct ContentView: View {
             }
         }
         .tint(Color.accentColor)
+    }
+
+    private func ensureFulfillmentCategoriesExist() {
+        let titles = [
+            "Career & Business",
+            "Leadership & Impact",
+            "Wealth & Lifestyle",
+            "Mind & Meaning",
+            "Love & Relationships",
+            "Health & Vitality",
+        ]
+        var insertedAny = false
+        for title in titles where !fulfillments.contains(where: { $0.category == title }) {
+            modelContext.insert(Fulfillment(category: title))
+            insertedAny = true
+        }
+        if insertedAny {
+            try? modelContext.save()
+        }
     }
     
     @Query(sort: \DrivingForce.updatedAt, order: .reverse)

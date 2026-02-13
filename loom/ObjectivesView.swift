@@ -160,12 +160,6 @@ struct ObjectivesView: View {
             }
         }
         .navigationTitle("Objectives")
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Image(systemName: "graduationcap")
-                    .font(.title2)
-            }
-        }
         .background(
             Color.clear
                 .contentShape(Rectangle())
@@ -570,4 +564,3 @@ extension UIColor {
         return UIColor(red: red, green: green, blue: blue, alpha: alpha)
     }
 }
-
