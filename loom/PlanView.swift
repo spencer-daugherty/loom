@@ -2,6 +2,23 @@ import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
 
+private struct PlanStepProgressBar: View {
+    let current: Int
+    let total: Int
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(1...total, id: \.self) { index in
+                Capsule()
+                    .fill(index <= current ? Color.accentColor : Color(.systemGray4))
+                    .frame(width: 26, height: 4)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Step \(current) of \(total)")
+    }
+}
+
 /// Step 1 of a multi-step flow.
 /// UI-only: Three one-line text fields with a bottom-pinned "Next" + "Close" button.
 struct PlanView: View {
@@ -75,11 +92,14 @@ struct PlanView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
-            Text("Weekly Planning")
-                .font(.largeTitle)
-                .fontWeight(.bold)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.top, 8)
+            VStack(spacing: 1) {
+                PlanStepProgressBar(current: 1, total: 5)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                Text("Weekly Planning")
+                    .font(.largeTitle)
+                    .fontWeight(.bold)
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("Power Question")
@@ -449,11 +469,14 @@ struct PlanStepTwoView: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            Text("Capture")
-                .font(.largeTitle)
-                .fontWeight(.bold)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.top, 8)
+            VStack(spacing: 1) {
+                PlanStepProgressBar(current: 2, total: 5)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                Text("Capture")
+                    .font(.largeTitle)
+                    .fontWeight(.bold)
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
 
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: "info.circle")
@@ -601,7 +624,7 @@ struct PlanStepTwoView: View {
                 Button("Return", role: .cancel) { }
             },
             message: {
-                Text("Make sure you've entered all current actions on your mind that need to be completed soon.")
+                Text("Make sure you've entered all actions that need to be done soon.")
             }
         )
         .onAppear {
@@ -804,13 +827,41 @@ struct PlanStepThreeView: View {
         return FulfillmentCategoryColors.lightColor(for: categoryName)
     }
 
+    private func formatShortDate(_ date: Date) -> String {
+        let cal = Calendar.current
+        let nowYear = cal.component(.year, from: Date())
+        let year = cal.component(.year, from: date)
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        if year == nowYear {
+            formatter.setLocalizedDateFormatFromTemplate("Md")
+        } else {
+            formatter.setLocalizedDateFormatFromTemplate("Mdyy")
+        }
+        return formatter.string(from: date)
+    }
+
+    private func hiddenStatusText(for item: RollingCaptureItem) -> String? {
+        guard showHidden else { return nil }
+        if let d = item.unhiddenAt {
+            return "Unhidden " + formatShortDate(d)
+        }
+        if item.isGhost, let scheduled = item.unhideDate {
+            return "Hidden until " + formatShortDate(scheduled)
+        }
+        return nil
+    }
+
     var body: some View {
         VStack(spacing: 12) {
-            Text("Chunk")
-                .font(.largeTitle)
-                .fontWeight(.bold)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.top, 8)
+            VStack(spacing: 1) {
+                PlanStepProgressBar(current: 3, total: 5)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                Text("Chunk")
+                    .font(.largeTitle)
+                    .fontWeight(.bold)
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
 
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: "info.circle")
@@ -867,10 +918,15 @@ struct PlanStepThreeView: View {
                 ) { EmptyView() }
                 .labelsHidden()
                 .disabled(hasHiddenActionInAnyChunk)
+                .tint(hasHiddenActionInAnyChunk ? Color.blue.opacity(0.65) : .blue)
 
                 Image(systemName: hiddenUntilLaterIconName)
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(showHidden ? .blue : .secondary)
+                    .foregroundStyle(
+                        showHidden
+                        ? (hasHiddenActionInAnyChunk ? Color.blue.opacity(0.65) : .blue)
+                        : .secondary
+                    )
                     .accessibilityHidden(true)
 
                 Text("Show Actions Hidden Until Later")
@@ -885,6 +941,7 @@ struct PlanStepThreeView: View {
                     rowView(
                         text: item.text,
                         showGhostOutline: item.isGhost,
+                        hiddenStatusText: hiddenStatusText(for: item),
                         isDraggable: true,
                         dragPayload: DragPayload(itemID: item.id)
                     )
@@ -1106,12 +1163,19 @@ struct PlanStepThreeView: View {
     private func rowView(
         text: String,
         showGhostOutline: Bool,
+        hiddenStatusText: String?,
         isDraggable: Bool,
         dragPayload: DragPayload?
     ) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(text)
                 .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let hiddenStatusText {
+                Text(hiddenStatusText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
                 .foregroundStyle(.secondary)
@@ -1272,13 +1336,14 @@ struct PlanStepThreeView: View {
                     .padding(.vertical, 14)
                     .frame(maxWidth: .infinity)
             } else {
-                ForEach(chunkItems(for: chunkIndex)) { item in
-                    rowView(
-                        text: item.text,
-                        showGhostOutline: item.isGhost,
-                        isDraggable: true,
-                        dragPayload: DragPayload(itemID: item.id)
-                    )
+                    ForEach(chunkItems(for: chunkIndex)) { item in
+                        rowView(
+                            text: item.text,
+                            showGhostOutline: item.isGhost,
+                            hiddenStatusText: hiddenStatusText(for: item),
+                            isDraggable: true,
+                            dragPayload: DragPayload(itemID: item.id)
+                        )
                     .contentShape(Rectangle())
                     .dropDestination(for: DragPayload.self) { payloads, _ in
                         guard let payload = payloads.first else { return false }
@@ -1845,11 +1910,14 @@ struct PlanStepFourView: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            Text("Plan")
-                .font(.largeTitle)
-                .fontWeight(.bold)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.top, 8)
+            VStack(spacing: 1) {
+                PlanStepProgressBar(current: 4, total: 5)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                Text("Plan")
+                    .font(.largeTitle)
+                    .fontWeight(.bold)
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
 
             instructionsRow
 
@@ -2399,8 +2467,9 @@ struct PlanStepFourView: View {
                         .fontWeight(.bold)
                         .foregroundStyle(forcedDarkTextColor)
                     Spacer()
-                    Text("How can I best acheive it now?")
+                    Text("How can I achieve it now?")
                         .font(.subheadline)
+                        .italic()
                         .foregroundStyle(forcedDarkTextColor)
                 }
 
@@ -2707,11 +2776,14 @@ struct PlanStepFiveView: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            Text("Define")
-                .font(.largeTitle)
-                .fontWeight(.bold)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.top, 8)
+            VStack(spacing: 1) {
+                PlanStepProgressBar(current: 5, total: 5)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                Text("Define")
+                    .font(.largeTitle)
+                    .fontWeight(.bold)
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
 
             instructionsRow
 
@@ -3289,7 +3361,7 @@ struct PlanStepFiveView: View {
                         .fontWeight(.bold)
                         .foregroundStyle(forcedDarkTextColor)
                     Spacer()
-                    Text("Drag to reorder")
+                    Text("Drag to reorder importance")
                         .font(.subheadline)
                         .foregroundStyle(forcedDarkTextColor)
                 }
