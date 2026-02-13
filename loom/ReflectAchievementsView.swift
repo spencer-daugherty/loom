@@ -1076,8 +1076,8 @@ private struct ReflectionLoadingStyleLinesBackground: View {
                         let phase = rand(i * 17 + 3, 0.0, 1.0)
                         let posFrac = (t * speed + phase).truncatingRemainder(dividingBy: 1)
 
-                        let amp = rand(i * 23 + 5, 24.0, 64.0) // exaggerated waves
-                        let freq = rand(i * 29 + 9, 1.8, 4.8)
+                        let amp = rand(i * 23 + 5, 34.0, 82.0) // larger vertical travel for more pronounced waves
+                        let freq = rand(i * 29 + 9, 2.4, 6.2)
                         let sigma = rand(i * 31 + 11, 0.08, 0.16)
                         let wobblePhase = rand(i * 37 + 13, 0.0, 2 * .pi)
 
@@ -1099,7 +1099,7 @@ private struct ReflectionLoadingStyleLinesBackground: View {
                             let pulse = sin(pulseArg) * amp * envelope
                             let swellArg = twoPi * (s * (freq * 0.45) + t * speed * 0.25) + wobblePhase * 0.7
                             let swell = sin(swellArg) * (amp * 0.6)
-                            let wiggle = (pulse + swell) * sin(Double.pi * s) * 0.5
+                            let wiggle = (pulse + swell) * sin(Double.pi * s) * 0.62
 
                             let baseLineY = baseY + (endY - baseY) * CGFloat(s)
                             var y = baseLineY + CGFloat(wiggle)
@@ -1119,13 +1119,13 @@ private struct ReflectionLoadingStyleLinesBackground: View {
                             if j == 0 { path.move(to: point) } else { path.addLine(to: point) }
                         }
 
-                        let tailStartFrac: CGFloat = 0.85
+                        let tailStartFrac: CGFloat = 0.72
                         let baseOpacity: Double = 0.11
                         let tailGradient = Gradient(stops: [
                             .init(color: color.opacity(baseOpacity), location: 0.0),
-                            .init(color: color.opacity(baseOpacity * 0.75), location: Double(tailStartFrac)),
-                            .init(color: color.opacity(baseOpacity * 0.18), location: 0.90),
-                            .init(color: color.opacity(baseOpacity * 0.03), location: 0.95),
+                            .init(color: color.opacity(baseOpacity * 0.72), location: Double(tailStartFrac)),
+                            .init(color: color.opacity(baseOpacity * 0.15), location: 0.84),
+                            .init(color: color.opacity(baseOpacity * 0.03), location: 0.92),
                             .init(color: color.opacity(0.0), location: 1.0),
                         ])
 
@@ -1176,10 +1176,10 @@ private struct ReflectionLoadingStyleLinesBackground: View {
                 let startX = leftInset
                 let endX = max(startX + 40, focusX - circleRadius)
                 let lineLength = max(1, endX - startX)
-                let fadeStartX = endX - (lineLength * 0.25) // last 25% of line run
+                let fadeStartX = endX - (lineLength * 0.48) // longer fade run before the radar
 
                 let fadeStart = max(0, min(1, fadeStartX / w))
-                let fadeMid = max(fadeStart, min(1, (endX - (lineLength * 0.08)) / w))
+                let fadeMid = max(fadeStart, min(1, (endX - (lineLength * 0.16)) / w))
                 let fadeEnd = max(fadeMid, min(1, endX / w))
                 LinearGradient(
                     stops: [

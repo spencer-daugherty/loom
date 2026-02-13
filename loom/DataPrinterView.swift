@@ -437,7 +437,6 @@ struct ModelFilter: Identifiable, Hashable {
 // MARK: - Main View
 struct DataPrinterView: View {
     @Environment(\.modelContext) private var context
-    @State private var showingDeleteActionBlocksAlert = false
     @State private var showingMigrationResultAlert = false
     @State private var migrationResultMessage = ""
 
@@ -469,29 +468,10 @@ struct DataPrinterView: View {
                         Text("Manage Raw Data")
                     }
                 }
-
-                Button(role: .destructive) {
-                    showingDeleteActionBlocksAlert = true
-                } label: {
-                    HStack {
-                        Text("Delete Action Blocks")
-                        Spacer()
-                        Image(systemName: "trash")
-                    }
-                }
             }
         }
         .listStyle(.plain)
-        .tint(.red)
         .navigationTitle("All Data")
-        .alert("Delete all Action Blocks?", isPresented: $showingDeleteActionBlocksAlert) {
-            Button("Cancel", role: .cancel) { }
-            Button("Delete", role: .destructive) {
-                performDeleteActionBlocks()
-            }
-        } message: {
-            Text("This will permanently delete all chunk block planning/action records.")
-        }
         .alert("Legacy Migration", isPresented: $showingMigrationResultAlert) {
             Button("OK", role: .cancel) { }
         } message: {
@@ -499,30 +479,6 @@ struct DataPrinterView: View {
         }
         .onAppear {
             runLegacyArchiveMigrationIfNeeded()
-        }
-    }
-
-    private func performDeleteActionBlocks() {
-        deleteAll(PlanChunkSelection.self)
-        deleteAll(PlannedChunk.self)
-        deleteAll(PlannedChunkAction.self)
-        deleteAll(PlannedChunkStepFourState.self)
-        deleteAll(PlannedChunkOutcomeLink.self)
-        deleteAll(PlannedChunkActionDefineState.self)
-        deleteAll(PlannedChunkActionExecutionState.self)
-        deleteAll(PlannedChunkActionLeverageSelection.self)
-        deleteAll(PlannedChunkActionSensitivityPlaceLink.self)
-        deleteAll(PlannedChunkActionNote.self)
-        deleteAll(PlannedChunkActionAttachment.self)
-        try? context.save()
-    }
-
-    private func deleteAll<T: PersistentModel>(_ type: T.Type) {
-        let fd = FetchDescriptor<T>()
-        if let rows = try? context.fetch(fd) {
-            for row in rows {
-                context.delete(row)
-            }
         }
     }
 
@@ -733,6 +689,7 @@ struct ManageRawDataView: View {
     @State private var showingDeleteAlert = false
     @State private var showingFilterSheet = false
     @State private var selectedFilters = Set<String>()
+    @State private var showDeveloperData = false
 
     private let availableFilters: [ModelFilter] = [
         .init(id: "vision", name: "Ultimate Vision"),
@@ -779,6 +736,18 @@ struct ManageRawDataView: View {
         .init(id: "reflect", name: "Reflection Archive"),
         .init(id: "reflectAction", name: "Reflection Archive Action"),
         .init(id: "reflectOutcome", name: "Reflection Archive Outcome"),
+    ]
+
+    private let developerFilterIDs: Set<String> = [
+        "join",
+        "joinArch",
+        "activePlan",
+        "planLabel",
+        "planSelect",
+        "chunkOutcome",
+        "leverageSel",
+        "placeLink",
+        "adhoc",
     ]
 
     @Query(sort: \DrivingForce.updatedAt, order: .reverse) private var drivingForces: [DrivingForce]
@@ -934,11 +903,21 @@ struct ManageRawDataView: View {
             DataItem(id: "reflectOutcome-\($0.id.uuidString)", source: "Reflection Archive Outcome", content: $0.outcomeText, date: $0.weekStart, emotion: nil, additionalFields: ["Category": $0.category])
         }
 
+        let visibleItems: [DataItem]
+        if showDeveloperData {
+            visibleItems = allItems
+        } else {
+            visibleItems = allItems.filter { item in
+                guard let prefix = item.id.split(separator: "-").first else { return true }
+                return !developerFilterIDs.contains(String(prefix))
+            }
+        }
+
         let filtered: [DataItem]
         if selectedFilters.isEmpty {
-            filtered = allItems
+            filtered = visibleItems
         } else {
-            filtered = allItems.filter { item in
+            filtered = visibleItems.filter { item in
                 guard let prefix = item.id.split(separator: "-").first else { return false }
                 return selectedFilters.contains(String(prefix))
             }
@@ -946,8 +925,15 @@ struct ManageRawDataView: View {
         return filtered.sorted { $0.date > $1.date }
     }
 
+    private var visibleFilters: [ModelFilter] {
+        if showDeveloperData { return availableFilters }
+        return availableFilters.filter { !developerFilterIDs.contains($0.id) }
+    }
+
     var body: some View {
         List(selection: $selection) {
+            Toggle("Developer", isOn: $showDeveloperData)
+
             ForEach(items) { item in
                 NavigationLink {
                     DataPrinterDetailView(item: item)
@@ -1007,9 +993,14 @@ struct ManageRawDataView: View {
         }
         .sheet(isPresented: $showingFilterSheet) {
             FilterView(
-                availableFilters: availableFilters,
+                availableFilters: visibleFilters,
                 selectedFilters: $selectedFilters
             )
+        }
+        .onChange(of: showDeveloperData) { _, isOn in
+            if !isOn {
+                selectedFilters.subtract(developerFilterIDs)
+            }
         }
     }
 
