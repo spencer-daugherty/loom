@@ -19,6 +19,9 @@ struct PlanView: View {
     private var allReflectionArchives: [ActionBlocksReflectionArchive]
 
     @State private var navigateToStep2: Bool = false
+    @State private var showStep1ValidationHint: Bool = false
+    @State private var shouldHighlightStep1Validation: Bool = false
+    @State private var step1ValidationResetWorkItem: DispatchWorkItem?
     @FocusState private var focusedField: Field?
     private enum Field: Hashable { case morning, grateful, incantation }
     private let stepOneFreshStartCleanupKeyPrefix = "plan_step1_fresh_start_cleanup_done"
@@ -54,6 +57,18 @@ struct PlanView: View {
         incantation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    private var isMorningMissing: Bool {
+        morningPowerQuestion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var isGratefulMissing: Bool {
+        gratefulFor.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var isIncantationMissing: Bool {
+        incantation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     private var secondaryButtonTextColor: Color {
         colorScheme == .dark ? Color(.secondaryLabel) : .black
     }
@@ -78,6 +93,13 @@ struct PlanView: View {
                     .submitLabel(.next)
                     .focused($focusedField, equals: .morning)
                     .onSubmit { focusedField = .grateful }
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(
+                                shouldHighlightStep1Validation && isMorningMissing ? Color.red.opacity(0.75) : Color.clear,
+                                lineWidth: shouldHighlightStep1Validation && isMorningMissing ? 1.5 : 0
+                            )
+                    )
             }
             .padding(.top, 16)
 
@@ -89,6 +111,13 @@ struct PlanView: View {
                     .submitLabel(.next)
                     .focused($focusedField, equals: .grateful)
                     .onSubmit { focusedField = .incantation }
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(
+                                shouldHighlightStep1Validation && isGratefulMissing ? Color.red.opacity(0.75) : Color.clear,
+                                lineWidth: shouldHighlightStep1Validation && isGratefulMissing ? 1.5 : 0
+                            )
+                    )
             }
 
             VStack(alignment: .leading, spacing: 8) {
@@ -106,6 +135,13 @@ struct PlanView: View {
                         if isNextDisabled { return }
                         saveStepOneAndAdvance()
                     }
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(
+                                shouldHighlightStep1Validation && isIncantationMissing ? Color.red.opacity(0.75) : Color.clear,
+                                lineWidth: shouldHighlightStep1Validation && isIncantationMissing ? 1.5 : 0
+                            )
+                    )
             }
 
             Spacer(minLength: 0)
@@ -125,16 +161,39 @@ struct PlanView: View {
                 )
 
                 Button {
-                    saveStepOneAndAdvance()
+                    if isNextDisabled {
+                        triggerStep1ValidationFeedback()
+                    } else {
+                        shouldHighlightStep1Validation = false
+                        showStep1ValidationHint = false
+                        saveStepOneAndAdvance()
+                    }
                 } label: {
                     Text("Next")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(isNextDisabled)
+                .tint(isNextDisabled ? Color(.systemGray3) : .accentColor)
             }
         }
         .padding(.horizontal)
+        .overlay(alignment: .bottom) {
+            if showStep1ValidationHint {
+                Text("Please complete")
+                    .font(.footnote)
+                    .fontWeight(.bold)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .padding(10)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color.black.opacity(0.12), lineWidth: 1)
+                    )
+                    .padding(.bottom, 56)
+                    .transition(.opacity)
+            }
+        }
         .safeAreaPadding(.top)
         .safeAreaPadding(.bottom)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -165,6 +224,24 @@ struct PlanView: View {
 
             DispatchQueue.main.async {
                 focusedField = .morning
+            }
+        }
+        .onChange(of: morningPowerQuestion) { _, _ in
+            if !isNextDisabled {
+                shouldHighlightStep1Validation = false
+                showStep1ValidationHint = false
+            }
+        }
+        .onChange(of: gratefulFor) { _, _ in
+            if !isNextDisabled {
+                shouldHighlightStep1Validation = false
+                showStep1ValidationHint = false
+            }
+        }
+        .onChange(of: incantation) { _, _ in
+            if !isNextDisabled {
+                shouldHighlightStep1Validation = false
+                showStep1ValidationHint = false
             }
         }
     }
@@ -207,6 +284,23 @@ struct PlanView: View {
 
         try? modelContext.save()
         navigateToStep2 = true
+    }
+
+    private func triggerStep1ValidationFeedback() {
+        step1ValidationResetWorkItem?.cancel()
+        shouldHighlightStep1Validation = true
+        withAnimation(.easeInOut(duration: 0.15)) {
+            showStep1ValidationHint = true
+        }
+
+        let workItem = DispatchWorkItem {
+            shouldHighlightStep1Validation = false
+            withAnimation(.easeInOut(duration: 0.15)) {
+                showStep1ValidationHint = false
+            }
+        }
+        step1ValidationResetWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8, execute: workItem)
     }
 
     private func clearResidualWeekPlanningRowsForFreshStart() {
@@ -591,6 +685,9 @@ struct PlanStepThreeView: View {
     @State private var baselineChunks: [ChunkContainerState] = []
 
     @State private var isHydratingFromStorage: Bool = false
+    @State private var showStep3ValidationHint: Bool = false
+    @State private var shouldHighlightStep3Validation: Bool = false
+    @State private var step3ValidationResetWorkItem: DispatchWorkItem?
 
     private let hiddenUntilLaterIconName = "clock.arrow.trianglehead.clockwise.rotate.90.path.dotted"
     private let maxChunks = 5
@@ -638,6 +735,24 @@ struct PlanStepThreeView: View {
         let qualifying = qualifyingChunkIndices
         guard qualifying.count >= 2 else { return false }
         return qualifying.allSatisfy { chunks[$0].selectionLabelId != nil }
+    }
+
+    private var step3RelevantChunkIndices: [Int] {
+        chunks.indices.filter { $0 < 2 || !chunks[$0].itemIDs.isEmpty }
+    }
+
+    private var step3ChunksMissingMinimumActions: Set<Int> {
+        Set(step3RelevantChunkIndices.filter { chunks[$0].itemIDs.count < 3 })
+    }
+
+    private var step3ChunksMissingLabel: Set<Int> {
+        Set(step3RelevantChunkIndices.filter { chunks[$0].selectionLabelId == nil })
+    }
+
+    private var step3ChunksNeedingLabelOutline: Set<Int> {
+        Set(step3RelevantChunkIndices.filter {
+            chunks[$0].itemIDs.count >= 3 && chunks[$0].selectionLabelId == nil
+        })
     }
 
     private var isRefreshVisible: Bool {
@@ -847,17 +962,48 @@ struct PlanStepThreeView: View {
                 )
 
                 Button {
-                    if let onNext { onNext() }
+                    if isStep3NextEnabled {
+                        shouldHighlightStep3Validation = false
+                        showStep3ValidationHint = false
+                        if let onNext { onNext() }
+                    } else {
+                        triggerStep3ValidationFeedback()
+                    }
                 } label: {
                     Text("Next")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(!isStep3NextEnabled)
+                .tint(isStep3NextEnabled ? .accentColor : Color(.systemGray3))
             }
             .padding(.bottom, 2)
         }
         .padding(.horizontal)
+        .overlay(alignment: .bottom) {
+            if showStep3ValidationHint {
+                VStack(alignment: .center, spacing: 6) {
+                    Text("Complete your chunks")
+                        .font(.footnote)
+                        .fontWeight(.bold)
+                    Text("• 2 or more chunks")
+                        .font(.footnote)
+                    Text("• 3 or more actions per chunk")
+                        .font(.footnote)
+                    Text("• Select label")
+                        .font(.footnote)
+                }
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: true, vertical: false)
+                .padding(10)
+                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Color.black.opacity(0.12), lineWidth: 1)
+                )
+                .padding(.bottom, 56)
+                .transition(.opacity)
+            }
+        }
         .safeAreaPadding(.top)
         .safeAreaPadding(.bottom)
         .onAppear {
@@ -896,6 +1042,12 @@ struct PlanStepThreeView: View {
             enforceShowHiddenIfNeeded()
             syncPoolWithVisibility()
             persistStep3Plan()
+        }
+        .onChange(of: chunks) { _, _ in
+            if isStep3NextEnabled {
+                shouldHighlightStep3Validation = false
+                showStep3ValidationHint = false
+            }
         }
     }
 
@@ -1000,84 +1152,26 @@ struct PlanStepThreeView: View {
         let chunk = chunks[chunkIndex]
         let showDeleteX = chunkIndex >= 2
         let canDeleteThisChunk = canDeleteChunk(at: chunkIndex)
+        let hasTooFewActions = shouldHighlightStep3Validation && step3ChunksMissingMinimumActions.contains(chunkIndex)
+        let missingLabel = shouldHighlightStep3Validation && step3ChunksMissingLabel.contains(chunkIndex)
+        let shouldShowMissingLabelOutline = shouldHighlightStep3Validation && step3ChunksNeedingLabelOutline.contains(chunkIndex)
         let fill = chunkLightFillColor(categoryName: chunk.selectionCategory)
+        let headerTextColor: Color = (colorScheme == .dark && chunk.selectionLabelId != nil) ? .black : .secondary
+        let pickerTextColor: Color = missingLabel ? .red : .primary
+        let cardOverlayColor: Color = hasTooFewActions ? Color.red.opacity(0.7) : (colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.18))
+        let cardBackgroundOverlay: Color = hasTooFewActions ? Color.red.opacity(colorScheme == .dark ? 0.15 : 0.08) : .clear
+        let cardOverlayWidth: CGFloat = hasTooFewActions ? 1.6 : 1
 
         VStack(spacing: 10) {
-            HStack(alignment: .center, spacing: 6) {
-                Text("Actions Related To:")
-                    .font(.caption)
-                    .fontWeight(.bold)
-                    .foregroundStyle((colorScheme == .dark && chunk.selectionLabelId != nil) ? Color.black : Color.secondary)
-
-                Picker(
-                    "",
-                    selection: Binding(
-                        get: { chunks[chunkIndex].selectionLabelId },
-                        set: { newValue in
-                            setChunkSelection(chunkIndex: chunkIndex, toLabelId: newValue)
-                            persistStep3Plan()
-                        }
-                    )
-                ) {
-                    Text("Select…").tag(UUID?.none)
-
-                    ForEach(labelsByCategory(for: chunkIndex), id: \.category) { section in
-                        Section(section.category) {
-                            ForEach(section.labels, id: \.labelId) { label in
-                                Text(label.label)
-                                    .tag(Optional(label.labelId))
-                            }
-                        }
-                    }
-                }
-                .pickerStyle(.menu)
-
-                Spacer(minLength: 0)
-
-                if showDeleteX {
-                    Button {
-                        deleteChunkContainerIfAllowed(at: chunkIndex)
-                        persistStep3Plan()
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                            .opacity(canDeleteThisChunk ? 1.0 : 0.35)
-                            .accessibilityLabel("Delete chunk")
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!canDeleteThisChunk)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            VStack(spacing: 0) {
-                if chunk.itemIDs.isEmpty {
-                    Text("Drag actions here")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .padding(.vertical, 14)
-                        .frame(maxWidth: .infinity)
-                } else {
-                    ForEach(chunkItems(for: chunkIndex)) { item in
-                        rowView(
-                            text: item.text,
-                            showGhostOutline: item.isGhost,
-                            isDraggable: true,
-                            dragPayload: DragPayload(itemID: item.id)
-                        )
-                        .contentShape(Rectangle())
-                        .dropDestination(for: DragPayload.self) { payloads, _ in
-                            guard let payload = payloads.first else { return false }
-                            moveItem(payload.itemID, toChunkAt: chunkIndex)
-
-                            enforceShowHiddenIfNeeded()
-                            persistStep3Plan()
-                            return true
-                        }
-                    }
-                }
-            }
+            chunkHeaderView(
+                chunkIndex: chunkIndex,
+                headerTextColor: headerTextColor,
+                pickerTextColor: pickerTextColor,
+                shouldShowMissingLabelOutline: shouldShowMissingLabelOutline,
+                showDeleteX: showDeleteX,
+                canDeleteThisChunk: canDeleteThisChunk
+            )
+            chunkItemsView(chunkIndex: chunkIndex, chunk: chunk)
         }
         .padding(12)
         .frame(maxWidth: .infinity)
@@ -1085,9 +1179,13 @@ struct PlanStepThreeView: View {
             RoundedRectangle(cornerRadius: 12)
                 .fill(fill)
         )
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(cardBackgroundOverlay)
+        )
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.18), lineWidth: 1)
+                .stroke(cardOverlayColor, lineWidth: cardOverlayWidth)
         )
         .dropDestination(for: DragPayload.self) { payloads, _ in
             guard let payload = payloads.first else { return false }
@@ -1096,6 +1194,102 @@ struct PlanStepThreeView: View {
             enforceShowHiddenIfNeeded()
             persistStep3Plan()
             return true
+        }
+    }
+
+    @ViewBuilder
+    private func chunkHeaderView(
+        chunkIndex: Int,
+        headerTextColor: Color,
+        pickerTextColor: Color,
+        shouldShowMissingLabelOutline: Bool,
+        showDeleteX: Bool,
+        canDeleteThisChunk: Bool
+    ) -> some View {
+        HStack(alignment: .center, spacing: 6) {
+            Text("Actions Related To:")
+                .font(.caption)
+                .fontWeight(.bold)
+                .foregroundStyle(headerTextColor)
+
+            Picker(
+                "",
+                selection: Binding(
+                    get: { chunks[chunkIndex].selectionLabelId },
+                    set: { newValue in
+                        setChunkSelection(chunkIndex: chunkIndex, toLabelId: newValue)
+                        persistStep3Plan()
+                    }
+                )
+            ) {
+                Text("Select…").tag(UUID?.none)
+
+                ForEach(labelsByCategory(for: chunkIndex), id: \.category) { section in
+                    Section(section.category) {
+                        ForEach(section.labels, id: \.labelId) { label in
+                            Text(label.label)
+                                .tag(Optional(label.labelId))
+                        }
+                    }
+                }
+            }
+            .pickerStyle(.menu)
+            .foregroundStyle(pickerTextColor)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(shouldShowMissingLabelOutline ? Color.red.opacity(0.75) : Color.clear, lineWidth: shouldShowMissingLabelOutline ? 1.5 : 0)
+            )
+
+            Spacer(minLength: 0)
+
+            if showDeleteX {
+                Button {
+                    deleteChunkContainerIfAllowed(at: chunkIndex)
+                    persistStep3Plan()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .opacity(canDeleteThisChunk ? 1.0 : 0.35)
+                        .accessibilityLabel("Delete chunk")
+                }
+                .buttonStyle(.plain)
+                .disabled(!canDeleteThisChunk)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func chunkItemsView(chunkIndex: Int, chunk: ChunkContainerState) -> some View {
+        VStack(spacing: 0) {
+            if chunk.itemIDs.isEmpty {
+                Text("Drag actions here")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 14)
+                    .frame(maxWidth: .infinity)
+            } else {
+                ForEach(chunkItems(for: chunkIndex)) { item in
+                    rowView(
+                        text: item.text,
+                        showGhostOutline: item.isGhost,
+                        isDraggable: true,
+                        dragPayload: DragPayload(itemID: item.id)
+                    )
+                    .contentShape(Rectangle())
+                    .dropDestination(for: DragPayload.self) { payloads, _ in
+                        guard let payload = payloads.first else { return false }
+                        moveItem(payload.itemID, toChunkAt: chunkIndex)
+
+                        enforceShowHiddenIfNeeded()
+                        persistStep3Plan()
+                        return true
+                    }
+                }
+            }
         }
     }
 
@@ -1482,6 +1676,24 @@ struct PlanStepThreeView: View {
         guard canDeleteChunk(at: index) else { return }
         chunks.remove(at: index)
     }
+
+    private func triggerStep3ValidationFeedback() {
+        step3ValidationResetWorkItem?.cancel()
+
+        shouldHighlightStep3Validation = true
+        withAnimation(.easeInOut(duration: 0.15)) {
+            showStep3ValidationHint = true
+        }
+
+        let workItem = DispatchWorkItem {
+            shouldHighlightStep3Validation = false
+            withAnimation(.easeInOut(duration: 0.15)) {
+                showStep3ValidationHint = false
+            }
+        }
+        step3ValidationResetWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8, execute: workItem)
+    }
 }
 
 // MARK: - Step 4
@@ -1542,6 +1754,9 @@ struct PlanStepFourView: View {
     private struct SheetChunkID: Identifiable, Hashable { let id: UUID }
     @State private var outcomeSheetChunkID: SheetChunkID? = nil
     @State private var roleSheetChunkID: SheetChunkID? = nil
+    @State private var showStep4ValidationHint: Bool = false
+    @State private var shouldHighlightStep4Validation: Bool = false
+    @State private var step4ValidationResetWorkItem: DispatchWorkItem?
 
     private let targetIconName = "scope"
 
@@ -1574,6 +1789,26 @@ struct PlanStepFourView: View {
             let roleOK = (selectedRoleIDByChunk[id] ?? nil) != nil
             return resultOK && roleNoteOK && roleOK
         }
+    }
+
+    private var step4MissingResultChunkIDs: Set<UUID> {
+        Set(plannedChunksForWeek.compactMap { chunk in
+            let isMissing = (resultTextByChunk[chunk.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            return isMissing ? chunk.id : nil
+        })
+    }
+
+    private var step4MissingPurposeChunkIDs: Set<UUID> {
+        Set(plannedChunksForWeek.compactMap { chunk in
+            let isMissing = (roleTextByChunk[chunk.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            return isMissing ? chunk.id : nil
+        })
+    }
+
+    private var step4MissingRoleChunkIDs: Set<UUID> {
+        Set(plannedChunksForWeek.compactMap { chunk in
+            (selectedRoleIDByChunk[chunk.id] ?? nil) == nil ? chunk.id : nil
+        })
     }
 
     private func selectedOutcomeIDs(excludingChunk chunkID: UUID?) -> Set<UUID> {
@@ -1654,17 +1889,48 @@ struct PlanStepFourView: View {
                 Button {
                     step4AutosaveTask?.cancel()
                     persistStep4ForWeekNow()
-                    if let onNext { onNext() }
+                    if isStep4NextEnabled {
+                        shouldHighlightStep4Validation = false
+                        showStep4ValidationHint = false
+                        if let onNext { onNext() }
+                    } else {
+                        triggerStep4ValidationFeedback()
+                    }
                 } label: {
                     Text("Next")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(!isStep4NextEnabled)
+                .tint(isStep4NextEnabled ? .accentColor : Color(.systemGray3))
             }
             .padding(.bottom, 2)
         }
         .padding(.horizontal)
+        .overlay(alignment: .bottom) {
+            if showStep4ValidationHint {
+                VStack(alignment: .center, spacing: 6) {
+                    Text("Complete your plan")
+                        .font(.footnote)
+                        .fontWeight(.bold)
+                    Text("• Result")
+                        .font(.footnote)
+                    Text("• Role")
+                        .font(.footnote)
+                    Text("• Purpose")
+                        .font(.footnote)
+                }
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: true, vertical: false)
+                .padding(10)
+                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Color.black.opacity(0.12), lineWidth: 1)
+                )
+                .padding(.bottom, 56)
+                .transition(.opacity)
+            }
+        }
         .safeAreaPadding(.top)
         .safeAreaPadding(.bottom)
         .sheet(isPresented: $isShowingInstructions) {
@@ -1709,6 +1975,12 @@ struct PlanStepFourView: View {
         }
         .onChange(of: plannedChunksForWeek.map(\.id)) { _, _ in
             hydrateStep4ForWeek()
+        }
+        .onChange(of: isStep4NextEnabled) { _, isEnabled in
+            if isEnabled {
+                shouldHighlightStep4Validation = false
+                showStep4ValidationHint = false
+            }
         }
         .onDisappear {
             step4AutosaveTask?.cancel()
@@ -1805,6 +2077,9 @@ struct PlanStepFourView: View {
             roleNoteText: roleNoteBinding,
             selectedOutcomeIDs: selectedOutcomeIDsBinding,
             selectedRoleID: selectedRoleIDBinding,
+            highlightMissingResult: shouldHighlightStep4Validation && step4MissingResultChunkIDs.contains(chunkID),
+            highlightMissingPurpose: shouldHighlightStep4Validation && step4MissingPurposeChunkIDs.contains(chunkID),
+            highlightMissingRoleSelection: shouldHighlightStep4Validation && step4MissingRoleChunkIDs.contains(chunkID),
             pasteFromCategoryTitle: chunk.category,
             canPasteCategoryPurpose: canPasteCategoryPurpose,
             onPasteCategoryPurpose: {
@@ -1846,6 +2121,10 @@ struct PlanStepFourView: View {
         @Binding var selectedOutcomeIDs: [UUID]
         @Binding var selectedRoleID: UUID?
 
+        let highlightMissingResult: Bool
+        let highlightMissingPurpose: Bool
+        let highlightMissingRoleSelection: Bool
+
         let pasteFromCategoryTitle: String
         let canPasteCategoryPurpose: Bool
         let onPasteCategoryPurpose: () -> Void
@@ -1886,6 +2165,13 @@ struct PlanStepFourView: View {
                     .textFieldStyle(.roundedBorder)
                     .submitLabel(.done)
                     .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(
+                                highlightMissingPurpose ? Color.red.opacity(0.75) : Color.clear,
+                                lineWidth: highlightMissingPurpose ? 1.5 : 0
+                            )
+                    )
 
                 pasteFromRow
 
@@ -1940,6 +2226,13 @@ struct PlanStepFourView: View {
                     .textFieldStyle(.roundedBorder)
                     .submitLabel(.done)
                     .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(
+                                highlightMissingResult ? Color.red.opacity(0.75) : Color.clear,
+                                lineWidth: highlightMissingResult ? 1.5 : 0
+                            )
+                    )
             }
         }
 
@@ -2083,7 +2376,10 @@ struct PlanStepFourView: View {
                         .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
                 }
                 .padding(10)
-                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                .background(
+                    (highlightMissingRoleSelection ? Color.red.opacity(0.25) : Color(.secondarySystemBackground)),
+                    in: RoundedRectangle(cornerRadius: 10)
+                )
                 .overlay(
                     RoundedRectangle(cornerRadius: 10)
                         .stroke(
@@ -2270,6 +2566,23 @@ struct PlanStepFourView: View {
         guard let fulfillment = fulfillmentForCategoryName(chunk.category) else { return [] }
         return rolesForCategoryID(fulfillment.category_id)
     }
+
+    private func triggerStep4ValidationFeedback() {
+        step4ValidationResetWorkItem?.cancel()
+        shouldHighlightStep4Validation = true
+        withAnimation(.easeInOut(duration: 0.15)) {
+            showStep4ValidationHint = true
+        }
+
+        let workItem = DispatchWorkItem {
+            shouldHighlightStep4Validation = false
+            withAnimation(.easeInOut(duration: 0.15)) {
+                showStep4ValidationHint = false
+            }
+        }
+        step4ValidationResetWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8, execute: workItem)
+    }
 }
 
 // MARK: - Step 5 (Define)
@@ -2348,6 +2661,7 @@ struct PlanStepFiveView: View {
 
     // “Try start without durations” feedback
     @State private var shouldHighlightMissingDurations: Bool = false
+    @State private var shouldHighlightMissingOptionalIcons: Bool = false
     @State private var showMissingDurationHint: Bool = false
 
     // Confirmation dialog for Start
@@ -2750,6 +3064,7 @@ struct PlanStepFiveView: View {
                 hasAnyAttachments(actionId: actionId)
             },
             shouldHighlightMissingDurations: shouldHighlightMissingDurations,
+            shouldHighlightMissingOptionalIcons: shouldHighlightMissingOptionalIcons,
             onToggleMust: { actionId, isOn in
                 upsertDefineState(forActionId: actionId) { st in
                     st.isMust = isOn
@@ -2823,6 +3138,7 @@ struct PlanStepFiveView: View {
         let hasAttachments: (UUID) -> Bool
 
         let shouldHighlightMissingDurations: Bool
+        let shouldHighlightMissingOptionalIcons: Bool
 
         let onToggleMust: (UUID, Bool) -> Void
         let onOpenClock: (UUID) -> Void
@@ -3003,6 +3319,7 @@ struct PlanStepFiveView: View {
                                 hasSensitivity: hasSensitivity(action.id),
                                 hasAttachments: hasAttachments(action.id),
                                 shouldHighlightMissingDuration: shouldHighlightMissingDurations && isMissingDuration,
+                                shouldHighlightOptionalIcons: shouldHighlightMissingOptionalIcons && isMissingDuration,
                                 onToggleMust: { onToggleMust(action.id, !isMust) },
                                 onTapClock: { onOpenClock(action.id) },
                                 onTapPerson: { onOpenLeverage(action.id) },
@@ -3042,6 +3359,7 @@ struct PlanStepFiveView: View {
             let hasAttachments: Bool
 
             let shouldHighlightMissingDuration: Bool
+            let shouldHighlightOptionalIcons: Bool
 
             let onToggleMust: () -> Void
             let onTapClock: () -> Void
@@ -3067,6 +3385,7 @@ struct PlanStepFiveView: View {
                             iconButton(
                                 systemName: isMust ? "star.square.fill" : "star.square",
                                 isOn: isMust,
+                                shouldHighlightCaution: shouldHighlightOptionalIcons,
                                 onTap: onToggleMust
                             )
 
@@ -3080,18 +3399,21 @@ struct PlanStepFiveView: View {
                             iconButton(
                                 systemName: leverageSystemName,
                                 isOn: hasLeverage,
+                                shouldHighlightCaution: shouldHighlightOptionalIcons,
                                 onTap: onTapPerson
                             )
 
                             iconButton(
                                 systemName: hasSensitivity ? "gearshape.fill" : "gearshape",
                                 isOn: hasSensitivity,
+                                shouldHighlightCaution: shouldHighlightOptionalIcons,
                                 onTap: onTapGear
                             )
 
                             iconButton(
                                 systemName: hasAttachments ? "paperclip.badge.ellipsis" : "paperclip",
                                 isOn: hasAttachments,
+                                shouldHighlightCaution: shouldHighlightOptionalIcons,
                                 onTap: onTapPaperclip
                             )
                         }
@@ -3113,14 +3435,25 @@ struct PlanStepFiveView: View {
                 )
             }
 
-            private func iconButton(systemName: String, isOn: Bool, onTap: @escaping () -> Void) -> some View {
-                Button {
+            private func iconButton(
+                systemName: String,
+                isOn: Bool,
+                shouldHighlightCaution: Bool,
+                onTap: @escaping () -> Void
+            ) -> some View {
+                let cautionColor = Color.orange.opacity(0.9)
+                let iconColor: Color = {
+                    if isOn { return accent }
+                    if shouldHighlightCaution { return cautionColor }
+                    return Color(.systemGray)
+                }()
+                return Button {
                     withAnimation(.easeInOut(duration: 0.14)) {
                         onTap()
                     }
                 } label: {
                     Image(systemName: systemName)
-                        .foregroundStyle(isOn ? accent : Color(.systemGray))
+                        .foregroundStyle(iconColor)
                         .frame(width: 26, height: 26)
                         .contentShape(Rectangle())
                         .accessibilityLabel(systemName)
@@ -3433,11 +3766,13 @@ struct PlanStepFiveView: View {
 
     private func triggerMissingDurationsFeedback() {
         shouldHighlightMissingDurations = true
+        shouldHighlightMissingOptionalIcons = true
         withAnimation(.easeInOut(duration: 0.15)) {
             showMissingDurationHint = true
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             shouldHighlightMissingDurations = false
+            shouldHighlightMissingOptionalIcons = false
             withAnimation(.easeInOut(duration: 0.15)) {
                 showMissingDurationHint = false
             }
