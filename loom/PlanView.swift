@@ -15,10 +15,13 @@ struct PlanView: View {
 
     @Query(sort: \WeeklyMindsetEntry.Fields.createdAt, order: .reverse)
     private var allWeeklyMindsetEntries: [WeeklyMindsetEntry.Fields]
+    @Query(sort: \ActionBlocksReflectionArchive.completedAt, order: .reverse)
+    private var allReflectionArchives: [ActionBlocksReflectionArchive]
 
     @State private var navigateToStep2: Bool = false
     @FocusState private var focusedField: Field?
     private enum Field: Hashable { case morning, grateful, incantation }
+    private let stepOneFreshStartCleanupKeyPrefix = "plan_step1_fresh_start_cleanup_done"
 
     private var currentWeekStart: Date {
         WeeklyMindsetEntry.weekStart(for: Date())
@@ -26,6 +29,23 @@ struct PlanView: View {
 
     private var existingEntryForWeek: WeeklyMindsetEntry.Fields? {
         allWeeklyMindsetEntries.first { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) }
+    }
+
+    private var hasCompletedReflectionForWeek: Bool {
+        allReflectionArchives.contains { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) }
+    }
+
+    private var latestReflectionForWeek: ActionBlocksReflectionArchive? {
+        allReflectionArchives.first { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) }
+    }
+
+    /// Hydrate Step 1 only when there is no completed reflection for this week,
+    /// or when the entry was created after the latest completed reflection
+    /// (i.e. it belongs to a new planning cycle).
+    private var shouldHydrateStepOneFromExisting: Bool {
+        guard let existing = existingEntryForWeek else { return false }
+        guard let latestReflection = latestReflectionForWeek else { return true }
+        return existing.createdAt > latestReflection.completedAt
     }
 
     private var isNextDisabled: Bool {
@@ -47,7 +67,7 @@ struct PlanView: View {
                 .padding(.top, 8)
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("Morning Power Question")
+                Text("Power Question")
                     .font(.headline)
                 Text("What am I happy about in life right now?")
                     .font(.subheadline)
@@ -123,8 +143,21 @@ struct PlanView: View {
             PlanFlowHostView()
         }
         .onAppear {
-            // Hydrate Step 1 from persisted weekly record if present.
-            if let existing = existingEntryForWeek {
+            if hasCompletedReflectionForWeek {
+                if shouldRunStepOneFreshStartCleanup {
+                    clearResidualWeekPlanningRowsForFreshStart()
+                    markStepOneFreshStartCleanupDone()
+                }
+                if shouldHydrateStepOneFromExisting, let existing = existingEntryForWeek {
+                    morningPowerQuestion = existing.morningPowerQuestion
+                    gratefulFor = existing.gratitude
+                    incantation = existing.incantation
+                } else {
+                    morningPowerQuestion = ""
+                    gratefulFor = ""
+                    incantation = ""
+                }
+            } else if let existing = existingEntryForWeek {
                 morningPowerQuestion = existing.morningPowerQuestion
                 gratefulFor = existing.gratitude
                 incantation = existing.incantation
@@ -141,7 +174,23 @@ struct PlanView: View {
         let trimmedGratitude = gratefulFor.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedIncantation = incantation.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        if let existing = existingEntryForWeek {
+        if hasCompletedReflectionForWeek {
+            let canUpdateExisting = shouldHydrateStepOneFromExisting && existingEntryForWeek != nil
+            if canUpdateExisting, let existing = existingEntryForWeek {
+                existing.createdAt = .now
+                existing.morningPowerQuestion = trimmedMorning
+                existing.gratitude = trimmedGratitude
+                existing.incantation = trimmedIncantation
+            } else {
+                let entry = WeeklyMindsetEntry.Fields(
+                    createdAt: .now,
+                    morningPowerQuestion: trimmedMorning,
+                    gratitude: trimmedGratitude,
+                    incantation: trimmedIncantation
+                )
+                modelContext.insert(entry)
+            }
+        } else if let existing = existingEntryForWeek {
             existing.createdAt = .now
             existing.morningPowerQuestion = trimmedMorning
             existing.gratitude = trimmedGratitude
@@ -158,6 +207,65 @@ struct PlanView: View {
 
         try? modelContext.save()
         navigateToStep2 = true
+    }
+
+    private func clearResidualWeekPlanningRowsForFreshStart() {
+        let ws = currentWeekStart
+        let we = Calendar.current.date(byAdding: .day, value: 7, to: ws) ?? ws
+
+        deleteWeekRows(PlanChunkSelection.self, ws: ws, we: we, keyPath: \.weekStart)
+        deleteWeekRows(PlannedChunk.self, ws: ws, we: we, keyPath: \.weekStart)
+        deleteWeekRows(PlannedChunkAction.self, ws: ws, we: we, keyPath: \.weekStart)
+        deleteWeekRows(PlannedChunkStepFourState.self, ws: ws, we: we, keyPath: \.weekStart)
+        deleteWeekRows(PlannedChunkOutcomeLink.self, ws: ws, we: we, keyPath: \.weekStart)
+        deleteWeekRows(PlannedChunkActionDefineState.self, ws: ws, we: we, keyPath: \.weekStart)
+        deleteWeekRows(PlannedChunkActionExecutionState.self, ws: ws, we: we, keyPath: \.weekStart)
+        deleteWeekRows(PlannedChunkActionLeverageSelection.self, ws: ws, we: we, keyPath: \.weekStart)
+        deleteWeekRows(PlannedChunkActionSensitivityPlaceLink.self, ws: ws, we: we, keyPath: \.weekStart)
+        deleteWeekRows(PlannedChunkActionNote.self, ws: ws, we: we, keyPath: \.weekStart)
+        deleteWeekRows(PlannedChunkActionAttachment.self, ws: ws, we: we, keyPath: \.weekStart)
+        deleteWeekRows(PlannedChunkActionAdHocMarker.self, ws: ws, we: we, keyPath: \.weekStart)
+
+        let activeFD = FetchDescriptor<ActivePlanState>()
+        if let states = try? modelContext.fetch(activeFD) {
+            for state in states {
+                state.isActive = false
+                state.weekStart = nil
+            }
+        }
+        try? modelContext.save()
+    }
+
+    private var stepOneFreshStartCleanupKey: String {
+        let comps = Calendar.current.dateComponents([.year, .month, .day], from: currentWeekStart)
+        let y = comps.year ?? 0
+        let m = comps.month ?? 0
+        let d = comps.day ?? 0
+        return "\(stepOneFreshStartCleanupKeyPrefix)_\(String(format: "%04d-%02d-%02d", y, m, d))"
+    }
+
+    private var shouldRunStepOneFreshStartCleanup: Bool {
+        UserDefaults.standard.bool(forKey: stepOneFreshStartCleanupKey) == false
+    }
+
+    private func markStepOneFreshStartCleanupDone() {
+        UserDefaults.standard.set(true, forKey: stepOneFreshStartCleanupKey)
+    }
+
+    private func deleteWeekRows<T: PersistentModel>(
+        _ type: T.Type,
+        ws: Date,
+        we: Date,
+        keyPath: KeyPath<T, Date>
+    ) {
+        let fd = FetchDescriptor<T>()
+        guard let rows = try? modelContext.fetch(fd) else { return }
+        for row in rows {
+            let date = row[keyPath: keyPath]
+            if date >= ws && date < we {
+                modelContext.delete(row)
+            }
+        }
     }
 }
 
@@ -208,8 +316,13 @@ struct PlanStepTwoView: View {
 
     @State private var baselineItemIDs: Set<UUID> = []
     @State private var isBrainstormExpanded: Bool = false
+    @State private var isShowingNextConfirmation: Bool = false
 
     private let hiddenUntilLaterIconName = "clock.arrow.trianglehead.clockwise.rotate.90.path.dotted"
+
+    private func normalizedActionText(_ text: String) -> String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
 
     private var secondaryButtonTextColor: Color {
         colorScheme == .dark ? Color(.secondaryLabel) : .black
@@ -330,11 +443,13 @@ struct PlanStepTwoView: View {
                     }
                     .padding(.vertical, 4)
                     .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                    .listRowSeparator(.hidden)
                 }
                 .onDelete(perform: deleteItems)
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
+            .scrollDismissesKeyboard(.never)
 
             HStack(spacing: 12) {
                 TextField("Add an action…", text: $input)
@@ -370,7 +485,7 @@ struct PlanStepTwoView: View {
                 )
 
                 Button {
-                    if let onNext { onNext() }
+                    isShowingNextConfirmation = true
                 } label: {
                     Text("Next")
                         .frame(maxWidth: .infinity)
@@ -382,6 +497,19 @@ struct PlanStepTwoView: View {
         .padding(.horizontal)
         .safeAreaPadding(.top)
         .safeAreaPadding(.bottom)
+        .alert(
+            "Have you captured everything?",
+            isPresented: $isShowingNextConfirmation,
+            actions: {
+                Button("Next") {
+                    if let onNext { onNext() }
+                }
+                Button("Return", role: .cancel) { }
+            },
+            message: {
+                Text("Make sure you've entered all current actions on your mind that need to be completed soon.")
+            }
+        )
         .onAppear {
             if baselineItemIDs.isEmpty {
                 baselineItemIDs = Set(allItems.map(\.id))
@@ -390,18 +518,14 @@ struct PlanStepTwoView: View {
                 isInputFocused = true
             }
         }
-        .onChange(of: isInputFocused) { _, newValue in
-            if newValue == false {
-                DispatchQueue.main.async {
-                    isInputFocused = true
-                }
-            }
-        }
     }
 
     private func addItem() {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+
+        let duplicateExists = allItems.contains { normalizedActionText($0.text) == normalizedActionText(trimmed) }
+        guard !duplicateExists else { return }
 
         let newItem = RollingCaptureItem(
             text: trimmed,
@@ -661,7 +785,7 @@ struct PlanStepThreeView: View {
                     .padding(.vertical, 4)
                     .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                 }
-                .listRowSeparator(.visible)
+                .listRowSeparator(.hidden)
             }
             .listRowSpacing(4)
             .listStyle(.plain)
@@ -876,7 +1000,6 @@ struct PlanStepThreeView: View {
         let chunk = chunks[chunkIndex]
         let showDeleteX = chunkIndex >= 2
         let canDeleteThisChunk = canDeleteChunk(at: chunkIndex)
-
         let fill = chunkLightFillColor(categoryName: chunk.selectionCategory)
 
         VStack(spacing: 10) {
@@ -1020,7 +1143,6 @@ struct PlanStepThreeView: View {
             .sorted { $0.createdAt > $1.createdAt }
             .map(\.id)
 
-        clearPersistedStep3PlanForCurrentWeek()
         persistStep3Plan()
 
         baselineShowHidden = showHidden
@@ -1028,21 +1150,12 @@ struct PlanStepThreeView: View {
         baselineChunks = chunks
     }
 
-    private func clearPersistedStep3PlanForCurrentWeek() {
-        for action in plannedActions where Calendar.current.isDate(action.weekStart, inSameDayAs: currentWeekStart) {
-            modelContext.delete(action)
-        }
-        for sel in allChunkSelections where Calendar.current.isDate(sel.weekStart, inSameDayAs: currentWeekStart) {
-            modelContext.delete(sel)
-        }
-        try? modelContext.save()
-    }
-
     private func hydrateStep3FromStorageOrInitialize() {
         guard poolItemIDs.isEmpty else { return }
 
         isHydratingFromStorage = true
         defer { isHydratingFromStorage = false }
+        let validLabelIDs = Set(defaultLabels.map(\.labelId))
 
         let persistedChunks = plannedChunks
             .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) }
@@ -1099,16 +1212,27 @@ struct PlanStepThreeView: View {
 
         for sel in persistedSelections {
             guard sel.chunkIndex >= 0, sel.chunkIndex < chunks.count else { continue }
-            chunks[sel.chunkIndex].selectionLabelId = sel.labelId
-            chunks[sel.chunkIndex].selectionLabel = sel.label
-            chunks[sel.chunkIndex].selectionCategoryId = sel.categoryId
-            chunks[sel.chunkIndex].selectionCategory = sel.category
+            if let labelId = sel.labelId, validLabelIDs.contains(labelId) {
+                chunks[sel.chunkIndex].selectionLabelId = labelId
+                chunks[sel.chunkIndex].selectionLabel = sel.label
+                chunks[sel.chunkIndex].selectionCategoryId = sel.categoryId
+                chunks[sel.chunkIndex].selectionCategory = sel.category
+            } else {
+                chunks[sel.chunkIndex].selectionLabelId = nil
+                chunks[sel.chunkIndex].selectionLabel = nil
+                chunks[sel.chunkIndex].selectionCategoryId = nil
+                chunks[sel.chunkIndex].selectionCategory = nil
+            }
         }
 
         for pc in persistedChunks {
             guard pc.chunkIndex >= 0, pc.chunkIndex < chunks.count else { continue }
 
-            if chunks[pc.chunkIndex].selectionLabelId == nil {
+            if
+                chunks[pc.chunkIndex].selectionLabelId == nil,
+                validLabelIDs.contains(pc.labelId),
+                !pc.label.isEmpty
+            {
                 chunks[pc.chunkIndex].selectionLabelId = pc.labelId
                 chunks[pc.chunkIndex].selectionLabel = pc.label
                 chunks[pc.chunkIndex].selectionCategoryId = pc.categoryId
@@ -1125,6 +1249,15 @@ struct PlanStepThreeView: View {
             chunks[pc.chunkIndex].itemIDs = ordered
         }
 
+        for idx in chunks.indices {
+            if let labelId = chunks[idx].selectionLabelId, !validLabelIDs.contains(labelId) {
+                chunks[idx].selectionLabelId = nil
+                chunks[idx].selectionLabel = nil
+                chunks[idx].selectionCategoryId = nil
+                chunks[idx].selectionCategory = nil
+            }
+        }
+
         syncPoolWithVisibility()
     }
 
@@ -1133,33 +1266,36 @@ struct PlanStepThreeView: View {
 
         let weekStart = currentWeekStart
         let captureByID = Dictionary(uniqueKeysWithValues: allItems.map { ($0.id, $0) })
+        let weekDayKey = dayKey(from: weekStart)
 
         let existingWeekChunks = plannedChunks
             .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: weekStart) }
             .sorted { $0.chunkIndex < $1.chunkIndex }
 
-        clearPersistedStep3PlanForCurrentWeek()
+        let existingWeekSelections = allChunkSelections
+            .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: weekStart) }
+
+        let existingWeekActions = plannedActions
+            .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: weekStart) }
 
         var weekChunksByIndex: [Int: PlannedChunk] = [:]
-        for pc in existingWeekChunks {
-            weekChunksByIndex[pc.chunkIndex] = pc
-        }
-
-        for (newIndex, pc) in existingWeekChunks.enumerated() {
-            if newIndex < chunks.count {
-                if pc.chunkIndex != newIndex {
-                    pc.chunkIndex = newIndex
-                    pc.weekChunkKey = "\(dayKey(from: weekStart))|\(newIndex)"
-                    pc.updatedAt = .now
-                }
-                weekChunksByIndex[newIndex] = pc
+        for pc in existingWeekChunks where pc.chunkIndex >= 0 {
+            if weekChunksByIndex[pc.chunkIndex] == nil {
+                weekChunksByIndex[pc.chunkIndex] = pc
             } else {
+                // Deduplicate stale rows for the same (week, index).
                 modelContext.delete(pc)
             }
         }
 
-        if chunks.count > existingWeekChunks.count {
-            for idx in existingWeekChunks.count..<chunks.count {
+        for idx in 0..<chunks.count {
+            if let pc = weekChunksByIndex[idx] {
+                pc.weekStart = weekStart
+                if pc.chunkIndex != idx { pc.chunkIndex = idx }
+                let nextWeekChunkKey = "\(weekDayKey)|\(idx)"
+                if pc.weekChunkKey != nextWeekChunkKey { pc.weekChunkKey = nextWeekChunkKey }
+                pc.updatedAt = .now
+            } else {
                 let pc = PlannedChunk(
                     weekStart: weekStart,
                     chunkIndex: idx,
@@ -1174,19 +1310,52 @@ struct PlanStepThreeView: View {
             }
         }
 
-        for (chunkIndex, chunkState) in chunks.enumerated() {
-            let sel = PlanChunkSelection(
-                weekStart: weekStart,
-                chunkIndex: chunkIndex,
-                labelId: chunkState.selectionLabelId,
-                label: chunkState.selectionLabel,
-                categoryId: chunkState.selectionCategoryId,
-                category: chunkState.selectionCategory,
-                updatedAt: .now
-            )
-            modelContext.insert(sel)
+        let validChunkIndexes = Set(0..<chunks.count)
+        for pc in existingWeekChunks where !validChunkIndexes.contains(pc.chunkIndex) {
+            modelContext.delete(pc)
         }
 
+        var selectionsByChunkIndex: [Int: PlanChunkSelection] = [:]
+        for sel in existingWeekSelections where sel.chunkIndex >= 0 {
+            if selectionsByChunkIndex[sel.chunkIndex] == nil {
+                selectionsByChunkIndex[sel.chunkIndex] = sel
+            } else {
+                // Deduplicate stale rows for the same (week, index).
+                modelContext.delete(sel)
+            }
+        }
+
+        for (chunkIndex, chunkState) in chunks.enumerated() {
+            if let sel = selectionsByChunkIndex[chunkIndex] {
+                sel.weekStart = weekStart
+                sel.chunkIndex = chunkIndex
+                sel.labelId = chunkState.selectionLabelId
+                sel.label = chunkState.selectionLabel
+                sel.categoryId = chunkState.selectionCategoryId
+                sel.category = chunkState.selectionCategory
+                sel.updatedAt = .now
+                let nextWeekChunkKey = "\(weekDayKey)|\(chunkIndex)"
+                if sel.weekChunkKey != nextWeekChunkKey { sel.weekChunkKey = nextWeekChunkKey }
+            } else {
+                let sel = PlanChunkSelection(
+                    weekStart: weekStart,
+                    chunkIndex: chunkIndex,
+                    labelId: chunkState.selectionLabelId,
+                    label: chunkState.selectionLabel,
+                    categoryId: chunkState.selectionCategoryId,
+                    category: chunkState.selectionCategory,
+                    updatedAt: .now
+                )
+                modelContext.insert(sel)
+                selectionsByChunkIndex[chunkIndex] = sel
+            }
+        }
+
+        for (chunkIndex, sel) in selectionsByChunkIndex where !validChunkIndexes.contains(chunkIndex) {
+            modelContext.delete(sel)
+        }
+
+        var desiredActionsByText: [String: (chunkIndex: Int, plannedChunkId: UUID, sortOrder: Int)] = [:]
         for (chunkIndex, chunkState) in chunks.enumerated() where !chunkState.itemIDs.isEmpty {
             guard let plannedChunk = weekChunksByIndex[chunkIndex] else { continue }
             guard let labelId = chunkState.selectionLabelId else { continue }
@@ -1198,21 +1367,45 @@ struct PlanStepThreeView: View {
             plannedChunk.categoryId = chunkState.selectionCategoryId ?? UUID()
             plannedChunk.category = chunkState.selectionCategory ?? ""
             plannedChunk.updatedAt = .now
-            plannedChunk.weekChunkKey = "\(dayKey(from: weekStart))|\(chunkIndex)"
+            plannedChunk.weekChunkKey = "\(weekDayKey)|\(chunkIndex)"
 
             for (order, itemID) in chunkState.itemIDs.enumerated() {
                 guard let item = captureByID[itemID] else { continue }
+                desiredActionsByText[item.text] = (chunkIndex, plannedChunk.id, order)
+            }
+        }
 
+        var existingActionsByText: [String: PlannedChunkAction] = [:]
+        for action in existingWeekActions {
+            if existingActionsByText[action.text] == nil {
+                existingActionsByText[action.text] = action
+            } else {
+                // Deduplicate stale rows for the same action text.
+                modelContext.delete(action)
+            }
+        }
+
+        for (text, desired) in desiredActionsByText {
+            if let action = existingActionsByText[text] {
+                action.weekStart = weekStart
+                action.chunkIndex = desired.chunkIndex
+                action.plannedChunkId = desired.plannedChunkId
+                action.sortOrder = desired.sortOrder
+            } else {
                 let planned = PlannedChunkAction(
                     weekStart: weekStart,
-                    chunkIndex: chunkIndex,
-                    plannedChunkId: plannedChunk.id,
-                    text: item.text,
-                    sortOrder: order,
+                    chunkIndex: desired.chunkIndex,
+                    plannedChunkId: desired.plannedChunkId,
+                    text: text,
+                    sortOrder: desired.sortOrder,
                     createdAt: .now
                 )
                 modelContext.insert(planned)
             }
+        }
+
+        for action in existingWeekActions where desiredActionsByText[action.text] == nil {
+            modelContext.delete(action)
         }
 
         try? modelContext.save()
@@ -1313,6 +1506,9 @@ struct PlanStepFourView: View {
 
     @Query(sort: \PlannedChunkAction.sortOrder, order: .forward)
     private var allPlannedActions: [PlannedChunkAction]
+
+    @Query(sort: \RollingCaptureItem.createdAt, order: .reverse)
+    private var allCaptureItems: [RollingCaptureItem]
 
     @Query(sort: \Outcomes.rank, order: .forward)
     private var outcomes: [Outcomes]
@@ -1628,6 +1824,9 @@ struct PlanStepFourView: View {
                 ids.removeAll { $0 == outcomeID }
                 selectedOutcomeIDsByChunk[chunkID] = ids
                 scheduleStep4Autosave()
+            },
+            onActionTextChanged: { action, newText in
+                renameStep4Action(action, to: newText)
             }
         )
     }
@@ -1658,6 +1857,7 @@ struct PlanStepFourView: View {
         let onOpenOutcomes: () -> Void
         let onOpenRoles: () -> Void
         let onRemoveOutcome: (UUID) -> Void
+        let onActionTextChanged: (PlannedChunkAction, String) -> Void
 
         private var forcedDarkTextColor: Color { .black }
 
@@ -1732,6 +1932,7 @@ struct PlanStepFourView: View {
                     Spacer()
                     Text("What do I want?")
                         .font(.subheadline)
+                        .italic()
                         .foregroundStyle(forcedDarkTextColor)
                 }
 
@@ -1818,6 +2019,7 @@ struct PlanStepFourView: View {
                 Spacer()
                 Text("Why do I want it?")
                     .font(.subheadline)
+                    .italic()
                     .foregroundStyle(forcedDarkTextColor)
             }
         }
@@ -1908,10 +2110,20 @@ struct PlanStepFourView: View {
 
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(actions) { action in
-                        Text("• \(action.text)")
-                            .font(.subheadline)
-                            .foregroundStyle(forcedDarkTextColor)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        TextField(
+                            "Action",
+                            text: Binding(
+                                get: { action.text },
+                                set: { newValue in
+                                    onActionTextChanged(action, newValue)
+                                }
+                            )
+                        )
+                        .font(.body.weight(.medium))
+                        .textFieldStyle(.roundedBorder)
+                        .submitLabel(.done)
+                        .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
+                        .padding(.vertical, 1)
                     }
                 }
             }
@@ -1931,12 +2143,44 @@ struct PlanStepFourView: View {
 
     @State private var step4AutosaveTask: Task<Void, Never>? = nil
 
+    private func normalizedActionText(_ text: String) -> String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
     private func scheduleStep4Autosave() {
         step4AutosaveTask?.cancel()
         step4AutosaveTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 400_000_000)
             persistStep4ForWeekNow()
         }
+    }
+
+    private func renameStep4Action(_ action: PlannedChunkAction, to rawText: String) {
+        let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        let oldNormalized = normalizedActionText(action.text)
+        let newNormalized = normalizedActionText(trimmed)
+
+        if oldNormalized == newNormalized && action.text == trimmed {
+            return
+        }
+
+        let duplicateInPlanned = plannedActionsForWeek.contains {
+            $0.id != action.id && normalizedActionText($0.text) == newNormalized
+        }
+        if duplicateInPlanned { return }
+
+        let matchingCaptureItem = allCaptureItems.first { normalizedActionText($0.text) == oldNormalized }
+        let duplicateInCapture = allCaptureItems.contains {
+            if let matchingCaptureItem, $0.id == matchingCaptureItem.id { return false }
+            return normalizedActionText($0.text) == newNormalized
+        }
+        if duplicateInCapture { return }
+
+        action.text = trimmed
+        matchingCaptureItem?.text = trimmed
+        scheduleStep4Autosave()
     }
 
     private func hydrateStep4ForWeek() {
@@ -2049,6 +2293,9 @@ struct PlanStepFiveView: View {
     @Query(sort: \PlannedChunkAction.sortOrder, order: .forward)
     private var allPlannedActions: [PlannedChunkAction]
 
+    @Query(sort: \RollingCaptureItem.createdAt, order: .reverse)
+    private var allCaptureItems: [RollingCaptureItem]
+
     @Query(sort: \PlannedChunkStepFourState.updatedAt, order: .reverse)
     private var stepFourStates: [PlannedChunkStepFourState]
 
@@ -2101,6 +2348,7 @@ struct PlanStepFiveView: View {
 
     // “Try start without durations” feedback
     @State private var shouldHighlightMissingDurations: Bool = false
+    @State private var showMissingDurationHint: Bool = false
 
     // Confirmation dialog for Start
     @State private var isShowingStartConfirmation: Bool = false
@@ -2199,28 +2447,48 @@ struct PlanStepFiveView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(plannedActionsForWeek().isEmpty)
+                .tint(isStep5StartEnabled ? .accentColor : Color(.systemGray3))
             }
             .padding(.bottom, 2)
+        }
+        .overlay(alignment: .bottom) {
+            if showMissingDurationHint {
+                HStack(spacing: 8) {
+                    Image(systemName: "clock.fill")
+                    Text("Please assign all actions with a duration")
+                        .fontWeight(.semibold)
+                }
+                .font(.footnote)
+                .padding(10)
+                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Color.black.opacity(0.12), lineWidth: 1)
+                )
+                .padding(.horizontal, 4)
+                .padding(.bottom, 56)
+                .transition(.opacity)
+            }
         }
         .padding(.horizontal)
         .safeAreaPadding(.top)
         .safeAreaPadding(.bottom)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .confirmationDialog(
+        .alert(
             "Ready to Start?",
             isPresented: $isShowingStartConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Start") {
-                confirmStartPlanAndDismiss()
+            actions: {
+                Button("Start") {
+                    confirmStartPlanAndDismiss()
+                }
+                Button("Return", role: .cancel) {
+                    isShowingStartConfirmation = false
+                }
+            },
+            message: {
+                Text("Make sure you've defined all of your actions.")
             }
-            Button("Return", role: .cancel) {
-                // stay on page
-            }
-        } message: {
-            Text("Make sure you've defined all of your actions.")
-        }
+        )
         .sheet(isPresented: $isShowingInstructions) {
             StepFiveInstructionsPopup()
                 .presentationDetents([.medium, .large])
@@ -2466,6 +2734,15 @@ struct PlanStepFiveView: View {
             hasLeverage: { actionId in
                 currentLeverageSelectionResourceId(forActionId: actionId) != nil
             },
+            leverageIconName: { actionId in
+                guard
+                    let resourceId = currentLeverageSelectionResourceId(forActionId: actionId),
+                    let resource = leverageCatalog.first(where: { $0.id == resourceId })
+                else {
+                    return "person"
+                }
+                return resource.kind == .tool ? "wrench.and.screwdriver.fill" : "person.fill"
+            },
             hasSensitivity: { actionId in
                 hasAnySensitivity(actionId: actionId)
             },
@@ -2541,6 +2818,7 @@ struct PlanStepFiveView: View {
 
         let defineStateForAction: (UUID) -> PlannedChunkActionDefineState?
         let hasLeverage: (UUID) -> Bool
+        let leverageIconName: (UUID) -> String
         let hasSensitivity: (UUID) -> Bool
         let hasAttachments: (UUID) -> Bool
 
@@ -2624,6 +2902,7 @@ struct PlanStepFiveView: View {
                     Spacer()
                     Text("What do I want?")
                         .font(.subheadline)
+                        .italic()
                         .foregroundStyle(forcedDarkTextColor)
                 }
 
@@ -2651,6 +2930,7 @@ struct PlanStepFiveView: View {
                 Spacer()
                 Text("Why do I want it?")
                     .font(.subheadline)
+                    .italic()
                     .foregroundStyle(forcedDarkTextColor)
             }
         }
@@ -2719,6 +2999,7 @@ struct PlanStepFiveView: View {
                                 isMust: isMust,
                                 timeMinutes: timeMinutes,
                                 hasLeverage: hasLeverage(action.id),
+                                leverageSystemName: leverageIconName(action.id),
                                 hasSensitivity: hasSensitivity(action.id),
                                 hasAttachments: hasAttachments(action.id),
                                 shouldHighlightMissingDuration: shouldHighlightMissingDurations && isMissingDuration,
@@ -2756,6 +3037,7 @@ struct PlanStepFiveView: View {
             let timeMinutes: Int?
 
             let hasLeverage: Bool
+            let leverageSystemName: String
             let hasSensitivity: Bool
             let hasAttachments: Bool
 
@@ -2796,7 +3078,7 @@ struct PlanStepFiveView: View {
                             )
 
                             iconButton(
-                                systemName: hasLeverage ? "person.fill" : "person",
+                                systemName: leverageSystemName,
                                 isOn: hasLeverage,
                                 onTap: onTapPerson
                             )
@@ -2808,7 +3090,7 @@ struct PlanStepFiveView: View {
                             )
 
                             iconButton(
-                                systemName: hasAttachments ? "paperclip.circle.fill" : "paperclip",
+                                systemName: hasAttachments ? "paperclip.badge.ellipsis" : "paperclip",
                                 isOn: hasAttachments,
                                 onTap: onTapPaperclip
                             )
@@ -3151,14 +3433,30 @@ struct PlanStepFiveView: View {
 
     private func triggerMissingDurationsFeedback() {
         shouldHighlightMissingDurations = true
+        withAnimation(.easeInOut(duration: 0.15)) {
+            showMissingDurationHint = true
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             shouldHighlightMissingDurations = false
+            withAnimation(.easeInOut(duration: 0.15)) {
+                showMissingDurationHint = false
+            }
         }
     }
 
     private func confirmStartPlanAndDismiss() {
         step5AutosaveTask?.cancel()
         persistStep5ForWeekNow()
+
+        let actionTextSet = Set(plannedActionsForWeek().map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() })
+        if !actionTextSet.isEmpty {
+            for item in allCaptureItems {
+                let key = item.text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                if actionTextSet.contains(key) {
+                    modelContext.delete(item)
+                }
+            }
+        }
 
         let state = ActivePlanState.fetchOrCreate(in: modelContext)
         state.isActive = true
@@ -3959,4 +4257,3 @@ private enum FulfillmentCategoryColors {
         }
     }
 }
-

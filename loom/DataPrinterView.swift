@@ -437,6 +437,297 @@ struct ModelFilter: Identifiable, Hashable {
 // MARK: - Main View
 struct DataPrinterView: View {
     @Environment(\.modelContext) private var context
+    @State private var showingDeleteActionBlocksAlert = false
+    @State private var showingMigrationResultAlert = false
+    @State private var migrationResultMessage = ""
+
+    private let legacyArchiveMigrationFlag = "legacy_actionblocks_archive_migration_v2_done"
+
+    var body: some View {
+        List {
+            Section {
+                NavigationLink {
+                    CompletedActionBlocksListView()
+                } label: {
+                    HStack {
+                        Text("Completed Action Blocks")
+                    }
+                }
+
+                NavigationLink {
+                    DemoPlanViewContainer()
+                } label: {
+                    HStack {
+                        Text("Open PlanView (Demo)")
+                    }
+                }
+
+                NavigationLink {
+                    ManageRawDataView()
+                } label: {
+                    HStack {
+                        Text("Manage Raw Data")
+                    }
+                }
+
+                Button(role: .destructive) {
+                    showingDeleteActionBlocksAlert = true
+                } label: {
+                    HStack {
+                        Text("Delete Action Blocks")
+                        Spacer()
+                        Image(systemName: "trash")
+                    }
+                }
+            }
+        }
+        .listStyle(.plain)
+        .tint(.red)
+        .navigationTitle("All Data")
+        .alert("Delete all Action Blocks?", isPresented: $showingDeleteActionBlocksAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) {
+                performDeleteActionBlocks()
+            }
+        } message: {
+            Text("This will permanently delete all chunk block planning/action records.")
+        }
+        .alert("Legacy Migration", isPresented: $showingMigrationResultAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(migrationResultMessage)
+        }
+        .onAppear {
+            runLegacyArchiveMigrationIfNeeded()
+        }
+    }
+
+    private func performDeleteActionBlocks() {
+        deleteAll(PlanChunkSelection.self)
+        deleteAll(PlannedChunk.self)
+        deleteAll(PlannedChunkAction.self)
+        deleteAll(PlannedChunkStepFourState.self)
+        deleteAll(PlannedChunkOutcomeLink.self)
+        deleteAll(PlannedChunkActionDefineState.self)
+        deleteAll(PlannedChunkActionExecutionState.self)
+        deleteAll(PlannedChunkActionLeverageSelection.self)
+        deleteAll(PlannedChunkActionSensitivityPlaceLink.self)
+        deleteAll(PlannedChunkActionNote.self)
+        deleteAll(PlannedChunkActionAttachment.self)
+        try? context.save()
+    }
+
+    private func deleteAll<T: PersistentModel>(_ type: T.Type) {
+        let fd = FetchDescriptor<T>()
+        if let rows = try? context.fetch(fd) {
+            for row in rows {
+                context.delete(row)
+            }
+        }
+    }
+
+    private func runLegacyArchiveMigrationIfNeeded() {
+        guard UserDefaults.standard.bool(forKey: legacyArchiveMigrationFlag) == false else { return }
+
+        let result = performLegacyArchiveMigration()
+        UserDefaults.standard.set(true, forKey: legacyArchiveMigrationFlag)
+        migrationResultMessage = result
+        showingMigrationResultAlert = true
+    }
+
+    /// One-time backfill:
+    /// - Finds weeks with planned actions but no reflection archive
+    /// - Enriches existing reflection archive action rows with result/purpose from Step 4 state
+    /// - Migrates only weeks where all actions are in a closed status
+    /// - Creates ActionBlocksReflectionArchive + action/outcome snapshot rows
+    private func performLegacyArchiveMigration() -> String {
+        let calendar = Calendar.current
+        let closed: Set<ActionExecutionStatus> = [.done, .carriedToCapture, .notNeeded]
+
+        let actions = (try? context.fetch(FetchDescriptor<PlannedChunkAction>())) ?? []
+        guard !actions.isEmpty else { return "No legacy action-block rows found." }
+
+        let chunks = (try? context.fetch(FetchDescriptor<PlannedChunk>())) ?? []
+        let defineStates = (try? context.fetch(FetchDescriptor<PlannedChunkActionDefineState>())) ?? []
+        let executionStates = (try? context.fetch(FetchDescriptor<PlannedChunkActionExecutionState>())) ?? []
+        let leverageSelections = (try? context.fetch(FetchDescriptor<PlannedChunkActionLeverageSelection>())) ?? []
+        let resources = (try? context.fetch(FetchDescriptor<LeverageResource>())) ?? []
+        let placeLinks = (try? context.fetch(FetchDescriptor<PlannedChunkActionSensitivityPlaceLink>())) ?? []
+        let placeCatalog = (try? context.fetch(FetchDescriptor<SensitivityPlaceCatalogItem>())) ?? []
+        let notes = (try? context.fetch(FetchDescriptor<PlannedChunkActionNote>())) ?? []
+        let attachments = (try? context.fetch(FetchDescriptor<PlannedChunkActionAttachment>())) ?? []
+        let outcomeLinks = (try? context.fetch(FetchDescriptor<PlannedChunkOutcomeLink>())) ?? []
+        let stepFourStates = (try? context.fetch(FetchDescriptor<PlannedChunkStepFourState>())) ?? []
+        let outcomes = (try? context.fetch(FetchDescriptor<Outcomes>())) ?? []
+        let existingArchives = (try? context.fetch(FetchDescriptor<ActionBlocksReflectionArchive>())) ?? []
+        let existingReflectionActions = (try? context.fetch(FetchDescriptor<ActionBlocksReflectionArchiveAction>())) ?? []
+
+        let archiveWeekKeys = Set(existingArchives.map { dayKey($0.weekStart, calendar: calendar) })
+
+        let resourceById = Dictionary(uniqueKeysWithValues: resources.map { ($0.id, $0) })
+        let placeById = Dictionary(uniqueKeysWithValues: placeCatalog.map { ($0.id, $0) })
+        let chunkById = Dictionary(uniqueKeysWithValues: chunks.map { ($0.id, $0) })
+        let outcomeById = Dictionary(uniqueKeysWithValues: outcomes.map { ($0.outcome_id, $0) })
+
+        let defineByAction = latestByActionId(defineStates) { $0.plannedChunkActionId } newer: { $0.updatedAt < $1.updatedAt }
+        let executionByAction = latestByActionId(executionStates) { $0.plannedChunkActionId } newer: { $0.updatedAt < $1.updatedAt }
+        let leverageByAction = latestByActionId(leverageSelections) { $0.plannedChunkActionId } newer: { $0.updatedAt < $1.updatedAt }
+        let noteByAction = latestByActionId(notes) { $0.plannedChunkActionId } newer: { $0.updatedAt < $1.updatedAt }
+
+        let placeLinksByAction = Dictionary(grouping: placeLinks, by: \.plannedChunkActionId)
+        let attachmentsByAction = Dictionary(grouping: attachments, by: \.plannedChunkActionId)
+        let outcomeLinksByWeek = Dictionary(grouping: outcomeLinks, by: { dayKey($0.weekStart, calendar: calendar) })
+        let stepFourByWeekChunk: [String: PlannedChunkStepFourState] = {
+            var map: [String: PlannedChunkStepFourState] = [:]
+            for row in stepFourStates {
+                let key = "\(dayKey(row.weekStart, calendar: calendar))|\(row.plannedChunkId.uuidString)"
+                if let existing = map[key] {
+                    if row.updatedAt > existing.updatedAt { map[key] = row }
+                } else {
+                    map[key] = row
+                }
+            }
+            return map
+        }()
+
+        var enrichedExistingActions = 0
+        for archiveAction in existingReflectionActions {
+            let key = "\(dayKey(archiveAction.weekStart, calendar: calendar))|\(archiveAction.plannedChunkId.uuidString)"
+            guard let step4 = stepFourByWeekChunk[key] else { continue }
+            let incomingResult = step4.resultText.trimmingCharacters(in: .whitespacesAndNewlines)
+            let incomingPurpose = step4.roleNoteText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            let hasResult = !((archiveAction.resultText ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            let hasPurpose = !((archiveAction.purposeText ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+            var changed = false
+            if !hasResult, !incomingResult.isEmpty {
+                archiveAction.resultText = incomingResult
+                changed = true
+            }
+            if !hasPurpose, !incomingPurpose.isEmpty {
+                archiveAction.purposeText = incomingPurpose
+                changed = true
+            }
+            if changed { enrichedExistingActions += 1 }
+        }
+
+        let actionsByWeek = Dictionary(grouping: actions, by: { dayKey($0.weekStart, calendar: calendar) })
+        var migratedWeeks = 0
+        var migratedActions = 0
+        var migratedOutcomes = 0
+
+        for (weekKey, weekActions) in actionsByWeek {
+            if archiveWeekKeys.contains(weekKey) { continue }
+            guard let firstAction = weekActions.first else { continue }
+
+            let isFullyClosed = weekActions.allSatisfy { action in
+                let status = executionByAction[action.id]?.status ?? .noAction
+                return closed.contains(status)
+            }
+            if !isFullyClosed { continue }
+
+            let startedAt = weekActions.map(\.createdAt).min() ?? firstAction.weekStart
+            let completedAt = weekActions.compactMap { executionByAction[$0.id]?.updatedAt }.max() ?? startedAt
+
+            let archive = ActionBlocksReflectionArchive(
+                weekStart: firstAction.weekStart,
+                startedAt: startedAt,
+                completedAt: completedAt,
+                achievementsText: "(Migrated legacy data)",
+                magicMomentsText: "",
+                powerQuestionText: ""
+            )
+            context.insert(archive)
+            migratedWeeks += 1
+
+            for action in weekActions {
+                let define = defineByAction[action.id]
+                let execution = executionByAction[action.id]
+                let leverage = leverageByAction[action.id]
+                let resource = leverage.flatMap { $0.resourceId.flatMap { resourceById[$0] } }
+                let places = (placeLinksByAction[action.id] ?? []).compactMap { placeById[$0.placeId]?.place }
+                let note = noteByAction[action.id]
+                let filesAndLinks = attachmentsByAction[action.id] ?? []
+                let chunk = chunkById[action.plannedChunkId]
+                let step4 = stepFourByWeekChunk["\(weekKey)|\(action.plannedChunkId.uuidString)"]
+
+                context.insert(
+                    ActionBlocksReflectionArchiveAction(
+                        archiveId: archive.id,
+                        weekStart: firstAction.weekStart,
+                        plannedChunkId: action.plannedChunkId,
+                        plannedChunkActionId: action.id,
+                        chunkLabel: chunk?.label ?? "",
+                        chunkCategory: chunk?.category ?? "",
+                        resultText: step4?.resultText,
+                        purposeText: step4?.roleNoteText,
+                        actionText: action.text,
+                        statusRaw: (execution?.status ?? .noAction).rawValue,
+                        isMust: define?.isMust ?? false,
+                        durationMinutes: define?.timeEstimateMinutes,
+                        leverageKindRaw: resource?.kind.rawValue,
+                        leverageValue: resource?.value,
+                        placeNamesCSV: places.joined(separator: ", "),
+                        hasNote: !(note?.noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true),
+                        linkAttachmentCount: filesAndLinks.filter { $0.kind == .link }.count,
+                        fileAttachmentCount: filesAndLinks.filter { $0.kind == .file }.count
+                    )
+                )
+                migratedActions += 1
+            }
+
+            for link in outcomeLinksByWeek[weekKey] ?? [] {
+                guard let outcome = outcomeById[link.outcomeId] else { continue }
+                context.insert(
+                    ActionBlocksReflectionArchiveOutcome(
+                        archiveId: archive.id,
+                        weekStart: firstAction.weekStart,
+                        plannedChunkId: link.plannedChunkId,
+                        outcomeId: link.outcomeId,
+                        outcomeText: outcome.outcome,
+                        category: outcome.category
+                    )
+                )
+                migratedOutcomes += 1
+            }
+        }
+
+        try? context.save()
+
+        if migratedWeeks == 0 && enrichedExistingActions == 0 {
+            return "Migration complete. No eligible legacy completed weeks or missing result/purpose fields were found."
+        }
+        return "Migrated \(migratedWeeks) week(s), \(migratedActions) action snapshots, and \(migratedOutcomes) outcome links. Enriched \(enrichedExistingActions) archived action rows with result/purpose."
+    }
+
+    private func dayKey(_ date: Date, calendar: Calendar) -> String {
+        let comps = calendar.dateComponents([.year, .month, .day], from: date)
+        let y = comps.year ?? 0
+        let m = comps.month ?? 0
+        let d = comps.day ?? 0
+        return String(format: "%04d-%02d-%02d", y, m, d)
+    }
+
+    private func latestByActionId<Row, ID: Hashable>(
+        _ rows: [Row],
+        id: (Row) -> ID,
+        newer: (Row, Row) -> Bool
+    ) -> [ID: Row] {
+        var map: [ID: Row] = [:]
+        for row in rows {
+            let key = id(row)
+            if let existing = map[key], newer(existing, row) == false {
+                continue
+            }
+            map[key] = row
+        }
+        return map
+    }
+}
+
+struct ManageRawDataView: View {
+    @Environment(\.modelContext) private var context
     @Environment(\.editMode) private var editMode
     @State private var selection = Set<String>()
     @State private var showingDeleteAlert = false
@@ -463,65 +754,79 @@ struct DataPrinterView: View {
         .init(id: "outcome", name: "Outcome"),
         .init(id: "outcomeArch", name: "Outcome (Archived)"),
         .init(id: "measure", name: "Outcome Measure"),
-        .init(id: "measureArch", name: "Outcome Measure (Archived)")
+        .init(id: "measureArch", name: "Outcome Measure (Archived)"),
+        .init(id: "weekly", name: "Weekly Mindset Entry"),
+        .init(id: "activePlan", name: "Active Plan State"),
+        .init(id: "capture", name: "Rolling Capture Item"),
+        .init(id: "quickCapture", name: "Quick Completed Capture"),
+        .init(id: "planLabel", name: "Plan Label"),
+        .init(id: "planSelect", name: "Plan Chunk Selection"),
+        .init(id: "chunk", name: "Planned Chunk"),
+        .init(id: "chunkAction", name: "Planned Chunk Action"),
+        .init(id: "step4", name: "Step 4 Chunk State"),
+        .init(id: "chunkOutcome", name: "Step 4 Outcome Link"),
+        .init(id: "define", name: "Define State"),
+        .init(id: "exec", name: "Execution State"),
+        .init(id: "leverageRes", name: "Leverage Resource"),
+        .init(id: "leverageSel", name: "Leverage Selection"),
+        .init(id: "placeCatalog", name: "Place Catalog"),
+        .init(id: "placeLink", name: "Place Link"),
+        .init(id: "actionNote", name: "Action Note"),
+        .init(id: "actionAttachment", name: "Action Attachment"),
+        .init(id: "legacyLeverage", name: "Legacy Leverage Item"),
+        .init(id: "legacyPlace", name: "Legacy Sensitivity Place"),
+        .init(id: "adhoc", name: "Action Ad Hoc Marker"),
+        .init(id: "reflect", name: "Reflection Archive"),
+        .init(id: "reflectAction", name: "Reflection Archive Action"),
+        .init(id: "reflectOutcome", name: "Reflection Archive Outcome"),
     ]
 
-    @Query(sort: \DrivingForce.updatedAt, order: .reverse)
-    private var drivingForces: [DrivingForce]
+    @Query(sort: \DrivingForce.updatedAt, order: .reverse) private var drivingForces: [DrivingForce]
+    @Query(sort: \DrivingForceArchive.archivedAt, order: .reverse) private var drivingForceArchives: [DrivingForceArchive]
+    @Query(sort: \Passion.date, order: .forward) private var passions: [Passion]
+    @Query(sort: \PassionArchive.archivedAt, order: .forward) private var passionArchives: [PassionArchive]
+    @Query(sort: \Fulfillment.updatedAt, order: .reverse) private var fulfillments: [Fulfillment]
+    @Query(sort: \FulfillmentArchive.archivedAt, order: .reverse) private var fulfillmentArchives: [FulfillmentArchive]
+    @Query(sort: \FulfillmentRoles.updatedAt, order: .reverse) private var fulfillmentRoles: [FulfillmentRoles]
+    @Query(sort: \FulfillmentRolesArchive.archivedAt, order: .reverse) private var fulfillmentRolesArchives: [FulfillmentRolesArchive]
+    @Query(sort: \FulfillmentFocus.updatedAt, order: .reverse) private var fulfillmentFocus: [FulfillmentFocus]
+    @Query(sort: \FulfillmentFocusArchive.archivedAt, order: .reverse) private var fulfillmentFocusArchives: [FulfillmentFocusArchive]
+    @Query(sort: \FulfillmentResources.updatedAt, order: .reverse) private var fulfillmentResources: [FulfillmentResources]
+    @Query(sort: \FulfillmentResourcesArchive.archivedAt, order: .reverse) private var fulfillmentResourcesArchives: [FulfillmentResourcesArchive]
+    @Query(sort: \PassionFulfillmentJoin.id, order: .forward) private var passionFulfillmentJoins: [PassionFulfillmentJoin]
+    @Query(sort: \PassionFulfillmentJoinArchive.archivedAt, order: .forward) private var passionFulfillmentJoinArchives: [PassionFulfillmentJoinArchive]
+    @Query(sort: \Outcomes.updatedAt, order: .reverse) private var outcomes: [Outcomes]
+    @Query(sort: \OutcomesArchive.archivedAt, order: .reverse) private var outcomesArchives: [OutcomesArchive]
+    @Query(sort: \OutcomesMeasure.measuredAt, order: .reverse) private var outcomesMeasures: [OutcomesMeasure]
+    @Query(sort: \OutcomesMeasureArchive.archivedAt, order: .reverse) private var outcomesMeasuresArchives: [OutcomesMeasureArchive]
 
-    @Query(sort: \DrivingForceArchive.archivedAt, order: .reverse)
-    private var drivingForceArchives: [DrivingForceArchive]
-
-    @Query(sort: \Passion.date, order: .forward)
-    private var passions: [Passion]
-
-    @Query(sort: \PassionArchive.archivedAt, order: .forward)
-    private var passionArchives: [PassionArchive]
-
-    @Query(sort: \Fulfillment.updatedAt, order: .reverse)
-    private var fulfillments: [Fulfillment]
-
-    @Query(sort: \FulfillmentArchive.archivedAt, order: .reverse)
-    private var fulfillmentArchives: [FulfillmentArchive]
-
-    @Query(sort: \FulfillmentRoles.updatedAt, order: .reverse)
-    private var fulfillmentRoles: [FulfillmentRoles]
-
-    @Query(sort: \FulfillmentRolesArchive.archivedAt, order: .reverse)
-    private var fulfillmentRolesArchives: [FulfillmentRolesArchive]
-
-    @Query(sort: \FulfillmentFocus.updatedAt, order: .reverse)
-    private var fulfillmentFocus: [FulfillmentFocus]
-
-    @Query(sort: \FulfillmentFocusArchive.archivedAt, order: .reverse)
-    private var fulfillmentFocusArchives: [FulfillmentFocusArchive]
-
-    @Query(sort: \FulfillmentResources.updatedAt, order: .reverse)
-    private var fulfillmentResources: [FulfillmentResources]
-
-    @Query(sort: \FulfillmentResourcesArchive.archivedAt, order: .reverse)
-    private var fulfillmentResourcesArchives: [FulfillmentResourcesArchive]
-
-    @Query(sort: \PassionFulfillmentJoin.id, order: .forward)
-    private var passionFulfillmentJoins: [PassionFulfillmentJoin]
-
-    @Query(sort: \PassionFulfillmentJoinArchive.archivedAt, order: .forward)
-    private var passionFulfillmentJoinArchives: [PassionFulfillmentJoinArchive]
-
-    @Query(sort: \Outcomes.updatedAt, order: .reverse)
-    private var outcomes: [Outcomes]
-
-    @Query(sort: \OutcomesArchive.archivedAt, order: .reverse)
-    private var outcomesArchives: [OutcomesArchive]
-
-    @Query(sort: \OutcomesMeasure.measuredAt, order: .reverse)
-    private var outcomesMeasures: [OutcomesMeasure]
-
-    @Query(sort: \OutcomesMeasureArchive.archivedAt, order: .reverse)
-    private var outcomesMeasuresArchives: [OutcomesMeasureArchive]
+    @Query(sort: \WeeklyMindsetEntry.Fields.createdAt, order: .reverse) private var weeklyEntries: [WeeklyMindsetEntry.Fields]
+    @Query(sort: \ActivePlanState.id, order: .forward) private var activePlanStates: [ActivePlanState]
+    @Query(sort: \RollingCaptureItem.createdAt, order: .reverse) private var rollingCapture: [RollingCaptureItem]
+    @Query(sort: \QuickCompletedCaptureItem.completedAt, order: .reverse) private var quickCompletedCapture: [QuickCompletedCaptureItem]
+    @Query(sort: \PlanLabel.label, order: .forward) private var planLabels: [PlanLabel]
+    @Query(sort: \PlanChunkSelection.updatedAt, order: .reverse) private var planSelections: [PlanChunkSelection]
+    @Query(sort: \PlannedChunk.updatedAt, order: .reverse) private var plannedChunks: [PlannedChunk]
+    @Query(sort: \PlannedChunkAction.createdAt, order: .reverse) private var plannedActions: [PlannedChunkAction]
+    @Query(sort: \PlannedChunkStepFourState.updatedAt, order: .reverse) private var stepFourStates: [PlannedChunkStepFourState]
+    @Query(sort: \PlannedChunkOutcomeLink.createdAt, order: .reverse) private var chunkOutcomeLinks: [PlannedChunkOutcomeLink]
+    @Query(sort: \PlannedChunkActionDefineState.updatedAt, order: .reverse) private var defineStates: [PlannedChunkActionDefineState]
+    @Query(sort: \PlannedChunkActionExecutionState.updatedAt, order: .reverse) private var executionStates: [PlannedChunkActionExecutionState]
+    @Query(sort: \LeverageResource.createdAt, order: .reverse) private var leverageResources: [LeverageResource]
+    @Query(sort: \PlannedChunkActionLeverageSelection.updatedAt, order: .reverse) private var leverageSelections: [PlannedChunkActionLeverageSelection]
+    @Query(sort: \SensitivityPlaceCatalogItem.createdAt, order: .reverse) private var placeCatalog: [SensitivityPlaceCatalogItem]
+    @Query(sort: \PlannedChunkActionSensitivityPlaceLink.createdAt, order: .reverse) private var placeLinks: [PlannedChunkActionSensitivityPlaceLink]
+    @Query(sort: \PlannedChunkActionNote.updatedAt, order: .reverse) private var actionNotes: [PlannedChunkActionNote]
+    @Query(sort: \PlannedChunkActionAttachment.createdAt, order: .reverse) private var actionAttachments: [PlannedChunkActionAttachment]
+    @Query(sort: \PlannedChunkActionLeverageItem.createdAt, order: .reverse) private var legacyLeverageItems: [PlannedChunkActionLeverageItem]
+    @Query(sort: \PlannedChunkActionSensitivityPlace.createdAt, order: .reverse) private var legacyPlaces: [PlannedChunkActionSensitivityPlace]
+    @Query(sort: \PlannedChunkActionAdHocMarker.createdAt, order: .reverse) private var adHocMarkers: [PlannedChunkActionAdHocMarker]
+    @Query(sort: \ActionBlocksReflectionArchive.savedAt, order: .reverse) private var reflections: [ActionBlocksReflectionArchive]
+    @Query(sort: \ActionBlocksReflectionArchiveAction.weekStart, order: .reverse) private var reflectionActions: [ActionBlocksReflectionArchiveAction]
+    @Query(sort: \ActionBlocksReflectionArchiveOutcome.weekStart, order: .reverse) private var reflectionOutcomes: [ActionBlocksReflectionArchiveOutcome]
 
     private var items: [DataItem] {
-        let allItems = DataItem.flatten(
+        var allItems = DataItem.flatten(
             forces: drivingForces,
             forceArch: drivingForceArchives,
             passions: passions,
@@ -541,28 +846,118 @@ struct DataPrinterView: View {
             outcomesMeasures: outcomesMeasures,
             outcomesMeasuresArch: outcomesMeasuresArchives
         )
-        
+
+        allItems += weeklyEntries.map {
+            DataItem(
+                id: "weekly-\($0.id.uuidString)",
+                source: "Weekly Mindset Entry",
+                content: $0.morningPowerQuestion,
+                date: $0.createdAt,
+                emotion: nil,
+                additionalFields: ["Gratitude": $0.gratitude, "Incantation": $0.incantation, "Week Start": $0.weekStart.formatted()]
+            )
+        }
+        allItems += activePlanStates.map {
+            DataItem(
+                id: "activePlan-\($0.id.uuidString)",
+                source: "Active Plan State",
+                content: $0.isActive ? "Active" : "Inactive",
+                date: $0.activatedAt ?? .distantPast,
+                emotion: nil,
+                additionalFields: ["Week Start": $0.weekStart?.formatted() ?? ""]
+            )
+        }
+        allItems += rollingCapture.map {
+            DataItem(id: "capture-\($0.id.uuidString)", source: "Rolling Capture Item", content: $0.text, date: $0.createdAt, emotion: nil, additionalFields: ["Ghost": "\($0.isGhost)"])
+        }
+        allItems += quickCompletedCapture.map {
+            DataItem(id: "quickCapture-\($0.id.uuidString)", source: "Quick Completed Capture", content: $0.text, date: $0.completedAt, emotion: nil, additionalFields: [:])
+        }
+        allItems += planLabels.map {
+            DataItem(id: "planLabel-\($0.labelId.uuidString)", source: "Plan Label", content: $0.label, date: .now, emotion: nil, additionalFields: ["Category": $0.category, "Source": $0.source])
+        }
+        allItems += planSelections.map {
+            DataItem(id: "planSelect-\($0.id.uuidString)", source: "Plan Chunk Selection", content: $0.label ?? "(none)", date: $0.updatedAt, emotion: nil, additionalFields: ["Chunk": "\($0.chunkIndex)", "Category": $0.category ?? ""])
+        }
+        allItems += plannedChunks.map {
+            DataItem(id: "chunk-\($0.id.uuidString)", source: "Planned Chunk", content: $0.label, date: $0.updatedAt, emotion: nil, additionalFields: ["Category": $0.category, "Index": "\($0.chunkIndex)"])
+        }
+        allItems += plannedActions.map {
+            DataItem(id: "chunkAction-\($0.id.uuidString)", source: "Planned Chunk Action", content: $0.text, date: $0.createdAt, emotion: nil, additionalFields: ["Chunk Index": "\($0.chunkIndex)", "Sort": "\($0.sortOrder)"])
+        }
+        allItems += stepFourStates.map {
+            DataItem(id: "step4-\($0.id.uuidString)", source: "Step 4 Chunk State", content: $0.resultText, date: $0.updatedAt, emotion: nil, additionalFields: ["Role Note": $0.roleNoteText])
+        }
+        allItems += chunkOutcomeLinks.map {
+            DataItem(id: "chunkOutcome-\($0.id.uuidString)", source: "Step 4 Outcome Link", content: $0.outcomeId.uuidString, date: $0.createdAt, emotion: nil, additionalFields: ["Chunk ID": $0.plannedChunkId.uuidString])
+        }
+        allItems += defineStates.map {
+            DataItem(id: "define-\($0.id.uuidString)", source: "Define State", content: $0.isMust ? "Must" : "Optional", date: $0.updatedAt, emotion: nil, additionalFields: ["Time (min)": "\($0.timeEstimateMinutes ?? 0)", "Action ID": $0.plannedChunkActionId.uuidString])
+        }
+        allItems += executionStates.map {
+            DataItem(id: "exec-\($0.id.uuidString)", source: "Execution State", content: $0.statusRaw, date: $0.updatedAt, emotion: nil, additionalFields: ["Action ID": $0.plannedChunkActionId.uuidString])
+        }
+        allItems += leverageResources.map {
+            DataItem(id: "leverageRes-\($0.id.uuidString)", source: "Leverage Resource", content: $0.value, date: $0.createdAt, emotion: nil, additionalFields: ["Kind": $0.kindRaw])
+        }
+        allItems += leverageSelections.map {
+            DataItem(id: "leverageSel-\($0.id.uuidString)", source: "Leverage Selection", content: $0.resourceId?.uuidString ?? "(none)", date: $0.updatedAt, emotion: nil, additionalFields: ["Action ID": $0.plannedChunkActionId.uuidString])
+        }
+        allItems += placeCatalog.map {
+            DataItem(id: "placeCatalog-\($0.id.uuidString)", source: "Place Catalog", content: $0.place, date: $0.createdAt, emotion: nil, additionalFields: [:])
+        }
+        allItems += placeLinks.map {
+            DataItem(id: "placeLink-\($0.id.uuidString)", source: "Place Link", content: $0.placeId.uuidString, date: $0.createdAt, emotion: nil, additionalFields: ["Action ID": $0.plannedChunkActionId.uuidString])
+        }
+        allItems += actionNotes.map {
+            DataItem(id: "actionNote-\($0.id.uuidString)", source: "Action Note", content: $0.noteText, date: $0.updatedAt, emotion: nil, additionalFields: ["Action ID": $0.plannedChunkActionId.uuidString])
+        }
+        allItems += actionAttachments.map {
+            DataItem(id: "actionAttachment-\($0.id.uuidString)", source: "Action Attachment", content: $0.fileName ?? $0.urlString ?? "", date: $0.createdAt, emotion: nil, additionalFields: ["Kind": $0.kindRaw, "Action ID": $0.plannedChunkActionId.uuidString])
+        }
+        allItems += legacyLeverageItems.map {
+            DataItem(id: "legacyLeverage-\($0.id.uuidString)", source: "Legacy Leverage Item", content: $0.value, date: $0.createdAt, emotion: nil, additionalFields: ["Kind": $0.kindRaw, "Action ID": $0.plannedChunkActionId.uuidString])
+        }
+        allItems += legacyPlaces.map {
+            DataItem(id: "legacyPlace-\($0.id.uuidString)", source: "Legacy Sensitivity Place", content: $0.place, date: $0.createdAt, emotion: nil, additionalFields: ["Action ID": $0.plannedChunkActionId.uuidString])
+        }
+        allItems += adHocMarkers.map {
+            DataItem(id: "adhoc-\($0.id.uuidString)", source: "Action Ad Hoc Marker", content: $0.plannedChunkActionId.uuidString, date: $0.createdAt, emotion: nil, additionalFields: [:])
+        }
+        allItems += reflections.map {
+            DataItem(id: "reflect-\($0.id.uuidString)", source: "Reflection Archive", content: $0.achievementsText, date: $0.savedAt, emotion: nil, additionalFields: ["Magic Moments": $0.magicMomentsText, "Power Question": $0.powerQuestionText])
+        }
+        allItems += reflectionActions.map {
+            DataItem(id: "reflectAction-\($0.id.uuidString)", source: "Reflection Archive Action", content: $0.actionText, date: $0.weekStart, emotion: nil, additionalFields: ["Status": $0.statusRaw, "Chunk": $0.chunkLabel])
+        }
+        allItems += reflectionOutcomes.map {
+            DataItem(id: "reflectOutcome-\($0.id.uuidString)", source: "Reflection Archive Outcome", content: $0.outcomeText, date: $0.weekStart, emotion: nil, additionalFields: ["Category": $0.category])
+        }
+
+        let filtered: [DataItem]
         if selectedFilters.isEmpty {
-            return allItems
+            filtered = allItems
+        } else {
+            filtered = allItems.filter { item in
+                guard let prefix = item.id.split(separator: "-").first else { return false }
+                return selectedFilters.contains(String(prefix))
+            }
         }
-        
-        return allItems.filter { item in
-            guard let prefix = item.id.split(separator: "-").first else { return false }
-            return selectedFilters.contains(String(prefix))
-        }
+        return filtered.sorted { $0.date > $1.date }
     }
 
     var body: some View {
-        List(items, selection: $selection) { item in
-            NavigationLink {
-                DataPrinterDetailView(item: item)
-            } label: {
-                DataPrinterRow(item)
+        List(selection: $selection) {
+            ForEach(items) { item in
+                NavigationLink {
+                    DataPrinterDetailView(item: item)
+                } label: {
+                    DataPrinterRow(item)
+                }
+                .tag(item.id)
             }
-            .tag(item.id)
         }
         .listStyle(.plain)
-        .tint(.red)
         .toolbar {
             ToolbarItemGroup(placement: .bottomBar) {
                 if editMode?.wrappedValue == .active {
@@ -596,12 +991,12 @@ struct DataPrinterView: View {
                         Image(systemName: "line.3.horizontal.decrease.circle")
                             .foregroundColor(selectedFilters.isEmpty ? .gray : .blue)
                     }
-                    
+
                     EditButton()
                 }
             }
         }
-        .navigationTitle("All Data")
+        .navigationTitle("Manage Raw Data")
         .alert("Permanently delete selected items?", isPresented: $showingDeleteAlert) {
             Button("Cancel", role: .cancel) { }
             Button("Delete", role: .destructive) {
@@ -618,93 +1013,122 @@ struct DataPrinterView: View {
         }
     }
 
-    // MARK: - Bulk Delete Logic
     private func performBulkDelete() {
         for id in selection {
             guard let dash = id.firstIndex(of: "-") else { continue }
             let uuidString = String(id[id.index(after: dash)...])
             guard let uuid = UUID(uuidString: uuidString) else { continue }
-
             let prefix = String(id[..<dash])
+
             switch prefix {
-            case "vision", "purpose":
-                if let df = drivingForces.first(where: { $0.id == uuid }) {
-                    context.delete(df)
-                }
-            case "visionArch", "purposeArch":
-                if let arch = drivingForceArchives.first(where: { $0.id == uuid }) {
-                    context.delete(arch)
-                }
-            case "passion":
-                if let p = passions.first(where: { $0.passion_id == uuid }) {
-                    context.delete(p)
-                }
-            case "passionArch":
-                if let arch = passionArchives.first(where: { $0.id == uuid }) {
-                    context.delete(arch)
-                }
-            case "fulfillment":
-                if let f = fulfillments.first(where: { $0.category_id == uuid }) {
-                    context.delete(f)
-                }
-            case "fulfillmentArch":
-                if let arch = fulfillmentArchives.first(where: { $0.id == uuid }) {
-                    context.delete(arch)
-                }
-            case "role":
-                if let role = fulfillmentRoles.first(where: { $0.id == uuid }) {
-                    context.delete(role)
-                }
-            case "roleArch":
-                if let arch = fulfillmentRolesArchives.first(where: { $0.id == uuid }) {
-                    context.delete(arch)
-                }
-            case "focus":
-                if let focus = fulfillmentFocus.first(where: { $0.id == uuid }) {
-                    context.delete(focus)
-                }
-            case "focusArch":
-                if let arch = fulfillmentFocusArchives.first(where: { $0.id == uuid }) {
-                    context.delete(arch)
-                }
-            case "resource":
-                if let resource = fulfillmentResources.first(where: { $0.id == uuid }) {
-                    context.delete(resource)
-                }
-            case "resourceArch":
-                if let arch = fulfillmentResourcesArchives.first(where: { $0.id == uuid }) {
-                    context.delete(arch)
-                }
-            case "join":
-                if let join = passionFulfillmentJoins.first(where: { $0.id == uuid }) {
-                    context.delete(join)
-                }
-            case "joinArch":
-                if let arch = passionFulfillmentJoinArchives.first(where: { $0.id == uuid }) {
-                    context.delete(arch)
-                }
-            case "outcome":
-                if let outcome = outcomes.first(where: { $0.outcome_id == uuid }) {
-                    context.delete(outcome)
-                }
-            case "outcomeArch":
-                if let arch = outcomesArchives.first(where: { $0.outcome_id == uuid }) {
-                    context.delete(arch)
-                }
-            case "measure":
-                if let measure = outcomesMeasures.first(where: { $0.outcome_id == uuid }) {
-                    context.delete(measure)
-                }
-            case "measureArch":
-                if let arch = outcomesMeasuresArchives.first(where: { $0.outcome_id == uuid }) {
-                    context.delete(arch)
-                }
-            default:
-                break
+            case "vision", "purpose": if let row = drivingForces.first(where: { $0.id == uuid }) { context.delete(row) }
+            case "visionArch", "purposeArch": if let row = drivingForceArchives.first(where: { $0.id == uuid }) { context.delete(row) }
+            case "passion": if let row = passions.first(where: { $0.passion_id == uuid }) { context.delete(row) }
+            case "passionArch": if let row = passionArchives.first(where: { $0.id == uuid }) { context.delete(row) }
+            case "fulfillment": if let row = fulfillments.first(where: { $0.category_id == uuid }) { context.delete(row) }
+            case "fulfillmentArch": if let row = fulfillmentArchives.first(where: { $0.id == uuid }) { context.delete(row) }
+            case "role": if let row = fulfillmentRoles.first(where: { $0.id == uuid }) { context.delete(row) }
+            case "roleArch": if let row = fulfillmentRolesArchives.first(where: { $0.id == uuid }) { context.delete(row) }
+            case "focus": if let row = fulfillmentFocus.first(where: { $0.id == uuid }) { context.delete(row) }
+            case "focusArch": if let row = fulfillmentFocusArchives.first(where: { $0.id == uuid }) { context.delete(row) }
+            case "resource": if let row = fulfillmentResources.first(where: { $0.id == uuid }) { context.delete(row) }
+            case "resourceArch": if let row = fulfillmentResourcesArchives.first(where: { $0.id == uuid }) { context.delete(row) }
+            case "join": if let row = passionFulfillmentJoins.first(where: { $0.id == uuid }) { context.delete(row) }
+            case "joinArch": if let row = passionFulfillmentJoinArchives.first(where: { $0.id == uuid }) { context.delete(row) }
+            case "outcome": if let row = outcomes.first(where: { $0.outcome_id == uuid }) { context.delete(row) }
+            case "outcomeArch": if let row = outcomesArchives.first(where: { $0.outcome_id == uuid }) { context.delete(row) }
+            case "measure": if let row = outcomesMeasures.first(where: { $0.outcome_id == uuid }) { context.delete(row) }
+            case "measureArch": if let row = outcomesMeasuresArchives.first(where: { $0.outcome_id == uuid }) { context.delete(row) }
+            case "weekly": if let row = weeklyEntries.first(where: { $0.id == uuid }) { context.delete(row) }
+            case "activePlan": if let row = activePlanStates.first(where: { $0.id == uuid }) { context.delete(row) }
+            case "capture": if let row = rollingCapture.first(where: { $0.id == uuid }) { context.delete(row) }
+            case "quickCapture": if let row = quickCompletedCapture.first(where: { $0.id == uuid }) { context.delete(row) }
+            case "planLabel": if let row = planLabels.first(where: { $0.labelId == uuid }) { context.delete(row) }
+            case "planSelect": if let row = planSelections.first(where: { $0.id == uuid }) { context.delete(row) }
+            case "chunk": if let row = plannedChunks.first(where: { $0.id == uuid }) { context.delete(row) }
+            case "chunkAction": if let row = plannedActions.first(where: { $0.id == uuid }) { context.delete(row) }
+            case "step4": if let row = stepFourStates.first(where: { $0.id == uuid }) { context.delete(row) }
+            case "chunkOutcome": if let row = chunkOutcomeLinks.first(where: { $0.id == uuid }) { context.delete(row) }
+            case "define": if let row = defineStates.first(where: { $0.id == uuid }) { context.delete(row) }
+            case "exec": if let row = executionStates.first(where: { $0.id == uuid }) { context.delete(row) }
+            case "leverageRes": if let row = leverageResources.first(where: { $0.id == uuid }) { context.delete(row) }
+            case "leverageSel": if let row = leverageSelections.first(where: { $0.id == uuid }) { context.delete(row) }
+            case "placeCatalog": if let row = placeCatalog.first(where: { $0.id == uuid }) { context.delete(row) }
+            case "placeLink": if let row = placeLinks.first(where: { $0.id == uuid }) { context.delete(row) }
+            case "actionNote": if let row = actionNotes.first(where: { $0.id == uuid }) { context.delete(row) }
+            case "actionAttachment": if let row = actionAttachments.first(where: { $0.id == uuid }) { context.delete(row) }
+            case "legacyLeverage": if let row = legacyLeverageItems.first(where: { $0.id == uuid }) { context.delete(row) }
+            case "legacyPlace": if let row = legacyPlaces.first(where: { $0.id == uuid }) { context.delete(row) }
+            case "adhoc": if let row = adHocMarkers.first(where: { $0.id == uuid }) { context.delete(row) }
+            case "reflect": if let row = reflections.first(where: { $0.id == uuid }) { context.delete(row) }
+            case "reflectAction": if let row = reflectionActions.first(where: { $0.id == uuid }) { context.delete(row) }
+            case "reflectOutcome": if let row = reflectionOutcomes.first(where: { $0.id == uuid }) { context.delete(row) }
+            default: break
             }
         }
         try? context.save()
         selection.removeAll()
+    }
+}
+
+private struct DemoPlanViewContainer: View {
+    private let demoContainer: ModelContainer = {
+        let schema: [any PersistentModel.Type] = [
+            DrivingForce.self,
+            DrivingForceArchive.self,
+            Passion.self,
+            PassionArchive.self,
+            PassionFulfillmentJoin.self,
+            PassionFulfillmentJoinArchive.self,
+            Fulfillment.self,
+            FulfillmentArchive.self,
+            FulfillmentRoles.self,
+            FulfillmentRolesArchive.self,
+            FulfillmentFocus.self,
+            FulfillmentFocusArchive.self,
+            FulfillmentResources.self,
+            FulfillmentResourcesArchive.self,
+            Outcomes.self,
+            OutcomesArchive.self,
+            OutcomesMeasure.self,
+            OutcomesMeasureArchive.self,
+            WeeklyMindsetEntry.Fields.self,
+            ActivePlanState.self,
+            RollingCaptureItem.self,
+            QuickCompletedCaptureItem.self,
+            PlannedChunkActionAdHocMarker.self,
+            ActionBlocksReflectionArchive.self,
+            ActionBlocksReflectionArchiveAction.self,
+            ActionBlocksReflectionArchiveOutcome.self,
+            PlanLabel.self,
+            PlanChunkSelection.self,
+            PlannedChunk.self,
+            PlannedChunkAction.self,
+            PlannedChunkStepFourState.self,
+            PlannedChunkOutcomeLink.self,
+            PlannedChunkActionDefineState.self,
+            PlannedChunkActionExecutionState.self,
+            LeverageResource.self,
+            PlannedChunkActionLeverageSelection.self,
+            SensitivityPlaceCatalogItem.self,
+            PlannedChunkActionSensitivityPlaceLink.self,
+            PlannedChunkActionNote.self,
+            PlannedChunkActionAttachment.self,
+            PlannedChunkActionLeverageItem.self,
+            PlannedChunkActionSensitivityPlace.self,
+        ]
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        do {
+            let demoSchema = Schema(schema)
+            return try ModelContainer(for: demoSchema, configurations: config)
+        } catch {
+            fatalError("Failed to create demo model container: \(error)")
+        }
+    }()
+
+    var body: some View {
+        PlanView()
+            .modelContainer(demoContainer)
     }
 }
 

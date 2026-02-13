@@ -31,6 +31,10 @@ struct ContentView: View {
     // Model-derived state
     @Query(sort: \ActivePlanState.id, order: .forward)
     private var activePlanStates: [ActivePlanState]
+    @Query(sort: \PlannedChunkAction.createdAt, order: .reverse)
+    private var allPlannedActions: [PlannedChunkAction]
+    @Query(sort: \ActionBlocksReflectionArchive.completedAt, order: .reverse)
+    private var reflectionArchives: [ActionBlocksReflectionArchive]
 
     @State private var navPath: [PlayDestination] = []
     @State private var playSheetDestination: PlayDestination? = nil
@@ -43,6 +47,20 @@ struct ContentView: View {
 
     private var isActivePlan: Bool {
         activePlanStates.first?.isActive ?? false
+    }
+
+    private var hasChunkStoredActionsThisWeek: Bool {
+        let week = WeeklyMindsetEntry.weekStart(for: Date())
+        return allPlannedActions.contains { Calendar.current.isDate($0.weekStart, inSameDayAs: week) }
+    }
+
+    private var hasCompletedReflectionThisWeek: Bool {
+        let week = WeeklyMindsetEntry.weekStart(for: Date())
+        return reflectionArchives.contains { Calendar.current.isDate($0.weekStart, inSameDayAs: week) }
+    }
+
+    private var isActiveActionFlow: Bool {
+        isActivePlan || (hasChunkStoredActionsThisWeek && !hasCompletedReflectionThisWeek)
     }
     
     private func daysUntil(_ endDate: Date) -> Int {
@@ -405,9 +423,9 @@ struct ContentView: View {
                 .buttonStyle(.plain)
 
                 Button(action: {
-                    playSheetDestination = isActivePlan ? .action : .plan
+                    playSheetDestination = isActiveActionFlow ? .action : .plan
                 }) {
-                    Image(systemName: isActivePlan ? "forward.fill" : "play.fill")
+                    Image(systemName: isActiveActionFlow ? "forward.fill" : "play.fill")
                         .font(.title)
                         .foregroundColor(Color(.systemBackground))
                         .frame(width: 60, height: 60)
@@ -428,6 +446,7 @@ struct ContentView: View {
         .background(Color.clear)
         .sheet(isPresented: $isPresentingCaptureView) {
             CaptureView()
+                .presentationDragIndicator(.visible)
         }
     }
 
@@ -1237,4 +1256,3 @@ extension View {
         }
     }
 }
-

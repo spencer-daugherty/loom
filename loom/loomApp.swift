@@ -30,6 +30,11 @@ struct loomApp: App {
                 WeeklyMindsetEntry.Fields.self,
                 ActivePlanState.self,
                 RollingCaptureItem.self,
+                QuickCompletedCaptureItem.self,
+                PlannedChunkActionAdHocMarker.self,
+                ActionBlocksReflectionArchive.self,
+                ActionBlocksReflectionArchiveAction.self,
+                ActionBlocksReflectionArchiveOutcome.self,
                 PlanLabel.self,
                 PlanChunkSelection.self,
                 PlannedChunk.self,
@@ -41,6 +46,7 @@ struct loomApp: App {
 
                 // Step 5 persistence
                 PlannedChunkActionDefineState.self,
+                PlannedChunkActionExecutionState.self,
 
                 // NEW Step 5 universal + links
                 LeverageResource.self,

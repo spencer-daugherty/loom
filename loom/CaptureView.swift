@@ -15,15 +15,24 @@ struct CaptureView: View {
 
     @Query(sort: \RollingCaptureItem.createdAt, order: .reverse)
     private var allItems: [RollingCaptureItem]
+    @Query(sort: \QuickCompletedCaptureItem.completedAt, order: .reverse)
+    private var completedItems: [QuickCompletedCaptureItem]
 
     @State private var input: String = ""
     @State private var isGhostOn: Bool = false
-    @FocusState private var isInputFocused: Bool
+    @FocusState private var focusedField: FocusField?
 
     @State private var selectedUnhideDate: Date? = nil
     @State private var isDatePickerPresented: Bool = false
     @State private var datePickerTempDate: Date = Calendar.current.date(byAdding: .day, value: 7, to: Date())!
     @State private var popoverDetentHeight: CGFloat = 520
+    @State private var inlineEditSaveTask: Task<Void, Never>? = nil
+    @State private var showCompletedList: Bool = false
+
+    private enum FocusField: Hashable {
+        case newInput
+        case item(UUID)
+    }
 
     private var displayItems: [RollingCaptureItem] {
         // After auto-unhide runs, anything due will have isGhost=false, so filtering is straightforward.
@@ -35,6 +44,10 @@ struct CaptureView: View {
     }
 
     private var earliestUnhideDate: Date { Calendar.current.date(byAdding: .day, value: 7, to: Date())! }
+
+    private func normalizedActionText(_ text: String) -> String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
 
     private func formatShortDate(_ date: Date) -> String {
         let cal = Calendar.current
@@ -55,64 +68,160 @@ struct CaptureView: View {
             ZStack {
                 (colorScheme == .dark ? Color(.systemGroupedBackground) : Color.white).ignoresSafeArea()
                 VStack(spacing: 12) {
-                    List {
-                        ForEach(displayItems) { item in
-                            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                Text(item.text)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
+                    ScrollViewReader { proxy in
+                        List {
+                            ForEach(displayItems) { item in
+                                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                    TextField(
+                                        "Action",
+                                        text: Binding(
+                                            get: { item.text },
+                                            set: { newValue in
+                                                renameItemInline(item, to: newValue)
+                                            }
+                                        )
+                                    )
+                                    .font(.body.weight(.medium))
+                                    .textFieldStyle(.plain)
+                                    .focused($focusedField, equals: .item(item.id))
+                                    .submitLabel(.done)
+                                    .onSubmit {
+                                        focusedField = .newInput
+                                    }
+                                        .frame(maxWidth: .infinity, alignment: .leading)
 
-                                // Show unhide history if present (matches your existing “Unhidden …” UI).
-                                if let d = item.unhiddenAt {
-                                    Text("Unhidden " + formatShortDate(d))
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                } else if item.isGhost, let scheduled = item.unhideDate {
-                                    // Optional: If you prefer not to show this, remove it.
-                                    Text("Hidden until " + formatShortDate(scheduled))
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                    if let d = item.unhiddenAt {
+                                        Text("Unhidden " + formatShortDate(d))
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    } else if item.isGhost, let scheduled = item.unhideDate {
+                                        Text("Hidden until " + formatShortDate(scheduled))
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                .padding(8)
+                                .padding(.vertical, 2)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+                                .overlay {
+                                    if item.isGhost {
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .stroke(style: StrokeStyle(lineWidth: 2, dash: [6]))
+                                            .foregroundStyle(.blue)
+                                    }
+                                }
+                                .padding(.vertical, 1)
+                                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                                .listRowSeparator(.hidden)
+                                .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                                    Button {
+                                        quickCompleteItem(item)
+                                    } label: {
+                                        Text("Quick Complete")
+                                    }
+                                    .tint(.green)
                                 }
                             }
-                            .padding(8)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
-                            .overlay {
-                                if item.isGhost {
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .stroke(style: StrokeStyle(lineWidth: 2, dash: [6]))
-                                        .foregroundStyle(.blue)
+                            .onDelete(perform: deleteItems)
+
+                            if !completedItems.isEmpty {
+                                Button {
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        showCompletedList.toggle()
+                                    }
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: showCompletedList ? "chevron.up" : "chevron.down")
+                                            .font(.caption2.weight(.semibold))
+                                        Text("Quickly Completed")
+                                            .font(.caption2.weight(.semibold))
+                                    }
+                                    .foregroundStyle(colorScheme == .dark ? Color.white.opacity(0.68) : .black)
+                                    .padding(.vertical, 5)
+                                    .padding(.horizontal, 8)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .fill(Color(.systemGray4))
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .stroke(Color.black.opacity(0.15), lineWidth: 1)
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .id("completed-toggle")
+                                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 0, trailing: 16))
+                                .listRowSeparator(.hidden)
+
+                                if showCompletedList {
+                                    ForEach(Array(completedItems.enumerated()), id: \.element.id) { index, item in
+                                        let row = HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                            Text(item.text)
+                                                .font(.body.weight(.medium))
+                                                .foregroundStyle(.secondary)
+                                                .strikethrough(true, color: .secondary)
+                                                .frame(maxWidth: .infinity, alignment: .leading)
+                                        }
+                                        .padding(8)
+                                        .padding(.vertical, 2)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+                                        .padding(.vertical, 1)
+                                        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                                        .listRowSeparator(.hidden)
+                                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                            Button {
+                                                recaptureCompletedItem(item)
+                                            } label: {
+                                                Text("Recapture")
+                                            }
+                                            .tint(.gray)
+                                        }
+                                        if index == 0 {
+                                            row.id("completed-list-start")
+                                        } else {
+                                            row
+                                        }
+                                    }
                                 }
                             }
-                            .padding(.vertical, 1)
-                            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                         }
-                        .onDelete(perform: deleteItems)
+                        .listRowSpacing(4)
+                        .listStyle(.plain)
+                        .scrollContentBackground(.hidden)
+                        .onChange(of: showCompletedList) { _, isShowing in
+                            guard isShowing else { return }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                withAnimation(.easeInOut(duration: 0.25)) {
+                                    proxy.scrollTo("completed-list-start", anchor: .top)
+                                }
+                            }
+                        }
                     }
-                    .listRowSpacing(4)
-                    .listStyle(.plain)
-                    .scrollContentBackground(.hidden)
                 }
                 .background(Color.clear)
                 .navigationTitle("Rolling Capture")
                 .navigationBarTitleDisplayMode(.inline)
-                .onAppear {
-                    runAutoUnhideIfNeeded()
+                    .onAppear {
+                        runAutoUnhideIfNeeded()
 
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        isInputFocused = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            focusedField = .newInput
+                        }
                     }
-                }
                 .onChange(of: scenePhase) { _, newPhase in
                     // Ensures items unhide when app comes back to foreground.
                     if newPhase == .active {
                         runAutoUnhideIfNeeded()
                     }
                 }
-                .onChange(of: isInputFocused) { _, newValue in
-                    if newValue == false {
+                .onChange(of: focusedField) { _, newValue in
+                    if newValue == nil {
                         if isDatePickerPresented { return }
                         DispatchQueue.main.async {
-                            isInputFocused = true
+                            focusedField = .newInput
                         }
                     }
                 }
@@ -121,10 +230,10 @@ struct CaptureView: View {
                 }
                 .onChange(of: isDatePickerPresented) { _, newValue in
                     if newValue {
-                        isInputFocused = false
+                        focusedField = nil
                     } else {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                            isInputFocused = true
+                            focusedField = .newInput
                         }
                     }
                 }
@@ -140,7 +249,7 @@ struct CaptureView: View {
                                         datePickerTempDate = earliestUnhideDate
                                     }
                                     DispatchQueue.main.async {
-                                        isInputFocused = false
+                                        focusedField = nil
                                     }
                                     isDatePickerPresented = true
                                 }) {
@@ -223,7 +332,7 @@ struct CaptureView: View {
                             TextField("Add an action…", text: $input)
                                 .textInputAutocapitalization(.none)
                                 .autocorrectionDisabled(true)
-                                .focused($isInputFocused)
+                                .focused($focusedField, equals: .newInput)
                                 .submitLabel(.done)
                                 .onSubmit(addItem)
                                 .padding(12)
@@ -261,6 +370,9 @@ struct CaptureView: View {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
+        let duplicateExists = allItems.contains { normalizedActionText($0.text) == normalizedActionText(trimmed) }
+        guard !duplicateExists else { return }
+
         if isGhostOn && selectedUnhideDate == nil {
             datePickerTempDate = earliestUnhideDate
             isDatePickerPresented = true
@@ -281,7 +393,7 @@ struct CaptureView: View {
         datePickerTempDate = earliestUnhideDate
 
         input = ""
-        isInputFocused = true
+        focusedField = .newInput
     }
 
     private func deleteItems(at offsets: IndexSet) {
@@ -290,6 +402,34 @@ struct CaptureView: View {
             modelContext.delete(item)
         }
         try? modelContext.save()
+    }
+
+    private func renameItemInline(_ item: RollingCaptureItem, to rawText: String) {
+        let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        let newNormalized = normalizedActionText(trimmed)
+        let oldNormalized = normalizedActionText(item.text)
+
+        if oldNormalized == newNormalized && item.text == trimmed {
+            return
+        }
+
+        let duplicateExists = allItems.contains {
+            $0.id != item.id && normalizedActionText($0.text) == newNormalized
+        }
+        if duplicateExists { return }
+
+        item.text = trimmed
+        scheduleInlineEditSave()
+    }
+
+    private func scheduleInlineEditSave() {
+        inlineEditSaveTask?.cancel()
+        inlineEditSaveTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            try? modelContext.save()
+        }
     }
 
     private func runAutoUnhideIfNeeded() {
@@ -310,6 +450,29 @@ struct CaptureView: View {
             item.unhideDate = nil
         }
 
+        try? modelContext.save()
+    }
+
+    private func quickCompleteItem(_ item: RollingCaptureItem) {
+        modelContext.insert(QuickCompletedCaptureItem(text: item.text, completedAt: .now))
+        modelContext.delete(item)
+        try? modelContext.save()
+    }
+
+    private func recaptureCompletedItem(_ item: QuickCompletedCaptureItem) {
+        let duplicateExists = allItems.contains {
+            normalizedActionText($0.text) == normalizedActionText(item.text)
+        }
+        if !duplicateExists {
+            modelContext.insert(RollingCaptureItem(
+                text: item.text,
+                isGhost: false,
+                createdAt: .now,
+                unhideDate: nil,
+                unhiddenAt: nil
+            ))
+        }
+        modelContext.delete(item)
         try? modelContext.save()
     }
 }

@@ -665,6 +665,186 @@ final class RollingCaptureItem {
   }
 }
 
+@Model
+final class QuickCompletedCaptureItem {
+  @Attribute(.unique) var id: UUID
+  var text: String
+  var completedAt: Date
+
+  init(
+    id: UUID = .init(),
+    text: String,
+    completedAt: Date = .now
+  ) {
+    self.id = id
+    self.text = text
+    self.completedAt = completedAt
+  }
+}
+
+@Model
+final class PlannedChunkActionAdHocMarker {
+    @Attribute(.unique) var id: UUID
+    var weekStart: Date
+    var plannedChunkActionId: UUID
+    var createdAt: Date
+    @Attribute(.unique) var weekActionKey: String
+
+    init(
+        id: UUID = .init(),
+        weekStart: Date,
+        plannedChunkActionId: UUID,
+        createdAt: Date = .now
+    ) {
+        self.id = id
+        self.weekStart = weekStart
+        self.plannedChunkActionId = plannedChunkActionId
+        self.createdAt = createdAt
+
+        let dayKey = PlannedChunkActionAdHocMarker.dayKey(from: weekStart)
+        self.weekActionKey = "\(dayKey)|\(plannedChunkActionId.uuidString)"
+    }
+
+    private static func dayKey(from date: Date) -> String {
+        let cal = Calendar.current
+        let comps = cal.dateComponents([.year, .month, .day], from: date)
+        let y = comps.year ?? 0
+        let m = comps.month ?? 0
+        let d = comps.day ?? 0
+        return String(format: "%04d-%02d-%02d", y, m, d)
+    }
+}
+
+@Model
+final class ActionBlocksReflectionArchive {
+    @Attribute(.unique) var id: UUID
+    var weekStart: Date
+    var startedAt: Date
+    var completedAt: Date
+    var savedAt: Date
+
+    var achievementsText: String
+    var magicMomentsText: String
+    var powerQuestionText: String
+
+    init(
+        id: UUID = .init(),
+        weekStart: Date,
+        startedAt: Date,
+        completedAt: Date,
+        savedAt: Date = .now,
+        achievementsText: String,
+        magicMomentsText: String,
+        powerQuestionText: String
+    ) {
+        self.id = id
+        self.weekStart = weekStart
+        self.startedAt = startedAt
+        self.completedAt = completedAt
+        self.savedAt = savedAt
+        self.achievementsText = achievementsText
+        self.magicMomentsText = magicMomentsText
+        self.powerQuestionText = powerQuestionText
+    }
+}
+
+@Model
+final class ActionBlocksReflectionArchiveAction {
+    @Attribute(.unique) var id: UUID
+    var archiveId: UUID
+    var weekStart: Date
+    var plannedChunkId: UUID
+    var plannedChunkActionId: UUID
+
+    var chunkLabel: String
+    var chunkCategory: String
+    var resultText: String?
+    var purposeText: String?
+    var actionText: String
+    var statusRaw: String
+
+    var isMust: Bool
+    var durationMinutes: Int?
+    var leverageKindRaw: String?
+    var leverageValue: String?
+    var placeNamesCSV: String
+
+    var hasNote: Bool
+    var linkAttachmentCount: Int
+    var fileAttachmentCount: Int
+
+    init(
+        id: UUID = .init(),
+        archiveId: UUID,
+        weekStart: Date,
+        plannedChunkId: UUID,
+        plannedChunkActionId: UUID,
+        chunkLabel: String,
+        chunkCategory: String,
+        resultText: String? = nil,
+        purposeText: String? = nil,
+        actionText: String,
+        statusRaw: String,
+        isMust: Bool,
+        durationMinutes: Int?,
+        leverageKindRaw: String? = nil,
+        leverageValue: String? = nil,
+        placeNamesCSV: String = "",
+        hasNote: Bool = false,
+        linkAttachmentCount: Int = 0,
+        fileAttachmentCount: Int = 0
+    ) {
+        self.id = id
+        self.archiveId = archiveId
+        self.weekStart = weekStart
+        self.plannedChunkId = plannedChunkId
+        self.plannedChunkActionId = plannedChunkActionId
+        self.chunkLabel = chunkLabel
+        self.chunkCategory = chunkCategory
+        self.resultText = resultText
+        self.purposeText = purposeText
+        self.actionText = actionText
+        self.statusRaw = statusRaw
+        self.isMust = isMust
+        self.durationMinutes = durationMinutes
+        self.leverageKindRaw = leverageKindRaw
+        self.leverageValue = leverageValue
+        self.placeNamesCSV = placeNamesCSV
+        self.hasNote = hasNote
+        self.linkAttachmentCount = linkAttachmentCount
+        self.fileAttachmentCount = fileAttachmentCount
+    }
+}
+
+@Model
+final class ActionBlocksReflectionArchiveOutcome {
+    @Attribute(.unique) var id: UUID
+    var archiveId: UUID
+    var weekStart: Date
+    var plannedChunkId: UUID
+    var outcomeId: UUID
+    var outcomeText: String
+    var category: String
+
+    init(
+        id: UUID = .init(),
+        archiveId: UUID,
+        weekStart: Date,
+        plannedChunkId: UUID,
+        outcomeId: UUID,
+        outcomeText: String,
+        category: String
+    ) {
+        self.id = id
+        self.archiveId = archiveId
+        self.weekStart = weekStart
+        self.plannedChunkId = plannedChunkId
+        self.outcomeId = outcomeId
+        self.outcomeText = outcomeText
+        self.category = category
+    }
+}
+
 // MARK: - NEW: Planned chunks (Step 3 -> Step 4 persistence)
 /// A persisted chunk created in Plan Step 3 for a given plan week.
 @Model
@@ -841,6 +1021,61 @@ enum ActionAttachmentKind: String, Codable, CaseIterable, Identifiable {
     case file
 
     var id: String { rawValue }
+}
+
+enum ActionExecutionStatus: String, Codable, CaseIterable, Identifiable {
+    case noAction
+    case leveraged
+    case inProgress
+    case done
+    case carriedToCapture
+    case notNeeded
+
+    var id: String { rawValue }
+}
+
+/// Per-action execution status for ActionView.
+/// One row per (weekStart, PlannedChunkAction.id).
+@Model
+final class PlannedChunkActionExecutionState {
+    @Attribute(.unique) var id: UUID
+    var weekStart: Date
+    var plannedChunkActionId: UUID
+    var statusRaw: String
+    var updatedAt: Date
+
+    @Attribute(.unique) var weekActionKey: String
+
+    init(
+        id: UUID = .init(),
+        weekStart: Date,
+        plannedChunkActionId: UUID,
+        statusRaw: String = ActionExecutionStatus.noAction.rawValue,
+        updatedAt: Date = .now
+    ) {
+        self.id = id
+        self.weekStart = weekStart
+        self.plannedChunkActionId = plannedChunkActionId
+        self.statusRaw = statusRaw
+        self.updatedAt = updatedAt
+
+        let dayKey = PlannedChunkActionExecutionState.dayKey(from: weekStart)
+        self.weekActionKey = "\(dayKey)|\(plannedChunkActionId.uuidString)"
+    }
+
+    var status: ActionExecutionStatus {
+        get { ActionExecutionStatus(rawValue: statusRaw) ?? .noAction }
+        set { statusRaw = newValue.rawValue }
+    }
+
+    private static func dayKey(from date: Date) -> String {
+        let cal = Calendar.current
+        let comps = cal.dateComponents([.year, .month, .day], from: date)
+        let y = comps.year ?? 0
+        let m = comps.month ?? 0
+        let d = comps.day ?? 0
+        return String(format: "%04d-%02d-%02d", y, m, d)
+    }
 }
 
 /// Universal leverage resource catalog (shared across all actions).
@@ -1114,4 +1349,3 @@ final class PlannedChunkActionSensitivityPlace {
         self.createdAt = createdAt
     }
 }
-
