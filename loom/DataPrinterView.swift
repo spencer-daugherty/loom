@@ -853,6 +853,9 @@ struct RecentlyDeletedView: View {
     @Environment(\.modelContext) private var context
     @Query(sort: \RecentlyDeletedItem.deletedAt, order: .reverse) private var items: [RecentlyDeletedItem]
     @State private var showRecoverFailedAlert = false
+    private var visibleItems: [RecentlyDeletedItem] {
+        items.filter { $0.entityType != "OutcomesMeasure" && $0.entityType != "OutcomesMeasureEntry" }
+    }
 
     var body: some View {
         List {
@@ -863,11 +866,11 @@ struct RecentlyDeletedView: View {
             }
 
             Section {
-                if items.isEmpty {
+                if visibleItems.isEmpty {
                     Text("No recently deleted items.")
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(items) { item in
+                    ForEach(visibleItems) { item in
                         VStack(alignment: .leading, spacing: 4) {
                             Text(item.titleText)
                                 .font(.body)

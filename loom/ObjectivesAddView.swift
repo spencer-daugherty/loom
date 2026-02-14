@@ -351,7 +351,6 @@ struct ObjectivesAddView: View {
                                 decimalPlaces: outcomeMeasure.decimalPlaces
                             )
                             modelContext.insert(archivedMeasure)
-                            RecentlyDeletedStore.trash(outcomeMeasure, in: modelContext, source: "Outcome")
                         }
                         
                         RecentlyDeletedStore.trash(outcome, in: modelContext, source: "Outcome")

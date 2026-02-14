@@ -214,6 +214,7 @@ struct CaptureView: View {
                 .navigationBarTitleDisplayMode(.inline)
                     .onAppear {
                         runAutoUnhideIfNeeded()
+                        dedupeCaptureItemsIfNeeded()
 
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                             focusedField = .newInput
@@ -223,7 +224,11 @@ struct CaptureView: View {
                     // Ensures items unhide when app comes back to foreground.
                     if newPhase == .active {
                         runAutoUnhideIfNeeded()
+                        dedupeCaptureItemsIfNeeded()
                     }
+                }
+                .onChange(of: allItems.map(\.id)) { _, _ in
+                    dedupeCaptureItemsIfNeeded()
                 }
                 .onChange(of: focusedField) { _, newValue in
                     if newValue == nil {
@@ -481,6 +486,43 @@ struct CaptureView: View {
             item.unhideDate = nil
         }
 
+        try? modelContext.save()
+    }
+
+    private func dedupeCaptureItemsIfNeeded() {
+        var keeperByKey: [String: RollingCaptureItem] = [:]
+        var toDelete: [RollingCaptureItem] = []
+
+        for item in allItems {
+            let key = normalizedActionText(item.text)
+            guard !key.isEmpty else { continue }
+
+            if let existing = keeperByKey[key] {
+                let keepCurrent: Bool
+                if item.isGhost != existing.isGhost {
+                    // Prefer visible actions over hidden (ghost) when duplicates exist.
+                    keepCurrent = !item.isGhost
+                } else if item.createdAt != existing.createdAt {
+                    keepCurrent = item.createdAt > existing.createdAt
+                } else {
+                    keepCurrent = item.id.uuidString > existing.id.uuidString
+                }
+
+                if keepCurrent {
+                    toDelete.append(existing)
+                    keeperByKey[key] = item
+                } else {
+                    toDelete.append(item)
+                }
+            } else {
+                keeperByKey[key] = item
+            }
+        }
+
+        guard !toDelete.isEmpty else { return }
+        for item in toDelete {
+            RecentlyDeletedStore.trash(item, in: modelContext, source: "Capture Deduplication")
+        }
         try? modelContext.save()
     }
 
