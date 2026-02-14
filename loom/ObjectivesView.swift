@@ -178,8 +178,10 @@ struct ObjectivesView: View {
             switch action {
             case .addOutcome:
                 ObjectivesAddView()
+                    .presentationDragIndicator(.visible)
             case .editOutcome(let outcome):
-                ObjectivesAddView(outcome: outcome, outcomeMeasure: latestMeasure(for: outcome))
+                OutcomeView(outcome: outcome, outcomeMeasure: latestMeasure(for: outcome))
+                    .presentationDragIndicator(.visible)
             }
         }
         .sheet(isPresented: $isShowingSortSheet) {

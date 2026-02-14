@@ -583,6 +583,7 @@ struct OutcomesAllDataView: View {
                 }
             }
             .onDelete { offsets in
+                let deletedIDs = Set(offsets.map { mergedRows[$0].id })
                 for idx in offsets {
                     let row = mergedRows[idx]
                     if let persisted = entries.first(where: { $0.id == row.id }) {
@@ -590,6 +591,10 @@ struct OutcomesAllDataView: View {
                     } else if let legacy = legacyMeasures.first(where: { $0.outcome_id == outcomeID }) {
                         modelContext.delete(legacy)
                     }
+                }
+                if !entries.isEmpty {
+                    let remainingEntries = entries.filter { !deletedIDs.contains($0.id) }
+                    syncSnapshot(with: remainingEntries)
                 }
                 try? modelContext.save()
             }
@@ -617,6 +622,42 @@ struct OutcomesAllDataView: View {
         default:
             let raw = String(format: "%.\(places)f", rounded)
             return unitRaw == ObjectivesAddView.UnitOption.defaultUnit ? raw : "\(raw) \(unitRaw)"
+        }
+    }
+
+    private func syncSnapshot(with remainingEntries: [OutcomesMeasureEntry]) {
+        let snapshot = legacyMeasures.first(where: { $0.outcome_id == outcomeID })
+
+        guard let latest = remainingEntries.max(by: { $0.measuredAt < $1.measuredAt }) else {
+            if let snapshot {
+                modelContext.delete(snapshot)
+            }
+            return
+        }
+
+        if let snapshot {
+            snapshot.measure = latest.measure
+            snapshot.measure_amt = latest.measure_amt
+            snapshot.measuredAt = latest.measuredAt
+            snapshot.measure_updated = .now
+            snapshot.direction = nil
+            snapshot.format = latest.format ?? formatRaw
+            snapshot.unit = latest.unit ?? unitRaw
+            snapshot.decimalPlaces = latest.decimalPlaces ?? decimalPlaces
+        } else {
+            modelContext.insert(
+                OutcomesMeasure(
+                    outcome_id: outcomeID,
+                    measure: latest.measure,
+                    measuredAt: latest.measuredAt,
+                    measure_amt: latest.measure_amt,
+                    measure_updated: .now,
+                    direction: nil,
+                    format: latest.format ?? formatRaw,
+                    unit: latest.unit ?? unitRaw,
+                    decimalPlaces: latest.decimalPlaces ?? decimalPlaces
+                )
+            )
         }
     }
 }
