@@ -10,7 +10,17 @@ struct ObjectivesView: View {
     @State private var sortByDaysLeft = false
     @State private var sortDaysAscending = true
     @State private var navigationAction: NavigationAction?
-    @State private var showUpcoming = true
+    @State private var showUpcoming = false
+    private var sortSheetHeight: CGFloat {
+        let rows = CGFloat(activeOutcomesForSort.count)
+        return min(max(260, rows * 56 + 140), 620)
+    }
+
+    private var activeOutcomesForSort: [Outcomes] {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: .now)
+        return outcomes.filter { calendar.startOfDay(for: $0.start) <= today }
+    }
 
     enum NavigationAction: Identifiable {
         case addOutcome
@@ -32,7 +42,7 @@ struct ObjectivesView: View {
         
         let filtered = outcomes.filter { outcome in
             let startOfStartDate = calendar.startOfDay(for: outcome.start)
-            return showUpcoming ? startOfStartDate <= today : startOfStartDate > today
+            return showUpcoming ? startOfStartDate > today : startOfStartDate <= today
         }
         
         if sortByDaysLeft {
@@ -59,34 +69,36 @@ struct ObjectivesView: View {
                                 .font(.title2)
                                 .fontWeight(.bold)
                             HStack {
-                                Text("Arrange by:")
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                                Button(action: { isShowingSortSheet = true }) {
-                                    Text("Focus")
+                                Button(action: {
+                                    sortByDaysLeft = false
+                                    isShowingSortSheet = true
+                                }) {
+                                    Text("Prioritize")
                                         .font(.subheadline)
-                                        .foregroundColor(showUpcoming ? .blue : .gray)
+                                        .foregroundColor(.blue)
                                         .padding(.vertical, 4)
                                         .padding(.horizontal, 8)
                                 }
-                                .disabled(!showUpcoming)
                                 Button(action: {
                                     sortByDaysLeft = true
                                     sortDaysAscending.toggle()
                                 }) {
-                                    Text("Days")
+                                    Text("Sort by Days")
                                         .font(.subheadline)
                                         .foregroundColor(.blue)
                                         .padding(.vertical, 4)
                                         .padding(.horizontal, 8)
                                 }
-                                Button(action: { showUpcoming.toggle() }) {
-                                    Text(showUpcoming ? "Upcoming" : "Active")
+                                HStack(spacing: 6) {
+                                    Text("Upcoming")
                                         .font(.subheadline)
-                                        .foregroundColor(.blue)
-                                        .padding(.vertical, 4)
-                                        .padding(.horizontal, 8)
+                                        .foregroundColor(.secondary)
+                                    Toggle("", isOn: $showUpcoming)
+                                        .labelsHidden()
+                                        .toggleStyle(.switch)
+                                        .tint(.blue)
                                 }
+                                .frame(maxWidth: .infinity, alignment: .trailing)
                             }
                         }
                         Spacer()
@@ -119,11 +131,8 @@ struct ObjectivesView: View {
                                 .font(.title2)
                                 .fontWeight(.bold)
                             HStack {
-                                Text("Arrange by:")
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
                                 Button(action: {}) {
-                                    Text("Focus")
+                                    Text("Prioritize")
                                         .font(.subheadline)
                                         .foregroundColor(.blue)
                                         .padding(.vertical, 4)
@@ -176,8 +185,16 @@ struct ObjectivesView: View {
         .sheet(isPresented: $isShowingSortSheet) {
             SortOutcomesView(outcomes: outcomes)
                 .environment(\.modelContext, modelContext)
+                .presentationDetents([.height(sortSheetHeight)])
+                .presentationDragIndicator(.visible)
         }
-        .onAppear { showUpcoming = true }
+        .onChange(of: isShowingSortSheet) { _, isShowing in
+            if !isShowing {
+                // Ensure list returns to rank-based order after prioritize flow closes.
+                sortByDaysLeft = false
+            }
+        }
+        .onAppear { showUpcoming = false }
     }
 
     private func hideKeyboard() {
@@ -476,42 +493,51 @@ struct SortOutcomesView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            VStack {
-                Text("Sort Outcomes")
-                    .font(.title2)
-                    .fontWeight(.bold)
-                    .padding(.top)
+        VStack(spacing: 10) {
+            Color.clear.frame(height: 8)
 
-                List {
-                    ForEach(outcomes) { outcome in
-                        Text(outcome.outcome)
+            Text("Prioritize Outcomes")
+                .font(.headline)
+                .fontWeight(.bold)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.top, 6)
+            Text("Top 4 will remain visible on home screen")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .center)
+
+            List {
+                ForEach(outcomes.indices, id: \.self) { idx in
+                    VStack(spacing: 0) {
+                        Text(outcomes[idx].outcome)
                             .font(.body)
-                            .padding(.vertical, 4)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
                     }
-                    .onMove { indices, newOffset in
-                        outcomes.move(fromOffsets: indices, toOffset: newOffset)
-                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                 }
-                .environment(\.editMode, .constant(.active))
+                .onMove { indices, newOffset in
+                    outcomes.move(fromOffsets: indices, toOffset: newOffset)
+                }
+            }
+            .listStyle(.plain)
+            .environment(\.editMode, .constant(.active))
 
+            HStack {
                 Spacer()
-
-                Button(action: {
+                Button("Done") {
                     saveRanks()
                     dismiss()
-                }) {
-                    Text("Done")
-                        .font(.body)
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.blue)
-                        .cornerRadius(8)
                 }
-                .padding(.horizontal)
-                .padding(.bottom)
+                .buttonStyle(.borderedProminent)
             }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 10)
+        }
+        .onDisappear {
+            saveRanks()
         }
     }
     
