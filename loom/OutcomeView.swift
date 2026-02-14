@@ -17,6 +17,9 @@ struct OutcomeView: View {
     @State private var selectedCategory: ObjectivesAddView.Category
     @State private var isShowingDeleteOutcomeAlert = false
     @State private var isShowingAddMeasureSheet = false
+    @State private var isShowingCompletedActionSheet = false
+    @State private var filterConnectedBlocksOnly = true
+    @State private var selectedCompletedArchiveActionIDs: Set<UUID> = []
     @State private var isMeasurable = false
     @State private var measureGoal: String = ""
     @State private var measureCurrent: String = ""
@@ -26,6 +29,21 @@ struct OutcomeView: View {
 
     @Query(sort: \OutcomesMeasureEntry.measuredAt, order: .forward) private var allMeasureEntries: [OutcomesMeasureEntry]
     @Query(sort: \ActionBlocksReflectionOutcomeContribution.completedAt, order: .reverse) private var allContributingActions: [ActionBlocksReflectionOutcomeContribution]
+    @Query(sort: \QuickCompletedCaptureItem.completedAt, order: .reverse) private var quickCompletedCaptureItems: [QuickCompletedCaptureItem]
+    @Query private var allReflectionActions: [ActionBlocksReflectionArchiveAction]
+    @Query private var allReflectionOutcomes: [ActionBlocksReflectionArchiveOutcome]
+    @Query private var allReflectionArchives: [ActionBlocksReflectionArchive]
+
+    private struct CompletedActionCandidate: Identifiable {
+        let id: UUID // archive action row id
+        let archiveId: UUID
+        let weekStart: Date
+        let plannedChunkId: UUID
+        let plannedChunkActionId: UUID
+        let actionText: String
+        let completedAt: Date
+        let isQuickCompleted: Bool
+    }
 
     init(outcome: Outcomes, outcomeMeasure: OutcomesMeasure?) {
         self.outcome = outcome
@@ -97,6 +115,82 @@ struct OutcomeView: View {
         allContributingActions.filter { $0.outcomeId == outcome.outcome_id }
     }
 
+    private var archiveById: [UUID: ActionBlocksReflectionArchive] {
+        Dictionary(uniqueKeysWithValues: allReflectionArchives.map { ($0.id, $0) })
+    }
+
+    private var connectedBlockKeysForOutcome: Set<String> {
+        Set(
+            allReflectionOutcomes
+                .filter { $0.outcomeId == outcome.outcome_id }
+                .map { "\($0.archiveId.uuidString)|\($0.plannedChunkId.uuidString)" }
+        )
+    }
+
+    private var hasContributingActionsOutsideConnectedBlocks: Bool {
+        contributingActionsForOutcome.contains {
+            guard let blockKey = blockKeyForContribution($0) else { return true }
+            return !connectedBlockKeysForOutcome.contains(blockKey)
+        }
+    }
+
+    private var hasSelectedActionsOutsideConnectedBlocks: Bool {
+        let candidateByID = Dictionary(uniqueKeysWithValues: completedActionCandidates.map { ($0.id, $0) })
+        for selectedID in selectedCompletedArchiveActionIDs {
+            guard let candidate = candidateByID[selectedID] else { continue }
+            if candidate.isQuickCompleted {
+                return true
+            }
+            let blockKey = "\(candidate.archiveId.uuidString)|\(candidate.plannedChunkId.uuidString)"
+            if !connectedBlockKeysForOutcome.contains(blockKey) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private var completedActionCandidates: [CompletedActionCandidate] {
+        var rows: [CompletedActionCandidate] = allReflectionActions.compactMap { action in
+            guard (ActionExecutionStatus(rawValue: action.statusRaw) ?? .noAction) == .done else { return nil }
+            let completedAt = archiveById[action.archiveId]?.completedAt ?? action.weekStart
+            return CompletedActionCandidate(
+                id: action.id,
+                archiveId: action.archiveId,
+                weekStart: action.weekStart,
+                plannedChunkId: action.plannedChunkId,
+                plannedChunkActionId: action.plannedChunkActionId,
+                actionText: action.actionText,
+                completedAt: completedAt,
+                isQuickCompleted: false
+            )
+        }
+
+        let quickRows: [CompletedActionCandidate] = quickCompletedCaptureItems.map { item in
+            let ws = WeeklyMindsetEntry.weekStart(for: item.completedAt)
+            return CompletedActionCandidate(
+                id: item.id,
+                archiveId: item.id,
+                weekStart: ws,
+                plannedChunkId: item.id,
+                plannedChunkActionId: item.id,
+                actionText: item.text,
+                completedAt: item.completedAt,
+                isQuickCompleted: true
+            )
+        }
+
+        if filterConnectedBlocksOnly {
+            rows = rows.filter {
+                connectedBlockKeysForOutcome.contains("\($0.archiveId.uuidString)|\($0.plannedChunkId.uuidString)")
+            }
+        } else {
+            rows.append(contentsOf: quickRows)
+        }
+
+        rows.sort { $0.completedAt > $1.completedAt }
+        return rows
+    }
+
     private var showCompleteButton: Bool {
         Calendar.current.startOfDay(for: outcome.start) <= Calendar.current.startOfDay(for: .now)
     }
@@ -160,6 +254,14 @@ struct OutcomeView: View {
 
     private var contributingActionsSection: some View {
         Section("Contributing Actions") {
+            Button {
+                seedCompletedActionSelection()
+                isShowingCompletedActionSheet = true
+            } label: {
+                Text("+ Completed Actions")
+                    .foregroundStyle(.blue)
+            }
+
             if contributingActionsForOutcome.isEmpty {
                 Text("No contributing actions logged yet.")
                     .foregroundStyle(.secondary)
@@ -170,11 +272,11 @@ struct OutcomeView: View {
                             Text(item.actionText)
                                 .font(.body)
                                 .foregroundStyle(.primary)
-                            Text("Completed \(shortDate(item.completedAt))")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
                         }
-                        Spacer(minLength: 0)
+                        Spacer(minLength: 8)
+                        Text("Completed on \(compactDate(item.completedAt))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                     .padding(.vertical, 2)
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
@@ -326,6 +428,68 @@ struct OutcomeView: View {
             if !showing {
                 hydrateMeasureFromLatestEntry()
             }
+        }
+        .sheet(isPresented: $isShowingCompletedActionSheet, onDismiss: {
+            applySelectedCompletedActions()
+        }) {
+            NavigationStack {
+                VStack(spacing: 0) {
+                    HStack {
+                        Text("Actions in blocks outcome was connected with")
+                            .font(.subheadline)
+                        Spacer(minLength: 8)
+                        Toggle("", isOn: $filterConnectedBlocksOnly)
+                            .labelsHidden()
+                    }
+                    .opacity(hasSelectedActionsOutsideConnectedBlocks ? 0.45 : 1.0)
+                    .disabled(hasSelectedActionsOutsideConnectedBlocks)
+                    .padding(.horizontal)
+                    .padding(.vertical, 10)
+
+                    List {
+                        ForEach(completedActionCandidates) { candidate in
+                            Button {
+                                if selectedCompletedArchiveActionIDs.contains(candidate.id) {
+                                    selectedCompletedArchiveActionIDs.remove(candidate.id)
+                                } else {
+                                    selectedCompletedArchiveActionIDs.insert(candidate.id)
+                                }
+                            } label: {
+                                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                    Image(systemName: selectedCompletedArchiveActionIDs.contains(candidate.id) ? "checkmark.circle.fill" : "circle")
+                                        .foregroundStyle(selectedCompletedArchiveActionIDs.contains(candidate.id) ? Color.accentColor : Color(.systemGray3))
+                                    Text(candidate.actionText)
+                                        .font(.body.weight(.medium))
+                                        .foregroundStyle(.primary)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    Text("Completed on \(compactDate(candidate.completedAt))")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(8)
+                                .padding(.vertical, 2)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+                                .padding(.vertical, 1)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                            .listRowSeparator(.hidden)
+                        }
+                    }
+                    .listStyle(.plain)
+                }
+                .navigationTitle("Completed Actions")
+                .navigationBarTitleDisplayMode(.inline)
+                .onAppear {
+                    if hasSelectedActionsOutsideConnectedBlocks || hasContributingActionsOutsideConnectedBlocks {
+                        filterConnectedBlocksOnly = false
+                    }
+                }
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
     }
 
@@ -493,6 +657,74 @@ struct OutcomeView: View {
     private func unassignContributingAction(_ item: ActionBlocksReflectionOutcomeContribution) {
         RecentlyDeletedStore.trash(item, in: modelContext)
         try? modelContext.save()
+    }
+
+    private func seedCompletedActionSelection() {
+        let existingPairs = Set(
+            contributingActionsForOutcome.map { "\($0.archiveId.uuidString)|\($0.plannedChunkActionId.uuidString)" }
+        )
+        selectedCompletedArchiveActionIDs = Set(
+            completedActionCandidates
+                .filter { existingPairs.contains("\($0.archiveId.uuidString)|\($0.plannedChunkActionId.uuidString)") }
+                .map(\.id)
+        )
+        filterConnectedBlocksOnly = hasContributingActionsOutsideConnectedBlocks ? false : true
+    }
+
+    private func applySelectedCompletedActions() {
+        let selected = completedActionCandidates.filter { selectedCompletedArchiveActionIDs.contains($0.id) }
+        let candidatePairByID = Dictionary(
+            uniqueKeysWithValues: completedActionCandidates.map { ($0.id, "\($0.archiveId.uuidString)|\($0.plannedChunkActionId.uuidString)") }
+        )
+        let selectedPairs = Set(selected.map { "\($0.archiveId.uuidString)|\($0.plannedChunkActionId.uuidString)" })
+        let candidatePairs = Set(candidatePairByID.values)
+
+        let existingRows = contributingActionsForOutcome
+        let existingPairs = Set(existingRows.map { "\($0.archiveId.uuidString)|\($0.plannedChunkActionId.uuidString)" })
+
+        for row in selected {
+            let key = "\(row.archiveId.uuidString)|\(row.plannedChunkActionId.uuidString)"
+            guard !existingPairs.contains(key) else { continue }
+            modelContext.insert(
+                ActionBlocksReflectionOutcomeContribution(
+                    archiveId: row.archiveId,
+                    weekStart: row.weekStart,
+                    outcomeId: outcome.outcome_id,
+                    plannedChunkActionId: row.plannedChunkActionId,
+                    actionText: row.actionText,
+                    completedAt: row.completedAt
+                )
+            )
+        }
+
+        for existing in existingRows {
+            let key = "\(existing.archiveId.uuidString)|\(existing.plannedChunkActionId.uuidString)"
+            if candidatePairs.contains(key) && !selectedPairs.contains(key) {
+                RecentlyDeletedStore.trash(existing, in: modelContext)
+            }
+        }
+        try? modelContext.save()
+    }
+
+    private func blockKeyForContribution(_ row: ActionBlocksReflectionOutcomeContribution) -> String? {
+        guard let archivedAction = allReflectionActions.first(where: {
+            $0.archiveId == row.archiveId && $0.plannedChunkActionId == row.plannedChunkActionId
+        }) else { return nil }
+        return "\(archivedAction.archiveId.uuidString)|\(archivedAction.plannedChunkId.uuidString)"
+    }
+
+    private func compactDate(_ date: Date) -> String {
+        let cal = Calendar.current
+        let nowYear = cal.component(.year, from: .now)
+        let year = cal.component(.year, from: date)
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        if year == nowYear {
+            formatter.setLocalizedDateFormatFromTemplate("Md")
+        } else {
+            formatter.setLocalizedDateFormatFromTemplate("Mdyy")
+        }
+        return formatter.string(from: date)
     }
 
 }
