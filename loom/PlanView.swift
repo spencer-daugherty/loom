@@ -3928,18 +3928,16 @@ private struct TimeEstimateSheet: View {
 private struct LeverageSheet: View {
     let leverageCatalog: [LeverageResource]
     let selectedResourceId: UUID?
-
     let onAdd: (ActionLeverageKind, String) -> Void
     let onDeleteCatalogItems: (Set<UUID>) -> Void
     let onSelectResource: (UUID?) -> Void
 
     @Environment(\.dismiss) private var dismiss
-
     @State private var localSelection: UUID? = nil
-
-    @State private var isAddResourcesPresented: Bool = false
+    @State private var isNewResourceMode: Bool = false
     @State private var kind: ActionLeverageKind = .person
     @State private var value: String = ""
+    @FocusState private var isNewResourceFocused: Bool
 
     var body: some View {
         NavigationStack {
@@ -3947,33 +3945,52 @@ private struct LeverageSheet: View {
                 Section {
                     Text("Leverage action to someone or something else")
                         .font(.subheadline)
-                        .fontWeight(.regular)
                         .foregroundStyle(.secondary)
                 }
 
                 Section("Resources") {
                     Button {
-                        isAddResourcesPresented = true
+                        isNewResourceMode = true
+                        localSelection = nil
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            isNewResourceFocused = true
+                        }
                     } label: {
-                        HStack {
-                            Image(systemName: "plus")
-                            Text("Add Resources")
+                        HStack(spacing: 10) {
+                            if isNewResourceMode {
+                                TextField(kind == .person ? "Add person…" : "Add tool…", text: $value)
+                                    .focused($isNewResourceFocused)
+                                    .submitLabel(.done)
+                                    .onSubmit {
+                                        commitInlineResource()
+                                    }
+                            } else {
+                                Text("+ Add Resource")
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(.blue)
+                            }
                             Spacer()
+                            if isNewResourceMode {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(.blue)
+                            }
                         }
                         .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
 
-                    if filteredCatalog.isEmpty {
+                    if leverageCatalog.isEmpty {
                         Text("None yet.")
                             .foregroundStyle(.secondary)
                     } else {
-                        ForEach(filteredCatalog) { item in
+                        ForEach(leverageCatalog.sorted(by: { $0.createdAt < $1.createdAt })) { item in
                             Button {
-                                if localSelection == item.id {
-                                    localSelection = nil
-                                } else {
-                                    localSelection = item.id
+                                if isNewResourceMode {
+                                    isNewResourceMode = false
+                                    value = ""
+                                    isNewResourceFocused = false
                                 }
+                                localSelection = (localSelection == item.id) ? nil : item.id
                             } label: {
                                 HStack {
                                     Text(item.kind == .person ? "Person" : "Tool")
@@ -3998,6 +4015,7 @@ private struct LeverageSheet: View {
                                 } label: {
                                     Text("Delete")
                                 }
+                                .tint(.red)
                             }
                         }
                     }
@@ -4005,75 +4023,56 @@ private struct LeverageSheet: View {
             }
             .navigationTitle("Leverage")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") {
-                        onSelectResource(localSelection)
-                        dismiss()
-                    }
-                }
-            }
-            .onAppear {
-                localSelection = selectedResourceId
-            }
-            .sheet(isPresented: $isAddResourcesPresented) {
-                NavigationStack {
-                    VStack(spacing: 14) {
+            .safeAreaInset(edge: .bottom) {
+                if isNewResourceMode && isNewResourceFocused {
+                    VStack(spacing: 8) {
                         Picker("Type", selection: $kind) {
                             ForEach(ActionLeverageKind.allCases) { k in
                                 Text(k.title).tag(k)
                             }
                         }
                         .pickerStyle(.segmented)
-
-                        HStack(spacing: 10) {
-                            TextField(kind == .person ? "Add person…" : "Add tool…", text: $value)
-                                .textFieldStyle(.roundedBorder)
-
-                            Button("Add") {
-                                onAdd(kind, value)
-                                value = ""
-                                isAddResourcesPresented = false
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        }
-
-                        Spacer(minLength: 0)
                     }
-                    .padding()
-                    .navigationTitle("Add Resources")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Cancel") { isAddResourcesPresented = false }
-                        }
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+                    .padding(.bottom, 10)
+                }
+            }
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        commitInlineResource()
+                        onSelectResource(localSelection)
+                        dismiss()
                     }
                 }
-                .presentationDetents([.height(220)])
-                .presentationDragIndicator(.visible)
             }
+            .onAppear { localSelection = selectedResourceId }
         }
     }
 
-    private var filteredCatalog: [LeverageResource] {
-        leverageCatalog.sorted { $0.createdAt < $1.createdAt }
+    private func commitInlineResource() {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isNewResourceMode, !trimmed.isEmpty else { return }
+        onAdd(kind, trimmed)
+        value = ""
+        isNewResourceMode = false
+        isNewResourceFocused = false
     }
 }
 
 private struct SensitivitySheet: View {
     @Binding var defineState: PlannedChunkActionDefineState
-
     let placesCatalog: [SensitivityPlaceCatalogItem]
     let selectedPlaceIDs: Set<UUID>
-
     let onAddPlaceToCatalog: (String) -> Void
     let onDeleteCatalogPlaces: (Set<UUID>) -> Void
     let onTogglePlaceSelected: (UUID) -> Void
 
     @Environment(\.dismiss) private var dismiss
-
     @State private var newPlace: String = ""
+    @State private var isNewPlaceMode: Bool = false
+    @FocusState private var isNewPlaceFocused: Bool
 
     var body: some View {
         NavigationStack {
@@ -4085,12 +4084,46 @@ private struct SensitivitySheet: View {
                 }
 
                 Section("Places") {
+                    Button {
+                        isNewPlaceMode = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            isNewPlaceFocused = true
+                        }
+                    } label: {
+                        HStack(spacing: 10) {
+                            if isNewPlaceMode {
+                                TextField("Add place…", text: $newPlace)
+                                    .focused($isNewPlaceFocused)
+                                    .submitLabel(.done)
+                                    .onSubmit {
+                                        commitInlinePlace()
+                                    }
+                            } else {
+                                Text("+ New Place")
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(.blue)
+                            }
+                            Spacer()
+                            if isNewPlaceMode {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(.blue)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+
                     if placesCatalog.isEmpty {
                         Text("No places yet.")
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(placesCatalog) { p in
                             Button {
+                                if isNewPlaceMode {
+                                    isNewPlaceMode = false
+                                    newPlace = ""
+                                    isNewPlaceFocused = false
+                                }
                                 onTogglePlaceSelected(p.id)
                             } label: {
                                 HStack {
@@ -4111,19 +4144,9 @@ private struct SensitivitySheet: View {
                                 } label: {
                                     Text("Delete")
                                 }
+                                .tint(.red)
                             }
                         }
-                    }
-
-                    HStack(spacing: 10) {
-                        TextField("Add place…", text: $newPlace)
-                            .textFieldStyle(.roundedBorder)
-                        Button("Add") {
-                            onAddPlaceToCatalog(newPlace)
-                            newPlace = ""
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(newPlace.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                 }
             }
@@ -4131,19 +4154,22 @@ private struct SensitivitySheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+                    Button("Done") {
+                        commitInlinePlace()
+                        dismiss()
+                    }
                 }
             }
         }
-        .onAppear {
-            if defineState.sensitiveMorning == false &&
-                defineState.sensitiveAfternoon == false &&
-                defineState.sensitiveEvening == false {
-                defineState.sensitiveMorning = true
-                defineState.sensitiveAfternoon = true
-                defineState.sensitiveEvening = true
-            }
-        }
+    }
+
+    private func commitInlinePlace() {
+        let trimmed = newPlace.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isNewPlaceMode, !trimmed.isEmpty else { return }
+        onAddPlaceToCatalog(trimmed)
+        newPlace = ""
+        isNewPlaceMode = false
+        isNewPlaceFocused = false
     }
 
     private func bindingForTimeOfDay(_ keyPath: WritableKeyPath<PlannedChunkActionDefineState, Bool>) -> Binding<Bool> {
@@ -4172,17 +4198,17 @@ private struct SensitivitySheet: View {
 
 private struct AttachmentsSheet: View {
     let attachments: [PlannedChunkActionAttachment]
-
     @Binding var noteText: String
     let onSaveNote: () -> Void
-
     let onAddLink: (String) -> Void
     let onAddFile: (URL, Data, String) -> Void
     let onDeleteAttachment: (UUID) -> Void
 
     @Environment(\.dismiss) private var dismiss
-
+    @Environment(\.openURL) private var openURL
     @State private var linkText: String = ""
+    @State private var isNewLinkMode: Bool = false
+    @FocusState private var isNewLinkFocused: Bool
     @State private var isFileImporterPresented: Bool = false
 
     var body: some View {
@@ -4191,61 +4217,74 @@ private struct AttachmentsSheet: View {
                 Section("Notes") {
                     TextEditor(text: $noteText)
                         .frame(height: 120)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color.secondary.opacity(0.25))
-                        )
-
-                    Button("Save") {
-                        onSaveNote()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
 
-                Section("Attached") {
+                Section("Files and Links") {
+                    Button {
+                        isNewLinkMode = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            isNewLinkFocused = true
+                        }
+                    } label: {
+                        HStack(spacing: 10) {
+                            if isNewLinkMode {
+                                TextField("Add link…", text: $linkText)
+                                    .focused($isNewLinkFocused)
+                                    .submitLabel(.done)
+                                    .onSubmit {
+                                        commitInlineLink()
+                                    }
+                            } else {
+                                Text("+ New Link")
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(.blue)
+                            }
+                            Spacer()
+                            if isNewLinkMode {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(.blue)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+
+                    Button("Attach file…") {
+                        isFileImporterPresented = true
+                    }
+
                     if attachments.isEmpty {
                         Text("No attachments yet.")
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(attachments) { a in
-                            HStack(alignment: .top, spacing: 10) {
-                                Image(systemName: iconName(for: a))
-                                    .foregroundStyle(.secondary)
+                            Button {
+                                openAttachment(a)
+                            } label: {
+                                HStack(alignment: .top, spacing: 10) {
+                                    Image(systemName: iconName(for: a))
+                                        .foregroundStyle(.secondary)
 
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(titleText(for: a))
-                                        .font(.subheadline)
-                                        .foregroundStyle(.primary)
-                                        .fixedSize(horizontal: false, vertical: true)
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(titleText(for: a))
+                                            .font(.subheadline)
+                                            .foregroundStyle(.primary)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                                 }
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
                             }
+                            .buttonStyle(.plain)
                             .swipeActions(edge: .trailing) {
                                 Button(role: .destructive) {
                                     onDeleteAttachment(a.id)
                                 } label: {
                                     Text("Delete")
                                 }
+                                .tint(.red)
                             }
                         }
-                    }
-                }
-
-                Section("Files and Links") {
-                    HStack(spacing: 10) {
-                        TextField("Add link…", text: $linkText)
-                            .textFieldStyle(.roundedBorder)
-                        Button("Add") {
-                            onAddLink(linkText)
-                            linkText = ""
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(linkText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    }
-
-                    Button("Attach file…") {
-                        isFileImporterPresented = true
                     }
                 }
             }
@@ -4283,10 +4322,23 @@ private struct AttachmentsSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+                    Button("Done") {
+                        commitInlineLink()
+                        onSaveNote()
+                        dismiss()
+                    }
                 }
             }
         }
+    }
+
+    private func commitInlineLink() {
+        let trimmed = linkText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isNewLinkMode, !trimmed.isEmpty else { return }
+        onAddLink(trimmed)
+        linkText = ""
+        isNewLinkMode = false
+        isNewLinkFocused = false
     }
 
     private func iconName(for a: PlannedChunkActionAttachment) -> String {
@@ -4302,9 +4354,72 @@ private struct AttachmentsSheet: View {
         case .link:
             return a.urlString ?? "(link)"
         case .note:
-            return "(note)"
+            return "Note"
         case .file:
             return a.fileName ?? "(file)"
+        }
+    }
+
+    private func openAttachment(_ a: PlannedChunkActionAttachment) {
+        switch a.kind {
+        case .link:
+            if let urlString = a.urlString, let url = URL(string: urlString) {
+                openURL(url)
+            }
+        case .file:
+            guard let data = a.fileBookmarkData else { return }
+            var isStale = false
+            #if os(macOS)
+            if let url = try? URL(
+                resolvingBookmarkData: data,
+                options: [.withoutUI, .withSecurityScope],
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            ) {
+                let didAccess = url.startAccessingSecurityScopedResource()
+                openURL(url)
+                if didAccess {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                        url.stopAccessingSecurityScopedResource()
+                    }
+                }
+            } else if let url = try? URL(
+                resolvingBookmarkData: data,
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            ) {
+                openURL(url)
+            }
+            #else
+            if let url = try? URL(
+                resolvingBookmarkData: data,
+                options: [.withoutUI],
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            ) {
+                let didAccess = url.startAccessingSecurityScopedResource()
+                openURL(url)
+                if didAccess {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                        url.stopAccessingSecurityScopedResource()
+                    }
+                }
+            } else if let url = try? URL(
+                resolvingBookmarkData: data,
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            ) {
+                let didAccess = url.startAccessingSecurityScopedResource()
+                openURL(url)
+                if didAccess {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                        url.stopAccessingSecurityScopedResource()
+                    }
+                }
+            }
+            #endif
+        case .note:
+            break
         }
     }
 }
