@@ -97,134 +97,150 @@ struct OutcomeView: View {
         allContributingActions.filter { $0.outcomeId == outcome.outcome_id }
     }
 
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(goal.isEmpty ? "Goal" : goal)
+    private var showCompleteButton: Bool {
+        Calendar.current.startOfDay(for: outcome.start) <= Calendar.current.startOfDay(for: .now)
+    }
+
+    private var summarySection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(goal.isEmpty ? "Goal" : goal)
+                    .font(.title3)
+                    .fontWeight(.semibold)
+                    .foregroundColor(categoryColor(for: selectedCategory.rawValue))
+                    .lineLimit(3)
+                Text(reasons)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(4)
+                    .padding(.bottom, 2)
+
+                HStack(spacing: 8) {
+                    VStack(spacing: 2) {
+                        Text("\(daysLeft)")
                             .font(.title3)
-                            .fontWeight(.semibold)
-                            .foregroundColor(categoryColor(for: selectedCategory.rawValue))
-                            .lineLimit(3)
-                        Text(reasons)
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.leading)
-                            .lineLimit(4)
-                            .padding(.bottom, 2)
-
-                        HStack(spacing: 8) {
-                            VStack(spacing: 2) {
-                                Text("\(daysLeft)")
-                                    .font(.title3)
-                                    .fontWeight(.bold)
-                                    .foregroundColor(.black)
-                                Text("days left")
-                                    .font(.caption2)
-                                    .foregroundColor(.black)
-                            }
-                            .padding(.vertical, 6)
-                            .padding(.horizontal, 10)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(lightenedCategoryColor(for: selectedCategory.rawValue))
-                            )
-                            .frame(height: 44)
-
-                            if isMeasurable, let current = Double(measureCurrent), let goalAmount = Double(measureGoal), goalAmount != 0 {
-                                MeasurableOutcomeBox(
-                                    measure: current,
-                                    measuredAt: latestMeasureDate(),
-                                    measureAmt: goalAmount,
-                                    endDate: endDate,
-                                    format: measureFormat.rawValue
-                                )
-                                .frame(height: 44)
-
-                                ProgressCircleView(
-                                    measure: current,
-                                    measureAmt: goalAmount,
-                                    startMeasure: allMeasureEntries.first(where: { $0.outcome_id == outcome.outcome_id })?.measure ?? current
-                                )
-                                .frame(width: 40, height: 40)
-                            }
-                        }
+                            .fontWeight(.bold)
+                            .foregroundColor(.black)
+                        Text("days left")
+                            .font(.caption2)
+                            .foregroundColor(.black)
                     }
-                    .padding(.vertical, 4)
-                }
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(lightenedCategoryColor(for: selectedCategory.rawValue))
+                    )
+                    .frame(height: 44)
 
-                ChartSection(
-                    isMeasurable: isMeasurable,
-                    hasOutcome: true,
-                    outcomeId: outcome.outcome_id,
-                    measureGoal: $measureGoal,
-                    measureFormat: $measureFormat,
-                    measureUnit: $measureUnit,
-                    measureDecimalPlaces: $measureDecimalPlaces
-                )
-                ChartActionsSection(
-                    isMeasurable: isMeasurable,
-                    hasOutcome: true,
-                    outcomeId: outcome.outcome_id,
-                    measureFormat: $measureFormat,
-                    measureUnit: $measureUnit,
-                    measureDecimalPlaces: $measureDecimalPlaces,
-                    onAddMeasure: {
-                        isShowingAddMeasureSheet = true
-                    }
-                )
-                GoalSection(goal: $goal)
-                ReasonsSection(reasons: $reasons)
-                if !isStartEditable {
-                    OutcomeStartedOnSection(startDate: outcome.start)
-                } else {
-                    StartSection(startNow: $startNow, startDate: $startDate, selectedDuration: selectedDuration, endDate: $endDate)
-                }
-                OutcomeTargetSection(
-                    endDate: $endDate,
-                    selectedDuration: $selectedDuration,
-                    effectiveStartDate: effectiveStartDate
-                )
-                MeasureSection(
-                    isMeasurable: $isMeasurable,
-                    measureGoal: $measureGoal,
-                    measureFormat: $measureFormat,
-                    measureDecimalPlaces: $measureDecimalPlaces
-                )
-                Section("Contributing Actions") {
-                    if contributingActionsForOutcome.isEmpty {
-                        Text("No contributing actions logged yet.")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(contributingActionsForOutcome, id: \.id) { item in
-                            HStack(alignment: .top, spacing: 10) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(item.actionText)
-                                        .font(.body)
-                                        .foregroundStyle(.primary)
-                                    Text("Completed \(shortDate(item.completedAt))")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer(minLength: 0)
-                            }
-                            .padding(.vertical, 2)
-                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                Button("Unassign") {
-                                    unassignContributingAction(item)
-                                }
-                                .tint(.gray)
-                            }
-                        }
+                    if isMeasurable, let current = Double(measureCurrent), let goalAmount = Double(measureGoal), goalAmount != 0 {
+                        let startMeasure = allMeasureEntries.first(where: { $0.outcome_id == outcome.outcome_id })?.measure ?? current
+                        MeasurableOutcomeBox(
+                            measure: current,
+                            measuredAt: latestMeasureDate(),
+                            measureAmt: goalAmount,
+                            endDate: endDate,
+                            format: measureFormat.rawValue
+                        )
+                        .frame(height: 44)
+
+                        ProgressCircleView(
+                            measure: current,
+                            measureAmt: goalAmount,
+                            startMeasure: startMeasure
+                        )
+                        .frame(width: 40, height: 40)
                     }
                 }
-                CategorySection(selectedCategory: $selectedCategory)
-                DeleteOutcomeSection(
-                    isShowingDeleteOutcomeAlert: $isShowingDeleteOutcomeAlert,
-                    showCompleteButton: Calendar.current.startOfDay(for: outcome.start) <= Calendar.current.startOfDay(for: .now)
-                )
             }
+            .padding(.vertical, 4)
+        }
+    }
+
+    private var contributingActionsSection: some View {
+        Section("Contributing Actions") {
+            if contributingActionsForOutcome.isEmpty {
+                Text("No contributing actions logged yet.")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(contributingActionsForOutcome, id: \.id) { item in
+                    HStack(alignment: .top, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(item.actionText)
+                                .font(.body)
+                                .foregroundStyle(.primary)
+                            Text("Completed \(shortDate(item.completedAt))")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.vertical, 2)
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        Button("Unassign") {
+                            unassignContributingAction(item)
+                        }
+                        .tint(.gray)
+                    }
+                }
+            }
+        }
+    }
+
+    private var formContent: some View {
+        Form {
+            summarySection
+
+            ChartSection(
+                isMeasurable: isMeasurable,
+                hasOutcome: true,
+                outcomeId: outcome.outcome_id,
+                measureGoal: $measureGoal,
+                measureFormat: $measureFormat,
+                measureUnit: $measureUnit,
+                measureDecimalPlaces: $measureDecimalPlaces
+            )
+            ChartActionsSection(
+                isMeasurable: isMeasurable,
+                hasOutcome: true,
+                outcomeId: outcome.outcome_id,
+                measureFormat: $measureFormat,
+                measureUnit: $measureUnit,
+                measureDecimalPlaces: $measureDecimalPlaces,
+                onAddMeasure: {
+                    isShowingAddMeasureSheet = true
+                }
+            )
+            GoalSection(goal: $goal)
+            ReasonsSection(reasons: $reasons)
+            if !isStartEditable {
+                OutcomeStartedOnSection(startDate: outcome.start)
+            } else {
+                StartSection(startNow: $startNow, startDate: $startDate, selectedDuration: selectedDuration, endDate: $endDate)
+            }
+            OutcomeTargetSection(
+                endDate: $endDate,
+                selectedDuration: $selectedDuration,
+                effectiveStartDate: effectiveStartDate
+            )
+            MeasureSection(
+                isMeasurable: $isMeasurable,
+                measureGoal: $measureGoal,
+                measureFormat: $measureFormat,
+                measureDecimalPlaces: $measureDecimalPlaces
+            )
+            contributingActionsSection
+            CategorySection(selectedCategory: $selectedCategory)
+            DeleteOutcomeSection(
+                isShowingDeleteOutcomeAlert: $isShowingDeleteOutcomeAlert,
+                showCompleteButton: showCompleteButton
+            )
+        }
+    }
+
+    private var formWithModifiers: some View {
+        formContent
             .navigationTitle(goal.isEmpty ? "Outcome" : goal)
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.visible, for: .navigationBar)
@@ -289,22 +305,27 @@ struct OutcomeView: View {
                     Button("Done") {
                         hideKeyboard()
                     }
+                }
             }
+    }
+
+    var body: some View {
+        NavigationStack {
+            formWithModifiers
         }
         .sheet(isPresented: $isShowingAddMeasureSheet) {
             AddOutcomeMeasureSheet(
                 outcomeID: outcome.outcome_id,
-                    formatRaw: measureFormat.rawValue,
-                    unitRaw: measureUnit,
-                    decimalPlaces: measureDecimalPlaces
-                )
-                .presentationDetents([.medium])
-                .presentationDragIndicator(.visible)
-            }
-            .onChange(of: isShowingAddMeasureSheet) { _, showing in
-                if !showing {
-                    hydrateMeasureFromLatestEntry()
-                }
+                formatRaw: measureFormat.rawValue,
+                unitRaw: measureUnit,
+                decimalPlaces: measureDecimalPlaces
+            )
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
+        }
+        .onChange(of: isShowingAddMeasureSheet) { _, showing in
+            if !showing {
+                hydrateMeasureFromLatestEntry()
             }
         }
     }
@@ -419,6 +440,7 @@ struct OutcomeView: View {
         modelContext.delete(item)
         try? modelContext.save()
     }
+
 }
 
 struct OutcomeTargetSection: View {

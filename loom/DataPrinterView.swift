@@ -439,8 +439,11 @@ struct DataPrinterView: View {
     @Environment(\.modelContext) private var context
     @State private var showingMigrationResultAlert = false
     @State private var migrationResultMessage = ""
+    @State private var showingOutcomeRecoveryAlert = false
+    @State private var outcomeRecoveryMessage = ""
 
     private let legacyArchiveMigrationFlag = "legacy_actionblocks_archive_migration_v2_done"
+    private let outcomesRecoveryFlag = "outcomes_archive_recovery_v1_done"
 
     var body: some View {
         List {
@@ -450,6 +453,17 @@ struct DataPrinterView: View {
                 } label: {
                     HStack {
                         Text("Completed Action Blocks")
+                    }
+                }
+
+                Button {
+                    let message = performOutcomeArchiveRecovery()
+                    outcomeRecoveryMessage = message
+                    showingOutcomeRecoveryAlert = true
+                } label: {
+                    HStack {
+                        Text("Recover Outcomes (One-Time)")
+                        Spacer()
                     }
                 }
 
@@ -477,9 +491,171 @@ struct DataPrinterView: View {
         } message: {
             Text(migrationResultMessage)
         }
+        .alert("Outcome Recovery", isPresented: $showingOutcomeRecoveryAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(outcomeRecoveryMessage)
+        }
         .onAppear {
             runLegacyArchiveMigrationIfNeeded()
         }
+    }
+
+    /// One-time conservative recovery:
+    /// - restores archived outcomes that no longer exist
+    /// - restores likely overwritten snapshots (when archived state is not represented in active outcomes)
+    /// - restores archived measure snapshots for recovered rows
+    private func performOutcomeArchiveRecovery() -> String {
+        if UserDefaults.standard.bool(forKey: outcomesRecoveryFlag) {
+            return "Outcome recovery already ran for this device. No action taken."
+        }
+
+        let activeOutcomes = (try? context.fetch(FetchDescriptor<Outcomes>())) ?? []
+        let archivedOutcomes = (try? context.fetch(FetchDescriptor<OutcomesArchive>())) ?? []
+        let archivedMeasures = (try? context.fetch(FetchDescriptor<OutcomesMeasureArchive>())) ?? []
+        let activeMeasures = (try? context.fetch(FetchDescriptor<OutcomesMeasure>())) ?? []
+
+        guard !archivedOutcomes.isEmpty else {
+            UserDefaults.standard.set(true, forKey: outcomesRecoveryFlag)
+            return "No archived outcomes found to recover."
+        }
+
+        let activeById = Dictionary(uniqueKeysWithValues: activeOutcomes.map { ($0.outcome_id, $0) })
+        let activeMeasureById = Dictionary(uniqueKeysWithValues: activeMeasures.map { ($0.outcome_id, $0) })
+        let archivedMeasureById = Dictionary(uniqueKeysWithValues: archivedMeasures.map { ($0.outcome_id, $0) })
+
+        func signature(
+            category: String,
+            outcome: String,
+            reasons: String,
+            start: Date,
+            end: Date
+        ) -> String {
+            let cal = Calendar.current
+            let s = cal.startOfDay(for: start).timeIntervalSince1970
+            let e = cal.startOfDay(for: end).timeIntervalSince1970
+            return [
+                category.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+                outcome.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+                reasons.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+                "\(Int(s))",
+                "\(Int(e))"
+            ].joined(separator: "|")
+        }
+
+        let activeSignatures = Set(
+            activeOutcomes.map {
+                signature(
+                    category: $0.category,
+                    outcome: $0.outcome,
+                    reasons: $0.reasons,
+                    start: $0.start,
+                    end: $0.end
+                )
+            }
+        )
+
+        var restoredMissing = 0
+        var restoredOverwritten = 0
+        var restoredMeasures = 0
+        var maxRank = activeOutcomes.map(\.rank).max() ?? 0
+
+        for archived in archivedOutcomes {
+            let archivedSignature = signature(
+                category: archived.category,
+                outcome: archived.outcome,
+                reasons: archived.reasons,
+                start: archived.start,
+                end: archived.end
+            )
+
+            let hasSameId = activeById[archived.outcome_id] != nil
+            let hasEquivalentActiveState = activeSignatures.contains(archivedSignature)
+
+            // Case 1: archived row id no longer exists -> restore with same id.
+            if !hasSameId {
+                if !hasEquivalentActiveState {
+                    let recovered = Outcomes(
+                        outcome_id: archived.outcome_id,
+                        category: archived.category,
+                        updatedAt: .now,
+                        outcome: archived.outcome,
+                        reasons: archived.reasons,
+                        start: archived.start,
+                        end: archived.end,
+                        rank: maxRank + 1,
+                        format: archived.format
+                    )
+                    maxRank += 1
+                    context.insert(recovered)
+                    restoredMissing += 1
+
+                    if let mArch = archivedMeasureById[archived.outcome_id], activeMeasureById[archived.outcome_id] == nil {
+                        context.insert(
+                            OutcomesMeasure(
+                                outcome_id: archived.outcome_id,
+                                measure: mArch.measure,
+                                measuredAt: mArch.measuredAt,
+                                measure_amt: mArch.measure_amt,
+                                measure_updated: .now,
+                                direction: mArch.direction,
+                                format: mArch.format,
+                                unit: mArch.unit,
+                                decimalPlaces: mArch.decimalPlaces
+                            )
+                        )
+                        restoredMeasures += 1
+                    }
+                }
+                continue
+            }
+
+            // Case 2: same id exists but archived snapshot state no longer appears anywhere.
+            // Recover as a new outcome (new UUID) to avoid overwriting existing data.
+            if hasSameId && !hasEquivalentActiveState {
+                let recoveredId = UUID()
+                let recovered = Outcomes(
+                    outcome_id: recoveredId,
+                    category: archived.category,
+                    updatedAt: .now,
+                    outcome: archived.outcome,
+                    reasons: archived.reasons,
+                    start: archived.start,
+                    end: archived.end,
+                    rank: maxRank + 1,
+                    format: archived.format
+                )
+                maxRank += 1
+                context.insert(recovered)
+                restoredOverwritten += 1
+
+                if let mArch = archivedMeasureById[archived.outcome_id] {
+                    context.insert(
+                        OutcomesMeasure(
+                            outcome_id: recoveredId,
+                            measure: mArch.measure,
+                            measuredAt: mArch.measuredAt,
+                            measure_amt: mArch.measure_amt,
+                            measure_updated: .now,
+                            direction: mArch.direction,
+                            format: mArch.format,
+                            unit: mArch.unit,
+                            decimalPlaces: mArch.decimalPlaces
+                        )
+                    )
+                    restoredMeasures += 1
+                }
+            }
+        }
+
+        try? context.save()
+        UserDefaults.standard.set(true, forKey: outcomesRecoveryFlag)
+
+        if restoredMissing == 0 && restoredOverwritten == 0 {
+            return "No recoverable overwritten/missing outcomes were found."
+        }
+
+        return "Recovered \(restoredMissing + restoredOverwritten) outcome(s) (\(restoredMissing) missing, \(restoredOverwritten) overwritten-candidate) and \(restoredMeasures) measure snapshot(s)."
     }
 
     private func runLegacyArchiveMigrationIfNeeded() {

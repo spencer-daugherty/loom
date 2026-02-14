@@ -227,6 +227,7 @@ struct ObjectivesView: View {
                     .presentationDragIndicator(.visible)
             case .editOutcome(let outcome):
                 OutcomeView(outcome: outcome, outcomeMeasure: latestMeasure(for: outcome))
+                    .id(outcome.outcome_id)
                     .presentationDetents([.large])
                     .presentationContentInteraction(.scrolls)
                     .presentationDragIndicator(.visible)

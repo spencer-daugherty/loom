@@ -293,7 +293,7 @@ struct ObjectivesAddView: View {
                     )
                 }
             }
-            .navigationTitle(" ")
+            .navigationTitle(outcome == nil ? "Add Outcome" : (goal.isEmpty ? "Outcome" : goal))
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
