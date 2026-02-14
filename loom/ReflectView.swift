@@ -1206,7 +1206,7 @@ struct ReflectView: View {
     private func daysUntil(_ date: Date) -> Int {
         let calendar = Calendar.current
         let components = calendar.dateComponents([.day], from: .now, to: date)
-        return max(0, components.day ?? 0)
+        return components.day ?? 0
     }
 
     private func latestMeasure(for outcome: Outcomes) -> OutcomesMeasure? {
@@ -1241,14 +1241,15 @@ struct ReflectView: View {
             }
 
             HStack(spacing: 8) {
+                let remainingDays = daysUntil(outcome.end)
                 VStack(spacing: 2) {
-                    Text("\(daysUntil(outcome.end))")
+                    Text("\(remainingDays)")
                         .font(.title3)
                         .fontWeight(.bold)
-                        .foregroundColor(.black)
+                        .foregroundColor(remainingDays < 0 ? .red : .black)
                     Text("days left")
                         .font(.caption2)
-                        .foregroundColor(.black)
+                        .foregroundColor(remainingDays < 0 ? .red : .black)
                 }
                 .padding(.vertical, 6)
                 .padding(.horizontal, 10)

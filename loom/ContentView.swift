@@ -66,7 +66,7 @@ struct ContentView: View {
     private func daysUntil(_ endDate: Date) -> Int {
         let calendar = Calendar.current
         let components = calendar.dateComponents([.day], from: Date(), to: endDate)
-        return max(0, components.day ?? 0)
+        return components.day ?? 0
     }
     
     var body: some View {
@@ -681,6 +681,7 @@ struct ContentView: View {
                             let filteredOutcomes = outcomes.filter { $0.start <= currentDate }
 
                             ForEach(filteredOutcomes.prefix(4)) { outcome in
+                                let remainingDays = daysUntil(outcome.end)
                                 HStack(alignment: .center, spacing: 8) {
 
                                     // Box with days until end date
@@ -689,9 +690,9 @@ struct ContentView: View {
                                             .fill(categoryBackgroundColor(for: outcome.category))
                                             .frame(width: 40, height: 20)
 
-                                        Text("\(daysUntil(outcome.end))d")
+                                        Text("\(remainingDays)d")
                                             .font(.caption)
-                                            .foregroundColor(.primary)
+                                            .foregroundColor(remainingDays < 0 ? .red : .primary)
                                             .bold()
                                     }
 
@@ -958,7 +959,7 @@ struct OutcomePopupOverlay: View {
     private func daysUntil(_ date: Date) -> Int {
         let calendar = Calendar.current
         let components = calendar.dateComponents([.day], from: .now, to: date)
-        return max(0, components.day ?? 0)
+        return components.day ?? 0
     }
 
     private func formattedDate(_ date: Date) -> String {
@@ -1065,14 +1066,15 @@ struct OutcomePopupOverlay: View {
 
             // Days + Progress
             HStack(spacing: 8) {
+                let remainingDays = daysUntil(outcome.end)
                 VStack(spacing: 2) {
-                    Text("\(daysUntil(outcome.end))")
+                    Text("\(remainingDays)")
                         .font(.title3)
                         .fontWeight(.bold)
-                        .foregroundColor(.black)
+                        .foregroundColor(remainingDays < 0 ? .red : .black)
                     Text("days left")
                         .font(.caption2)
-                        .foregroundColor(.black)
+                        .foregroundColor(remainingDays < 0 ? .red : .black)
                 }
                 .padding(.vertical, 6)
                 .padding(.horizontal, 10)

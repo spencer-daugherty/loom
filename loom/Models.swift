@@ -563,6 +563,123 @@ final class OutcomeAnalyticsEvent {
     }
 }
 
+@Model
+final class CompletedOutcomeArchive {
+    @Attribute(.unique) var id: UUID
+    var originalOutcomeId: UUID
+    var category: String
+    var outcome: String
+    var reasons: String
+    var start: Date
+    var end: Date
+    var completedAt: Date
+    var format: String?
+
+    var isMeasurable: Bool
+    var goalValue: Double?
+    var finalValue: Double?
+    var goalMet: Bool
+    var successLevel: Int?
+
+    var daysElapsed: Int
+    var goalPushCount: Int
+    var dataEntryCount: Int
+    var targetChangeCount: Int
+
+    var journalWins: String
+    var journalLearned: String
+    var journalNext: String
+
+    init(
+        id: UUID = .init(),
+        originalOutcomeId: UUID,
+        category: String,
+        outcome: String,
+        reasons: String,
+        start: Date,
+        end: Date,
+        completedAt: Date = .now,
+        format: String? = nil,
+        isMeasurable: Bool,
+        goalValue: Double? = nil,
+        finalValue: Double? = nil,
+        goalMet: Bool,
+        successLevel: Int? = nil,
+        daysElapsed: Int,
+        goalPushCount: Int,
+        dataEntryCount: Int,
+        targetChangeCount: Int,
+        journalWins: String,
+        journalLearned: String,
+        journalNext: String
+    ) {
+        self.id = id
+        self.originalOutcomeId = originalOutcomeId
+        self.category = category
+        self.outcome = outcome
+        self.reasons = reasons
+        self.start = start
+        self.end = end
+        self.completedAt = completedAt
+        self.format = format
+        self.isMeasurable = isMeasurable
+        self.goalValue = goalValue
+        self.finalValue = finalValue
+        self.goalMet = goalMet
+        self.successLevel = successLevel
+        self.daysElapsed = daysElapsed
+        self.goalPushCount = goalPushCount
+        self.dataEntryCount = dataEntryCount
+        self.targetChangeCount = targetChangeCount
+        self.journalWins = journalWins
+        self.journalLearned = journalLearned
+        self.journalNext = journalNext
+    }
+}
+
+@Model
+final class CompletedOutcomeContributionArchive {
+    @Attribute(.unique) var id: UUID
+    var completedOutcomeArchiveId: UUID
+    var actionText: String
+    var completedAt: Date
+
+    init(
+        id: UUID = .init(),
+        completedOutcomeArchiveId: UUID,
+        actionText: String,
+        completedAt: Date
+    ) {
+        self.id = id
+        self.completedOutcomeArchiveId = completedOutcomeArchiveId
+        self.actionText = actionText
+        self.completedAt = completedAt
+    }
+}
+
+@Model
+final class CompletedOutcomeMeasurePointArchive {
+    @Attribute(.unique) var id: UUID
+    var completedOutcomeArchiveId: UUID
+    var measuredAt: Date
+    var measure: Double
+    var goal: Double
+
+    init(
+        id: UUID = .init(),
+        completedOutcomeArchiveId: UUID,
+        measuredAt: Date,
+        measure: Double,
+        goal: Double
+    ) {
+        self.id = id
+        self.completedOutcomeArchiveId = completedOutcomeArchiveId
+        self.measuredAt = measuredAt
+        self.measure = measure
+        self.goal = goal
+    }
+}
+
 // MARK: - WeeklyMindsetEntry
 
 enum WeeklyMindsetEntry {

@@ -32,6 +32,11 @@ struct OutcomeView: View {
     @State private var isShowingDeleteOutcomeAlert = false
     @State private var isShowingAddMeasureSheet = false
     @State private var isShowingCompletedActionSheet = false
+    @State private var isShowingCompleteOutcomeSheet = false
+    @State private var isShowingChangeTargetSheet = false
+    @State private var isShowingGoalMetConfirmAlert = false
+    @State private var isShowingMeasureCheckAlert = false
+    @State private var completionValidationMessage: String = ""
     @State private var filterConnectedBlocksOnly = true
     @State private var selectedCompletedArchiveActionIDs: Set<UUID> = []
     @State private var isShowingAllContributingActions = false
@@ -42,8 +47,16 @@ struct OutcomeView: View {
     @State private var measureUnit: String = ObjectivesAddView.UnitOption.defaultUnit
     @State private var measureDecimalPlaces: Int = 0
     @FocusState private var isMeasureGoalFieldFocused: Bool
+    @State private var completionSuccessLevel: Int = 3
+    @State private var completionJournalWins: String = ""
+    @State private var completionJournalLearned: String = ""
+    @State private var completionJournalNext: String = ""
+    @State private var completionRecordedDate: Date = Calendar.current.startOfDay(for: .now)
+    @FocusState private var completionJournalFocusedField: CompletionJournalField?
+    @State private var changeTargetDateDraft: Date = .now
 
     @Query(sort: \OutcomesMeasureEntry.measuredAt, order: .forward) private var allMeasureEntries: [OutcomesMeasureEntry]
+    @Query(sort: \OutcomeAnalyticsEvent.occurredAt, order: .forward) private var allOutcomeEvents: [OutcomeAnalyticsEvent]
     @Query(sort: \ActionBlocksReflectionOutcomeContribution.completedAt, order: .reverse) private var allContributingActions: [ActionBlocksReflectionOutcomeContribution]
     @Query(sort: \QuickCompletedCaptureItem.completedAt, order: .reverse) private var quickCompletedCaptureItems: [QuickCompletedCaptureItem]
     @Query private var allReflectionActions: [ActionBlocksReflectionArchiveAction]
@@ -59,6 +72,12 @@ struct OutcomeView: View {
         let actionText: String
         let completedAt: Date
         let isQuickCompleted: Bool
+    }
+
+    private enum CompletionJournalField: Hashable {
+        case wins
+        case learned
+        case next
     }
 
     init(outcome: Outcomes, outcomeMeasure: OutcomesMeasure?) {
@@ -124,7 +143,7 @@ struct OutcomeView: View {
 
     private var daysLeft: Int {
         let components = Calendar.current.dateComponents([.day], from: .now, to: endDate)
-        return max(0, components.day ?? 0)
+        return components.day ?? 0
     }
 
     private var contributingActionsForOutcome: [ActionBlocksReflectionOutcomeContribution] {
@@ -211,6 +230,78 @@ struct OutcomeView: View {
         Calendar.current.startOfDay(for: outcome.start) <= Calendar.current.startOfDay(for: .now)
     }
 
+    private var showGoalAchievedEarlyBanner: Bool {
+        guard isMeasurable, isGoalMetNow else { return false }
+        return Calendar.current.startOfDay(for: .now) < Calendar.current.startOfDay(for: endDate)
+    }
+
+    private var showTargetPassedBanner: Bool {
+        let passed = Calendar.current.startOfDay(for: .now) > Calendar.current.startOfDay(for: endDate)
+        guard passed else { return false }
+        if isMeasurable {
+            return !isGoalMetNow
+        }
+        return true
+    }
+
+    private var targetPassedBannerMessage: String {
+        if isMeasurable {
+            return "Target date has passed, would you like to change your goal amount or target date?"
+        }
+        return "Target date has passed, would you like to change your target date?"
+    }
+
+    private var outcomeMeasureEntries: [OutcomesMeasureEntry] {
+        allMeasureEntries.filter { $0.outcome_id == outcome.outcome_id }.sorted { $0.measuredAt < $1.measuredAt }
+    }
+
+    private var outcomeEvents: [OutcomeAnalyticsEvent] {
+        allOutcomeEvents.filter { $0.outcome_id == outcome.outcome_id }
+    }
+
+    private var currentMeasureValue: Double? {
+        outcomeMeasureEntries.last?.measure ?? outcomeMeasure?.measure
+    }
+
+    private var currentGoalValue: Double? {
+        outcomeMeasureEntries.last?.measure_amt ?? outcomeMeasure?.measure_amt
+    }
+
+    private var startMeasureValue: Double? {
+        outcomeMeasureEntries.first?.measure ?? outcomeMeasure?.measure
+    }
+
+    private var isGoalMetNow: Bool {
+        guard
+            let current = currentMeasureValue,
+            let goal = currentGoalValue,
+            let start = startMeasureValue
+        else { return false }
+        if goal == start { return current >= goal }
+        if goal > start { return current >= goal }
+        return current <= goal
+    }
+
+    private var completionFormValid: Bool {
+        let universalValid = !completionJournalWins.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            !completionJournalLearned.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            !completionJournalNext.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if isMeasurable {
+            return universalValid
+        }
+        return universalValid && (1...5).contains(completionSuccessLevel)
+    }
+
+    private var completionDateRange: ClosedRange<Date> {
+        let cal = Calendar.current
+        let lower = cal.startOfDay(for: outcome.start)
+        let upper = cal.startOfDay(for: .now)
+        if lower <= upper {
+            return lower...upper
+        }
+        return upper...upper
+    }
+
     private var summarySection: some View {
         Section {
             VStack(alignment: .leading, spacing: 8) {
@@ -231,10 +322,10 @@ struct OutcomeView: View {
                         Text("\(daysLeft)")
                             .font(.title3)
                             .fontWeight(.bold)
-                            .foregroundColor(.black)
+                            .foregroundColor(daysLeft < 0 ? .red : .black)
                         Text("days left")
                             .font(.caption2)
-                            .foregroundColor(.black)
+                            .foregroundColor(daysLeft < 0 ? .red : .black)
                     }
                     .padding(.vertical, 6)
                     .padding(.horizontal, 10)
@@ -319,6 +410,63 @@ struct OutcomeView: View {
 
     private var formContent: some View {
         Form {
+            if showTargetPassedBanner {
+                Section {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.primary)
+                            .padding(.top, 2)
+                        VStack(alignment: .leading, spacing: 4) {
+                            (Text("Caution: ").fontWeight(.bold) + Text(targetPassedBannerMessage))
+                                .font(.subheadline)
+                                .foregroundStyle(.primary)
+                            Button("Change target date") {
+                                changeTargetDateDraft = endDate
+                                isShowingChangeTargetSheet = true
+                            }
+                            .font(.subheadline)
+                            .foregroundStyle(.blue)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color(red: 0.98, green: 0.92, blue: 0.72))
+                    )
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
+                }
+            }
+
+            if showGoalAchievedEarlyBanner {
+                Section {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "flag.fill")
+                            .foregroundStyle(.primary)
+                            .padding(.top, 2)
+                        VStack(alignment: .leading, spacing: 4) {
+                            (Text("Goal Acheived: ").fontWeight(.bold) + Text("Complete your outcome now!"))
+                                .font(.subheadline)
+                                .foregroundStyle(.primary)
+                            Button("Complete") {
+                                prepareCompletionAttempt()
+                            }
+                            .font(.subheadline)
+                            .foregroundStyle(.blue)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color(red: 0.82, green: 0.95, blue: 0.84))
+                    )
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
+                }
+            }
+
             summarySection
 
             ChartSection(
@@ -362,10 +510,18 @@ struct OutcomeView: View {
                 isMeasureGoalFieldFocused: $isMeasureGoalFieldFocused
             )
             CategorySection(selectedCategory: $selectedCategory)
-            DeleteOutcomeSection(
-                isShowingDeleteOutcomeAlert: $isShowingDeleteOutcomeAlert,
-                showCompleteButton: showCompleteButton
-            )
+            Section {
+                if showCompleteButton {
+                    Button("Complete") {
+                        prepareCompletionAttempt()
+                    }
+                    .foregroundColor(.blue)
+                }
+                Button("Delete") {
+                    isShowingDeleteOutcomeAlert = true
+                }
+                .foregroundColor(.red)
+            }
         }
     }
 
@@ -414,6 +570,23 @@ struct OutcomeView: View {
             } message: {
                 Text("Are you sure you want to delete this outcome? It will be available for 30 days in account management.")
             }
+            .alert("Goal Met", isPresented: $isShowingGoalMetConfirmAlert) {
+                Button("Not Yet", role: .cancel) {}
+                Button("Continue") {
+                    isShowingCompleteOutcomeSheet = true
+                }
+            } message: {
+                Text(completionValidationMessage)
+            }
+            .alert("Before Completing", isPresented: $isShowingMeasureCheckAlert) {
+                Button("Return", role: .cancel) {
+                }
+                Button("Continue") {
+                    isShowingCompleteOutcomeSheet = true
+                }
+            } message: {
+                Text(completionValidationMessage)
+            }
             .onChange(of: isMeasurable) { _, newValue in
                 guard newValue else { return }
             }
@@ -456,6 +629,116 @@ struct OutcomeView: View {
             if !showing {
                 hydrateMeasureFromLatestEntry()
             }
+        }
+        .sheet(isPresented: $isShowingChangeTargetSheet) {
+            NavigationStack {
+                Form {
+                    Section("Target") {
+                        DatePicker(
+                            "End Date",
+                            selection: $changeTargetDateDraft,
+                            in: Calendar.current.startOfDay(for: .now)...,
+                            displayedComponents: [.date]
+                        )
+                        .datePickerStyle(.graphical)
+                    }
+                }
+                .navigationTitle("Change Target")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") { isShowingChangeTargetSheet = false }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Save") {
+                            endDate = changeTargetDateDraft
+                            saveOutcome()
+                            isShowingChangeTargetSheet = false
+                        }
+                    }
+                }
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $isShowingCompleteOutcomeSheet) {
+            NavigationStack {
+                Form {
+                    Section("Completion") {
+                        if isMeasurable {
+                            if let current = currentMeasureValue, let goal = currentGoalValue {
+                                Text(isGoalMetNow ? "Goal is met" : "Goal is not met")
+                                    .fontWeight(.bold)
+                                    .foregroundStyle(isGoalMetNow ? .green : .red)
+                                Text("Latest value: \(formatMetricValue(current, format: measureFormat.rawValue))")
+                                Text("Goal: \(formatMetricValue(goal, format: measureFormat.rawValue))")
+                            } else {
+                                Text("No measured data found.")
+                                    .foregroundStyle(.secondary)
+                            }
+                        } else {
+                            Picker("Success Level", selection: $completionSuccessLevel) {
+                                ForEach(1...5, id: \.self) { level in
+                                    Text("\(level)/5").tag(level)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                        }
+
+                        HStack {
+                            Text("Target Date")
+                            Spacer()
+                            Text(endDate, style: .date)
+                                .foregroundStyle(.gray)
+                        }
+
+                        DatePicker(
+                            "Completed",
+                            selection: $completionRecordedDate,
+                            in: completionDateRange,
+                            displayedComponents: [.date]
+                        )
+                    }
+
+                    Section("Journal") {
+                        TextField("Wins", text: $completionJournalWins, axis: .vertical)
+                            .lineLimit(2...4)
+                            .focused($completionJournalFocusedField, equals: .wins)
+                        TextField("What I learned", text: $completionJournalLearned, axis: .vertical)
+                            .lineLimit(2...4)
+                            .focused($completionJournalFocusedField, equals: .learned)
+                        TextField("What I will do next", text: $completionJournalNext, axis: .vertical)
+                            .lineLimit(2...4)
+                            .focused($completionJournalFocusedField, equals: .next)
+                    }
+                }
+                .navigationTitle("Complete Outcome")
+                .navigationBarTitleDisplayMode(.inline)
+                .onAppear {
+                    completionRecordedDate = Calendar.current.startOfDay(for: .now)
+                }
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") { isShowingCompleteOutcomeSheet = false }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Save") {
+                            finalizeOutcomeCompletion()
+                        }
+                        .disabled(!completionFormValid)
+                    }
+                    ToolbarItemGroup(placement: .keyboard) {
+                        Spacer()
+                        Button("Done") {
+                            completionJournalFocusedField = nil
+                            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                        }
+                        .foregroundStyle(.blue)
+                    }
+                }
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $isShowingCompletedActionSheet, onDismiss: {
             applySelectedCompletedActions()
@@ -518,6 +801,127 @@ struct OutcomeView: View {
             }
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
+        }
+    }
+
+    private func prepareCompletionAttempt() {
+        completionRecordedDate = Calendar.current.startOfDay(for: .now)
+        completionValidationMessage = ""
+        if isMeasurable {
+            guard currentMeasureValue != nil, currentGoalValue != nil else {
+                completionValidationMessage = "Enter measured data before completing."
+                isShowingMeasureCheckAlert = true
+                return
+            }
+            if isGoalMetNow {
+                let currentText = formatMetricValue(currentMeasureValue ?? 0, format: measureFormat.rawValue)
+                completionValidationMessage = "Latest value \(currentText) meets your goal. Complete now?"
+                isShowingGoalMetConfirmAlert = true
+            } else {
+                let targetNotArrived = Calendar.current.startOfDay(for: .now) < Calendar.current.startOfDay(for: outcome.end)
+                if targetNotArrived {
+                    completionValidationMessage = "Goal is not met and target date has not arrived. Are you completing outcome not acheived?"
+                } else {
+                    completionValidationMessage = "Goal is not met. Add any missing data first, or continue if your latest value is final."
+                }
+                isShowingMeasureCheckAlert = true
+            }
+            return
+        }
+        let targetNotArrived = Calendar.current.startOfDay(for: .now) < Calendar.current.startOfDay(for: outcome.end)
+        if targetNotArrived {
+            completionValidationMessage = "Target date has not arrived. Are you completing outcome early or marking not acheived?"
+            isShowingMeasureCheckAlert = true
+            return
+        }
+        isShowingCompleteOutcomeSheet = true
+    }
+
+    private func finalizeOutcomeCompletion() {
+        let cal = Calendar.current
+        let startDay = cal.startOfDay(for: outcome.start)
+        let endDay = cal.startOfDay(for: completionRecordedDate)
+        let elapsed = max(1, (cal.dateComponents([.day], from: startDay, to: endDay).day ?? 0) + 1)
+        let goalPushes = outcomeEvents.filter { $0.eventType == "goal_changed" }.count
+        let targetChanges = outcomeEvents.filter { $0.eventType == "target_changed" }.count
+        let dataPoints = outcomeMeasureEntries.count
+
+        let archive = CompletedOutcomeArchive(
+            originalOutcomeId: outcome.outcome_id,
+            category: outcome.category,
+            outcome: outcome.outcome,
+            reasons: outcome.reasons,
+            start: outcome.start,
+            end: outcome.end,
+            completedAt: completionRecordedDate,
+            format: outcome.format,
+            isMeasurable: isMeasurable,
+            goalValue: currentGoalValue,
+            finalValue: currentMeasureValue,
+            goalMet: isGoalMetNow,
+            successLevel: isMeasurable ? nil : completionSuccessLevel,
+            daysElapsed: elapsed,
+            goalPushCount: goalPushes,
+            dataEntryCount: dataPoints,
+            targetChangeCount: targetChanges,
+            journalWins: completionJournalWins,
+            journalLearned: completionJournalLearned,
+            journalNext: completionJournalNext
+        )
+        modelContext.insert(archive)
+
+        for row in contributingActionsForOutcome {
+            modelContext.insert(
+                CompletedOutcomeContributionArchive(
+                    completedOutcomeArchiveId: archive.id,
+                    actionText: row.actionText,
+                    completedAt: row.completedAt
+                )
+            )
+        }
+
+        for row in outcomeMeasureEntries {
+            modelContext.insert(
+                CompletedOutcomeMeasurePointArchive(
+                    completedOutcomeArchiveId: archive.id,
+                    measuredAt: row.measuredAt,
+                    measure: row.measure,
+                    goal: row.measure_amt
+                )
+            )
+        }
+
+        if let snapshot = outcomeMeasure {
+            RecentlyDeletedStore.trash(snapshot, in: modelContext)
+        }
+        for row in outcomeMeasureEntries {
+            RecentlyDeletedStore.trash(row, in: modelContext)
+        }
+        for row in contributingActionsForOutcome {
+            RecentlyDeletedStore.trash(row, in: modelContext)
+        }
+        for event in outcomeEvents {
+            RecentlyDeletedStore.trash(event, in: modelContext)
+        }
+        RecentlyDeletedStore.trash(outcome, in: modelContext, source: "Outcome Completed")
+        try? modelContext.save()
+        isShowingCompleteOutcomeSheet = false
+        dismiss()
+    }
+
+    private func formatMetricValue(_ value: Double, format: String) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = 2
+        formatter.minimumFractionDigits = 0
+        let base = formatter.string(from: NSNumber(value: value)) ?? "\(value)"
+        switch format {
+        case ObjectivesAddView.MeasureFormat.dollars.rawValue:
+            return "$\(base)"
+        case ObjectivesAddView.MeasureFormat.percentage.rawValue:
+            return "\(base)%"
+        default:
+            return base
         }
     }
 

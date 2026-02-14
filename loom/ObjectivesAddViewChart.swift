@@ -570,13 +570,6 @@ struct AddOutcomeMeasureSheet: View {
                         }
                     }
                 }
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button("Done") {
-                        isMeasureFieldFocused = false
-                    }
-                    .foregroundStyle(.blue)
-                }
             }
             .alert("Override existing value?", isPresented: $showOverrideAlert) {
                 Button("Cancel", role: .cancel) {

@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import Charts
 
 struct ObjectivesView: View {
     @Environment(\.colorScheme) private var colorScheme
@@ -7,6 +8,7 @@ struct ObjectivesView: View {
     @Query(sort: \Outcomes.rank, order: .forward) private var outcomes: [Outcomes]
     @Query(sort: \OutcomesMeasure.measuredAt, order: .reverse) private var outcomeMeasures: [OutcomesMeasure]
     @Query(sort: \OutcomesMeasureEntry.measuredAt, order: .forward) private var outcomeMeasureEntries: [OutcomesMeasureEntry]
+    @Query(sort: \CompletedOutcomeArchive.completedAt, order: .reverse) private var completedOutcomeArchives: [CompletedOutcomeArchive]
     @State private var isShowingSortSheet = false
     @State private var sortByDaysLeft = false
     @State private var sortDaysAscending = true
@@ -14,6 +16,8 @@ struct ObjectivesView: View {
     @State private var pendingSavedOutcomeID: UUID?
     @State private var showUpcoming = false
     @State private var showCompletedOutcomesPlaceholder = false
+    private let oneTimeTargetPassedDemoFlag = "one_time_outcome_target_passed_demo_v1_done"
+    private let oneTimeUnmeasurablePassedDemoFlag = "one_time_outcome_unmeasurable_target_passed_demo_v1_done"
     private var sortSheetHeight: CGFloat {
         let rows = CGFloat(activeOutcomesForSort.count)
         return min(max(260, rows * 56 + 140), 620)
@@ -28,6 +32,7 @@ struct ObjectivesView: View {
     enum NavigationAction: Identifiable {
         case addOutcome
         case editOutcome(Outcomes)
+        case completedOutcome(CompletedOutcomeArchive)
 
         var id: String {
             switch self {
@@ -35,6 +40,8 @@ struct ObjectivesView: View {
                 return "addOutcome"
             case .editOutcome(let outcome):
                 return "editOutcome_\(outcome.outcome_id.uuidString)"
+            case .completedOutcome(let archive):
+                return "completedOutcome_\(archive.id.uuidString)"
             }
         }
     }
@@ -160,11 +167,22 @@ struct ObjectivesView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
 
                         if showCompletedOutcomesPlaceholder {
-                            Text("No completed outcomes yet.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.leading, 2)
+                            if completedOutcomeArchives.isEmpty {
+                                Text("No completed outcomes yet.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.leading, 2)
+                            } else {
+                                ForEach(completedOutcomeArchives) { archive in
+                                    Button {
+                                        navigationAction = .completedOutcome(archive)
+                                    } label: {
+                                        CompletedOutcomeRow(archive: archive)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
                         }
                     }
                     .padding(.horizontal)
@@ -242,6 +260,12 @@ struct ObjectivesView: View {
                     .presentationDetents([.large])
                     .presentationContentInteraction(.scrolls)
                     .presentationDragIndicator(.visible)
+            case .completedOutcome(let archive):
+                CompletedOutcomeDetailView(archive: archive)
+                    .id(archive.id)
+                    .presentationDetents([.large])
+                    .presentationContentInteraction(.scrolls)
+                    .presentationDragIndicator(.visible)
             }
         }
         .sheet(isPresented: $isShowingSortSheet) {
@@ -256,11 +280,125 @@ struct ObjectivesView: View {
                 sortByDaysLeft = false
             }
         }
-        .onAppear { showUpcoming = false }
+        .onAppear {
+            showUpcoming = false
+            seedOneTimeTargetPassedDemoOutcomeIfNeeded()
+            seedOneTimeUnmeasurablePassedDemoOutcomeIfNeeded()
+        }
     }
 
     private func hideKeyboard() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+
+    private func seedOneTimeTargetPassedDemoOutcomeIfNeeded() {
+        guard UserDefaults.standard.bool(forKey: oneTimeTargetPassedDemoFlag) == false else { return }
+
+        let calendar = Calendar.current
+        let now = Date()
+        let start = calendar.startOfDay(for: calendar.date(byAdding: .day, value: -20, to: now) ?? now)
+        let end = calendar.startOfDay(for: calendar.date(byAdding: .day, value: -3, to: now) ?? now)
+
+        let existing = outcomes.contains {
+            $0.outcome == "Demo: Target Passed (Goal Not Met)" && $0.reasons == "One-time seeded demo outcome."
+        }
+        guard !existing else {
+            UserDefaults.standard.set(true, forKey: oneTimeTargetPassedDemoFlag)
+            return
+        }
+
+        let newOutcomeID = UUID()
+        let newOutcome = Outcomes(
+            outcome_id: newOutcomeID,
+            category: "Health & Vitality",
+            updatedAt: .now,
+            outcome: "Demo: Target Passed (Goal Not Met)",
+            reasons: "One-time seeded demo outcome.",
+            start: start,
+            end: end,
+            rank: (outcomes.map(\.rank).max() ?? 0) + 1,
+            format: ObjectivesAddView.MeasureFormat.number.rawValue
+        )
+        modelContext.insert(newOutcome)
+
+        let goal: Double = 200
+        let startMeasure: Double = 150
+        let latestMeasure: Double = 170 // not met yet (direction is up from 150 -> 200)
+
+        modelContext.insert(
+            OutcomesMeasure(
+                outcome_id: newOutcomeID,
+                measure: latestMeasure,
+                measuredAt: .now,
+                measure_amt: goal,
+                measure_updated: .now,
+                direction: nil,
+                format: ObjectivesAddView.MeasureFormat.number.rawValue,
+                unit: ObjectivesAddView.UnitOption.defaultUnit,
+                decimalPlaces: 0
+            )
+        )
+
+        modelContext.insert(
+            OutcomesMeasureEntry(
+                outcome_id: newOutcomeID,
+                measure: startMeasure,
+                measure_amt: goal,
+                measuredAt: start,
+                createdAt: start,
+                format: ObjectivesAddView.MeasureFormat.number.rawValue,
+                unit: ObjectivesAddView.UnitOption.defaultUnit,
+                decimalPlaces: 0
+            )
+        )
+
+        modelContext.insert(
+            OutcomesMeasureEntry(
+                outcome_id: newOutcomeID,
+                measure: latestMeasure,
+                measure_amt: goal,
+                measuredAt: calendar.startOfDay(for: calendar.date(byAdding: .day, value: -1, to: now) ?? now),
+                createdAt: .now,
+                format: ObjectivesAddView.MeasureFormat.number.rawValue,
+                unit: ObjectivesAddView.UnitOption.defaultUnit,
+                decimalPlaces: 0
+            )
+        )
+
+        try? modelContext.save()
+        UserDefaults.standard.set(true, forKey: oneTimeTargetPassedDemoFlag)
+    }
+
+    private func seedOneTimeUnmeasurablePassedDemoOutcomeIfNeeded() {
+        guard UserDefaults.standard.bool(forKey: oneTimeUnmeasurablePassedDemoFlag) == false else { return }
+
+        let calendar = Calendar.current
+        let now = Date()
+        let start = calendar.startOfDay(for: calendar.date(byAdding: .day, value: -35, to: now) ?? now)
+        let end = calendar.startOfDay(for: calendar.date(byAdding: .day, value: -5, to: now) ?? now)
+
+        let existing = outcomes.contains {
+            $0.outcome == "Demo: Past Target (Unmeasurable)" && $0.reasons == "One-time seeded unmeasurable demo outcome."
+        }
+        guard !existing else {
+            UserDefaults.standard.set(true, forKey: oneTimeUnmeasurablePassedDemoFlag)
+            return
+        }
+
+        let newOutcome = Outcomes(
+            outcome_id: UUID(),
+            category: "Mind & Meaning",
+            updatedAt: .now,
+            outcome: "Demo: Past Target (Unmeasurable)",
+            reasons: "One-time seeded unmeasurable demo outcome.",
+            start: start,
+            end: end,
+            rank: (outcomes.map(\.rank).max() ?? 0) + 2,
+            format: nil
+        )
+        modelContext.insert(newOutcome)
+        try? modelContext.save()
+        UserDefaults.standard.set(true, forKey: oneTimeUnmeasurablePassedDemoFlag)
     }
 
     private func categoryColor(for category: String) -> Color {
@@ -283,7 +421,7 @@ struct ObjectivesView: View {
     private func daysUntil(_ date: Date) -> Int {
         let calendar = Calendar.current
         let components = calendar.dateComponents([.day], from: .now, to: date)
-        return max(0, components.day ?? 0)
+        return components.day ?? 0
     }
 
     private func daysBetween(_ start: Date, _ end: Date) -> Int {
@@ -355,14 +493,16 @@ struct OutcomeRow: View {
                     .lineLimit(4)
                     .padding(.bottom, 2)
                 HStack(spacing: 8) {
+                    let dayValue = isUpcoming ? daysBetween(outcome.start, outcome.end) : daysUntil(outcome.end)
+                    let shouldShowRed = !isUpcoming && dayValue < 0
                     VStack(spacing: 2) {
-                        Text("\(isUpcoming ? daysBetween(outcome.start, outcome.end) : daysUntil(outcome.end))")
+                        Text("\(dayValue)")
                             .font(.title3)
                             .fontWeight(.bold)
-                            .foregroundColor(.black)
+                            .foregroundColor(shouldShowRed ? .red : .black)
                         Text(isUpcoming ? "days long" : "days left")
                             .font(.caption2)
-                            .foregroundColor(.black)
+                            .foregroundColor(shouldShowRed ? .red : .black)
                     }
                     .padding(.vertical, 6)
                     .padding(.horizontal, 10)
@@ -423,7 +563,7 @@ struct OutcomeRow: View {
     private func daysUntil(_ date: Date) -> Int {
         let calendar = Calendar.current
         let components = calendar.dateComponents([.day], from: .now, to: date)
-        return max(0, components.day ?? 0)
+        return components.day ?? 0
     }
 
     private func daysBetween(_ start: Date, _ end: Date) -> Int {
@@ -440,6 +580,222 @@ struct OutcomeRow: View {
         let formatter = DateFormatter()
         formatter.dateFormat = "M/d"
         return formatter.string(from: date)
+    }
+}
+
+struct CompletedOutcomeRow: View {
+    let archive: CompletedOutcomeArchive
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(archive.outcome)
+                    .font(.title3)
+                    .fontWeight(.semibold)
+                    .foregroundColor(categoryColor(for: archive.category))
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(3)
+                Text(archive.reasons)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(4)
+                    .padding(.bottom, 2)
+                HStack(spacing: 8) {
+                    VStack(spacing: 2) {
+                        Text("\(archive.daysElapsed)d")
+                            .font(.title3)
+                            .fontWeight(.bold)
+                            .foregroundColor(.black)
+                        Text("elapsed")
+                            .font(.caption2)
+                            .foregroundColor(.black)
+                    }
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(lightenedCategoryColor(for: archive.category))
+                    )
+                    .frame(height: 44)
+                }
+                Divider()
+                    .background(Color.gray.opacity(0.3))
+                    .padding(.top, 20)
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .foregroundColor(.gray)
+                .padding(.trailing, 8)
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+    }
+
+    private func categoryColor(for category: String) -> Color {
+        switch category {
+        case "Career & Business": return .blue
+        case "Leadership & Impact": return .indigo
+        case "Wealth & Lifestyle": return .green
+        case "Mind & Meaning": return .purple
+        case "Love & Relationships": return .red
+        case "Health & Vitality": return .orange
+        default: return .primary
+        }
+    }
+
+    private func lightenedCategoryColor(for category: String) -> Color {
+        let baseColor = UIColor(categoryColor(for: category))
+        return Color(baseColor.adjusted(by: 0.8))
+    }
+}
+
+struct CompletedOutcomeDetailView: View {
+    let archive: CompletedOutcomeArchive
+    @Query(sort: \CompletedOutcomeContributionArchive.completedAt, order: .forward) private var contributionRows: [CompletedOutcomeContributionArchive]
+    @Query(sort: \CompletedOutcomeMeasurePointArchive.measuredAt, order: .forward) private var measureRows: [CompletedOutcomeMeasurePointArchive]
+
+    private var contributions: [CompletedOutcomeContributionArchive] {
+        contributionRows.filter { $0.completedOutcomeArchiveId == archive.id }
+    }
+
+    private var measures: [CompletedOutcomeMeasurePointArchive] {
+        measureRows.filter { $0.completedOutcomeArchiveId == archive.id }
+    }
+
+    private var contributionByDay: [(Date, Int)] {
+        let cal = Calendar.current
+        let grouped = Dictionary(grouping: contributions) { cal.startOfDay(for: $0.completedAt) }
+        return grouped.map { ($0.key, $0.value.count) }.sorted { $0.0 < $1.0 }
+    }
+
+    private var progressHighlights: [String] {
+        guard measures.count > 1 else { return [] }
+        let deltas: [(Date, Double)] = zip(measures.dropFirst(), measures).map { current, prev in
+            (current.measuredAt, current.measure - prev.measure)
+        }
+        let top = deltas.sorted { abs($0.1) > abs($1.1) }.prefix(3)
+        let fmt = DateFormatter()
+        fmt.dateFormat = "M/d"
+        return top.map { date, delta in
+            let sign = delta >= 0 ? "+" : ""
+            return "\(fmt.string(from: date)): \(sign)\(String(format: "%.1f", delta))"
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(archive.outcome)
+                            .font(.title3)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.primary)
+                        Text(archive.reasons)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        HStack(spacing: 8) {
+                            metricPill(value: "\(archive.daysElapsed)d", caption: "elapsed")
+                            if archive.isMeasurable {
+                                metricPill(value: archive.goalMet ? "Met" : "Not Met", caption: "goal status")
+                            } else if let success = archive.successLevel {
+                                metricPill(value: "\(success)/5", caption: "success")
+                            }
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                Section("Insights") {
+                    insightRow("Goal pushes", "\(archive.goalPushCount)")
+                    insightRow("Data entered", "\(archive.dataEntryCount)")
+                    insightRow("Target changes", "\(archive.targetChangeCount)")
+                    if !progressHighlights.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Times with lots of progress")
+                                .font(.subheadline.weight(.semibold))
+                            ForEach(progressHighlights, id: \.self) { line in
+                                Text("• \(line)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+
+                if !contributionByDay.isEmpty {
+                    Section("Contributing Actions Over Time") {
+                        Chart(contributionByDay, id: \.0) { row in
+                            BarMark(
+                                x: .value("Date", row.0),
+                                y: .value("Count", row.1)
+                            )
+                            .foregroundStyle(Color.accentColor.gradient)
+                        }
+                        .frame(height: 180)
+                    }
+                }
+
+                Section("Contributing Actions") {
+                    if contributions.isEmpty {
+                        Text("No contributing actions logged.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(contributions) { row in
+                            HStack(alignment: .top, spacing: 10) {
+                                Text(row.actionText)
+                                    .font(.body)
+                                Spacer()
+                                Text(row.completedAt, format: .dateTime.month().day().year())
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+                }
+
+                Section("Journal") {
+                    journalBox(title: "Wins", text: archive.journalWins)
+                    journalBox(title: "Learned", text: archive.journalLearned)
+                    journalBox(title: "Next", text: archive.journalNext)
+                }
+            }
+            .navigationTitle("Completed Outcome")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+
+    private func metricPill(value: String, caption: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.title3.weight(.bold))
+            Text(caption)
+                .font(.caption2)
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 10)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color(.systemGray5)))
+    }
+
+    private func insightRow(_ title: String, _ value: String) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Text(value).fontWeight(.semibold)
+        }
+    }
+
+    private func journalBox(title: String, text: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+            Text(text)
+                .font(.body)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 2)
     }
 }
 
@@ -640,7 +996,7 @@ struct ObjectivesView_Previews: PreviewProvider {
     static var previews: some View {
         NavigationStack {
             ObjectivesView()
-                .modelContainer(for: [Outcomes.self, OutcomesArchive.self, OutcomesMeasure.self, OutcomesMeasureArchive.self], inMemory: true)
+                .modelContainer(for: [Outcomes.self, OutcomesArchive.self, OutcomesMeasure.self, OutcomesMeasureArchive.self, CompletedOutcomeArchive.self, CompletedOutcomeContributionArchive.self, CompletedOutcomeMeasurePointArchive.self], inMemory: true)
         }
     }
 }
