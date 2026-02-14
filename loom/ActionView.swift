@@ -905,7 +905,9 @@ struct ActionView: View {
 
             if !isHeaderCollapsed {
                 instructionsRow
-                cautionRow
+                if let age = blocksAgeDays, age >= 8 {
+                    cautionRow
+                }
                 filterChipsRow
                 if let openFilter, isFilterMenuAvailable(openFilter) {
                     filterDropdown(for: openFilter)
