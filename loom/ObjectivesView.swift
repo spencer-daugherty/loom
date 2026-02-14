@@ -12,6 +12,7 @@ struct ObjectivesView: View {
     @State private var sortDaysAscending = true
     @State private var navigationAction: NavigationAction?
     @State private var showUpcoming = false
+    @State private var showCompletedOutcomesPlaceholder = false
     private var sortSheetHeight: CGFloat {
         let rows = CGFloat(activeOutcomesForSort.count)
         return min(max(260, rows * 56 + 140), 620)
@@ -126,6 +127,43 @@ struct ObjectivesView: View {
                                     .frame(maxWidth: .infinity)
                                     .padding(.vertical, 4)
                             }
+                        }
+                    }
+                    .padding(.horizontal)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                showCompletedOutcomesPlaceholder.toggle()
+                            }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: showCompletedOutcomesPlaceholder ? "chevron.up" : "chevron.down")
+                                    .font(.caption2.weight(.semibold))
+                                Text("Outcomes Completed")
+                                    .font(.caption2.weight(.semibold))
+                            }
+                            .foregroundStyle(colorScheme == .dark ? Color.white.opacity(0.68) : .black)
+                            .padding(.vertical, 5)
+                            .padding(.horizontal, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Color(.systemGray4))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.black.opacity(0.15), lineWidth: 1)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                        if showCompletedOutcomesPlaceholder {
+                            Text("No completed outcomes yet.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.leading, 2)
                         }
                     }
                     .padding(.horizontal)

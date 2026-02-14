@@ -37,6 +37,10 @@ struct ReflectAchievementsView: View {
     @State private var powerQuestionText: String = ""
     @State private var showSaveHint: Bool = false
     @State private var highlightedMissingJournalFields: Set<JournalField> = []
+    @State private var showContributionPrompt: Bool = false
+    @State private var contributionOutcomeIndex: Int = 0
+    @State private var contributionTempSelection: Set<UUID> = []
+    @State private var contributionSelectionsByOutcome: [UUID: Set<UUID>] = [:]
 
     @Namespace private var reflectionNamespace
 
@@ -312,6 +316,33 @@ struct ReflectAchievementsView: View {
         return outcomes.filter { ids.contains($0.outcome_id) }
     }
 
+    private var outcomesForContributionFlow: [Outcomes] {
+        outcomesForWeek
+    }
+
+    private var doneActionsByOutcomeId: [UUID: [PlannedChunkAction]] {
+        let linksByOutcome = Dictionary(grouping: weekOutcomeLinks, by: \.outcomeId)
+        var map: [UUID: [PlannedChunkAction]] = [:]
+        for (outcomeId, links) in linksByOutcome {
+            let chunkIds = Set(links.map(\.plannedChunkId))
+            let done = weekActions.filter {
+                chunkIds.contains($0.plannedChunkId) && status(for: $0.id) == .done
+            }
+            map[outcomeId] = done
+        }
+        return map
+    }
+
+    private var currentContributionOutcome: Outcomes? {
+        guard contributionOutcomeIndex >= 0, contributionOutcomeIndex < outcomesForContributionFlow.count else { return nil }
+        return outcomesForContributionFlow[contributionOutcomeIndex]
+    }
+
+    private var currentContributionDoneActions: [PlannedChunkAction] {
+        guard let outcome = currentContributionOutcome else { return [] }
+        return doneActionsByOutcomeId[outcome.outcome_id] ?? []
+    }
+
     private var productiveDayRows: [ProductiveDayRow] {
         let cal = Calendar.current
         let firstDay = cal.startOfDay(for: weekStart)
@@ -385,6 +416,11 @@ struct ReflectAchievementsView: View {
         .sheet(isPresented: $showInstructions) {
             instructionsSheet
                 .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showContributionPrompt) {
+            contributionPromptSheet
+                .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
         .overlay(alignment: .bottom) {
@@ -635,7 +671,7 @@ struct ReflectAchievementsView: View {
                 )
 
                 Button {
-                    step = 2
+                    beginContributionFlowOrProceed()
                 } label: {
                     Text("Next")
                         .frame(maxWidth: .infinity)
@@ -740,6 +776,106 @@ struct ReflectAchievementsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding()
             }
+        }
+    }
+
+    private var contributionPromptSheet: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 12) {
+                if outcomesForContributionFlow.count > 1 {
+                    ProgressView(value: Double(contributionOutcomeIndex + 1), total: Double(outcomesForContributionFlow.count))
+                        .tint(.accentColor)
+                    Text("\(contributionOutcomeIndex + 1) of \(outcomesForContributionFlow.count)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Text("Did any of these actions contribute to your outcome progress?")
+                    .font(.headline)
+
+                if let outcome = currentContributionOutcome {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(outcome.outcome)
+                            .font(.title3)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(categoryColor(for: outcome.category))
+                            .lineLimit(3)
+                        if !outcome.reasons.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Text(outcome.reasons)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(3)
+                        }
+                        HStack(spacing: 8) {
+                            Text("\(daysUntil(outcome.end))d")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(.black)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .fill(lightenedCategoryColor(for: outcome.category))
+                                )
+                            Text("days left")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(10)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+                }
+
+                if currentContributionDoneActions.isEmpty {
+                    Text("No completed actions were found in this outcome's action block.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 6)
+                } else {
+                    List {
+                        ForEach(currentContributionDoneActions, id: \.id) { action in
+                            Button {
+                                if contributionTempSelection.contains(action.id) {
+                                    contributionTempSelection.remove(action.id)
+                                } else {
+                                    contributionTempSelection.insert(action.id)
+                                }
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: contributionTempSelection.contains(action.id) ? "checkmark.circle.fill" : "circle")
+                                        .foregroundStyle(contributionTempSelection.contains(action.id) ? Color.accentColor : Color(.systemGray3))
+                                    Text(action.text)
+                                        .foregroundStyle(.primary)
+                                        .multilineTextAlignment(.leading)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .buttonStyle(.plain)
+                            .listRowSeparator(.hidden)
+                        }
+                    }
+                    .listStyle(.plain)
+                }
+
+                HStack(spacing: 12) {
+                    Button("Skip") {
+                        advanceContributionFlow()
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color(.systemGray5)))
+                    .foregroundStyle(.primary)
+
+                    Button(contributionOutcomeIndex + 1 < outcomesForContributionFlow.count ? "Next" : "Continue") {
+                        saveCurrentContributionSelection()
+                        advanceContributionFlow()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .frame(maxWidth: .infinity)
+                }
+            }
+            .padding()
+            .navigationTitle("Contributing Actions")
+            .navigationBarTitleDisplayMode(.inline)
         }
     }
 
@@ -961,6 +1097,25 @@ struct ReflectAchievementsView: View {
             }
         }
 
+        let executionByID = executionByActionID
+        let actionByID = Dictionary(uniqueKeysWithValues: weekActions.map { ($0.id, $0) })
+        for (outcomeId, selectedActionIDs) in contributionSelectionsByOutcome {
+            for actionId in selectedActionIDs {
+                guard let action = actionByID[actionId] else { continue }
+                let actionCompletedAt = executionByID[actionId]?.updatedAt ?? self.completedAt
+                modelContext.insert(
+                    ActionBlocksReflectionOutcomeContribution(
+                        archiveId: archive.id,
+                        weekStart: weekStart,
+                        outcomeId: outcomeId,
+                        plannedChunkActionId: actionId,
+                        actionText: action.text,
+                        completedAt: actionCompletedAt
+                    )
+                )
+            }
+        }
+
         recaptureCarriedActions()
         clearWeekPlanningStateAfterArchive()
 
@@ -971,6 +1126,57 @@ struct ReflectAchievementsView: View {
 
         try? modelContext.save()
         onFinish()
+    }
+
+    private func beginContributionFlowOrProceed() {
+        let queue = outcomesForContributionFlow
+        guard !queue.isEmpty else {
+            step = 2
+            return
+        }
+        contributionOutcomeIndex = 0
+        let firstId = queue[0].outcome_id
+        contributionTempSelection = contributionSelectionsByOutcome[firstId] ?? []
+        showContributionPrompt = true
+    }
+
+    private func saveCurrentContributionSelection() {
+        guard let outcome = currentContributionOutcome else { return }
+        contributionSelectionsByOutcome[outcome.outcome_id] = contributionTempSelection
+    }
+
+    private func advanceContributionFlow() {
+        if contributionOutcomeIndex + 1 < outcomesForContributionFlow.count {
+            contributionOutcomeIndex += 1
+            let nextId = outcomesForContributionFlow[contributionOutcomeIndex].outcome_id
+            contributionTempSelection = contributionSelectionsByOutcome[nextId] ?? []
+        } else {
+            showContributionPrompt = false
+            step = 2
+        }
+    }
+
+    private func categoryColor(for category: String) -> Color {
+        switch category {
+        case "Career & Business": return .blue
+        case "Leadership & Impact": return .indigo
+        case "Wealth & Lifestyle": return .green
+        case "Mind & Meaning": return .purple
+        case "Love & Relationships": return .red
+        case "Health & Vitality": return .orange
+        default: return .primary
+        }
+    }
+
+    private func lightenedCategoryColor(for category: String) -> Color {
+        let baseColor = UIColor(categoryColor(for: category))
+        return Color(baseColor.adjusted(by: 0.8))
+    }
+
+    private func daysUntil(_ date: Date) -> Int {
+        let calendar = Calendar.current
+        let components = calendar.dateComponents([.day], from: .now, to: date)
+        return max(0, components.day ?? 0)
     }
 
     private func recaptureCarriedActions() {

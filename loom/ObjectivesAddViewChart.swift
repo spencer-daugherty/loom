@@ -362,11 +362,23 @@ struct ObjectivesAddViewChart: View {
     }
 
     private func yAxisRange() -> ClosedRange<Double> {
-        let values = chartRows.flatMap { [$0.measure, $0.measure_amt] }.filter { $0 != 0 }
-        let minValue = values.min() ?? 0
-        let maxValue = values.max() ?? 100
-        let padding = max(1, (maxValue - minValue) * 0.12)
-        return (minValue - padding)...(maxValue + padding)
+        var values: [Double] = visibleRows.flatMap { [$0.measure, $0.measure_amt] }
+        if let startValue { values.append(startValue) }
+        if let latestValue { values.append(latestValue) }
+        if let goalValue { values.append(goalValue) }
+        if let selected = selectedEntry?.measure { values.append(selected) }
+
+        guard let minValue = values.min(), let maxValue = values.max() else {
+            return 0...10
+        }
+
+        let span = maxValue - minValue
+        let minSpan = max(1.0, abs(maxValue) * 0.1)
+        let effectiveSpan = max(span, minSpan)
+        let padding = max(0.5, effectiveSpan * 0.14)
+        let mid = (minValue + maxValue) / 2
+        let half = (effectiveSpan / 2) + padding
+        return (mid - half)...(mid + half)
     }
 
     private func xAxisValues() -> [Date] {

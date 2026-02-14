@@ -25,6 +25,7 @@ struct OutcomeView: View {
     @State private var measureDecimalPlaces: Int = 0
 
     @Query(sort: \OutcomesMeasureEntry.measuredAt, order: .forward) private var allMeasureEntries: [OutcomesMeasureEntry]
+    @Query(sort: \ActionBlocksReflectionOutcomeContribution.completedAt, order: .reverse) private var allContributingActions: [ActionBlocksReflectionOutcomeContribution]
 
     init(outcome: Outcomes, outcomeMeasure: OutcomesMeasure?) {
         self.outcome = outcome
@@ -90,6 +91,10 @@ struct OutcomeView: View {
     private var daysLeft: Int {
         let components = Calendar.current.dateComponents([.day], from: .now, to: endDate)
         return max(0, components.day ?? 0)
+    }
+
+    private var contributingActionsForOutcome: [ActionBlocksReflectionOutcomeContribution] {
+        allContributingActions.filter { $0.outcomeId == outcome.outcome_id }
     }
 
     var body: some View {
@@ -187,6 +192,27 @@ struct OutcomeView: View {
                     measureFormat: $measureFormat,
                     measureDecimalPlaces: $measureDecimalPlaces
                 )
+                Section("Contributing Actions") {
+                    if contributingActionsForOutcome.isEmpty {
+                        Text("No contributing actions logged yet.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(contributingActionsForOutcome, id: \.id) { item in
+                            HStack(alignment: .top, spacing: 10) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(item.actionText)
+                                        .font(.body)
+                                        .foregroundStyle(.primary)
+                                    Text("Completed \(shortDate(item.completedAt))")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+                }
                 CategorySection(selectedCategory: $selectedCategory)
                 DeleteOutcomeSection(
                     isShowingDeleteOutcomeAlert: $isShowingDeleteOutcomeAlert,
@@ -368,6 +394,12 @@ struct OutcomeView: View {
         let calendar = Calendar.current
         let components = calendar.dateComponents([.day], from: start, to: end)
         return max(0, components.day ?? 0)
+    }
+
+    private func shortDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        return formatter.string(from: date)
     }
 
     private func hideKeyboard() {

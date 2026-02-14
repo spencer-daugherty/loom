@@ -892,6 +892,35 @@ final class ActionBlocksReflectionArchiveOutcome {
     }
 }
 
+@Model
+final class ActionBlocksReflectionOutcomeContribution {
+    @Attribute(.unique) var id: UUID
+    var archiveId: UUID
+    var weekStart: Date
+    var outcomeId: UUID
+    var plannedChunkActionId: UUID
+    var actionText: String
+    var completedAt: Date
+
+    init(
+        id: UUID = .init(),
+        archiveId: UUID,
+        weekStart: Date,
+        outcomeId: UUID,
+        plannedChunkActionId: UUID,
+        actionText: String,
+        completedAt: Date
+    ) {
+        self.id = id
+        self.archiveId = archiveId
+        self.weekStart = weekStart
+        self.outcomeId = outcomeId
+        self.plannedChunkActionId = plannedChunkActionId
+        self.actionText = actionText
+        self.completedAt = completedAt
+    }
+}
+
 // MARK: - NEW: Planned chunks (Step 3 -> Step 4 persistence)
 /// A persisted chunk created in Plan Step 3 for a given plan week.
 @Model
