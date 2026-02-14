@@ -136,8 +136,11 @@ struct FulfillmentView: View {
     @State private var isAddingResource = false
     @State private var newResourceText = ""
     @State private var isShowingInstructions = false
+    @State private var highlightedCategoryIndex: Int = 0
+    @State private var radarAutoRotatePausedUntil: Date = .distantPast
     @FocusState private var focusedField: Field?
     private enum Field { case vision, purpose, role, focus, resource }
+    private let radarTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
 
     private let lightBlue = Color(red: 0.70, green: 0.85, blue: 1.00)
     private let lightIndigo = Color(red: 0.80, green: 0.80, blue: 0.95)
@@ -159,6 +162,8 @@ struct FulfillmentView: View {
                 }
 
                 VStack(spacing: 16) {
+                    fulfillmentRadarHeader
+
                     ForEach(categories) { cat in
                         card(
                             id: cat.id,
@@ -197,6 +202,11 @@ struct FulfillmentView: View {
         .task {
             ensureCategoryRecordsExist()
         }
+        .onReceive(radarTimer) { _ in
+            guard !categories.isEmpty else { return }
+            guard Date() >= radarAutoRotatePausedUntil else { return }
+            highlightedCategoryIndex = (highlightedCategoryIndex + 1) % categories.count
+        }
         .sheet(isPresented: $isShowingInstructions) {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Instructions")
@@ -209,6 +219,52 @@ struct FulfillmentView: View {
             .presentationDetents([.medium])
             .presentationDragIndicator(.visible)
         }
+    }
+
+    private var fulfillmentRadarHeader: some View {
+        GeometryReader { geo in
+            let width = geo.size.width
+            let graphWidth = max(120, width * 0.40)
+            let leftWidth = max(120, width - graphWidth - 28)
+            let selected = categories[highlightedCategoryIndex]
+            let selectedScore = radarScore(for: selected.title)
+
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(selected.title)
+                        .font(.headline)
+                        .fontWeight(.bold)
+                        .foregroundStyle(selected.color)
+                        .lineLimit(2)
+                    Text("Tap radar slice to focus")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(selected.color)
+                        .frame(width: 92, height: 58)
+                        .overlay {
+                            Text("\(selectedScore)/5")
+                                .font(.system(size: 26, weight: .bold))
+                                .foregroundStyle(.white)
+                        }
+                }
+                .frame(width: leftWidth, alignment: .leading)
+
+                FulfillmentInteractiveRadar(
+                    metrics: fulfillmentMetrics,
+                    selectedIndex: $highlightedCategoryIndex,
+                    onManualSelect: {
+                        radarAutoRotatePausedUntil = Date().addingTimeInterval(20)
+                    }
+                )
+                .frame(width: graphWidth, height: graphWidth)
+                .frame(maxHeight: .infinity, alignment: .top)
+
+                Spacer(minLength: 0)
+            }
+        }
+        .frame(height: 170)
     }
 
     private func commitInlineIfNeeded() {
@@ -528,6 +584,19 @@ struct FulfillmentView: View {
         completionCount(for: categoryTitle) == 6
     }
 
+    private var fulfillmentMetrics: [(String, Color, Double)] {
+        categories.map { cat in
+            let pct = (Double(radarScore(for: cat.title)) / 5.0) * 100.0
+            return (cat.title, cat.color, pct)
+        }
+    }
+
+    private func radarScore(for categoryTitle: String) -> Int {
+        let raw = completionCount(for: categoryTitle)
+        let scaled = Int(round((Double(raw) / 6.0) * 5.0))
+        return min(5, max(0, scaled))
+    }
+
     // MARK: - Data Helpers
 
     private func fulfillmentRecord(for category: String) -> Fulfillment? {
@@ -746,6 +815,116 @@ struct FulfillmentView: View {
             )
             modelContext.insert(archive)
             modelContext.delete(r)
+        }
+    }
+}
+
+private struct FulfillmentInteractiveRadar: View {
+    let metrics: [(String, Color, Double)]
+    @Binding var selectedIndex: Int
+    let onManualSelect: () -> Void
+    @State private var pulseIndex: Int? = nil
+
+    var body: some View {
+        GeometryReader { geo in
+            let size = min(geo.size.width, geo.size.height)
+            let center = CGPoint(x: size / 2, y: size / 2)
+            let radius = size / 2
+            let count = max(metrics.count, 1)
+
+            let outerPoints: [CGPoint] = (0..<count).map { i in
+                let angle = Angle.degrees((Double(i) / Double(count)) * 360 - 90).radians
+                return CGPoint(x: center.x + cos(angle) * radius, y: center.y + sin(angle) * radius)
+            }
+
+            let renderedMetrics: [(String, Color, Double)] = (0..<count).map { i in
+                (metrics[i].0, segmentColor(i), metrics[i].2)
+            }
+            let valuePoints: [CGPoint] = (0..<count).map { i in
+                let ratio = max(0, min(metrics[i].2 / 100.0, 1.0))
+                let outer = outerPoints[i]
+                return CGPoint(
+                    x: center.x + (outer.x - center.x) * ratio,
+                    y: center.y + (outer.y - center.y) * ratio
+                )
+            }
+
+            ZStack {
+                // Keep the radar internals identical to ContentView's graph style.
+                FulfillmentRadarGraph(
+                    metrics: renderedMetrics,
+                    showOutline: true,
+                    dotDiameter: 20,
+                    showDotOutline: false,
+                    showDotShadow: false
+                )
+
+                ForEach(0..<count, id: \.self) { i in
+                    Circle()
+                        .fill(metrics[i].1)
+                        .frame(width: 20, height: 20)
+                        .overlay(
+                            Circle().stroke(Color(.systemBackground), lineWidth: 2)
+                        )
+                        .shadow(color: Color.white.opacity(0.9), radius: 10, x: 0, y: 0)
+                        .scaleEffect(pulseIndex == i ? 1.25 : 1.0)
+                        .animation(.easeInOut(duration: 0.18), value: pulseIndex)
+                        .position(valuePoints[i])
+                }
+
+                ForEach(0..<count, id: \.self) { i in
+                    let next = (i + 1) % count
+                    sliceTapShape(center: center, p1: outerPoints[i], p2: outerPoints[next])
+                        .fill(Color.clear)
+                        .contentShape(sliceTapShape(center: center, p1: outerPoints[i], p2: outerPoints[next]))
+                        .onTapGesture {
+                            selectSlice(i)
+                        }
+                }
+
+                // Larger, invisible tap targets around dots for easier selection.
+                ForEach(0..<count, id: \.self) { i in
+                    Circle()
+                        .fill(Color.clear)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Circle())
+                        .position(valuePoints[i])
+                        .onTapGesture {
+                            selectSlice(i)
+                        }
+                }
+            }
+        }
+    }
+
+    private func segmentColor(_ index: Int) -> Color {
+        if index == selectedIndex {
+            return metrics[index].1
+        }
+        return muted(metrics[index].1)
+    }
+
+    private func muted(_ color: Color) -> Color {
+        color.opacity(0.25)
+    }
+
+    private func selectSlice(_ index: Int) {
+        selectedIndex = index
+        onManualSelect()
+        pulseIndex = index
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+            if pulseIndex == index {
+                pulseIndex = nil
+            }
+        }
+    }
+
+    private func sliceTapShape(center: CGPoint, p1: CGPoint, p2: CGPoint) -> Path {
+        Path { path in
+            path.move(to: center)
+            path.addLine(to: p1)
+            path.addLine(to: p2)
+            path.closeSubpath()
         }
     }
 }
