@@ -3392,6 +3392,7 @@ struct PlanStepFiveView: View {
                                 hasAttachments: hasAttachments(action.id),
                                 shouldHighlightMissingDuration: shouldHighlightMissingDurations && isMissingDuration,
                                 shouldHighlightOptionalIcons: shouldHighlightMissingOptionalIcons && isMissingDuration,
+                                shouldHighlightReorderArrow: shouldHighlightMissingOptionalIcons && isMissingDuration,
                                 onToggleMust: { onToggleMust(action.id, !isMust) },
                                 onTapClock: { onOpenClock(action.id) },
                                 onTapPerson: { onOpenLeverage(action.id) },
@@ -3432,6 +3433,7 @@ struct PlanStepFiveView: View {
 
             let shouldHighlightMissingDuration: Bool
             let shouldHighlightOptionalIcons: Bool
+            let shouldHighlightReorderArrow: Bool
 
             let onToggleMust: () -> Void
             let onTapClock: () -> Void
@@ -3495,7 +3497,7 @@ struct PlanStepFiveView: View {
 
                     Image(systemName: "chevron.up.chevron.down")
                         .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(shouldHighlightReorderArrow ? Color.orange.opacity(0.9) : .secondary)
                         .frame(width: 20, alignment: .center)
                         .padding(.vertical, 6)
                 }
