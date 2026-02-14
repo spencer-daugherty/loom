@@ -34,11 +34,11 @@ struct ObjectivesAddViewChart: View {
     @Query private var entries: [OutcomesMeasureEntry]
     @Query private var legacyMeasures: [OutcomesMeasure]
     @Query private var outcomes: [Outcomes]
-    @State private var selectedTimeRange: String = "M"
+    @State private var selectedTimeRange: String = "All"
     @State private var selectedEntryID: UUID? = nil
     @State private var selectedDate: Date? = nil
     @State private var showSuccessPaths: Bool = false
-    private let allTimeRanges = ["W", "M", "3M", "6M", "Y"]
+    private let allTimeRanges = ["All", "W", "M", "3M", "6M", "Y"]
 
     private var availableTimeRanges: [String] {
         guard let outcome = outcomes.first else { return allTimeRanges }
@@ -47,11 +47,11 @@ struct ObjectivesAddViewChart: View {
         let days = max(1, Calendar.current.dateComponents([.day], from: start, to: end).day ?? 1)
 
         let maxIndex: Int
-        if days <= 7 { maxIndex = 0 }
-        else if days <= 30 { maxIndex = 1 }
-        else if days <= 90 { maxIndex = 2 }
-        else if days <= 180 { maxIndex = 3 }
-        else { maxIndex = 4 }
+        if days <= 7 { maxIndex = 1 }
+        else if days <= 30 { maxIndex = 2 }
+        else if days <= 90 { maxIndex = 3 }
+        else if days <= 180 { maxIndex = 4 }
+        else { maxIndex = 5 }
 
         return Array(allTimeRanges.prefix(maxIndex + 1))
     }
@@ -114,7 +114,10 @@ struct ObjectivesAddViewChart: View {
     }
 
     private var goalValue: Double? {
-        chartRows.last?.measure_amt
+        if let snapshot = legacyMeasures.first, snapshot.measure_amt != 0 {
+            return snapshot.measure_amt
+        }
+        return chartRows.last?.measure_amt
     }
 
     private var latestValue: Double? {
@@ -173,12 +176,12 @@ struct ObjectivesAddViewChart: View {
             .pickerStyle(.segmented)
             .onAppear {
                 if !availableTimeRanges.contains(selectedTimeRange) {
-                    selectedTimeRange = availableTimeRanges.last ?? "M"
+                    selectedTimeRange = availableTimeRanges.first ?? "All"
                 }
             }
             .onChange(of: availableTimeRanges) { _, newRanges in
                 if !newRanges.contains(selectedTimeRange) {
-                    selectedTimeRange = newRanges.last ?? "M"
+                    selectedTimeRange = newRanges.first ?? "All"
                 }
             }
 
@@ -195,7 +198,7 @@ struct ObjectivesAddViewChart: View {
             }
 
             Chart {
-                if let latestGoal = chartRows.last?.measure_amt, latestGoal != 0 {
+                if let latestGoal = goalValue, latestGoal != 0 {
                     RuleMark(y: .value("Goal", latestGoal))
                         .foregroundStyle(.gray)
                         .lineStyle(.init(lineWidth: 4.5, dash: [6, 4]))
@@ -315,7 +318,7 @@ struct ObjectivesAddViewChart: View {
             }
             .frame(height: 260)
 
-            Toggle("Show Success Paths", isOn: $showSuccessPaths)
+            Toggle("Show Success Path", isOn: $showSuccessPaths)
                 .font(.subheadline)
                 .tint(.blue)
                 .padding(.top, 2)
@@ -385,6 +388,7 @@ struct ObjectivesAddViewChart: View {
         let calendar = Calendar.current
         let range = fullDateRange()
         let step: DateComponents = switch selectedTimeRange {
+        case "All": DateComponents(month: 1)
         case "W": DateComponents(day: 1)
         case "M": DateComponents(day: 7)
         case "3M": DateComponents(month: 1)
@@ -404,6 +408,8 @@ struct ObjectivesAddViewChart: View {
 
     private func xAxisLabelFormat() -> Date.FormatStyle {
         switch selectedTimeRange {
+        case "All":
+            return .dateTime.month(.abbreviated)
         case "W":
             return .dateTime.weekday(.abbreviated)
         case "M":
@@ -414,6 +420,9 @@ struct ObjectivesAddViewChart: View {
     }
 
     private func visibleDomainLength() -> TimeInterval {
+        if selectedTimeRange == "All" {
+            return fullDateRange().upperBound.timeIntervalSince(fullDateRange().lowerBound)
+        }
         switch selectedTimeRange {
         case "W": return 60 * 60 * 24 * 7
         case "M": return 60 * 60 * 24 * 31
@@ -552,6 +561,40 @@ struct AddOutcomeMeasureSheet: View {
 
     private func persistMeasure(current: Double, measuredDay: Date, overrideExisting: Bool) {
         let goal = goalValue
+        let hasExactDuplicateForDay = entries.contains {
+            Calendar.current.isDate($0.measuredAt, inSameDayAs: measuredDay) &&
+            $0.measure == current &&
+            $0.measure_amt == goal
+        }
+
+        if hasExactDuplicateForDay {
+            if let snapshot = snapshots.first {
+                snapshot.measure = current
+                snapshot.measure_amt = goal
+                snapshot.measuredAt = measuredDay
+                snapshot.measure_updated = .now
+                snapshot.format = formatRaw
+                snapshot.unit = unitRaw
+                snapshot.direction = nil
+                snapshot.decimalPlaces = decimalPlaces
+            } else {
+                modelContext.insert(
+                    OutcomesMeasure(
+                        outcome_id: outcomeID,
+                        measure: current,
+                        measuredAt: measuredDay,
+                        measure_amt: goal,
+                        measure_updated: .now,
+                        direction: nil,
+                        format: formatRaw,
+                        unit: unitRaw,
+                        decimalPlaces: decimalPlaces
+                    )
+                )
+            }
+            try? modelContext.save()
+            return
+        }
 
         if overrideExisting {
             let sameDayEntries = entries.filter {
@@ -681,8 +724,28 @@ struct OutcomesAllDataView: View {
                 for idx in offsets {
                     let row = mergedRows[idx]
                     if let persisted = entries.first(where: { $0.id == row.id }) {
+                        modelContext.insert(
+                            OutcomeAnalyticsEvent(
+                                outcome_id: outcomeID,
+                                eventType: "measure_deleted",
+                                measuredAt: persisted.measuredAt,
+                                oldMeasure: persisted.measure,
+                                oldGoal: persisted.measure_amt,
+                                source: "All Measure Data"
+                            )
+                        )
                         RecentlyDeletedStore.trash(persisted, in: modelContext)
                     } else if let legacy = legacyMeasures.first(where: { $0.outcome_id == outcomeID }) {
+                        modelContext.insert(
+                            OutcomeAnalyticsEvent(
+                                outcome_id: outcomeID,
+                                eventType: "measure_deleted",
+                                measuredAt: legacy.measuredAt,
+                                oldMeasure: legacy.measure,
+                                oldGoal: legacy.measure_amt,
+                                source: "All Measure Data (Legacy)"
+                            )
+                        )
                         RecentlyDeletedStore.trash(legacy, in: modelContext)
                     }
                 }

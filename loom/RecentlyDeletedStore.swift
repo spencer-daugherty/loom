@@ -190,6 +190,16 @@ enum RecentlyDeletedStore {
         }
     }
 
+    static func permanentlyDelete(_ item: RecentlyDeletedItem, in context: ModelContext) {
+        if item.entityType == "Outcomes", let outcomeUUID = UUID(uuidString: item.entityID) {
+            let events = (try? context.fetch(FetchDescriptor<OutcomeAnalyticsEvent>())) ?? []
+            for event in events where event.outcome_id == outcomeUUID {
+                context.delete(event)
+            }
+        }
+        context.delete(item)
+    }
+
     private static func entityType(for model: any PersistentModel) -> String {
         String(describing: type(of: model))
     }

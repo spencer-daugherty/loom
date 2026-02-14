@@ -860,9 +860,19 @@ struct RecentlyDeletedView: View {
     var body: some View {
         List {
             Section {
-                Text("Items remain here for 30 days, then are permanently deleted.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 0) {
+                        Text("Items remain here for 30 days, then are permanently deleted.")
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.92)
+                        Spacer(minLength: 0)
+                    }
+                    Text("Swipe right to recover and left to delete permanently.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Section {
@@ -885,12 +895,12 @@ struct RecentlyDeletedView: View {
                                 Text("Deletes in \(max(0, Calendar.current.dateComponents([.day], from: .now, to: item.purgeAt).day ?? 0))d")
                                     .font(.caption2)
                                     .fontWeight(.bold)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(.red)
                             }
                         }
                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            Button("Delete", role: .destructive) {
-                                context.delete(item)
+                            Button("Detele Permanently", role: .destructive) {
+                                RecentlyDeletedStore.permanentlyDelete(item, in: context)
                                 try? context.save()
                             }
                             .tint(.red)

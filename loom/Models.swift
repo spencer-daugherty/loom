@@ -517,6 +517,52 @@ final class OutcomesMeasureEntry {
     }
 }
 
+@Model
+final class OutcomeAnalyticsEvent {
+    @Attribute(.unique) var id: UUID
+    var outcome_id: UUID
+    /// "measure_deleted", "goal_changed", "target_changed"
+    var eventType: String
+    var occurredAt: Date
+
+    var measuredAt: Date?
+    var oldMeasure: Double?
+    var newMeasure: Double?
+    var oldGoal: Double?
+    var newGoal: Double?
+    var oldTargetDate: Date?
+    var newTargetDate: Date?
+    var source: String?
+
+    init(
+        id: UUID = .init(),
+        outcome_id: UUID,
+        eventType: String,
+        occurredAt: Date = .now,
+        measuredAt: Date? = nil,
+        oldMeasure: Double? = nil,
+        newMeasure: Double? = nil,
+        oldGoal: Double? = nil,
+        newGoal: Double? = nil,
+        oldTargetDate: Date? = nil,
+        newTargetDate: Date? = nil,
+        source: String? = nil
+    ) {
+        self.id = id
+        self.outcome_id = outcome_id
+        self.eventType = eventType
+        self.occurredAt = occurredAt
+        self.measuredAt = measuredAt
+        self.oldMeasure = oldMeasure
+        self.newMeasure = newMeasure
+        self.oldGoal = oldGoal
+        self.newGoal = newGoal
+        self.oldTargetDate = oldTargetDate
+        self.newTargetDate = newTargetDate
+        self.source = source
+    }
+}
+
 // MARK: - WeeklyMindsetEntry
 
 enum WeeklyMindsetEntry {

@@ -330,12 +330,13 @@ struct OutcomeView: View {
     }
 
     private func saveOutcome() {
+        let previousEndDate = outcome.end
         let start = Calendar.current.startOfDay(for: startNow ? .now : startDate)
         let normalizedEndDate = Calendar.current.startOfDay(for: endDate)
         let measureValue = isMeasurable ? (Double(measureGoal) ?? 0.0) : 0.0
         let formatValue = isMeasurable ? measureFormat.rawValue : nil
         let unitValue = isMeasurable ? measureUnit : nil
-        let decimalPlacesValue = isMeasurable ? measureDecimalPlaces : nil
+        let decimalPlacesValue = isMeasurable ? (measureFormat == .dollars ? 2 : measureDecimalPlaces) : nil
 
         outcome.category = selectedCategory.rawValue
         outcome.updatedAt = .now
@@ -345,8 +346,55 @@ struct OutcomeView: View {
         outcome.end = normalizedEndDate
         outcome.format = formatValue
 
+        if previousEndDate != normalizedEndDate {
+            modelContext.insert(
+                OutcomeAnalyticsEvent(
+                    outcome_id: outcome.outcome_id,
+                    eventType: "target_changed",
+                    oldTargetDate: previousEndDate,
+                    newTargetDate: normalizedEndDate,
+                    source: "OutcomeView"
+                )
+            )
+        }
+
         if isMeasurable {
             if let existingMeasure = try? modelContext.fetch(FetchDescriptor<OutcomesMeasure>()).first(where: { $0.outcome_id == outcome.outcome_id }) {
+                let oldGoal = existingMeasure.measure_amt
+                let goalChanged = existingMeasure.measure_amt != measureValue
+                if goalChanged {
+                    modelContext.insert(
+                        OutcomeAnalyticsEvent(
+                            outcome_id: outcome.outcome_id,
+                            eventType: "goal_changed",
+                            oldMeasure: existingMeasure.measure,
+                            oldGoal: oldGoal,
+                            newGoal: measureValue,
+                            source: "OutcomeView"
+                        )
+                    )
+                    let day = Calendar.current.startOfDay(for: .now)
+                    let duplicateExists = allMeasureEntries.contains {
+                        $0.outcome_id == outcome.outcome_id &&
+                        Calendar.current.isDate($0.measuredAt, inSameDayAs: day) &&
+                        $0.measure == existingMeasure.measure &&
+                        $0.measure_amt == measureValue
+                    }
+                    if !duplicateExists {
+                        modelContext.insert(
+                            OutcomesMeasureEntry(
+                                outcome_id: outcome.outcome_id,
+                                measure: existingMeasure.measure,
+                                measure_amt: measureValue,
+                                measuredAt: day,
+                                createdAt: .now,
+                                format: formatValue,
+                                unit: unitValue,
+                                decimalPlaces: decimalPlacesValue
+                            )
+                        )
+                    }
+                }
                 existingMeasure.measure_amt = measureValue
                 existingMeasure.measure_updated = .now
                 existingMeasure.direction = nil
@@ -376,25 +424,32 @@ struct OutcomeView: View {
 
     private func hydrateMeasureFromLatestEntry() {
         let entries = allMeasureEntries.filter { $0.outcome_id == outcome.outcome_id }
-        guard let latest = entries.max(by: { $0.measuredAt < $1.measuredAt }) else { return }
+        let latest = entries.max(by: { $0.measuredAt < $1.measuredAt })
+        let snapshot = outcomeMeasure
 
-        if latest.measure_amt != 0 {
-            let places = min(3, max(0, latest.decimalPlaces ?? 0))
-            measureGoal = String(format: "%.\(places)f", latest.measure_amt).replacingOccurrences(of: places == 0 ? ".0" : "", with: "")
+        let goalSource = snapshot?.measure_amt ?? latest?.measure_amt ?? 0
+        let currentSource = latest?.measure ?? snapshot?.measure ?? 0
+        let formatSource = snapshot?.format ?? latest?.format
+        let unitSource = snapshot?.unit ?? latest?.unit
+        let decimalSource = snapshot?.decimalPlaces ?? latest?.decimalPlaces ?? 0
+
+        if goalSource != 0 {
+            let places = min(3, max(0, decimalSource))
+            measureGoal = String(format: "%.\(places)f", goalSource)
+                .replacingOccurrences(of: places == 0 ? ".0" : "", with: "")
         }
-        if latest.measure != 0 {
-            let places = min(3, max(0, latest.decimalPlaces ?? 0))
-            measureCurrent = String(format: "%.\(places)f", latest.measure).replacingOccurrences(of: places == 0 ? ".0" : "", with: "")
+        if currentSource != 0 {
+            let places = min(3, max(0, decimalSource))
+            measureCurrent = String(format: "%.\(places)f", currentSource)
+                .replacingOccurrences(of: places == 0 ? ".0" : "", with: "")
         }
-        if let formatRaw = latest.format, let format = ObjectivesAddView.MeasureFormat(rawValue: formatRaw) {
+        if let formatRaw = formatSource, let format = ObjectivesAddView.MeasureFormat(rawValue: formatRaw) {
             measureFormat = format
         }
-        if let unit = latest.unit {
+        if let unit = unitSource {
             measureUnit = unit
         }
-        if let places = latest.decimalPlaces {
-            measureDecimalPlaces = min(3, max(0, places))
-        }
+        measureDecimalPlaces = min(3, max(0, decimalSource))
     }
 
     private func latestMeasureDate() -> Date {
