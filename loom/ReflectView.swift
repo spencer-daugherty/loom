@@ -16,7 +16,7 @@ private struct ReflectDarkModeInvertImage: ViewModifier {
     }
 }
 
-struct ReflectAchievementsView: View {
+struct ReflectView: View {
     let weekStart: Date
     let onFinish: () -> Void
 
@@ -812,6 +812,8 @@ struct ReflectAchievementsView: View {
 
                     Text("Did any of these actions contribute to your outcome progress?")
                         .font(.headline)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 10)
                 }
 
                 ScrollView {
@@ -820,10 +822,6 @@ struct ReflectAchievementsView: View {
                             contributionOutcomeCard(outcome)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(10)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .stroke(Color(.systemGray4), lineWidth: 1)
-                                )
                         }
 
                         ForEach(currentContributionDoneActions, id: \.id) { action in

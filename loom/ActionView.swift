@@ -74,6 +74,7 @@ struct ActionView: View {
     @State private var highlightedStatusActionIDs: Set<UUID> = []
     @State private var showCompleteHint: Bool = false
     @State private var showReflectionFlow: Bool = false
+    @State private var dismissActionViewAfterReflect: Bool = false
     private let weekStart: Date
 
     init() {
@@ -656,13 +657,24 @@ struct ActionView: View {
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
         }
-        .fullScreenCover(isPresented: $showReflectionFlow) {
-            ReflectAchievementsView(
+        .fullScreenCover(isPresented: $showReflectionFlow, onDismiss: {
+            if dismissActionViewAfterReflect {
+                dismissActionViewAfterReflect = false
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    dismiss()
+                }
+            }
+        }) {
+            ReflectView(
                 weekStart: currentWeekStart,
                 onFinish: {
-                    showReflectionFlow = false
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                        dismiss()
+                    dismissActionViewAfterReflect = true
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) {
+                        showReflectionFlow = false
                     }
                 }
             )

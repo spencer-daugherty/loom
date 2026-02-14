@@ -28,6 +28,11 @@ struct CaptureView: View {
     @State private var popoverDetentHeight: CGFloat = 520
     @State private var inlineEditSaveTask: Task<Void, Never>? = nil
     @State private var showCompletedList: Bool = false
+    @State private var showDuplicateHint: Bool = false
+    @State private var shouldHighlightDuplicateInput: Bool = false
+    @State private var duplicateMessage: String = "Duplicate: action is already entered"
+    @State private var highlightedDuplicateItemID: UUID? = nil
+    @State private var duplicateResetWorkItem: DispatchWorkItem? = nil
 
     private enum FocusField: Hashable {
         case newInput
@@ -109,6 +114,9 @@ struct CaptureView: View {
                                         RoundedRectangle(cornerRadius: 8)
                                             .stroke(style: StrokeStyle(lineWidth: 2, dash: [6]))
                                             .foregroundStyle(.blue)
+                                    } else if highlightedDuplicateItemID == item.id {
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .stroke(Color.red.opacity(0.85), lineWidth: 1.5)
                                     }
                                 }
                                 .padding(.vertical, 1)
@@ -340,7 +348,12 @@ struct CaptureView: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 10))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 10)
-                                        .stroke(colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.3), lineWidth: 1)
+                                        .stroke(
+                                            shouldHighlightDuplicateInput
+                                            ? Color.red.opacity(0.85)
+                                            : (colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.3)),
+                                            lineWidth: shouldHighlightDuplicateInput ? 1.5 : 1
+                                        )
                                 )
                                 .layoutPriority(1)
                                 .frame(maxWidth: .infinity)
@@ -357,6 +370,22 @@ struct CaptureView: View {
                                 .foregroundStyle(isGhostOn ? .blue : .secondary)
                                 .accessibilityHidden(true)
                         }
+                        .overlay(alignment: .top) {
+                            if showDuplicateHint {
+                                Text(duplicateMessage)
+                                    .font(.footnote)
+                                    .fontWeight(.bold)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 8)
+                                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .stroke(Color.black.opacity(0.12), lineWidth: 1)
+                                    )
+                                    .offset(y: -58)
+                                    .transition(.opacity)
+                            }
+                        }
                         .padding(.horizontal, 24)
                         .padding(.bottom, 24)
                     }
@@ -370,8 +399,10 @@ struct CaptureView: View {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
-        let duplicateExists = allItems.contains { normalizedActionText($0.text) == normalizedActionText(trimmed) }
-        guard !duplicateExists else { return }
+        if let duplicate = allItems.first(where: { normalizedActionText($0.text) == normalizedActionText(trimmed) }) {
+            triggerDuplicateFeedback(duplicateID: duplicate.id)
+            return
+        }
 
         if isGhostOn && selectedUnhideDate == nil {
             datePickerTempDate = earliestUnhideDate
@@ -474,5 +505,24 @@ struct CaptureView: View {
         }
         modelContext.delete(item)
         try? modelContext.save()
+    }
+
+    private func triggerDuplicateFeedback(duplicateID: UUID) {
+        duplicateResetWorkItem?.cancel()
+        shouldHighlightDuplicateInput = true
+        highlightedDuplicateItemID = duplicateID
+        withAnimation(.easeInOut(duration: 0.15)) {
+            showDuplicateHint = true
+        }
+
+        let workItem = DispatchWorkItem {
+            shouldHighlightDuplicateInput = false
+            highlightedDuplicateItemID = nil
+            withAnimation(.easeInOut(duration: 0.15)) {
+                showDuplicateHint = false
+            }
+        }
+        duplicateResetWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8, execute: workItem)
     }
 }

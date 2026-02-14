@@ -222,9 +222,13 @@ struct ObjectivesView: View {
             switch action {
             case .addOutcome:
                 ObjectivesAddView()
+                    .presentationDetents([.large])
+                    .presentationContentInteraction(.scrolls)
                     .presentationDragIndicator(.visible)
             case .editOutcome(let outcome):
                 OutcomeView(outcome: outcome, outcomeMeasure: latestMeasure(for: outcome))
+                    .presentationDetents([.large])
+                    .presentationContentInteraction(.scrolls)
                     .presentationDragIndicator(.visible)
             }
         }

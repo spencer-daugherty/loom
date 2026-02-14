@@ -91,7 +91,11 @@ struct PlanView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
+        Group {
+            if navigateToStep2 {
+                PlanFlowHostView()
+            } else {
+                VStack(alignment: .leading, spacing: 24) {
             VStack(spacing: 1) {
                 PlanStepProgressBar(current: 1, total: 5)
                     .frame(maxWidth: .infinity, alignment: .center)
@@ -217,10 +221,6 @@ struct PlanView: View {
         .safeAreaPadding(.top)
         .safeAreaPadding(.bottom)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        // IMPORTANT: keep only ONE modal host; navigate steps *inside* that host.
-        .fullScreenCover(isPresented: $navigateToStep2) {
-            PlanFlowHostView()
-        }
         .onAppear {
             if hasCompletedReflectionForWeek {
                 if shouldRunStepOneFreshStartCleanup {
@@ -262,6 +262,8 @@ struct PlanView: View {
             if !isNextDisabled {
                 shouldHighlightStep1Validation = false
                 showStep1ValidationHint = false
+            }
+        }
             }
         }
     }
@@ -433,6 +435,8 @@ struct PlanStepTwoView: View {
     @State private var isShowingNextConfirmation: Bool = false
     @State private var showStep2ValidationHint: Bool = false
     @State private var shouldHighlightStep2InputValidation: Bool = false
+    @State private var step2ValidationMessage: String = "Please enter value on keyboard"
+    @State private var highlightedDuplicateItemID: UUID? = nil
     @State private var step2ValidationResetWorkItem: DispatchWorkItem?
 
     private let hiddenUntilLaterIconName = "clock.arrow.trianglehead.clockwise.rotate.90.path.dotted"
@@ -563,6 +567,9 @@ struct PlanStepTwoView: View {
                             RoundedRectangle(cornerRadius: 8)
                                 .stroke(style: StrokeStyle(lineWidth: 2, dash: [6]))
                                 .foregroundStyle(.blue)
+                        } else if highlightedDuplicateItemID == item.id {
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.red.opacity(0.85), lineWidth: 1.5)
                         }
                     }
                     .padding(.vertical, 4)
@@ -600,11 +607,13 @@ struct PlanStepTwoView: View {
             .overlay(alignment: .top) {
                 if showStep2ValidationHint {
                     HStack(spacing: 8) {
-                        Text("Please enter value on keyboard")
+                        Text(step2ValidationMessage)
                             .font(.footnote)
                             .fontWeight(.bold)
-                        Image(systemName: "checkmark.rectangle.fill")
-                            .foregroundStyle(.blue)
+                        if step2ValidationMessage == "Please enter value on keyboard" {
+                            Image(systemName: "checkmark.rectangle.fill")
+                                .foregroundStyle(.blue)
+                        }
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 8)
@@ -686,8 +695,10 @@ struct PlanStepTwoView: View {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
-        let duplicateExists = allItems.contains { normalizedActionText($0.text) == normalizedActionText(trimmed) }
-        guard !duplicateExists else { return }
+        if let duplicate = allItems.first(where: { normalizedActionText($0.text) == normalizedActionText(trimmed) }) {
+            triggerStep2DuplicateFeedback(duplicateID: duplicate.id)
+            return
+        }
 
         let newItem = RollingCaptureItem(
             text: trimmed,
@@ -713,6 +724,7 @@ struct PlanStepTwoView: View {
 
     private func triggerStep2InputValidationFeedback() {
         step2ValidationResetWorkItem?.cancel()
+        step2ValidationMessage = "Please enter value on keyboard"
         shouldHighlightStep2InputValidation = true
         withAnimation(.easeInOut(duration: 0.15)) {
             showStep2ValidationHint = true
@@ -720,6 +732,27 @@ struct PlanStepTwoView: View {
 
         let workItem = DispatchWorkItem {
             shouldHighlightStep2InputValidation = false
+            highlightedDuplicateItemID = nil
+            withAnimation(.easeInOut(duration: 0.15)) {
+                showStep2ValidationHint = false
+            }
+        }
+        step2ValidationResetWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8, execute: workItem)
+    }
+
+    private func triggerStep2DuplicateFeedback(duplicateID: UUID) {
+        step2ValidationResetWorkItem?.cancel()
+        step2ValidationMessage = "Duplicate: action is already entered"
+        shouldHighlightStep2InputValidation = true
+        highlightedDuplicateItemID = duplicateID
+        withAnimation(.easeInOut(duration: 0.15)) {
+            showStep2ValidationHint = true
+        }
+
+        let workItem = DispatchWorkItem {
+            shouldHighlightStep2InputValidation = false
+            highlightedDuplicateItemID = nil
             withAnimation(.easeInOut(duration: 0.15)) {
                 showStep2ValidationHint = false
             }
@@ -2931,21 +2964,78 @@ struct PlanStepFiveView: View {
         .safeAreaPadding(.top)
         .safeAreaPadding(.bottom)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .alert(
-            "Ready to Start?",
-            isPresented: $isShowingStartConfirmation,
-            actions: {
-                Button("Start") {
-                    confirmStartPlanAndDismiss()
+        .overlay {
+            if isShowingStartConfirmation {
+                ZStack {
+                    Color.black.opacity(0.18)
+                        .ignoresSafeArea()
+                        .contentShape(Rectangle())
+                        .onTapGesture { }
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Ready to Start?")
+                            .font(.headline)
+                            .fontWeight(.bold)
+
+                        Text("Make sure you've defined all of your actions.")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            checklistRow(icon: "chevron.up.chevron.down", text: "Reorder priority")
+                            checklistRow(icon: "star.square", text: "Star musts")
+                            checklistRow(icon: "clock", text: "Estimate duration")
+                            checklistRow(icon: "person", text: "Assign people or tools")
+                            checklistRow(icon: "gearshape", text: "Mark sensitivities (examples: Time of Day, Place)")
+                            checklistRow(icon: "paperclip", text: "Attach notes, files, or links")
+                        }
+                        .font(.footnote)
+
+                        HStack(spacing: 12) {
+                            Button {
+                                isShowingStartConfirmation = false
+                            } label: {
+                                Text("Return")
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 8)
+                                    .contentShape(Rectangle())
+                            }
+                            .foregroundStyle(secondaryButtonTextColor)
+                            .background(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(Color(.systemGray5))
+                            )
+                            .buttonStyle(.plain)
+
+                            Button {
+                                confirmStartPlanAndDismiss()
+                            } label: {
+                                Text("Confirm")
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 8)
+                                    .contentShape(Rectangle())
+                            }
+                            .background(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(Color.accentColor)
+                            )
+                            .foregroundStyle(Color.white)
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.top, 2)
+                    }
+                    .frame(maxWidth: 420, alignment: .leading)
+                    .padding(14)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20)
+                            .stroke(Color.black.opacity(0.12), lineWidth: 1)
+                    )
+                    .padding(.horizontal, 16)
                 }
-                Button("Return", role: .cancel) {
-                    isShowingStartConfirmation = false
-                }
-            },
-            message: {
-                Text("Make sure you've defined all of your actions.")
+                .transition(.opacity)
             }
-        )
+        }
         .sheet(isPresented: $isShowingInstructions) {
             StepFiveInstructionsPopup()
                 .presentationDetents([.medium, .large])
@@ -3922,6 +4012,17 @@ struct PlanStepFiveView: View {
                 showMissingDurationHint = false
             }
         }
+    }
+
+    @ViewBuilder
+    private func checklistRow(icon: String, text: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: icon)
+                .frame(width: 16, alignment: .center)
+            Text(text)
+                .multilineTextAlignment(.leading)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func confirmStartPlanAndDismiss() {

@@ -98,7 +98,7 @@ struct OutcomeView: View {
     }
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             Form {
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
@@ -177,7 +177,7 @@ struct OutcomeView: View {
                 GoalSection(goal: $goal)
                 ReasonsSection(reasons: $reasons)
                 if !isStartEditable {
-                    StartedOnSection(startDate: outcome.start)
+                    OutcomeStartedOnSection(startDate: outcome.start)
                 } else {
                     StartSection(startNow: $startNow, startDate: $startDate, selectedDuration: selectedDuration, endDate: $endDate)
                 }
@@ -225,6 +225,9 @@ struct OutcomeView: View {
                     showCompleteButton: Calendar.current.startOfDay(for: outcome.start) <= Calendar.current.startOfDay(for: .now)
                 )
             }
+            .navigationTitle(goal.isEmpty ? "Outcome" : goal)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.visible, for: .navigationBar)
             .alert("Delete Outcome?", isPresented: $isShowingDeleteOutcomeAlert) {
                 Button("Delete", role: .destructive) {
                     let archivedOutcome = OutcomesArchive(
@@ -286,11 +289,11 @@ struct OutcomeView: View {
                     Button("Done") {
                         hideKeyboard()
                     }
-                }
             }
-            .sheet(isPresented: $isShowingAddMeasureSheet) {
-                AddOutcomeMeasureSheet(
-                    outcomeID: outcome.outcome_id,
+        }
+        .sheet(isPresented: $isShowingAddMeasureSheet) {
+            AddOutcomeMeasureSheet(
+                outcomeID: outcome.outcome_id,
                     formatRaw: measureFormat.rawValue,
                     unitRaw: measureUnit,
                     decimalPlaces: measureDecimalPlaces
@@ -465,6 +468,22 @@ struct OutcomeTargetSection: View {
             let start = Calendar.current.startOfDay(for: effectiveStartDate)
             let end = Calendar.current.startOfDay(for: newEndDate)
             selectedDuration = max(1, Calendar.current.dateComponents([.day], from: start, to: end).day ?? 1)
+        }
+    }
+}
+
+private struct OutcomeStartedOnSection: View {
+    let startDate: Date
+
+    var body: some View {
+        Section("Start") {
+            HStack {
+                Text("Start Date")
+                    .foregroundColor(.secondary)
+                Spacer()
+                Text(startDate, style: .date)
+                    .foregroundColor(.secondary)
+            }
         }
     }
 }

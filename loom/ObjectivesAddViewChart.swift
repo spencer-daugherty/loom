@@ -457,6 +457,7 @@ struct AddOutcomeMeasureSheet: View {
     @Query private var entries: [OutcomesMeasureEntry]
     @State private var measureText: String = ""
     @State private var measuredDate: Date = Calendar.current.startOfDay(for: .now)
+    @FocusState private var isMeasureFieldFocused: Bool
 
     init(outcomeID: UUID, formatRaw: String, unitRaw: String, decimalPlaces: Int) {
         self.outcomeID = outcomeID
@@ -475,12 +476,18 @@ struct AddOutcomeMeasureSheet: View {
                 DatePicker("Date", selection: $measuredDate, displayedComponents: [.date])
                 TextField("Current", text: $measureText)
                     .keyboardType(.decimalPad)
+                    .focused($isMeasureFieldFocused)
                     .onChange(of: measureText) { _, newValue in
                         measureText = sanitizeDecimalInput(newValue, maxFractionDigits: min(3, max(0, decimalPlaces)))
                     }
             }
             .navigationTitle("Add Measure")
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    isMeasureFieldFocused = true
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -613,6 +620,8 @@ struct OutcomesAllDataView: View {
         }
         .environment(\.editMode, $editMode)
         .navigationTitle("All Measure Data")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(.visible, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button(editMode == .active ? "Done" : "Edit") {
@@ -676,19 +685,25 @@ struct OutcomesAllDataView: View {
 
 struct DataSourcesPlaceholderView: View {
     var body: some View {
-        VStack(spacing: 8) {
-            Text("Not Available Yet")
-                .font(.headline)
-                .fontWeight(.bold)
-            Text("Data source integrations and access controls will be added here.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 20)
-            Spacer()
+        List {
+            Section {
+                VStack(spacing: 8) {
+                    Text("Not Available Yet")
+                        .font(.headline)
+                        .fontWeight(.bold)
+                    Text("Data source integrations and access controls will be added here.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 20)
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.vertical, 20)
+            }
         }
-        .padding(.top, 24)
+        .listStyle(.insetGrouped)
         .navigationTitle("Data Sources & Access")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(.visible, for: .navigationBar)
     }
 }

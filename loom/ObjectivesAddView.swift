@@ -249,7 +249,7 @@ struct ObjectivesAddView: View {
     }
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             Form {
                 ChartSection(
                     isMeasurable: isMeasurable,
@@ -293,6 +293,9 @@ struct ObjectivesAddView: View {
                     )
                 }
             }
+            .navigationTitle(" ")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(outcome != nil && !hasChanges ? "Close" : "Cancel") {
@@ -559,57 +562,29 @@ struct ChartActionsSection: View {
         Group {
             if isMeasurable && hasOutcome, let outcomeId {
                 Section {
-                    VStack(spacing: 0) {
-                        Button {
-                            onAddMeasure()
-                        } label: {
-                            Text("Add Measure")
-                                .font(.body)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 12)
-                        }
-                        .buttonStyle(.plain)
-
-                        Divider()
-
-                        NavigationLink {
-                            OutcomesAllDataView(
-                                outcomeID: outcomeId,
-                                formatRaw: measureFormat.rawValue,
-                                unitRaw: measureUnit,
-                                decimalPlaces: measureDecimalPlaces
-                            )
-                        } label: {
-                            Text("Show All Data")
-                                .font(.body)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 12)
-                        }
-
-                        Divider()
-
-                        NavigationLink {
-                            DataSourcesPlaceholderView()
-                        } label: {
-                            Text("Data Sources & Access")
-                                .font(.body)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 12)
-                        }
+                    Button {
+                        onAddMeasure()
+                    } label: {
+                        Text("Add Measure")
+                            .foregroundStyle(Color.accentColor)
                     }
-                    .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(Color(.secondarySystemBackground))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color(.separator).opacity(0.35), lineWidth: 1)
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .listRowBackground(Color.clear)
+
+                    NavigationLink {
+                        OutcomesAllDataView(
+                            outcomeID: outcomeId,
+                            formatRaw: measureFormat.rawValue,
+                            unitRaw: measureUnit,
+                            decimalPlaces: measureDecimalPlaces
+                        )
+                    } label: {
+                        Text("Show All Data")
+                    }
+
+                    NavigationLink {
+                        DataSourcesPlaceholderView()
+                    } label: {
+                        Text("Data Sources & Access")
+                    }
                 }
             }
         }

@@ -201,6 +201,8 @@ struct CompletedActionBlocksDetailView: View {
         }
         .padding(.horizontal)
         .safeAreaPadding(.top)
+        .navigationTitle("Completed Action Blocks")
+        .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showMotivation) {
             NavigationStack {
                 ScrollView {
