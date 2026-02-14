@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import Charts
+import UIKit
 
 private struct ReflectDarkModeInvertImage: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
@@ -544,24 +545,39 @@ struct ReflectView: View {
                         )
                         .position(x: radarX, y: radarY)
 
-                        VStack(spacing: 2) {
+                        let titleColor: Color = colorScheme == .dark ? .white : .black
+                        let titleBlockWidth: CGFloat = 206
+                        let actionFont = UIFont.systemFont(ofSize: 28, weight: .bold)
+                        let doneFont = UIFont.systemFont(ofSize: 50, weight: .black)
+                        let actionWidth = ("Action Blocks" as NSString).size(withAttributes: [.font: actionFont]).width
+                        let doneWidth = ("DONE!" as NSString).size(withAttributes: [.font: doneFont]).width
+                        let doneScaleX = max(0.1, actionWidth / max(doneWidth, 1))
+
+                        VStack(spacing: 0) {
                             Text("Action Blocks")
-                                .font(.system(size: 24, weight: .bold))
-                                .foregroundStyle(colorScheme == .dark ? .white : .black)
+                                .font(.system(size: 28, weight: .bold))
+                                .foregroundStyle(titleColor)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.8)
-                                .frame(maxWidth: .infinity)
+                                .frame(width: titleBlockWidth, alignment: .center)
                             Text("DONE!")
-                                .font(.system(size: 44, weight: .black))
-                                .foregroundStyle(colorScheme == .dark ? .white : .black)
+                                .font(.system(size: 50, weight: .black))
+                                .kerning(1.2)
+                                .foregroundStyle(titleColor)
                                 .lineLimit(1)
-                                .minimumScaleFactor(0.7)
-                                .frame(maxWidth: .infinity)
+                                .minimumScaleFactor(0.6)
+                                .scaleEffect(x: doneScaleX, y: 1.0, anchor: .center)
+                                .frame(width: titleBlockWidth, alignment: .center)
                         }
-                        .frame(width: 230)
+                        .padding(.vertical, 6)
+                        .padding(.horizontal, 3)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16)
+                                .stroke(titleColor, lineWidth: 4)
+                        )
                         .position(
                             x: geo.size.width * 0.5,
-                            y: max(geo.safeAreaInsets.top + 48, geo.size.height * 0.18)
+                            y: max(geo.safeAreaInsets.top + 62, geo.size.height * 0.16)
                         )
 
                         Image("logo")
