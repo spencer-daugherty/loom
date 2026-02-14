@@ -41,6 +41,7 @@ struct OutcomeView: View {
     @State private var measureFormat: ObjectivesAddView.MeasureFormat = .number
     @State private var measureUnit: String = ObjectivesAddView.UnitOption.defaultUnit
     @State private var measureDecimalPlaces: Int = 0
+    @FocusState private var isMeasureGoalFieldFocused: Bool
 
     @Query(sort: \OutcomesMeasureEntry.measuredAt, order: .forward) private var allMeasureEntries: [OutcomesMeasureEntry]
     @Query(sort: \ActionBlocksReflectionOutcomeContribution.completedAt, order: .reverse) private var allContributingActions: [ActionBlocksReflectionOutcomeContribution]
@@ -357,7 +358,8 @@ struct OutcomeView: View {
                 isMeasurable: $isMeasurable,
                 measureGoal: $measureGoal,
                 measureFormat: $measureFormat,
-                measureDecimalPlaces: $measureDecimalPlaces
+                measureDecimalPlaces: $measureDecimalPlaces,
+                isMeasureGoalFieldFocused: $isMeasureGoalFieldFocused
             )
             CategorySection(selectedCategory: $selectedCategory)
             DeleteOutcomeSection(
@@ -425,12 +427,12 @@ struct OutcomeView: View {
             }
             .toolbar {
                 ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button {
-                        hideKeyboard()
-                    } label: {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(.blue)
+                    if isMeasureGoalFieldFocused {
+                        Spacer()
+                        Button("Done") {
+                            isMeasureGoalFieldFocused = false
+                        }
+                        .foregroundStyle(.blue)
                     }
                 }
             }
@@ -673,10 +675,6 @@ struct OutcomeView: View {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         return formatter.string(from: date)
-    }
-
-    private func hideKeyboard() {
-        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 
     private func unassignContributingAction(_ item: ActionBlocksReflectionOutcomeContribution) {

@@ -77,6 +77,7 @@ struct ObjectivesAddView: View {
     @State private var measureFormat: MeasureFormat = .number
     @State private var measureUnit: String = UnitOption.defaultUnit
     @State private var measureDecimalPlaces: Int = 0
+    @FocusState private var isMeasureGoalFieldFocused: Bool
     let onSaved: ((UUID) -> Void)?
     
     private let outcome: Outcomes?
@@ -319,7 +320,8 @@ struct ObjectivesAddView: View {
                     isMeasurable: $isMeasurable,
                     measureGoal: $measureGoal,
                     measureFormat: $measureFormat,
-                    measureDecimalPlaces: $measureDecimalPlaces
+                    measureDecimalPlaces: $measureDecimalPlaces,
+                    isMeasureGoalFieldFocused: $isMeasureGoalFieldFocused
                 )
                 CategorySection(selectedCategory: $selectedCategory)
                 if outcome != nil {
@@ -350,12 +352,12 @@ struct ObjectivesAddView: View {
                     .disabled(isSaveDisabled)
                 }
                 ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button {
-                        hideKeyboard()
-                    } label: {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(.blue)
+                    if isMeasureGoalFieldFocused {
+                        Spacer()
+                        Button("Done") {
+                            isMeasureGoalFieldFocused = false
+                        }
+                        .foregroundStyle(.blue)
                     }
                 }
             }
@@ -582,9 +584,6 @@ struct ObjectivesAddView: View {
         }
     }
 
-    private func hideKeyboard() {
-        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-    }
 }
 
 struct ChartSection: View {
@@ -775,6 +774,7 @@ struct MeasureSection: View {
     @Binding var measureGoal: String
     @Binding var measureFormat: ObjectivesAddView.MeasureFormat
     @Binding var measureDecimalPlaces: Int
+    var isMeasureGoalFieldFocused: FocusState<Bool>.Binding
 
     var body: some View {
         Section("Measure Data") {
@@ -825,6 +825,7 @@ struct MeasureSection: View {
                     TextField("Goal", text: $measureGoal)
                         .keyboardType(.decimalPad)
                         .submitLabel(.done)
+                        .focused(isMeasureGoalFieldFocused)
                         .multilineTextAlignment(.trailing)
                         .frame(width: 100)
                         .onChange(of: measureGoal) { _, newValue in
