@@ -544,10 +544,18 @@ struct ReflectView: View {
                         )
                         .position(x: radarX, y: radarY)
 
-                        Text("Action Blocks, DONE!")
-                            .font(.system(size: 22, weight: .bold))
-                            .foregroundStyle(colorScheme == .dark ? .white : .black)
-                            .position(x: geo.size.width * 0.5, y: geo.size.height * 0.85)
+                        VStack(spacing: 2) {
+                            Text("Action Blocks")
+                                .font(.system(size: 22, weight: .bold))
+                                .foregroundStyle(colorScheme == .dark ? .white : .black)
+                            Text("DONE!")
+                                .font(.system(size: 34, weight: .black))
+                                .foregroundStyle(colorScheme == .dark ? .white : .black)
+                                .minimumScaleFactor(0.6)
+                                .frame(maxWidth: .infinity)
+                        }
+                        .frame(width: 190)
+                        .position(x: geo.size.width * 0.5, y: geo.size.height * 0.85)
 
                         Image("logo")
                             .resizable()
@@ -1270,13 +1278,13 @@ struct ReflectView: View {
     /// Archive is persisted first, then active-week planning/action rows are cleared
     /// so a fresh PlanView session does not reuse completed Action Blocks data.
     private func clearWeekPlanningStateAfterArchive() {
-        for row in allChunkSelections { modelContext.delete(row) }
-        for row in allStepFourStates { modelContext.delete(row) }
-        for row in allOutcomeLinks { modelContext.delete(row) }
-        for row in allAdHocMarkers { modelContext.delete(row) }
+        for row in allChunkSelections { RecentlyDeletedStore.trash(row, in: modelContext) }
+        for row in allStepFourStates { RecentlyDeletedStore.trash(row, in: modelContext) }
+        for row in allOutcomeLinks { RecentlyDeletedStore.trash(row, in: modelContext) }
+        for row in allAdHocMarkers { RecentlyDeletedStore.trash(row, in: modelContext) }
 
-        for row in allActions { modelContext.delete(row) }
-        for row in allChunks { modelContext.delete(row) }
+        for row in allActions { RecentlyDeletedStore.trash(row, in: modelContext) }
+        for row in allChunks { RecentlyDeletedStore.trash(row, in: modelContext) }
     }
 
     private func normalized(_ text: String) -> String {

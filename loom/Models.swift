@@ -730,6 +730,41 @@ final class QuickCompletedCaptureItem {
 }
 
 @Model
+final class RecentlyDeletedItem {
+    @Attribute(.unique) var id: UUID
+    var entityType: String
+    var entityID: String
+    var titleText: String
+    var subtitleText: String
+    var source: String
+    var payloadJSON: String?
+    var deletedAt: Date
+    var purgeAt: Date
+
+    init(
+        id: UUID = .init(),
+        entityType: String,
+        entityID: String,
+        titleText: String,
+        subtitleText: String = "",
+        source: String = "",
+        payloadJSON: String? = nil,
+        deletedAt: Date = .now,
+        purgeAt: Date = Calendar.current.date(byAdding: .day, value: 30, to: .now) ?? .now
+    ) {
+        self.id = id
+        self.entityType = entityType
+        self.entityID = entityID
+        self.titleText = titleText
+        self.subtitleText = subtitleText
+        self.source = source
+        self.payloadJSON = payloadJSON
+        self.deletedAt = deletedAt
+        self.purgeAt = purgeAt
+    }
+}
+
+@Model
 final class PlannedChunkActionAdHocMarker {
     @Attribute(.unique) var id: UUID
     var weekStart: Date

@@ -379,7 +379,7 @@ struct PlanView: View {
         for row in rows {
             let date = row[keyPath: keyPath]
             if date >= ws && date < we {
-                modelContext.delete(row)
+                RecentlyDeletedStore.trash(row, in: modelContext)
             }
         }
     }
@@ -717,7 +717,7 @@ struct PlanStepTwoView: View {
     private func deleteItems(at offsets: IndexSet) {
         for offset in offsets {
             let item = displayItems[offset]
-            modelContext.delete(item)
+            RecentlyDeletedStore.trash(item, in: modelContext)
         }
         try? modelContext.save()
     }
@@ -1648,7 +1648,7 @@ struct PlanStepThreeView: View {
                 weekChunksByIndex[pc.chunkIndex] = pc
             } else {
                 // Deduplicate stale rows for the same (week, index).
-                modelContext.delete(pc)
+                RecentlyDeletedStore.trash(pc, in: modelContext)
             }
         }
 
@@ -1676,7 +1676,7 @@ struct PlanStepThreeView: View {
 
         let validChunkIndexes = Set(0..<chunks.count)
         for pc in existingWeekChunks where !validChunkIndexes.contains(pc.chunkIndex) {
-            modelContext.delete(pc)
+            RecentlyDeletedStore.trash(pc, in: modelContext)
         }
 
         var selectionsByChunkIndex: [Int: PlanChunkSelection] = [:]
@@ -1685,7 +1685,7 @@ struct PlanStepThreeView: View {
                 selectionsByChunkIndex[sel.chunkIndex] = sel
             } else {
                 // Deduplicate stale rows for the same (week, index).
-                modelContext.delete(sel)
+                RecentlyDeletedStore.trash(sel, in: modelContext)
             }
         }
 
@@ -1716,7 +1716,7 @@ struct PlanStepThreeView: View {
         }
 
         for (chunkIndex, sel) in selectionsByChunkIndex where !validChunkIndexes.contains(chunkIndex) {
-            modelContext.delete(sel)
+            RecentlyDeletedStore.trash(sel, in: modelContext)
         }
 
         var desiredActionsByText: [String: (chunkIndex: Int, plannedChunkId: UUID, sortOrder: Int)] = [:]
@@ -1744,7 +1744,7 @@ struct PlanStepThreeView: View {
                 existingActionsByText[action.text] = action
             } else {
                 // Deduplicate stale rows for the same action text.
-                modelContext.delete(action)
+                RecentlyDeletedStore.trash(action, in: modelContext)
             }
         }
 
@@ -1768,7 +1768,7 @@ struct PlanStepThreeView: View {
         }
 
         for action in existingWeekActions where desiredActionsByText[action.text] == nil {
-            modelContext.delete(action)
+            RecentlyDeletedStore.trash(action, in: modelContext)
         }
 
         try? modelContext.save()
@@ -2685,10 +2685,10 @@ struct PlanStepFourView: View {
         let weekStart = currentWeekStart
 
         for st in stepFourStates where Calendar.current.isDate(st.weekStart, inSameDayAs: weekStart) {
-            modelContext.delete(st)
+            RecentlyDeletedStore.trash(st, in: modelContext)
         }
         for link in outcomeLinks where Calendar.current.isDate(link.weekStart, inSameDayAs: weekStart) {
-            modelContext.delete(link)
+            RecentlyDeletedStore.trash(link, in: modelContext)
         }
 
         for chunk in plannedChunksForWeek {
@@ -3075,7 +3075,7 @@ struct PlanStepFiveView: View {
                             sel.resourceId = nil
                             sel.updatedAt = .now
                         }
-                        modelContext.delete(it)
+                        RecentlyDeletedStore.trash(it, in: modelContext)
                     }
                     markStep5DirtyAndAutosave()
                 },
@@ -3120,9 +3120,9 @@ struct PlanStepFiveView: View {
                 onDeleteCatalogPlaces: { ids in
                     for p in placesCatalog where ids.contains(p.id) {
                         for link in placeLinks where link.placeId == p.id {
-                            modelContext.delete(link)
+                            RecentlyDeletedStore.trash(link, in: modelContext)
                         }
-                        modelContext.delete(p)
+                        RecentlyDeletedStore.trash(p, in: modelContext)
                     }
                     markStep5DirtyAndAutosave()
                 },
@@ -3178,7 +3178,7 @@ struct PlanStepFiveView: View {
                 },
                 onDeleteAttachment: { attId in
                     if let a = attachments.first(where: { $0.id == attId }) {
-                        modelContext.delete(a)
+                        RecentlyDeletedStore.trash(a, in: modelContext)
                         markStep5DirtyAndAutosave()
                     }
                 }
@@ -3890,7 +3890,7 @@ struct PlanStepFiveView: View {
             $0.plannedChunkActionId == actionId &&
             $0.placeId == placeId
         }) {
-            modelContext.delete(existing)
+            RecentlyDeletedStore.trash(existing, in: modelContext)
         } else {
             modelContext.insert(PlannedChunkActionSensitivityPlaceLink(
                 weekStart: week,
@@ -4034,7 +4034,7 @@ struct PlanStepFiveView: View {
             for item in allCaptureItems {
                 let key = item.text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                 if actionTextSet.contains(key) {
-                    modelContext.delete(item)
+                    RecentlyDeletedStore.trash(item, in: modelContext)
                 }
             }
         }

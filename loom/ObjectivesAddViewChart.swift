@@ -606,9 +606,9 @@ struct OutcomesAllDataView: View {
                 for idx in offsets {
                     let row = mergedRows[idx]
                     if let persisted = entries.first(where: { $0.id == row.id }) {
-                        modelContext.delete(persisted)
+                        RecentlyDeletedStore.trash(persisted, in: modelContext)
                     } else if let legacy = legacyMeasures.first(where: { $0.outcome_id == outcomeID }) {
-                        modelContext.delete(legacy)
+                        RecentlyDeletedStore.trash(legacy, in: modelContext)
                     }
                 }
                 if !entries.isEmpty {
@@ -651,7 +651,7 @@ struct OutcomesAllDataView: View {
 
         guard let latest = remainingEntries.max(by: { $0.measuredAt < $1.measuredAt }) else {
             if let snapshot {
-                modelContext.delete(snapshot)
+                RecentlyDeletedStore.trash(snapshot, in: modelContext)
             }
             return
         }

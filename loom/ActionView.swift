@@ -689,7 +689,7 @@ struct ActionView: View {
                     else { return }
                     if let captureId = selection.captureItemID,
                        let capture = captureItems.first(where: { $0.id == captureId }) {
-                        modelContext.delete(capture)
+                        RecentlyDeletedStore.trash(capture, in: modelContext)
                     }
                     insertAction(
                         to: chunk,
@@ -739,7 +739,7 @@ struct ActionView: View {
                             sel.resourceId = nil
                             sel.updatedAt = .now
                         }
-                        modelContext.delete(it)
+                        RecentlyDeletedStore.trash(it, in: modelContext)
                     }
                     scheduleAutosave()
                 },
@@ -782,9 +782,9 @@ struct ActionView: View {
                 onDeleteCatalogPlaces: { ids in
                     for p in placesCatalog where ids.contains(p.id) {
                         for link in placeLinks where link.placeId == p.id {
-                            modelContext.delete(link)
+                            RecentlyDeletedStore.trash(link, in: modelContext)
                         }
-                        modelContext.delete(p)
+                        RecentlyDeletedStore.trash(p, in: modelContext)
                     }
                     scheduleAutosave()
                 },
@@ -840,7 +840,7 @@ struct ActionView: View {
                 },
                 onDeleteAttachment: { attachmentId in
                     if let a = attachmentsByActionID.values.flatMap({ $0 }).first(where: { $0.id == attachmentId }) {
-                        modelContext.delete(a)
+                        RecentlyDeletedStore.trash(a, in: modelContext)
                         scheduleAutosave()
                     }
                 }
@@ -1924,7 +1924,7 @@ struct ActionView: View {
 
     private func togglePlaceSelection(actionId: UUID, placeId: UUID) {
         if let existing = placeLinks.first(where: { $0.plannedChunkActionId == actionId && $0.placeId == placeId }) {
-            modelContext.delete(existing)
+            RecentlyDeletedStore.trash(existing, in: modelContext)
         } else {
             modelContext.insert(PlannedChunkActionSensitivityPlaceLink(
                 weekStart: currentWeekStart,
@@ -2077,14 +2077,14 @@ struct ActionView: View {
     }
 
     private func deleteActionAndLinkedData(_ actionId: UUID) {
-        if let st = defineStateByActionID[actionId] { modelContext.delete(st) }
-        if let st = executionStateByActionID[actionId] { modelContext.delete(st) }
-        if let sel = leverageSelections.first(where: { $0.plannedChunkActionId == actionId }) { modelContext.delete(sel) }
-        if let note = notesByActionID[actionId] { modelContext.delete(note) }
-        for link in placeLinks where link.plannedChunkActionId == actionId { modelContext.delete(link) }
-        for a in attachments where a.plannedChunkActionId == actionId { modelContext.delete(a) }
+        if let st = defineStateByActionID[actionId] { RecentlyDeletedStore.trash(st, in: modelContext) }
+        if let st = executionStateByActionID[actionId] { RecentlyDeletedStore.trash(st, in: modelContext) }
+        if let sel = leverageSelections.first(where: { $0.plannedChunkActionId == actionId }) { RecentlyDeletedStore.trash(sel, in: modelContext) }
+        if let note = notesByActionID[actionId] { RecentlyDeletedStore.trash(note, in: modelContext) }
+        for link in placeLinks where link.plannedChunkActionId == actionId { RecentlyDeletedStore.trash(link, in: modelContext) }
+        for a in attachments where a.plannedChunkActionId == actionId { RecentlyDeletedStore.trash(a, in: modelContext) }
         if let action = weekActions.first(where: { $0.id == actionId }) {
-            modelContext.delete(action)
+            RecentlyDeletedStore.trash(action, in: modelContext)
         }
         pendingNewActionIDs.remove(actionId)
         if pendingDurationDefaultActionID == actionId { pendingDurationDefaultActionID = nil }

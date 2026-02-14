@@ -435,12 +435,10 @@ struct ModelFilter: Identifiable, Hashable {
 }
 
 // MARK: - Main View
-struct DataPrinterView: View {
+struct AccountView: View {
     @Environment(\.modelContext) private var context
     @State private var showingMigrationResultAlert = false
     @State private var migrationResultMessage = ""
-    @State private var showingOutcomeRecoveryAlert = false
-    @State private var outcomeRecoveryMessage = ""
 
     private let legacyArchiveMigrationFlag = "legacy_actionblocks_archive_migration_v2_done"
     private let outcomesRecoveryFlag = "outcomes_archive_recovery_v1_done"
@@ -456,14 +454,11 @@ struct DataPrinterView: View {
                     }
                 }
 
-                Button {
-                    let message = performOutcomeArchiveRecovery()
-                    outcomeRecoveryMessage = message
-                    showingOutcomeRecoveryAlert = true
+                NavigationLink {
+                    RecentlyDeletedView()
                 } label: {
                     HStack {
-                        Text("Recover Outcomes (One-Time)")
-                        Spacer()
+                        Text("Recently Deleted")
                     }
                 }
 
@@ -485,18 +480,14 @@ struct DataPrinterView: View {
             }
         }
         .listStyle(.plain)
-        .navigationTitle("All Data")
+        .navigationTitle("Account Manager")
         .alert("Legacy Migration", isPresented: $showingMigrationResultAlert) {
             Button("OK", role: .cancel) { }
         } message: {
             Text(migrationResultMessage)
         }
-        .alert("Outcome Recovery", isPresented: $showingOutcomeRecoveryAlert) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text(outcomeRecoveryMessage)
-        }
         .onAppear {
+            RecentlyDeletedStore.purgeExpired(in: context)
             runLegacyArchiveMigrationIfNeeded()
         }
     }
@@ -858,6 +849,75 @@ struct DataPrinterView: View {
     }
 }
 
+struct RecentlyDeletedView: View {
+    @Environment(\.modelContext) private var context
+    @Query(sort: \RecentlyDeletedItem.deletedAt, order: .reverse) private var items: [RecentlyDeletedItem]
+    @State private var showRecoverFailedAlert = false
+
+    var body: some View {
+        List {
+            Section {
+                Text("Items remain here for 30 days, then are permanently deleted.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                if items.isEmpty {
+                    Text("No recently deleted items.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(items) { item in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(item.titleText)
+                                .font(.body)
+                            Text(item.subtitleText)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            HStack {
+                                Text("Deleted \(item.deletedAt, format: .dateTime.month().day().year().hour().minute())")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Spacer(minLength: 8)
+                                Text("Deletes in \(max(0, Calendar.current.dateComponents([.day], from: .now, to: item.purgeAt).day ?? 0))d")
+                                    .font(.caption2)
+                                    .fontWeight(.bold)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button("Delete", role: .destructive) {
+                                context.delete(item)
+                                try? context.save()
+                            }
+                            .tint(.red)
+                        }
+                        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                            Button("Recover") {
+                                if RecentlyDeletedStore.restore(item, in: context) {
+                                    try? context.save()
+                                } else {
+                                    showRecoverFailedAlert = true
+                                }
+                            }
+                            .tint(.blue)
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("Recently Deleted")
+        .alert("Recovery Not Available", isPresented: $showRecoverFailedAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("This item cannot be automatically recovered yet.")
+        }
+        .onAppear {
+            RecentlyDeletedStore.purgeExpired(in: context)
+        }
+    }
+}
+
 struct ManageRawDataView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.editMode) private var editMode
@@ -1188,48 +1248,48 @@ struct ManageRawDataView: View {
             let prefix = String(id[..<dash])
 
             switch prefix {
-            case "vision", "purpose": if let row = drivingForces.first(where: { $0.id == uuid }) { context.delete(row) }
-            case "visionArch", "purposeArch": if let row = drivingForceArchives.first(where: { $0.id == uuid }) { context.delete(row) }
-            case "passion": if let row = passions.first(where: { $0.passion_id == uuid }) { context.delete(row) }
-            case "passionArch": if let row = passionArchives.first(where: { $0.id == uuid }) { context.delete(row) }
-            case "fulfillment": if let row = fulfillments.first(where: { $0.category_id == uuid }) { context.delete(row) }
-            case "fulfillmentArch": if let row = fulfillmentArchives.first(where: { $0.id == uuid }) { context.delete(row) }
-            case "role": if let row = fulfillmentRoles.first(where: { $0.id == uuid }) { context.delete(row) }
-            case "roleArch": if let row = fulfillmentRolesArchives.first(where: { $0.id == uuid }) { context.delete(row) }
-            case "focus": if let row = fulfillmentFocus.first(where: { $0.id == uuid }) { context.delete(row) }
-            case "focusArch": if let row = fulfillmentFocusArchives.first(where: { $0.id == uuid }) { context.delete(row) }
-            case "resource": if let row = fulfillmentResources.first(where: { $0.id == uuid }) { context.delete(row) }
-            case "resourceArch": if let row = fulfillmentResourcesArchives.first(where: { $0.id == uuid }) { context.delete(row) }
-            case "join": if let row = passionFulfillmentJoins.first(where: { $0.id == uuid }) { context.delete(row) }
-            case "joinArch": if let row = passionFulfillmentJoinArchives.first(where: { $0.id == uuid }) { context.delete(row) }
-            case "outcome": if let row = outcomes.first(where: { $0.outcome_id == uuid }) { context.delete(row) }
-            case "outcomeArch": if let row = outcomesArchives.first(where: { $0.outcome_id == uuid }) { context.delete(row) }
-            case "measure": if let row = outcomesMeasures.first(where: { $0.outcome_id == uuid }) { context.delete(row) }
-            case "measureArch": if let row = outcomesMeasuresArchives.first(where: { $0.outcome_id == uuid }) { context.delete(row) }
-            case "weekly": if let row = weeklyEntries.first(where: { $0.id == uuid }) { context.delete(row) }
-            case "activePlan": if let row = activePlanStates.first(where: { $0.id == uuid }) { context.delete(row) }
-            case "capture": if let row = rollingCapture.first(where: { $0.id == uuid }) { context.delete(row) }
-            case "quickCapture": if let row = quickCompletedCapture.first(where: { $0.id == uuid }) { context.delete(row) }
-            case "planLabel": if let row = planLabels.first(where: { $0.labelId == uuid }) { context.delete(row) }
-            case "planSelect": if let row = planSelections.first(where: { $0.id == uuid }) { context.delete(row) }
-            case "chunk": if let row = plannedChunks.first(where: { $0.id == uuid }) { context.delete(row) }
-            case "chunkAction": if let row = plannedActions.first(where: { $0.id == uuid }) { context.delete(row) }
-            case "step4": if let row = stepFourStates.first(where: { $0.id == uuid }) { context.delete(row) }
-            case "chunkOutcome": if let row = chunkOutcomeLinks.first(where: { $0.id == uuid }) { context.delete(row) }
-            case "define": if let row = defineStates.first(where: { $0.id == uuid }) { context.delete(row) }
-            case "exec": if let row = executionStates.first(where: { $0.id == uuid }) { context.delete(row) }
-            case "leverageRes": if let row = leverageResources.first(where: { $0.id == uuid }) { context.delete(row) }
-            case "leverageSel": if let row = leverageSelections.first(where: { $0.id == uuid }) { context.delete(row) }
-            case "placeCatalog": if let row = placeCatalog.first(where: { $0.id == uuid }) { context.delete(row) }
-            case "placeLink": if let row = placeLinks.first(where: { $0.id == uuid }) { context.delete(row) }
-            case "actionNote": if let row = actionNotes.first(where: { $0.id == uuid }) { context.delete(row) }
-            case "actionAttachment": if let row = actionAttachments.first(where: { $0.id == uuid }) { context.delete(row) }
-            case "legacyLeverage": if let row = legacyLeverageItems.first(where: { $0.id == uuid }) { context.delete(row) }
-            case "legacyPlace": if let row = legacyPlaces.first(where: { $0.id == uuid }) { context.delete(row) }
-            case "adhoc": if let row = adHocMarkers.first(where: { $0.id == uuid }) { context.delete(row) }
-            case "reflect": if let row = reflections.first(where: { $0.id == uuid }) { context.delete(row) }
-            case "reflectAction": if let row = reflectionActions.first(where: { $0.id == uuid }) { context.delete(row) }
-            case "reflectOutcome": if let row = reflectionOutcomes.first(where: { $0.id == uuid }) { context.delete(row) }
+            case "vision", "purpose": if let row = drivingForces.first(where: { $0.id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "visionArch", "purposeArch": if let row = drivingForceArchives.first(where: { $0.id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "passion": if let row = passions.first(where: { $0.passion_id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "passionArch": if let row = passionArchives.first(where: { $0.id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "fulfillment": if let row = fulfillments.first(where: { $0.category_id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "fulfillmentArch": if let row = fulfillmentArchives.first(where: { $0.id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "role": if let row = fulfillmentRoles.first(where: { $0.id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "roleArch": if let row = fulfillmentRolesArchives.first(where: { $0.id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "focus": if let row = fulfillmentFocus.first(where: { $0.id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "focusArch": if let row = fulfillmentFocusArchives.first(where: { $0.id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "resource": if let row = fulfillmentResources.first(where: { $0.id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "resourceArch": if let row = fulfillmentResourcesArchives.first(where: { $0.id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "join": if let row = passionFulfillmentJoins.first(where: { $0.id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "joinArch": if let row = passionFulfillmentJoinArchives.first(where: { $0.id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "outcome": if let row = outcomes.first(where: { $0.outcome_id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "outcomeArch": if let row = outcomesArchives.first(where: { $0.outcome_id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "measure": if let row = outcomesMeasures.first(where: { $0.outcome_id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "measureArch": if let row = outcomesMeasuresArchives.first(where: { $0.outcome_id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "weekly": if let row = weeklyEntries.first(where: { $0.id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "activePlan": if let row = activePlanStates.first(where: { $0.id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "capture": if let row = rollingCapture.first(where: { $0.id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "quickCapture": if let row = quickCompletedCapture.first(where: { $0.id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "planLabel": if let row = planLabels.first(where: { $0.labelId == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "planSelect": if let row = planSelections.first(where: { $0.id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "chunk": if let row = plannedChunks.first(where: { $0.id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "chunkAction": if let row = plannedActions.first(where: { $0.id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "step4": if let row = stepFourStates.first(where: { $0.id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "chunkOutcome": if let row = chunkOutcomeLinks.first(where: { $0.id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "define": if let row = defineStates.first(where: { $0.id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "exec": if let row = executionStates.first(where: { $0.id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "leverageRes": if let row = leverageResources.first(where: { $0.id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "leverageSel": if let row = leverageSelections.first(where: { $0.id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "placeCatalog": if let row = placeCatalog.first(where: { $0.id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "placeLink": if let row = placeLinks.first(where: { $0.id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "actionNote": if let row = actionNotes.first(where: { $0.id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "actionAttachment": if let row = actionAttachments.first(where: { $0.id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "legacyLeverage": if let row = legacyLeverageItems.first(where: { $0.id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "legacyPlace": if let row = legacyPlaces.first(where: { $0.id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "adhoc": if let row = adHocMarkers.first(where: { $0.id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "reflect": if let row = reflections.first(where: { $0.id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "reflectAction": if let row = reflectionActions.first(where: { $0.id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
+            case "reflectOutcome": if let row = reflectionOutcomes.first(where: { $0.id == uuid }) { RecentlyDeletedStore.trash(row, in: context) }
             default: break
             }
         }

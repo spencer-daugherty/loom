@@ -274,16 +274,16 @@ struct OutcomeView: View {
                             decimalPlaces: existingMeasure.decimalPlaces
                         )
                         modelContext.insert(archivedMeasure)
-                        modelContext.delete(existingMeasure)
+                        RecentlyDeletedStore.trash(existingMeasure, in: modelContext, source: "Outcome")
                     }
 
-                    modelContext.delete(outcome)
+                    RecentlyDeletedStore.trash(outcome, in: modelContext, source: "Outcome")
                     try? modelContext.save()
                     dismiss()
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Are you sure you want to permanently delete this outcome?")
+                Text("Are you sure you want to delete this outcome? It will be available for 30 days in account management.")
             }
             .onChange(of: isMeasurable) { _, newValue in
                 guard newValue else { return }
@@ -369,7 +369,7 @@ struct OutcomeView: View {
                 modelContext.insert(newMeasure)
             }
         } else if let existingMeasure = try? modelContext.fetch(FetchDescriptor<OutcomesMeasure>()).first(where: { $0.outcome_id == outcome.outcome_id }) {
-            modelContext.delete(existingMeasure)
+            RecentlyDeletedStore.trash(existingMeasure, in: modelContext)
         }
 
         try? modelContext.save()
@@ -437,7 +437,7 @@ struct OutcomeView: View {
     }
 
     private func unassignContributingAction(_ item: ActionBlocksReflectionOutcomeContribution) {
-        modelContext.delete(item)
+        RecentlyDeletedStore.trash(item, in: modelContext)
         try? modelContext.save()
     }
 

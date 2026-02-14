@@ -351,17 +351,17 @@ struct ObjectivesAddView: View {
                                 decimalPlaces: outcomeMeasure.decimalPlaces
                             )
                             modelContext.insert(archivedMeasure)
-                            modelContext.delete(outcomeMeasure)
+                            RecentlyDeletedStore.trash(outcomeMeasure, in: modelContext, source: "Outcome")
                         }
                         
-                        modelContext.delete(outcome)
+                        RecentlyDeletedStore.trash(outcome, in: modelContext, source: "Outcome")
                         try? modelContext.save()
                     }
                     dismiss()
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Are you sure you want to permanently delete this outcome?")
+                Text("Are you sure you want to delete this outcome? It will be available for 30 days in account management.")
             }
         }
         .interactiveDismissDisabled(outcome != nil ? hasChanges : showDeleteButton)
@@ -449,7 +449,7 @@ struct ObjectivesAddView: View {
                 }
             } else {
                 if let existingMeasure = try? modelContext.fetch(FetchDescriptor<OutcomesMeasure>()).first(where: { $0.outcome_id == existingOutcome.outcome_id }) {
-                    modelContext.delete(existingMeasure)
+                    RecentlyDeletedStore.trash(existingMeasure, in: modelContext)
                 }
             }
         } else {

@@ -200,7 +200,7 @@ struct DrivingForceView: View {
             archivedAt: .now
         )
         context.insert(archive)
-        context.delete(passion)
+        RecentlyDeletedStore.trash(passion, in: context)
     }
     
     private func saveChanges() {
@@ -316,7 +316,7 @@ struct PassionEditor: View {
     private func commitEdit(passion: Passion) {
         let trimmed = editText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            context.delete(passion)
+            RecentlyDeletedStore.trash(passion, in: context)
             editingPassion = nil
             return
         }

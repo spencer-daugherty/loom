@@ -430,7 +430,7 @@ struct CaptureView: View {
     private func deleteItems(at offsets: IndexSet) {
         for offset in offsets {
             let item = displayItems[offset]
-            modelContext.delete(item)
+            RecentlyDeletedStore.trash(item, in: modelContext)
         }
         try? modelContext.save()
     }
@@ -486,7 +486,7 @@ struct CaptureView: View {
 
     private func quickCompleteItem(_ item: RollingCaptureItem) {
         modelContext.insert(QuickCompletedCaptureItem(text: item.text, completedAt: .now))
-        modelContext.delete(item)
+        RecentlyDeletedStore.trash(item, in: modelContext)
         try? modelContext.save()
     }
 
@@ -503,7 +503,7 @@ struct CaptureView: View {
                 unhiddenAt: nil
             ))
         }
-        modelContext.delete(item)
+        RecentlyDeletedStore.trash(item, in: modelContext)
         try? modelContext.save()
     }
 

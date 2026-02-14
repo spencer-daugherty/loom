@@ -391,7 +391,7 @@ struct ContentView: View {
                 Spacer()
 
                 NavigationLink {
-                    DataPrinterView()
+                    AccountView()
                 } label: {
                     Image(systemName: "person.circle")
                         .font(.system(size: 28))

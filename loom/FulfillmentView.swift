@@ -108,7 +108,7 @@ struct PassionsSectionView: View {
         }
         
         if let join = existingJoin {
-            modelContext.delete(join)
+            RecentlyDeletedStore.trash(join, in: modelContext)
         } else {
             let join = PassionFulfillmentJoin(
                 passion_id: passion.passion_id,
@@ -763,7 +763,7 @@ struct FulfillmentView: View {
                 archivedAt: Date()
             )
             modelContext.insert(archive)
-            modelContext.delete(r)
+            RecentlyDeletedStore.trash(r, in: modelContext)
         }
     }
 
@@ -811,7 +811,7 @@ struct FulfillmentView: View {
                 archivedAt: Date()
             )
             modelContext.insert(archive)
-            modelContext.delete(f)
+            RecentlyDeletedStore.trash(f, in: modelContext)
         }
     }
 
@@ -858,7 +858,7 @@ struct FulfillmentView: View {
                 archivedAt: Date()
             )
             modelContext.insert(archive)
-            modelContext.delete(r)
+            RecentlyDeletedStore.trash(r, in: modelContext)
         }
     }
 }

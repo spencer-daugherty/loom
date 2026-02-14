@@ -44,6 +44,7 @@ struct loomApp: App {
                 ActivePlanState.self,
                 RollingCaptureItem.self,
                 QuickCompletedCaptureItem.self,
+                RecentlyDeletedItem.self,
                 PlannedChunkActionAdHocMarker.self,
                 ActionBlocksReflectionArchive.self,
                 ActionBlocksReflectionArchiveAction.self,
