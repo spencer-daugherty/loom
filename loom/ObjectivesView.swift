@@ -589,6 +589,7 @@ struct OutcomeRow: View {
 
 struct CompletedOutcomeRow: View {
     let archive: CompletedOutcomeArchive
+    var showsChevron: Bool = true
 
     var body: some View {
         HStack {
@@ -696,9 +697,11 @@ struct CompletedOutcomeRow: View {
                 }
             }
             Spacer()
-            Image(systemName: "chevron.right")
-                .foregroundColor(.gray)
-                .padding(.trailing, 8)
+            if showsChevron {
+                Image(systemName: "chevron.right")
+                    .foregroundColor(.gray)
+                    .padding(.trailing, 8)
+            }
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())
@@ -744,9 +747,12 @@ struct CompletedOutcomeRow: View {
 }
 
 struct CompletedOutcomeDetailView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
     let archive: CompletedOutcomeArchive
     @Query(sort: \CompletedOutcomeContributionArchive.completedAt, order: .forward) private var contributionRows: [CompletedOutcomeContributionArchive]
     @Query(sort: \CompletedOutcomeMeasurePointArchive.measuredAt, order: .forward) private var measureRows: [CompletedOutcomeMeasurePointArchive]
+    @State private var isShowingDeleteAlert = false
 
     private var contributions: [CompletedOutcomeContributionArchive] {
         contributionRows.filter { $0.completedOutcomeArchiveId == archive.id }
@@ -780,28 +786,7 @@ struct CompletedOutcomeDetailView: View {
         NavigationStack {
             Form {
                 Section {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(archive.outcome)
-                            .font(.title3)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.primary)
-                        Text(archive.reasons)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                        HStack(spacing: 8) {
-                            metricPill(value: "\(archive.daysElapsed)d", caption: "elapsed")
-                            if archive.isMeasurable {
-                                metricPill(
-                                    value: archive.goalMet ? "Met" : "Not Met",
-                                    caption: "goal status",
-                                    valueColor: archive.goalMet ? .green : .red
-                                )
-                            } else if let success = archive.successLevel {
-                                metricPill(value: "\(success)/5", caption: "success")
-                            }
-                        }
-                    }
-                    .padding(.vertical, 4)
+                    CompletedOutcomeRow(archive: archive, showsChevron: false)
                 }
 
                 Section("Insights") {
@@ -858,9 +843,26 @@ struct CompletedOutcomeDetailView: View {
                     journalBox(title: "Learned", text: archive.journalLearned)
                     journalBox(title: "Next", text: archive.journalNext)
                 }
+
+                Section {
+                    Button("Delete") {
+                        isShowingDeleteAlert = true
+                    }
+                    .foregroundColor(.red)
+                }
             }
             .navigationTitle("Completed Outcome")
             .navigationBarTitleDisplayMode(.inline)
+            .alert("Delete Outcome?", isPresented: $isShowingDeleteAlert) {
+                Button("Delete", role: .destructive) {
+                    RecentlyDeletedStore.trash(archive, in: modelContext, source: "Completed Outcome")
+                    try? modelContext.save()
+                    dismiss()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Are you sure you want to delete this outcome? It will be available for 30 days in account management.")
+            }
         }
     }
 

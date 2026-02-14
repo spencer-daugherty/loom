@@ -56,6 +56,47 @@ enum RecentlyDeletedStore {
         var completedAt: Date
     }
 
+    private struct CompletedOutcomeContributionSnapshot: Codable {
+        var id: UUID
+        var completedOutcomeArchiveId: UUID
+        var actionText: String
+        var completedAt: Date
+    }
+
+    private struct CompletedOutcomeMeasurePointSnapshot: Codable {
+        var id: UUID
+        var completedOutcomeArchiveId: UUID
+        var measuredAt: Date
+        var measure: Double
+        var goal: Double
+    }
+
+    private struct CompletedOutcomeArchiveSnapshot: Codable {
+        var id: UUID
+        var originalOutcomeId: UUID
+        var category: String
+        var outcome: String
+        var reasons: String
+        var start: Date
+        var end: Date
+        var completedAt: Date
+        var format: String?
+        var isMeasurable: Bool
+        var goalValue: Double?
+        var finalValue: Double?
+        var goalMet: Bool
+        var successLevel: Int?
+        var daysElapsed: Int
+        var goalPushCount: Int
+        var dataEntryCount: Int
+        var targetChangeCount: Int
+        var journalWins: String
+        var journalLearned: String
+        var journalNext: String
+        var contributions: [CompletedOutcomeContributionSnapshot]
+        var measurePoints: [CompletedOutcomeMeasurePointSnapshot]
+    }
+
     static func trash(_ model: any PersistentModel, in context: ModelContext, source: String = "") {
         if model is RecentlyDeletedItem {
             context.delete(model)
@@ -91,6 +132,16 @@ enum RecentlyDeletedStore {
             let allEntries = (try? context.fetch(FetchDescriptor<OutcomesMeasureEntry>())) ?? []
             for entry in allEntries where entry.outcome_id == outcome.outcome_id {
                 context.delete(entry)
+            }
+        }
+        if let completed = model as? CompletedOutcomeArchive {
+            let allContribs = (try? context.fetch(FetchDescriptor<CompletedOutcomeContributionArchive>())) ?? []
+            for row in allContribs where row.completedOutcomeArchiveId == completed.id {
+                context.delete(row)
+            }
+            let allPoints = (try? context.fetch(FetchDescriptor<CompletedOutcomeMeasurePointArchive>())) ?? []
+            for row in allPoints where row.completedOutcomeArchiveId == completed.id {
+                context.delete(row)
             }
         }
         context.delete(model)
@@ -211,6 +262,73 @@ enum RecentlyDeletedStore {
             context.delete(item)
             return true
 
+        case "CompletedOutcomeArchive":
+            guard
+                let payload = item.payloadJSON,
+                let data = payload.data(using: .utf8),
+                let decoded = try? decoder.decode(CompletedOutcomeArchiveSnapshot.self, from: data)
+            else { return false }
+
+            let existingArchives = (try? context.fetch(FetchDescriptor<CompletedOutcomeArchive>())) ?? []
+            if existingArchives.contains(where: { $0.id == decoded.id }) {
+                context.delete(item)
+                return true
+            }
+
+            context.insert(
+                CompletedOutcomeArchive(
+                    id: decoded.id,
+                    originalOutcomeId: decoded.originalOutcomeId,
+                    category: decoded.category,
+                    outcome: decoded.outcome,
+                    reasons: decoded.reasons,
+                    start: decoded.start,
+                    end: decoded.end,
+                    completedAt: decoded.completedAt,
+                    format: decoded.format,
+                    isMeasurable: decoded.isMeasurable,
+                    goalValue: decoded.goalValue,
+                    finalValue: decoded.finalValue,
+                    goalMet: decoded.goalMet,
+                    successLevel: decoded.successLevel,
+                    daysElapsed: decoded.daysElapsed,
+                    goalPushCount: decoded.goalPushCount,
+                    dataEntryCount: decoded.dataEntryCount,
+                    targetChangeCount: decoded.targetChangeCount,
+                    journalWins: decoded.journalWins,
+                    journalLearned: decoded.journalLearned,
+                    journalNext: decoded.journalNext
+                )
+            )
+
+            let existingContribIDs = Set(((try? context.fetch(FetchDescriptor<CompletedOutcomeContributionArchive>())) ?? []).map(\.id))
+            for row in decoded.contributions where !existingContribIDs.contains(row.id) {
+                context.insert(
+                    CompletedOutcomeContributionArchive(
+                        id: row.id,
+                        completedOutcomeArchiveId: row.completedOutcomeArchiveId,
+                        actionText: row.actionText,
+                        completedAt: row.completedAt
+                    )
+                )
+            }
+
+            let existingPointIDs = Set(((try? context.fetch(FetchDescriptor<CompletedOutcomeMeasurePointArchive>())) ?? []).map(\.id))
+            for row in decoded.measurePoints where !existingPointIDs.contains(row.id) {
+                context.insert(
+                    CompletedOutcomeMeasurePointArchive(
+                        id: row.id,
+                        completedOutcomeArchiveId: row.completedOutcomeArchiveId,
+                        measuredAt: row.measuredAt,
+                        measure: row.measure,
+                        goal: row.goal
+                    )
+                )
+            }
+
+            context.delete(item)
+            return true
+
         default:
             return false
         }
@@ -241,6 +359,7 @@ enum RecentlyDeletedStore {
     private static func entityID(for model: any PersistentModel) -> String {
         if let m = model as? Outcomes { return m.outcome_id.uuidString }
         if let m = model as? RollingCaptureItem { return m.id.uuidString }
+        if let m = model as? CompletedOutcomeArchive { return m.id.uuidString }
         if let m = model as? RecentlyDeletedItem { return m.id.uuidString }
 
         let mirror = Mirror(reflecting: model)
@@ -253,6 +372,7 @@ enum RecentlyDeletedStore {
     private static func title(for model: any PersistentModel) -> String {
         if let m = model as? Outcomes { return m.outcome }
         if let m = model as? RollingCaptureItem { return m.text }
+        if let m = model as? CompletedOutcomeArchive { return m.outcome }
 
         let mirror = Mirror(reflecting: model)
         for key in ["text", "outcome", "role", "activity", "resource", "category"] {
@@ -270,6 +390,9 @@ enum RecentlyDeletedStore {
         }
         if let m = model as? RollingCaptureItem {
             return m.isGhost ? "Capture (Hidden)" : "Capture"
+        }
+        if let m = model as? CompletedOutcomeArchive {
+            return "Completed Outcome • \(shortDate(m.start)) - \(shortDate(m.completedAt))"
         }
         return String(describing: type(of: model))
     }
@@ -367,6 +490,58 @@ enum RecentlyDeletedStore {
                 plannedChunkActionId: m.plannedChunkActionId,
                 actionText: m.actionText,
                 completedAt: m.completedAt
+            )
+            if let data = try? encoder.encode(snapshot) {
+                return String(data: data, encoding: .utf8)
+            }
+        }
+
+        if let m = model as? CompletedOutcomeArchive {
+            let allContribs = (try? context.fetch(FetchDescriptor<CompletedOutcomeContributionArchive>())) ?? []
+            let allPoints = (try? context.fetch(FetchDescriptor<CompletedOutcomeMeasurePointArchive>())) ?? []
+            let snapshot = CompletedOutcomeArchiveSnapshot(
+                id: m.id,
+                originalOutcomeId: m.originalOutcomeId,
+                category: m.category,
+                outcome: m.outcome,
+                reasons: m.reasons,
+                start: m.start,
+                end: m.end,
+                completedAt: m.completedAt,
+                format: m.format,
+                isMeasurable: m.isMeasurable,
+                goalValue: m.goalValue,
+                finalValue: m.finalValue,
+                goalMet: m.goalMet,
+                successLevel: m.successLevel,
+                daysElapsed: m.daysElapsed,
+                goalPushCount: m.goalPushCount,
+                dataEntryCount: m.dataEntryCount,
+                targetChangeCount: m.targetChangeCount,
+                journalWins: m.journalWins,
+                journalLearned: m.journalLearned,
+                journalNext: m.journalNext,
+                contributions: allContribs
+                    .filter { $0.completedOutcomeArchiveId == m.id }
+                    .map {
+                        CompletedOutcomeContributionSnapshot(
+                            id: $0.id,
+                            completedOutcomeArchiveId: $0.completedOutcomeArchiveId,
+                            actionText: $0.actionText,
+                            completedAt: $0.completedAt
+                        )
+                    },
+                measurePoints: allPoints
+                    .filter { $0.completedOutcomeArchiveId == m.id }
+                    .map {
+                        CompletedOutcomeMeasurePointSnapshot(
+                            id: $0.id,
+                            completedOutcomeArchiveId: $0.completedOutcomeArchiveId,
+                            measuredAt: $0.measuredAt,
+                            measure: $0.measure,
+                            goal: $0.goal
+                        )
+                    }
             )
             if let data = try? encoder.encode(snapshot) {
                 return String(data: data, encoding: .utf8)
