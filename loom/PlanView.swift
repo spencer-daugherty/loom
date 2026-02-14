@@ -431,6 +431,9 @@ struct PlanStepTwoView: View {
     @State private var baselineItemIDs: Set<UUID> = []
     @State private var isBrainstormExpanded: Bool = false
     @State private var isShowingNextConfirmation: Bool = false
+    @State private var showStep2ValidationHint: Bool = false
+    @State private var shouldHighlightStep2InputValidation: Bool = false
+    @State private var step2ValidationResetWorkItem: DispatchWorkItem?
 
     private let hiddenUntilLaterIconName = "clock.arrow.trianglehead.clockwise.rotate.90.path.dotted"
 
@@ -465,6 +468,10 @@ struct PlanStepTwoView: View {
             if rL != rR { return rL < rR }
             return lhs.createdAt > rhs.createdAt
         }
+    }
+
+    private var hasDraftInput: Bool {
+        !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     var body: some View {
@@ -580,10 +587,35 @@ struct PlanStepTwoView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                     .overlay(
                         RoundedRectangle(cornerRadius: 10)
-                            .stroke(colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.3), lineWidth: 1)
+                            .stroke(
+                                shouldHighlightStep2InputValidation
+                                ? Color.red.opacity(0.85)
+                                : (colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.3)),
+                                lineWidth: shouldHighlightStep2InputValidation ? 1.5 : 1
+                            )
                     )
                     .layoutPriority(1)
                     .frame(maxWidth: .infinity)
+            }
+            .overlay(alignment: .top) {
+                if showStep2ValidationHint {
+                    HStack(spacing: 8) {
+                        Text("Please enter value on keyboard")
+                            .font(.footnote)
+                            .fontWeight(.bold)
+                        Image(systemName: "checkmark.rectangle.fill")
+                            .foregroundStyle(.blue)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color.black.opacity(0.12), lineWidth: 1)
+                    )
+                    .offset(y: -58)
+                    .transition(.opacity)
+                }
             }
             .padding(.top, 4)
 
@@ -602,12 +634,17 @@ struct PlanStepTwoView: View {
                 )
 
                 Button {
-                    isShowingNextConfirmation = true
+                    if hasDraftInput {
+                        triggerStep2InputValidationFeedback()
+                    } else {
+                        isShowingNextConfirmation = true
+                    }
                 } label: {
                     Text("Next")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                .tint(hasDraftInput ? Color(.systemGray3) : .accentColor)
             }
             .padding(.bottom, 2)
         }
@@ -633,6 +670,14 @@ struct PlanStepTwoView: View {
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 isInputFocused = true
+            }
+        }
+        .onChange(of: input) { _, newValue in
+            if newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                shouldHighlightStep2InputValidation = false
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    showStep2ValidationHint = false
+                }
             }
         }
     }
@@ -664,6 +709,23 @@ struct PlanStepTwoView: View {
             modelContext.delete(item)
         }
         try? modelContext.save()
+    }
+
+    private func triggerStep2InputValidationFeedback() {
+        step2ValidationResetWorkItem?.cancel()
+        shouldHighlightStep2InputValidation = true
+        withAnimation(.easeInOut(duration: 0.15)) {
+            showStep2ValidationHint = true
+        }
+
+        let workItem = DispatchWorkItem {
+            shouldHighlightStep2InputValidation = false
+            withAnimation(.easeInOut(duration: 0.15)) {
+                showStep2ValidationHint = false
+            }
+        }
+        step2ValidationResetWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8, execute: workItem)
     }
 }
 
@@ -708,6 +770,7 @@ struct PlanStepThreeView: View {
     @State private var baselineChunks: [ChunkContainerState] = []
 
     @State private var isHydratingFromStorage: Bool = false
+    @State private var hasInitializedStep3State: Bool = false
     @State private var showStep3ValidationHint: Bool = false
     @State private var shouldHighlightStep3Validation: Bool = false
     @State private var step3ValidationResetWorkItem: DispatchWorkItem?
@@ -1065,6 +1128,7 @@ struct PlanStepThreeView: View {
         .safeAreaPadding(.bottom)
         .onAppear {
             PlanLabelSeeder.seedDefaultsIfNeeded(in: modelContext)
+            hasInitializedStep3State = false
 
             if chunks.isEmpty {
                 chunks = [
@@ -1089,13 +1153,16 @@ struct PlanStepThreeView: View {
                     baselineChunks = chunks
                 }
             }
+            hasInitializedStep3State = true
         }
         .onChange(of: allItems.map(\.id)) { _, _ in
+            guard hasInitializedStep3State else { return }
             enforceShowHiddenIfNeeded()
             syncPoolWithVisibility()
             persistStep3Plan()
         }
         .onChange(of: allItems.map(\.isGhost)) { _, _ in
+            guard hasInitializedStep3State else { return }
             enforceShowHiddenIfNeeded()
             syncPoolWithVisibility()
             persistStep3Plan()
@@ -1105,6 +1172,10 @@ struct PlanStepThreeView: View {
                 shouldHighlightStep3Validation = false
                 showStep3ValidationHint = false
             }
+        }
+        .onDisappear {
+            guard hasInitializedStep3State else { return }
+            persistStep3Plan(force: true)
         }
     }
 
@@ -1402,7 +1473,7 @@ struct PlanStepThreeView: View {
             .sorted { $0.createdAt > $1.createdAt }
             .map(\.id)
 
-        persistStep3Plan()
+        persistStep3Plan(force: true)
 
         baselineShowHidden = showHidden
         baselinePoolItemIDs = poolItemIDs
@@ -1437,7 +1508,7 @@ struct PlanStepThreeView: View {
 
             poolItemIDs = initialPoolIDs
             syncPoolWithVisibility()
-            persistStep3Plan()
+            persistStep3Plan(force: true)
 
             baselineShowHidden = showHidden
             baselinePoolItemIDs = poolItemIDs
@@ -1520,8 +1591,9 @@ struct PlanStepThreeView: View {
         syncPoolWithVisibility()
     }
 
-    private func persistStep3Plan() {
+    private func persistStep3Plan(force: Bool = false) {
         guard !isHydratingFromStorage else { return }
+        guard force || hasInitializedStep3State else { return }
 
         let weekStart = currentWeekStart
         let captureByID = Dictionary(uniqueKeysWithValues: allItems.map { ($0.id, $0) })
@@ -1617,11 +1689,10 @@ struct PlanStepThreeView: View {
         var desiredActionsByText: [String: (chunkIndex: Int, plannedChunkId: UUID, sortOrder: Int)] = [:]
         for (chunkIndex, chunkState) in chunks.enumerated() where !chunkState.itemIDs.isEmpty {
             guard let plannedChunk = weekChunksByIndex[chunkIndex] else { continue }
-            guard let labelId = chunkState.selectionLabelId else { continue }
 
             plannedChunk.weekStart = weekStart
             plannedChunk.chunkIndex = chunkIndex
-            plannedChunk.labelId = labelId
+            plannedChunk.labelId = chunkState.selectionLabelId ?? UUID()
             plannedChunk.label = chunkState.selectionLabel ?? ""
             plannedChunk.categoryId = chunkState.selectionCategoryId ?? UUID()
             plannedChunk.category = chunkState.selectionCategory ?? ""

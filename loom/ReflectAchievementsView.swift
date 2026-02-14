@@ -2,6 +2,20 @@ import SwiftUI
 import SwiftData
 import Charts
 
+private struct ReflectDarkModeInvertImage: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+
+    func body(content: Content) -> some View {
+        if colorScheme == .dark {
+            content
+                .colorInvert()
+                .compositingGroup()
+        } else {
+            content
+        }
+    }
+}
+
 struct ReflectAchievementsView: View {
     let weekStart: Date
     let onFinish: () -> Void
@@ -23,6 +37,8 @@ struct ReflectAchievementsView: View {
     @Query private var allOutcomeLinks: [PlannedChunkOutcomeLink]
     @Query private var allChunkSelections: [PlanChunkSelection]
     @Query(sort: \Outcomes.rank, order: .forward) private var outcomes: [Outcomes]
+    @Query(sort: \OutcomesMeasure.measuredAt, order: .reverse) private var outcomeMeasures: [OutcomesMeasure]
+    @Query(sort: \OutcomesMeasureEntry.measuredAt, order: .forward) private var outcomeMeasureEntries: [OutcomesMeasureEntry]
     @Query private var allMindsetRows: [WeeklyMindsetEntry.Fields]
     @Query private var allAdHocMarkers: [PlannedChunkActionAdHocMarker]
     @Query(sort: \RollingCaptureItem.createdAt, order: .reverse) private var captureItems: [RollingCaptureItem]
@@ -317,7 +333,9 @@ struct ReflectAchievementsView: View {
     }
 
     private var outcomesForContributionFlow: [Outcomes] {
-        outcomesForWeek
+        outcomesForWeek.filter { outcome in
+            !(doneActionsByOutcomeId[outcome.outcome_id] ?? []).isEmpty
+        }
     }
 
     private var doneActionsByOutcomeId: [UUID: [PlannedChunkAction]] {
@@ -528,13 +546,14 @@ struct ReflectAchievementsView: View {
 
                         Text("Action Blocks, DONE!")
                             .font(.system(size: 22, weight: .bold))
-                            .foregroundStyle(.black)
-                            .position(x: geo.size.width * 0.5, y: geo.size.height * 0.10)
+                            .foregroundStyle(colorScheme == .dark ? .white : .black)
+                            .position(x: geo.size.width * 0.5, y: geo.size.height * 0.85)
 
                         Image("logo")
                             .resizable()
                             .scaledToFit()
                             .frame(height: 44)
+                            .modifier(ReflectDarkModeInvertImage())
                             .position(x: geo.size.width * 0.5, y: geo.size.height * 0.92)
                     }
                 }
@@ -781,57 +800,32 @@ struct ReflectAchievementsView: View {
 
     private var contributionPromptSheet: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 12) {
-                if outcomesForContributionFlow.count > 1 {
-                    ProgressView(value: Double(contributionOutcomeIndex + 1), total: Double(outcomesForContributionFlow.count))
-                        .tint(.accentColor)
-                    Text("\(contributionOutcomeIndex + 1) of \(outcomesForContributionFlow.count)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Text("Did any of these actions contribute to your outcome progress?")
-                    .font(.headline)
-
-                if let outcome = currentContributionOutcome {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(outcome.outcome)
-                            .font(.title3)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(categoryColor(for: outcome.category))
-                            .lineLimit(3)
-                        if !outcome.reasons.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            Text(outcome.reasons)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(3)
-                        }
-                        HStack(spacing: 8) {
-                            Text("\(daysUntil(outcome.end))d")
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(.black)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 6)
-                                        .fill(lightenedCategoryColor(for: outcome.category))
-                                )
-                            Text("days left")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
+            VStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 12) {
+                    if outcomesForContributionFlow.count > 1 {
+                        ProgressView(value: Double(contributionOutcomeIndex + 1), total: Double(outcomesForContributionFlow.count))
+                            .tint(.accentColor)
+                        Text("\(contributionOutcomeIndex + 1) of \(outcomesForContributionFlow.count)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
-                    .padding(10)
-                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+
+                    Text("Did any of these actions contribute to your outcome progress?")
+                        .font(.headline)
                 }
 
-                if currentContributionDoneActions.isEmpty {
-                    Text("No completed actions were found in this outcome's action block.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 6)
-                } else {
-                    List {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        if let outcome = currentContributionOutcome {
+                            contributionOutcomeCard(outcome)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(10)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(Color(.systemGray4), lineWidth: 1)
+                                )
+                        }
+
                         ForEach(currentContributionDoneActions, id: \.id) { action in
                             Button {
                                 if contributionTempSelection.contains(action.id) {
@@ -848,32 +842,39 @@ struct ReflectAchievementsView: View {
                                         .multilineTextAlignment(.leading)
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(10)
+                                .background(Color(.systemGray5), in: RoundedRectangle(cornerRadius: 10))
                             }
                             .buttonStyle(.plain)
-                            .listRowSeparator(.hidden)
                         }
                     }
-                    .listStyle(.plain)
                 }
 
                 HStack(spacing: 12) {
-                    Button("Skip") {
+                    Button {
                         advanceContributionFlow()
+                    } label: {
+                        Text("Skip")
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .foregroundStyle(colorScheme == .dark ? Color(.secondaryLabel) : .black)
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(Color(.systemGray5)))
-                    .foregroundStyle(.primary)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8).fill(Color(.systemGray5))
+                    )
 
-                    Button(contributionOutcomeIndex + 1 < outcomesForContributionFlow.count ? "Next" : "Continue") {
+                    Button {
                         saveCurrentContributionSelection()
                         advanceContributionFlow()
+                    } label: {
+                        Text(contributionOutcomeIndex + 1 < outcomesForContributionFlow.count ? "Next" : "Continue")
+                            .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
-                    .frame(maxWidth: .infinity)
                 }
             }
             .padding()
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .navigationTitle("Contributing Actions")
             .navigationBarTitleDisplayMode(.inline)
         }
@@ -1177,6 +1178,76 @@ struct ReflectAchievementsView: View {
         let calendar = Calendar.current
         let components = calendar.dateComponents([.day], from: .now, to: date)
         return max(0, components.day ?? 0)
+    }
+
+    private func latestMeasure(for outcome: Outcomes) -> OutcomesMeasure? {
+        outcomeMeasures.first { $0.outcome_id == outcome.outcome_id }
+    }
+
+    private func startMeasure(for outcome: Outcomes, latestMeasure: OutcomesMeasure?) -> Double? {
+        if let first = outcomeMeasureEntries.first(where: { $0.outcome_id == outcome.outcome_id }) {
+            return first.measure
+        }
+        return latestMeasure?.measure
+    }
+
+    @ViewBuilder
+    private func contributionOutcomeCard(_ outcome: Outcomes) -> some View {
+        let measure = latestMeasure(for: outcome)
+        let start = startMeasure(for: outcome, latestMeasure: measure)
+
+        VStack(alignment: .leading, spacing: 8) {
+            Text(outcome.outcome)
+                .font(.title3)
+                .fontWeight(.semibold)
+                .foregroundStyle(categoryColor(for: outcome.category))
+                .lineLimit(3)
+
+            if !outcome.reasons.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(outcome.reasons)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(4)
+                    .padding(.bottom, 2)
+            }
+
+            HStack(spacing: 8) {
+                VStack(spacing: 2) {
+                    Text("\(daysUntil(outcome.end))")
+                        .font(.title3)
+                        .fontWeight(.bold)
+                        .foregroundColor(.black)
+                    Text("days left")
+                        .font(.caption2)
+                        .foregroundColor(.black)
+                }
+                .padding(.vertical, 6)
+                .padding(.horizontal, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(lightenedCategoryColor(for: outcome.category))
+                )
+                .frame(height: 44)
+
+                if let measure, measure.measure_amt != 0, measure.format != nil {
+                    MeasurableOutcomeBox(
+                        measure: measure.measure,
+                        measuredAt: measure.measuredAt,
+                        measureAmt: measure.measure_amt,
+                        endDate: outcome.end,
+                        format: measure.format ?? "Number"
+                    )
+                    .frame(height: 44)
+
+                    ProgressCircleView(
+                        measure: measure.measure,
+                        measureAmt: measure.measure_amt,
+                        startMeasure: start
+                    )
+                    .frame(width: 40, height: 40)
+                }
+            }
+        }
     }
 
     private func recaptureCarriedActions() {

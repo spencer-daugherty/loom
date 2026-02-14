@@ -210,6 +210,12 @@ struct OutcomeView: View {
                                 Spacer(minLength: 0)
                             }
                             .padding(.vertical, 2)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button("Unassign") {
+                                    unassignContributingAction(item)
+                                }
+                                .tint(.gray)
+                            }
                         }
                     }
                 }
@@ -404,6 +410,11 @@ struct OutcomeView: View {
 
     private func hideKeyboard() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+
+    private func unassignContributingAction(_ item: ActionBlocksReflectionOutcomeContribution) {
+        modelContext.delete(item)
+        try? modelContext.save()
     }
 }
 

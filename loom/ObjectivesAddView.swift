@@ -559,35 +559,57 @@ struct ChartActionsSection: View {
         Group {
             if isMeasurable && hasOutcome, let outcomeId {
                 Section {
-                    Button {
-                        onAddMeasure()
-                    } label: {
-                        Text("Add Measure")
-                            .font(.body)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .listRowBackground(Color(.secondarySystemBackground))
+                    VStack(spacing: 0) {
+                        Button {
+                            onAddMeasure()
+                        } label: {
+                            Text("Add Measure")
+                                .font(.body)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 12)
+                        }
+                        .buttonStyle(.plain)
 
-                    NavigationLink {
-                        OutcomesAllDataView(
-                            outcomeID: outcomeId,
-                            formatRaw: measureFormat.rawValue,
-                            unitRaw: measureUnit,
-                            decimalPlaces: measureDecimalPlaces
-                        )
-                    } label: {
-                        Text("Show All Data")
-                            .font(.body)
-                    }
-                    .listRowBackground(Color(.secondarySystemBackground))
+                        Divider()
 
-                    NavigationLink {
-                        DataSourcesPlaceholderView()
-                    } label: {
-                        Text("Data Sources & Access")
-                            .font(.body)
+                        NavigationLink {
+                            OutcomesAllDataView(
+                                outcomeID: outcomeId,
+                                formatRaw: measureFormat.rawValue,
+                                unitRaw: measureUnit,
+                                decimalPlaces: measureDecimalPlaces
+                            )
+                        } label: {
+                            Text("Show All Data")
+                                .font(.body)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 12)
+                        }
+
+                        Divider()
+
+                        NavigationLink {
+                            DataSourcesPlaceholderView()
+                        } label: {
+                            Text("Data Sources & Access")
+                                .font(.body)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 12)
+                        }
                     }
-                    .listRowBackground(Color(.secondarySystemBackground))
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color(.secondarySystemBackground))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color(.separator).opacity(0.35), lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .listRowBackground(Color.clear)
                 }
             }
         }
