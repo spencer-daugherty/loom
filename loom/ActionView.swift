@@ -2230,7 +2230,6 @@ struct ActionView: View {
             scheduleAutosave()
         }
     }
-
     private func showCompleteActionsHint() {
         let active = Set(weekActions.filter { isActiveStatus(status(for: $0.id)) }.map(\.id))
         highlightedStatusActionIDs = active

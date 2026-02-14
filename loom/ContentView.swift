@@ -186,6 +186,7 @@ struct ContentView: View {
             }
         }
         .tint(Color.accentColor)
+        .ignoresSafeArea(.keyboard, edges: .bottom)
     }
 
     private func ensureFulfillmentCategoriesExist() {
