@@ -455,9 +455,13 @@ struct AddOutcomeMeasureSheet: View {
 
     @Query private var snapshots: [OutcomesMeasure]
     @Query private var entries: [OutcomesMeasureEntry]
+    @Query private var outcomes: [Outcomes]
     @State private var measureText: String = ""
     @State private var measuredDate: Date = Calendar.current.startOfDay(for: .now)
     @FocusState private var isMeasureFieldFocused: Bool
+    @State private var showOverrideAlert: Bool = false
+    @State private var pendingCurrentValue: Double?
+    @State private var pendingMeasuredDay: Date?
 
     init(outcomeID: UUID, formatRaw: String, unitRaw: String, decimalPlaces: Int) {
         self.outcomeID = outcomeID
@@ -468,12 +472,14 @@ struct AddOutcomeMeasureSheet: View {
         _snapshots = Query(filter: snapshotPredicate, sort: [SortDescriptor(\OutcomesMeasure.measuredAt, order: .reverse)])
         let entriesPredicate = #Predicate<OutcomesMeasureEntry> { $0.outcome_id == outcomeID }
         _entries = Query(filter: entriesPredicate, sort: [SortDescriptor(\OutcomesMeasureEntry.measuredAt, order: .reverse)])
+        let outcomePredicate = #Predicate<Outcomes> { $0.outcome_id == outcomeID }
+        _outcomes = Query(filter: outcomePredicate)
     }
 
     var body: some View {
         NavigationStack {
             Form {
-                DatePicker("Date", selection: $measuredDate, displayedComponents: [.date])
+                DatePicker("Date", selection: $measuredDate, in: allowedDateRange, displayedComponents: [.date])
                 TextField("Current", text: $measureText)
                     .keyboardType(.decimalPad)
                     .focused($isMeasureFieldFocused)
@@ -495,47 +501,35 @@ struct AddOutcomeMeasureSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         let current = Double(measureText) ?? 0
-                        let goal = goalValue
-                        modelContext.insert(
-                            OutcomesMeasureEntry(
-                                outcome_id: outcomeID,
-                                measure: current,
-                                measure_amt: goal,
-                                measuredAt: Calendar.current.startOfDay(for: measuredDate),
-                                createdAt: .now,
-                                format: formatRaw,
-                                unit: unitRaw,
-                                decimalPlaces: decimalPlaces
-                            )
-                        )
-                        if let snapshot = snapshots.first {
-                            snapshot.measure = current
-                            snapshot.measure_amt = goal
-                            snapshot.measuredAt = measuredDate
-                            snapshot.measure_updated = .now
-                            snapshot.format = formatRaw
-                            snapshot.unit = unitRaw
-                            snapshot.direction = nil
-                            snapshot.decimalPlaces = decimalPlaces
-                        } else {
-                            modelContext.insert(
-                                OutcomesMeasure(
-                                    outcome_id: outcomeID,
-                                    measure: current,
-                                    measuredAt: measuredDate,
-                                    measure_amt: goal,
-                                    measure_updated: .now,
-                                    direction: nil,
-                                    format: formatRaw,
-                                    unit: unitRaw,
-                                    decimalPlaces: decimalPlaces
-                                )
-                            )
+                        let selectedDay = Calendar.current.startOfDay(for: measuredDate)
+                        let existingSameDay = entries.filter {
+                            Calendar.current.isDate($0.measuredAt, inSameDayAs: selectedDay)
                         }
-                        try? modelContext.save()
-                        dismiss()
+                        if existingSameDay.isEmpty {
+                            persistMeasure(current: current, measuredDay: selectedDay, overrideExisting: false)
+                            dismiss()
+                        } else {
+                            pendingCurrentValue = current
+                            pendingMeasuredDay = selectedDay
+                            showOverrideAlert = true
+                        }
                     }
                 }
+            }
+            .alert("Override existing value?", isPresented: $showOverrideAlert) {
+                Button("Cancel", role: .cancel) {
+                    pendingCurrentValue = nil
+                    pendingMeasuredDay = nil
+                }
+                Button("Override") {
+                    guard let current = pendingCurrentValue, let day = pendingMeasuredDay else { return }
+                    persistMeasure(current: current, measuredDay: day, overrideExisting: true)
+                    pendingCurrentValue = nil
+                    pendingMeasuredDay = nil
+                    dismiss()
+                }
+            } message: {
+                Text("A value already exists for this date. Would you like to override it?")
             }
         }
     }
@@ -548,6 +542,87 @@ struct AddOutcomeMeasureSheet: View {
             return latestEntry.measure_amt
         }
         return 0
+    }
+
+    private var allowedDateRange: ClosedRange<Date> {
+        let today = Calendar.current.startOfDay(for: .now)
+        let start = Calendar.current.startOfDay(for: outcomes.first?.start ?? today)
+        return start...today
+    }
+
+    private func persistMeasure(current: Double, measuredDay: Date, overrideExisting: Bool) {
+        let goal = goalValue
+
+        if overrideExisting {
+            let sameDayEntries = entries.filter {
+                Calendar.current.isDate($0.measuredAt, inSameDayAs: measuredDay)
+            }
+            if let keep = sameDayEntries.first {
+                keep.measure = current
+                keep.measure_amt = goal
+                keep.measuredAt = measuredDay
+                keep.createdAt = .now
+                keep.format = formatRaw
+                keep.unit = unitRaw
+                keep.decimalPlaces = decimalPlaces
+                for extra in sameDayEntries.dropFirst() {
+                    RecentlyDeletedStore.trash(extra, in: modelContext)
+                }
+            } else {
+                modelContext.insert(
+                    OutcomesMeasureEntry(
+                        outcome_id: outcomeID,
+                        measure: current,
+                        measure_amt: goal,
+                        measuredAt: measuredDay,
+                        createdAt: .now,
+                        format: formatRaw,
+                        unit: unitRaw,
+                        decimalPlaces: decimalPlaces
+                    )
+                )
+            }
+        } else {
+            modelContext.insert(
+                OutcomesMeasureEntry(
+                    outcome_id: outcomeID,
+                    measure: current,
+                    measure_amt: goal,
+                    measuredAt: measuredDay,
+                    createdAt: .now,
+                    format: formatRaw,
+                    unit: unitRaw,
+                    decimalPlaces: decimalPlaces
+                )
+            )
+        }
+
+        if let snapshot = snapshots.first {
+            snapshot.measure = current
+            snapshot.measure_amt = goal
+            snapshot.measuredAt = measuredDay
+            snapshot.measure_updated = .now
+            snapshot.format = formatRaw
+            snapshot.unit = unitRaw
+            snapshot.direction = nil
+            snapshot.decimalPlaces = decimalPlaces
+        } else {
+            modelContext.insert(
+                OutcomesMeasure(
+                    outcome_id: outcomeID,
+                    measure: current,
+                    measuredAt: measuredDay,
+                    measure_amt: goal,
+                    measure_updated: .now,
+                    direction: nil,
+                    format: formatRaw,
+                    unit: unitRaw,
+                    decimalPlaces: decimalPlaces
+                )
+            )
+        }
+
+        try? modelContext.save()
     }
 }
 
