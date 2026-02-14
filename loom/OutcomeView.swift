@@ -1,6 +1,20 @@
 import SwiftUI
 import SwiftData
 
+private func parseFormattedDecimalOutcome(_ input: String) -> Double? {
+    Double(input.replacingOccurrences(of: ",", with: ""))
+}
+
+private func groupedDecimalStringOutcome(_ value: Double, fractionDigits: Int) -> String {
+    let places = max(0, min(3, fractionDigits))
+    let formatter = NumberFormatter()
+    formatter.numberStyle = .decimal
+    formatter.usesGroupingSeparator = true
+    formatter.minimumFractionDigits = places
+    formatter.maximumFractionDigits = places
+    return formatter.string(from: NSNumber(value: value)) ?? String(format: "%.\(places)f", value)
+}
+
 struct OutcomeView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
@@ -20,6 +34,7 @@ struct OutcomeView: View {
     @State private var isShowingCompletedActionSheet = false
     @State private var filterConnectedBlocksOnly = true
     @State private var selectedCompletedArchiveActionIDs: Set<UUID> = []
+    @State private var isShowingAllContributingActions = false
     @State private var isMeasurable = false
     @State private var measureGoal: String = ""
     @State private var measureCurrent: String = ""
@@ -103,7 +118,7 @@ struct OutcomeView: View {
     }
 
     private var isSaveDisabled: Bool {
-        goal.isEmpty || selectedCategory == .placeholder || (isMeasurable && (measureGoal.isEmpty || Double(measureGoal) == nil))
+        goal.isEmpty || selectedCategory == .placeholder || (isMeasurable && (measureGoal.isEmpty || parseFormattedDecimalOutcome(measureGoal) == nil))
     }
 
     private var daysLeft: Int {
@@ -228,7 +243,7 @@ struct OutcomeView: View {
                     )
                     .frame(height: 44)
 
-                    if isMeasurable, let current = Double(measureCurrent), let goalAmount = Double(measureGoal), goalAmount != 0 {
+                    if isMeasurable, let current = parseFormattedDecimalOutcome(measureCurrent), let goalAmount = parseFormattedDecimalOutcome(measureGoal), goalAmount != 0 {
                         let startMeasure = allMeasureEntries.first(where: { $0.outcome_id == outcome.outcome_id })?.measure ?? current
                         MeasurableOutcomeBox(
                             measure: current,
@@ -266,7 +281,8 @@ struct OutcomeView: View {
                 Text("No contributing actions logged yet.")
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(contributingActionsForOutcome, id: \.id) { item in
+                let visibleItems = isShowingAllContributingActions ? contributingActionsForOutcome : Array(contributingActionsForOutcome.prefix(10))
+                ForEach(visibleItems, id: \.id) { item in
                     HStack(alignment: .top, spacing: 10) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(item.actionText)
@@ -285,6 +301,16 @@ struct OutcomeView: View {
                         }
                         .tint(.gray)
                     }
+                }
+
+                if contributingActionsForOutcome.count > 10 {
+                    Button(isShowingAllContributingActions ? "Show Less" : "Show More") {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            isShowingAllContributingActions.toggle()
+                        }
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.blue)
                 }
             }
         }
@@ -314,6 +340,7 @@ struct OutcomeView: View {
                     isShowingAddMeasureSheet = true
                 }
             )
+            contributingActionsSection
             GoalSection(goal: $goal)
             ReasonsSection(reasons: $reasons)
             if !isStartEditable {
@@ -332,7 +359,6 @@ struct OutcomeView: View {
                 measureFormat: $measureFormat,
                 measureDecimalPlaces: $measureDecimalPlaces
             )
-            contributingActionsSection
             CategorySection(selectedCategory: $selectedCategory)
             DeleteOutcomeSection(
                 isShowingDeleteOutcomeAlert: $isShowingDeleteOutcomeAlert,
@@ -388,9 +414,6 @@ struct OutcomeView: View {
             }
             .onChange(of: isMeasurable) { _, newValue in
                 guard newValue else { return }
-                if measureGoal.isEmpty {
-                    measureGoal = "100"
-                }
             }
             .onAppear {
                 hydrateMeasureFromLatestEntry()
@@ -403,8 +426,11 @@ struct OutcomeView: View {
             .toolbar {
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
-                    Button("Done") {
+                    Button {
                         hideKeyboard()
+                    } label: {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.blue)
                     }
                 }
             }
@@ -497,7 +523,7 @@ struct OutcomeView: View {
         let previousEndDate = outcome.end
         let start = Calendar.current.startOfDay(for: startNow ? .now : startDate)
         let normalizedEndDate = Calendar.current.startOfDay(for: endDate)
-        let measureValue = isMeasurable ? (Double(measureGoal) ?? 0.0) : 0.0
+        let measureValue = isMeasurable ? (parseFormattedDecimalOutcome(measureGoal) ?? 0.0) : 0.0
         let formatValue = isMeasurable ? measureFormat.rawValue : nil
         let unitValue = isMeasurable ? measureUnit : nil
         let decimalPlacesValue = isMeasurable ? (measureFormat == .dollars ? 2 : measureDecimalPlaces) : nil
@@ -599,8 +625,7 @@ struct OutcomeView: View {
 
         if goalSource != 0 {
             let places = min(3, max(0, decimalSource))
-            measureGoal = String(format: "%.\(places)f", goalSource)
-                .replacingOccurrences(of: places == 0 ? ".0" : "", with: "")
+            measureGoal = groupedDecimalStringOutcome(goalSource, fractionDigits: places)
         }
         if currentSource != 0 {
             let places = min(3, max(0, decimalSource))

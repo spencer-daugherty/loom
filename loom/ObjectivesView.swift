@@ -11,6 +11,7 @@ struct ObjectivesView: View {
     @State private var sortByDaysLeft = false
     @State private var sortDaysAscending = true
     @State private var navigationAction: NavigationAction?
+    @State private var pendingSavedOutcomeID: UUID?
     @State private var showUpcoming = false
     @State private var showCompletedOutcomesPlaceholder = false
     private var sortSheetHeight: CGFloat {
@@ -218,10 +219,20 @@ struct ObjectivesView: View {
                 .contentShape(Rectangle())
                 .onTapGesture { hideKeyboard() }
         )
-        .sheet(item: $navigationAction) { action in
+        .sheet(item: $navigationAction, onDismiss: {
+            guard let savedID = pendingSavedOutcomeID else { return }
+            pendingSavedOutcomeID = nil
+            if let savedOutcome = outcomes.first(where: { $0.outcome_id == savedID }) {
+                DispatchQueue.main.async {
+                    navigationAction = .editOutcome(savedOutcome)
+                }
+            }
+        }) { action in
             switch action {
             case .addOutcome:
-                ObjectivesAddView()
+                ObjectivesAddView(onSaved: { savedID in
+                    pendingSavedOutcomeID = savedID
+                })
                     .presentationDetents([.large])
                     .presentationContentInteraction(.scrolls)
                     .presentationDragIndicator(.visible)
@@ -450,11 +461,16 @@ struct MeasurableOutcomeBox: View {
     }
 
     private func formattedValue(_ value: Double, format: String) -> String {
-        let roundedValue = String(format: "%.0f", value)
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.usesGroupingSeparator = true
+        formatter.maximumFractionDigits = 0
+        formatter.minimumFractionDigits = 0
+        let grouped = formatter.string(from: NSNumber(value: value)) ?? String(format: "%.0f", value)
         switch format {
-        case "Dollars": return "$\(roundedValue)"
-        case "Percentage": return "\(roundedValue)%"
-        default: return roundedValue
+        case "Dollars": return "$\(grouped)"
+        case "Percentage": return "\(grouped)%"
+        default: return grouped
         }
     }
 
@@ -548,7 +564,6 @@ struct ProgressCircleView: View {
 
 struct SortOutcomesView: View {
     @Environment(\.modelContext) private var modelContext
-    @Environment(\.dismiss) private var dismiss
     @State private var outcomes: [Outcomes]
 
     init(outcomes: [Outcomes]) {
@@ -592,16 +607,6 @@ struct SortOutcomesView: View {
             .listStyle(.plain)
             .environment(\.editMode, .constant(.active))
 
-            HStack {
-                Spacer()
-                Button("Done") {
-                    saveRanks()
-                    dismiss()
-                }
-                .buttonStyle(.borderedProminent)
-            }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 10)
         }
         .onDisappear {
             saveRanks()

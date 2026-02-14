@@ -24,6 +24,40 @@ private func sanitizeDecimalInput(_ input: String, maxFractionDigits: Int = 4) -
     return out
 }
 
+private func parseFormattedDecimalChart(_ input: String) -> Double? {
+    Double(input.replacingOccurrences(of: ",", with: ""))
+}
+
+private func groupedDecimalStringChart(_ value: Double, fractionDigits: Int) -> String {
+    let places = max(0, min(3, fractionDigits))
+    let formatter = NumberFormatter()
+    formatter.numberStyle = .decimal
+    formatter.usesGroupingSeparator = true
+    formatter.minimumFractionDigits = places
+    formatter.maximumFractionDigits = places
+    return formatter.string(from: NSNumber(value: value)) ?? String(format: "%.\(places)f", value)
+}
+
+private func sanitizeAndFormatDecimalInputChart(_ input: String, maxFractionDigits: Int = 4) -> String {
+    let clean = sanitizeDecimalInput(input.replacingOccurrences(of: ",", with: ""), maxFractionDigits: maxFractionDigits)
+    guard !clean.isEmpty else { return "" }
+    let hasDot = clean.contains(".")
+    let parts = clean.split(separator: ".", omittingEmptySubsequences: false)
+    let intPartRaw = String(parts.first ?? "")
+    let fractionPart = parts.count > 1 ? String(parts[1]) : ""
+    let intValue = Int(intPartRaw) ?? 0
+    let formatter = NumberFormatter()
+    formatter.numberStyle = .decimal
+    formatter.usesGroupingSeparator = true
+    formatter.minimumFractionDigits = 0
+    formatter.maximumFractionDigits = 0
+    let groupedInt = formatter.string(from: NSNumber(value: intValue)) ?? intPartRaw
+    if hasDot {
+        return groupedInt + "." + fractionPart
+    }
+    return groupedInt
+}
+
 struct ObjectivesAddViewChart: View {
     let outcome_id: UUID
     let formatRaw: String
@@ -251,7 +285,11 @@ struct ObjectivesAddViewChart: View {
                     AxisGridLine(stroke: .init(dash: [2, 2]))
                         .foregroundStyle(.gray.opacity(0.5))
                     AxisTick()
-                    AxisValueLabel(format: xAxisLabelFormat())
+                    AxisValueLabel {
+                        if let date = value.as(Date.self) {
+                            Text(xAxisLabel(for: date))
+                        }
+                    }
                 }
             }
             .chartYAxis {
@@ -339,11 +377,11 @@ struct ObjectivesAddViewChart: View {
         let rounded = roundedValue(value, places: places)
         switch formatRaw {
         case ObjectivesAddView.MeasureFormat.dollars.rawValue:
-            return String(format: "$%.\(places)f", rounded)
+            return "$" + groupedDecimalStringChart(rounded, fractionDigits: places)
         case ObjectivesAddView.MeasureFormat.percentage.rawValue:
-            return String(format: "%.\(places)f%%", rounded)
+            return groupedDecimalStringChart(rounded, fractionDigits: places) + "%"
         default:
-            let num = String(format: "%.\(places)f", rounded)
+            let num = groupedDecimalStringChart(rounded, fractionDigits: places)
             if unitRaw != ObjectivesAddView.UnitOption.defaultUnit {
                 return "\(num) \(unitRaw)"
             }
@@ -406,16 +444,24 @@ struct ObjectivesAddViewChart: View {
         return values
     }
 
-    private func xAxisLabelFormat() -> Date.FormatStyle {
+    private func xAxisLabel(for date: Date) -> String {
+        let spanDays = Calendar.current.dateComponents([.day], from: fullDateRange().lowerBound, to: fullDateRange().upperBound).day ?? 0
+        let isLongRange = spanDays > 365
+        let formatter = DateFormatter()
         switch selectedTimeRange {
-        case "All":
-            return .dateTime.month(.abbreviated)
         case "W":
-            return .dateTime.weekday(.abbreviated)
+            formatter.dateFormat = "EEE"
+            return formatter.string(from: date)
         case "M":
-            return .dateTime.month(.defaultDigits).day()
+            formatter.dateFormat = "M/d"
+            return formatter.string(from: date)
         default:
-            return .dateTime.month(.abbreviated)
+            if isLongRange {
+                formatter.dateFormat = "MMMM"
+                return String(formatter.string(from: date).prefix(1))
+            }
+            formatter.dateFormat = "MMM"
+            return formatter.string(from: date)
         }
     }
 
@@ -493,7 +539,7 @@ struct AddOutcomeMeasureSheet: View {
                     .keyboardType(.decimalPad)
                     .focused($isMeasureFieldFocused)
                     .onChange(of: measureText) { _, newValue in
-                        measureText = sanitizeDecimalInput(newValue, maxFractionDigits: min(3, max(0, decimalPlaces)))
+                        measureText = sanitizeAndFormatDecimalInputChart(newValue, maxFractionDigits: min(3, max(0, decimalPlaces)))
                     }
             }
             .navigationTitle("Add Measure")
@@ -509,7 +555,7 @@ struct AddOutcomeMeasureSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        let current = Double(measureText) ?? 0
+                        let current = parseFormattedDecimalChart(measureText) ?? 0
                         let selectedDay = Calendar.current.startOfDay(for: measuredDate)
                         let existingSameDay = entries.filter {
                             Calendar.current.isDate($0.measuredAt, inSameDayAs: selectedDay)
@@ -523,6 +569,13 @@ struct AddOutcomeMeasureSheet: View {
                             showOverrideAlert = true
                         }
                     }
+                }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") {
+                        isMeasureFieldFocused = false
+                    }
+                    .foregroundStyle(.blue)
                 }
             }
             .alert("Override existing value?", isPresented: $showOverrideAlert) {
@@ -775,11 +828,11 @@ struct OutcomesAllDataView: View {
         let rounded = (value * p).rounded() / p
         switch formatRaw {
         case ObjectivesAddView.MeasureFormat.dollars.rawValue:
-            return String(format: "$%.\(places)f", rounded)
+            return "$" + groupedDecimalStringChart(rounded, fractionDigits: places)
         case ObjectivesAddView.MeasureFormat.percentage.rawValue:
-            return String(format: "%.\(places)f%%", rounded)
+            return groupedDecimalStringChart(rounded, fractionDigits: places) + "%"
         default:
-            let raw = String(format: "%.\(places)f", rounded)
+            let raw = groupedDecimalStringChart(rounded, fractionDigits: places)
             return unitRaw == ObjectivesAddView.UnitOption.defaultUnit ? raw : "\(raw) \(unitRaw)"
         }
     }

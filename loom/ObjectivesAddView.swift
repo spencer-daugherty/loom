@@ -23,6 +23,40 @@ private func sanitizeDecimalInput(_ input: String, maxFractionDigits: Int = 4) -
     return out
 }
 
+private func parseFormattedDecimal(_ input: String) -> Double? {
+    Double(input.replacingOccurrences(of: ",", with: ""))
+}
+
+private func groupedDecimalString(_ value: Double, fractionDigits: Int) -> String {
+    let places = max(0, min(3, fractionDigits))
+    let formatter = NumberFormatter()
+    formatter.numberStyle = .decimal
+    formatter.usesGroupingSeparator = true
+    formatter.minimumFractionDigits = places
+    formatter.maximumFractionDigits = places
+    return formatter.string(from: NSNumber(value: value)) ?? String(format: "%.\(places)f", value)
+}
+
+private func sanitizeAndFormatDecimalInput(_ input: String, maxFractionDigits: Int = 4) -> String {
+    let clean = sanitizeDecimalInput(input.replacingOccurrences(of: ",", with: ""), maxFractionDigits: maxFractionDigits)
+    guard !clean.isEmpty else { return "" }
+    let hasDot = clean.contains(".")
+    let parts = clean.split(separator: ".", omittingEmptySubsequences: false)
+    let intPartRaw = String(parts.first ?? "")
+    let fractionPart = parts.count > 1 ? String(parts[1]) : ""
+    let intValue = Int(intPartRaw) ?? 0
+    let formatter = NumberFormatter()
+    formatter.numberStyle = .decimal
+    formatter.usesGroupingSeparator = true
+    formatter.minimumFractionDigits = 0
+    formatter.maximumFractionDigits = 0
+    let groupedInt = formatter.string(from: NSNumber(value: intValue)) ?? intPartRaw
+    if hasDot {
+        return groupedInt + "." + fractionPart
+    }
+    return groupedInt
+}
+
 struct ObjectivesAddView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
@@ -43,6 +77,7 @@ struct ObjectivesAddView: View {
     @State private var measureFormat: MeasureFormat = .number
     @State private var measureUnit: String = UnitOption.defaultUnit
     @State private var measureDecimalPlaces: Int = 0
+    let onSaved: ((UUID) -> Void)?
     
     private let outcome: Outcomes?
     private let outcomeMeasure: OutcomesMeasure?
@@ -76,7 +111,7 @@ struct ObjectivesAddView: View {
     }
 
     private var isSaveDisabled: Bool {
-        goal.isEmpty || selectedCategory == .placeholder || (isMeasurable && (measureGoal.isEmpty || Double(measureGoal) == nil))
+        goal.isEmpty || selectedCategory == .placeholder || (isMeasurable && (measureGoal.isEmpty || parseFormattedDecimal(measureGoal) == nil))
     }
 
     private var effectiveStartDate: Date {
@@ -205,9 +240,10 @@ struct ObjectivesAddView: View {
         static let defaultUnit = "none"
     }
 
-    init(outcome: Outcomes? = nil, outcomeMeasure: OutcomesMeasure? = nil) {
+    init(outcome: Outcomes? = nil, outcomeMeasure: OutcomesMeasure? = nil, onSaved: ((UUID) -> Void)? = nil) {
         self.outcome = outcome
         self.outcomeMeasure = outcomeMeasure
+        self.onSaved = onSaved
         if let outcome {
             _goal = State(initialValue: outcome.outcome)
             _reasons = State(initialValue: outcome.reasons)
@@ -313,6 +349,15 @@ struct ObjectivesAddView: View {
                     }
                     .disabled(isSaveDisabled)
                 }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button {
+                        hideKeyboard()
+                    } label: {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.blue)
+                    }
+                }
             }
             .alert("Discard Changes?", isPresented: $isShowingDeleteAlert) {
                 Button("Discard", role: .destructive) { dismiss() }
@@ -364,12 +409,6 @@ struct ObjectivesAddView: View {
             }
         }
         .interactiveDismissDisabled(outcome != nil ? hasChanges : showDeleteButton)
-        .onChange(of: isMeasurable) { _, newValue in
-            guard newValue else { return }
-            if measureGoal.isEmpty {
-                applyOptimizedMeasureDefaults()
-            }
-        }
         .onAppear {
             hydrateMeasureFromLatestEntry()
         }
@@ -390,10 +429,11 @@ struct ObjectivesAddView: View {
     private func saveOutcome() {
         let start = Calendar.current.startOfDay(for: startNow ? .now : startDate)
         let normalizedEndDate = Calendar.current.startOfDay(for: endDate)
-        let measureValue = isMeasurable ? (Double(measureGoal) ?? 0.0) : 0.0
+        let measureValue = isMeasurable ? (parseFormattedDecimal(measureGoal) ?? 0.0) : 0.0
         let formatValue = isMeasurable ? measureFormat.rawValue : nil
         let unitValue = isMeasurable ? measureUnit : nil
         let decimalPlacesValue = isMeasurable ? (measureFormat == .dollars ? 2 : measureDecimalPlaces) : nil
+        var newlyCreatedOutcomeID: UUID?
 
         if let existingOutcome = outcome {
             let previousEndDate = existingOutcome.end
@@ -489,6 +529,7 @@ struct ObjectivesAddView: View {
                 rank: 0,
                 format: formatValue
             )
+            newlyCreatedOutcomeID = newOutcome.outcome_id
             modelContext.insert(newOutcome)
             
             if isMeasurable {
@@ -508,6 +549,9 @@ struct ObjectivesAddView: View {
         }
         
         try? modelContext.save()
+        if let newOutcomeID = newlyCreatedOutcomeID {
+            onSaved?(newOutcomeID)
+        }
         dismiss()
     }
 
@@ -517,19 +561,12 @@ struct ObjectivesAddView: View {
         return max(0, components.day ?? 0)
     }
 
-    private func applyOptimizedMeasureDefaults() {
-        let goalText = goal.lowercased()
-        let isDecrease = ["lose", "reduce", "decrease", "lower", "cut", "drop"].contains { goalText.contains($0) }
-        if measureGoal.isEmpty {
-            measureGoal = isDecrease ? "80" : "100"
-        }
-    }
-
     private func hydrateMeasureFromLatestEntry() {
         guard let outcomeID = outcome?.outcome_id else { return }
         guard let latest = allMeasureEntries.filter({ $0.outcome_id == outcomeID }).max(by: { $0.measuredAt < $1.measuredAt }) else { return }
         if latest.measure_amt != 0 {
-            measureGoal = latest.measure_amt.truncatingRemainder(dividingBy: 1) == 0 ? String(Int(latest.measure_amt)) : String(latest.measure_amt)
+            let places = min(3, max(0, latest.decimalPlaces ?? measureDecimalPlaces))
+            measureGoal = groupedDecimalString(latest.measure_amt, fractionDigits: places)
         }
         if latest.measure != 0 {
             measureCurrent = latest.measure.truncatingRemainder(dividingBy: 1) == 0 ? String(Int(latest.measure)) : String(latest.measure)
@@ -543,6 +580,10 @@ struct ObjectivesAddView: View {
         if let places = latest.decimalPlaces {
             measureDecimalPlaces = min(3, max(0, places))
         }
+    }
+
+    private func hideKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 }
 
@@ -582,6 +623,13 @@ struct ChartActionsSection: View {
     @Binding var measureUnit: String
     @Binding var measureDecimalPlaces: Int
     let onAddMeasure: () -> Void
+    @Query(sort: \OutcomesMeasureEntry.measuredAt, order: .forward) private var allMeasureEntries: [OutcomesMeasureEntry]
+
+    private var addMeasureTitle: String {
+        guard let outcomeId else { return "Add Measure" }
+        let hasAnyMeasureEntries = allMeasureEntries.contains { $0.outcome_id == outcomeId }
+        return hasAnyMeasureEntries ? "Add Measure" : "Add Starting Measure"
+    }
 
     var body: some View {
         Group {
@@ -590,7 +638,7 @@ struct ChartActionsSection: View {
                     Button {
                         onAddMeasure()
                     } label: {
-                        Text("Add Measure")
+                        Text(addMeasureTitle)
                             .foregroundStyle(Color.accentColor)
                     }
 
@@ -622,6 +670,7 @@ struct GoalSection: View {
     var body: some View {
         Section("Goal") {
             TextField("Enter your goal", text: $goal)
+                .submitLabel(.done)
         }
     }
 }
@@ -632,6 +681,7 @@ struct ReasonsSection: View {
     var body: some View {
         Section("Reasons") {
             TextField("Why is this important?", text: $reasons)
+                .submitLabel(.done)
         }
     }
 }
@@ -746,13 +796,9 @@ struct MeasureSection: View {
                     if newFormat == .dollars {
                         measureDecimalPlaces = 2
                     }
-                    guard let value = Double(measureGoal) else { return }
+                    guard let value = parseFormattedDecimal(measureGoal) else { return }
                     let places = newFormat == .dollars ? 2 : min(3, max(0, measureDecimalPlaces))
-                    if places == 0 {
-                        measureGoal = String(Int(value.rounded()))
-                    } else {
-                        measureGoal = String(format: "%.\(places)f", value)
-                    }
+                    measureGoal = groupedDecimalString(value, fractionDigits: places)
                 }
 
                 if measureFormat != .dollars {
@@ -778,23 +824,20 @@ struct MeasureSection: View {
                     }
                     TextField("Goal", text: $measureGoal)
                         .keyboardType(.decimalPad)
+                        .submitLabel(.done)
                         .multilineTextAlignment(.trailing)
                         .frame(width: 100)
                         .onChange(of: measureGoal) { _, newValue in
                             let places = measureFormat == .dollars ? 2 : min(3, max(0, measureDecimalPlaces))
-                            measureGoal = sanitizeDecimalInput(newValue, maxFractionDigits: places)
+                            measureGoal = sanitizeAndFormatDecimalInput(newValue, maxFractionDigits: places)
                         }
                     Text(measureFormat.suffix)
                 }
                 .onChange(of: measureDecimalPlaces) { _, _ in
                     guard measureFormat != .dollars else { return }
-                    guard let value = Double(measureGoal) else { return }
+                    guard let value = parseFormattedDecimal(measureGoal) else { return }
                     let places = min(3, max(0, measureDecimalPlaces))
-                    if places == 0 {
-                        measureGoal = String(Int(value.rounded()))
-                    } else {
-                        measureGoal = String(format: "%.\(places)f", value)
-                    }
+                    measureGoal = groupedDecimalString(value, fractionDigits: places)
                 }
                 
             }
