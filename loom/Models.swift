@@ -418,6 +418,8 @@ final class OutcomesMeasure {
     var measure_updated: Date
     var direction: String?
     var format: String?
+    var unit: String?
+    var decimalPlaces: Int?
 
     init(
         outcome_id: UUID,
@@ -426,7 +428,9 @@ final class OutcomesMeasure {
         measure_amt: Double,
         measure_updated: Date = .now,
         direction: String? = nil,
-        format: String? = nil
+        format: String? = nil,
+        unit: String? = nil,
+        decimalPlaces: Int? = nil
     ) {
         self.outcome_id = outcome_id
         self.measure = measure
@@ -435,6 +439,8 @@ final class OutcomesMeasure {
         self.measure_updated = measure_updated
         self.direction = direction
         self.format = format
+        self.unit = unit
+        self.decimalPlaces = decimalPlaces
     }
 }
 
@@ -448,6 +454,8 @@ final class OutcomesMeasureArchive {
     var archivedAt: Date
     var direction: String?
     var format: String?
+    var unit: String?
+    var decimalPlaces: Int?
 
     init(
         outcome_id: UUID,
@@ -457,7 +465,9 @@ final class OutcomesMeasureArchive {
         measure_updated: Date,
         archivedAt: Date = .now,
         direction: String? = nil,
-        format: String? = nil
+        format: String? = nil,
+        unit: String? = nil,
+        decimalPlaces: Int? = nil
     ) {
         self.outcome_id = outcome_id
         self.measure = measure
@@ -467,6 +477,43 @@ final class OutcomesMeasureArchive {
         self.archivedAt = archivedAt
         self.direction = direction
         self.format = format
+        self.unit = unit
+        self.decimalPlaces = decimalPlaces
+    }
+}
+
+@Model
+final class OutcomesMeasureEntry {
+    @Attribute(.unique) var id: UUID
+    var outcome_id: UUID
+    var measure: Double
+    var measure_amt: Double
+    var measuredAt: Date
+    var createdAt: Date
+    var format: String?
+    var unit: String?
+    var decimalPlaces: Int?
+
+    init(
+        id: UUID = .init(),
+        outcome_id: UUID,
+        measure: Double,
+        measure_amt: Double,
+        measuredAt: Date = .now,
+        createdAt: Date = .now,
+        format: String? = nil,
+        unit: String? = nil,
+        decimalPlaces: Int? = nil
+    ) {
+        self.id = id
+        self.outcome_id = outcome_id
+        self.measure = measure
+        self.measure_amt = measure_amt
+        self.measuredAt = measuredAt
+        self.createdAt = createdAt
+        self.format = format
+        self.unit = unit
+        self.decimalPlaces = decimalPlaces
     }
 }
 

@@ -1,6 +1,28 @@
 import SwiftUI
 import SwiftData
 
+private func sanitizeDecimalInput(_ input: String, maxFractionDigits: Int = 4) -> String {
+    var out = ""
+    var seenDot = false
+    var fractionCount = 0
+    for ch in input {
+        if ch.isWholeNumber {
+            if seenDot {
+                if fractionCount < maxFractionDigits {
+                    out.append(ch)
+                    fractionCount += 1
+                }
+            } else {
+                out.append(ch)
+            }
+        } else if ch == "." && !seenDot {
+            seenDot = true
+            out.append(ch)
+        }
+    }
+    return out
+}
+
 struct ObjectivesAddView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
@@ -14,23 +36,26 @@ struct ObjectivesAddView: View {
     @State private var selectedCategory: Category
     @State private var isShowingDeleteAlert = false
     @State private var isShowingDeleteOutcomeAlert = false
+    @State private var isShowingAddMeasureSheet = false
     @State private var isMeasurable = false
     @State private var measureGoal: String = ""
     @State private var measureCurrent: String = ""
-    @State private var measureDirection: MeasureDirection = .up
     @State private var measureFormat: MeasureFormat = .number
+    @State private var measureUnit: String = UnitOption.defaultUnit
+    @State private var measureDecimalPlaces: Int = 0
     
     private let outcome: Outcomes?
     private let outcomeMeasure: OutcomesMeasure?
+    @Query(sort: \OutcomesMeasureEntry.measuredAt, order: .forward) private var allMeasureEntries: [OutcomesMeasureEntry]
 
     private var hasChanges: Bool {
         if let outcome {
             let measureChanged = if let outcomeMeasure {
                 isMeasurable != (outcomeMeasure.measure_amt != 0) ||
                 (isMeasurable && measureGoal != String(outcomeMeasure.measure_amt)) ||
-                (isMeasurable && measureCurrent != String(outcomeMeasure.measure)) ||
-                (isMeasurable && measureDirection.rawValue != (outcomeMeasure.direction ?? MeasureDirection.up.rawValue)) ||
-                (isMeasurable && measureFormat.rawValue != (outcomeMeasure.format ?? MeasureFormat.number.rawValue))
+                (isMeasurable && measureFormat.rawValue != (outcomeMeasure.format ?? MeasureFormat.number.rawValue)) ||
+                (isMeasurable && measureUnit != (outcomeMeasure.unit ?? UnitOption.defaultUnit)) ||
+                (isMeasurable && measureDecimalPlaces != (outcomeMeasure.decimalPlaces ?? 0))
             } else {
                 isMeasurable
             }
@@ -51,7 +76,7 @@ struct ObjectivesAddView: View {
     }
 
     private var isSaveDisabled: Bool {
-        goal.isEmpty || selectedCategory == .placeholder || (isMeasurable && (measureGoal.isEmpty || measureCurrent.isEmpty || Double(measureGoal) == nil || Double(measureCurrent) == nil))
+        goal.isEmpty || selectedCategory == .placeholder || (isMeasurable && (measureGoal.isEmpty || Double(measureGoal) == nil))
     }
 
     private var effectiveStartDate: Date {
@@ -125,14 +150,59 @@ struct ObjectivesAddView: View {
             }
         }
     }
-    
-    enum MeasureDirection: String, CaseIterable, Identifiable {
-        case up = "↑"
-        case down = "↓"
-        
-        var id: String { rawValue }
-        
-        var symbol: String { rawValue }
+
+    struct UnitOption: Identifiable, Hashable {
+        let id: String
+        let display: String
+
+        static let all: [UnitOption] = [
+            .init(id: "none", display: "None"),
+            .init(id: "lbs", display: "lbs"),
+            .init(id: "oz", display: "oz"),
+            .init(id: "tons", display: "tons"),
+            .init(id: "in", display: "in"),
+            .init(id: "ft", display: "ft"),
+            .init(id: "yd", display: "yd"),
+            .init(id: "mi", display: "mi"),
+            .init(id: "sq ft", display: "sq ft"),
+            .init(id: "acres", display: "acres"),
+            .init(id: "fl oz", display: "fl oz"),
+            .init(id: "cups", display: "cups"),
+            .init(id: "pt", display: "pt"),
+            .init(id: "qt", display: "qt"),
+            .init(id: "gal", display: "gal"),
+            .init(id: "mph", display: "mph"),
+            .init(id: "bpm", display: "bpm"),
+            .init(id: "steps", display: "steps"),
+            .init(id: "cal", display: "cal"),
+            .init(id: "hours", display: "hours"),
+            .init(id: "minutes", display: "minutes"),
+            .init(id: "days", display: "days"),
+            .init(id: "weeks", display: "weeks"),
+            .init(id: "months", display: "months"),
+            .init(id: "years", display: "years"),
+            .init(id: "reps", display: "reps"),
+            .init(id: "sessions", display: "sessions"),
+            .init(id: "visits", display: "visits"),
+            .init(id: "clients", display: "clients"),
+            .init(id: "sales", display: "sales"),
+            .init(id: "leads", display: "leads"),
+            .init(id: "calls", display: "calls"),
+            .init(id: "emails", display: "emails"),
+            .init(id: "tasks", display: "tasks"),
+            .init(id: "books", display: "books"),
+            .init(id: "pages", display: "pages"),
+            .init(id: "courses", display: "courses"),
+            .init(id: "projects", display: "projects"),
+            .init(id: "deliverables", display: "deliverables"),
+            .init(id: "followers", display: "followers"),
+            .init(id: "subscribers", display: "subscribers"),
+            .init(id: "views", display: "views"),
+            .init(id: "downloads", display: "downloads"),
+            .init(id: "streak days", display: "streak days")
+        ]
+
+        static let defaultUnit = "none"
     }
 
     init(outcome: Outcomes? = nil, outcomeMeasure: OutcomesMeasure? = nil) {
@@ -150,14 +220,16 @@ struct ObjectivesAddView: View {
                 _isMeasurable = State(initialValue: outcomeMeasure.measure_amt != 0)
                 _measureGoal = State(initialValue: String(outcomeMeasure.measure_amt))
                 _measureCurrent = State(initialValue: String(outcomeMeasure.measure))
-                _measureDirection = State(initialValue: MeasureDirection(rawValue: outcomeMeasure.direction ?? MeasureDirection.up.rawValue) ?? .up)
                 _measureFormat = State(initialValue: MeasureFormat(rawValue: outcomeMeasure.format ?? MeasureFormat.number.rawValue) ?? .number)
+                _measureUnit = State(initialValue: outcomeMeasure.unit ?? UnitOption.defaultUnit)
+                _measureDecimalPlaces = State(initialValue: outcomeMeasure.decimalPlaces ?? 0)
             } else {
                 _isMeasurable = State(initialValue: false)
                 _measureGoal = State(initialValue: "")
                 _measureCurrent = State(initialValue: "")
-                _measureDirection = State(initialValue: .up)
                 _measureFormat = State(initialValue: .number)
+                _measureUnit = State(initialValue: UnitOption.defaultUnit)
+                _measureDecimalPlaces = State(initialValue: 0)
             }
         } else {
             _goal = State(initialValue: "")
@@ -170,8 +242,9 @@ struct ObjectivesAddView: View {
             _isMeasurable = State(initialValue: false)
             _measureGoal = State(initialValue: "")
             _measureCurrent = State(initialValue: "")
-            _measureDirection = State(initialValue: .up)
             _measureFormat = State(initialValue: .number)
+            _measureUnit = State(initialValue: UnitOption.defaultUnit)
+            _measureDecimalPlaces = State(initialValue: 0)
         }
     }
 
@@ -182,10 +255,21 @@ struct ObjectivesAddView: View {
                     isMeasurable: isMeasurable,
                     hasOutcome: outcome != nil,
                     outcomeId: outcome?.outcome_id,
-                    measureCurrent: $measureCurrent,
                     measureGoal: $measureGoal,
                     measureFormat: $measureFormat,
-                    measureDirection: $measureDirection
+                    measureUnit: $measureUnit,
+                    measureDecimalPlaces: $measureDecimalPlaces
+                )
+                ChartActionsSection(
+                    isMeasurable: isMeasurable,
+                    hasOutcome: outcome != nil,
+                    outcomeId: outcome?.outcome_id,
+                    measureFormat: $measureFormat,
+                    measureUnit: $measureUnit,
+                    measureDecimalPlaces: $measureDecimalPlaces,
+                    onAddMeasure: {
+                        isShowingAddMeasureSheet = true
+                    }
                 )
                 GoalSection(goal: $goal)
                 ReasonsSection(reasons: $reasons)
@@ -198,9 +282,8 @@ struct ObjectivesAddView: View {
                 MeasureSection(
                     isMeasurable: $isMeasurable,
                     measureGoal: $measureGoal,
-                    measureCurrent: $measureCurrent,
-                    measureDirection: $measureDirection,
-                    measureFormat: $measureFormat
+                    measureFormat: $measureFormat,
+                    measureDecimalPlaces: $measureDecimalPlaces
                 )
                 CategorySection(selectedCategory: $selectedCategory)
                 if outcome != nil {
@@ -260,7 +343,9 @@ struct ObjectivesAddView: View {
                                 measure_updated: outcomeMeasure.measure_updated,
                                 archivedAt: .now,
                                 direction: outcomeMeasure.direction,
-                                format: outcomeMeasure.format
+                                format: outcomeMeasure.format,
+                                unit: outcomeMeasure.unit,
+                                decimalPlaces: outcomeMeasure.decimalPlaces
                             )
                             modelContext.insert(archivedMeasure)
                             modelContext.delete(outcomeMeasure)
@@ -277,15 +362,36 @@ struct ObjectivesAddView: View {
             }
         }
         .interactiveDismissDisabled(outcome != nil ? hasChanges : showDeleteButton)
+        .onChange(of: isMeasurable) { _, newValue in
+            guard newValue else { return }
+            if measureGoal.isEmpty {
+                applyOptimizedMeasureDefaults()
+            }
+        }
+        .onAppear {
+            hydrateMeasureFromLatestEntry()
+        }
+        .sheet(isPresented: $isShowingAddMeasureSheet) {
+            if let outcomeID = outcome?.outcome_id {
+                AddOutcomeMeasureSheet(
+                    outcomeID: outcomeID,
+                    formatRaw: measureFormat.rawValue,
+                    unitRaw: measureUnit,
+                    decimalPlaces: measureDecimalPlaces
+                )
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+            }
+        }
     }
 
     private func saveOutcome() {
         let start = Calendar.current.startOfDay(for: startNow ? .now : startDate)
         let normalizedEndDate = Calendar.current.startOfDay(for: endDate)
         let measureValue = isMeasurable ? (Double(measureGoal) ?? 0.0) : 0.0
-        let currentValue = isMeasurable ? (Double(measureCurrent) ?? 0.0) : 0.0
-        let directionValue = isMeasurable ? measureDirection.rawValue : nil
         let formatValue = isMeasurable ? measureFormat.rawValue : nil
+        let unitValue = isMeasurable ? measureUnit : nil
+        let decimalPlacesValue = isMeasurable ? measureDecimalPlaces : nil
 
         if let existingOutcome = outcome {
             if existingOutcome.outcome != goal ||
@@ -318,21 +424,23 @@ struct ObjectivesAddView: View {
             
             if isMeasurable {
                 if let existingMeasure = try? modelContext.fetch(FetchDescriptor<OutcomesMeasure>()).first(where: { $0.outcome_id == existingOutcome.outcome_id }) {
-                    existingMeasure.measure = currentValue
                     existingMeasure.measure_amt = measureValue
-                    existingMeasure.measuredAt = .now
                     existingMeasure.measure_updated = .now
-                    existingMeasure.direction = directionValue
+                    existingMeasure.direction = nil
                     existingMeasure.format = formatValue
+                    existingMeasure.unit = unitValue
+                    existingMeasure.decimalPlaces = decimalPlacesValue
                 } else {
                     let newMeasure = OutcomesMeasure(
                         outcome_id: existingOutcome.outcome_id,
-                        measure: currentValue,
-                        measuredAt: .now,
+                        measure: 0,
+                        measuredAt: existingOutcome.start,
                         measure_amt: measureValue,
                         measure_updated: .now,
-                        direction: directionValue,
-                        format: formatValue
+                        direction: nil,
+                        format: formatValue,
+                        unit: unitValue,
+                        decimalPlaces: decimalPlacesValue
                     )
                     modelContext.insert(newMeasure)
                 }
@@ -358,12 +466,14 @@ struct ObjectivesAddView: View {
             if isMeasurable {
                 let newMeasure = OutcomesMeasure(
                     outcome_id: newOutcome.outcome_id,
-                    measure: currentValue,
-                    measuredAt: .now,
+                    measure: 0,
+                    measuredAt: start,
                     measure_amt: measureValue,
                     measure_updated: .now,
-                    direction: directionValue,
-                    format: formatValue
+                    direction: nil,
+                    format: formatValue,
+                    unit: unitValue,
+                    decimalPlaces: decimalPlacesValue
                 )
                 modelContext.insert(newMeasure)
             }
@@ -378,24 +488,107 @@ struct ObjectivesAddView: View {
         let components = calendar.dateComponents([.day], from: start, to: end)
         return max(0, components.day ?? 0)
     }
+
+    private func applyOptimizedMeasureDefaults() {
+        let goalText = goal.lowercased()
+        let isDecrease = ["lose", "reduce", "decrease", "lower", "cut", "drop"].contains { goalText.contains($0) }
+        if measureGoal.isEmpty {
+            measureGoal = isDecrease ? "80" : "100"
+        }
+    }
+
+    private func hydrateMeasureFromLatestEntry() {
+        guard let outcomeID = outcome?.outcome_id else { return }
+        guard let latest = allMeasureEntries.filter({ $0.outcome_id == outcomeID }).max(by: { $0.measuredAt < $1.measuredAt }) else { return }
+        if latest.measure_amt != 0 {
+            measureGoal = latest.measure_amt.truncatingRemainder(dividingBy: 1) == 0 ? String(Int(latest.measure_amt)) : String(latest.measure_amt)
+        }
+        if latest.measure != 0 {
+            measureCurrent = latest.measure.truncatingRemainder(dividingBy: 1) == 0 ? String(Int(latest.measure)) : String(latest.measure)
+        }
+        if let formatRaw = latest.format, let format = MeasureFormat(rawValue: formatRaw) {
+            measureFormat = format
+        }
+        if let unit = latest.unit {
+            measureUnit = unit
+        }
+        if let places = latest.decimalPlaces {
+            measureDecimalPlaces = min(3, max(0, places))
+        }
+    }
 }
 
 struct ChartSection: View {
     let isMeasurable: Bool
     let hasOutcome: Bool
     let outcomeId: UUID?
-    @Binding var measureCurrent: String
     @Binding var measureGoal: String
     @Binding var measureFormat: ObjectivesAddView.MeasureFormat
-    @Binding var measureDirection: ObjectivesAddView.MeasureDirection
+    @Binding var measureUnit: String
+    @Binding var measureDecimalPlaces: Int
 
     var body: some View {
         Group {
             if isMeasurable && hasOutcome && outcomeId != nil {
-                VStack(alignment: .leading, spacing: 16) {
-                    ObjectivesAddViewChart(outcome_id: outcomeId!)
+                Section {
+                    VStack(alignment: .leading, spacing: 16) {
+                        ObjectivesAddViewChart(
+                            outcome_id: outcomeId!,
+                            formatRaw: measureFormat.rawValue,
+                            unitRaw: measureUnit,
+                            decimalPlaces: measureDecimalPlaces
+                        )
+                    }
+                    .padding(.vertical, 8)
                 }
-                .padding(.vertical, 8)
+            }
+        }
+    }
+}
+
+struct ChartActionsSection: View {
+    let isMeasurable: Bool
+    let hasOutcome: Bool
+    let outcomeId: UUID?
+    @Binding var measureFormat: ObjectivesAddView.MeasureFormat
+    @Binding var measureUnit: String
+    @Binding var measureDecimalPlaces: Int
+    let onAddMeasure: () -> Void
+
+    var body: some View {
+        Group {
+            if isMeasurable && hasOutcome, let outcomeId {
+                Section {
+                    Button {
+                        onAddMeasure()
+                    } label: {
+                        Text("Add Measure")
+                            .font(.body)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .listRowBackground(Color(.secondarySystemBackground))
+
+                    NavigationLink {
+                        OutcomesAllDataView(
+                            outcomeID: outcomeId,
+                            formatRaw: measureFormat.rawValue,
+                            unitRaw: measureUnit,
+                            decimalPlaces: measureDecimalPlaces
+                        )
+                    } label: {
+                        Text("Show All Data")
+                            .font(.body)
+                    }
+                    .listRowBackground(Color(.secondarySystemBackground))
+
+                    NavigationLink {
+                        DataSourcesPlaceholderView()
+                    } label: {
+                        Text("Data Sources & Access")
+                            .font(.body)
+                    }
+                    .listRowBackground(Color(.secondarySystemBackground))
+                }
             }
         }
     }
@@ -508,12 +701,11 @@ struct TargetSection: View {
 struct MeasureSection: View {
     @Binding var isMeasurable: Bool
     @Binding var measureGoal: String
-    @Binding var measureCurrent: String
-    @Binding var measureDirection: ObjectivesAddView.MeasureDirection
     @Binding var measureFormat: ObjectivesAddView.MeasureFormat
+    @Binding var measureDecimalPlaces: Int
 
     var body: some View {
-        Section("Measure") {
+        Section("Measure Data") {
             Toggle("Outcome is measurable", isOn: $isMeasurable)
             
             if isMeasurable {
@@ -523,6 +715,19 @@ struct MeasureSection: View {
                     }
                 }
                 .pickerStyle(.segmented)
+
+                HStack {
+                    Text("Decimal")
+                    Spacer()
+                    Picker("Decimal", selection: $measureDecimalPlaces) {
+                        Text("No").tag(0)
+                        Text("0.0").tag(1)
+                        Text("0.00").tag(2)
+                        Text("0.000").tag(3)
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                }
                 
                 HStack {
                     Text("Goal")
@@ -535,44 +740,20 @@ struct MeasureSection: View {
                         .multilineTextAlignment(.trailing)
                         .frame(width: 100)
                         .onChange(of: measureGoal) { _, newValue in
-                            measureGoal = newValue.filter { "0123456789.".contains($0) }
-                            if newValue.components(separatedBy: ".").count > 2 {
-                                measureGoal = String(newValue.prefix(while: { $0 != "." }) + newValue.drop(while: { $0 != "." }).prefix(2))
-                            }
+                            measureGoal = sanitizeDecimalInput(newValue, maxFractionDigits: min(3, max(0, measureDecimalPlaces)))
                         }
                     Text(measureFormat.suffix)
                 }
-                
-                HStack {
-                    Text("Current")
-                    Spacer()
-                    if measureFormat == .dollars {
-                        Text("$")
+                .onChange(of: measureDecimalPlaces) { _, _ in
+                    guard let value = Double(measureGoal) else { return }
+                    let places = min(3, max(0, measureDecimalPlaces))
+                    if places == 0 {
+                        measureGoal = String(Int(value.rounded()))
+                    } else {
+                        measureGoal = String(format: "%.\(places)f", value)
                     }
-                    TextField("Current", text: $measureCurrent)
-                        .keyboardType(.decimalPad)
-                        .multilineTextAlignment(.trailing)
-                        .frame(width: 100)
-                        .onChange(of: measureCurrent) { _, newValue in
-                            measureCurrent = newValue.filter { "0123456789.".contains($0) }
-                            if newValue.components(separatedBy: ".").count > 2 {
-                                measureCurrent = String(newValue.prefix(while: { $0 != "." }) + newValue.drop(while: { $0 != "." }).prefix(2))
-                            }
-                        }
-                    Text(measureFormat.suffix)
                 }
                 
-                HStack {
-                    Text("Direction")
-                    Spacer()
-                    Picker("Direction", selection: $measureDirection) {
-                        ForEach(ObjectivesAddView.MeasureDirection.allCases) { direction in
-                            Text(direction.symbol).tag(direction)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 100)
-                }
             }
         }
     }
@@ -646,6 +827,15 @@ struct DeleteOutcomeSection: View {
 struct ObjectivesAddView_Previews: PreviewProvider {
     static var previews: some View {
         ObjectivesAddView()
-            .modelContainer(for: [Outcomes.self, OutcomesArchive.self, OutcomesMeasure.self, OutcomesMeasureArchive.self], inMemory: true)
+            .modelContainer(
+                for: [
+                    Outcomes.self,
+                    OutcomesArchive.self,
+                    OutcomesMeasure.self,
+                    OutcomesMeasureArchive.self,
+                    OutcomesMeasureEntry.self
+                ],
+                inMemory: true
+            )
     }
 }

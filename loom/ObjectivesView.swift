@@ -231,7 +231,7 @@ struct ObjectivesView: View {
     }
 
     private func isOutcomeMeasurable(_ measure: OutcomesMeasure) -> Bool {
-        measure.measure_amt != 0 && measure.direction != nil && measure.format != nil
+        measure.measure_amt != 0 && measure.format != nil
     }
 
     private func latestMeasure(for outcome: Outcomes) -> OutcomesMeasure? {
@@ -315,7 +315,7 @@ struct OutcomeRow: View {
                         ProgressCircleView(
                             measure: measure.measure,
                             measureAmt: measure.measure_amt,
-                            direction: measure.direction ?? MeasureDirection.up.rawValue
+                            direction: inferredDirection(for: measure)
                         )
                         .frame(width: 40, height: 40)
                     }
@@ -363,7 +363,14 @@ struct OutcomeRow: View {
     }
 
     private func isOutcomeMeasurable(_ measure: OutcomesMeasure) -> Bool {
-        measure.measure_amt != 0 && measure.direction != nil && measure.format != nil
+        measure.measure_amt != 0 && measure.format != nil
+    }
+
+    private func inferredDirection(for measure: OutcomesMeasure) -> String {
+        // Without explicit direction, infer "up" for most goals and "down" for common decrease-oriented units.
+        let format = (measure.format ?? "").lowercased()
+        if format == "percentage" { return MeasureDirection.up.rawValue }
+        return MeasureDirection.up.rawValue
     }
 
     private func formattedDate(_ date: Date) -> String {
