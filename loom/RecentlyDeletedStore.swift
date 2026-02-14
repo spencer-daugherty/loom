@@ -13,6 +13,7 @@ enum RecentlyDeletedStore {
         var format: String?
         var measure: MeasureSnapshot?
         var measureEntries: [MeasureEntrySnapshot]
+        var contributions: [OutcomeContributionSnapshot]?
     }
 
     private struct MeasureSnapshot: Codable {
@@ -43,6 +44,16 @@ enum RecentlyDeletedStore {
         var createdAt: Date
         var unhideDate: Date?
         var unhiddenAt: Date?
+    }
+
+    private struct OutcomeContributionSnapshot: Codable {
+        var id: UUID
+        var archiveId: UUID
+        var weekStart: Date
+        var outcomeId: UUID
+        var plannedChunkActionId: UUID
+        var actionText: String
+        var completedAt: Date
     }
 
     static func trash(_ model: any PersistentModel, in context: ModelContext, source: String = "") {
@@ -140,6 +151,29 @@ enum RecentlyDeletedStore {
                         format: entry.format,
                         unit: entry.unit,
                         decimalPlaces: entry.decimalPlaces
+                    )
+                )
+            }
+
+            let existingContribs = (try? context.fetch(FetchDescriptor<ActionBlocksReflectionOutcomeContribution>())) ?? []
+            let existingContribIDs = Set(existingContribs.map(\.id))
+            let existingContribKeys = Set(existingContribs.map {
+                "\($0.archiveId.uuidString)|\($0.plannedChunkActionId.uuidString)|\($0.outcomeId.uuidString)"
+            })
+            for contribution in decoded.contributions ?? [] {
+                let key = "\(contribution.archiveId.uuidString)|\(contribution.plannedChunkActionId.uuidString)|\(contribution.outcomeId.uuidString)"
+                if existingContribIDs.contains(contribution.id) || existingContribKeys.contains(key) {
+                    continue
+                }
+                context.insert(
+                    ActionBlocksReflectionOutcomeContribution(
+                        id: contribution.id,
+                        archiveId: contribution.archiveId,
+                        weekStart: contribution.weekStart,
+                        outcomeId: contribution.outcomeId,
+                        plannedChunkActionId: contribution.plannedChunkActionId,
+                        actionText: contribution.actionText,
+                        completedAt: contribution.completedAt
                     )
                 )
             }
@@ -249,6 +283,8 @@ enum RecentlyDeletedStore {
             let measure = allMeasures.first(where: { $0.outcome_id == m.outcome_id })
             let allEntries = (try? context.fetch(FetchDescriptor<OutcomesMeasureEntry>())) ?? []
             let outcomeEntries = allEntries.filter { $0.outcome_id == m.outcome_id }
+            let allContributions = (try? context.fetch(FetchDescriptor<ActionBlocksReflectionOutcomeContribution>())) ?? []
+            let outcomeContributions = allContributions.filter { $0.outcomeId == m.outcome_id }
             let latestEntry = outcomeEntries.max(by: { $0.measuredAt < $1.measuredAt })
 
             let snapMeasure = latestEntry?.measure ?? measure?.measure
@@ -290,6 +326,17 @@ enum RecentlyDeletedStore {
                         unit: $0.unit,
                         decimalPlaces: $0.decimalPlaces
                     )
+                },
+                contributions: outcomeContributions.map {
+                    OutcomeContributionSnapshot(
+                        id: $0.id,
+                        archiveId: $0.archiveId,
+                        weekStart: $0.weekStart,
+                        outcomeId: $0.outcomeId,
+                        plannedChunkActionId: $0.plannedChunkActionId,
+                        actionText: $0.actionText,
+                        completedAt: $0.completedAt
+                    )
                 }
             )
 
@@ -305,6 +352,21 @@ enum RecentlyDeletedStore {
                 createdAt: m.createdAt,
                 unhideDate: m.unhideDate,
                 unhiddenAt: m.unhiddenAt
+            )
+            if let data = try? encoder.encode(snapshot) {
+                return String(data: data, encoding: .utf8)
+            }
+        }
+
+        if let m = model as? ActionBlocksReflectionOutcomeContribution {
+            let snapshot = OutcomeContributionSnapshot(
+                id: m.id,
+                archiveId: m.archiveId,
+                weekStart: m.weekStart,
+                outcomeId: m.outcomeId,
+                plannedChunkActionId: m.plannedChunkActionId,
+                actionText: m.actionText,
+                completedAt: m.completedAt
             )
             if let data = try? encoder.encode(snapshot) {
                 return String(data: data, encoding: .utf8)

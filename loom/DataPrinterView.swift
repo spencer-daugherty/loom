@@ -854,7 +854,11 @@ struct RecentlyDeletedView: View {
     @Query(sort: \RecentlyDeletedItem.deletedAt, order: .reverse) private var items: [RecentlyDeletedItem]
     @State private var showRecoverFailedAlert = false
     private var visibleItems: [RecentlyDeletedItem] {
-        items.filter { $0.entityType != "OutcomesMeasure" && $0.entityType != "OutcomesMeasureEntry" }
+        items.filter {
+            $0.entityType != "OutcomesMeasure" &&
+            $0.entityType != "OutcomesMeasureEntry" &&
+            $0.entityType != "ActionBlocksReflectionOutcomeContribution"
+        }
     }
 
     var body: some View {

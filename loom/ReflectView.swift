@@ -546,16 +546,23 @@ struct ReflectView: View {
 
                         VStack(spacing: 2) {
                             Text("Action Blocks")
-                                .font(.system(size: 22, weight: .bold))
+                                .font(.system(size: 24, weight: .bold))
                                 .foregroundStyle(colorScheme == .dark ? .white : .black)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                                .frame(maxWidth: .infinity)
                             Text("DONE!")
-                                .font(.system(size: 34, weight: .black))
+                                .font(.system(size: 44, weight: .black))
                                 .foregroundStyle(colorScheme == .dark ? .white : .black)
-                                .minimumScaleFactor(0.6)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
                                 .frame(maxWidth: .infinity)
                         }
-                        .frame(width: 190)
-                        .position(x: geo.size.width * 0.5, y: geo.size.height * 0.85)
+                        .frame(width: 230)
+                        .position(
+                            x: geo.size.width * 0.5,
+                            y: max(geo.safeAreaInsets.top + 48, geo.size.height * 0.18)
+                        )
 
                         Image("logo")
                             .resizable()
