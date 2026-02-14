@@ -678,11 +678,13 @@ struct OutcomeView: View {
                             }
                         } else {
                             Picker("Success Level", selection: $completionSuccessLevel) {
-                                ForEach(1...5, id: \.self) { level in
-                                    Text("\(level)/5").tag(level)
-                                }
+                                Text("Regressed Significantly").tag(1)
+                                Text("Regressed Somewhat").tag(2)
+                                Text("Partially Acheived").tag(3)
+                                Text("Fully Acheived").tag(4)
+                                Text("Overacheived").tag(5)
                             }
-                            .pickerStyle(.segmented)
+                            .pickerStyle(.menu)
                         }
 
                         HStack {
@@ -718,6 +720,14 @@ struct OutcomeView: View {
                     completionRecordedDate = Calendar.current.startOfDay(for: .now)
                 }
                 .toolbar {
+                    ToolbarItemGroup(placement: .keyboard) {
+                        Spacer()
+                        Button("Done") {
+                            completionJournalFocusedField = nil
+                            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                        }
+                        .foregroundStyle(.blue)
+                    }
                     ToolbarItem(placement: .cancellationAction) {
                         Button("Cancel") { isShowingCompleteOutcomeSheet = false }
                     }
@@ -726,14 +736,6 @@ struct OutcomeView: View {
                             finalizeOutcomeCompletion()
                         }
                         .disabled(!completionFormValid)
-                    }
-                    ToolbarItemGroup(placement: .keyboard) {
-                        Spacer()
-                        Button("Done") {
-                            completionJournalFocusedField = nil
-                            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                        }
-                        .foregroundStyle(.blue)
                     }
                 }
             }

@@ -65,6 +65,10 @@ struct ObjectivesView: View {
         return filtered
     }
 
+    private var sortedCompletedOutcomes: [CompletedOutcomeArchive] {
+        completedOutcomeArchives.sorted { $0.completedAt > $1.completedAt }
+    }
+
     var body: some View {
         ZStack {
             (colorScheme == .dark ? Color.black : Color(.systemGray6))
@@ -167,14 +171,14 @@ struct ObjectivesView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
 
                         if showCompletedOutcomesPlaceholder {
-                            if completedOutcomeArchives.isEmpty {
+                            if sortedCompletedOutcomes.isEmpty {
                                 Text("No completed outcomes yet.")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .padding(.leading, 2)
                             } else {
-                                ForEach(completedOutcomeArchives) { archive in
+                                ForEach(sortedCompletedOutcomes) { archive in
                                     Button {
                                         navigationAction = .completedOutcome(archive)
                                     } label: {
@@ -589,6 +593,12 @@ struct CompletedOutcomeRow: View {
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Spacer()
+                    Text("\(formattedDate(archive.start)) - \(formattedDate(archive.completedAt))")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                }
                 Text(archive.outcome)
                     .font(.title3)
                     .fontWeight(.semibold)
@@ -618,10 +628,72 @@ struct CompletedOutcomeRow: View {
                             .fill(lightenedCategoryColor(for: archive.category))
                     )
                     .frame(height: 44)
+
+                    if archive.isMeasurable {
+                        VStack(spacing: 2) {
+                            Text(archive.goalMet ? "Met" : "Not Met")
+                                .font(.title3)
+                                .fontWeight(.bold)
+                                .foregroundColor(archive.goalMet ? .green : .red)
+                            Text("goal status")
+                                .font(.caption2)
+                                .foregroundColor(.black)
+                        }
+                        .padding(.vertical, 6)
+                        .padding(.horizontal, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color(.systemGray5))
+                        )
+                        .frame(height: 44)
+
+                        MeasurableOutcomeBox(
+                            measure: archive.finalValue ?? 0,
+                            measuredAt: archive.completedAt,
+                            measureAmt: archive.goalValue ?? 0,
+                            endDate: archive.end,
+                            format: archive.format ?? ObjectivesAddView.MeasureFormat.number.rawValue
+                        )
+                        .frame(height: 44)
+
+                        ProgressCircleView(
+                            measure: archive.finalValue ?? 0,
+                            measureAmt: archive.goalValue ?? 0,
+                            startMeasure: 0
+                        )
+                        .frame(width: 40, height: 40)
+                    } else {
+                        VStack(spacing: 2) {
+                            Text("\(successLevelNumber)/5")
+                                .font(.title3)
+                                .fontWeight(.bold)
+                                .foregroundColor(.primary)
+                            Text("success")
+                                .font(.caption2)
+                                .foregroundColor(.primary)
+                        }
+                        .padding(.vertical, 6)
+                        .padding(.horizontal, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color(.systemGray5))
+                        )
+                        .frame(height: 44)
+
+                        Text(successDescription(for: successLevelNumber))
+                            .font(.system(size: 40, weight: .bold))
+                            .foregroundStyle(.gray)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.1)
+                            .allowsTightening(true)
+                            .frame(maxWidth: .infinity, minHeight: 44, maxHeight: 44, alignment: .leading)
+                            .padding(.horizontal, 10)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.gray, lineWidth: 3)
+                            )
+                    }
                 }
-                Divider()
-                    .background(Color.gray.opacity(0.3))
-                    .padding(.top, 20)
             }
             Spacer()
             Image(systemName: "chevron.right")
@@ -647,6 +719,27 @@ struct CompletedOutcomeRow: View {
     private func lightenedCategoryColor(for category: String) -> Color {
         let baseColor = UIColor(categoryColor(for: category))
         return Color(baseColor.adjusted(by: 0.8))
+    }
+
+    private var successLevelNumber: Int {
+        max(1, min(5, archive.successLevel ?? 3))
+    }
+
+    private func successDescription(for level: Int) -> String {
+        switch level {
+        case 1: return "Regressed Significantly"
+        case 2: return "Regressed Somewhat"
+        case 3: return "Partially Acheived"
+        case 4: return "Fully Acheived"
+        case 5: return "Overacheived"
+        default: return "Partially Acheived"
+        }
+    }
+
+    private func formattedDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "M/d/yy"
+        return formatter.string(from: date)
     }
 }
 
@@ -698,7 +791,11 @@ struct CompletedOutcomeDetailView: View {
                         HStack(spacing: 8) {
                             metricPill(value: "\(archive.daysElapsed)d", caption: "elapsed")
                             if archive.isMeasurable {
-                                metricPill(value: archive.goalMet ? "Met" : "Not Met", caption: "goal status")
+                                metricPill(
+                                    value: archive.goalMet ? "Met" : "Not Met",
+                                    caption: "goal status",
+                                    valueColor: archive.goalMet ? .green : .red
+                                )
                             } else if let success = archive.successLevel {
                                 metricPill(value: "\(success)/5", caption: "success")
                             }
@@ -767,10 +864,11 @@ struct CompletedOutcomeDetailView: View {
         }
     }
 
-    private func metricPill(value: String, caption: String) -> some View {
+    private func metricPill(value: String, caption: String, valueColor: Color = .primary) -> some View {
         VStack(spacing: 2) {
             Text(value)
                 .font(.title3.weight(.bold))
+                .foregroundStyle(valueColor)
             Text(caption)
                 .font(.caption2)
         }
