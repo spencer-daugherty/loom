@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import Charts
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -161,21 +162,26 @@ struct FulfillmentView: View {
                         }
                 }
 
-                VStack(spacing: 16) {
+                VStack(spacing: 0) {
                     fulfillmentRadarHeader
+                        .padding(.horizontal)
+                        .padding(.top)
+                        .background(Color(.systemGray6))
 
-                    ForEach(categories) { cat in
-                        card(
-                            id: cat.id,
-                            title: cat.title,
-                            iconName: batteryIconName(for: cat.title),
-                            color: cat.color,
-                            lightColor: lightColor(for: cat.id)
-                        )
+                    VStack(spacing: 16) {
+                        ForEach(categories) { cat in
+                            card(
+                                id: cat.id,
+                                title: cat.title,
+                                iconName: batteryIconName(for: cat.title),
+                                color: cat.color,
+                                lightColor: lightColor(for: cat.id)
+                            )
+                        }
+                        Spacer()
                     }
-                    Spacer()
+                    .padding()
                 }
-                .padding()
             }
         }
         .navigationTitle("Fulfillment")
@@ -224,12 +230,13 @@ struct FulfillmentView: View {
     private var fulfillmentRadarHeader: some View {
         GeometryReader { geo in
             let width = geo.size.width
-            let graphWidth = max(120, width * 0.40)
-            let leftWidth = max(120, width - graphWidth - 28)
+            let baseGraphWidth = max(120, width * 0.40)
+            let graphWidth = baseGraphWidth * 1.2
+            let leftWidth = max(120, width - baseGraphWidth - 28)
             let selected = categories[highlightedCategoryIndex]
             let selectedScore = radarScore(for: selected.title)
 
-            HStack(alignment: .top, spacing: 12) {
+            HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(selected.title)
                         .font(.headline)
@@ -248,23 +255,60 @@ struct FulfillmentView: View {
                                 .font(.system(size: 26, weight: .bold))
                                 .foregroundStyle(.white)
                         }
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("analyzed:")
+                            .font(.caption)
+                            .fontWeight(.bold)
+                            .foregroundStyle(.gray)
+                        Text("• Outcome progress")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text("• Action block completion")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text("• Three-to-Thrive consistency")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text("• Category engagement")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text("• Momentum")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer(minLength: 4)
+
+                    NavigationLink {
+                        FulfillmentTrendsView()
+                    } label: {
+                        Text("Show trends")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.blue)
+                    }
+                    .buttonStyle(.plain)
                 }
                 .frame(width: leftWidth, alignment: .leading)
 
-                FulfillmentInteractiveRadar(
-                    metrics: fulfillmentMetrics,
-                    selectedIndex: $highlightedCategoryIndex,
-                    onManualSelect: {
-                        radarAutoRotatePausedUntil = Date().addingTimeInterval(20)
-                    }
-                )
-                .frame(width: graphWidth, height: graphWidth)
-                .frame(maxHeight: .infinity, alignment: .top)
+                ZStack(alignment: .topTrailing) {
+                    FulfillmentInteractiveRadar(
+                        metrics: fulfillmentMetrics,
+                        selectedIndex: $highlightedCategoryIndex,
+                        onManualSelect: {
+                            radarAutoRotatePausedUntil = Date().addingTimeInterval(20)
+                        }
+                    )
+                    .frame(width: graphWidth, height: graphWidth, alignment: .topTrailing)
+                }
+                .frame(width: baseGraphWidth, height: baseGraphWidth, alignment: .topTrailing)
 
                 Spacer(minLength: 0)
             }
         }
-        .frame(height: 170)
+        .frame(height: 245)
+        .padding(.bottom, 8)
     }
 
     private func commitInlineIfNeeded() {
@@ -819,6 +863,183 @@ struct FulfillmentView: View {
     }
 }
 
+private struct FulfillmentTrendRow: Identifiable {
+    let id = UUID()
+    let monthIndex: Int
+    let month: String
+    let category: String
+    let value: Double
+}
+
+private struct FulfillmentTrendsView: View {
+    private let rows: [FulfillmentTrendRow] = FulfillmentTrendsView.buildRows()
+    private let months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    private let categoryStyleScale: KeyValuePairs<String, Color> = [
+        "Career & Business": .blue,
+        "Leadership & Impact": .indigo,
+        "Wealth & Lifestyle": .green,
+        "Mind & Meaning": .purple,
+        "Love & Relationships": .red,
+        "Health & Vitality": .orange
+    ]
+
+    private let colorScale: [String: Color] = [
+        "Career & Business": .blue,
+        "Leadership & Impact": .indigo,
+        "Wealth & Lifestyle": .green,
+        "Mind & Meaning": .purple,
+        "Love & Relationships": .red,
+        "Health & Vitality": .orange
+    ]
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                Chart(rows) { row in
+                    AreaMark(
+                        x: .value("Month", row.monthIndex),
+                        y: .value("Score", row.value),
+                        stacking: .standard
+                    )
+                    .foregroundStyle(by: .value("Category", row.category))
+                    .interpolationMethod(.catmullRom)
+                }
+                .chartForegroundStyleScale(categoryStyleScale)
+                .chartXScale(domain: 0...11)
+                .chartXAxis {
+                    AxisMarks(values: Array(0...11)) { value in
+                        AxisGridLine()
+                        AxisTick()
+                        AxisValueLabel {
+                            if let i = value.as(Int.self), i >= 0, i < months.count {
+                                Text(months[i])
+                            }
+                        }
+                    }
+                }
+                .chartYScale(domain: 0...25)
+                .chartYAxis {
+                    AxisMarks(position: .trailing, values: Array(stride(from: 0, through: 25, by: 5))) { _ in
+                        AxisGridLine()
+                        AxisTick()
+                        AxisValueLabel()
+                    }
+                }
+                .frame(height: 250)
+                .opacity(0.2)
+                .overlay {
+                    VStack(spacing: 4) {
+                        Text("Not Available Yet")
+                            .font(.title3)
+                            .fontWeight(.bold)
+                        Text("History and trends will be available over time.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 16)
+                }
+
+                insightsSkeleton
+            }
+            .padding(.horizontal)
+            .padding(.top, 4)
+            .padding(.bottom, 12)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .navigationTitle("Fulfillment Trends")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var insightsSkeleton: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                skeletonTile()
+                skeletonTile()
+                skeletonTile()
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                skeletonLine(width: 180, height: 12)
+                skeletonSignalRow()
+                skeletonSignalRow()
+                skeletonSignalRow()
+            }
+            .padding(10)
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+
+            VStack(alignment: .leading, spacing: 8) {
+                skeletonCapsuleRow()
+                skeletonCapsuleRow()
+                skeletonCapsuleRow()
+            }
+        }
+    }
+
+    private func skeletonTile() -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            skeletonLine(width: 54, height: 8)
+            skeletonLine(width: 42, height: 16)
+            skeletonLine(width: 62, height: 8)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func skeletonSignalRow() -> some View {
+        HStack(spacing: 8) {
+            RoundedRectangle(cornerRadius: 4)
+                .fill(Color(.systemGray4))
+                .frame(width: 14, height: 14)
+            skeletonLine(width: 130, height: 11)
+            Spacer(minLength: 0)
+            skeletonLine(width: 70, height: 11)
+        }
+    }
+
+    private func skeletonCapsuleRow() -> some View {
+        HStack(spacing: 8) {
+            skeletonLine(width: 140, height: 12)
+            Spacer(minLength: 0)
+            Capsule()
+                .fill(Color(.systemGray4))
+                .frame(width: 42, height: 20)
+        }
+    }
+
+    private func skeletonLine(width: CGFloat, height: CGFloat) -> some View {
+        RoundedRectangle(cornerRadius: max(4, height / 2))
+            .fill(Color(.systemGray4))
+            .frame(width: width, height: height)
+    }
+
+    private static func buildRows() -> [FulfillmentTrendRow] {
+        let months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        let categoryTitles = [
+            "Career & Business",
+            "Leadership & Impact",
+            "Wealth & Lifestyle",
+            "Mind & Meaning",
+            "Love & Relationships",
+            "Health & Vitality"
+        ]
+
+        return months.enumerated().flatMap { monthIndex, month in
+            categoryTitles.enumerated().map { categoryIndex, category in
+                // Deterministic but varied whole-number values in 1...5.
+                let baseSeed = monthIndex * 131 + categoryIndex * 59 + 17
+                let wave1 = sin(Double(baseSeed) * 0.51 + Double(monthIndex) * 0.93)
+                let wave2 = cos(Double(baseSeed) * 0.27 + Double(categoryIndex) * 1.21)
+                let mixed = (wave1 * 0.55 + wave2 * 0.45 + 1.0) * 0.5
+                let score = min(5.0, max(1.0, round(mixed * 5.0)))
+                return FulfillmentTrendRow(monthIndex: monthIndex, month: month, category: category, value: score)
+            }
+        }
+    }
+}
+
 private struct FulfillmentInteractiveRadar: View {
     let metrics: [(String, Color, Double)]
     @Binding var selectedIndex: Int
@@ -867,8 +1088,9 @@ private struct FulfillmentInteractiveRadar: View {
                             Circle().stroke(Color(.systemBackground), lineWidth: 2)
                         )
                         .shadow(color: Color.white.opacity(0.9), radius: 10, x: 0, y: 0)
-                        .scaleEffect(pulseIndex == i ? 1.25 : 1.0)
+                        .scaleEffect(circleScale(for: i))
                         .animation(.easeInOut(duration: 0.18), value: pulseIndex)
+                        .animation(.easeInOut(duration: 0.18), value: selectedIndex)
                         .position(valuePoints[i])
                 }
 
@@ -926,5 +1148,11 @@ private struct FulfillmentInteractiveRadar: View {
             path.addLine(to: p2)
             path.closeSubpath()
         }
+    }
+
+    private func circleScale(for index: Int) -> CGFloat {
+        if pulseIndex == index { return 1.35 }
+        if selectedIndex == index { return 1.20 }
+        return 1.0
     }
 }
