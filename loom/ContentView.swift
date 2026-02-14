@@ -216,6 +216,8 @@ struct ContentView: View {
     
     @Query(sort: \OutcomesMeasure.measuredAt, order: .reverse)
     private var outcomeMeasures: [OutcomesMeasure]
+    @Query(sort: \OutcomesMeasureEntry.measuredAt, order: .forward)
+    private var outcomeMeasureEntries: [OutcomesMeasureEntry]
 
     @Query(sort: \Passion.date, order: .forward)
     private var passions: [Passion]
@@ -358,15 +360,9 @@ struct ContentView: View {
         }
     }
 
-    private func progressTrim(for measure: OutcomesMeasure) -> Double {
-        let measureAmt = measure.measure_amt
-        guard measureAmt != 0 else { return 0 }
-        let value = measure.measure
-        if measure.direction == "↑" {
-            return min(max(value / measureAmt, 0), 1)
-        } else {
-            return min(max((measureAmt - value) / (measureAmt - 0), 0), 1)
-        }
+    private func progressTrim(for measure: OutcomesMeasure, outcomeID: UUID) -> Double {
+        let start = outcomeMeasureEntries.first(where: { $0.outcome_id == outcomeID })?.measure ?? measure.measure
+        return ProgressCircleView.progressValue(current: measure.measure, goal: measure.measure_amt, start: start)
     }
 
     private func latestMeasure(for outcome: Outcomes) -> OutcomesMeasure? {
@@ -707,7 +703,7 @@ struct ContentView: View {
 
                                     // Progress Circle
                                     if let measure = outcomeMeasures.first(where: { $0.outcome_id == outcome.outcome_id }),
-                                       measure.measure_amt != 0 && measure.direction != nil && measure.format != nil {
+                                       measure.measure_amt != 0 && measure.format != nil {
                                         Spacer()
                                         ZStack {
                                             Circle()
@@ -715,7 +711,7 @@ struct ContentView: View {
                                                 .frame(width: 16, height: 16)
 
                                             Circle()
-                                                .trim(from: 0, to: progressTrim(for: measure))
+                                                .trim(from: 0, to: progressTrim(for: measure, outcomeID: outcome.outcome_id))
                                                 .stroke(Color.primary, lineWidth: 1.5)
                                                 .frame(width: 16, height: 16)
                                                 .rotationEffect(.degrees(-90))
@@ -936,6 +932,7 @@ struct OutcomePopupOverlay: View {
     let measure: OutcomesMeasure?
 
     @Environment(\.colorScheme) private var colorScheme
+    @Query(sort: \OutcomesMeasureEntry.measuredAt, order: .forward) private var allMeasureEntries: [OutcomesMeasureEntry]
 
     private func categoryColor(for category: String) -> Color {
         switch category {
@@ -955,7 +952,7 @@ struct OutcomePopupOverlay: View {
     }
 
     private func isOutcomeMeasurable(_ measure: OutcomesMeasure) -> Bool {
-        measure.measure_amt != 0 && measure.direction != nil && measure.format != nil
+        measure.measure_amt != 0 && measure.format != nil
     }
 
     private func daysUntil(_ date: Date) -> Int {
@@ -981,14 +978,9 @@ struct OutcomePopupOverlay: View {
         }
     }
 
-    private func progressValue(measure: Double, measureAmt: Double, direction: String) -> Double {
-        guard measureAmt != 0 else { return 0 }
-        let isUpDirection = direction == MeasureDirection.up.rawValue
-        if isUpDirection {
-            return min(max(measure / measureAmt, 0), 1)
-        } else {
-            return min(max((measure - measureAmt) / (0 - measureAmt), 0), 1)
-        }
+    private func progressValue(measure: Double, measureAmt: Double) -> Double {
+        let start = allMeasureEntries.first(where: { $0.outcome_id == outcome.outcome_id })?.measure ?? measure
+        return ProgressCircleView.progressValue(current: measure, goal: measureAmt, start: start)
     }
 
     @ViewBuilder
@@ -1031,8 +1023,8 @@ struct OutcomePopupOverlay: View {
     }
 
     @ViewBuilder
-    private func DarkProgressCircleView(measure: Double, measureAmt: Double, direction: String) -> some View {
-        let progress = progressValue(measure: measure, measureAmt: measureAmt, direction: direction)
+    private func DarkProgressCircleView(measure: Double, measureAmt: Double) -> some View {
+        let progress = progressValue(measure: measure, measureAmt: measureAmt)
         let percentageText = String(format: "%.0f%%", progress * 100)
         ZStack {
             Circle()
@@ -1103,8 +1095,7 @@ struct OutcomePopupOverlay: View {
 
                         DarkProgressCircleView(
                             measure: measure.measure,
-                            measureAmt: measure.measure_amt,
-                            direction: measure.direction ?? MeasureDirection.up.rawValue
+                            measureAmt: measure.measure_amt
                         )
                         .frame(width: 40, height: 40)
                     } else {
@@ -1120,7 +1111,7 @@ struct OutcomePopupOverlay: View {
                         ProgressCircleView(
                             measure: measure.measure,
                             measureAmt: measure.measure_amt,
-                            direction: measure.direction ?? MeasureDirection.up.rawValue
+                            startMeasure: allMeasureEntries.first(where: { $0.outcome_id == outcome.outcome_id })?.measure ?? measure.measure
                         )
                         .frame(width: 40, height: 40)
                     }

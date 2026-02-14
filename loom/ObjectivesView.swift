@@ -6,6 +6,7 @@ struct ObjectivesView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Outcomes.rank, order: .forward) private var outcomes: [Outcomes]
     @Query(sort: \OutcomesMeasure.measuredAt, order: .reverse) private var outcomeMeasures: [OutcomesMeasure]
+    @Query(sort: \OutcomesMeasureEntry.measuredAt, order: .forward) private var outcomeMeasureEntries: [OutcomesMeasureEntry]
     @State private var isShowingSortSheet = false
     @State private var sortByDaysLeft = false
     @State private var sortDaysAscending = true
@@ -109,8 +110,13 @@ struct ObjectivesView: View {
                     OutcomesSectionCard {
                         VStack(spacing: 8) {
                             ForEach(filteredOutcomes) { outcome in
+                                let latest = latestMeasure(for: outcome)
                                 Button(action: { navigationAction = .editOutcome(outcome) }) {
-                                    OutcomeRow(outcome: outcome, measure: latestMeasure(for: outcome))
+                                    OutcomeRow(
+                                        outcome: outcome,
+                                        measure: latest,
+                                        startMeasure: startMeasure(for: outcome, latestMeasure: latest)
+                                    )
                                 }
                             }
                             Button(action: { navigationAction = .addOutcome }) {
@@ -240,6 +246,13 @@ struct ObjectivesView: View {
         outcomeMeasures.first { $0.outcome_id == outcome.outcome_id }
     }
 
+    private func startMeasure(for outcome: Outcomes, latestMeasure: OutcomesMeasure?) -> Double? {
+        if let first = outcomeMeasureEntries.first(where: { $0.outcome_id == outcome.outcome_id }) {
+            return first.measure
+        }
+        return latestMeasure?.measure
+    }
+
     private func formattedDate(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "M/d"
@@ -252,6 +265,7 @@ struct ObjectivesView: View {
 struct OutcomeRow: View {
     let outcome: Outcomes
     let measure: OutcomesMeasure?
+    let startMeasure: Double?
 
     var body: some View {
         HStack {
@@ -317,7 +331,7 @@ struct OutcomeRow: View {
                         ProgressCircleView(
                             measure: measure.measure,
                             measureAmt: measure.measure_amt,
-                            direction: inferredDirection(for: measure)
+                            startMeasure: startMeasure
                         )
                         .frame(width: 40, height: 40)
                     }
@@ -366,13 +380,6 @@ struct OutcomeRow: View {
 
     private func isOutcomeMeasurable(_ measure: OutcomesMeasure) -> Bool {
         measure.measure_amt != 0 && measure.format != nil
-    }
-
-    private func inferredDirection(for measure: OutcomesMeasure) -> String {
-        // Without explicit direction, infer "up" for most goals and "down" for common decrease-oriented units.
-        let format = (measure.format ?? "").lowercased()
-        if format == "percentage" { return MeasureDirection.up.rawValue }
-        return MeasureDirection.up.rawValue
     }
 
     private func formattedDate(_ date: Date) -> String {
@@ -452,16 +459,12 @@ struct ProgressCircleView: View {
 
     let measure: Double
     let measureAmt: Double
-    let direction: String
+    let startMeasure: Double?
 
     private var progress: Double {
         guard measureAmt != 0 else { return 0 }
-        let isUpDirection = direction == MeasureDirection.up.rawValue
-        if isUpDirection {
-            return min(max(measure / measureAmt, 0), 1)
-        } else {
-            return min(max((measure - measureAmt) / (0 - measureAmt), 0), 1)
-        }
+        let start = startMeasure ?? measure
+        return Self.progressValue(current: measure, goal: measureAmt, start: start)
     }
 
     private var percentageText: String {
@@ -484,6 +487,18 @@ struct ProgressCircleView: View {
                 .font(.caption)
                 .fontWeight(.bold)
                 .foregroundColor(colorScheme == .dark ? .white : .black)
+        }
+    }
+
+    static func progressValue(current: Double, goal: Double, start: Double) -> Double {
+        guard goal != 0 else { return 0 }
+        if goal == start {
+            return min(max(current / goal, 0), 1)
+        }
+        if goal > start {
+            return min(max((current - start) / (goal - start), 0), 1)
+        } else {
+            return min(max((start - current) / (start - goal), 0), 1)
         }
     }
 }

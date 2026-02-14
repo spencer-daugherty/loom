@@ -140,7 +140,7 @@ struct OutcomeView: View {
                                 ProgressCircleView(
                                     measure: current,
                                     measureAmt: goalAmount,
-                                    direction: MeasureDirection.up.rawValue
+                                    startMeasure: allMeasureEntries.first(where: { $0.outcome_id == outcome.outcome_id })?.measure ?? current
                                 )
                                 .frame(width: 40, height: 40)
                             }
