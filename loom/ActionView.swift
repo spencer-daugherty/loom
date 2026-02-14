@@ -478,6 +478,9 @@ struct ActionView: View {
         let resourcesByAction = selectedResourceByActionID
         let placesByAction = placeIDsByActionID
         let resourcesCatalogByID = resourceByID
+        let allByChunk = Dictionary(grouping: weekActions, by: \.plannedChunkId)
+        let rolesByID = Dictionary(uniqueKeysWithValues: roles.map { ($0.id, $0.role) })
+        let outcomesByID = Dictionary(uniqueKeysWithValues: outcomes.map { ($0.outcome_id, $0) })
         let filteredByChunk = buildFilteredActionsByChunk(
             defineByAction: defineByAction,
             executionByAction: executionByAction,
@@ -513,13 +516,16 @@ struct ActionView: View {
                             ForEach(weekChunks) { chunk in
                             chunkCard(
                                 chunk,
+                                allActions: allByChunk[chunk.id] ?? [],
                                 filteredActions: filteredByChunk[chunk.id] ?? [],
                                 defineByAction: defineByAction,
                                 executionByAction: executionByAction,
                                 resourcesByAction: resourcesByAction,
                                 placesByAction: placesByAction,
                                 notesByAction: notesByAction,
-                                attachmentsByAction: attachmentsByAction
+                                attachmentsByAction: attachmentsByAction,
+                                rolesByID: rolesByID,
+                                outcomesByID: outcomesByID
                             )
                             .id("chunk-\(chunk.id.uuidString)")
                         }
@@ -1208,24 +1214,25 @@ struct ActionView: View {
 
     private func chunkCard(
         _ chunk: PlannedChunk,
+        allActions: [PlannedChunkAction],
         filteredActions: [PlannedChunkAction],
         defineByAction: [UUID: PlannedChunkActionDefineState],
         executionByAction: [UUID: PlannedChunkActionExecutionState],
         resourcesByAction: [UUID: UUID],
         placesByAction: [UUID: Set<UUID>],
         notesByAction: [UUID: PlannedChunkActionNote],
-        attachmentsByAction: [UUID: [PlannedChunkActionAttachment]]
+        attachmentsByAction: [UUID: [PlannedChunkActionAttachment]],
+        rolesByID: [UUID: String],
+        outcomesByID: [UUID: Outcomes]
     ) -> some View {
         let filtered = filteredActions
-        let allForChunk = weekActions.filter { $0.plannedChunkId == chunk.id }
+        let allForChunk = allActions
         let fill = categoryFillColor(for: chunk.category)
         let accent = categoryAccentColor(for: chunk.category)
         let step4 = weekStepFourStatesByChunkID[chunk.id]
-        let roleName = roles.first(where: { $0.id == step4?.connectedRoleId })?.role ?? ""
+        let roleName = step4?.connectedRoleId.flatMap { rolesByID[$0] } ?? ""
         let selectedOutcomeIDs = weekOutcomeIDsByChunkID[chunk.id] ?? []
-        let outcomesForChunk = selectedOutcomeIDs.compactMap { id in
-            outcomes.first(where: { $0.outcome_id == id })
-        }
+        let outcomesForChunk = selectedOutcomeIDs.compactMap { outcomesByID[$0] }
 
         return VStack(alignment: .leading, spacing: 10) {
             if filtered.isEmpty {
@@ -3074,37 +3081,55 @@ private struct InlineActionEditor: View {
     }
 
     var body: some View {
-        TextField("Action", text: $text, axis: .vertical)
-            .font(font)
-            .foregroundStyle(textColor)
-            .strikethrough(strike, color: textColor)
-            .lineLimit(3)
-            .focused($isFocused)
-            .onChange(of: text) { _, _ in
-                scheduleCommit()
+        Group {
+            if focusedActionID == actionId || isFocused {
+                TextField("Action", text: $text, axis: .vertical)
+                    .font(font)
+                    .foregroundStyle(textColor)
+                    .strikethrough(strike, color: textColor)
+                    .lineLimit(3)
+                    .focused($isFocused)
+                    .onChange(of: text) { _, _ in
+                        scheduleCommit()
+                    }
+            } else {
+                Text(text)
+                    .font(font)
+                    .foregroundStyle(textColor)
+                    .strikethrough(strike, color: textColor)
+                    .lineLimit(3)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        focusedActionID = actionId
+                        DispatchQueue.main.async {
+                            isFocused = true
+                        }
+                    }
             }
-            .onChange(of: sourceText) { _, newValue in
-                if newValue != text { text = newValue }
+        }
+        .onChange(of: sourceText) { _, newValue in
+            if newValue != text { text = newValue }
+        }
+        .onChange(of: focusedActionID) { _, newValue in
+            isFocused = (newValue == actionId)
+        }
+        .onChange(of: isFocused) { _, nowFocused in
+            if nowFocused {
+                if focusedActionID != actionId { focusedActionID = actionId }
+            } else if focusedActionID == actionId {
+                focusedActionID = nil
             }
-            .onChange(of: focusedActionID) { _, newValue in
-                isFocused = (newValue == actionId)
+        }
+        .onAppear {
+            if focusedActionID == actionId {
+                DispatchQueue.main.async { isFocused = true }
             }
-            .onChange(of: isFocused) { _, nowFocused in
-                if nowFocused {
-                    if focusedActionID != actionId { focusedActionID = actionId }
-                } else if focusedActionID == actionId {
-                    focusedActionID = nil
-                }
-            }
-            .onAppear {
-                if focusedActionID == actionId {
-                    DispatchQueue.main.async { isFocused = true }
-                }
-            }
-            .onDisappear {
-                commitTask?.cancel()
-                onCommit(text)
-            }
+        }
+        .onDisappear {
+            commitTask?.cancel()
+            onCommit(text)
+        }
     }
 
     private func scheduleCommit() {
@@ -3140,15 +3165,14 @@ private struct ActionSwipeRow: View {
     let onSwipeDone: () -> Void
     let onSwipeRecapture: () -> Void
 
-    @GestureState private var dragTranslation: CGSize = .zero
-    @State private var settleOffset: CGFloat = 0
+    @GestureState private var dragOffset: CGFloat = 0
 
     private var dragX: CGFloat {
-        max(-180, min(180, dragTranslation.width))
+        max(-180, min(180, dragOffset))
     }
 
     private var rowOffset: CGFloat {
-        settleOffset + dragX
+        dragX
     }
 
     private var isSwipeInteracting: Bool {
@@ -3182,46 +3206,26 @@ private struct ActionSwipeRow: View {
 
     private var rowGesture: some Gesture {
         DragGesture(minimumDistance: 20)
-            .updating($dragTranslation) { value, state, _ in
+            .updating($dragOffset) { value, state, _ in
                 let horizontal = value.translation.width
                 let vertical = value.translation.height
                 if abs(horizontal) > abs(vertical) {
-                    state = value.translation
+                    state = horizontal
                 }
             }
             .onEnded { value in
                 let horizontal = value.translation.width
                 let vertical = value.translation.height
                 guard abs(horizontal) > abs(vertical) else {
-                    withAnimation(.spring(response: 0.22, dampingFraction: 0.88)) {
-                        settleOffset = 0
-                    }
                     return
                 }
 
-                let triggerThreshold: CGFloat = 145
-                settleOffset = max(-180, min(180, horizontal))
+                let triggerThreshold: CGFloat = 150
 
                 if horizontal >= triggerThreshold {
-                    withAnimation(.easeOut(duration: 0.14)) {
-                        settleOffset = 165
-                    }
                     onSwipeDone()
-                    withAnimation(.spring(response: 0.24, dampingFraction: 0.86).delay(0.04)) {
-                        settleOffset = 0
-                    }
                 } else if horizontal <= -triggerThreshold {
-                    withAnimation(.easeOut(duration: 0.14)) {
-                        settleOffset = -165
-                    }
                     onSwipeRecapture()
-                    withAnimation(.spring(response: 0.24, dampingFraction: 0.86).delay(0.04)) {
-                        settleOffset = 0
-                    }
-                } else {
-                    withAnimation(.spring(response: 0.24, dampingFraction: 0.86)) {
-                        settleOffset = 0
-                    }
                 }
             }
     }
@@ -3232,25 +3236,23 @@ private struct ActionSwipeRow: View {
                 .fill(Color(.tertiarySystemFill))
 
             HStack {
-                if rowOffset > 8 {
-                    Text(status == .done ? "Unmark" : "Mark Done")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.black)
-                        .padding(.leading, 14)
-                }
+                Text(status == .done ? "Unmark" : "Mark Done")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.black)
+                    .padding(.leading, 14)
+                    .opacity(rowOffset > 12 ? 1 : 0)
                 Spacer()
-                if rowOffset < -8 {
-                    HStack(spacing: 6) {
-                        Text(status == .carriedToCapture ? "Unmark" : "Recapture")
-                            .font(.subheadline.weight(.semibold))
+                HStack(spacing: 6) {
+                    Text(status == .carriedToCapture ? "Unmark" : "Recapture")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.gray)
+                    if status != .carriedToCapture {
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(.gray)
-                        if status != .carriedToCapture {
-                            Image(systemName: "arrow.right")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(.gray)
-                        }
                     }
                 }
+                .opacity(rowOffset < -12 ? 1 : 0)
                 Spacer().frame(width: 14)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
