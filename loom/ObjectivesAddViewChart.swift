@@ -265,13 +265,21 @@ struct ObjectivesAddViewChart: View {
                         y: .value("Measure", row.measure)
                     )
                     .symbol(.circle)
-                    .symbolSize(selectedEntryID == row.id ? 140 : 70)
-                    .foregroundStyle(selectedEntryID == row.id ? .blue : .blue.opacity(0.7))
+                    .symbolSize(selectedEntryID == row.id ? 70 : 40)
+                    .foregroundStyle(selectedEntryID == row.id ? Color.blue : Color.white)
+                    .annotation(position: .overlay, alignment: .center) {
+                        Circle()
+                            .stroke(Color.blue, lineWidth: selectedEntryID == row.id ? 2.4 : 1.8)
+                            .frame(
+                                width: selectedEntryID == row.id ? 9 : 7,
+                                height: selectedEntryID == row.id ? 9 : 7
+                            )
+                    }
                 }
 
                 if let selectedEntry {
                     RuleMark(x: .value("Selected Date", Calendar.current.startOfDay(for: selectedEntry.measuredAt)))
-                        .foregroundStyle(.blue)
+                        .foregroundStyle(.blue.opacity(0.5))
                         .lineStyle(.init(lineWidth: 2))
                 }
             }
@@ -518,6 +526,11 @@ struct AddOutcomeMeasureSheet: View {
     @State private var pendingCurrentValue: Double?
     @State private var pendingMeasuredDay: Date?
 
+    private var canSave: Bool {
+        let trimmed = measureText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmed.isEmpty && parseFormattedDecimalChart(measureText) != nil
+    }
+
     init(outcomeID: UUID, formatRaw: String, unitRaw: String, decimalPlaces: Int) {
         self.outcomeID = outcomeID
         self.formatRaw = formatRaw
@@ -554,19 +567,21 @@ struct AddOutcomeMeasureSheet: View {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        let current = parseFormattedDecimalChart(measureText) ?? 0
-                        let selectedDay = Calendar.current.startOfDay(for: measuredDate)
-                        let existingSameDay = entries.filter {
-                            Calendar.current.isDate($0.measuredAt, inSameDayAs: selectedDay)
-                        }
-                        if existingSameDay.isEmpty {
-                            persistMeasure(current: current, measuredDay: selectedDay, overrideExisting: false)
-                            dismiss()
-                        } else {
-                            pendingCurrentValue = current
-                            pendingMeasuredDay = selectedDay
-                            showOverrideAlert = true
+                    if canSave {
+                        Button("Save") {
+                            let current = parseFormattedDecimalChart(measureText) ?? 0
+                            let selectedDay = Calendar.current.startOfDay(for: measuredDate)
+                            let existingSameDay = entries.filter {
+                                Calendar.current.isDate($0.measuredAt, inSameDayAs: selectedDay)
+                            }
+                            if existingSameDay.isEmpty {
+                                persistMeasure(current: current, measuredDay: selectedDay, overrideExisting: false)
+                                dismiss()
+                            } else {
+                                pendingCurrentValue = current
+                                pendingMeasuredDay = selectedDay
+                                showOverrideAlert = true
+                            }
                         }
                     }
                 }
@@ -723,7 +738,10 @@ struct OutcomesAllDataView: View {
     let decimalPlaces: Int
     @Query private var entries: [OutcomesMeasureEntry]
     @Query private var legacyMeasures: [OutcomesMeasure]
-    @State private var editMode: EditMode = .inactive
+    @Query private var outcomes: [Outcomes]
+    @Query(sort: \OutcomeAnalyticsEvent.occurredAt, order: .reverse) private var allEvents: [OutcomeAnalyticsEvent]
+    @State private var isEditingStartingValue = false
+    @State private var startingValueInput = ""
 
     init(outcomeID: UUID, formatRaw: String, unitRaw: String, decimalPlaces: Int) {
         self.outcomeID = outcomeID
@@ -734,9 +752,25 @@ struct OutcomesAllDataView: View {
         _entries = Query(filter: predicate, sort: [SortDescriptor(\OutcomesMeasureEntry.measuredAt, order: .reverse)])
         let legacyPredicate = #Predicate<OutcomesMeasure> { $0.outcome_id == outcomeID }
         _legacyMeasures = Query(filter: legacyPredicate, sort: [SortDescriptor(\OutcomesMeasure.measuredAt, order: .reverse)])
+        let outcomePredicate = #Predicate<Outcomes> { $0.outcome_id == outcomeID }
+        _outcomes = Query(filter: outcomePredicate)
     }
 
-    private var mergedRows: [OutcomesMeasureEntry] {
+    private var outcomeStartDate: Date {
+        Calendar.current.startOfDay(for: outcomes.first?.start ?? .now)
+    }
+
+    private var startDayEntries: [OutcomesMeasureEntry] {
+        entries
+            .filter { Calendar.current.isDate($0.measuredAt, inSameDayAs: outcomeStartDate) }
+            .sorted { $0.createdAt > $1.createdAt }
+    }
+
+    private var startingValue: Double {
+        startDayEntries.first?.measure ?? 0
+    }
+
+    private var mergedMeasureRows: [OutcomesMeasureEntry] {
         if !entries.isEmpty { return entries }
         guard let legacy = legacyMeasures.first else { return [] }
         return [
@@ -753,66 +787,287 @@ struct OutcomesAllDataView: View {
         ]
     }
 
+    private var nonStartingMeasureRows: [OutcomesMeasureEntry] {
+        mergedMeasureRows.filter { !Calendar.current.isDate($0.measuredAt, inSameDayAs: outcomeStartDate) }
+    }
+
+    private var goalChangeEvents: [OutcomeAnalyticsEvent] {
+        let base = allEvents.filter {
+            $0.outcome_id == outcomeID &&
+            $0.eventType == "goal_changed" &&
+            $0.oldGoal != nil &&
+            $0.newGoal != nil &&
+            $0.oldGoal != $0.newGoal
+        }
+        // Build chronologically to remove baseline/original setup and repeated same-goal updates.
+        let chronological = base.sorted { $0.occurredAt < $1.occurredAt }
+        var result: [OutcomeAnalyticsEvent] = []
+        var lastGoal: Double?
+
+        for event in chronological {
+            guard let oldGoal = event.oldGoal, let newGoal = event.newGoal else { continue }
+            // Skip the original setup transition (ex: 0 -> first configured goal).
+            if oldGoal == 0 && lastGoal == nil {
+                lastGoal = newGoal
+                continue
+            }
+            // Skip no-op repeats where the resulting goal is unchanged from the latest known goal.
+            if let lastGoal, newGoal == lastGoal {
+                continue
+            }
+
+            result.append(event)
+            lastGoal = newGoal
+        }
+        return result.sorted { $0.occurredAt > $1.occurredAt }
+    }
+
+    private var recordedRows: [RecordedRow] {
+        var rows: [RecordedRow] = nonStartingMeasureRows.map {
+            RecordedRow(id: "measure-\($0.id.uuidString)", date: $0.measuredAt, kind: .measure($0))
+        }
+        rows.append(contentsOf: goalChangeEvents.map {
+            RecordedRow(id: "goal-\($0.id.uuidString)", date: $0.occurredAt, kind: .goalChange($0))
+        })
+        rows.sort { $0.date > $1.date }
+        return rows
+    }
+
     var body: some View {
         List {
-            ForEach(mergedRows) { row in
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(row.measuredAt, format: .dateTime.month().day().year())
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                    Text("Current: \(formatted(row.measure))  Goal: \(formatted(row.measure_amt))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+            ForEach(recordedRows) { row in
+                NavigationLink {
+                    RecordedDataDetailsView(
+                        row: row,
+                        formatRaw: formatRaw,
+                        unitRaw: unitRaw,
+                        decimalPlaces: decimalPlaces
+                    )
+                } label: {
+                    recordedRowLabel(row)
+                }
+                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                    Button("Delete", role: .destructive) {
+                        switch row.kind {
+                        case .measure(let measureRow):
+                            deleteMeasureRow(measureRow)
+                        case .goalChange(let event):
+                            deleteGoalChangeRow(event)
+                        }
+                    }
+                    .tint(.red)
                 }
             }
-            .onDelete { offsets in
-                let deletedIDs = Set(offsets.map { mergedRows[$0].id })
-                for idx in offsets {
-                    let row = mergedRows[idx]
-                    if let persisted = entries.first(where: { $0.id == row.id }) {
-                        modelContext.insert(
-                            OutcomeAnalyticsEvent(
-                                outcome_id: outcomeID,
-                                eventType: "measure_deleted",
-                                measuredAt: persisted.measuredAt,
-                                oldMeasure: persisted.measure,
-                                oldGoal: persisted.measure_amt,
-                                source: "All Measure Data"
-                            )
-                        )
-                        RecentlyDeletedStore.trash(persisted, in: modelContext)
-                    } else if let legacy = legacyMeasures.first(where: { $0.outcome_id == outcomeID }) {
-                        modelContext.insert(
-                            OutcomeAnalyticsEvent(
-                                outcome_id: outcomeID,
-                                eventType: "measure_deleted",
-                                measuredAt: legacy.measuredAt,
-                                oldMeasure: legacy.measure,
-                                oldGoal: legacy.measure_amt,
-                                source: "All Measure Data (Legacy)"
-                            )
-                        )
-                        RecentlyDeletedStore.trash(legacy, in: modelContext)
+
+            Section {
+                Button {
+                    startingValueInput = sanitizeAndFormatDecimalInputChart(
+                        startingValue == 0 ? "" : formatted(startingValue),
+                        maxFractionDigits: min(3, max(0, decimalPlaces))
+                    )
+                    isEditingStartingValue = true
+                } label: {
+                    HStack(spacing: 10) {
+                        Text("Starting Value")
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(formatted(startingValue))
+                            .font(.body)
+                            .foregroundStyle(.blue)
                     }
+                    .padding(.vertical, 1)
                 }
-                if !entries.isEmpty {
-                    let remainingEntries = entries.filter { !deletedIDs.contains($0.id) }
-                    syncSnapshot(with: remainingEntries)
-                }
-                try? modelContext.save()
+                .buttonStyle(.plain)
+                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
             }
         }
-        .environment(\.editMode, $editMode)
-        .navigationTitle("All Measure Data")
+        .navigationTitle("All Recorded Data")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.visible, for: .navigationBar)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button(editMode == .active ? "Done" : "Edit") {
-                    editMode = editMode == .active ? .inactive : .active
+        .sheet(isPresented: $isEditingStartingValue) {
+            NavigationStack {
+                Form {
+                    HStack {
+                        Text("Date")
+                        Spacer()
+                        Text(compactDate(outcomeStartDate))
+                            .foregroundStyle(.secondary)
+                    }
+                    HStack {
+                        Text("Starting Value")
+                        Spacer()
+                        TextField("0", text: $startingValueInput)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 120)
+                            .onChange(of: startingValueInput) { _, newValue in
+                                startingValueInput = sanitizeAndFormatDecimalInputChart(
+                                    newValue,
+                                    maxFractionDigits: min(3, max(0, decimalPlaces))
+                                )
+                            }
+                    }
+                }
+                .navigationTitle("New Starting Value")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") { isEditingStartingValue = false }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Save") {
+                            saveStartingValue()
+                            isEditingStartingValue = false
+                        }
+                    }
                 }
             }
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
         }
+    }
+
+    @ViewBuilder
+    private func recordedRowLabel(_ row: RecordedRow) -> some View {
+        switch row.kind {
+        case .measure(let measureRow):
+            HStack(spacing: 10) {
+                Image("logo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 32, height: 32)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(Color.gray.opacity(0.45), lineWidth: 0.6)
+                    )
+                Text(formatted(measureRow.measure))
+                    .font(.body)
+                    .foregroundStyle(.blue)
+                Spacer()
+                Text(compactDate(measureRow.measuredAt))
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 1)
+        case .goalChange(let event):
+            HStack(spacing: 10) {
+                Image(systemName: "target")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(formatted(event.newGoal ?? 0))
+                    .font(.body)
+                    .foregroundStyle(.blue)
+                Spacer()
+                Text(compactDate(event.occurredAt))
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 1)
+        }
+    }
+
+    private func compactDate(_ date: Date) -> String {
+        let cal = Calendar.current
+        let nowYear = cal.component(.year, from: .now)
+        let year = cal.component(.year, from: date)
+        let formatter = DateFormatter()
+        if year == nowYear {
+            formatter.dateFormat = "M/d"
+        } else {
+            formatter.dateFormat = "M/d/yyyy"
+        }
+        return formatter.string(from: date)
+    }
+
+    private func deleteMeasureRow(_ row: OutcomesMeasureEntry) {
+        if let persisted = entries.first(where: { $0.id == row.id }) {
+            modelContext.insert(
+                OutcomeAnalyticsEvent(
+                    outcome_id: outcomeID,
+                    eventType: "measure_deleted",
+                    measuredAt: persisted.measuredAt,
+                    oldMeasure: persisted.measure,
+                    oldGoal: persisted.measure_amt,
+                    source: "All Recorded Data"
+                )
+            )
+            RecentlyDeletedStore.trash(persisted, in: modelContext)
+            let remainingEntries = entries.filter { $0.id != row.id }
+            syncSnapshot(with: remainingEntries)
+        } else if let legacy = legacyMeasures.first(where: { $0.outcome_id == outcomeID }) {
+            modelContext.insert(
+                OutcomeAnalyticsEvent(
+                    outcome_id: outcomeID,
+                    eventType: "measure_deleted",
+                    measuredAt: legacy.measuredAt,
+                    oldMeasure: legacy.measure,
+                    oldGoal: legacy.measure_amt,
+                    source: "All Recorded Data (Legacy)"
+                )
+            )
+            RecentlyDeletedStore.trash(legacy, in: modelContext)
+        }
+        try? modelContext.save()
+    }
+
+    private func saveStartingValue() {
+        let parsed = parseFormattedDecimalChart(startingValueInput) ?? 0
+        let goal = currentGoalValue()
+        if let existing = startDayEntries.first {
+            existing.measure = parsed
+            existing.measure_amt = goal
+            existing.createdAt = .now
+            existing.format = formatRaw
+            existing.unit = unitRaw
+            existing.decimalPlaces = decimalPlaces
+        } else {
+            modelContext.insert(
+                OutcomesMeasureEntry(
+                    outcome_id: outcomeID,
+                    measure: parsed,
+                    measure_amt: goal,
+                    measuredAt: outcomeStartDate,
+                    createdAt: .now,
+                    format: formatRaw,
+                    unit: unitRaw,
+                    decimalPlaces: decimalPlaces
+                )
+            )
+        }
+        try? modelContext.save()
+    }
+
+    private func currentGoalValue() -> Double {
+        if let snapshot = legacyMeasures.first, snapshot.measure_amt != 0 {
+            return snapshot.measure_amt
+        }
+        if let latestEntry = entries.max(by: { $0.measuredAt < $1.measuredAt }) {
+            return latestEntry.measure_amt
+        }
+        return 0
+    }
+
+    private func deleteGoalChangeRow(_ event: OutcomeAnalyticsEvent) {
+        guard let oldGoal = event.oldGoal else {
+            modelContext.delete(event)
+            try? modelContext.save()
+            return
+        }
+
+        if let snapshot = legacyMeasures.first(where: { $0.outcome_id == outcomeID }) {
+            snapshot.measure_amt = oldGoal
+            snapshot.measure_updated = .now
+        }
+
+        if let latestEntry = entries.max(by: { $0.measuredAt < $1.measuredAt }) {
+            latestEntry.measure_amt = oldGoal
+        }
+
+        modelContext.delete(event)
+        try? modelContext.save()
     }
 
     private func formatted(_ value: Double) -> String {
@@ -863,6 +1118,82 @@ struct OutcomesAllDataView: View {
                     decimalPlaces: latest.decimalPlaces ?? decimalPlaces
                 )
             )
+        }
+    }
+}
+
+private struct RecordedRow: Identifiable {
+    enum Kind {
+        case measure(OutcomesMeasureEntry)
+        case goalChange(OutcomeAnalyticsEvent)
+    }
+    let id: String
+    let date: Date
+    let kind: Kind
+}
+
+private struct RecordedDataDetailsView: View {
+    let row: RecordedRow
+    let formatRaw: String
+    let unitRaw: String
+    let decimalPlaces: Int
+
+    var body: some View {
+        Form {
+            switch row.kind {
+            case .measure(let measureRow):
+                detailRow("Value", formatted(measureRow.measure))
+                detailRow("Date", fullDate(measureRow.measuredAt))
+                detailRow("Source", "Loom")
+                detailRow("Was User Entered", "Yes")
+            case .goalChange(let event):
+                let oldGoal = event.oldGoal ?? 0
+                let newGoal = event.newGoal ?? 0
+                let diff = newGoal - oldGoal
+                detailRow("New Goal", formatted(newGoal))
+                detailRow("Old Goal", formatted(oldGoal))
+                HStack {
+                    Text("Difference")
+                    Spacer()
+                    Text(formatted(diff))
+                        .foregroundStyle(diff > 0 ? .green : (diff < 0 ? .red : .secondary))
+                }
+                detailRow("Date", fullDate(event.occurredAt))
+                detailRow("Source", "Loom")
+                detailRow("Was User Entered", "Yes")
+            }
+        }
+        .navigationTitle("Details")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func detailRow(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label)
+            Spacer()
+            Text(value)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func fullDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MM/dd/yyyy"
+        return formatter.string(from: date)
+    }
+
+    private func formatted(_ value: Double) -> String {
+        let places = min(3, max(0, decimalPlaces))
+        let p = pow(10.0, Double(places))
+        let rounded = (value * p).rounded() / p
+        switch formatRaw {
+        case ObjectivesAddView.MeasureFormat.dollars.rawValue:
+            return "$" + groupedDecimalStringChart(rounded, fractionDigits: places)
+        case ObjectivesAddView.MeasureFormat.percentage.rawValue:
+            return groupedDecimalStringChart(rounded, fractionDigits: places) + "%"
+        default:
+            let raw = groupedDecimalStringChart(rounded, fractionDigits: places)
+            return unitRaw == ObjectivesAddView.UnitOption.defaultUnit ? raw : "\(raw) \(unitRaw)"
         }
     }
 }

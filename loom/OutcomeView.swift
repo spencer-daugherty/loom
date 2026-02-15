@@ -36,6 +36,7 @@ struct OutcomeView: View {
     @State private var isShowingChangeTargetSheet = false
     @State private var isShowingGoalMetConfirmAlert = false
     @State private var isShowingMeasureCheckAlert = false
+    @State private var isShowingTargetDatePicker = false
     @State private var completionValidationMessage: String = ""
     @State private var filterConnectedBlocksOnly = true
     @State private var selectedCompletedArchiveActionIDs: Set<UUID> = []
@@ -500,7 +501,8 @@ struct OutcomeView: View {
             OutcomeTargetSection(
                 endDate: $endDate,
                 selectedDuration: $selectedDuration,
-                effectiveStartDate: effectiveStartDate
+                effectiveStartDate: effectiveStartDate,
+                isShowingDatePicker: $isShowingTargetDatePicker
             )
             MeasureSection(
                 isMeasurable: $isMeasurable,
@@ -760,35 +762,42 @@ struct OutcomeView: View {
                     .padding(.vertical, 10)
 
                     List {
-                        ForEach(completedActionCandidates) { candidate in
-                            Button {
-                                if selectedCompletedArchiveActionIDs.contains(candidate.id) {
-                                    selectedCompletedArchiveActionIDs.remove(candidate.id)
-                                } else {
-                                    selectedCompletedArchiveActionIDs.insert(candidate.id)
+                        if completedActionCandidates.isEmpty {
+                            Text("No completed action items are available yet.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .listRowSeparator(.hidden)
+                        } else {
+                            ForEach(completedActionCandidates) { candidate in
+                                Button {
+                                    if selectedCompletedArchiveActionIDs.contains(candidate.id) {
+                                        selectedCompletedArchiveActionIDs.remove(candidate.id)
+                                    } else {
+                                        selectedCompletedArchiveActionIDs.insert(candidate.id)
+                                    }
+                                } label: {
+                                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                        Image(systemName: selectedCompletedArchiveActionIDs.contains(candidate.id) ? "checkmark.circle.fill" : "circle")
+                                            .foregroundStyle(selectedCompletedArchiveActionIDs.contains(candidate.id) ? Color.accentColor : Color(.systemGray3))
+                                        Text(candidate.actionText)
+                                            .font(.body.weight(.medium))
+                                            .foregroundStyle(.primary)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                        Text("Completed on \(compactDate(candidate.completedAt))")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .padding(8)
+                                    .padding(.vertical, 2)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+                                    .padding(.vertical, 1)
+                                    .contentShape(Rectangle())
                                 }
-                            } label: {
-                                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                    Image(systemName: selectedCompletedArchiveActionIDs.contains(candidate.id) ? "checkmark.circle.fill" : "circle")
-                                        .foregroundStyle(selectedCompletedArchiveActionIDs.contains(candidate.id) ? Color.accentColor : Color(.systemGray3))
-                                    Text(candidate.actionText)
-                                        .font(.body.weight(.medium))
-                                        .foregroundStyle(.primary)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                    Text("Completed on \(compactDate(candidate.completedAt))")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                .padding(8)
-                                .padding(.vertical, 2)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
-                                .padding(.vertical, 1)
-                                .contentShape(Rectangle())
+                                .buttonStyle(.plain)
+                                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                                .listRowSeparator(.hidden)
                             }
-                            .buttonStyle(.plain)
-                            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
-                            .listRowSeparator(.hidden)
                         }
                     }
                     .listStyle(.plain)
@@ -934,7 +943,9 @@ struct OutcomeView: View {
         let measureValue = isMeasurable ? (parseFormattedDecimalOutcome(measureGoal) ?? 0.0) : 0.0
         let formatValue = isMeasurable ? measureFormat.rawValue : nil
         let unitValue = isMeasurable ? measureUnit : nil
-        let decimalPlacesValue = isMeasurable ? (measureFormat == .dollars ? 2 : measureDecimalPlaces) : nil
+        let decimalPlacesValue = isMeasurable
+            ? (measureFormat == .dollars ? (measureDecimalPlaces == 2 ? 2 : 0) : measureDecimalPlaces)
+            : nil
 
         outcome.category = selectedCategory.rawValue
         outcome.updatedAt = .now
@@ -961,34 +972,23 @@ struct OutcomeView: View {
                 let oldGoal = existingMeasure.measure_amt
                 let goalChanged = existingMeasure.measure_amt != measureValue
                 if goalChanged {
-                    modelContext.insert(
-                        OutcomeAnalyticsEvent(
-                            outcome_id: outcome.outcome_id,
-                            eventType: "goal_changed",
-                            oldMeasure: existingMeasure.measure,
-                            oldGoal: oldGoal,
-                            newGoal: measureValue,
-                            source: "OutcomeView"
-                        )
-                    )
-                    let day = Calendar.current.startOfDay(for: .now)
-                    let duplicateExists = allMeasureEntries.contains {
+                    let now = Date()
+                    let hasDuplicateGoalEvent = allOutcomeEvents.contains {
                         $0.outcome_id == outcome.outcome_id &&
-                        Calendar.current.isDate($0.measuredAt, inSameDayAs: day) &&
-                        $0.measure == existingMeasure.measure &&
-                        $0.measure_amt == measureValue
+                        $0.eventType == "goal_changed" &&
+                        $0.oldGoal == oldGoal &&
+                        $0.newGoal == measureValue &&
+                        abs($0.occurredAt.timeIntervalSince(now)) < 5
                     }
-                    if !duplicateExists {
+                    if !hasDuplicateGoalEvent {
                         modelContext.insert(
-                            OutcomesMeasureEntry(
+                            OutcomeAnalyticsEvent(
                                 outcome_id: outcome.outcome_id,
-                                measure: existingMeasure.measure,
-                                measure_amt: measureValue,
-                                measuredAt: day,
-                                createdAt: .now,
-                                format: formatValue,
-                                unit: unitValue,
-                                decimalPlaces: decimalPlacesValue
+                                eventType: "goal_changed",
+                                oldMeasure: existingMeasure.measure,
+                                oldGoal: oldGoal,
+                                newGoal: measureValue,
+                                source: "OutcomeView"
                             )
                         )
                     }
@@ -1162,7 +1162,7 @@ struct OutcomeTargetSection: View {
     @Binding var endDate: Date
     @Binding var selectedDuration: Int
     let effectiveStartDate: Date
-    @State private var isShowingDatePicker = false
+    @Binding var isShowingDatePicker: Bool
 
     var body: some View {
         Section("Target") {

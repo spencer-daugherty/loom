@@ -434,7 +434,9 @@ struct ObjectivesAddView: View {
         let measureValue = isMeasurable ? (parseFormattedDecimal(measureGoal) ?? 0.0) : 0.0
         let formatValue = isMeasurable ? measureFormat.rawValue : nil
         let unitValue = isMeasurable ? measureUnit : nil
-        let decimalPlacesValue = isMeasurable ? (measureFormat == .dollars ? 2 : measureDecimalPlaces) : nil
+        let decimalPlacesValue = isMeasurable
+            ? (measureFormat == .dollars ? (measureDecimalPlaces == 2 ? 2 : 0) : measureDecimalPlaces)
+            : nil
         var newlyCreatedOutcomeID: UUID?
 
         if let existingOutcome = outcome {
@@ -483,16 +485,27 @@ struct ObjectivesAddView: View {
                 if let existingMeasure = try? modelContext.fetch(FetchDescriptor<OutcomesMeasure>()).first(where: { $0.outcome_id == existingOutcome.outcome_id }) {
                     let oldGoal = existingMeasure.measure_amt
                     if oldGoal != measureValue {
-                        modelContext.insert(
-                            OutcomeAnalyticsEvent(
-                                outcome_id: existingOutcome.outcome_id,
-                                eventType: "goal_changed",
-                                oldMeasure: existingMeasure.measure,
-                                oldGoal: oldGoal,
-                                newGoal: measureValue,
-                                source: "ObjectivesAddView"
+                        let now = Date()
+                        let allEvents = (try? modelContext.fetch(FetchDescriptor<OutcomeAnalyticsEvent>())) ?? []
+                        let hasDuplicateGoalEvent = allEvents.contains {
+                            $0.outcome_id == existingOutcome.outcome_id &&
+                            $0.eventType == "goal_changed" &&
+                            $0.oldGoal == oldGoal &&
+                            $0.newGoal == measureValue &&
+                            abs($0.occurredAt.timeIntervalSince(now)) < 5
+                        }
+                        if !hasDuplicateGoalEvent {
+                            modelContext.insert(
+                                OutcomeAnalyticsEvent(
+                                    outcome_id: existingOutcome.outcome_id,
+                                    eventType: "goal_changed",
+                                    oldMeasure: existingMeasure.measure,
+                                    oldGoal: oldGoal,
+                                    newGoal: measureValue,
+                                    source: "ObjectivesAddView"
+                                )
                             )
-                        )
+                        }
                     }
                     existingMeasure.measure_amt = measureValue
                     existingMeasure.measure_updated = .now
@@ -781,11 +794,6 @@ struct MeasureSection: View {
             Toggle("Outcome is measurable", isOn: $isMeasurable)
             
             if isMeasurable {
-                if measureFormat == .dollars && measureDecimalPlaces != 2 {
-                    Color.clear
-                        .frame(width: 0, height: 0)
-                        .onAppear { measureDecimalPlaces = 2 }
-                }
                 Picker("Format", selection: $measureFormat) {
                     ForEach(ObjectivesAddView.MeasureFormat.allCases) { format in
                         Text(format.displayName).tag(format)
@@ -793,15 +801,28 @@ struct MeasureSection: View {
                 }
                 .pickerStyle(.segmented)
                 .onChange(of: measureFormat) { _, newFormat in
-                    if newFormat == .dollars {
+                    if newFormat == .dollars && measureDecimalPlaces != 0 && measureDecimalPlaces != 2 {
                         measureDecimalPlaces = 2
                     }
                     guard let value = parseFormattedDecimal(measureGoal) else { return }
-                    let places = newFormat == .dollars ? 2 : min(3, max(0, measureDecimalPlaces))
+                    let places = newFormat == .dollars
+                        ? (measureDecimalPlaces == 2 ? 2 : 0)
+                        : min(3, max(0, measureDecimalPlaces))
                     measureGoal = groupedDecimalString(value, fractionDigits: places)
                 }
 
-                if measureFormat != .dollars {
+                if measureFormat == .dollars {
+                    HStack {
+                        Text("Cents")
+                        Spacer()
+                        Picker("Cents", selection: $measureDecimalPlaces) {
+                            Text("No").tag(0)
+                            Text("Yes").tag(2)
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                    }
+                } else {
                     HStack {
                         Text("Decimal")
                         Spacer()
@@ -835,9 +856,10 @@ struct MeasureSection: View {
                     Text(measureFormat.suffix)
                 }
                 .onChange(of: measureDecimalPlaces) { _, _ in
-                    guard measureFormat != .dollars else { return }
                     guard let value = parseFormattedDecimal(measureGoal) else { return }
-                    let places = min(3, max(0, measureDecimalPlaces))
+                    let places = measureFormat == .dollars
+                        ? (measureDecimalPlaces == 2 ? 2 : 0)
+                        : min(3, max(0, measureDecimalPlaces))
                     measureGoal = groupedDecimalString(value, fractionDigits: places)
                 }
                 
