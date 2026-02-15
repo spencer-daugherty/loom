@@ -584,8 +584,8 @@ struct PlanStepTwoView: View {
 
             HStack(spacing: 12) {
                 TextField("Add an action…", text: $input)
-                    .textInputAutocapitalization(.none)
-                    .autocorrectionDisabled(true)
+                    .textInputAutocapitalization(.sentences)
+                    .autocorrectionDisabled(false)
                     .focused($isInputFocused)
                     .submitLabel(.done)
                     .onSubmit(addItem)
