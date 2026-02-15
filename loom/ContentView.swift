@@ -366,7 +366,22 @@ struct ContentView: View {
     }
 
     private func latestMeasure(for outcome: Outcomes) -> OutcomesMeasure? {
-        outcomeMeasures.first { $0.outcome_id == outcome.outcome_id }
+        if let latestEntry = outcomeMeasureEntries
+            .filter({ $0.outcome_id == outcome.outcome_id })
+            .max(by: { $0.measuredAt < $1.measuredAt }) {
+            return OutcomesMeasure(
+                outcome_id: outcome.outcome_id,
+                measure: latestEntry.measure,
+                measuredAt: latestEntry.measuredAt,
+                measure_amt: latestEntry.measure_amt,
+                measure_updated: .now,
+                direction: nil,
+                format: latestEntry.format,
+                unit: latestEntry.unit,
+                decimalPlaces: latestEntry.decimalPlaces
+            )
+        }
+        return outcomeMeasures.first { $0.outcome_id == outcome.outcome_id }
     }
 
     private var fulfillmentMetrics: [(String, Color, Double)] {
@@ -703,7 +718,7 @@ struct ContentView: View {
                                         .lineLimit(1)
 
                                     // Progress Circle
-                                    if let measure = outcomeMeasures.first(where: { $0.outcome_id == outcome.outcome_id }),
+                                    if let measure = latestMeasure(for: outcome),
                                        measure.measure_amt != 0 && measure.format != nil {
                                         Spacer()
                                         ZStack {

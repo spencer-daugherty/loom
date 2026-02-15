@@ -439,7 +439,22 @@ struct ObjectivesView: View {
     }
 
     private func latestMeasure(for outcome: Outcomes) -> OutcomesMeasure? {
-        outcomeMeasures.first { $0.outcome_id == outcome.outcome_id }
+        if let latestEntry = outcomeMeasureEntries
+            .filter({ $0.outcome_id == outcome.outcome_id })
+            .max(by: { $0.measuredAt < $1.measuredAt }) {
+            return OutcomesMeasure(
+                outcome_id: outcome.outcome_id,
+                measure: latestEntry.measure,
+                measuredAt: latestEntry.measuredAt,
+                measure_amt: latestEntry.measure_amt,
+                measure_updated: .now,
+                direction: nil,
+                format: latestEntry.format,
+                unit: latestEntry.unit,
+                decimalPlaces: latestEntry.decimalPlaces
+            )
+        }
+        return outcomeMeasures.first { $0.outcome_id == outcome.outcome_id }
     }
 
     private func startMeasure(for outcome: Outcomes, latestMeasure: OutcomesMeasure?) -> Double? {
@@ -588,17 +603,21 @@ struct OutcomeRow: View {
 }
 
 struct CompletedOutcomeRow: View {
+    @Environment(\.colorScheme) private var colorScheme
     let archive: CompletedOutcomeArchive
     var showsChevron: Bool = true
+    var showDates: Bool = true
 
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Spacer()
-                    Text("\(formattedDate(archive.start)) - \(formattedDate(archive.completedAt))")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.secondary)
+                if showDates {
+                    HStack {
+                        Spacer()
+                        Text("\(formattedDate(archive.start)) - \(formattedDate(archive.completedAt))")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Text(archive.outcome)
                     .font(.title3)
@@ -638,13 +657,13 @@ struct CompletedOutcomeRow: View {
                                 .foregroundColor(archive.goalMet ? .green : .red)
                             Text("goal status")
                                 .font(.caption2)
-                                .foregroundColor(.black)
+                                .foregroundColor(colorScheme == .dark ? .white : .black)
                         }
                         .padding(.vertical, 6)
                         .padding(.horizontal, 10)
                         .background(
                             RoundedRectangle(cornerRadius: 8)
-                                .fill(Color(.systemGray5))
+                                .fill(colorScheme == .dark ? Color(.tertiarySystemBackground) : Color(.systemGray5))
                         )
                         .frame(height: 44)
 
@@ -677,7 +696,7 @@ struct CompletedOutcomeRow: View {
                         .padding(.horizontal, 10)
                         .background(
                             RoundedRectangle(cornerRadius: 8)
-                                .fill(Color(.systemGray5))
+                                .fill(colorScheme == .dark ? Color(.tertiarySystemBackground) : Color(.systemGray5))
                         )
                         .frame(height: 44)
 
@@ -752,8 +771,15 @@ struct CompletedOutcomeDetailView: View {
     let archive: CompletedOutcomeArchive
     @Query(sort: \CompletedOutcomeContributionArchive.completedAt, order: .forward) private var contributionRows: [CompletedOutcomeContributionArchive]
     @Query(sort: \CompletedOutcomeMeasurePointArchive.measuredAt, order: .forward) private var measureRows: [CompletedOutcomeMeasurePointArchive]
+    @Query(sort: \OutcomeAnalyticsEvent.occurredAt, order: .reverse) private var allOutcomeEvents: [OutcomeAnalyticsEvent]
     @State private var isShowingDeleteAlert = false
+    @State private var insightDetailSheet: InsightDetailSheetType? = nil
 
+    private enum InsightDetailSheetType: String, Identifiable {
+        case goalChanges
+        case targetPushes
+        var id: String { rawValue }
+    }
     private var contributions: [CompletedOutcomeContributionArchive] {
         contributionRows.filter { $0.completedOutcomeArchiveId == archive.id }
     }
@@ -782,40 +808,46 @@ struct CompletedOutcomeDetailView: View {
         }
     }
 
+    private var outcomeEvents: [OutcomeAnalyticsEvent] {
+        allOutcomeEvents.filter { $0.outcome_id == archive.originalOutcomeId }
+    }
+
+    private var goalChangeEvents: [OutcomeAnalyticsEvent] {
+        outcomeEvents.filter { $0.eventType == "goal_changed" }
+    }
+
+    private var targetPushEvents: [OutcomeAnalyticsEvent] {
+        outcomeEvents.filter { $0.eventType == "target_changed" }
+    }
+
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    CompletedOutcomeRow(archive: archive, showsChevron: false)
+                    CompletedOutcomeRow(archive: archive, showsChevron: false, showDates: false)
                 }
 
-                Section("Insights") {
-                    insightRow("Goal pushes", "\(archive.goalPushCount)")
-                    insightRow("Data entered", "\(archive.dataEntryCount)")
-                    insightRow("Target changes", "\(archive.targetChangeCount)")
-                    if !progressHighlights.isEmpty {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Times with lots of progress")
-                                .font(.subheadline.weight(.semibold))
-                            ForEach(progressHighlights, id: \.self) { line in
-                                Text("• \(line)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
+                if archive.isMeasurable {
+                    Section {
+                        CompletedOutcomeArchiveChart(
+                            rows: measures,
+                            startDate: archive.start,
+                            endDate: archive.end,
+                            formatRaw: archive.format ?? ObjectivesAddView.MeasureFormat.number.rawValue
+                        )
                     }
                 }
 
-                if !contributionByDay.isEmpty {
-                    Section("Contributing Actions Over Time") {
-                        Chart(contributionByDay, id: \.0) { row in
-                            BarMark(
-                                x: .value("Date", row.0),
-                                y: .value("Count", row.1)
+                if archive.isMeasurable {
+                    Section {
+                        NavigationLink {
+                            CompletedOutcomeAllDataView(
+                                archiveID: archive.id,
+                                formatRaw: archive.format ?? ObjectivesAddView.MeasureFormat.number.rawValue
                             )
-                            .foregroundStyle(Color.accentColor.gradient)
+                        } label: {
+                            Text("Show All Data")
                         }
-                        .frame(height: 180)
                     }
                 }
 
@@ -835,6 +867,73 @@ struct CompletedOutcomeDetailView: View {
                             }
                             .padding(.vertical, 2)
                         }
+                    }
+                }
+
+                Section("Goal") {
+                    Text(archive.outcome)
+                        .font(.body)
+                }
+
+                Section("Reasons") {
+                    Text(archive.reasons)
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Start") {
+                    HStack {
+                        Text("Started")
+                        Spacer()
+                        Text(archive.start, format: .dateTime.month().day().year())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("Target") {
+                    HStack {
+                        Text("Ended")
+                        Spacer()
+                        Text(archive.end, format: .dateTime.month().day().year())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("Category of Improvement") {
+                    Text(archive.category)
+                        .font(.body)
+                }
+
+                Section("Insights") {
+                    if archive.isMeasurable {
+                        insightRow("Data entered", "\(archive.dataEntryCount)")
+                        insightDetailRow(
+                            title: "Goal changes",
+                            value: "\(archive.goalPushCount)",
+                            isEnabled: archive.goalPushCount > 0
+                        ) {
+                            insightDetailSheet = .goalChanges
+                        }
+                        insightDetailRow(
+                            title: "Target date pushes",
+                            value: "\(archive.targetChangeCount)",
+                            isEnabled: archive.targetChangeCount > 0
+                        ) {
+                            insightDetailSheet = .targetPushes
+                        }
+                    } else {
+                        insightRow("Goal changes", "\(archive.goalPushCount)")
+                        insightRow("Target date pushes", "\(archive.targetChangeCount)")
+                    }
+                    if !contributionByDay.isEmpty {
+                        Chart(contributionByDay, id: \.0) { row in
+                            BarMark(
+                                x: .value("Date", row.0),
+                                y: .value("Count", row.1)
+                            )
+                            .foregroundStyle(Color.accentColor.gradient)
+                        }
+                        .frame(height: 160)
                     }
                 }
 
@@ -863,20 +962,21 @@ struct CompletedOutcomeDetailView: View {
             } message: {
                 Text("Are you sure you want to delete this outcome? It will be available for 30 days in account management.")
             }
+            .sheet(item: $insightDetailSheet) { sheet in
+                switch sheet {
+                case .goalChanges:
+                    CompletedOutcomeInsightDetailSheet(
+                        title: "Goal changes",
+                        rows: goalChangeRows
+                    )
+                case .targetPushes:
+                    CompletedOutcomeInsightDetailSheet(
+                        title: "Target date pushes",
+                        rows: targetPushRows
+                    )
+                }
+            }
         }
-    }
-
-    private func metricPill(value: String, caption: String, valueColor: Color = .primary) -> some View {
-        VStack(spacing: 2) {
-            Text(value)
-                .font(.title3.weight(.bold))
-                .foregroundStyle(valueColor)
-            Text(caption)
-                .font(.caption2)
-        }
-        .padding(.vertical, 6)
-        .padding(.horizontal, 10)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color(.systemGray5)))
     }
 
     private func insightRow(_ title: String, _ value: String) -> some View {
@@ -885,6 +985,68 @@ struct CompletedOutcomeDetailView: View {
             Spacer()
             Text(value).fontWeight(.semibold)
         }
+    }
+
+    private func insightDetailRow(
+        title: String,
+        value: String,
+        isEnabled: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            if isEnabled { action() }
+        } label: {
+            HStack {
+                Text(title)
+                    .foregroundStyle(.primary)
+                Spacer()
+                Text(value)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.primary)
+                if isEnabled {
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+    }
+
+    private var goalChangeRows: [String] {
+        if goalChangeEvents.isEmpty {
+            return ["No detailed goal-change history is available for this outcome."]
+        }
+        return goalChangeEvents.compactMap { event in
+            guard let oldGoal = event.oldGoal, let newGoal = event.newGoal else { return nil }
+            return "\(shortDate(event.occurredAt)): goal changes \(compactNumber(oldGoal)) to \(compactNumber(newGoal))"
+        }
+    }
+
+    private var targetPushRows: [String] {
+        if targetPushEvents.isEmpty {
+            return ["No detailed target-date history is available for this outcome."]
+        }
+        return targetPushEvents.compactMap { event in
+            guard let oldDate = event.oldTargetDate, let newDate = event.newTargetDate else { return nil }
+            return "\(shortDate(event.occurredAt)): \(shortDate(oldDate)) to \(shortDate(newDate))"
+        }
+    }
+
+    private func shortDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MM/dd/yyyy"
+        return formatter.string(from: date)
+    }
+
+    private func compactNumber(_ value: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = 2
+        formatter.minimumFractionDigits = 0
+        return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
     }
 
     private func journalBox(title: String, text: String) -> some View {
@@ -896,6 +1058,435 @@ struct CompletedOutcomeDetailView: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.vertical, 2)
+    }
+
+}
+
+private struct CompletedOutcomeInsightDetailSheet: View {
+    let title: String
+    let rows: [String]
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(rows, id: \.self) { row in
+                    Text(row)
+                        .font(.body)
+                }
+            }
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+}
+
+struct CompletedOutcomeAllDataView: View {
+    let archiveID: UUID
+    let formatRaw: String
+    @Query(sort: \CompletedOutcomeMeasurePointArchive.measuredAt, order: .reverse) private var points: [CompletedOutcomeMeasurePointArchive]
+
+    private var rows: [CompletedOutcomeMeasurePointArchive] {
+        points.filter { $0.completedOutcomeArchiveId == archiveID }
+    }
+
+    var body: some View {
+        List {
+            ForEach(rows) { row in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(row.measuredAt, format: .dateTime.month().day().year())
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                    Text("Current: \(formatted(row.measure, format: formatRaw))  Goal: \(formatted(row.goal, format: formatRaw))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .navigationTitle("All Measure Data")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func formatted(_ value: Double, format: String) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = 2
+        formatter.minimumFractionDigits = 0
+        let base = formatter.string(from: NSNumber(value: value)) ?? "\(value)"
+        switch format {
+        case ObjectivesAddView.MeasureFormat.dollars.rawValue:
+            return "$\(base)"
+        case ObjectivesAddView.MeasureFormat.percentage.rawValue:
+            return "\(base)%"
+        default:
+            return base
+        }
+    }
+}
+
+private struct CompletedOutcomeArchiveChart: View {
+    let rows: [CompletedOutcomeMeasurePointArchive]
+    let startDate: Date
+    let endDate: Date
+    let formatRaw: String
+
+    @State private var selectedTimeRange: String = "All"
+    @State private var selectedEntryID: UUID? = nil
+    @State private var selectedDate: Date? = nil
+    @State private var showSuccessPaths: Bool = false
+    private let allTimeRanges = ["All", "W", "M", "3M", "6M", "Y"]
+
+    private var sortedRows: [CompletedOutcomeMeasurePointArchive] {
+        rows.sorted { $0.measuredAt < $1.measuredAt }
+    }
+
+    private var availableTimeRanges: [String] {
+        let days = max(1, Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: startDate), to: Calendar.current.startOfDay(for: endDate)).day ?? 1)
+        let maxIndex: Int
+        if days <= 7 { maxIndex = 1 }
+        else if days <= 30 { maxIndex = 2 }
+        else if days <= 90 { maxIndex = 3 }
+        else if days <= 180 { maxIndex = 4 }
+        else { maxIndex = 5 }
+        return Array(allTimeRanges.prefix(maxIndex + 1))
+    }
+
+    private var selectedEntry: CompletedOutcomeMeasurePointArchive? {
+        if let selectedEntryID {
+            return sortedRows.first(where: { $0.id == selectedEntryID })
+        }
+        return sortedRows.last
+    }
+
+    private var startValue: Double? { sortedRows.first?.measure }
+    private var latestValue: Double? { sortedRows.last?.measure }
+    private var latestDate: Date? { sortedRows.last.map { Calendar.current.startOfDay(for: $0.measuredAt) } }
+    private var goalValue: Double? { sortedRows.last?.goal }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Picker("Time Range", selection: $selectedTimeRange) {
+                ForEach(availableTimeRanges, id: \.self) { range in
+                    Text(range).tag(range)
+                }
+            }
+            .pickerStyle(.segmented)
+            .onAppear {
+                if !availableTimeRanges.contains(selectedTimeRange) {
+                    selectedTimeRange = availableTimeRanges.first ?? "All"
+                }
+            }
+            .onChange(of: availableTimeRanges) { _, newRanges in
+                if !newRanges.contains(selectedTimeRange) {
+                    selectedTimeRange = newRanges.first ?? "All"
+                }
+            }
+
+            if let selectedEntry {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(formatMeasure(selectedEntry.measure))
+                        .foregroundStyle(.blue)
+                        .font(.title3.weight(.semibold))
+                    Text(selectedEntry.measuredAt, format: .dateTime.month(.abbreviated).day().year())
+                        .foregroundStyle(.gray)
+                        .font(.caption)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Chart {
+                if let latestGoal = goalValue, latestGoal != 0 {
+                    RuleMark(y: .value("Goal", latestGoal))
+                        .foregroundStyle(.gray)
+                        .lineStyle(.init(lineWidth: 4.5, dash: [6, 4]))
+                }
+
+                RuleMark(x: .value("Start Date", Calendar.current.startOfDay(for: startDate)))
+                    .foregroundStyle(.green)
+                    .lineStyle(.init(lineWidth: 2, dash: [5, 5]))
+
+                RuleMark(x: .value("End Date", Calendar.current.startOfDay(for: endDate)))
+                    .foregroundStyle(.red)
+                    .lineStyle(.init(lineWidth: 2, dash: [5, 5]))
+
+                ForEach(visibleRows) { row in
+                    LineMark(
+                        x: .value("Date", Calendar.current.startOfDay(for: row.measuredAt)),
+                        y: .value("Measure", row.measure)
+                    )
+                    .interpolationMethod(.catmullRom)
+                    .foregroundStyle(.blue)
+
+                    PointMark(
+                        x: .value("Date", Calendar.current.startOfDay(for: row.measuredAt)),
+                        y: .value("Measure", row.measure)
+                    )
+                    .symbol(.circle)
+                    .symbolSize(selectedEntryID == row.id ? 140 : 70)
+                    .foregroundStyle(selectedEntryID == row.id ? .blue : .blue.opacity(0.7))
+                }
+
+                if let selectedEntry {
+                    RuleMark(x: .value("Selected Date", Calendar.current.startOfDay(for: selectedEntry.measuredAt)))
+                        .foregroundStyle(.blue)
+                        .lineStyle(.init(lineWidth: 2))
+                }
+            }
+            .chartScrollableAxes(.horizontal)
+            .chartXScale(domain: fullDateRange())
+            .chartXVisibleDomain(length: visibleDomainLength())
+            .chartScrollPosition(initialX: initialScrollX)
+            .chartYScale(domain: yAxisRange())
+            .chartXAxis {
+                AxisMarks(values: xAxisValues()) { value in
+                    AxisGridLine(stroke: .init(dash: [2, 2]))
+                        .foregroundStyle(.gray.opacity(0.5))
+                    AxisTick()
+                    AxisValueLabel {
+                        if let date = value.as(Date.self) {
+                            Text(xAxisLabel(for: date))
+                        }
+                    }
+                }
+            }
+            .chartYAxis {
+                AxisMarks(position: .trailing, values: .automatic) { _ in
+                    AxisGridLine()
+                    AxisTick()
+                    AxisValueLabel()
+                }
+            }
+            .chartXSelection(value: $selectedDate)
+            .onChange(of: selectedDate) { _, newValue in
+                guard let newValue, let nearest = nearestEntry(to: newValue) else { return }
+                selectedEntryID = nearest.id
+            }
+            .chartOverlay { proxy in
+                GeometryReader { geo in
+                    if showSuccessPaths, let frame = proxy.plotFrame {
+                        let plot = geo[frame]
+                        if
+                            let startPoint = chartPoint(proxy: proxy, plot: plot, date: Calendar.current.startOfDay(for: startDate), value: startValue),
+                            let goalPoint = chartPoint(proxy: proxy, plot: plot, date: Calendar.current.startOfDay(for: endDate), value: goalValue),
+                            let latestPoint = chartPoint(proxy: proxy, plot: plot, date: latestDate, value: latestValue)
+                        {
+                            Path { p in
+                                p.move(to: startPoint)
+                                p.addLine(to: goalPoint)
+                                p.addLine(to: latestPoint)
+                                p.closeSubpath()
+                            }
+                            .fill(((isBehindGoalPath ?? false) ? Color.red : Color.green).opacity(0.18))
+                            .mask(
+                                Rectangle()
+                                    .frame(width: plot.width, height: plot.height)
+                                    .offset(x: plot.minX, y: plot.minY)
+                            )
+
+                            Path { p in
+                                p.move(to: startPoint)
+                                p.addLine(to: goalPoint)
+                            }
+                            .stroke(.gray, lineWidth: 2.2)
+                            .mask(
+                                Rectangle()
+                                    .frame(width: plot.width, height: plot.height)
+                                    .offset(x: plot.minX, y: plot.minY)
+                            )
+
+                            Path { p in
+                                p.move(to: latestPoint)
+                                p.addLine(to: goalPoint)
+                            }
+                            .stroke((isBehindGoalPath ?? false) ? .red : .green, lineWidth: 2.2)
+                            .mask(
+                                Rectangle()
+                                    .frame(width: plot.width, height: plot.height)
+                                    .offset(x: plot.minX, y: plot.minY)
+                            )
+                        }
+                    }
+                }
+            }
+            .onAppear {
+                selectedEntryID = sortedRows.last?.id
+            }
+            .frame(height: 260)
+
+            Toggle("Show Success Path", isOn: $showSuccessPaths)
+                .font(.subheadline)
+                .tint(.blue)
+                .padding(.top, 2)
+        }
+    }
+
+    private var isBehindGoalPath: Bool? {
+        guard
+            let start = startValue,
+            let goal = goalValue,
+            let latest = latestValue,
+            let currentDate = latestDate
+        else { return nil }
+
+        let startDay = Calendar.current.startOfDay(for: startDate)
+        let endDay = Calendar.current.startOfDay(for: endDate)
+        if endDay <= startDay { return nil }
+
+        let total = endDay.timeIntervalSince(startDay)
+        let elapsed = min(max(0, currentDate.timeIntervalSince(startDay)), total)
+        let progress = elapsed / total
+        let expected = start + (goal - start) * progress
+        let directionUp = goal >= start
+        return directionUp ? (latest < expected) : (latest > expected)
+    }
+
+    private var visibleRows: [CompletedOutcomeMeasurePointArchive] {
+        let range = fullDateRange()
+        return sortedRows.filter {
+            let day = Calendar.current.startOfDay(for: $0.measuredAt)
+            return range.contains(day)
+        }
+    }
+
+    private var latestLoggedDate: Date {
+        Calendar.current.startOfDay(for: (sortedRows.last?.measuredAt ?? .now))
+    }
+
+    private var initialScrollX: Date {
+        let halfWindow = visibleDomainLength() / 2
+        let proposed = latestLoggedDate.addingTimeInterval(-halfWindow)
+        let range = fullDateRange()
+        if proposed < range.lowerBound { return range.lowerBound }
+        if proposed > range.upperBound { return range.upperBound }
+        return proposed
+    }
+
+    private func nearestEntry(to date: Date) -> CompletedOutcomeMeasurePointArchive? {
+        guard !sortedRows.isEmpty else { return nil }
+        let target = Calendar.current.startOfDay(for: date)
+        return sortedRows.min(by: {
+            abs($0.measuredAt.timeIntervalSince(target)) < abs($1.measuredAt.timeIntervalSince(target))
+        })
+    }
+
+    private func formatMeasure(_ value: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = 2
+        formatter.minimumFractionDigits = 0
+        let base = formatter.string(from: NSNumber(value: value)) ?? "\(value)"
+        switch formatRaw {
+        case ObjectivesAddView.MeasureFormat.dollars.rawValue:
+            return "$\(base)"
+        case ObjectivesAddView.MeasureFormat.percentage.rawValue:
+            return "\(base)%"
+        default:
+            return base
+        }
+    }
+
+    private func fullDateRange() -> ClosedRange<Date> {
+        let calendar = Calendar.current
+        let allDatesFromEntries = sortedRows.map { calendar.startOfDay(for: $0.measuredAt) }
+        let allDates = allDatesFromEntries + [calendar.startOfDay(for: startDate), calendar.startOfDay(for: endDate)]
+        let minDate = allDates.min() ?? calendar.startOfDay(for: .now)
+        let maxDate = allDates.max() ?? calendar.startOfDay(for: .now)
+        let paddedStart = calendar.date(byAdding: .day, value: -30, to: minDate) ?? minDate
+        let paddedEnd = calendar.date(byAdding: .day, value: 30, to: maxDate) ?? maxDate
+        return paddedStart...paddedEnd
+    }
+
+    private func yAxisRange() -> ClosedRange<Double> {
+        var values: [Double] = visibleRows.flatMap { [$0.measure, $0.goal] }
+        if let startValue { values.append(startValue) }
+        if let latestValue { values.append(latestValue) }
+        if let goalValue { values.append(goalValue) }
+        if let selected = selectedEntry?.measure { values.append(selected) }
+
+        guard let minValue = values.min(), let maxValue = values.max() else {
+            return 0...10
+        }
+
+        let span = maxValue - minValue
+        let minSpan = max(1.0, abs(maxValue) * 0.1)
+        let effectiveSpan = max(span, minSpan)
+        let padding = max(0.5, effectiveSpan * 0.14)
+        let mid = (minValue + maxValue) / 2
+        let half = (effectiveSpan / 2) + padding
+        return (mid - half)...(mid + half)
+    }
+
+    private func xAxisValues() -> [Date] {
+        let calendar = Calendar.current
+        let range = fullDateRange()
+        let step: DateComponents = switch selectedTimeRange {
+        case "All": DateComponents(month: 1)
+        case "W": DateComponents(day: 1)
+        case "M": DateComponents(day: 7)
+        case "3M": DateComponents(month: 1)
+        case "6M": DateComponents(month: 1)
+        case "Y": DateComponents(month: 2)
+        default: DateComponents(month: 1)
+        }
+
+        var values: [Date] = []
+        var current = range.lowerBound
+        while current <= range.upperBound {
+            values.append(current)
+            current = calendar.date(byAdding: step, to: current) ?? range.upperBound.addingTimeInterval(1)
+        }
+        return values
+    }
+
+    private func xAxisLabel(for date: Date) -> String {
+        let spanDays = Calendar.current.dateComponents([.day], from: fullDateRange().lowerBound, to: fullDateRange().upperBound).day ?? 0
+        let isLongRange = spanDays > 365
+        let formatter = DateFormatter()
+        switch selectedTimeRange {
+        case "W":
+            formatter.dateFormat = "EEE"
+            return formatter.string(from: date)
+        case "M":
+            formatter.dateFormat = "M/d"
+            return formatter.string(from: date)
+        default:
+            if isLongRange {
+                formatter.dateFormat = "MMMM"
+                let full = formatter.string(from: date)
+                return full.isEmpty ? "" : String(full.prefix(1))
+            } else {
+                formatter.dateFormat = "MMM"
+                return formatter.string(from: date)
+            }
+        }
+    }
+
+    private func visibleDomainLength() -> TimeInterval {
+        let day: TimeInterval = 86_400
+        switch selectedTimeRange {
+        case "W": return day * 7
+        case "M": return day * 30
+        case "3M": return day * 90
+        case "6M": return day * 180
+        case "Y": return day * 365
+        default:
+            let full = fullDateRange()
+            return max(day * 30, full.upperBound.timeIntervalSince(full.lowerBound))
+        }
+    }
+
+    private func chartPoint(
+        proxy: ChartProxy,
+        plot: CGRect,
+        date: Date?,
+        value: Double?
+    ) -> CGPoint? {
+        guard let date, let value else { return nil }
+        let xDate = Calendar.current.startOfDay(for: date)
+        guard
+            let x = proxy.position(forX: xDate),
+            let y = proxy.position(forY: value)
+        else { return nil }
+        return CGPoint(x: plot.minX + x, y: plot.minY + y)
     }
 }
 

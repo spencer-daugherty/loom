@@ -463,14 +463,6 @@ struct AccountView: View {
                 }
 
                 NavigationLink {
-                    DemoPlanViewContainer()
-                } label: {
-                    HStack {
-                        Text("Open PlanView (Demo)")
-                    }
-                }
-
-                NavigationLink {
                     ManageRawDataView()
                 } label: {
                     HStack {
@@ -647,6 +639,184 @@ struct AccountView: View {
         }
 
         return "Recovered \(restoredMissing + restoredOverwritten) outcome(s) (\(restoredMissing) missing, \(restoredOverwritten) overwritten-candidate) and \(restoredMeasures) measure snapshot(s)."
+    }
+
+    /// Rebuilds ActionView source rows (planned chunks/actions + key state) from archived reflection snapshots.
+    /// Recovery is performed only for weeks that currently have no PlannedChunkAction rows.
+    private func performActionBlocksRecoveryFromArchiveSnapshots() -> String {
+        let calendar = Calendar.current
+
+        let archives = (try? context.fetch(FetchDescriptor<ActionBlocksReflectionArchive>())) ?? []
+        guard !archives.isEmpty else { return "No Action Block archives found to recover from." }
+
+        let archivedActions = (try? context.fetch(FetchDescriptor<ActionBlocksReflectionArchiveAction>())) ?? []
+        guard !archivedActions.isEmpty else { return "No archived Action Block actions found to recover." }
+
+        let archivedOutcomes = (try? context.fetch(FetchDescriptor<ActionBlocksReflectionArchiveOutcome>())) ?? []
+        let existingActions = (try? context.fetch(FetchDescriptor<PlannedChunkAction>())) ?? []
+        let existingChunks = (try? context.fetch(FetchDescriptor<PlannedChunk>())) ?? []
+        let existingStep4 = (try? context.fetch(FetchDescriptor<PlannedChunkStepFourState>())) ?? []
+        let existingLinks = (try? context.fetch(FetchDescriptor<PlannedChunkOutcomeLink>())) ?? []
+        let existingDefine = (try? context.fetch(FetchDescriptor<PlannedChunkActionDefineState>())) ?? []
+        let existingExec = (try? context.fetch(FetchDescriptor<PlannedChunkActionExecutionState>())) ?? []
+
+        let weeksWithActiveActions = Set(existingActions.map { dayKey($0.weekStart, calendar: calendar) })
+        let actionsByArchive = Dictionary(grouping: archivedActions, by: \.archiveId)
+        let outcomesByArchive = Dictionary(grouping: archivedOutcomes, by: \.archiveId)
+
+        var usedChunkIDs = Set(existingChunks.map(\.id))
+        var usedActionIDs = Set(existingActions.map(\.id))
+        var restoredWeeks = 0
+        var restoredChunks = 0
+        var restoredActions = 0
+        var restoredOutcomes = 0
+        var lastRecoveredWeek: Date?
+
+        for archive in archives.sorted(by: { $0.completedAt > $1.completedAt }) {
+            let weekKey = dayKey(archive.weekStart, calendar: calendar)
+            if weeksWithActiveActions.contains(weekKey) { continue }
+
+            let rows = actionsByArchive[archive.id] ?? []
+            if rows.isEmpty { continue }
+
+            let weekStart = archive.weekStart
+            lastRecoveredWeek = weekStart
+
+            // Chunk mapping (archived chunk id -> recovered chunk id/index)
+            let chunkGroups = Dictionary(grouping: rows, by: \.plannedChunkId)
+            let orderedChunkIDs = chunkGroups.keys.sorted {
+                let lhs = chunkGroups[$0]?.first?.chunkLabel ?? ""
+                let rhs = chunkGroups[$1]?.first?.chunkLabel ?? ""
+                if lhs == rhs { return $0.uuidString < $1.uuidString }
+                return lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
+            }
+
+            var chunkMap: [UUID: (id: UUID, index: Int)] = [:]
+
+            for (idx, archivedChunkID) in orderedChunkIDs.enumerated() {
+                guard let first = chunkGroups[archivedChunkID]?.first else { continue }
+                var recoveredChunkID = archivedChunkID
+                if usedChunkIDs.contains(recoveredChunkID) {
+                    recoveredChunkID = UUID()
+                }
+                usedChunkIDs.insert(recoveredChunkID)
+
+                let chunk = PlannedChunk(
+                    id: recoveredChunkID,
+                    weekStart: weekStart,
+                    chunkIndex: idx,
+                    labelId: UUID(),
+                    label: first.chunkLabel,
+                    categoryId: UUID(),
+                    category: first.chunkCategory
+                )
+                context.insert(chunk)
+                chunkMap[archivedChunkID] = (recoveredChunkID, idx)
+                restoredChunks += 1
+            }
+
+            // Step 4 restore per chunk from first archived row values.
+            for archivedChunkID in orderedChunkIDs {
+                guard
+                    let mapped = chunkMap[archivedChunkID],
+                    let first = chunkGroups[archivedChunkID]?.first
+                else { continue }
+
+                let chunkKey = "\(dayKey(weekStart, calendar: calendar))|\(mapped.id.uuidString)"
+                if existingStep4.contains(where: { $0.weekPlannedChunkKey == chunkKey }) { continue }
+
+                let row = PlannedChunkStepFourState(
+                    weekStart: weekStart,
+                    plannedChunkId: mapped.id,
+                    resultText: first.resultText ?? "",
+                    roleNoteText: first.purposeText ?? "",
+                    connectedRoleId: nil
+                )
+                context.insert(row)
+            }
+
+            // Action + define/execution restore.
+            for archivedChunkID in orderedChunkIDs {
+                guard let mapped = chunkMap[archivedChunkID] else { continue }
+                let chunkRows = (chunkGroups[archivedChunkID] ?? []).sorted {
+                    if $0.actionText == $1.actionText { return $0.id.uuidString < $1.id.uuidString }
+                    return $0.actionText.localizedCaseInsensitiveCompare($1.actionText) == .orderedAscending
+                }
+
+                for (order, row) in chunkRows.enumerated() {
+                    var actionID = row.plannedChunkActionId
+                    if usedActionIDs.contains(actionID) {
+                        actionID = UUID()
+                    }
+                    usedActionIDs.insert(actionID)
+
+                    let action = PlannedChunkAction(
+                        id: actionID,
+                        weekStart: weekStart,
+                        chunkIndex: mapped.index,
+                        plannedChunkId: mapped.id,
+                        text: row.actionText,
+                        sortOrder: order
+                    )
+                    context.insert(action)
+                    restoredActions += 1
+
+                    let defineKey = "\(dayKey(weekStart, calendar: calendar))|\(actionID.uuidString)"
+                    if !existingDefine.contains(where: { $0.weekActionKey == defineKey }) {
+                        context.insert(
+                            PlannedChunkActionDefineState(
+                                weekStart: weekStart,
+                                plannedChunkActionId: actionID,
+                                rank: order,
+                                isMust: row.isMust,
+                                timeEstimateMinutes: row.durationMinutes
+                            )
+                        )
+                    }
+
+                    if !existingExec.contains(where: { $0.weekActionKey == defineKey }) {
+                        context.insert(
+                            PlannedChunkActionExecutionState(
+                                weekStart: weekStart,
+                                plannedChunkActionId: actionID,
+                                statusRaw: row.statusRaw
+                            )
+                        )
+                    }
+                }
+            }
+
+            // Restore chunk-outcome links.
+            for row in outcomesByArchive[archive.id] ?? [] {
+                guard let mapped = chunkMap[row.plannedChunkId] else { continue }
+                let linkKey = "\(dayKey(weekStart, calendar: calendar))|\(mapped.id.uuidString)|\(row.outcomeId.uuidString)"
+                if existingLinks.contains(where: { $0.weekChunkOutcomeKey == linkKey }) { continue }
+                context.insert(
+                    PlannedChunkOutcomeLink(
+                        weekStart: weekStart,
+                        plannedChunkId: mapped.id,
+                        outcomeId: row.outcomeId
+                    )
+                )
+                restoredOutcomes += 1
+            }
+
+            restoredWeeks += 1
+        }
+
+        guard restoredWeeks > 0 else {
+            return "No recoverable Action Block weeks were found. Existing weeks already have active actions or no archive snapshots exist."
+        }
+
+        if let lastRecoveredWeek {
+            let state = ActivePlanState.fetchOrCreate(in: context)
+            state.isActive = true
+            state.weekStart = lastRecoveredWeek
+            state.activatedAt = .now
+        }
+
+        try? context.save()
+        return "Recovered \(restoredWeeks) week(s), \(restoredChunks) chunk(s), \(restoredActions) action(s), and \(restoredOutcomes) outcome link(s) from archived Action Blocks."
     }
 
     private func runLegacyArchiveMigrationIfNeeded() {

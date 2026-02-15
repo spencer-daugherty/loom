@@ -37,6 +37,8 @@ struct ActionView: View {
     @Query private var attachments: [PlannedChunkActionAttachment]
     @Query(sort: \RollingCaptureItem.createdAt, order: .reverse)
     private var captureItems: [RollingCaptureItem]
+    @Query(sort: \ActivePlanState.id, order: .forward)
+    private var activePlanStates: [ActivePlanState]
 
     @State private var isShowingInstructions: Bool = false
     @State private var openFilter: FilterMenu? = nil
@@ -864,10 +866,15 @@ struct ActionView: View {
         .onAppear {
             ensureStateRowsExistForWeek()
             cleanupAllBlankActions()
+            deactivatePlanIfNoActionBlocks()
+        }
+        .onChange(of: weekChunks.map(\.id)) { _, _ in
+            deactivatePlanIfNoActionBlocks()
         }
         .onChange(of: weekActions.map(\.id)) { _, ids in
             ensureStateRowsExistForWeek()
             cleanupAllBlankActions()
+            deactivatePlanIfNoActionBlocks()
             if let pending = pendingFocusActionID, ids.contains(pending) {
                 scrollTargetActionID = pending
                 pendingFocusActionID = nil
@@ -2248,6 +2255,15 @@ struct ActionView: View {
     }
 
     private func persistNow() {
+        try? modelContext.save()
+    }
+
+    private func deactivatePlanIfNoActionBlocks() {
+        guard weekChunks.isEmpty else { return }
+        let state = activePlanStates.first ?? ActivePlanState.fetchOrCreate(in: modelContext)
+        guard state.isActive || state.weekStart != nil else { return }
+        state.isActive = false
+        state.weekStart = nil
         try? modelContext.save()
     }
 
