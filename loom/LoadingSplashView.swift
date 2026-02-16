@@ -36,7 +36,7 @@ struct FulfillmentRadarGraph: View {
                 }
                 // compute data polygon vertices
                 let filledPoints: [CGPoint] = outerPoints.enumerated().map { i, pt in
-                    let ratio = max(0, min(metrics[i].2 / 100, 1))
+                    let ratio = max(0.1, min(metrics[i].2 / 100, 1))
                     return CGPoint(x: half + (pt.x - half)*ratio,
                                    y: half + (pt.y - half)*ratio)
                 }
@@ -110,7 +110,7 @@ struct FulfillmentRadarGraph: View {
                                     Circle().stroke(Color(.systemBackground), lineWidth: 2 * scale)
                                 }
                             }
-                            .shadow(color: showDotShadow ? Color.white.opacity(0.9) : Color.clear,
+                            .shadow(color: showDotShadow ? Color(.systemBackground).opacity(0.9) : Color.clear,
                                     radius: showDotShadow ? 10 * scale : 0,
                                     x: 0, y: 0)
                             .position(filledPoints[i])
@@ -396,6 +396,7 @@ struct LoadingSplashView: View {
     let minimumDisplayDuration: TimeInterval
     let onMinimumElapsed: (() -> Void)?
     private var isPresented: Binding<Bool>?
+    @State private var splashRadarSelectedIndex: Int = 0
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -463,12 +464,11 @@ struct LoadingSplashView: View {
                         .transition(.opacity)
                         .modifier(DarkModeInvertImage())
 
-                    FulfillmentRadarGraph(
+                    FulfillmentInteractiveRadar(
                         metrics: animatedMetrics,
-                        showOutline: false,
-                        dotDiameter: 14,
-                        showDotOutline: false,
-                        showDotShadow: false
+                        selectedIndex: $splashRadarSelectedIndex,
+                        onManualSelect: {},
+                        enableInteraction: false
                     )
                     .matchedGeometryEffect(id: "fulfillmentGraph", in: namespace)
                     .rotationEffect(.degrees(t * Double(337.5)))

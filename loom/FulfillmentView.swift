@@ -1338,7 +1338,7 @@ struct FulfillmentInteractiveRadar: View {
                     (metrics[i].0, segmentColor(i, selectedIndex: safeSelectedIndex), metrics[i].2)
                 }
                 let valuePoints: [CGPoint] = (0..<count).map { i in
-                    let ratio = max(0, min(metrics[i].2 / 100.0, 1.0))
+                    let ratio = max(0.1, min(metrics[i].2 / 100.0, 1.0))
                     let outer = outerPoints[i]
                     return CGPoint(
                         x: center.x + (outer.x - center.x) * ratio,
@@ -1363,7 +1363,7 @@ struct FulfillmentInteractiveRadar: View {
                             .overlay(
                                 Circle().stroke(Color(.systemBackground), lineWidth: 2)
                             )
-                            .shadow(color: Color.white.opacity(0.9), radius: useOriginalDotStyle ? 7 : 10, x: 0, y: 0)
+                            .shadow(color: Color(.systemBackground).opacity(0.9), radius: useOriginalDotStyle ? 7 : 10, x: 0, y: 0)
                             .scaleEffect(useOriginalDotStyle ? 1 : circleScale(for: i, selectedIndex: safeSelectedIndex))
                             .animation(.easeInOut(duration: 0.18), value: pulseIndex)
                             .animation(.easeInOut(duration: 0.18), value: selectedIndex)
