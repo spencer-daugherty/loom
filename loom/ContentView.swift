@@ -682,19 +682,51 @@ struct ContentView: View {
     }
 
     private var objectivesSection: some View {
-        NavigationLink {
-            ObjectivesView()
+        let isObjectivesEmptyState = outcomes.isEmpty && !enableProjectsFeature
+        let objectivesCardBackground: Color = isObjectivesEmptyState
+            ? Color(.systemGray5)
+            : Color(.secondarySystemBackground)
+        return NavigationLink {
+            ObjectivesView(autoOpenAddOutcome: isObjectivesEmptyState)
         } label: {
-            SectionCard(iconName: "scope", title: "Objectives") {
-                HStack(alignment: .top, spacing: 2) {
+            SectionCard(
+                iconName: "scope",
+                title: "Objectives",
+                backgroundColor: objectivesCardBackground
+            ) {
+                if isObjectivesEmptyState {
+                    VStack(spacing: 12) {
+                        VStack(spacing: 4) {
+                            Text("No long term goals")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.gray)
+                            Text("Tap to add an Outcome")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                        }
 
-                    // Left: four outcome texts with dividers
-                    VStack(alignment: .leading, spacing: 8) {
-                        if outcomes.isEmpty {
-                            Text("+ Add Outcome")
-                                .font(.body)
-                                .foregroundColor(.primary)
-                        } else {
+                        Text("Open Objectives")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.gray)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(
+                                Capsule()
+                                    .fill(Color(.systemGray6))
+                            )
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 132)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color(.systemGray5))
+                    )
+                } else {
+                    HStack(alignment: .top, spacing: 2) {
+
+                        // Left: four outcome texts with dividers
+                        VStack(alignment: .leading, spacing: 8) {
                             let currentDate = Date()
                             let filteredOutcomes = outcomes.filter { $0.start <= currentDate }
 
@@ -761,62 +793,62 @@ struct ContentView: View {
                                 }
                             }
                         }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
 
-                    if enableProjectsFeature {
-                        // Right: two folder icons
-                        VStack(spacing: 8) {
-                            ZStack {
-                                Image(systemName: "doc.fill")
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(height: 65)
-                                    .foregroundColor(Color.gray.opacity(0.2))
+                        if enableProjectsFeature {
+                            // Right: two folder icons
+                            VStack(spacing: 8) {
+                                ZStack {
+                                    Image(systemName: "doc.fill")
+                                        .resizable()
+                                        .scaledToFit()
+                                        .frame(height: 65)
+                                        .foregroundColor(Color.gray.opacity(0.2))
 
-                                Text("+ Add Project")
-                                    .font(.caption2)
-                                    .bold()
-                                    .foregroundColor(.primary)
-                                    .multilineTextAlignment(.center)
-                                    .lineLimit(2)
-                                    .truncationMode(.tail)
-                                    .frame(width: 50)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .offset(y: 10)
+                                    Text("+ Add Project")
+                                        .font(.caption2)
+                                        .bold()
+                                        .foregroundColor(.primary)
+                                        .multilineTextAlignment(.center)
+                                        .lineLimit(2)
+                                        .truncationMode(.tail)
+                                        .frame(width: 50)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .offset(y: 10)
+                                }
+
+                                ZStack {
+                                    Image(systemName: "doc.fill")
+                                        .resizable()
+                                        .scaledToFit()
+                                        .frame(height: 65)
+                                        .foregroundColor(Color.gray.opacity(0.2))
+
+                                    Text("+ Add Project")
+                                        .font(.caption2)
+                                        .bold()
+                                        .foregroundColor(.primary)
+                                        .multilineTextAlignment(.center)
+                                        .lineLimit(2)
+                                        .truncationMode(.tail)
+                                        .frame(width: 50)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .offset(y: 10)
+                                }
                             }
-
-                            ZStack {
-                                Image(systemName: "doc.fill")
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(height: 65)
-                                    .foregroundColor(Color.gray.opacity(0.2))
-
-                                Text("+ Add Project")
-                                    .font(.caption2)
-                                    .bold()
-                                    .foregroundColor(.primary)
-                                    .multilineTextAlignment(.center)
-                                    .lineLimit(2)
-                                    .truncationMode(.tail)
-                                    .frame(width: 50)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .offset(y: 10)
-                            }
+                            .frame(width: 60, alignment: .trailing)
                         }
-                        .frame(width: 60, alignment: .trailing)
                     }
+                    .frame(maxWidth: .infinity, minHeight: 132, alignment: .topLeading)
+                    .padding(.vertical, 12)
+                    .overlay(
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundColor(Color(.lightGray))
+                            .offset(y: 1),
+                        alignment: .bottom
+                    )
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .overlay(
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 20, weight: .bold))
-                        .foregroundColor(Color(.lightGray))
-                        .offset(y: 1),
-                    alignment: .bottom
-                )
             }
         }
         .buttonStyle(.plain)
@@ -827,7 +859,20 @@ struct ContentView: View {
 struct SectionCard<Content: View>: View {
     let iconName: String
     let title: String
+    let backgroundColor: Color
     let content: () -> Content
+
+    init(
+        iconName: String,
+        title: String,
+        backgroundColor: Color = Color(.secondarySystemBackground),
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.iconName = iconName
+        self.title = title
+        self.backgroundColor = backgroundColor
+        self.content = content
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -853,7 +898,7 @@ struct SectionCard<Content: View>: View {
                 .padding(.horizontal)
                 .padding(.bottom, 12)
         }
-        .background(Color(.secondarySystemBackground))
+        .background(backgroundColor)
         .cornerRadius(16)
         .shadow(color: Color.primary.opacity(0.08), radius: 6, x: 0, y: 3)
     }

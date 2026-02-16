@@ -3,6 +3,7 @@ import SwiftData
 import Charts
 
 struct ObjectivesView: View {
+    let autoOpenAddOutcome: Bool
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.modelContext) private var modelContext
     @AppStorage("enable_projects_feature") private var enableProjectsFeature = false
@@ -17,6 +18,7 @@ struct ObjectivesView: View {
     @State private var pendingSavedOutcomeID: UUID?
     @State private var showUpcoming = false
     @State private var showCompletedOutcomesPlaceholder = false
+    @State private var hasAutoOpenedAddOutcome = false
     private let oneTimeTargetPassedDemoFlag = "one_time_outcome_target_passed_demo_v1_done"
     private let oneTimeUnmeasurablePassedDemoFlag = "one_time_outcome_unmeasurable_target_passed_demo_v1_done"
     private var sortSheetHeight: CGFloat {
@@ -73,6 +75,10 @@ struct ObjectivesView: View {
     private var hasUpcomingOutcomes: Bool {
         let today = Calendar.current.startOfDay(for: .now)
         return outcomes.contains { Calendar.current.startOfDay(for: $0.start) > today }
+    }
+
+    init(autoOpenAddOutcome: Bool = false) {
+        self.autoOpenAddOutcome = autoOpenAddOutcome
     }
 
     var body: some View {
@@ -298,6 +304,12 @@ struct ObjectivesView: View {
         }
         .onAppear {
             showUpcoming = false
+            if autoOpenAddOutcome && !hasAutoOpenedAddOutcome {
+                hasAutoOpenedAddOutcome = true
+                DispatchQueue.main.async {
+                    navigationAction = .addOutcome
+                }
+            }
             seedOneTimeTargetPassedDemoOutcomeIfNeeded()
             seedOneTimeUnmeasurablePassedDemoOutcomeIfNeeded()
         }
@@ -972,9 +984,7 @@ struct CompletedOutcomeDetailView: View {
                 }
 
                 Section("Journal") {
-                    journalBox(title: "Wins", text: archive.journalWins)
-                    journalBox(title: "Learned", text: archive.journalLearned)
-                    journalBox(title: "Next", text: archive.journalNext)
+                    journalBox(title: "Journal", text: combinedJournalText(for: archive))
                 }
 
                 Section {
@@ -1081,6 +1091,24 @@ struct CompletedOutcomeDetailView: View {
         formatter.maximumFractionDigits = 2
         formatter.minimumFractionDigits = 0
         return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
+    }
+
+    private func combinedJournalText(for archive: CompletedOutcomeArchive) -> String {
+        let wins = archive.journalWins.trimmingCharacters(in: .whitespacesAndNewlines)
+        let learned = archive.journalLearned.trimmingCharacters(in: .whitespacesAndNewlines)
+        let next = archive.journalNext.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // New records store the unified journal in journalWins and leave others blank.
+        if !wins.isEmpty && learned.isEmpty && next.isEmpty {
+            return wins
+        }
+
+        // Migration display for older records that used 3 fields.
+        var lines: [String] = []
+        if !wins.isEmpty { lines.append("Wins: \(wins)") }
+        if !learned.isEmpty { lines.append("Learned: \(learned)") }
+        if !next.isEmpty { lines.append("Next: \(next)") }
+        return lines.isEmpty ? "—" : lines.joined(separator: "\n\n")
     }
 
     private func journalBox(title: String, text: String) -> some View {

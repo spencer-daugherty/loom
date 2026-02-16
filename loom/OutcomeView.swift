@@ -90,11 +90,9 @@ struct OutcomeView: View {
     @State private var updateGoalDate: Date = Calendar.current.startOfDay(for: .now)
     @FocusState private var isUpdateGoalFieldFocused: Bool
     @State private var completionSuccessLevel: Int = 3
-    @State private var completionJournalWins: String = ""
-    @State private var completionJournalLearned: String = ""
-    @State private var completionJournalNext: String = ""
+    @State private var completionJournalText: String = ""
     @State private var completionRecordedDate: Date = Calendar.current.startOfDay(for: .now)
-    @FocusState private var completionJournalFocusedField: CompletionJournalField?
+    @FocusState private var isCompletionJournalFocused: Bool
     @State private var changeTargetDateDraft: Date = .now
 
     @Query(sort: \OutcomesMeasureEntry.measuredAt, order: .forward) private var allMeasureEntries: [OutcomesMeasureEntry]
@@ -115,12 +113,6 @@ struct OutcomeView: View {
         let actionText: String
         let completedAt: Date
         let isQuickCompleted: Bool
-    }
-
-    private enum CompletionJournalField: Hashable {
-        case wins
-        case learned
-        case next
     }
 
     private var popupForegroundColor: Color {
@@ -338,9 +330,7 @@ struct OutcomeView: View {
     }
 
     private var completionFormValid: Bool {
-        let universalValid = !completionJournalWins.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-            !completionJournalLearned.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-            !completionJournalNext.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let universalValid = !completionJournalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         if isMeasurable {
             return universalValid
         }
@@ -812,15 +802,13 @@ struct OutcomeView: View {
                     }
 
                     Section("Journal") {
-                        TextField("Wins", text: $completionJournalWins, axis: .vertical)
-                            .lineLimit(2...4)
-                            .focused($completionJournalFocusedField, equals: .wins)
-                        TextField("What I learned", text: $completionJournalLearned, axis: .vertical)
-                            .lineLimit(2...4)
-                            .focused($completionJournalFocusedField, equals: .learned)
-                        TextField("What I will do next", text: $completionJournalNext, axis: .vertical)
-                            .lineLimit(2...4)
-                            .focused($completionJournalFocusedField, equals: .next)
+                        TextField(
+                            "How was the goal progressed? What did I learn? What will I do next?",
+                            text: $completionJournalText,
+                            axis: .vertical
+                        )
+                        .lineLimit(4...8)
+                        .focused($isCompletionJournalFocused)
                     }
                 }
                 .navigationTitle("Complete Outcome")
@@ -832,7 +820,7 @@ struct OutcomeView: View {
                     ToolbarItemGroup(placement: .keyboard) {
                         Spacer()
                         Button("Done") {
-                            completionJournalFocusedField = nil
+                            isCompletionJournalFocused = false
                             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                         }
                         .foregroundStyle(.blue)
@@ -982,9 +970,9 @@ struct OutcomeView: View {
             goalPushCount: goalPushes,
             dataEntryCount: dataPoints,
             targetChangeCount: targetChanges,
-            journalWins: completionJournalWins,
-            journalLearned: completionJournalLearned,
-            journalNext: completionJournalNext
+            journalWins: completionJournalText,
+            journalLearned: "",
+            journalNext: ""
         )
         modelContext.insert(archive)
 
