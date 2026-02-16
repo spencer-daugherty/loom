@@ -996,12 +996,12 @@ struct ReflectView: View {
 
     private func loadingStylePulsedMetrics(at time: TimeInterval) -> [(String, Color, Double)] {
         let base: [(String, Color, Double)] = [
-            ("Career & Business", .blue, 80),
-            ("Leadership & Impact", .indigo, 65),
-            ("Wealth & Lifestyle", .green, 90),
-            ("Mind & Meaning", .purple, 75),
-            ("Love & Relationships", .red, 85),
-            ("Health & Vitality", .orange, 70),
+            ("Career & Business", FulfillmentCategoryTheme.color(for: "Career & Business"), 80),
+            ("Leadership & Impact", FulfillmentCategoryTheme.color(for: "Leadership & Impact"), 65),
+            ("Wealth & Lifestyle", FulfillmentCategoryTheme.color(for: "Wealth & Lifestyle"), 90),
+            ("Mind & Meaning", FulfillmentCategoryTheme.color(for: "Mind & Meaning"), 75),
+            ("Love & Relationships", FulfillmentCategoryTheme.color(for: "Love & Relationships"), 85),
+            ("Health & Vitality", FulfillmentCategoryTheme.color(for: "Health & Vitality"), 70),
         ]
         let amplitude: Double = 180
         let speed: Double = 1.6
@@ -1187,20 +1187,11 @@ struct ReflectView: View {
     }
 
     private func categoryColor(for category: String) -> Color {
-        switch category {
-        case "Career & Business": return .blue
-        case "Leadership & Impact": return .indigo
-        case "Wealth & Lifestyle": return .green
-        case "Mind & Meaning": return .purple
-        case "Love & Relationships": return .red
-        case "Health & Vitality": return .orange
-        default: return .primary
-        }
+        FulfillmentCategoryTheme.color(for: category)
     }
 
     private func lightenedCategoryColor(for category: String) -> Color {
-        let baseColor = UIColor(categoryColor(for: category))
-        return Color(baseColor.adjusted(by: 0.8))
+        FulfillmentCategoryTheme.lightColor(for: category)
     }
 
     private func daysUntil(_ date: Date) -> Int {

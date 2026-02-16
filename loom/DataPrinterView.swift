@@ -1689,11 +1689,21 @@ struct ManageRawDataView: View {
 }
 
 private struct ManageFulfillmentCategoriesView: View {
+    @Environment(\.modelContext) private var context
     @Query(sort: \Fulfillment.category, order: .forward) private var fulfillments: [Fulfillment]
+    @Query(sort: \FulfillmentRoles.updatedAt, order: .forward) private var allRoles: [FulfillmentRoles]
+    @Query(sort: \FulfillmentFocus.updatedAt, order: .forward) private var allFocuses: [FulfillmentFocus]
+    @Query(sort: \FulfillmentResources.updatedAt, order: .forward) private var allResources: [FulfillmentResources]
     @Query(sort: \PlanLabel.category, order: .forward) private var labels: [PlanLabel]
     @State private var categoryColorKeys: [String: String] = [:]
     @State private var selectedCategoryForColor: String = ""
     @State private var showColorPicker: Bool = false
+    @State private var isDeleteMode: Bool = false
+    @State private var categoriesMarkedForDelete: Set<String> = []
+    @State private var isAddingCategory: Bool = false
+    @State private var newCategoryText: String = ""
+    @State private var showMinimumCategoryAlert: Bool = false
+    @FocusState private var isAddCategoryFocused: Bool
 
     private var categories: [String] {
         let fromFulfillment = fulfillments.map(\.category)
@@ -1706,42 +1716,121 @@ private struct ManageFulfillmentCategoriesView: View {
     var body: some View {
         List {
             ForEach(categories, id: \.self) { category in
-                HStack(spacing: 12) {
+                if isDeleteMode {
                     Button {
-                        selectedCategoryForColor = category
-                        showColorPicker = true
+                        toggleDeleteSelection(for: category)
                     } label: {
-                        Circle()
-                            .fill(fulfillmentCategoryColor(for: category, colorKeys: categoryColorKeys))
-                            .overlay(
-                                Circle()
-                                    .stroke(Color(.darkGray), lineWidth: 2.4)
-                            )
-                            .frame(width: 26, height: 26)
+                        HStack(spacing: 12) {
+                            Circle()
+                                .fill(fulfillmentCategoryColor(for: category, colorKeys: categoryColorKeys))
+                                .overlay(
+                                    Circle()
+                                        .stroke(Color(.darkGray), lineWidth: 2.4)
+                                )
+                                .frame(width: 26, height: 26)
+
+                            Text(category)
+                                .fontWeight(.bold)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            Image(systemName: categoriesMarkedForDelete.contains(category) ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(categoriesMarkedForDelete.contains(category) ? .red : .secondary)
+                        }
                     }
                     .buttonStyle(.plain)
+                } else {
+                    HStack(spacing: 12) {
+                        Button {
+                            selectedCategoryForColor = category
+                            showColorPicker = true
+                        } label: {
+                            Circle()
+                                .fill(fulfillmentCategoryColor(for: category, colorKeys: categoryColorKeys))
+                                .overlay(
+                                    Circle()
+                                        .stroke(Color(.darkGray), lineWidth: 2.4)
+                                )
+                                .frame(width: 26, height: 26)
+                        }
+                        .buttonStyle(.plain)
 
-                    NavigationLink {
-                        FulfillmentCategoryLabelsView(category: category)
-                    } label: {
-                        Text(category)
-                            .fontWeight(.bold)
+                        NavigationLink {
+                            FulfillmentCategoryLabelsView(category: category)
+                        } label: {
+                            Text(category)
+                                .fontWeight(.bold)
+                        }
                     }
+                }
+            }
+
+            if !isDeleteMode && categories.count < 7 {
+                if isAddingCategory {
+                    HStack(spacing: 10) {
+                        Image(systemName: "plus.circle")
+                            .foregroundStyle(.blue)
+                        TextField("Add category", text: $newCategoryText)
+                            .focused($isAddCategoryFocused)
+                            .submitLabel(.done)
+                            .onSubmit { commitAddCategory() }
+                    }
+                    .padding(.vertical, 4)
+                } else {
+                    Button("+ Add Category") {
+                        isAddingCategory = true
+                        isAddCategoryFocused = true
+                    }
+                    .foregroundStyle(.blue)
                 }
             }
         }
         .listStyle(.plain)
         .navigationTitle("Manage Fulfillment Categories")
+        .navigationBarBackButtonHidden(isDeleteMode)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                if isDeleteMode {
+                    Button("Cancel") {
+                        isDeleteMode = false
+                        categoriesMarkedForDelete.removeAll()
+                    }
+                }
+            }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                if isDeleteMode {
+                    Button("Delete") {
+                        deleteMarkedCategories()
+                    }
+                    .foregroundStyle(.red)
+                } else {
+                    Button("Edit") {
+                        isDeleteMode = true
+                        categoriesMarkedForDelete.removeAll()
+                    }
+                }
+            }
+        }
         .onAppear {
             categoryColorKeys = resolvedFulfillmentCategoryColorKeys(for: categories)
             persistFulfillmentCategoryColorKeys(categoryColorKeys)
+        }
+        .onChange(of: isAddCategoryFocused) { _, focused in
+            if !focused && isAddingCategory {
+                isAddingCategory = false
+                newCategoryText = ""
+            }
+        }
+        .alert("Minimum 3 categories required", isPresented: $showMinimumCategoryAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("At least 3 categories must remain.")
         }
         .sheet(isPresented: $showColorPicker) {
             FulfillmentCategoryColorPickerView(
                 category: selectedCategoryForColor,
                 currentColorKey: categoryColorKeys[selectedCategoryForColor]
-                    ?? defaultFulfillmentCategoryColorKeys()[selectedCategoryForColor]
-                    ?? FulfillmentCategoryPalette.all.first?.key
+                    ?? FulfillmentCategoryTheme.defaultColorKeys()[selectedCategoryForColor]
+                    ?? FulfillmentCategoryTheme.palette.first?.key
                     ?? "blue",
                 onSelect: { newColorKey in
                     applyColorSelection(newColorKey, for: selectedCategoryForColor)
@@ -1756,7 +1845,7 @@ private struct ManageFulfillmentCategoriesView: View {
     private func applyColorSelection(_ newColorKey: String, for category: String) {
         guard !category.isEmpty else { return }
         var map = categoryColorKeys
-        let defaults = defaultFulfillmentCategoryColorKeys()
+        let defaults = FulfillmentCategoryTheme.defaultColorKeys()
         let currentColorKey = map[category] ?? defaults[category] ?? "blue"
         if currentColorKey == newColorKey { return }
 
@@ -1769,6 +1858,96 @@ private struct ManageFulfillmentCategoriesView: View {
         map[category] = newColorKey
         categoryColorKeys = map
         persistFulfillmentCategoryColorKeys(map)
+    }
+
+    private func toggleDeleteSelection(for category: String) {
+        if categoriesMarkedForDelete.contains(category) {
+            categoriesMarkedForDelete.remove(category)
+        } else {
+            categoriesMarkedForDelete.insert(category)
+        }
+    }
+
+    private func commitAddCategory() {
+        let trimmed = newCategoryText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        guard !categories.contains(where: { $0.caseInsensitiveCompare(trimmed) == .orderedSame }) else {
+            isAddingCategory = false
+            newCategoryText = ""
+            return
+        }
+
+        let categoryID = UUID()
+        let fulfillment = Fulfillment(
+            category_id: categoryID,
+            category: trimmed,
+            category_identitiy: "",
+            category_vision: "",
+            category_purpose: ""
+        )
+        context.insert(fulfillment)
+
+        for seed in ["label 1", "label 2", "label 3"] {
+            context.insert(
+                PlanLabel(
+                    label: seed,
+                    categoryId: categoryID,
+                    category: trimmed,
+                    source: "default"
+                )
+            )
+        }
+
+        var map = categoryColorKeys
+        let used = Set(map.values)
+        let nextColor = FulfillmentCategoryTheme.palette.map(\.key).first(where: { !used.contains($0) }) ?? "blue"
+        map[trimmed] = nextColor
+        categoryColorKeys = map
+        persistFulfillmentCategoryColorKeys(map)
+
+        try? context.save()
+        isAddingCategory = false
+        newCategoryText = ""
+    }
+
+    private func deleteMarkedCategories() {
+        guard !categoriesMarkedForDelete.isEmpty else { return }
+        if categories.count - categoriesMarkedForDelete.count < 3 {
+            showMinimumCategoryAlert = true
+            return
+        }
+
+        let fulfillmentByCategory = Dictionary(grouping: fulfillments, by: \.category)
+        let idsToDelete = Set(categoriesMarkedForDelete.compactMap { category in
+            fulfillmentByCategory[category]?.first?.category_id
+        })
+
+        for item in fulfillments where categoriesMarkedForDelete.contains(item.category) {
+            context.delete(item)
+        }
+        for label in labels where categoriesMarkedForDelete.contains(label.category) {
+            context.delete(label)
+        }
+        for role in allRoles where idsToDelete.contains(role.category_id) {
+            context.delete(role)
+        }
+        for focus in allFocuses where idsToDelete.contains(focus.category_id) {
+            context.delete(focus)
+        }
+        for resource in allResources where idsToDelete.contains(resource.category_id) {
+            context.delete(resource)
+        }
+
+        var map = categoryColorKeys
+        for category in categoriesMarkedForDelete {
+            map.removeValue(forKey: category)
+        }
+        categoryColorKeys = map
+        persistFulfillmentCategoryColorKeys(map)
+
+        try? context.save()
+        isDeleteMode = false
+        categoriesMarkedForDelete.removeAll()
     }
 }
 
@@ -1983,81 +2162,27 @@ private enum FulfillmentCategoryPalette {
         let color: Color
     }
 
-    static let all: [Option] = [
-        Option(key: "blue", name: "Blue", color: .blue),
-        Option(key: "indigo", name: "Indigo", color: .indigo),
-        Option(key: "green", name: "Green", color: .green),
-        Option(key: "purple", name: "Purple", color: .purple),
-        Option(key: "red", name: "Red", color: .red),
-        Option(key: "orange", name: "Orange", color: .orange),
-        Option(
-            key: "yellow",
-            name: "Yellow",
-            color: Color(red: 0.65, green: 0.47, blue: 0.00) // dark yellow for white-text contrast
-        ),
-        Option(
-            key: "pink",
-            name: "Pink",
-            color: Color(red: 0.74, green: 0.20, blue: 0.47) // dark pink for white-text contrast
-        )
-    ]
+    static let all: [Option] = FulfillmentCategoryTheme.palette.map { .init(key: $0.key, name: $0.name, color: $0.color) }
 
     static func color(for key: String) -> Color {
         all.first(where: { $0.key == key })?.color ?? .gray
     }
 }
 
-private let fulfillmentCategoryColorPrefsKey = "fulfillment_category_color_prefs_v1"
-
-private func defaultFulfillmentCategoryColorKeys() -> [String: String] {
-    [
-        "Career & Business": "blue",
-        "Leadership & Impact": "indigo",
-        "Wealth & Lifestyle": "green",
-        "Mind & Meaning": "purple",
-        "Love & Relationships": "red",
-        "Health & Vitality": "orange"
-    ]
-}
-
 private func persistedFulfillmentCategoryColorKeys() -> [String: String] {
-    UserDefaults.standard.dictionary(forKey: fulfillmentCategoryColorPrefsKey) as? [String: String] ?? [:]
+    FulfillmentCategoryTheme.persistedColorKeys()
 }
 
 private func persistFulfillmentCategoryColorKeys(_ map: [String: String]) {
-    UserDefaults.standard.set(map, forKey: fulfillmentCategoryColorPrefsKey)
+    FulfillmentCategoryTheme.persistColorKeys(map)
 }
 
 private func resolvedFulfillmentCategoryColorKeys(for categories: [String]) -> [String: String] {
-    let defaults = defaultFulfillmentCategoryColorKeys()
-    let persisted = persistedFulfillmentCategoryColorKeys()
-    var map = defaults.merging(persisted) { _, rhs in rhs }
-    let palette = FulfillmentCategoryPalette.all.map(\.key)
-    var used = Set<String>()
-
-    for category in categories {
-        let current = map[category]
-        if let current, palette.contains(current), !used.contains(current) {
-            used.insert(current)
-            continue
-        }
-
-        if let candidate = palette.first(where: { !used.contains($0) }) {
-            map[category] = candidate
-            used.insert(candidate)
-        } else if let fallback = defaults[category] {
-            map[category] = fallback
-        } else {
-            map[category] = "blue"
-        }
-    }
-    return map
+    FulfillmentCategoryTheme.resolvedColorKeys(for: categories)
 }
 
 private func fulfillmentCategoryColor(for category: String, colorKeys: [String: String]? = nil) -> Color {
-    let map = colorKeys ?? resolvedFulfillmentCategoryColorKeys(for: [category])
-    let key = map[category] ?? defaultFulfillmentCategoryColorKeys()[category] ?? "blue"
-    return FulfillmentCategoryPalette.color(for: key)
+    FulfillmentCategoryTheme.color(for: category, colorKeys: colorKeys)
 }
 
 private func fulfillmentCategoryColor(for category: String) -> Color {

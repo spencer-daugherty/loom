@@ -9,16 +9,15 @@ fileprivate struct CategoryDef: Identifiable {
     let id: String
     let title: String
     let iconName: String
-    let color: Color
 }
 
 fileprivate let categories: [CategoryDef] = [
-    .init(id: "career",     title: "Career & Business",    iconName: "battery.25", color: .blue),
-    .init(id: "leadership", title: "Leadership & Impact",  iconName: "battery.25", color: .indigo),
-    .init(id: "wealth",     title: "Wealth & Lifestyle",   iconName: "battery.25", color: .green),
-    .init(id: "mind",       title: "Mind & Meaning",       iconName: "battery.25", color: .purple),
-    .init(id: "love",       title: "Love & Relationships", iconName: "battery.25", color: .red),
-    .init(id: "health",     title: "Health & Vitality",    iconName: "battery.25", color: .orange),
+    .init(id: "career",     title: "Career & Business",    iconName: "battery.25"),
+    .init(id: "leadership", title: "Leadership & Impact",  iconName: "battery.25"),
+    .init(id: "wealth",     title: "Wealth & Lifestyle",   iconName: "battery.25"),
+    .init(id: "mind",       title: "Mind & Meaning",       iconName: "battery.25"),
+    .init(id: "love",       title: "Love & Relationships", iconName: "battery.25"),
+    .init(id: "health",     title: "Health & Vitality",    iconName: "battery.25"),
 ]
 
 fileprivate func estimatedListRowHeight() -> CGFloat {
@@ -143,13 +142,6 @@ struct FulfillmentView: View {
     private enum Field { case vision, purpose, role, focus, resource }
     private let radarTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
 
-    private let lightBlue = Color(red: 0.70, green: 0.85, blue: 1.00)
-    private let lightIndigo = Color(red: 0.80, green: 0.80, blue: 0.95)
-    private let lightGreen = Color(red: 0.80, green: 1.00, blue: 0.80)
-    private let lightPurple = Color(red: 0.90, green: 0.80, blue: 0.90)
-    private let lightRed = Color(red: 1.00, green: 0.80, blue: 0.80)
-    private let lightOrange = Color(red: 1.00, green: 0.90, blue: 0.70)
-
     var body: some View {
         ScrollView {
             ZStack {
@@ -174,8 +166,8 @@ struct FulfillmentView: View {
                                 id: cat.id,
                                 title: cat.title,
                                 iconName: batteryIconName(for: cat.title),
-                                color: cat.color,
-                                lightColor: lightColor(for: cat.id)
+                                color: FulfillmentCategoryTheme.color(for: cat.title),
+                                lightColor: FulfillmentCategoryTheme.lightColor(for: cat.title)
                             )
                         }
                         Spacer()
@@ -238,17 +230,17 @@ struct FulfillmentView: View {
 
             HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(selected.title)
-                        .font(.headline)
-                        .fontWeight(.bold)
-                        .foregroundStyle(selected.color)
-                        .lineLimit(2)
+                        Text(selected.title)
+                            .font(.headline)
+                            .fontWeight(.bold)
+                            .foregroundStyle(FulfillmentCategoryTheme.color(for: selected.title))
+                            .lineLimit(2)
                     Text("Tap radar slice to focus")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
                     RoundedRectangle(cornerRadius: 10)
-                        .fill(selected.color)
+                        .fill(FulfillmentCategoryTheme.color(for: selected.title))
                         .frame(width: 92, height: 58)
                         .overlay {
                             Text("\(selectedScore)/5")
@@ -584,18 +576,6 @@ struct FulfillmentView: View {
         }
     }
 
-    private func lightColor(for id: String) -> Color {
-        switch id {
-        case "career": return lightBlue
-        case "leadership": return lightIndigo
-        case "wealth": return lightGreen
-        case "mind": return lightPurple
-        case "love": return lightRed
-        case "health": return lightOrange
-        default: return Color.gray.opacity(0.1)
-        }
-    }
-
     // MARK: - Completion Helpers
     private func batteryIconName(for categoryTitle: String) -> String {
         let count = completionCount(for: categoryTitle)
@@ -629,7 +609,7 @@ struct FulfillmentView: View {
     private var fulfillmentMetrics: [(String, Color, Double)] {
         categories.map { cat in
             let pct = (Double(radarScore(for: cat.title)) / 5.0) * 100.0
-            return (cat.title, cat.color, pct)
+            return (cat.title, FulfillmentCategoryTheme.color(for: cat.title), pct)
         }
     }
 
@@ -872,23 +852,27 @@ private struct FulfillmentTrendRow: Identifiable {
 private struct FulfillmentTrendsView: View {
     private let rows: [FulfillmentTrendRow] = FulfillmentTrendsView.buildRows()
     private let months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-    private let categoryStyleScale: KeyValuePairs<String, Color> = [
-        "Career & Business": .blue,
-        "Leadership & Impact": .indigo,
-        "Wealth & Lifestyle": .green,
-        "Mind & Meaning": .purple,
-        "Love & Relationships": .red,
-        "Health & Vitality": .orange
-    ]
+    private var categoryStyleScale: KeyValuePairs<String, Color> {
+        [
+            "Career & Business": FulfillmentCategoryTheme.color(for: "Career & Business"),
+            "Leadership & Impact": FulfillmentCategoryTheme.color(for: "Leadership & Impact"),
+            "Wealth & Lifestyle": FulfillmentCategoryTheme.color(for: "Wealth & Lifestyle"),
+            "Mind & Meaning": FulfillmentCategoryTheme.color(for: "Mind & Meaning"),
+            "Love & Relationships": FulfillmentCategoryTheme.color(for: "Love & Relationships"),
+            "Health & Vitality": FulfillmentCategoryTheme.color(for: "Health & Vitality")
+        ]
+    }
 
-    private let colorScale: [String: Color] = [
-        "Career & Business": .blue,
-        "Leadership & Impact": .indigo,
-        "Wealth & Lifestyle": .green,
-        "Mind & Meaning": .purple,
-        "Love & Relationships": .red,
-        "Health & Vitality": .orange
-    ]
+    private var colorScale: [String: Color] {
+        [
+            "Career & Business": FulfillmentCategoryTheme.color(for: "Career & Business"),
+            "Leadership & Impact": FulfillmentCategoryTheme.color(for: "Leadership & Impact"),
+            "Wealth & Lifestyle": FulfillmentCategoryTheme.color(for: "Wealth & Lifestyle"),
+            "Mind & Meaning": FulfillmentCategoryTheme.color(for: "Mind & Meaning"),
+            "Love & Relationships": FulfillmentCategoryTheme.color(for: "Love & Relationships"),
+            "Health & Vitality": FulfillmentCategoryTheme.color(for: "Health & Vitality")
+        ]
+    }
 
     var body: some View {
         ScrollView {

@@ -147,12 +147,12 @@ struct ObjectivesAddView: View {
         var color: Color {
             switch self {
             case .placeholder: return .gray
-            case .career: return .blue
-            case .leadership: return .indigo
-            case .wealth: return .green
-            case .mind: return .purple
-            case .love: return .red
-            case .health: return .orange
+            case .career: return FulfillmentCategoryTheme.color(for: Self.career.rawValue)
+            case .leadership: return FulfillmentCategoryTheme.color(for: Self.leadership.rawValue)
+            case .wealth: return FulfillmentCategoryTheme.color(for: Self.wealth.rawValue)
+            case .mind: return FulfillmentCategoryTheme.color(for: Self.mind.rawValue)
+            case .love: return FulfillmentCategoryTheme.color(for: Self.love.rawValue)
+            case .health: return FulfillmentCategoryTheme.color(for: Self.health.rawValue)
             }
         }
     }

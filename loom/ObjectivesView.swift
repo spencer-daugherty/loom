@@ -430,20 +430,11 @@ struct ObjectivesView: View {
     }
 
     private func categoryColor(for category: String) -> Color {
-        switch category {
-        case "Career & Business": return .blue
-        case "Leadership & Impact": return .indigo
-        case "Wealth & Lifestyle": return .green
-        case "Mind & Meaning": return .purple
-        case "Love & Relationships": return .red
-        case "Health & Vitality": return .orange
-        default: return .primary
-        }
+        FulfillmentCategoryTheme.color(for: category)
     }
 
     private func lightenedCategoryColor(for category: String) -> Color {
-        let baseColor = UIColor(categoryColor(for: category))
-        return Color(baseColor.adjusted(by: 0.8))
+        FulfillmentCategoryTheme.lightColor(for: category)
     }
 
     private func daysUntil(_ date: Date) -> Int {
@@ -602,20 +593,11 @@ struct OutcomeRow: View {
     }
 
     private func categoryColor(for category: String) -> Color {
-        switch category {
-        case "Career & Business": return .blue
-        case "Leadership & Impact": return .indigo
-        case "Wealth & Lifestyle": return .green
-        case "Mind & Meaning": return .purple
-        case "Love & Relationships": return .red
-        case "Health & Vitality": return .orange
-        default: return .primary
-        }
+        FulfillmentCategoryTheme.color(for: category)
     }
 
     private func lightenedCategoryColor(for category: String) -> Color {
-        let baseColor = UIColor(categoryColor(for: category))
-        return Color(baseColor.adjusted(by: 0.8))
+        FulfillmentCategoryTheme.lightColor(for: category)
     }
 
     private func daysUntil(_ date: Date) -> Int {
@@ -773,20 +755,11 @@ struct CompletedOutcomeRow: View {
     }
 
     private func categoryColor(for category: String) -> Color {
-        switch category {
-        case "Career & Business": return .blue
-        case "Leadership & Impact": return .indigo
-        case "Wealth & Lifestyle": return .green
-        case "Mind & Meaning": return .purple
-        case "Love & Relationships": return .red
-        case "Health & Vitality": return .orange
-        default: return .primary
-        }
+        FulfillmentCategoryTheme.color(for: category)
     }
 
     private func lightenedCategoryColor(for category: String) -> Color {
-        let baseColor = UIColor(categoryColor(for: category))
-        return Color(baseColor.adjusted(by: 0.8))
+        FulfillmentCategoryTheme.lightColor(for: category)
     }
 
     private var successLevelNumber: Int {

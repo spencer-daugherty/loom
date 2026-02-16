@@ -2276,27 +2276,11 @@ struct ActionView: View {
     }
 
     private func categoryFillColor(for category: String) -> Color {
-        switch category {
-        case "Career & Business": return Color(red: 0.70, green: 0.85, blue: 1.00)
-        case "Leadership & Impact": return Color(red: 0.80, green: 0.80, blue: 0.95)
-        case "Wealth & Lifestyle": return Color(red: 0.80, green: 1.00, blue: 0.80)
-        case "Mind & Meaning": return Color(red: 0.90, green: 0.80, blue: 0.90)
-        case "Love & Relationships": return Color(red: 1.00, green: 0.80, blue: 0.80)
-        case "Health & Vitality": return Color(red: 1.00, green: 0.90, blue: 0.70)
-        default: return Color.gray.opacity(0.1)
-        }
+        FulfillmentCategoryTheme.lightColor(for: category)
     }
 
     private func categoryAccentColor(for category: String) -> Color {
-        switch category {
-        case "Career & Business": return .blue
-        case "Leadership & Impact": return .indigo
-        case "Wealth & Lifestyle": return .green
-        case "Mind & Meaning": return .purple
-        case "Love & Relationships": return .red
-        case "Health & Vitality": return .orange
-        default: return .accentColor
-        }
+        FulfillmentCategoryTheme.color(for: category)
     }
 }
 

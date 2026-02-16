@@ -809,7 +809,7 @@ struct PlanStepThreeView: View {
     @State private var step3ValidationResetWorkItem: DispatchWorkItem?
 
     private let hiddenUntilLaterIconName = "clock.arrow.trianglehead.clockwise.rotate.90.path.dotted"
-    private let maxChunks = 5
+    private let maxChunks = 8
 
     private var secondaryButtonTextColor: Color {
         colorScheme == .dark ? Color(.secondaryLabel) : .black
@@ -4922,34 +4922,11 @@ private extension View {
 }
 
 private enum FulfillmentCategoryColors {
-    private static let lightBlue = Color(red: 0.70, green: 0.85, blue: 1.00)
-    private static let lightIndigo = Color(red: 0.80, green: 0.80, blue: 0.95)
-    private static let lightGreen = Color(red: 0.80, green: 1.00, blue: 0.80)
-    private static let lightPurple = Color(red: 0.90, green: 0.80, blue: 0.90)
-    private static let lightRed = Color(red: 1.00, green: 0.80, blue: 0.80)
-    private static let lightOrange = Color(red: 1.00, green: 0.90, blue: 0.70)
-
     static func lightColor(for categoryTitle: String) -> Color {
-        switch categoryTitle {
-        case "Career & Business": return lightBlue
-        case "Leadership & Impact": return lightIndigo
-        case "Wealth & Lifestyle": return lightGreen
-        case "Mind & Meaning": return lightPurple
-        case "Love & Relationships": return lightRed
-        case "Health & Vitality": return lightOrange
-        default: return Color.gray.opacity(0.1)
-        }
+        FulfillmentCategoryTheme.lightColor(for: categoryTitle)
     }
 
     static func accentColor(for categoryTitle: String) -> Color {
-        switch categoryTitle {
-        case "Career & Business": return .blue
-        case "Leadership & Impact": return .indigo
-        case "Wealth & Lifestyle": return .green
-        case "Mind & Meaning": return .purple
-        case "Love & Relationships": return .red
-        case "Health & Vitality": return .orange
-        default: return .accentColor
-        }
+        FulfillmentCategoryTheme.color(for: categoryTitle)
     }
 }

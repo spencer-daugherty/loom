@@ -243,27 +243,11 @@ struct ContentView: View {
 
     // MARK: - Helpers to simplify complex expressions
     private func categoryTextColor(for category: String) -> Color {
-        switch category {
-        case "Career & Business": return .blue
-        case "Leadership & Impact": return .indigo
-        case "Wealth & Lifestyle": return .green
-        case "Mind & Meaning": return .purple
-        case "Love & Relationships": return .red
-        case "Health & Vitality": return .orange
-        default: return .black
-        }
+        FulfillmentCategoryTheme.color(for: category)
     }
 
     private func categoryBaseUIColor(for category: String) -> UIColor {
-        switch category {
-        case "Career & Business": return .systemBlue
-        case "Leadership & Impact": return .systemIndigo
-        case "Wealth & Lifestyle": return .systemGreen
-        case "Mind & Meaning": return .systemPurple
-        case "Love & Relationships": return .systemRed
-        case "Health & Vitality": return .systemOrange
-        default: return .black
-        }
+        UIColor(FulfillmentCategoryTheme.color(for: category))
     }
 
     private func lightenedColor(from base: UIColor, factor: CGFloat = 0.8) -> Color {
@@ -399,12 +383,12 @@ struct ContentView: View {
 
     private var fulfillmentMetrics: [(String, Color, Double)] {
         [
-            ("Career & Business",    .blue,   batteryPercentage(for: "Career & Business")),
-            ("Leadership & Impact",  .indigo, batteryPercentage(for: "Leadership & Impact")),
-            ("Wealth & Lifestyle",   .green,  batteryPercentage(for: "Wealth & Lifestyle")),
-            ("Mind & Meaning",       .purple, batteryPercentage(for: "Mind & Meaning")),
-            ("Love & Relationships", .red,    batteryPercentage(for: "Love & Relationships")),
-            ("Health & Vitality",    .orange, batteryPercentage(for: "Health & Vitality"))
+            ("Career & Business",    FulfillmentCategoryTheme.color(for: "Career & Business"),    batteryPercentage(for: "Career & Business")),
+            ("Leadership & Impact",  FulfillmentCategoryTheme.color(for: "Leadership & Impact"),  batteryPercentage(for: "Leadership & Impact")),
+            ("Wealth & Lifestyle",   FulfillmentCategoryTheme.color(for: "Wealth & Lifestyle"),   batteryPercentage(for: "Wealth & Lifestyle")),
+            ("Mind & Meaning",       FulfillmentCategoryTheme.color(for: "Mind & Meaning"),       batteryPercentage(for: "Mind & Meaning")),
+            ("Love & Relationships", FulfillmentCategoryTheme.color(for: "Love & Relationships"), batteryPercentage(for: "Love & Relationships")),
+            ("Health & Vitality",    FulfillmentCategoryTheme.color(for: "Health & Vitality"),    batteryPercentage(for: "Health & Vitality"))
         ]
     }
 
@@ -729,12 +713,12 @@ struct ContentView: View {
                         // labels
                         VStack(alignment: .leading, spacing: 6) {
                             let metrics: [(String, Color, Double)] = [
-                                ("Career & Business",    .blue,   80),
-                                ("Leadership & Impact",  .indigo, 65),
-                                ("Wealth & Lifestyle",   .green,  90),
-                                ("Mind & Meaning",       .purple, 75),
-                                ("Love & Relationships", .red,    85),
-                                ("Health & Vitality",    .orange, 70)
+                                ("Career & Business",    FulfillmentCategoryTheme.color(for: "Career & Business"),    80),
+                                ("Leadership & Impact",  FulfillmentCategoryTheme.color(for: "Leadership & Impact"),  65),
+                                ("Wealth & Lifestyle",   FulfillmentCategoryTheme.color(for: "Wealth & Lifestyle"),   90),
+                                ("Mind & Meaning",       FulfillmentCategoryTheme.color(for: "Mind & Meaning"),       75),
+                                ("Love & Relationships", FulfillmentCategoryTheme.color(for: "Love & Relationships"), 85),
+                                ("Health & Vitality",    FulfillmentCategoryTheme.color(for: "Health & Vitality"),    70)
                             ]
                             ForEach(metrics, id: \.0) { metric in
                                 Text(metric.0)
@@ -1101,15 +1085,7 @@ struct OutcomePopupOverlay: View {
     @Query(sort: \OutcomesMeasureEntry.measuredAt, order: .forward) private var allMeasureEntries: [OutcomesMeasureEntry]
 
     private func categoryColor(for category: String) -> Color {
-        switch category {
-        case "Career & Business": return .blue
-        case "Leadership & Impact": return .indigo
-        case "Wealth & Lifestyle": return .green
-        case "Mind & Meaning": return .purple
-        case "Love & Relationships": return .red
-        case "Health & Vitality": return .orange
-        default: return .primary
-        }
+        FulfillmentCategoryTheme.color(for: category)
     }
 
     private func lightenedCategoryColor(for category: String) -> Color {
