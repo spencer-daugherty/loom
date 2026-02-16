@@ -438,6 +438,7 @@ struct ModelFilter: Identifiable, Hashable {
 struct AccountView: View {
     @Environment(\.modelContext) private var context
     @AppStorage("enable_projects_feature") private var enableProjectsFeature = false
+    @AppStorage("blank_homepage_mode") private var blankHomepageMode = false
     @State private var showingMigrationResultAlert = false
     @State private var migrationResultMessage = ""
 
@@ -454,6 +455,14 @@ struct AccountView: View {
                         Text("Places, People, and Tools")
                     }
                 }
+
+                HStack {
+                    Text("Manage Fulfillment Categories")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .contentShape(Rectangle())
+                .allowsHitTesting(false)
 
                 NavigationLink {
                     CompletedActionBlocksListView()
@@ -482,6 +491,7 @@ struct AccountView: View {
                 }
 
                 Toggle("Enable Projects", isOn: $enableProjectsFeature)
+                Toggle("Blank Homepage", isOn: $blankHomepageMode)
             } header: {
                 HStack {
                     Spacer()

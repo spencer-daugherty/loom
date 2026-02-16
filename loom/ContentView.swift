@@ -19,6 +19,7 @@ private struct DarkModeInvertImage: ViewModifier {
 
 struct ContentView: View {
     @AppStorage("enable_projects_feature") private var enableProjectsFeature = false
+    @AppStorage("blank_homepage_mode") private var blankHomepageMode = false
     @State private var isPresentingCaptureView = false
     @State private var pressedEmotion: String? = nil
     @State private var pressedOutcome: Outcomes? = nil
@@ -500,6 +501,7 @@ struct ContentView: View {
         let ultimateVision = drivingForces.first?.ultimateVision ?? ""
         let ultimatePurpose = drivingForces.first?.ultimatePurpose ?? ""
         let isDrivingForceEmptyState =
+            blankHomepageMode ||
             ultimateVision.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
             ultimatePurpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let drivingForceCardBackground: Color = isDrivingForceEmptyState
@@ -675,51 +677,91 @@ struct ContentView: View {
     }
 
     private var fulfillmentSection: some View {
-        NavigationLink {
+        let isFulfillmentEmptyState = blankHomepageMode
+        let fulfillmentCardBackground: Color = isFulfillmentEmptyState
+            ? Color(.systemGray5)
+            : Color(.secondarySystemBackground)
+
+        return NavigationLink {
             FulfillmentView()
         } label: {
-            SectionCard(iconName: "trophy", title: "Fulfillment", headerHint: "why you live") {
-                HStack(alignment: .center, spacing: 16) {
-                    FulfillmentRadarGraph(metrics: fulfillmentMetrics)
-                        .matchedGeometryEffect(id: "fulfillmentGraph", in: graphNamespace)
-                        .frame(width: 140, height: 140)
-                        .padding(.top, 10)
-                    
-                    // labels
-                    VStack(alignment: .leading, spacing: 6) {
-                        let metrics: [(String, Color, Double)] = [
-                            ("Career & Business",    .blue,   80),
-                            ("Leadership & Impact",  .indigo, 65),
-                            ("Wealth & Lifestyle",   .green,  90),
-                            ("Mind & Meaning",       .purple, 75),
-                            ("Love & Relationships", .red,    85),
-                            ("Health & Vitality",    .orange, 70)
-                        ]
-                        ForEach(metrics, id: \.0) { metric in
-                            Text(metric.0)
-                                .foregroundColor(metric.1)
-                                .fontWeight(.bold)
-                                .contentShape(Rectangle())
-                                .pressHighlight(pressedCategoryTitle == metric.0, cornerRadius: 6, inset: 2)
-                                .onLongPressGesture(
-                                    minimumDuration: 0.5,
-                                    maximumDistance: 50,
-                                    pressing: { isPressing in
-                                        if !isPressing {
+            SectionCard(
+                iconName: "trophy",
+                title: "Fulfillment",
+                headerHint: "why you live",
+                backgroundColor: fulfillmentCardBackground
+            ) {
+                if isFulfillmentEmptyState {
+                    VStack(spacing: 12) {
+                        VStack(spacing: 4) {
+                            Text("No life alignment")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.gray)
+                            Text("Tap to add fulfillment categories")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                        }
+
+                        Text("Open Fulfillment")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.gray)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(
+                                Capsule()
+                                    .fill(Color(.systemGray6))
+                            )
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 132)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color(.systemGray5))
+                    )
+                } else {
+                    HStack(alignment: .center, spacing: 16) {
+                        FulfillmentRadarGraph(metrics: fulfillmentMetrics)
+                            .matchedGeometryEffect(id: "fulfillmentGraph", in: graphNamespace)
+                            .frame(width: 140, height: 140)
+                            .padding(.top, 10)
+                        
+                        // labels
+                        VStack(alignment: .leading, spacing: 6) {
+                            let metrics: [(String, Color, Double)] = [
+                                ("Career & Business",    .blue,   80),
+                                ("Leadership & Impact",  .indigo, 65),
+                                ("Wealth & Lifestyle",   .green,  90),
+                                ("Mind & Meaning",       .purple, 75),
+                                ("Love & Relationships", .red,    85),
+                                ("Health & Vitality",    .orange, 70)
+                            ]
+                            ForEach(metrics, id: \.0) { metric in
+                                Text(metric.0)
+                                    .foregroundColor(metric.1)
+                                    .fontWeight(.bold)
+                                    .contentShape(Rectangle())
+                                    .pressHighlight(pressedCategoryTitle == metric.0, cornerRadius: 6, inset: 2)
+                                    .onLongPressGesture(
+                                        minimumDuration: 0.5,
+                                        maximumDistance: 50,
+                                        pressing: { isPressing in
+                                            if !isPressing {
+                                                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                                                    pressedCategoryTitle = nil
+                                                }
+                                            }
+                                        },
+                                        perform: {
                                             withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-                                                pressedCategoryTitle = nil
+                                                pressedCategoryTitle = metric.0
                                             }
                                         }
-                                    },
-                                    perform: {
-                                        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-                                            pressedCategoryTitle = metric.0
-                                        }
-                                    }
-                                )
+                                    )
+                            }
                         }
+                        .font(.subheadline)
                     }
-                    .font(.subheadline)
                 }
             }
         }
@@ -728,7 +770,7 @@ struct ContentView: View {
     }
 
     private var objectivesSection: some View {
-        let isObjectivesEmptyState = outcomes.isEmpty && !enableProjectsFeature
+        let isObjectivesEmptyState = blankHomepageMode || (outcomes.isEmpty && !enableProjectsFeature)
         let objectivesCardBackground: Color = isObjectivesEmptyState
             ? Color(.systemGray5)
             : Color(.secondarySystemBackground)
