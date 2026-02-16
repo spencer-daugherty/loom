@@ -15,12 +15,14 @@ struct AddState {
 }
 
 enum Field: Hashable {
-    case vision, purpose, passion(String)
+    case passion(String)
 }
 
 struct DrivingForceView: View {
+    let autoOpenCreateVision: Bool
     @Environment(\.modelContext) private var context
     @Query(sort: \DrivingForce.updatedAt, order: .reverse) private var drivingForces: [DrivingForce]
+    @Query(sort: \DrivingForceArchive.archivedAt, order: .reverse) private var drivingForceArchives: [DrivingForceArchive]
     
     // Passion queries for each emotion
     @Query(
@@ -61,33 +63,254 @@ struct DrivingForceView: View {
     @State private var purposeText: String = ""
     @State private var addStates: [String: AddState] = [:]
     @State private var isShowingInstructions: Bool = false
+    @State private var isShowingHistoric = false
+    @State private var activeEditor: DrivingForceEditor?
+    @State private var editorDraftText: String = ""
+    @State private var pendingDeleteRow: HistoricRow?
+    @State private var editorCursorSeed: Int = 0
+    @State private var editorShouldFocus: Bool = false
+    @State private var didAutoOpenCreateVision: Bool = false
     @FocusState private var focusedField: Field?
+
+    private enum DrivingForceEditor: String, Identifiable {
+        case vision
+        case purpose
+        var id: String { rawValue }
+    }
+
+    private enum HistoricKind: String {
+        case vision
+        case purpose
+
+        var label: String {
+            switch self {
+            case .vision: return "Vision"
+            case .purpose: return "Purpose"
+            }
+        }
+    }
+
+    private struct HistoricRow: Identifiable {
+        let archive: DrivingForceArchive
+        let kind: HistoricKind
+        let text: String
+
+        var id: String { "\(archive.id.uuidString)|\(kind.rawValue)" }
+    }
+
+    private var currentDrivingForce: DrivingForce? {
+        drivingForces.first
+    }
+
+    private var visionPlaceholder: String {
+        "Imagine there are no limits. What do you want to be, do, have or create in your life overall? What does your ideal life look and feel like?"
+    }
+
+    private var purposePlaceholder: String {
+        "What gets you up in the morning? What keeps you going? What could... if you were really excited about it? What are the reasons WHY you want your life to be this way? What will it give you? How will it make you feel?"
+    }
+
+    private var historicRows: [HistoricRow] {
+        var rows: [HistoricRow] = []
+        rows.reserveCapacity(drivingForceArchives.count * 2)
+        for archive in drivingForceArchives {
+            let vision = archive.visionSnapshot.trimmingCharacters(in: .whitespacesAndNewlines)
+            let purpose = archive.purposeSnapshot.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !vision.isEmpty {
+                rows.append(HistoricRow(archive: archive, kind: .vision, text: archive.visionSnapshot))
+            }
+            if !purpose.isEmpty {
+                rows.append(HistoricRow(archive: archive, kind: .purpose, text: archive.purposeSnapshot))
+            }
+        }
+        return rows
+    }
     
     var body: some View {
         Form {
-            textEditorSection(
-                title: "Ultimate Vision",
-                text: $visionText,
-                field: .vision,
-                placeholder: """
-                Imagine there are no limits. What do you want to be, do, have or create in your life overall? What does your ideal life look and feel like?
-                """
-            )
-            
-            textEditorSection(
-                title: "Ultimate Purpose",
-                text: $purposeText,
-                field: .purpose,
-                placeholder: """
-                What gets you up in the morning? What keeps you going? What could... if you were really excited about it? What are the reasons WHY you want your life to be this way? What will it give you? How will it make you feel?
-                """
-            )
-            
-            Text("Passions")
-                .font(.title2).bold()
-                .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
-            
+            AnyView(drivingForceSections)
+            AnyView(passionsHeader)
+            AnyView(passionsSections)
+            if !historicRows.isEmpty {
+                AnyView(historicToggleRow)
+            }
+            AnyView(historicRowsSection)
+        }
+        .toolbar { topToolbar }
+        .navigationTitle("Driving Force")
+        .background(backgroundTapDismiss)
+        .sheet(item: $activeEditor, content: editorSheet)
+        .task {
+            if let existing = drivingForces.first {
+                visionText = existing.ultimateVision
+                purposeText = existing.ultimatePurpose
+            }
+            maybeAutoOpenCreateVision()
+        }
+        .onAppear {
+            maybeAutoOpenCreateVision()
+        }
+        .sheet(isPresented: $isShowingInstructions, content: instructionsSheet)
+        .alert("Delete Historic Item?", isPresented: deleteHistoricBinding, actions: deleteHistoricActions, message: deleteHistoricMessage)
+    }
+
+    @ToolbarContentBuilder
+    private var topToolbar: some ToolbarContent {
+        ToolbarItem(placement: .navigationBarTrailing) {
+            Button {
+                isShowingInstructions = true
+            } label: {
+                Image(systemName: "graduationcap")
+                    .font(.title2)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private var backgroundTapDismiss: some View {
+        Color.clear
+            .contentShape(Rectangle())
+            .onTapGesture {
+                focusedField = nil
+                hideKeyboard()
+            }
+    }
+
+    private func editorSheet(_ editor: DrivingForceEditor) -> some View {
+        let sheetTitle = editorSheetTitle(for: editor)
+        let placeholder = editorPlaceholder(for: editor)
+        return NavigationStack {
+            VStack(alignment: .leading, spacing: 10) {
+                ZStack(alignment: .topLeading) {
+#if canImport(UIKit)
+                    DrivingForceEditorTextView(
+                        text: $editorDraftText,
+                        isFocused: $editorShouldFocus,
+                        cursorSeed: editorCursorSeed
+                    )
+                    .frame(minHeight: 220)
+                    .padding(8)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+#else
+                    TextEditor(text: $editorDraftText)
+                        .frame(minHeight: 220)
+                        .padding(8)
+                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+#endif
+                    if editorDraftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text(placeholder)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 16)
+                            .allowsHitTesting(false)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding()
+            .navigationTitle(sheetTitle)
+            .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                switch editor {
+                case .vision:
+                    editorDraftText = visionText
+                case .purpose:
+                    editorDraftText = purposeText
+                }
+                editorCursorSeed += 1
+                editorShouldFocus = false
+                DispatchQueue.main.async {
+                    editorShouldFocus = true
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
+                    editorShouldFocus = true
+                }
+            }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        activeEditor = nil
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    if hasEditorChanges(editor) {
+                        Button("Save") {
+                            saveEditorChanges(editor)
+                            activeEditor = nil
+                        }
+                    }
+                }
+            }
+        }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+        .onDisappear {
+            editorShouldFocus = false
+        }
+    }
+
+    private func instructionsSheet() -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Instructions")
+                .font(.headline)
+            Text("Placeholder instructions text for Driving Force.")
+                .font(.body)
+            Spacer(minLength: 0)
+        }
+        .padding()
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
+    }
+
+    private var deleteHistoricBinding: Binding<Bool> {
+        Binding(
+            get: { pendingDeleteRow != nil },
+            set: { if !$0 { pendingDeleteRow = nil } }
+        )
+    }
+
+    private func deleteHistoricActions() -> some View {
+        Group {
+            Button("Delete", role: .destructive) {
+                if let row = pendingDeleteRow {
+                    deleteHistoricRow(row)
+                }
+                pendingDeleteRow = nil
+            }
+            Button("Cancel", role: .cancel) {
+                pendingDeleteRow = nil
+            }
+        }
+    }
+
+    private func deleteHistoricMessage() -> some View {
+        Text("Are you sure you want to delete this item? It will be available for 30 days in Account Manager.")
+    }
+
+    @ViewBuilder
+    private var drivingForceSections: some View {
+        readOnlyDrivingForceSection(
+            title: "Ultimate Vision",
+            text: visionText,
+            editor: .vision
+        )
+
+        readOnlyDrivingForceSection(
+            title: "Ultimate Purpose",
+            text: purposeText,
+            editor: .purpose
+        )
+    }
+
+    private var passionsHeader: some View {
+        Text("Passions")
+            .font(.title2).bold()
+            .listRowBackground(Color.clear)
+            .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
+    }
+
+    private var passionsSections: some View {
+        Group {
             ForEach(passionQueries, id: \.emotion) { category in
                 PassionEditor(
                     category: category,
@@ -103,81 +326,138 @@ struct DrivingForceView: View {
                 )
             }
         }
-        .toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                if focusedField == .vision || focusedField == .purpose {
-                    HStack {
-                        Spacer()
-                        Button("Save") {
-                            saveChanges()
-                            focusedField = nil
-                        }
-                        .fontWeight(.semibold)
-                        .padding(.trailing)
+    }
+
+    private var historicToggleRow: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isShowingHistoric.toggle()
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: isShowingHistoric ? "chevron.up" : "chevron.down")
+                    .font(.caption2.weight(.semibold))
+                Text("Previous Ultimate Visions/Purposes")
+                    .font(.caption2.weight(.semibold))
+            }
+            .foregroundStyle(.primary)
+            .padding(.vertical, 5)
+            .padding(.horizontal, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(.systemGray4))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.black.opacity(0.15), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 2, trailing: 16))
+        .listRowBackground(Color.clear)
+    }
+
+    @ViewBuilder
+    private var historicRowsSection: some View {
+        if isShowingHistoric {
+            if historicRows.isEmpty {
+                Section {
+                    Text("No historic ultimate vision/purpose snapshots yet.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                Section {
+                    ForEach(historicRows) { row in
+                        historicRowView(row)
                     }
-                    .frame(maxWidth: .infinity)
-                    .background(Color.white)
                 }
             }
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    isShowingInstructions = true
-                } label: {
-                    Image(systemName: "graduationcap")
-                        .font(.title2)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .navigationTitle("Driving Force")
-        .background(
-            Color.clear
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    focusedField = nil
-                    hideKeyboard()
-                }
-        )
-        .task {
-            if let existing = drivingForces.first {
-                visionText = existing.ultimateVision
-                purposeText = existing.ultimatePurpose
-            }
-        }
-        .sheet(isPresented: $isShowingInstructions) {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Instructions")
-                    .font(.headline)
-                Text("Placeholder instructions text for Driving Force.")
-                    .font(.body)
-                Spacer(minLength: 0)
-            }
-            .padding()
-            .presentationDetents([.medium])
-            .presentationDragIndicator(.visible)
         }
     }
 
-    private func textEditorSection(
-        title: String,
-        text: Binding<String>,
-        field: Field,
-        placeholder: String
-    ) -> some View {
-        Section(title) {
-            ZStack(alignment: .topLeading) {
-                if text.wrappedValue.isEmpty {
-                    Text(placeholder)
-                        .foregroundColor(.gray)
-                        .padding(.top, 8)
-                        .padding(.horizontal, 4)
-                }
-                TextEditor(text: text)
-                    .frame(height: 100)
-                    .focused($focusedField, equals: field)
+    private func historicRowView(_ row: HistoricRow) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(row.kind.label)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(shortDate(row.archive.archivedAt))
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
             }
+            Text(row.text)
+                .font(.body)
+                .foregroundStyle(.primary)
+        }
+        .padding(.vertical, 2)
+        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+            Button("Recover") {
+                recoverArchive(row.archive, kind: row.kind)
+            }
+            .tint(.blue)
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            Button("Delete", role: .destructive) {
+                pendingDeleteRow = row
+            }
+            .tint(.red)
+        }
+    }
+
+    private func readOnlyDrivingForceSection(
+        title: String,
+        text: String,
+        editor: DrivingForceEditor
+    ) -> some View {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let buttonTitle: String = trimmed.isEmpty
+            ? (editor == .vision ? "Create Ultimate Vision" : "Create Ultimate Purpose")
+            : "Edit"
+        return Section(title) {
+            if !trimmed.isEmpty {
+                Text(text)
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 10)
+            }
+
+            Button(buttonTitle) {
+                activeEditor = editor
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .foregroundStyle(.blue)
         }
         .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
+    }
+
+    private func editorSheetTitle(for editor: DrivingForceEditor) -> String {
+        let current = currentText(for: editor).trimmingCharacters(in: .whitespacesAndNewlines)
+        if current.isEmpty {
+            return editor == .vision ? "Create Ultimate Vision" : "Create Ultimate Purpose"
+        }
+        return editor == .vision ? "Edit Ultimate Vision" : "Edit Ultimate Purpose"
+    }
+
+    private func editorPlaceholder(for editor: DrivingForceEditor) -> String {
+        editor == .vision ? visionPlaceholder : purposePlaceholder
+    }
+
+    private func currentText(for editor: DrivingForceEditor) -> String {
+        editor == .vision ? visionText : purposeText
+    }
+
+    private func maybeAutoOpenCreateVision() {
+        guard autoOpenCreateVision, !didAutoOpenCreateVision else { return }
+        let hasMissingVision = visionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasMissingPurpose = purposeText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard hasMissingVision || hasMissingPurpose else { return }
+        didAutoOpenCreateVision = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            activeEditor = .vision
+        }
     }
     
     private func commitPassion(text: String, emotion: String) {
@@ -203,40 +483,220 @@ struct DrivingForceView: View {
         RecentlyDeletedStore.trash(passion, in: context)
     }
     
-    private func saveChanges() {
-        let trimmedVision = visionText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedPurpose = purposeText.trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        guard !trimmedVision.isEmpty || !trimmedPurpose.isEmpty else { return }
-        
+    private func hasEditorChanges(_ editor: DrivingForceEditor) -> Bool {
+        let current: String
+        switch editor {
+        case .vision:
+            current = visionText
+        case .purpose:
+            current = purposeText
+        }
+        return editorDraftText.trimmingCharacters(in: .whitespacesAndNewlines) != current.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func saveEditorChanges(_ editor: DrivingForceEditor) {
         let now = Date()
-        if let existing = drivingForces.first {
-            let archive = DrivingForceArchive(
-                visionSnapshot: existing.ultimateVision,
-                purposeSnapshot: existing.ultimatePurpose,
-                archivedAt: existing.updatedAt
-            )
-            context.insert(archive)
-            
-            if !trimmedVision.isEmpty {
-                existing.ultimateVision = trimmedVision
-            }
-            if !trimmedPurpose.isEmpty {
-                existing.ultimatePurpose = trimmedPurpose
+        let trimmedDraft = editorDraftText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if let existing = currentDrivingForce {
+            switch editor {
+            case .vision:
+                context.insert(
+                    DrivingForceArchive(
+                        visionSnapshot: existing.ultimateVision,
+                        purposeSnapshot: "",
+                        updatedAt: existing.updatedAt,
+                        archivedAt: now
+                    )
+                )
+                existing.ultimateVision = trimmedDraft
+                visionText = trimmedDraft
+            case .purpose:
+                context.insert(
+                    DrivingForceArchive(
+                        visionSnapshot: "",
+                        purposeSnapshot: existing.ultimatePurpose,
+                        updatedAt: existing.updatedAt,
+                        archivedAt: now
+                    )
+                )
+                existing.ultimatePurpose = trimmedDraft
+                purposeText = trimmedDraft
             }
             existing.updatedAt = now
         } else {
-            let newDF = DrivingForce(
-                ultimateVision: trimmedVision,
-                ultimatePurpose: trimmedPurpose,
+            let newVision = (editor == .vision) ? trimmedDraft : ""
+            let newPurpose = (editor == .purpose) ? trimmedDraft : ""
+            let created = DrivingForce(
+                ultimateVision: newVision,
+                ultimatePurpose: newPurpose,
                 updatedAt: now
             )
-            context.insert(newDF)
+            context.insert(created)
+            visionText = created.ultimateVision
+            purposeText = created.ultimatePurpose
         }
-        
+
         try? context.save()
     }
+
+    private func recoverArchive(_ archive: DrivingForceArchive, kind: HistoricKind) {
+        let now = Date()
+
+        if let existing = currentDrivingForce {
+            switch kind {
+            case .vision:
+                context.insert(
+                    DrivingForceArchive(
+                        visionSnapshot: existing.ultimateVision,
+                        purposeSnapshot: "",
+                        updatedAt: existing.updatedAt,
+                        archivedAt: now
+                    )
+                )
+                existing.ultimateVision = archive.visionSnapshot
+                visionText = archive.visionSnapshot
+            case .purpose:
+                context.insert(
+                    DrivingForceArchive(
+                        visionSnapshot: "",
+                        purposeSnapshot: existing.ultimatePurpose,
+                        updatedAt: existing.updatedAt,
+                        archivedAt: now
+                    )
+                )
+                existing.ultimatePurpose = archive.purposeSnapshot
+                purposeText = archive.purposeSnapshot
+            }
+            existing.updatedAt = now
+        } else {
+            switch kind {
+            case .vision:
+                visionText = archive.visionSnapshot
+            case .purpose:
+                purposeText = archive.purposeSnapshot
+            }
+            context.insert(DrivingForce(
+                ultimateVision: visionText,
+                ultimatePurpose: purposeText,
+                updatedAt: now
+            ))
+        }
+
+        // Consumed from history after recovery.
+        context.delete(archive)
+        try? context.save()
+    }
+
+    private func deleteHistoricRow(_ row: HistoricRow) {
+        let archive = row.archive
+        let hasVision = !archive.visionSnapshot.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasPurpose = !archive.purposeSnapshot.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
+        if hasVision && hasPurpose {
+            // Split an old combined archive entry so one row can be deleted independently.
+            let deletedOnly: DrivingForceArchive
+            switch row.kind {
+            case .vision:
+                deletedOnly = DrivingForceArchive(
+                    visionSnapshot: archive.visionSnapshot,
+                    purposeSnapshot: "",
+                    updatedAt: archive.updatedAt,
+                    archivedAt: archive.archivedAt
+                )
+                archive.visionSnapshot = ""
+            case .purpose:
+                deletedOnly = DrivingForceArchive(
+                    visionSnapshot: "",
+                    purposeSnapshot: archive.purposeSnapshot,
+                    updatedAt: archive.updatedAt,
+                    archivedAt: archive.archivedAt
+                )
+                archive.purposeSnapshot = ""
+            }
+            context.insert(deletedOnly)
+            RecentlyDeletedStore.trash(deletedOnly, in: context, source: "Driving Force Archive")
+            try? context.save()
+            return
+        }
+
+        RecentlyDeletedStore.trash(archive, in: context, source: "Driving Force Archive")
+        try? context.save()
+    }
+
+    private func shortDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "M/d/yyyy"
+        return formatter.string(from: date)
+    }
 }
+
+extension DrivingForceView {
+    init(autoOpenCreateVision: Bool = false) {
+        self.autoOpenCreateVision = autoOpenCreateVision
+    }
+}
+
+#if canImport(UIKit)
+private struct DrivingForceEditorTextView: UIViewRepresentable {
+    @Binding var text: String
+    @Binding var isFocused: Bool
+    var cursorSeed: Int
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        var parent: DrivingForceEditorTextView
+        var lastCursorSeed: Int = 0
+
+        init(parent: DrivingForceEditorTextView) {
+            self.parent = parent
+        }
+
+        func textViewDidChange(_ textView: UITextView) {
+            parent.text = textView.text
+        }
+
+        func textViewDidBeginEditing(_ textView: UITextView) {
+            parent.isFocused = true
+        }
+
+        func textViewDidEndEditing(_ textView: UITextView) {
+            parent.isFocused = false
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    func makeUIView(context: Context) -> UITextView {
+        let view = UITextView()
+        view.backgroundColor = .clear
+        view.font = UIFont.preferredFont(forTextStyle: .body)
+        view.delegate = context.coordinator
+        view.textContainerInset = .zero
+        return view
+    }
+
+    func updateUIView(_ uiView: UITextView, context: Context) {
+        context.coordinator.parent = self
+        if uiView.text != text {
+            uiView.text = text
+        }
+
+        if isFocused {
+            if !uiView.isFirstResponder {
+                uiView.becomeFirstResponder()
+            }
+            if context.coordinator.lastCursorSeed != cursorSeed {
+                uiView.selectedRange = NSRange(location: (uiView.text as NSString).length, length: 0)
+                context.coordinator.lastCursorSeed = cursorSeed
+            }
+        } else if uiView.isFirstResponder {
+            uiView.resignFirstResponder()
+        }
+    }
+}
+#endif
 
 struct PassionEditor: View {
     let category: PassionCategory

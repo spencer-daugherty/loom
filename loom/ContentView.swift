@@ -487,142 +487,173 @@ struct ContentView: View {
 
     // MARK: - Extracted Sections to reduce body complexity
     private var drivingForceSection: some View {
-        NavigationLink {
-            DrivingForceView()
-        } label: {
-            SectionCard(iconName: "infinity", title: "Driving Force") {
-                VStack(alignment: .leading, spacing: 12) {
+        let ultimateVision = drivingForces.first?.ultimateVision ?? ""
+        let ultimatePurpose = drivingForces.first?.ultimatePurpose ?? ""
+        let isDrivingForceEmptyState =
+            ultimateVision.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+            ultimatePurpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let drivingForceCardBackground: Color = isDrivingForceEmptyState
+            ? Color(.systemGray5)
+            : Color(.secondarySystemBackground)
 
-                    // Ultimate Vision + Purpose group
+        return NavigationLink {
+            DrivingForceView(autoOpenCreateVision: isDrivingForceEmptyState)
+        } label: {
+            SectionCard(iconName: "infinity", title: "Driving Force", backgroundColor: drivingForceCardBackground) {
+                if isDrivingForceEmptyState {
+                    VStack(spacing: 12) {
+                        VStack(spacing: 4) {
+                            Text("No core identities")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.gray)
+                            Text("Tap to add a vision and purpose")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                        }
+
+                        Text("Open Driving Force")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.gray)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(
+                                Capsule()
+                                    .fill(Color(.systemGray6))
+                            )
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 132)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color(.systemGray5))
+                    )
+                } else {
                     VStack(alignment: .leading, spacing: 12) {
 
-                        // Ultimate Vision
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("ULTIMATE VISION")
-                                .font(.caption)
-                                .fontWeight(.bold)
-                                .foregroundColor(.gray)
+                        // Ultimate Vision + Purpose group
+                        VStack(alignment: .leading, spacing: 12) {
 
-                            Text(
-                                (drivingForces.first?.ultimateVision ?? "").isEmpty
-                                    ? "+ Add My Ultimate Vision"
-                                    : (drivingForces.first?.ultimateVision ?? "")
-                            )
-                            .font(.body)
-                            .foregroundColor(.primary)
-                            .lineLimit(1)
-                            .fixedSize(horizontal: false, vertical: true)
-                        }
+                            // Ultimate Vision
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("ULTIMATE VISION")
+                                    .font(.caption)
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.gray)
 
-                        // Ultimate Purpose
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("ULTIMATE PURPOSE")
-                                .font(.caption)
-                                .fontWeight(.bold)
-                                .foregroundColor(.gray)
-
-                            Text(
-                                (drivingForces.first?.ultimatePurpose ?? "").isEmpty
-                                    ? "+ Add My Ultimate Purpose"
-                                    : (drivingForces.first?.ultimatePurpose ?? "")
-                            )
-                            .font(.body)
-                            .foregroundColor(.primary)
-                            .lineLimit(1)
-                        }
-                    }
-                    .contentShape(Rectangle())
-                    .pressHighlight(showVisionPurposePopup, cornerRadius: 8, inset: 3)
-                    .onLongPressGesture(
-                        minimumDuration: 0.5,
-                        maximumDistance: 50,
-                        pressing: { isPressing in
-                            if !isPressing {
-                                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-                                    showVisionPurposePopup = false
-                                }
+                                Text(ultimateVision)
+                                    .font(.body)
+                                    .foregroundColor(.primary)
+                                    .lineLimit(1)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
-                        },
-                        perform: {
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-                                showVisionPurposePopup = true
+
+                            // Ultimate Purpose
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("ULTIMATE PURPOSE")
+                                    .font(.caption)
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.gray)
+
+                                Text(ultimatePurpose)
+                                    .font(.body)
+                                    .foregroundColor(.primary)
+                                    .lineLimit(1)
                             }
                         }
-                    )
-
-                    // Icons Row with dynamic quadrant coloring
-                    HStack(spacing: 16) {
-                        ForEach([("heart.fill", "love"),
-                                 ("lock.fill",  "vows"),
-                                 ("bolt.fill",  "thrill"),
-                                 ("shield.fill","hate")], id: \.1) { iconName, label in
-                            ZStack {
-                                let value = usagePoints(for: label)
-                                let gap: Double = 4
-                                let halfGap = gap / 2
-                                let radius: CGFloat = 25
-                                let center = CGPoint(x: radius, y: radius)
-                                let quadrantAngles: [(start: Double, end: Double)] = [
-                                    (-90,   0),   // top-right
-                                    (   0,  90),  // bottom-right
-                                    (  90, 180),  // bottom-left
-                                    ( 180, 270)   // top-left
-                                ]
-
-                                // Draw each quadrant
-                                ZStack {
-                                    ForEach(0..<4, id: \.self) { index in
-                                        let angles = quadrantAngles[index]
-                                        Path { path in
-                                            path.addArc(center: center,
-                                                        radius: radius,
-                                                        startAngle: .degrees(angles.start + halfGap),
-                                                        endAngle:   .degrees(angles.end   - halfGap),
-                                                        clockwise: false)
-                                        }
-                                        .stroke((index + 1) <= value
-                                                ? Color.primary
-                                                : Color(.tertiaryLabel),
-                                                lineWidth: 2)
-                                    }
-                                }
-                                .frame(width: radius * 2, height: radius * 2)
-
-                                // Icon and label
-                                VStack(spacing: 2) {
-                                    Image(systemName: iconName)
-                                        .font(.caption)
-                                        .foregroundColor(.primary)
-                                    Text(label)
-                                        .font(.caption2)
-                                        .fontWeight(.bold)
-                                        .foregroundColor(.primary)
-                                }
-                            }
-                            .contentShape(Rectangle())
-                            .pressHighlight(pressedEmotion == emotionKey(for: label), cornerRadius: 8, inset: 3)
-                            .onLongPressGesture(
-                                minimumDuration: 0.5,
-                                maximumDistance: 50,
-                                pressing: { isPressing in
-                                    if !isPressing {
-                                        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-                                            pressedEmotion = nil
-                                        }
-                                    }
-                                },
-                                perform: {
-                                    let key = emotionKey(for: label)
+                        .contentShape(Rectangle())
+                        .pressHighlight(showVisionPurposePopup, cornerRadius: 8, inset: 3)
+                        .onLongPressGesture(
+                            minimumDuration: 0.5,
+                            maximumDistance: 50,
+                            pressing: { isPressing in
+                                if !isPressing {
                                     withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-                                        pressedEmotion = key
+                                        showVisionPurposePopup = false
                                     }
                                 }
-                            )
+                            },
+                            perform: {
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                                    showVisionPurposePopup = true
+                                }
+                            }
+                        )
+
+                        // Icons Row with dynamic quadrant coloring
+                        HStack(spacing: 16) {
+                            ForEach([("heart.fill", "love"),
+                                     ("lock.fill",  "vows"),
+                                     ("bolt.fill",  "thrill"),
+                                     ("shield.fill","hate")], id: \.1) { iconName, label in
+                                ZStack {
+                                    let value = usagePoints(for: label)
+                                    let gap: Double = 4
+                                    let halfGap = gap / 2
+                                    let radius: CGFloat = 25
+                                    let center = CGPoint(x: radius, y: radius)
+                                    let quadrantAngles: [(start: Double, end: Double)] = [
+                                        (-90,   0),   // top-right
+                                        (   0,  90),  // bottom-right
+                                        (  90, 180),  // bottom-left
+                                        ( 180, 270)   // top-left
+                                    ]
+
+                                    // Draw each quadrant
+                                    ZStack {
+                                        ForEach(0..<4, id: \.self) { index in
+                                            let angles = quadrantAngles[index]
+                                            Path { path in
+                                                path.addArc(center: center,
+                                                            radius: radius,
+                                                            startAngle: .degrees(angles.start + halfGap),
+                                                            endAngle:   .degrees(angles.end   - halfGap),
+                                                            clockwise: false)
+                                            }
+                                            .stroke((index + 1) <= value
+                                                    ? Color.primary
+                                                    : Color(.tertiaryLabel),
+                                                    lineWidth: 2)
+                                        }
+                                    }
+                                    .frame(width: radius * 2, height: radius * 2)
+
+                                    // Icon and label
+                                    VStack(spacing: 2) {
+                                        Image(systemName: iconName)
+                                            .font(.caption)
+                                            .foregroundColor(.primary)
+                                        Text(label)
+                                            .font(.caption2)
+                                            .fontWeight(.bold)
+                                            .foregroundColor(.primary)
+                                    }
+                                }
+                                .contentShape(Rectangle())
+                                .pressHighlight(pressedEmotion == emotionKey(for: label), cornerRadius: 8, inset: 3)
+                                .onLongPressGesture(
+                                    minimumDuration: 0.5,
+                                    maximumDistance: 50,
+                                    pressing: { isPressing in
+                                        if !isPressing {
+                                            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                                                pressedEmotion = nil
+                                            }
+                                        }
+                                    },
+                                    perform: {
+                                        let key = emotionKey(for: label)
+                                        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                                            pressedEmotion = key
+                                        }
+                                    }
+                                )
+                            }
                         }
+                        .frame(maxWidth: .infinity, alignment: .center)
                     }
-                    .frame(maxWidth: .infinity, alignment: .center)
+                    .frame(maxHeight: .infinity)
                 }
-                .frame(maxHeight: .infinity)
             }
         }
         .buttonStyle(.plain)
