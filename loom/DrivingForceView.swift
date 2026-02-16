@@ -299,6 +299,19 @@ struct PassionEditor: View {
             }
         }
         .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
+        .onChange(of: focusedField) { _, newValue in
+            // If focus leaves this category's inline add field, collapse back to "Add Item".
+            guard addState.isAdding else { return }
+            if newValue != .passion(category.emotion) {
+                onAddStateChange(AddState())
+            }
+        }
+        .onChange(of: editingPassion?.id) { _, newValue in
+            // Entering edit mode should close the add row for this category.
+            if addState.isAdding && newValue != nil {
+                onAddStateChange(AddState())
+            }
+        }
     }
     
     private func addStateWithNewText(_ text: String) -> AddState {
