@@ -470,7 +470,9 @@ struct AccountView: View {
                         Text("Recently Deleted")
                     }
                 }
+            }
 
+            Section {
                 NavigationLink {
                     ManageRawDataView()
                 } label: {
@@ -478,10 +480,14 @@ struct AccountView: View {
                         Text("Manage Raw Data")
                     }
                 }
-            }
 
-            Section {
                 Toggle("Enable Projects", isOn: $enableProjectsFeature)
+            } header: {
+                HStack {
+                    Spacer()
+                    Text("Developer")
+                    Spacer()
+                }
             }
         }
         .listStyle(.plain)
