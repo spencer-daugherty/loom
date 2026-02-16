@@ -260,16 +260,7 @@ struct FulfillmentView: View {
             highlightedCategoryIndex = (highlightedCategoryIndex + 1) % orderedFulfillments.count
         }
         .sheet(isPresented: $isShowingInstructions) {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Instructions")
-                    .font(.headline)
-                Text("Placeholder instructions text for Fulfillment.")
-                    .font(.body)
-                Spacer(minLength: 0)
-            }
-            .padding()
-            .presentationDetents([.medium])
-            .presentationDragIndicator(.visible)
+            fulfillmentInstructionsSheet()
         }
         .alert("Move to Recently Deleted?", isPresented: $showDeletePreviousAlert, presenting: pendingDeletePrevious) { snapshot in
             Button("Cancel", role: .cancel) {
@@ -321,6 +312,191 @@ struct FulfillmentView: View {
                     ForEach(replacedCategoryArchives, id: \.id) { archive in
                         previousCategorySwipeContainer(for: archive)
                     }
+                }
+            }
+        }
+    }
+
+    private func fulfillmentInstructionsSheet() -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Instructions")
+                    .font(.headline.weight(.semibold))
+                    .frame(maxWidth: .infinity, alignment: .center)
+
+                fulfillmentInstructionBody("You can manage and edit your categories anytime in:")
+                HStack(spacing: 6) {
+                    Text("Account")
+                    Image(systemName: "person.circle")
+                    Text("→ Manage Fulfillment Categories")
+                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+                Divider().opacity(0.45)
+
+                fulfillmentInstructionSectionTitle("1. Choose Your Fulfillment Categories")
+                fulfillmentInstructionBody("Start with broad, high-impact areas of life that must grow for your life to feel meaningful and balanced.")
+                fulfillmentInstructionBody("Most people use 5–7 categories.\nExamples include:")
+                fulfillmentInstructionBullets([
+                    "Career & Business",
+                    "Leadership & Impact",
+                    "Wealth & Lifestyle",
+                    "Mind & Meaning",
+                    "Love & Relationships",
+                    "Health & Vitality"
+                ])
+                fulfillmentInstructionBody("Your categories should be:")
+                fulfillmentInstructionBullets([
+                    "Broad enough to last years",
+                    "Clear enough to guide decisions",
+                    "Important enough that neglect hurts your life"
+                ])
+                fulfillmentInstructionBody("If you don’t improve in this area, your quality of life will suffer.\nIf you grow in this area, your fulfillment increases.")
+
+                Divider().opacity(0.45)
+
+                fulfillmentInstructionSectionTitle("2. Vision")
+                fulfillmentInstructionBody("What do you ultimately want this area of your life to look like?\nThink long-term. Imagine your ideal future.")
+                fulfillmentInstructionLabel("Focus on:")
+                fulfillmentInstructionBullets([
+                    "How your life looks",
+                    "How you feel",
+                    "What success in this area means"
+                ])
+                fulfillmentInstructionLabel("Example:")
+                fulfillmentInstructionExample("Strong, energized, confident, and physically capable in every stage of life.")
+
+                Divider().opacity(0.45)
+
+                fulfillmentInstructionSectionTitle("3. Purpose")
+                fulfillmentInstructionBody("Why is this area an absolute must for you?\nThis creates emotional drive. Without purpose, action fades.")
+                fulfillmentInstructionLabel("Consider:")
+                fulfillmentInstructionBullets([
+                    "Why this matters",
+                    "What this gives you",
+                    "Who this impacts",
+                    "How you will feel when you improve"
+                ])
+                fulfillmentInstructionBody("This is your fuel when motivation is low.")
+
+                Divider().opacity(0.45)
+
+                fulfillmentInstructionSectionTitle("4. Roles")
+                fulfillmentInstructionBody("Who are you being in this area of life?\nRoles shape identity and behavior.")
+                fulfillmentInstructionLabel("Think about:")
+                fulfillmentInstructionBullets([
+                    "The person you want to become",
+                    "How you show up for others",
+                    "The standards you hold yourself to"
+                ])
+                fulfillmentInstructionLabel("Examples:")
+                fulfillmentInstructionExample("Leader, Provider, Builder, Mentor, Creator, Partner.")
+
+                Divider().opacity(0.45)
+
+                fulfillmentInstructionSectionTitle("5. Three-to-Thrive")
+                fulfillmentInstructionBody("These are the three highest-impact habits in this category.")
+                fulfillmentInstructionBody("They should be:")
+                fulfillmentInstructionBullets([
+                    "Simple",
+                    "Repeatable",
+                    "Weekly or daily",
+                    "High leverage"
+                ])
+                fulfillmentInstructionBody("These drive consistent momentum even when life is busy.")
+                fulfillmentInstructionLabel("Examples:")
+                fulfillmentInstructionExample("Health & Vitality\n• 10k steps\n• Strength training\n• Deep breathing\n\nWealth & Lifestyle\n• Budget review\n• Financial learning\n• Strategic planning.")
+
+                Divider().opacity(0.45)
+
+                fulfillmentInstructionSectionTitle("6. Resources")
+                fulfillmentInstructionBody("What people, tools, or systems help you grow here?")
+                fulfillmentInstructionLabel("Examples:")
+                fulfillmentInstructionBullets([
+                    "Mentors",
+                    "Books or courses",
+                    "Apps or tools",
+                    "Networks",
+                    "Coaches or communities"
+                ])
+                fulfillmentInstructionBody("This prevents trying to do everything alone.")
+
+                Divider().opacity(0.45)
+
+                fulfillmentInstructionSectionTitle("7. Connect to Your Passions")
+                fulfillmentInstructionBody("Each category should link to your Driving Force.")
+                fulfillmentInstructionLabel("Ask:")
+                fulfillmentInstructionBullets([
+                    "Which Love does this category express?",
+                    "Which Thrills does it activate?",
+                    "Which Vows does it support?",
+                    "Which Hates does it help you fight?"
+                ])
+                fulfillmentInstructionBody("This connection creates emotional leverage and long-term consistency.")
+                fulfillmentInstructionBody("When your categories connect to your passions, progress becomes meaningful.")
+
+                Divider().opacity(0.45)
+
+                fulfillmentInstructionSectionTitle("Key Reminder")
+                fulfillmentInstructionBody("Your Fulfillment Categories are your life operating system.")
+                fulfillmentInstructionBody("They guide:")
+                fulfillmentInstructionBullets([
+                    "Your long-term goals",
+                    "Your weekly planning",
+                    "Your daily actions",
+                    "Your growth and identity"
+                ])
+                fulfillmentInstructionBody("Review them regularly.\nRefine them yearly.\n\nClarity here makes everything else easier.")
+            }
+            .padding()
+        }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+    }
+
+    @ViewBuilder
+    private func fulfillmentInstructionSectionTitle(_ text: String) -> some View {
+        Text(text)
+            .font(.headline.weight(.semibold))
+            .foregroundStyle(.primary)
+    }
+
+    @ViewBuilder
+    private func fulfillmentInstructionLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.secondary)
+    }
+
+    @ViewBuilder
+    private func fulfillmentInstructionBody(_ text: String) -> some View {
+        Text(text)
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    @ViewBuilder
+    private func fulfillmentInstructionExample(_ text: String) -> some View {
+        Text(text)
+            .font(.subheadline.italic())
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    @ViewBuilder
+    private func fulfillmentInstructionBullets(_ items: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(items, id: \.self) { item in
+                HStack(alignment: .top, spacing: 8) {
+                    Text("•")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(item)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }

@@ -262,16 +262,164 @@ struct DrivingForceView: View {
     }
 
     private func instructionsSheet() -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Instructions")
-                .font(.headline)
-            Text("Placeholder instructions text for Driving Force.")
-                .font(.body)
-            Spacer(minLength: 0)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Instructions")
+                    .font(.headline.weight(.semibold))
+                    .frame(maxWidth: .infinity, alignment: .center)
+
+                instructionSectionTitle("1. Ultimate Vision")
+                instructionBody("Describe the life you want to create overall.\nImagine there are no limits.")
+                instructionLabel("Focus on:")
+                instructionBullets([
+                    "The person you want to become",
+                    "The experiences you want to have",
+                    "The impact you want to make",
+                    "The lifestyle and environment you want"
+                ])
+                instructionBody("Write in present tense. Be bold and specific.")
+                instructionLabel("Example:")
+                instructionExample("“I create meaningful experiences, build powerful businesses, and live a life of adventure, love, and freedom.”")
+
+                Divider().opacity(0.45)
+
+                instructionSectionTitle("2. Ultimate Purpose")
+                instructionBody("Why must this vision happen?\nThis is your emotional fuel.")
+                instructionLabel("Focus on:")
+                instructionBullets([
+                    "How you want to feel",
+                    "Why this life matters to you",
+                    "Who you want to help",
+                    "What this will give you"
+                ])
+                instructionBody("If your vision is the destination, your purpose is the reason you keep going.")
+                instructionLabel("Example:")
+                instructionExample("“To use my gifts to serve others, honor God, provide for my family, and live with energy, discipline, and impact.”")
+
+                Divider().opacity(0.45)
+
+                instructionSectionTitle("3. Passions")
+                instructionBody("Passions drive daily behavior.\nList anything that creates strong emotion and motivates action.")
+                instructionBody("You will update and refine these over time.")
+
+                Divider().opacity(0.45)
+
+                instructionSubsection("Love")
+                instructionBody("What brings deep joy and meaning?")
+                instructionLabel("Examples:")
+                instructionBullets([
+                    "Celebrating with loved ones",
+                    "Making a difference",
+                    "Nature and movement",
+                    "Growth and connection"
+                ])
+
+                Divider().opacity(0.45)
+
+                instructionSubsection("Thrill")
+                instructionBody("What energizes and excites you?")
+                instructionLabel("Examples:")
+                instructionBullets([
+                    "Big challenges",
+                    "Travel and adventure",
+                    "New experiences",
+                    "Working with smart people"
+                ])
+
+                Divider().opacity(0.45)
+
+                instructionSubsection("Vows")
+                instructionBody("What are your commitments and non-negotiables?")
+                instructionLabel("Examples:")
+                instructionBullets([
+                    "Discipline and hard work",
+                    "Faith and integrity",
+                    "Providing and protecting",
+                    "Health and excellence"
+                ])
+
+                Divider().opacity(0.45)
+
+                instructionSubsection("Hate")
+                instructionBody("What will you not tolerate in your life?")
+                instructionLabel("Examples:")
+                instructionBullets([
+                    "Laziness",
+                    "Entitlement",
+                    "Injustice",
+                    "Anxiety or negativity"
+                ])
+
+                Divider().opacity(0.45)
+
+                instructionSectionTitle("How to Write Strong Entries")
+                instructionBullets([
+                    "Be honest, not impressive",
+                    "Use short and specific phrases",
+                    "Focus on emotions and action",
+                    "Choose what truly drives you",
+                    "You can refine this anytime"
+                ])
+                instructionBody("Your Driving Force will guide your goals, habits, and decisions.")
+            }
+            .padding()
         }
-        .padding()
-        .presentationDetents([.medium])
+        .presentationDetents([.large])
         .presentationDragIndicator(.visible)
+    }
+
+    @ViewBuilder
+    private func instructionSectionTitle(_ text: String) -> some View {
+        Text(text)
+            .font(.headline.weight(.semibold))
+            .foregroundStyle(.primary)
+    }
+
+    @ViewBuilder
+    private func instructionSubsection(_ text: String) -> some View {
+        Text(text)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.primary)
+    }
+
+    @ViewBuilder
+    private func instructionLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.secondary)
+    }
+
+    @ViewBuilder
+    private func instructionBody(_ text: String) -> some View {
+        Text(text)
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    @ViewBuilder
+    private func instructionExample(_ text: String) -> some View {
+        Text(text)
+            .font(.subheadline.italic())
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    @ViewBuilder
+    private func instructionBullets(_ items: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(items, id: \.self) { item in
+                HStack(alignment: .top, spacing: 8) {
+                    Text("•")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(item)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
     }
 
     private var deleteHistoricBinding: Binding<Bool> {
@@ -346,8 +494,8 @@ struct DrivingForceView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         }
-        .padding(.horizontal, 30)
-        .padding(.vertical, 30)
+        .padding(.horizontal, 15)
+        .padding(.vertical, 15)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -366,8 +514,8 @@ struct DrivingForceView: View {
                         .font(.system(size: 26, weight: .bold))
                         .foregroundStyle(.primary)
                 }
-                .padding(.top, 30)
-                .padding(.trailing, 30)
+                .padding(.top, 15)
+                .padding(.trailing, 15)
         }
     }
 
