@@ -1,6 +1,43 @@
 import SwiftUI
 import SwiftData
 
+private func sanitizeAndFormatDecimalInputOutcome(_ input: String, maxFractionDigits: Int = 3) -> String {
+    let sanitized = input.replacingOccurrences(of: ",", with: "")
+    var output = ""
+    var seenDot = false
+    var fractionCount = 0
+    for char in sanitized {
+        if char.isWholeNumber {
+            if seenDot {
+                if fractionCount < maxFractionDigits {
+                    output.append(char)
+                    fractionCount += 1
+                }
+            } else {
+                output.append(char)
+            }
+        } else if char == "." && !seenDot {
+            seenDot = true
+            output.append(char)
+        }
+    }
+    guard !output.isEmpty else { return "" }
+    let hasDot = output.contains(".")
+    let parts = output.split(separator: ".", omittingEmptySubsequences: false)
+    let intPart = Int(String(parts.first ?? "")) ?? 0
+    let formatter = NumberFormatter()
+    formatter.numberStyle = .decimal
+    formatter.usesGroupingSeparator = true
+    formatter.maximumFractionDigits = 0
+    formatter.minimumFractionDigits = 0
+    let grouped = formatter.string(from: NSNumber(value: intPart)) ?? String(intPart)
+    if hasDot {
+        let fraction = parts.count > 1 ? String(parts[1]) : ""
+        return grouped + "." + fraction
+    }
+    return grouped
+}
+
 private func parseFormattedDecimalOutcome(_ input: String) -> Double? {
     Double(input.replacingOccurrences(of: ",", with: ""))
 }
@@ -18,6 +55,7 @@ private func groupedDecimalStringOutcome(_ value: Double, fractionDigits: Int) -
 struct OutcomeView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
 
     let outcome: Outcomes
     let outcomeMeasure: OutcomesMeasure?
@@ -31,6 +69,7 @@ struct OutcomeView: View {
     @State private var selectedCategory: ObjectivesAddView.Category
     @State private var isShowingDeleteOutcomeAlert = false
     @State private var isShowingAddMeasureSheet = false
+    @State private var isShowingUpdateGoalSheet = false
     @State private var isShowingCompletedActionSheet = false
     @State private var isShowingCompleteOutcomeSheet = false
     @State private var isShowingChangeTargetSheet = false
@@ -47,7 +86,9 @@ struct OutcomeView: View {
     @State private var measureFormat: ObjectivesAddView.MeasureFormat = .number
     @State private var measureUnit: String = ObjectivesAddView.UnitOption.defaultUnit
     @State private var measureDecimalPlaces: Int = 0
-    @FocusState private var isMeasureGoalFieldFocused: Bool
+    @State private var updateGoalInput: String = ""
+    @State private var updateGoalDate: Date = Calendar.current.startOfDay(for: .now)
+    @FocusState private var isUpdateGoalFieldFocused: Bool
     @State private var completionSuccessLevel: Int = 3
     @State private var completionJournalWins: String = ""
     @State private var completionJournalLearned: String = ""
@@ -79,6 +120,10 @@ struct OutcomeView: View {
         case wins
         case learned
         case next
+    }
+
+    private var popupForegroundColor: Color {
+        colorScheme == .dark ? .black : .primary
     }
 
     init(outcome: Outcomes, outcomeMeasure: OutcomesMeasure?) {
@@ -338,12 +383,18 @@ struct OutcomeView: View {
 
                     if isMeasurable, let current = parseFormattedDecimalOutcome(measureCurrent), let goalAmount = parseFormattedDecimalOutcome(measureGoal), goalAmount != 0 {
                         let startMeasure = allMeasureEntries.first(where: { $0.outcome_id == outcome.outcome_id })?.measure ?? current
+                        let startMeasuredAt = allMeasureEntries
+                            .filter { $0.outcome_id == outcome.outcome_id }
+                            .min(by: { $0.measuredAt < $1.measuredAt })?
+                            .measuredAt
+                        let isStarting = startMeasuredAt.map { Calendar.current.isDate($0, inSameDayAs: latestMeasureDate()) } ?? false
                         MeasurableOutcomeBox(
                             measure: current,
                             measuredAt: latestMeasureDate(),
                             measureAmt: goalAmount,
                             endDate: endDate,
-                            format: measureFormat.rawValue
+                            format: measureFormat.rawValue,
+                            statusPrefix: isStarting ? "started" : "updated"
                         )
                         .frame(height: 44)
 
@@ -415,12 +466,12 @@ struct OutcomeView: View {
                 Section {
                     HStack(alignment: .top, spacing: 10) {
                         Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(popupForegroundColor)
                             .padding(.top, 2)
                         VStack(alignment: .leading, spacing: 4) {
                             (Text("Caution: ").fontWeight(.bold) + Text(targetPassedBannerMessage))
                                 .font(.subheadline)
-                                .foregroundStyle(.primary)
+                                .foregroundStyle(popupForegroundColor)
                             Button("Change target date") {
                                 changeTargetDateDraft = endDate
                                 isShowingChangeTargetSheet = true
@@ -444,12 +495,12 @@ struct OutcomeView: View {
                 Section {
                     HStack(alignment: .top, spacing: 10) {
                         Image(systemName: "flag.fill")
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(popupForegroundColor)
                             .padding(.top, 2)
                         VStack(alignment: .leading, spacing: 4) {
                             (Text("Goal Acheived: ").fontWeight(.bold) + Text("Complete your outcome now!"))
                                 .font(.subheadline)
-                                .foregroundStyle(.primary)
+                                .foregroundStyle(popupForegroundColor)
                             Button("Complete") {
                                 prepareCompletionAttempt()
                             }
@@ -504,13 +555,7 @@ struct OutcomeView: View {
                 effectiveStartDate: effectiveStartDate,
                 isShowingDatePicker: $isShowingTargetDatePicker
             )
-            MeasureSection(
-                isMeasurable: $isMeasurable,
-                measureGoal: $measureGoal,
-                measureFormat: $measureFormat,
-                measureDecimalPlaces: $measureDecimalPlaces,
-                isMeasureGoalFieldFocused: $isMeasureGoalFieldFocused
-            )
+            outcomeMeasureSection
             CategorySection(selectedCategory: $selectedCategory)
             Section {
                 if showCompleteButton {
@@ -600,17 +645,6 @@ struct OutcomeView: View {
                     saveOutcome()
                 }
             }
-            .toolbar {
-                ToolbarItemGroup(placement: .keyboard) {
-                    if isMeasureGoalFieldFocused {
-                        Spacer()
-                        Button("Done") {
-                            isMeasureGoalFieldFocused = false
-                        }
-                        .foregroundStyle(.blue)
-                    }
-                }
-            }
     }
 
     var body: some View {
@@ -624,6 +658,70 @@ struct OutcomeView: View {
                 unitRaw: measureUnit,
                 decimalPlaces: measureDecimalPlaces
             )
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $isShowingUpdateGoalSheet) {
+            NavigationStack {
+                Form {
+                    HStack {
+                        Text("Date")
+                        Spacer()
+                        Text(updateGoalDate, style: .date)
+                            .foregroundStyle(.secondary)
+                    }
+                    HStack {
+                        Text("New Goal")
+                        Spacer()
+                        if measureFormat == .dollars {
+                            Text("$")
+                                .foregroundStyle(.secondary)
+                        }
+                        TextField("Goal", text: $updateGoalInput)
+                            .keyboardType(.decimalPad)
+                            .focused($isUpdateGoalFieldFocused)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 120)
+                            .onChange(of: updateGoalInput) { _, newValue in
+                                let places = measureFormat == .dollars ? (measureDecimalPlaces == 2 ? 2 : 0) : min(3, max(0, measureDecimalPlaces))
+                                updateGoalInput = sanitizeAndFormatDecimalInputOutcome(newValue, maxFractionDigits: places)
+                            }
+                        if !measureFormat.suffix.isEmpty {
+                            Text(measureFormat.suffix)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .navigationTitle("Update Goal")
+                .navigationBarTitleDisplayMode(.inline)
+                .onAppear {
+                    updateGoalDate = Calendar.current.startOfDay(for: .now)
+                    updateGoalInput = ""
+                    isUpdateGoalFieldFocused = true
+                    DispatchQueue.main.async {
+                        isUpdateGoalFieldFocused = true
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        isUpdateGoalFieldFocused = true
+                    }
+                }
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") {
+                            isShowingUpdateGoalSheet = false
+                        }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        if let newGoalValue = parseFormattedDecimalOutcome(updateGoalInput),
+                           newGoalValue != (currentGoalValue ?? 0) {
+                            Button("Save") {
+                                saveUpdatedGoal(newGoalValue)
+                                isShowingUpdateGoalSheet = false
+                            }
+                        }
+                    }
+                }
+            }
             .presentationDetents([.medium])
             .presentationDragIndicator(.visible)
         }
@@ -763,7 +861,7 @@ struct OutcomeView: View {
 
                     List {
                         if completedActionCandidates.isEmpty {
-                            Text("No completed action items are available yet.")
+                            Text("This outcome does not have any associated blocks with actions completed. Try switching off toggle to see all completed actions.")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                                 .listRowSeparator(.hidden)
@@ -936,6 +1034,88 @@ struct OutcomeView: View {
         }
     }
 
+    private var outcomeMeasureSection: some View {
+        Section("Measure Data") {
+            Toggle("Outcome is measurable", isOn: $isMeasurable)
+
+            if isMeasurable {
+                Picker("Format", selection: $measureFormat) {
+                    ForEach(ObjectivesAddView.MeasureFormat.allCases) { format in
+                        Text(format.displayName).tag(format)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: measureFormat) { _, newFormat in
+                    if newFormat == .dollars && measureDecimalPlaces != 0 && measureDecimalPlaces != 2 {
+                        measureDecimalPlaces = 2
+                    }
+                    guard let value = parseFormattedDecimalOutcome(measureGoal) else { return }
+                    let places = newFormat == .dollars
+                        ? (measureDecimalPlaces == 2 ? 2 : 0)
+                        : min(3, max(0, measureDecimalPlaces))
+                    measureGoal = groupedDecimalStringOutcome(value, fractionDigits: places)
+                }
+
+                if measureFormat == .dollars {
+                    HStack {
+                        Text("Cents")
+                        Spacer()
+                        Picker("Cents", selection: $measureDecimalPlaces) {
+                            Text("No").tag(0)
+                            Text("Yes").tag(2)
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                    }
+                } else {
+                    HStack {
+                        Text("Decimal")
+                        Spacer()
+                        Picker("Decimal", selection: $measureDecimalPlaces) {
+                            Text("No").tag(0)
+                            Text("0.0").tag(1)
+                            Text("0.00").tag(2)
+                            Text("0.000").tag(3)
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                    }
+                }
+
+                HStack {
+                    Text("Goal")
+                    Spacer()
+                    if measureFormat == .dollars {
+                        Text("$")
+                            .foregroundStyle(.secondary)
+                    }
+                    Text(measureGoal.isEmpty ? "Not set" : measureGoal)
+                        .foregroundStyle(.secondary)
+                    if !measureFormat.suffix.isEmpty {
+                        Text(measureFormat.suffix)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Button {
+                    updateGoalDate = Calendar.current.startOfDay(for: .now)
+                    updateGoalInput = ""
+                    isShowingUpdateGoalSheet = true
+                } label: {
+                    Text("Update Goal")
+                        .foregroundStyle(Color.accentColor)
+                }
+            }
+        }
+        .onChange(of: measureDecimalPlaces) { _, _ in
+            guard let value = parseFormattedDecimalOutcome(measureGoal) else { return }
+            let places = measureFormat == .dollars
+                ? (measureDecimalPlaces == 2 ? 2 : 0)
+                : min(3, max(0, measureDecimalPlaces))
+            measureGoal = groupedDecimalStringOutcome(value, fractionDigits: places)
+        }
+    }
+
     private func saveOutcome() {
         let previousEndDate = outcome.end
         let start = Calendar.current.startOfDay(for: startNow ? .now : startDate)
@@ -1016,6 +1196,50 @@ struct OutcomeView: View {
         } else if let existingMeasure = try? modelContext.fetch(FetchDescriptor<OutcomesMeasure>()).first(where: { $0.outcome_id == outcome.outcome_id }) {
             RecentlyDeletedStore.trash(existingMeasure, in: modelContext)
         }
+
+        try? modelContext.save()
+    }
+
+    private func saveUpdatedGoal(_ newGoalValue: Double) {
+        let oldGoal = currentGoalValue ?? 0
+        guard oldGoal != newGoalValue else { return }
+
+        if let existingMeasure = try? modelContext.fetch(FetchDescriptor<OutcomesMeasure>()).first(where: { $0.outcome_id == outcome.outcome_id }) {
+            existingMeasure.measure_amt = newGoalValue
+            existingMeasure.measure_updated = updateGoalDate
+            existingMeasure.format = measureFormat.rawValue
+            existingMeasure.unit = measureUnit
+            existingMeasure.decimalPlaces = measureDecimalPlaces
+        } else {
+            modelContext.insert(
+                OutcomesMeasure(
+                    outcome_id: outcome.outcome_id,
+                    measure: currentMeasureValue ?? 0,
+                    measuredAt: outcome.start,
+                    measure_amt: newGoalValue,
+                    measure_updated: updateGoalDate,
+                    direction: nil,
+                    format: measureFormat.rawValue,
+                    unit: measureUnit,
+                    decimalPlaces: measureDecimalPlaces
+                )
+            )
+        }
+
+        modelContext.insert(
+            OutcomeAnalyticsEvent(
+                outcome_id: outcome.outcome_id,
+                eventType: "goal_changed",
+                oldGoal: oldGoal,
+                newGoal: newGoalValue,
+                source: "OutcomeView"
+            )
+        )
+
+        let places = measureFormat == .dollars
+            ? (measureDecimalPlaces == 2 ? 2 : 0)
+            : min(3, max(0, measureDecimalPlaces))
+        measureGoal = groupedDecimalStringOutcome(newGoalValue, fractionDigits: places)
 
         try? modelContext.save()
     }

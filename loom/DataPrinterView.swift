@@ -447,6 +447,14 @@ struct AccountView: View {
         List {
             Section {
                 NavigationLink {
+                    ManagePeoplePlacesToolsView()
+                } label: {
+                    HStack {
+                        Text("Places, People, and Tools")
+                    }
+                }
+
+                NavigationLink {
                     CompletedActionBlocksListView()
                 } label: {
                     HStack {
@@ -1102,6 +1110,180 @@ struct RecentlyDeletedView: View {
         .onAppear {
             RecentlyDeletedStore.purgeExpired(in: context)
         }
+    }
+}
+
+struct ManagePeoplePlacesToolsView: View {
+    @Environment(\.modelContext) private var context
+
+    @Query(sort: \SensitivityPlaceCatalogItem.place, order: .forward)
+    private var allPlaces: [SensitivityPlaceCatalogItem]
+    @Query(sort: \LeverageResource.createdAt, order: .forward)
+    private var allResources: [LeverageResource]
+
+    @State private var addingPlace = false
+    @State private var addingResource = false
+    @State private var placeInput = ""
+    @State private var resourceInput = ""
+    @State private var resourceKind: ActionLeverageKind = .person
+    @FocusState private var focusedEntry: EntryFocus?
+
+    private enum EntryFocus: Hashable {
+        case place
+        case resource
+    }
+
+    private var combinedResources: [LeverageResource] {
+        allResources
+            .sorted { $0.value.localizedCaseInsensitiveCompare($1.value) == .orderedAscending }
+    }
+
+    private var isEditingResource: Bool {
+        focusedEntry == .resource && addingResource
+    }
+
+    var body: some View {
+        List {
+            Section("Places") {
+                if addingPlace {
+                    TextField("New Place", text: $placeInput)
+                        .submitLabel(.done)
+                        .focused($focusedEntry, equals: .place)
+                        .onSubmit { savePlace() }
+                } else {
+                    Button("+ New Place") {
+                        addingPlace = true
+                        placeInput = ""
+                        focusedEntry = .place
+                    }
+                    .foregroundStyle(.blue)
+                }
+
+                ForEach(allPlaces) { place in
+                    Text(place.place)
+                }
+                .onDelete(perform: deletePlaces)
+            }
+
+            Section("People and Tools") {
+                if addingResource {
+                    TextField(resourceKind == .person ? "New Person" : "New Tool", text: $resourceInput)
+                        .submitLabel(.done)
+                        .focused($focusedEntry, equals: .resource)
+                        .onSubmit { saveResource() }
+                } else {
+                    Button("+ New Person or Tool") {
+                        addingResource = true
+                        resourceInput = ""
+                        resourceKind = .person
+                        focusedEntry = .resource
+                    }
+                    .foregroundStyle(.blue)
+                }
+
+                ForEach(combinedResources) { item in
+                    HStack {
+                        Text(item.value)
+                        Spacer()
+                        Text(item.kind.title)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .onDelete(perform: deleteResources)
+            }
+        }
+        .listStyle(.insetGrouped)
+        .safeAreaPadding(.bottom, isEditingResource ? 72 : 0)
+        .navigationTitle("Places, People, and Tools")
+        .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: focusedEntry) { _, newValue in
+            if newValue != .place && addingPlace {
+                addingPlace = false
+                placeInput = ""
+            }
+            if newValue != .resource && addingResource {
+                addingResource = false
+                resourceInput = ""
+            }
+        }
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                if isEditingResource {
+                    VStack(spacing: 0) {
+                        Picker("Type", selection: $resourceKind) {
+                            Text("Person").tag(ActionLeverageKind.person)
+                            Text("Tool").tag(ActionLeverageKind.tool)
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 8)
+
+                        Color.clear
+                            .frame(height: 10)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+        }
+    }
+
+    private func savePlace() {
+        let trimmed = placeInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            addingPlace = false
+            return
+        }
+
+        let normalized = trimmed.lowercased()
+        guard !allPlaces.contains(where: { $0.place.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == normalized }) else {
+            addingPlace = false
+            placeInput = ""
+            return
+        }
+
+        context.insert(SensitivityPlaceCatalogItem(place: trimmed))
+        try? context.save()
+        addingPlace = false
+        placeInput = ""
+    }
+
+    private func saveResource() {
+        let trimmed = resourceInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            addingResource = false
+            return
+        }
+
+        let normalized = trimmed.lowercased()
+        let existing = allResources.contains {
+            $0.kind == resourceKind &&
+            $0.value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == normalized
+        }
+        guard !existing else {
+            addingResource = false
+            resourceInput = ""
+            return
+        }
+
+        context.insert(LeverageResource(kindRaw: resourceKind.rawValue, value: trimmed))
+        try? context.save()
+        addingResource = false
+        resourceInput = ""
+    }
+
+    private func deletePlaces(at offsets: IndexSet) {
+        for index in offsets {
+            context.delete(allPlaces[index])
+        }
+        try? context.save()
+    }
+
+    private func deleteResources(at offsets: IndexSet) {
+        for index in offsets {
+            context.delete(combinedResources[index])
+        }
+        try? context.save()
     }
 }
 

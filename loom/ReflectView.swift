@@ -1220,10 +1220,18 @@ struct ReflectView: View {
         return latestMeasure?.measure
     }
 
+    private func startMeasuredAt(for outcome: Outcomes, latestMeasure: OutcomesMeasure?) -> Date? {
+        if let first = outcomeMeasureEntries.first(where: { $0.outcome_id == outcome.outcome_id }) {
+            return first.measuredAt
+        }
+        return latestMeasure?.measuredAt
+    }
+
     @ViewBuilder
     private func contributionOutcomeCard(_ outcome: Outcomes) -> some View {
         let measure = latestMeasure(for: outcome)
         let start = startMeasure(for: outcome, latestMeasure: measure)
+        let startDate = startMeasuredAt(for: outcome, latestMeasure: measure)
 
         VStack(alignment: .leading, spacing: 8) {
             Text(outcome.outcome)
@@ -1260,12 +1268,16 @@ struct ReflectView: View {
                 .frame(height: 44)
 
                 if let measure, measure.measure_amt != 0, measure.format != nil {
+                    let isStarting = startDate.map {
+                        Calendar.current.isDate($0, inSameDayAs: measure.measuredAt)
+                    } ?? false
                     MeasurableOutcomeBox(
                         measure: measure.measure,
                         measuredAt: measure.measuredAt,
                         measureAmt: measure.measure_amt,
                         endDate: outcome.end,
-                        format: measure.format ?? "Number"
+                        format: measure.format ?? "Number",
+                        statusPrefix: isStarting ? "started" : "updated"
                     )
                     .frame(height: 44)
 

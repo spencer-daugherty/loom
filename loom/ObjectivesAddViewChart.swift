@@ -65,6 +65,7 @@ struct ObjectivesAddViewChart: View {
     let decimalPlaces: Int
 
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.colorScheme) private var colorScheme
     @Query private var entries: [OutcomesMeasureEntry]
     @Query private var legacyMeasures: [OutcomesMeasure]
     @Query private var outcomes: [Outcomes]
@@ -129,6 +130,9 @@ struct ObjectivesAddViewChart: View {
     }
 
     private var selectedEntry: OutcomesMeasureEntry? {
+        if let selectedDate, let nearest = nearestEntry(to: selectedDate) {
+            return nearest
+        }
         if let selectedEntryID {
             return chartRows.first(where: { $0.id == selectedEntryID })
         }
@@ -189,6 +193,10 @@ struct ObjectivesAddViewChart: View {
 
     private var latestLoggedDate: Date {
         Calendar.current.startOfDay(for: (chartRows.last?.measuredAt ?? .now))
+    }
+
+    private var unselectedPointFillColor: Color {
+        colorScheme == .dark ? Color(.secondarySystemBackground) : Color(.systemBackground)
     }
 
     private var initialScrollX: Date {
@@ -265,19 +273,32 @@ struct ObjectivesAddViewChart: View {
                         y: .value("Measure", row.measure)
                     )
                     .symbol(.circle)
-                    .symbolSize(selectedEntryID == row.id ? 70 : 40)
-                    .foregroundStyle(selectedEntryID == row.id ? Color.blue : Color.white)
+                    .symbolSize(40)
+                    .foregroundStyle(unselectedPointFillColor)
                     .annotation(position: .overlay, alignment: .center) {
                         Circle()
-                            .stroke(Color.blue, lineWidth: selectedEntryID == row.id ? 2.4 : 1.8)
+                            .stroke(Color.blue, lineWidth: 1.8)
                             .frame(
-                                width: selectedEntryID == row.id ? 9 : 7,
-                                height: selectedEntryID == row.id ? 9 : 7
+                                width: 7,
+                                height: 7
                             )
                     }
                 }
 
                 if let selectedEntry {
+                    PointMark(
+                        x: .value("Selected Date Point", Calendar.current.startOfDay(for: selectedEntry.measuredAt)),
+                        y: .value("Selected Measure Point", selectedEntry.measure)
+                    )
+                    .symbol(.circle)
+                    .symbolSize(70)
+                    .foregroundStyle(Color.blue)
+                    .annotation(position: .overlay, alignment: .center) {
+                        Circle()
+                            .stroke(Color.blue, lineWidth: 2.4)
+                            .frame(width: 9, height: 9)
+                    }
+
                     RuleMark(x: .value("Selected Date", Calendar.current.startOfDay(for: selectedEntry.measuredAt)))
                         .foregroundStyle(.blue.opacity(0.5))
                         .lineStyle(.init(lineWidth: 2))
@@ -833,6 +854,16 @@ struct OutcomesAllDataView: View {
         return rows
     }
 
+    private var hasGoalUpdates: Bool {
+        !goalChangeEvents.isEmpty
+    }
+
+    private var originalGoalValue: Double {
+        goalChangeEvents
+            .sorted { $0.occurredAt < $1.occurredAt }
+            .first?.oldGoal ?? currentGoalValue()
+    }
+
     var body: some View {
         List {
             ForEach(recordedRows) { row in
@@ -861,6 +892,20 @@ struct OutcomesAllDataView: View {
             }
 
             Section {
+                HStack(spacing: 10) {
+                    Text(hasGoalUpdates ? "Original Goal" : "Goal")
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(formatted(hasGoalUpdates ? originalGoalValue : currentGoalValue()))
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 1)
+                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+            }
+
+            Section {
                 Button {
                     startingValueInput = sanitizeAndFormatDecimalInputChart(
                         startingValue == 0 ? "" : formatted(startingValue),
@@ -876,6 +921,9 @@ struct OutcomesAllDataView: View {
                         Text(formatted(startingValue))
                             .font(.body)
                             .foregroundStyle(.blue)
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.caption)
+                            .foregroundStyle(.blue)
                     }
                     .padding(.vertical, 1)
                 }
@@ -890,7 +938,7 @@ struct OutcomesAllDataView: View {
             NavigationStack {
                 Form {
                     HStack {
-                        Text("Date")
+                        Text("Start Date")
                         Spacer()
                         Text(compactDate(outcomeStartDate))
                             .foregroundStyle(.secondary)
@@ -910,7 +958,7 @@ struct OutcomesAllDataView: View {
                             }
                     }
                 }
-                .navigationTitle("New Starting Value")
+                .navigationTitle("Edit Starting Value")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
@@ -934,18 +982,18 @@ struct OutcomesAllDataView: View {
         switch row.kind {
         case .measure(let measureRow):
             HStack(spacing: 10) {
-                Image("logo")
+                Image("logo_appicon_any")
                     .resizable()
                     .scaledToFit()
-                    .frame(width: 32, height: 32)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .frame(width: 34, height: 34)
+                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
                             .stroke(Color.gray.opacity(0.45), lineWidth: 0.6)
                     )
                 Text(formatted(measureRow.measure))
                     .font(.body)
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(.primary)
                 Spacer()
                 Text(compactDate(measureRow.measuredAt))
                     .font(.body)
@@ -954,12 +1002,16 @@ struct OutcomesAllDataView: View {
             .padding(.vertical, 1)
         case .goalChange(let event):
             HStack(spacing: 10) {
-                Image(systemName: "target")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                ZStack {
+                    Color.clear
+                    Image(systemName: "scope")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(width: 34, height: 34)
                 Text(formatted(event.newGoal ?? 0))
                     .font(.body)
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(.primary)
                 Spacer()
                 Text(compactDate(event.occurredAt))
                     .font(.body)
@@ -975,9 +1027,9 @@ struct OutcomesAllDataView: View {
         let year = cal.component(.year, from: date)
         let formatter = DateFormatter()
         if year == nowYear {
-            formatter.dateFormat = "M/d"
+            formatter.dateFormat = "MMM d"
         } else {
-            formatter.dateFormat = "M/d/yyyy"
+            formatter.dateFormat = "MMM d, yyyy"
         }
         return formatter.string(from: date)
     }
@@ -1137,6 +1189,8 @@ private struct RecordedDataDetailsView: View {
     let formatRaw: String
     let unitRaw: String
     let decimalPlaces: Int
+    @Query(sort: \OutcomesMeasureEntry.measuredAt, order: .forward) private var allEntries: [OutcomesMeasureEntry]
+    @Query(sort: \OutcomesMeasure.measuredAt, order: .forward) private var allSnapshots: [OutcomesMeasure]
 
     var body: some View {
         Form {
@@ -1156,7 +1210,7 @@ private struct RecordedDataDetailsView: View {
                     Text("Difference")
                     Spacer()
                     Text(formatted(diff))
-                        .foregroundStyle(diff > 0 ? .green : (diff < 0 ? .red : .secondary))
+                        .foregroundStyle(differenceColor(oldGoal: oldGoal, newGoal: newGoal, outcomeId: event.outcome_id))
                 }
                 detailRow("Date", fullDate(event.occurredAt))
                 detailRow("Source", "Loom")
@@ -1170,16 +1224,42 @@ private struct RecordedDataDetailsView: View {
     private func detailRow(_ label: String, _ value: String) -> some View {
         HStack {
             Text(label)
+            .foregroundStyle(.secondary)
             Spacer()
             Text(value)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.primary)
         }
     }
 
     private func fullDate(_ date: Date) -> String {
         let formatter = DateFormatter()
-        formatter.dateFormat = "MM/dd/yyyy"
+        formatter.dateFormat = "MMM d, yyyy"
         return formatter.string(from: date)
+    }
+
+    private func startMeasure(for outcomeId: UUID) -> Double? {
+        if let first = allEntries.first(where: { $0.outcome_id == outcomeId }) {
+            return first.measure
+        }
+        return allSnapshots.first(where: { $0.outcome_id == outcomeId })?.measure
+    }
+
+    private func differenceColor(oldGoal: Double, newGoal: Double, outcomeId: UUID) -> Color {
+        guard let start = startMeasure(for: outcomeId), oldGoal != start else {
+            if newGoal > oldGoal { return .green }
+            if newGoal < oldGoal { return .red }
+            return .primary
+        }
+        let directionUp = oldGoal > start
+        if directionUp {
+            if newGoal > oldGoal { return .green }
+            if newGoal < oldGoal { return .red }
+            return .primary
+        } else {
+            if newGoal < oldGoal { return .green }
+            if newGoal > oldGoal { return .red }
+            return .primary
+        }
     }
 
     private func formatted(_ value: Double) -> String {

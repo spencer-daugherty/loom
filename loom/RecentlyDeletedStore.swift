@@ -2,6 +2,73 @@ import Foundation
 import SwiftData
 
 enum RecentlyDeletedStore {
+    private struct ReflectionArchiveActionSnapshot: Codable {
+        var id: UUID
+        var archiveId: UUID
+        var weekStart: Date
+        var plannedChunkId: UUID
+        var plannedChunkActionId: UUID
+        var chunkLabel: String
+        var chunkCategory: String
+        var resultText: String?
+        var purposeText: String?
+        var actionText: String
+        var statusRaw: String
+        var isMust: Bool
+        var durationMinutes: Int?
+        var leverageKindRaw: String?
+        var leverageValue: String?
+        var placeNamesCSV: String
+        var hasNote: Bool
+        var linkAttachmentCount: Int
+        var fileAttachmentCount: Int
+    }
+
+    private struct ReflectionArchiveOutcomeSnapshot: Codable {
+        var id: UUID
+        var archiveId: UUID
+        var weekStart: Date
+        var plannedChunkId: UUID
+        var outcomeId: UUID
+        var outcomeText: String
+        var category: String
+    }
+
+    private struct ReflectionArchiveSnapshot: Codable {
+        var id: UUID
+        var weekStart: Date
+        var startedAt: Date
+        var completedAt: Date
+        var savedAt: Date
+        var achievementsText: String
+        var magicMomentsText: String
+        var powerQuestionText: String
+        var actions: [ReflectionArchiveActionSnapshot]
+        var outcomes: [ReflectionArchiveOutcomeSnapshot]
+        var notes: [ActionNoteSnapshot]
+        var attachments: [ActionAttachmentSnapshot]
+        var contributions: [OutcomeContributionSnapshot]
+    }
+
+    private struct ActionAttachmentSnapshot: Codable {
+        var id: UUID
+        var weekStart: Date
+        var plannedChunkActionId: UUID
+        var kindRaw: String
+        var urlString: String?
+        var fileName: String?
+        var fileBookmarkData: Data?
+        var createdAt: Date
+    }
+
+    private struct ActionNoteSnapshot: Codable {
+        var id: UUID
+        var weekStart: Date
+        var plannedChunkActionId: UUID
+        var noteText: String
+        var updatedAt: Date
+    }
+
     private struct OutcomeSnapshot: Codable {
         var category: String
         var updatedAt: Date
@@ -143,6 +210,9 @@ enum RecentlyDeletedStore {
             for row in allPoints where row.completedOutcomeArchiveId == completed.id {
                 context.delete(row)
             }
+        }
+        if let reflection = model as? ActionBlocksReflectionArchive {
+            deleteReflectionArchiveChildren(for: reflection, in: context)
         }
         context.delete(model)
     }
@@ -329,6 +399,210 @@ enum RecentlyDeletedStore {
             context.delete(item)
             return true
 
+        case "PlannedChunkActionAttachment":
+            guard
+                let payload = item.payloadJSON,
+                let data = payload.data(using: .utf8),
+                let decoded = try? decoder.decode(ActionAttachmentSnapshot.self, from: data)
+            else { return false }
+
+            let allLive = (try? context.fetch(FetchDescriptor<PlannedChunkActionAttachment>())) ?? []
+            let duplicate = allLive.contains {
+                $0.plannedChunkActionId == decoded.plannedChunkActionId &&
+                $0.kindRaw == decoded.kindRaw &&
+                ($0.urlString ?? "") == (decoded.urlString ?? "") &&
+                ($0.fileName ?? "") == (decoded.fileName ?? "")
+            }
+            if !duplicate {
+                context.insert(
+                    PlannedChunkActionAttachment(
+                        id: allLive.contains(where: { $0.id == decoded.id }) ? UUID() : decoded.id,
+                        weekStart: decoded.weekStart,
+                        plannedChunkActionId: decoded.plannedChunkActionId,
+                        kindRaw: decoded.kindRaw,
+                        urlString: decoded.urlString,
+                        fileName: decoded.fileName,
+                        fileBookmarkData: decoded.fileBookmarkData,
+                        createdAt: decoded.createdAt
+                    )
+                )
+
+                let archiveActions = (try? context.fetch(FetchDescriptor<ActionBlocksReflectionArchiveAction>())) ?? []
+                if let archiveAction = archiveActions.first(where: { $0.plannedChunkActionId == decoded.plannedChunkActionId }) {
+                    if decoded.kindRaw == ActionAttachmentKind.link.rawValue {
+                        archiveAction.linkAttachmentCount += 1
+                    } else if decoded.kindRaw == ActionAttachmentKind.file.rawValue {
+                        archiveAction.fileAttachmentCount += 1
+                    }
+                }
+            }
+
+            context.delete(item)
+            return true
+
+        case "PlannedChunkActionNote":
+            guard
+                let payload = item.payloadJSON,
+                let data = payload.data(using: .utf8),
+                let decoded = try? decoder.decode(ActionNoteSnapshot.self, from: data)
+            else { return false }
+
+            let allNotes = (try? context.fetch(FetchDescriptor<PlannedChunkActionNote>())) ?? []
+            let dayKey = {
+                let comps = Calendar.current.dateComponents([.year, .month, .day], from: decoded.weekStart)
+                return String(format: "%04d-%02d-%02d", comps.year ?? 0, comps.month ?? 0, comps.day ?? 0)
+            }()
+            let weekActionKey = "\(dayKey)|\(decoded.plannedChunkActionId.uuidString)"
+
+            if let existing = allNotes.first(where: { $0.weekActionKey == weekActionKey }) {
+                existing.noteText = decoded.noteText
+                existing.updatedAt = decoded.updatedAt
+            } else {
+                context.insert(
+                    PlannedChunkActionNote(
+                        id: allNotes.contains(where: { $0.id == decoded.id }) ? UUID() : decoded.id,
+                        weekStart: decoded.weekStart,
+                        plannedChunkActionId: decoded.plannedChunkActionId,
+                        noteText: decoded.noteText,
+                        updatedAt: decoded.updatedAt
+                    )
+                )
+            }
+
+            let archiveActions = (try? context.fetch(FetchDescriptor<ActionBlocksReflectionArchiveAction>())) ?? []
+            if let archiveAction = archiveActions.first(where: { $0.plannedChunkActionId == decoded.plannedChunkActionId }) {
+                archiveAction.hasNote = !decoded.noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+
+            context.delete(item)
+            return true
+
+        case "ActionBlocksReflectionArchive":
+            guard
+                let payload = item.payloadJSON,
+                let data = payload.data(using: .utf8),
+                let decoded = try? decoder.decode(ReflectionArchiveSnapshot.self, from: data)
+            else { return false }
+
+            let existingArchives = (try? context.fetch(FetchDescriptor<ActionBlocksReflectionArchive>())) ?? []
+            if !existingArchives.contains(where: { $0.id == decoded.id }) {
+                context.insert(
+                    ActionBlocksReflectionArchive(
+                        id: decoded.id,
+                        weekStart: decoded.weekStart,
+                        startedAt: decoded.startedAt,
+                        completedAt: decoded.completedAt,
+                        savedAt: decoded.savedAt,
+                        achievementsText: decoded.achievementsText,
+                        magicMomentsText: decoded.magicMomentsText,
+                        powerQuestionText: decoded.powerQuestionText
+                    )
+                )
+            }
+
+            let existingActions = (try? context.fetch(FetchDescriptor<ActionBlocksReflectionArchiveAction>())) ?? []
+            let existingActionIDs = Set(existingActions.map(\.id))
+            for row in decoded.actions where !existingActionIDs.contains(row.id) {
+                context.insert(
+                    ActionBlocksReflectionArchiveAction(
+                        id: row.id,
+                        archiveId: row.archiveId,
+                        weekStart: row.weekStart,
+                        plannedChunkId: row.plannedChunkId,
+                        plannedChunkActionId: row.plannedChunkActionId,
+                        chunkLabel: row.chunkLabel,
+                        chunkCategory: row.chunkCategory,
+                        resultText: row.resultText,
+                        purposeText: row.purposeText,
+                        actionText: row.actionText,
+                        statusRaw: row.statusRaw,
+                        isMust: row.isMust,
+                        durationMinutes: row.durationMinutes,
+                        leverageKindRaw: row.leverageKindRaw,
+                        leverageValue: row.leverageValue,
+                        placeNamesCSV: row.placeNamesCSV,
+                        hasNote: row.hasNote,
+                        linkAttachmentCount: row.linkAttachmentCount,
+                        fileAttachmentCount: row.fileAttachmentCount
+                    )
+                )
+            }
+
+            let existingOutcomes = (try? context.fetch(FetchDescriptor<ActionBlocksReflectionArchiveOutcome>())) ?? []
+            let existingOutcomeIDs = Set(existingOutcomes.map(\.id))
+            for row in decoded.outcomes where !existingOutcomeIDs.contains(row.id) {
+                context.insert(
+                    ActionBlocksReflectionArchiveOutcome(
+                        id: row.id,
+                        archiveId: row.archiveId,
+                        weekStart: row.weekStart,
+                        plannedChunkId: row.plannedChunkId,
+                        outcomeId: row.outcomeId,
+                        outcomeText: row.outcomeText,
+                        category: row.category
+                    )
+                )
+            }
+
+            let existingNotes = (try? context.fetch(FetchDescriptor<PlannedChunkActionNote>())) ?? []
+            let existingNoteKeys = Set(existingNotes.map(\.weekActionKey))
+            for row in decoded.notes {
+                let comps = Calendar.current.dateComponents([.year, .month, .day], from: row.weekStart)
+                let dayKey = String(format: "%04d-%02d-%02d", comps.year ?? 0, comps.month ?? 0, comps.day ?? 0)
+                let weekActionKey = "\(dayKey)|\(row.plannedChunkActionId.uuidString)"
+                if existingNoteKeys.contains(weekActionKey) { continue }
+                context.insert(
+                    PlannedChunkActionNote(
+                        id: row.id,
+                        weekStart: row.weekStart,
+                        plannedChunkActionId: row.plannedChunkActionId,
+                        noteText: row.noteText,
+                        updatedAt: row.updatedAt
+                    )
+                )
+            }
+
+            let existingAttachments = (try? context.fetch(FetchDescriptor<PlannedChunkActionAttachment>())) ?? []
+            let existingAttachmentIDs = Set(existingAttachments.map(\.id))
+            for row in decoded.attachments where !existingAttachmentIDs.contains(row.id) {
+                context.insert(
+                    PlannedChunkActionAttachment(
+                        id: row.id,
+                        weekStart: row.weekStart,
+                        plannedChunkActionId: row.plannedChunkActionId,
+                        kindRaw: row.kindRaw,
+                        urlString: row.urlString,
+                        fileName: row.fileName,
+                        fileBookmarkData: row.fileBookmarkData,
+                        createdAt: row.createdAt
+                    )
+                )
+            }
+
+            let existingContribs = (try? context.fetch(FetchDescriptor<ActionBlocksReflectionOutcomeContribution>())) ?? []
+            let existingContribIDs = Set(existingContribs.map(\.id))
+            let existingContribKeys = Set(existingContribs.map {
+                "\($0.archiveId.uuidString)|\($0.plannedChunkActionId.uuidString)|\($0.outcomeId.uuidString)"
+            })
+            for row in decoded.contributions {
+                let key = "\(row.archiveId.uuidString)|\(row.plannedChunkActionId.uuidString)|\(row.outcomeId.uuidString)"
+                if existingContribIDs.contains(row.id) || existingContribKeys.contains(key) { continue }
+                context.insert(
+                    ActionBlocksReflectionOutcomeContribution(
+                        id: row.id,
+                        archiveId: row.archiveId,
+                        weekStart: row.weekStart,
+                        outcomeId: row.outcomeId,
+                        plannedChunkActionId: row.plannedChunkActionId,
+                        actionText: row.actionText,
+                        completedAt: row.completedAt
+                    )
+                )
+            }
+
+            context.delete(item)
+            return true
+
         default:
             return false
         }
@@ -360,6 +634,7 @@ enum RecentlyDeletedStore {
         if let m = model as? Outcomes { return m.outcome_id.uuidString }
         if let m = model as? RollingCaptureItem { return m.id.uuidString }
         if let m = model as? CompletedOutcomeArchive { return m.id.uuidString }
+        if let m = model as? ActionBlocksReflectionArchive { return m.id.uuidString }
         if let m = model as? RecentlyDeletedItem { return m.id.uuidString }
 
         let mirror = Mirror(reflecting: model)
@@ -373,6 +648,9 @@ enum RecentlyDeletedStore {
         if let m = model as? Outcomes { return m.outcome }
         if let m = model as? RollingCaptureItem { return m.text }
         if let m = model as? CompletedOutcomeArchive { return m.outcome }
+        if let m = model as? ActionBlocksReflectionArchive {
+            return "Action Blocks • \(shortDate(m.startedAt)) - \(shortDate(m.completedAt))"
+        }
 
         let mirror = Mirror(reflecting: model)
         for key in ["text", "outcome", "role", "activity", "resource", "category"] {
@@ -393,6 +671,9 @@ enum RecentlyDeletedStore {
         }
         if let m = model as? CompletedOutcomeArchive {
             return "Completed Outcome • \(shortDate(m.start)) - \(shortDate(m.completedAt))"
+        }
+        if model is ActionBlocksReflectionArchive {
+            return "Completed Action Blocks"
         }
         return String(describing: type(of: model))
     }
@@ -548,7 +829,157 @@ enum RecentlyDeletedStore {
             }
         }
 
+        if let m = model as? ActionBlocksReflectionArchive {
+            let allArchiveActions = (try? context.fetch(FetchDescriptor<ActionBlocksReflectionArchiveAction>())) ?? []
+            let allArchiveOutcomes = (try? context.fetch(FetchDescriptor<ActionBlocksReflectionArchiveOutcome>())) ?? []
+            let relatedActions = allArchiveActions.filter { $0.archiveId == m.id }
+            let relatedOutcomes = allArchiveOutcomes.filter { $0.archiveId == m.id }
+            let actionIDs = Set(relatedActions.map(\.plannedChunkActionId))
+            let allNotes = (try? context.fetch(FetchDescriptor<PlannedChunkActionNote>())) ?? []
+            let allAttachments = (try? context.fetch(FetchDescriptor<PlannedChunkActionAttachment>())) ?? []
+            let allContributions = (try? context.fetch(FetchDescriptor<ActionBlocksReflectionOutcomeContribution>())) ?? []
+            let relatedNotes = allNotes.filter { actionIDs.contains($0.plannedChunkActionId) }
+            let relatedAttachments = allAttachments.filter { actionIDs.contains($0.plannedChunkActionId) }
+            let relatedContributions = allContributions.filter { $0.archiveId == m.id }
+
+            let snapshot = ReflectionArchiveSnapshot(
+                id: m.id,
+                weekStart: m.weekStart,
+                startedAt: m.startedAt,
+                completedAt: m.completedAt,
+                savedAt: m.savedAt,
+                achievementsText: m.achievementsText,
+                magicMomentsText: m.magicMomentsText,
+                powerQuestionText: m.powerQuestionText,
+                actions: relatedActions.map {
+                    ReflectionArchiveActionSnapshot(
+                        id: $0.id,
+                        archiveId: $0.archiveId,
+                        weekStart: $0.weekStart,
+                        plannedChunkId: $0.plannedChunkId,
+                        plannedChunkActionId: $0.plannedChunkActionId,
+                        chunkLabel: $0.chunkLabel,
+                        chunkCategory: $0.chunkCategory,
+                        resultText: $0.resultText,
+                        purposeText: $0.purposeText,
+                        actionText: $0.actionText,
+                        statusRaw: $0.statusRaw,
+                        isMust: $0.isMust,
+                        durationMinutes: $0.durationMinutes,
+                        leverageKindRaw: $0.leverageKindRaw,
+                        leverageValue: $0.leverageValue,
+                        placeNamesCSV: $0.placeNamesCSV,
+                        hasNote: $0.hasNote,
+                        linkAttachmentCount: $0.linkAttachmentCount,
+                        fileAttachmentCount: $0.fileAttachmentCount
+                    )
+                },
+                outcomes: relatedOutcomes.map {
+                    ReflectionArchiveOutcomeSnapshot(
+                        id: $0.id,
+                        archiveId: $0.archiveId,
+                        weekStart: $0.weekStart,
+                        plannedChunkId: $0.plannedChunkId,
+                        outcomeId: $0.outcomeId,
+                        outcomeText: $0.outcomeText,
+                        category: $0.category
+                    )
+                },
+                notes: relatedNotes.map {
+                    ActionNoteSnapshot(
+                        id: $0.id,
+                        weekStart: $0.weekStart,
+                        plannedChunkActionId: $0.plannedChunkActionId,
+                        noteText: $0.noteText,
+                        updatedAt: $0.updatedAt
+                    )
+                },
+                attachments: relatedAttachments.map {
+                    ActionAttachmentSnapshot(
+                        id: $0.id,
+                        weekStart: $0.weekStart,
+                        plannedChunkActionId: $0.plannedChunkActionId,
+                        kindRaw: $0.kindRaw,
+                        urlString: $0.urlString,
+                        fileName: $0.fileName,
+                        fileBookmarkData: $0.fileBookmarkData,
+                        createdAt: $0.createdAt
+                    )
+                },
+                contributions: relatedContributions.map {
+                    OutcomeContributionSnapshot(
+                        id: $0.id,
+                        archiveId: $0.archiveId,
+                        weekStart: $0.weekStart,
+                        outcomeId: $0.outcomeId,
+                        plannedChunkActionId: $0.plannedChunkActionId,
+                        actionText: $0.actionText,
+                        completedAt: $0.completedAt
+                    )
+                }
+            )
+            if let data = try? encoder.encode(snapshot) {
+                return String(data: data, encoding: .utf8)
+            }
+        }
+
+        if let m = model as? PlannedChunkActionAttachment {
+            let snapshot = ActionAttachmentSnapshot(
+                id: m.id,
+                weekStart: m.weekStart,
+                plannedChunkActionId: m.plannedChunkActionId,
+                kindRaw: m.kindRaw,
+                urlString: m.urlString,
+                fileName: m.fileName,
+                fileBookmarkData: m.fileBookmarkData,
+                createdAt: m.createdAt
+            )
+            if let data = try? encoder.encode(snapshot) {
+                return String(data: data, encoding: .utf8)
+            }
+        }
+
+        if let m = model as? PlannedChunkActionNote {
+            let snapshot = ActionNoteSnapshot(
+                id: m.id,
+                weekStart: m.weekStart,
+                plannedChunkActionId: m.plannedChunkActionId,
+                noteText: m.noteText,
+                updatedAt: m.updatedAt
+            )
+            if let data = try? encoder.encode(snapshot) {
+                return String(data: data, encoding: .utf8)
+            }
+        }
+
         return nil
+    }
+
+    private static func deleteReflectionArchiveChildren(for archive: ActionBlocksReflectionArchive, in context: ModelContext) {
+        let allArchiveActions = (try? context.fetch(FetchDescriptor<ActionBlocksReflectionArchiveAction>())) ?? []
+        let allArchiveOutcomes = (try? context.fetch(FetchDescriptor<ActionBlocksReflectionArchiveOutcome>())) ?? []
+        let relatedActions = allArchiveActions.filter { $0.archiveId == archive.id }
+        let relatedOutcomes = allArchiveOutcomes.filter { $0.archiveId == archive.id }
+        let actionIDs = Set(relatedActions.map(\.plannedChunkActionId))
+
+        let allNotes = (try? context.fetch(FetchDescriptor<PlannedChunkActionNote>())) ?? []
+        let allAttachments = (try? context.fetch(FetchDescriptor<PlannedChunkActionAttachment>())) ?? []
+        let allContributions = (try? context.fetch(FetchDescriptor<ActionBlocksReflectionOutcomeContribution>())) ?? []
+        for row in allNotes where actionIDs.contains(row.plannedChunkActionId) {
+            context.delete(row)
+        }
+        for row in allAttachments where actionIDs.contains(row.plannedChunkActionId) {
+            context.delete(row)
+        }
+        for row in allContributions where row.archiveId == archive.id {
+            context.delete(row)
+        }
+        for row in relatedActions {
+            context.delete(row)
+        }
+        for row in relatedOutcomes {
+            context.delete(row)
+        }
     }
 
     private static func shortDate(_ date: Date) -> String {

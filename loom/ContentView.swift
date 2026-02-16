@@ -999,15 +999,26 @@ struct OutcomePopupOverlay: View {
         return ProgressCircleView.progressValue(current: measure, goal: measureAmt, start: start)
     }
 
+    private func measurementStatusPrefix(for measuredAt: Date) -> String {
+        if let startDate = allMeasureEntries
+            .filter({ $0.outcome_id == outcome.outcome_id })
+            .min(by: { $0.measuredAt < $1.measuredAt })?
+            .measuredAt,
+           Calendar.current.isDate(startDate, inSameDayAs: measuredAt) {
+            return "started"
+        }
+        return "updated"
+    }
+
     @ViewBuilder
-    private func DarkMeasurableOutcomeBox(measure: Double, measuredAt: Date, measureAmt: Double, endDate: Date, format: String) -> some View {
+    private func DarkMeasurableOutcomeBox(measure: Double, measuredAt: Date, measureAmt: Double, endDate: Date, format: String, statusPrefix: String) -> some View {
         HStack(spacing: 0) {
             VStack(spacing: 2) {
                 Text(formattedValue(measure, format: format))
                     .font(.title3)
                     .fontWeight(.bold)
                     .foregroundColor(.primary)
-                Text("updated \(formattedDate(measuredAt))")
+                Text("\(statusPrefix) \(formattedDate(measuredAt))")
                     .font(.caption2)
                     .foregroundColor(.primary)
             }
@@ -1106,7 +1117,8 @@ struct OutcomePopupOverlay: View {
                             measuredAt: measure.measuredAt,
                             measureAmt: measure.measure_amt,
                             endDate: outcome.end,
-                            format: measure.format ?? "Number"
+                            format: measure.format ?? "Number",
+                            statusPrefix: measurementStatusPrefix(for: measure.measuredAt)
                         )
                         .frame(height: 44)
 
@@ -1121,7 +1133,8 @@ struct OutcomePopupOverlay: View {
                             measuredAt: measure.measuredAt,
                             measureAmt: measure.measure_amt,
                             endDate: outcome.end,
-                            format: measure.format ?? "Number"
+                            format: measure.format ?? "Number",
+                            statusPrefix: measurementStatusPrefix(for: measure.measuredAt)
                         )
                         .frame(height: 44)
 

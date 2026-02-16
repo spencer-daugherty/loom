@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import Charts
+import UIKit
 
 private enum CompletedSearchScope: String, CaseIterable, Identifiable {
     case all = "All"
@@ -13,6 +14,7 @@ private enum CompletedSearchScope: String, CaseIterable, Identifiable {
 }
 
 struct CompletedActionBlocksListView: View {
+    @Environment(\.modelContext) private var modelContext
     @Query(sort: \ActionBlocksReflectionArchive.completedAt, order: .reverse)
     private var sessions: [ActionBlocksReflectionArchive]
     @Query private var actions: [ActionBlocksReflectionArchiveAction]
@@ -21,6 +23,7 @@ struct CompletedActionBlocksListView: View {
     @State private var searchText: String = ""
     @State private var searchScope: CompletedSearchScope = .all
     @FocusState private var isSearchFocused: Bool
+    @State private var pendingDeleteSession: ActionBlocksReflectionArchive?
 
     private var actionsBySession: [UUID: [ActionBlocksReflectionArchiveAction]] {
         Dictionary(grouping: actions, by: \.archiveId)
@@ -63,8 +66,30 @@ struct CompletedActionBlocksListView: View {
     }
 
     var body: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 8) {
+        List {
+            ForEach(filteredSessions) { session in
+                NavigationLink {
+                    CompletedActionBlocksDetailView(session: session)
+                } label: {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Started: \(session.startedAt.formatted(date: .abbreviated, time: .omitted))")
+                            .font(.subheadline)
+                        Text("Ended: \(session.completedAt.formatted(date: .abbreviated, time: .omitted))")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 8)
+                }
+                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                    Button("Delete", role: .destructive) {
+                        pendingDeleteSession = session
+                    }
+                    .tint(.red)
+                }
+            }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            HStack(spacing: 10) {
                 if isSearchFocused {
                     Menu {
                         Picker("Search area", selection: $searchScope) {
@@ -74,35 +99,46 @@ struct CompletedActionBlocksListView: View {
                         }
                     } label: {
                         Image(systemName: "line.3.horizontal.decrease.circle")
-                            .font(.title3)
+                            .font(.headline)
+                            .frame(width: 34, height: 34)
+                            .background(.regularMaterial, in: Circle())
                     }
+                    .buttonStyle(.plain)
                 }
 
-                TextField("Search completed blocks", text: $searchText)
-                    .textFieldStyle(.roundedBorder)
-                    .submitLabel(.done)
-                    .focused($isSearchFocused)
-            }
-            .padding(.horizontal)
-
-            List {
-                ForEach(filteredSessions) { session in
-                    NavigationLink {
-                        CompletedActionBlocksDetailView(session: session)
-                    } label: {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Started: \(session.startedAt.formatted(date: .abbreviated, time: .omitted))")
-                                .font(.subheadline)
-                            Text("Ended: \(session.completedAt.formatted(date: .abbreviated, time: .omitted))")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(.vertical, 8)
-                    }
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                    TextField("Search completed blocks", text: $searchText)
+                        .submitLabel(.search)
+                        .focused($isSearchFocused)
                 }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
+            .padding(.horizontal, 14)
+            .padding(.top, 8)
+            .padding(.bottom, 10)
+            .background(.clear)
         }
         .navigationTitle("Completed Action Blocks")
+        .alert("Delete Action Blocks?", isPresented: Binding(
+            get: { pendingDeleteSession != nil },
+            set: { if !$0 { pendingDeleteSession = nil } }
+        )) {
+            Button("Delete", role: .destructive) {
+                guard let session = pendingDeleteSession else { return }
+                RecentlyDeletedStore.trash(session, in: modelContext, source: "Completed Action Blocks")
+                try? modelContext.save()
+                pendingDeleteSession = nil
+            }
+            Button("Cancel", role: .cancel) {
+                pendingDeleteSession = nil
+            }
+        } message: {
+            Text("Are you sure you want to delete this item? It will be available for 30 days in account management.")
+        }
     }
 }
 
@@ -128,10 +164,12 @@ private enum CompletedPopup: Identifiable {
 
 struct CompletedActionBlocksDetailView: View {
     let session: ActionBlocksReflectionArchive
+    @Environment(\.colorScheme) private var colorScheme
 
     @Query private var allActions: [ActionBlocksReflectionArchiveAction]
     @Query private var allOutcomes: [ActionBlocksReflectionArchiveOutcome]
     @Query(sort: \WeeklyMindsetEntry.Fields.createdAt, order: .reverse) private var allMindsetRows: [WeeklyMindsetEntry.Fields]
+    @Query private var allNotes: [PlannedChunkActionNote]
     @Query private var allAttachments: [PlannedChunkActionAttachment]
 
     @State private var tab: CompletedTab = .actionBlocks
@@ -232,6 +270,7 @@ struct CompletedActionBlocksDetailView: View {
             case .attachments(let a):
                     CompletedAttachmentsSheet(
                         action: a,
+                        liveNote: allNotes.first(where: { $0.plannedChunkActionId == a.plannedChunkActionId }),
                         liveAttachments: allAttachments.filter { $0.plannedChunkActionId == a.plannedChunkActionId }
                     )
                     .presentationDetents([.medium, .large])
@@ -521,6 +560,7 @@ struct CompletedActionBlocksDetailView: View {
         let hasAttachments = action.hasNote || action.linkAttachmentCount > 0 || action.fileAttachmentCount > 0
         let hasSensitivity = !action.placeNamesCSV.isEmpty
         let isTool = action.leverageKindRaw?.lowercased() == "tool"
+        let darkFilledIconTint = colorScheme == .dark ? Color.white.opacity(0.82) : Color.black
         let leverageIcon = hasLeverage
             ? (isTool ? "wrench.and.screwdriver.fill" : "person.fill")
             : (isTool ? "wrench.and.screwdriver" : "person")
@@ -546,30 +586,6 @@ struct CompletedActionBlocksDetailView: View {
                     .strikethrough(isStrikeThrough(status: status), color: actionTextColor(status: status, accent: rowAccent))
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                if let result = action.resultText?.trimmingCharacters(in: .whitespacesAndNewlines), !result.isEmpty {
-                    HStack(spacing: 6) {
-                        Text("Result:")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        Text(result)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-
-                if let purpose = action.purposeText?.trimmingCharacters(in: .whitespacesAndNewlines), !purpose.isEmpty {
-                    HStack(spacing: 6) {
-                        Text("Purpose:")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        Text(purpose)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-
                 HStack(spacing: 18) {
                     Image(systemName: action.isMust ? "star.square.fill" : "star.square")
                         .foregroundStyle(action.isMust ? iconTint : Color(.systemGray))
@@ -588,7 +604,7 @@ struct CompletedActionBlocksDetailView: View {
                         popup = .leverage(action)
                     } label: {
                         Image(systemName: leverageIcon)
-                            .foregroundStyle(hasLeverage ? Color.black : Color(.systemGray))
+                            .foregroundStyle(hasLeverage ? darkFilledIconTint : Color(.systemGray))
                     }
                     .buttonStyle(.plain)
                     .disabled(!hasLeverage)
@@ -597,7 +613,7 @@ struct CompletedActionBlocksDetailView: View {
                         popup = .sensitivities(action)
                     } label: {
                         Image(systemName: hasSensitivity ? "gearshape.fill" : "gearshape")
-                            .foregroundStyle(hasSensitivity ? Color.black : Color(.systemGray))
+                            .foregroundStyle(hasSensitivity ? darkFilledIconTint : Color(.systemGray))
                     }
                     .buttonStyle(.plain)
                     .disabled(!hasSensitivity)
@@ -606,7 +622,7 @@ struct CompletedActionBlocksDetailView: View {
                         popup = .attachments(action)
                     } label: {
                         Image(systemName: hasAttachments ? "paperclip.badge.ellipsis" : "paperclip")
-                            .foregroundStyle(hasAttachments ? Color.black : Color(.systemGray))
+                            .foregroundStyle(hasAttachments ? darkFilledIconTint : Color(.systemGray))
                     }
                     .buttonStyle(.plain)
                     .disabled(!hasAttachments)
@@ -859,24 +875,42 @@ private struct CompletedSensitivitySheet: View {
 }
 
 private struct CompletedAttachmentsSheet: View {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.openURL) private var openURL
     let action: ActionBlocksReflectionArchiveAction
+    let liveNote: PlannedChunkActionNote?
     let liveAttachments: [PlannedChunkActionAttachment]
     @Environment(\.dismiss) private var dismiss
+    @State private var pendingDelete: PendingDelete?
 
-    private var attachmentRows: [(icon: String, title: String)] {
-        let rows = liveAttachments.map { attachment -> (String, String) in
-            switch attachment.kind {
-            case .link:
-                return ("link", attachment.urlString ?? "(link)")
-            case .file:
-                return ("doc", attachment.fileName ?? "(file)")
-            case .note:
-                return ("note.text", "Note")
+    private enum PendingDelete: Identifiable {
+        case note(PlannedChunkActionNote)
+        case attachment(PlannedChunkActionAttachment)
+
+        var id: String {
+            switch self {
+            case .note(let note):
+                return "note-\(note.id.uuidString)"
+            case .attachment(let attachment):
+                return "att-\(attachment.id.uuidString)"
             }
         }
-        if !rows.isEmpty { return rows }
-        let links = (0..<action.linkAttachmentCount).map { idx in ("link", "Link \(idx + 1)") }
-        let files = (0..<action.fileAttachmentCount).map { idx in ("doc", "File \(idx + 1)") }
+    }
+
+    private var normalizedNoteText: String {
+        (liveNote?.noteText ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var fileAndLinkRows: [PlannedChunkActionAttachment] {
+        liveAttachments
+            .filter { $0.kind != .note }
+            .sorted { $0.createdAt < $1.createdAt }
+    }
+
+    private var fallbackRows: [(icon: String, title: String)] {
+        if !fileAndLinkRows.isEmpty { return [] }
+        let links = (0..<action.linkAttachmentCount).map { _ in ("link", "(saved link)") }
+        let files = (0..<action.fileAttachmentCount).map { _ in ("doc", "(saved file)") }
         return links + files
     }
 
@@ -884,23 +918,55 @@ private struct CompletedAttachmentsSheet: View {
         NavigationStack {
             List {
                 Section("Notes") {
-                    Text(action.hasNote ? "Saved note" : "No note.")
-                        .foregroundStyle(action.hasNote ? .primary : .secondary)
+                    if !normalizedNoteText.isEmpty {
+                        Text(normalizedNoteText)
+                            .foregroundStyle(.primary)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                if let note = liveNote {
+                                    Button("Delete", role: .destructive) {
+                                        pendingDelete = .note(note)
+                                    }
+                                }
+                            }
+                    } else {
+                        Text(action.hasNote ? "(saved note)" : "No note.")
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Section("Files and Links") {
-                    if attachmentRows.isEmpty {
+                    if fileAndLinkRows.isEmpty && fallbackRows.isEmpty {
                         Text("No attachments yet.")
                             .foregroundStyle(.secondary)
                     } else {
-                        ForEach(Array(attachmentRows.enumerated()), id: \.offset) { entry in
+                        ForEach(fileAndLinkRows) { attachment in
+                            HStack(alignment: .top, spacing: 10) {
+                                Image(systemName: attachment.kind == .link ? "link" : "doc")
+                                    .foregroundStyle(.secondary)
+                                Text(titleText(for: attachment))
+                                    .font(.subheadline)
+                                    .foregroundStyle(.primary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                openAttachment(attachment)
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button("Delete", role: .destructive) {
+                                    pendingDelete = .attachment(attachment)
+                                }
+                            }
+                        }
+
+                        ForEach(Array(fallbackRows.enumerated()), id: \.offset) { entry in
                             let row = entry.element
                             HStack(alignment: .top, spacing: 10) {
                                 Image(systemName: row.icon)
                                     .foregroundStyle(.secondary)
                                 Text(row.title)
                                     .font(.subheadline)
-                                    .foregroundStyle(.primary)
+                                    .foregroundStyle(.secondary)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }
@@ -909,11 +975,121 @@ private struct CompletedAttachmentsSheet: View {
             }
             .navigationTitle("Attachments")
             .navigationBarTitleDisplayMode(.inline)
+            .alert("Delete Attachment?", isPresented: Binding(
+                get: { pendingDelete != nil },
+                set: { if !$0 { pendingDelete = nil } }
+            )) {
+                Button("Delete", role: .destructive) {
+                    deletePendingItem()
+                }
+                Button("Cancel", role: .cancel) {
+                    pendingDelete = nil
+                }
+            } message: {
+                Text("Are you sure you want to delete this item? It will be available for 30 days in account management.")
+            }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
             }
         }
+    }
+
+    private func titleText(for attachment: PlannedChunkActionAttachment) -> String {
+        switch attachment.kind {
+        case .link:
+            return attachment.urlString ?? "(link)"
+        case .file:
+            return attachment.fileName ?? "(file)"
+        case .note:
+            return "Note"
+        }
+    }
+
+    private func openAttachment(_ attachment: PlannedChunkActionAttachment) {
+        switch attachment.kind {
+        case .link:
+            guard let raw = attachment.urlString?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return }
+            if let direct = URL(string: raw), direct.scheme != nil {
+                openURL(direct)
+                return
+            }
+            if let fallback = URL(string: "https://\(raw)") {
+                openURL(fallback)
+            }
+        case .file:
+            guard let data = attachment.fileBookmarkData else { return }
+            var isStale = false
+            #if os(macOS)
+            if let url = try? URL(
+                resolvingBookmarkData: data,
+                options: [.withoutUI, .withSecurityScope],
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            ) {
+                let didAccess = url.startAccessingSecurityScopedResource()
+                openURL(url)
+                if didAccess {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                        url.stopAccessingSecurityScopedResource()
+                    }
+                }
+            } else if let url = try? URL(
+                resolvingBookmarkData: data,
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            ) {
+                openURL(url)
+            }
+            #else
+            if let url = try? URL(
+                resolvingBookmarkData: data,
+                options: [.withoutUI],
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            ) {
+                let didAccess = url.startAccessingSecurityScopedResource()
+                openURL(url)
+                if didAccess {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                        url.stopAccessingSecurityScopedResource()
+                    }
+                }
+            } else if let url = try? URL(
+                resolvingBookmarkData: data,
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            ) {
+                let didAccess = url.startAccessingSecurityScopedResource()
+                openURL(url)
+                if didAccess {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                        url.stopAccessingSecurityScopedResource()
+                    }
+                }
+            }
+            #endif
+        case .note:
+            break
+        }
+    }
+
+    private func deletePendingItem() {
+        guard let pendingDelete else { return }
+        switch pendingDelete {
+        case .note(let note):
+            RecentlyDeletedStore.trash(note, in: modelContext)
+            action.hasNote = false
+        case .attachment(let attachment):
+            RecentlyDeletedStore.trash(attachment, in: modelContext)
+            if attachment.kind == .link {
+                action.linkAttachmentCount = max(0, action.linkAttachmentCount - 1)
+            } else if attachment.kind == .file {
+                action.fileAttachmentCount = max(0, action.fileAttachmentCount - 1)
+            }
+        }
+        try? modelContext.save()
+        self.pendingDelete = nil
     }
 }

@@ -69,6 +69,11 @@ struct ObjectivesView: View {
         completedOutcomeArchives.sorted { $0.completedAt > $1.completedAt }
     }
 
+    private var hasUpcomingOutcomes: Bool {
+        let today = Calendar.current.startOfDay(for: .now)
+        return outcomes.contains { Calendar.current.startOfDay(for: $0.start) > today }
+    }
+
     var body: some View {
         ZStack {
             (colorScheme == .dark ? Color.black : Color(.systemGray6))
@@ -103,16 +108,18 @@ struct ObjectivesView: View {
                                         .padding(.vertical, 4)
                                         .padding(.horizontal, 8)
                                 }
-                                HStack(spacing: 6) {
-                                    Text("Upcoming")
-                                        .font(.subheadline)
-                                        .foregroundColor(.secondary)
-                                    Toggle("", isOn: $showUpcoming)
-                                        .labelsHidden()
-                                        .toggleStyle(.switch)
-                                        .tint(.blue)
+                                if hasUpcomingOutcomes {
+                                    HStack(spacing: 6) {
+                                        Text("Upcoming")
+                                            .font(.subheadline)
+                                            .foregroundColor(.secondary)
+                                        Toggle("", isOn: $showUpcoming)
+                                            .labelsHidden()
+                                            .toggleStyle(.switch)
+                                            .tint(.blue)
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .trailing)
                                 }
-                                .frame(maxWidth: .infinity, alignment: .trailing)
                             }
                         }
                         Spacer()
@@ -124,11 +131,13 @@ struct ObjectivesView: View {
                         VStack(spacing: 8) {
                             ForEach(filteredOutcomes) { outcome in
                                 let latest = latestMeasure(for: outcome)
+                                let startDate = startMeasuredAt(for: outcome, latestMeasure: latest)
                                 Button(action: { navigationAction = .editOutcome(outcome) }) {
                                     OutcomeRow(
                                         outcome: outcome,
                                         measure: latest,
-                                        startMeasure: startMeasure(for: outcome, latestMeasure: latest)
+                                        startMeasure: startMeasure(for: outcome, latestMeasure: latest),
+                                        startMeasuredAt: startDate
                                     )
                                 }
                             }
@@ -464,6 +473,13 @@ struct ObjectivesView: View {
         return latestMeasure?.measure
     }
 
+    private func startMeasuredAt(for outcome: Outcomes, latestMeasure: OutcomesMeasure?) -> Date? {
+        if let first = outcomeMeasureEntries.first(where: { $0.outcome_id == outcome.outcome_id }) {
+            return first.measuredAt
+        }
+        return latestMeasure?.measuredAt
+    }
+
     private func formattedDate(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "M/d"
@@ -477,17 +493,19 @@ struct OutcomeRow: View {
     let outcome: Outcomes
     let measure: OutcomesMeasure?
     let startMeasure: Double?
+    let startMeasuredAt: Date?
 
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
                 let isUpcoming = Calendar.current.startOfDay(for: outcome.start) > Calendar.current.startOfDay(for: .now)
                 if isUpcoming {
+                    let daysToStart = daysUntilStart(outcome.start)
                     HStack(spacing: 8) {
                         Image(systemName: "clock")
                             .foregroundColor(.gray)
                             .font(.caption)
-                        Text("starts on \(formattedDate(outcome.start))")
+                        Text("starts in \(daysToStart) day\(daysToStart == 1 ? "" : "s") on \(formattedDate(outcome.start))")
                             .font(.caption)
                             .foregroundColor(.gray)
                     }
@@ -532,12 +550,16 @@ struct OutcomeRow: View {
                     .frame(height: 44)
 
                     if let measure, isOutcomeMeasurable(measure) {
+                        let isStarting = startMeasuredAt.map {
+                            Calendar.current.isDate($0, inSameDayAs: measure.measuredAt)
+                        } ?? false
                         MeasurableOutcomeBox(
                             measure: measure.measure,
                             measuredAt: measure.measuredAt,
                             measureAmt: measure.measure_amt,
                             endDate: outcome.end,
-                            format: measure.format ?? "Number"
+                            format: measure.format ?? "Number",
+                            statusPrefix: isStarting ? "started" : "updated"
                         )
                         .frame(height: 44)
 
@@ -589,6 +611,13 @@ struct OutcomeRow: View {
         let calendar = Calendar.current
         let components = calendar.dateComponents([.day], from: start, to: end)
         return max(0, components.day ?? 0)
+    }
+
+    private func daysUntilStart(_ date: Date) -> Int {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: .now)
+        let start = calendar.startOfDay(for: date)
+        return max(1, calendar.dateComponents([.day], from: today, to: start).day ?? 1)
     }
 
     private func isOutcomeMeasurable(_ measure: OutcomesMeasure) -> Bool {
@@ -1083,27 +1112,168 @@ private struct CompletedOutcomeInsightDetailSheet: View {
 struct CompletedOutcomeAllDataView: View {
     let archiveID: UUID
     let formatRaw: String
+    @Environment(\.colorScheme) private var colorScheme
     @Query(sort: \CompletedOutcomeMeasurePointArchive.measuredAt, order: .reverse) private var points: [CompletedOutcomeMeasurePointArchive]
 
-    private var rows: [CompletedOutcomeMeasurePointArchive] {
-        points.filter { $0.completedOutcomeArchiveId == archiveID }
+    private var sortedRows: [CompletedOutcomeMeasurePointArchive] {
+        points
+            .filter { $0.completedOutcomeArchiveId == archiveID }
+            .sorted { $0.measuredAt < $1.measuredAt }
+    }
+
+    private var startRow: CompletedOutcomeMeasurePointArchive? {
+        sortedRows.first
+    }
+
+    private var hasGoalUpdates: Bool {
+        Set(sortedRows.map(\.goal)).count > 1
+    }
+
+    private var originalGoal: Double {
+        startRow?.goal ?? 0
+    }
+
+    private var currentGoal: Double {
+        sortedRows.last?.goal ?? originalGoal
+    }
+
+    private var nonStartingRows: [CompletedOutcomeMeasurePointArchive] {
+        guard let start = startRow else { return [] }
+        return sortedRows.filter { !Calendar.current.isDate($0.measuredAt, inSameDayAs: start.measuredAt) }
+    }
+
+    private var unselectedPointFillColor: Color {
+        colorScheme == .dark ? Color(.secondarySystemBackground) : Color(.systemBackground)
+    }
+
+    private var goalChangeRows: [CompletedGoalChangeRecord] {
+        guard sortedRows.count > 1 else { return [] }
+        var result: [CompletedGoalChangeRecord] = []
+        for idx in 1..<sortedRows.count {
+            let previous = sortedRows[idx - 1]
+            let current = sortedRows[idx]
+            if previous.goal != current.goal {
+                result.append(
+                    CompletedGoalChangeRecord(
+                        id: current.id,
+                        date: current.measuredAt,
+                        oldGoal: previous.goal,
+                        newGoal: current.goal,
+                        startMeasure: startRow?.measure
+                    )
+                )
+            }
+        }
+        return result
+    }
+
+    private var recordedRows: [CompletedRecordedRow] {
+        var rows: [CompletedRecordedRow] = nonStartingRows.map {
+            CompletedRecordedRow(id: "measure-\($0.id.uuidString)", date: $0.measuredAt, kind: .measure($0))
+        }
+        rows.append(contentsOf: goalChangeRows.map {
+            CompletedRecordedRow(id: "goal-\($0.id.uuidString)", date: $0.date, kind: .goalChange($0))
+        })
+        rows.sort { $0.date > $1.date }
+        return rows
     }
 
     var body: some View {
         List {
-            ForEach(rows) { row in
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(row.measuredAt, format: .dateTime.month().day().year())
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                    Text("Current: \(formatted(row.measure, format: formatRaw))  Goal: \(formatted(row.goal, format: formatRaw))")
-                        .font(.caption)
+            ForEach(recordedRows) { row in
+                NavigationLink {
+                    CompletedRecordedDataDetailsView(row: row, formatRaw: formatRaw)
+                } label: {
+                    completedRecordedRowLabel(row)
+                }
+                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+            }
+
+            Section {
+                HStack(spacing: 10) {
+                    Text(hasGoalUpdates ? "Original Goal" : "Goal")
+                        .font(.body)
                         .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(formatted(hasGoalUpdates ? originalGoal : currentGoal, format: formatRaw))
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 1)
+                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+            }
+
+            if let startRow {
+                Section {
+                    HStack(spacing: 10) {
+                        Text("Starting Value")
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(formatted(startRow.measure, format: formatRaw))
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 1)
+                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                 }
             }
         }
-        .navigationTitle("All Measure Data")
+        .navigationTitle("All Recorded Data")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    @ViewBuilder
+    private func completedRecordedRowLabel(_ row: CompletedRecordedRow) -> some View {
+        switch row.kind {
+        case .measure(let measureRow):
+            HStack(spacing: 10) {
+                Image("logo_appicon_any")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 34, height: 34)
+                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .stroke(Color.gray.opacity(0.45), lineWidth: 0.6)
+                    )
+                Text(formatted(measureRow.measure, format: formatRaw))
+                    .font(.body)
+                    .foregroundStyle(.primary)
+                Spacer()
+                Text(compactDate(measureRow.measuredAt))
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 1)
+        case .goalChange(let row):
+            HStack(spacing: 10) {
+                ZStack {
+                    Color.clear
+                    Image(systemName: "scope")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(width: 34, height: 34)
+                Text(formatted(row.newGoal, format: formatRaw))
+                    .font(.body)
+                    .foregroundStyle(.primary)
+                Spacer()
+                Text(compactDate(row.date))
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 1)
+        }
+    }
+
+    private func compactDate(_ date: Date) -> String {
+        let cal = Calendar.current
+        let nowYear = cal.component(.year, from: .now)
+        let year = cal.component(.year, from: date)
+        let formatter = DateFormatter()
+        formatter.dateFormat = year == nowYear ? "MMM d" : "MMM d, yyyy"
+        return formatter.string(from: date)
     }
 
     private func formatted(_ value: Double, format: String) -> String {
@@ -1123,12 +1293,114 @@ struct CompletedOutcomeAllDataView: View {
     }
 }
 
+private struct CompletedGoalChangeRecord: Identifiable {
+    let id: UUID
+    let date: Date
+    let oldGoal: Double
+    let newGoal: Double
+    let startMeasure: Double?
+}
+
+private struct CompletedRecordedRow: Identifiable {
+    enum Kind {
+        case measure(CompletedOutcomeMeasurePointArchive)
+        case goalChange(CompletedGoalChangeRecord)
+    }
+    let id: String
+    let date: Date
+    let kind: Kind
+}
+
+private struct CompletedRecordedDataDetailsView: View {
+    let row: CompletedRecordedRow
+    let formatRaw: String
+
+    var body: some View {
+        Form {
+            switch row.kind {
+            case .measure(let measureRow):
+                detailRow("Value", formatted(measureRow.measure))
+                detailRow("Date", fullDate(measureRow.measuredAt))
+                detailRow("Source", "Loom")
+                detailRow("Was User Entered", "Yes")
+            case .goalChange(let change):
+                let diff = change.newGoal - change.oldGoal
+                detailRow("New Goal", formatted(change.newGoal))
+                detailRow("Old Goal", formatted(change.oldGoal))
+                HStack {
+                    Text("Difference")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(formatted(diff))
+                        .foregroundStyle(differenceColor(oldGoal: change.oldGoal, newGoal: change.newGoal, startMeasure: change.startMeasure))
+                }
+                detailRow("Date", fullDate(change.date))
+                detailRow("Source", "Loom")
+                detailRow("Was User Entered", "Yes")
+            }
+        }
+        .navigationTitle("Details")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func detailRow(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(value)
+                .foregroundStyle(.primary)
+        }
+    }
+
+    private func fullDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d, yyyy"
+        return formatter.string(from: date)
+    }
+
+    private func differenceColor(oldGoal: Double, newGoal: Double, startMeasure: Double?) -> Color {
+        guard let start = startMeasure, oldGoal != start else {
+            if newGoal > oldGoal { return .green }
+            if newGoal < oldGoal { return .red }
+            return .primary
+        }
+        let directionUp = oldGoal > start
+        if directionUp {
+            if newGoal > oldGoal { return .green }
+            if newGoal < oldGoal { return .red }
+            return .primary
+        } else {
+            if newGoal < oldGoal { return .green }
+            if newGoal > oldGoal { return .red }
+            return .primary
+        }
+    }
+
+    private func formatted(_ value: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = 2
+        formatter.minimumFractionDigits = 0
+        let base = formatter.string(from: NSNumber(value: value)) ?? "\(value)"
+        switch formatRaw {
+        case ObjectivesAddView.MeasureFormat.dollars.rawValue:
+            return "$\(base)"
+        case ObjectivesAddView.MeasureFormat.percentage.rawValue:
+            return "\(base)%"
+        default:
+            return base
+        }
+    }
+}
+
 private struct CompletedOutcomeArchiveChart: View {
     let rows: [CompletedOutcomeMeasurePointArchive]
     let startDate: Date
     let endDate: Date
     let formatRaw: String
 
+    @Environment(\.colorScheme) private var colorScheme
     @State private var selectedTimeRange: String = "All"
     @State private var selectedEntryID: UUID? = nil
     @State private var selectedDate: Date? = nil
@@ -1151,6 +1423,9 @@ private struct CompletedOutcomeArchiveChart: View {
     }
 
     private var selectedEntry: CompletedOutcomeMeasurePointArchive? {
+        if let selectedDate, let nearest = nearestEntry(to: selectedDate) {
+            return nearest
+        }
         if let selectedEntryID {
             return sortedRows.first(where: { $0.id == selectedEntryID })
         }
@@ -1161,6 +1436,9 @@ private struct CompletedOutcomeArchiveChart: View {
     private var latestValue: Double? { sortedRows.last?.measure }
     private var latestDate: Date? { sortedRows.last.map { Calendar.current.startOfDay(for: $0.measuredAt) } }
     private var goalValue: Double? { sortedRows.last?.goal }
+    private var unselectedPointFillColor: Color {
+        colorScheme == .dark ? Color(.secondarySystemBackground) : Color(.systemBackground)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -1221,13 +1499,34 @@ private struct CompletedOutcomeArchiveChart: View {
                         y: .value("Measure", row.measure)
                     )
                     .symbol(.circle)
-                    .symbolSize(selectedEntryID == row.id ? 140 : 70)
-                    .foregroundStyle(selectedEntryID == row.id ? .blue : .blue.opacity(0.7))
+                    .symbolSize(40)
+                    .foregroundStyle(unselectedPointFillColor)
+                    .annotation(position: .overlay, alignment: .center) {
+                        Circle()
+                            .stroke(Color.blue, lineWidth: 1.8)
+                            .frame(
+                                width: 7,
+                                height: 7
+                            )
+                    }
                 }
 
                 if let selectedEntry {
+                    PointMark(
+                        x: .value("Selected Date Point", Calendar.current.startOfDay(for: selectedEntry.measuredAt)),
+                        y: .value("Selected Measure Point", selectedEntry.measure)
+                    )
+                    .symbol(.circle)
+                    .symbolSize(70)
+                    .foregroundStyle(Color.blue)
+                    .annotation(position: .overlay, alignment: .center) {
+                        Circle()
+                            .stroke(Color.blue, lineWidth: 2.4)
+                            .frame(width: 9, height: 9)
+                    }
+
                     RuleMark(x: .value("Selected Date", Calendar.current.startOfDay(for: selectedEntry.measuredAt)))
-                        .foregroundStyle(.blue)
+                        .foregroundStyle(.blue.opacity(0.5))
                         .lineStyle(.init(lineWidth: 2))
                 }
             }
@@ -1498,6 +1797,23 @@ struct MeasurableOutcomeBox: View {
     let measureAmt: Double
     let endDate: Date
     let format: String
+    let statusPrefix: String
+
+    init(
+        measure: Double,
+        measuredAt: Date,
+        measureAmt: Double,
+        endDate: Date,
+        format: String,
+        statusPrefix: String = "updated"
+    ) {
+        self.measure = measure
+        self.measuredAt = measuredAt
+        self.measureAmt = measureAmt
+        self.endDate = endDate
+        self.format = format
+        self.statusPrefix = statusPrefix
+    }
 
     private func formattedDate(_ date: Date) -> String {
         let calendar = Calendar.current
@@ -1528,7 +1844,7 @@ struct MeasurableOutcomeBox: View {
                     .font(.title3)
                     .fontWeight(.bold)
                     .foregroundColor(.primary)
-                Text("updated \(formattedDate(measuredAt))")
+                Text("\(statusPrefix) \(formattedDate(measuredAt))")
                     .font(.caption2)
                     .foregroundColor(.primary)
             }
