@@ -29,6 +29,10 @@ struct ContentView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Namespace private var graphNamespace
     @State private var showSplash: Bool = true
+    @State private var splashMinimumElapsed: Bool = false
+    @State private var splashPreparationFinished: Bool = false
+    @State private var splashPreparationStarted: Bool = false
+    @State private var measuredCardHeights: [String: CGFloat] = [:]
     @Environment(\.modelContext) private var modelContext
 
     // Model-derived state
@@ -71,6 +75,17 @@ struct ContentView: View {
         let components = calendar.dateComponents([.day], from: Date(), to: endDate)
         return components.day ?? 0
     }
+
+    @ViewBuilder
+    private func measuredCard<Content: View>(_ key: String, @ViewBuilder content: () -> Content) -> some View {
+        content()
+            .background(
+                GeometryReader { proxy in
+                    Color.clear
+                        .preference(key: HomeCardHeightPreferenceKey.self, value: [key: proxy.size.height])
+                }
+            )
+    }
     
     var body: some View {
         NavigationStack(path: $navPath) {
@@ -79,25 +94,74 @@ struct ContentView: View {
                     .ignoresSafeArea()
 
                 GeometryReader { proxy in
+                    let availableHeight = proxy.size.height - proxy.safeAreaInsets.top - proxy.safeAreaInsets.bottom
+                    let cardSpacing: CGFloat = availableHeight < 760 ? 10 : (availableHeight > 900 ? 20 : 16)
+                    let outerVerticalPadding: CGFloat = availableHeight < 760 ? 4 : (availableHeight > 900 ? 14 : 8)
+                    let cardDensity: CGFloat = availableHeight < 760 ? 0.88 : (availableHeight > 900 ? 1.06 : 1.0)
+
                     ZStack {
                         // Background
                         Color(.systemGroupedBackground)
                             .edgesIgnoringSafeArea(.all)
 
-                        // Main content pinned to top
+                        // Main content with fixed top and bottom regions, and a flexible middle.
                         VStack(spacing: 10) {
                             header
 
-                            VStack(spacing: 16) {
-                                drivingForceSection
-                                fulfillmentSection
-                                objectivesSection
+                            ViewThatFits(in: .vertical) {
+                                GeometryReader { middleProxy in
+                                    let middleHeight = middleProxy.size.height
+                                    let drivingHeight = measuredCardHeights["driving"] ?? 170
+                                    let fulfillmentHeight = measuredCardHeights["fulfillment"] ?? 170
+                                    let objectivesHeight = measuredCardHeights["objectives"] ?? 170
+                                    let totalCardHeight = drivingHeight + fulfillmentHeight + objectivesHeight
+                                    let uniformGap = max(0, (middleHeight - totalCardHeight) / 4)
+
+                                    VStack(spacing: 0) {
+                                        Color.clear.frame(height: uniformGap)
+                                        measuredCard("driving") {
+                                            drivingForceSection
+                                                .padding(.horizontal)
+                                        }
+                                        Color.clear.frame(height: uniformGap)
+                                        measuredCard("fulfillment") {
+                                            fulfillmentSection
+                                                .padding(.horizontal)
+                                        }
+                                        Color.clear.frame(height: uniformGap)
+                                        measuredCard("objectives") {
+                                            objectivesSection
+                                                .padding(.horizontal)
+                                        }
+                                        Color.clear.frame(height: uniformGap)
+                                    }
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                                }
+                                .padding(.vertical, max(0, outerVerticalPadding - 2))
+
+                                ScrollView(showsIndicators: false) {
+                                    VStack(spacing: cardSpacing) {
+                                        measuredCard("driving") { drivingForceSection }
+                                        measuredCard("fulfillment") { fulfillmentSection }
+                                        measuredCard("objectives") { objectivesSection }
+                                    }
+                                    .padding(.horizontal)
+                                    .padding(.vertical, outerVerticalPadding)
+                                }
                             }
-                            .padding(.horizontal)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .onPreferenceChange(HomeCardHeightPreferenceKey.self) { heights in
+                                var updated = measuredCardHeights
+                                updated.merge(heights) { _, new in new }
+                                if updated != measuredCardHeights {
+                                    measuredCardHeights = updated
+                                }
+                            }
+                            .environment(\.contentCardDensity, cardDensity)
 
-                            Spacer(minLength: 0)   // <-- this is the real “pin to bottom”
-
-                            footer
+                            if !showSplash {
+                                footer
+                            }
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -105,7 +169,14 @@ struct ContentView: View {
                         if showSplash {
                             LoadingSplashView(
                                 metrics: fulfillmentMetrics,
-                                namespace: graphNamespace
+                                namespace: graphNamespace,
+                                minimumDisplayDuration: 3.0,
+                                onMinimumElapsed: {
+                                    Task { @MainActor in
+                                        splashMinimumElapsed = true
+                                        dismissSplashIfReady()
+                                    }
+                                }
                             )
                             .transition(.opacity)
                             .zIndex(2)
@@ -159,7 +230,6 @@ struct ContentView: View {
                         }
                     }
                     .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
-                    .clipped()
                 }
             }
             .ignoresSafeArea(.keyboard)
@@ -191,19 +261,60 @@ struct ContentView: View {
             }
         }
         .onAppear {
-            // Ensure singleton exists, but DO NOT auto-activate.
-            _ = ActivePlanState.fetchOrCreate(in: modelContext)
-            ensureFulfillmentCategoriesExist()
-
-            // Ensure splash shows for at least 1 second
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-                withAnimation(.easeInOut(duration: 0.6)) {
-                    showSplash = false
-                }
-            }
+            beginStartupPreparationIfNeeded()
         }
         .tint(Color.accentColor)
         .ignoresSafeArea(.keyboard)
+    }
+
+    @MainActor
+    private func beginStartupPreparationIfNeeded() {
+        guard !splashPreparationStarted else { return }
+        splashPreparationStarted = true
+
+        Task { @MainActor in
+            await runStartupPreparation()
+            splashPreparationFinished = true
+            dismissSplashIfReady()
+        }
+    }
+
+    @MainActor
+    private func dismissSplashIfReady() {
+        guard showSplash, splashMinimumElapsed, splashPreparationFinished else { return }
+        withAnimation(.easeInOut(duration: 0.6)) {
+            showSplash = false
+        }
+    }
+
+    @MainActor
+    private func runStartupPreparation() async {
+        // 1) Core singleton + category seeding.
+        _ = ActivePlanState.fetchOrCreate(in: modelContext)
+        ensureFulfillmentCategoriesExist()
+        await Task.yield()
+
+        // 2) Housekeeping.
+        RecentlyDeletedStore.purgeExpired(in: modelContext)
+        await Task.yield()
+
+        // 3) Warm up a few commonly used model tables to reduce first-open jank.
+        warmupFetch(DrivingForce.self)
+        warmupFetch(Fulfillment.self)
+        warmupFetch(Outcomes.self)
+        warmupFetch(PlanLabel.self)
+        warmupFetch(PlannedChunkAction.self)
+        warmupFetch(RollingCaptureItem.self)
+        warmupFetch(ActionBlocksReflectionArchive.self)
+
+        try? modelContext.save()
+    }
+
+    @MainActor
+    private func warmupFetch<T: PersistentModel>(_ type: T.Type) {
+        var descriptor = FetchDescriptor<T>()
+        descriptor.fetchLimit = 1
+        _ = try? modelContext.fetch(descriptor)
     }
 
     private func ensureFulfillmentCategoriesExist() {
@@ -516,12 +627,8 @@ struct ContentView: View {
                 .buttonStyle(.plain)
             }
             .padding(.horizontal)
-            .padding(.top, 8)
-
-            Text("")
-                .font(.caption2)
-                .foregroundColor(.secondary)
-                .padding(.bottom, 4) // tiny, controlled spacing
+            .padding(.top, 6)
+            .padding(.bottom, 0)
         }
         .frame(maxWidth: .infinity)
         .background(Color.clear)
@@ -984,6 +1091,7 @@ struct SectionCard<Content: View>: View {
     let headerHint: String?
     let backgroundColor: Color
     let content: () -> Content
+    @Environment(\.contentCardDensity) private var cardDensity
 
     init(
         iconName: String,
@@ -1000,6 +1108,7 @@ struct SectionCard<Content: View>: View {
     }
 
     var body: some View {
+        let d = max(0.82, min(cardDensity, 1.12))
         VStack(spacing: 0) {
             HStack {
                 Image(systemName: iconName)
@@ -1021,19 +1130,38 @@ struct SectionCard<Content: View>: View {
                     .font(.headline)
             }
             .padding(.horizontal)
-            .padding(.top, 12)
+            .padding(.top, 12 * d)
             .foregroundColor(.primary)
 
             Divider()
-                .padding(.vertical, 4)
+                .padding(.vertical, 4 * d)
 
             content()
                 .padding(.horizontal)
-                .padding(.bottom, 12)
+                .padding(.bottom, 12 * d)
         }
         .background(backgroundColor)
-        .cornerRadius(16)
+        .cornerRadius(16 * d)
         .shadow(color: Color.primary.opacity(0.08), radius: 6, x: 0, y: 3)
+    }
+}
+
+private struct ContentCardDensityKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 1.0
+}
+
+private struct HomeCardHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: [String: CGFloat] = [:]
+
+    static func reduce(value: inout [String: CGFloat], nextValue: () -> [String: CGFloat]) {
+        value.merge(nextValue()) { _, new in new }
+    }
+}
+
+private extension EnvironmentValues {
+    var contentCardDensity: CGFloat {
+        get { self[ContentCardDensityKey.self] }
+        set { self[ContentCardDensityKey.self] = newValue }
     }
 }
 
