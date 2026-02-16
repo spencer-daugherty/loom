@@ -127,7 +127,11 @@ struct DrivingForceView: View {
     }
     
     var body: some View {
-        Form {
+        List {
+            drivingForceInsightsHeader
+                .listRowInsets(EdgeInsets(top: 0, leading: -16, bottom: 8, trailing: -16))
+                .listRowBackground(Color.clear)
+
             AnyView(drivingForceSections)
             AnyView(passionsHeader)
             AnyView(passionsSections)
@@ -136,6 +140,7 @@ struct DrivingForceView: View {
             }
             AnyView(historicRowsSection)
         }
+        .listStyle(.insetGrouped)
         .toolbar { topToolbar }
         .navigationTitle("Driving Force")
         .background(backgroundTapDismiss)
@@ -285,6 +290,103 @@ struct DrivingForceView: View {
 
     private func deleteHistoricMessage() -> some View {
         Text("Are you sure you want to delete this item? It will be available for 30 days in Account Manager.")
+    }
+
+    private var drivingForceInsightsHeader: some View {
+        HStack(alignment: .top, spacing: 16) {
+            VStack(alignment: .leading, spacing: 12) {
+                passionSignalRow(icon: "heart.fill", label: "Love", value: min(4, lovePassions.count))
+                passionSignalRow(icon: "lock.fill", label: "Vows", value: min(4, vowsPassions.count))
+                passionSignalRow(icon: "bolt.fill", label: "Thrill", value: min(4, thrillPassions.count))
+                passionSignalRow(icon: "shield.fill", label: "Hate", value: min(4, justPassions.count))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("analyzed:")
+                        .font(.caption)
+                        .fontWeight(.bold)
+                        .foregroundStyle(.gray)
+                    Text("• Action Done")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text("• Outcome Completion")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text("• Reflection Reports")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text("• Momentum")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 0)
+
+                HStack {
+                    Spacer()
+                    NavigationLink {
+                        DrivingForceTrendsView()
+                    } label: {
+                        Text("Show trends")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.blue)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, minHeight: 238, maxHeight: 238, alignment: .topLeading)
+        .background(
+            Color(.systemGray6)
+        )
+    }
+
+    private func passionSignalCircle(icon: String, value: Int) -> some View {
+        let gap: Double = 4
+        let halfGap = gap / 2
+        let radius: CGFloat = 22
+        let center = CGPoint(x: radius, y: radius)
+        let quadrantAngles: [(start: Double, end: Double)] = [
+            (-90,   0),
+            (0,    90),
+            (90,  180),
+            (180, 270)
+        ]
+
+        return ZStack {
+            ForEach(0..<4, id: \.self) { index in
+                let angles = quadrantAngles[index]
+                Path { path in
+                    path.addArc(center: center,
+                                radius: radius,
+                                startAngle: .degrees(angles.start + halfGap),
+                                endAngle: .degrees(angles.end - halfGap),
+                                clockwise: false)
+                }
+                .stroke((index + 1) <= value ? Color.primary : Color(.tertiaryLabel), lineWidth: 2.4)
+            }
+
+            Image(systemName: icon)
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(.primary)
+        }
+        .frame(width: radius * 2, height: radius * 2)
+    }
+
+    private func passionSignalRow(icon: String, label: String, value: Int) -> some View {
+        HStack(spacing: 10) {
+            passionSignalCircle(icon: icon, value: value)
+            Text(label)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+        }
     }
 
     @ViewBuilder
@@ -628,6 +730,24 @@ struct DrivingForceView: View {
         let formatter = DateFormatter()
         formatter.dateFormat = "M/d/yyyy"
         return formatter.string(from: date)
+    }
+}
+
+private struct DrivingForceTrendsView: View {
+    var body: some View {
+        VStack(spacing: 8) {
+            Text("Not Available Yet")
+                .font(.headline)
+                .fontWeight(.bold)
+            Text("History and trends will be available over time.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .padding(.top, 24)
+        .navigationTitle("Driving Force Trends")
+        .navigationBarTitleDisplayMode(.inline)
+        .background(Color(.systemBackground))
     }
 }
 

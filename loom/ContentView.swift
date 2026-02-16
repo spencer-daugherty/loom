@@ -458,6 +458,11 @@ struct ContentView: View {
                                         .foregroundColor(.primary)
                                         .padding(.leading, 12)
                                     Spacer()
+                                    Text("how you act")
+                                        .font(.caption2)
+                                        .italic()
+                                        .foregroundStyle(.secondary)
+                                        .padding(.trailing, 14)
                                 }
                             )
                             .frame(height: 60)
@@ -504,7 +509,12 @@ struct ContentView: View {
         return NavigationLink {
             DrivingForceView(autoOpenCreateVision: isDrivingForceEmptyState)
         } label: {
-            SectionCard(iconName: "infinity", title: "Driving Force", backgroundColor: drivingForceCardBackground) {
+            SectionCard(
+                iconName: "infinity",
+                title: "Driving Force",
+                headerHint: "who you are",
+                backgroundColor: drivingForceCardBackground
+            ) {
                 if isDrivingForceEmptyState {
                     VStack(spacing: 12) {
                         VStack(spacing: 4) {
@@ -668,7 +678,7 @@ struct ContentView: View {
         NavigationLink {
             FulfillmentView()
         } label: {
-            SectionCard(iconName: "trophy", title: "Fulfillment") {
+            SectionCard(iconName: "trophy", title: "Fulfillment", headerHint: "why you live") {
                 HStack(alignment: .center, spacing: 16) {
                     FulfillmentRadarGraph(metrics: fulfillmentMetrics)
                         .matchedGeometryEffect(id: "fulfillmentGraph", in: graphNamespace)
@@ -728,6 +738,7 @@ struct ContentView: View {
             SectionCard(
                 iconName: "scope",
                 title: "Objectives",
+                headerHint: "what you want",
                 backgroundColor: objectivesCardBackground
             ) {
                 if isObjectivesEmptyState {
@@ -895,17 +906,20 @@ struct ContentView: View {
 struct SectionCard<Content: View>: View {
     let iconName: String
     let title: String
+    let headerHint: String?
     let backgroundColor: Color
     let content: () -> Content
 
     init(
         iconName: String,
         title: String,
+        headerHint: String? = nil,
         backgroundColor: Color = Color(.secondarySystemBackground),
         @ViewBuilder content: @escaping () -> Content
     ) {
         self.iconName = iconName
         self.title = title
+        self.headerHint = headerHint
         self.backgroundColor = backgroundColor
         self.content = content
     }
@@ -919,6 +933,14 @@ struct SectionCard<Content: View>: View {
                     .font(.headline)
 
                 Spacer()
+
+                if let headerHint, !headerHint.isEmpty {
+                    Text(headerHint)
+                        .font(.caption2)
+                        .italic()
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
 
                 Image(systemName: "chevron.right")
                     .font(.headline)
