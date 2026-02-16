@@ -140,7 +140,12 @@ private struct DarkModeInvertImage: ViewModifier {
 // Animated background of thin wind lines flowing left-to-right on the left side of the logo
 struct WindLinesBackground: View {
     let colors: [Color]
-    @State private var animationStartDate: Date = .now
+    let animationStartDate: Date
+
+    init(colors: [Color], animationStartDate: Date = .distantPast) {
+        self.colors = colors
+        self.animationStartDate = animationStartDate
+    }
 
     private let lineCount: Int = 30
     private let leftInset: CGFloat = 0
@@ -397,9 +402,6 @@ struct WindLinesBackground: View {
             }
         }
         .allowsHitTesting(false)
-        .onAppear {
-            animationStartDate = .now
-        }
     }
 }
 
@@ -414,6 +416,7 @@ struct LoadingSplashView: View {
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var isTransitioningOut = false
+    @State private var splashStartDate: Date = .now
 
     init(
         metrics: [(String, Color, Double)],
@@ -461,13 +464,18 @@ struct LoadingSplashView: View {
             (colorScheme == .dark ? Color.black : Color(.systemGroupedBackground))
                 .ignoresSafeArea()
 
-            WindLinesBackground(colors: metrics.map { $0.1 })
+            WindLinesBackground(colors: metrics.map { $0.1 }, animationStartDate: splashStartDate)
                 .ignoresSafeArea()
 
             TimelineView(.animation) { context in
                 let t = context.date.timeIntervalSinceReferenceDate
                 let animatedMetrics = isTransitioningOut ? metrics : pulsedMetrics(at: t * 0.45)
                 let rotationDegrees = isTransitioningOut ? 0.0 : (t * Double(337.5))
+                let startupElapsed = context.date.timeIntervalSince(splashStartDate)
+                let firstLineCompletion: Double = 0.62
+                let radarGrowDuration: Double = 0.42
+                let radarGrowProgress = max(0.0, min((startupElapsed - firstLineCompletion) / radarGrowDuration, 1.0))
+                let radarScale = 0.78 + (0.22 * radarGrowProgress)
                 GeometryReader { geo in
                     HStack(spacing: 12) {
                         Color.clear
@@ -494,6 +502,7 @@ struct LoadingSplashView: View {
                             .rotationEffect(.degrees(rotationDegrees))
                         }
                         .frame(width: 45, height: 45)
+                        .scaleEffect(radarScale)
                         .matchedGeometryEffect(id: "fulfillmentGraph", in: namespace)
                     }
                     .position(x: geo.size.width / 2, y: geo.size.height / 2)
@@ -506,6 +515,9 @@ struct LoadingSplashView: View {
                 .font(.caption2)
                 .foregroundColor(.secondary)
                 .padding(.bottom, 10) // sits above the home indicator
+        }
+        .onAppear {
+            splashStartDate = .now
         }
         .task {
             try? await Task.sleep(nanoseconds: UInt64(minimumDisplayDuration * 1_000_000_000))

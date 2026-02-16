@@ -13,6 +13,7 @@ struct FulfillmentCategoryTheme {
     static let userDefaultsKey = "fulfillment_category_color_prefs_v1"
     private static let completedOutcomeColorKeyByArchiveKey = "completed_outcome_color_key_by_archive_v1"
     private static let completedActionBlockChunkColorKeyByArchiveChunkKey = "completed_action_block_chunk_color_key_v1"
+    private static let categoryAliasesKey = "fulfillment_category_aliases_v1"
 
     static let palette: [PaletteOption] = [
         PaletteOption(key: "blue", name: "Blue", color: .blue),
@@ -21,7 +22,7 @@ struct FulfillmentCategoryTheme {
         PaletteOption(key: "purple", name: "Purple", color: .purple),
         PaletteOption(key: "red", name: "Red", color: .red),
         PaletteOption(key: "orange", name: "Orange", color: .orange),
-        PaletteOption(key: "yellow", name: "Yellow", color: Color(red: 0.65, green: 0.47, blue: 0.00)),
+        PaletteOption(key: "brown", name: "Brown", color: .brown),
         PaletteOption(key: "pink", name: "Pink", color: Color(red: 0.74, green: 0.20, blue: 0.47))
     ]
 
@@ -37,7 +38,8 @@ struct FulfillmentCategoryTheme {
     }
 
     static func persistedColorKeys() -> [String: String] {
-        UserDefaults.standard.dictionary(forKey: userDefaultsKey) as? [String: String] ?? [:]
+        let raw = UserDefaults.standard.dictionary(forKey: userDefaultsKey) as? [String: String] ?? [:]
+        return raw.mapValues { $0 == "yellow" ? "brown" : $0 }
     }
 
     static func persistColorKeys(_ map: [String: String]) {
@@ -81,7 +83,8 @@ struct FulfillmentCategoryTheme {
     }
 
     static func color(forKey key: String) -> Color {
-        palette.first(where: { $0.key == key })?.color ?? .gray
+        let resolvedKey = key == "yellow" ? "brown" : key
+        return palette.first(where: { $0.key == resolvedKey })?.color ?? .gray
     }
 
     static func lightColor(for category: String) -> Color {
@@ -144,5 +147,24 @@ struct FulfillmentCategoryTheme {
     static func completedActionBlockChunkColorKey(archiveId: UUID, chunkId: UUID) -> String? {
         let map = UserDefaults.standard.dictionary(forKey: completedActionBlockChunkColorKeyByArchiveChunkKey) as? [String: String] ?? [:]
         return map["\(archiveId.uuidString)|\(chunkId.uuidString)"]
+    }
+
+    static func categoryAliases() -> [String: String] {
+        UserDefaults.standard.dictionary(forKey: categoryAliasesKey) as? [String: String] ?? [:]
+    }
+
+    static func saveCategoryAlias(from oldName: String, to newName: String) {
+        let from = oldName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let to = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !from.isEmpty, !to.isEmpty else { return }
+        var map = categoryAliases()
+        map[from.lowercased()] = to
+        UserDefaults.standard.set(map, forKey: categoryAliasesKey)
+    }
+
+    static func categoryAlias(for previousName: String) -> String? {
+        let key = previousName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !key.isEmpty else { return nil }
+        return categoryAliases()[key]
     }
 }
