@@ -752,16 +752,19 @@ struct ContentView: View {
                     )
                 } else {
                     HStack(alignment: .center, spacing: 16) {
-                        FulfillmentInteractiveRadar(
-                            metrics: fulfillmentMetrics,
-                            selectedIndex: $fulfillmentRadarSelectedIndex,
-                            onManualSelect: {},
-                            enableInteraction: false,
-                            useOriginalDotStyle: true
-                        )
-                            .matchedGeometryEffect(id: "fulfillmentGraph", in: graphNamespace)
-                            .frame(width: 140, height: 140)
-                            .padding(.top, 10)
+                        ZStack {
+                            FulfillmentInteractiveRadar(
+                                metrics: fulfillmentMetrics,
+                                selectedIndex: $fulfillmentRadarSelectedIndex,
+                                onManualSelect: {},
+                                enableInteraction: false,
+                                useOriginalDotStyle: true,
+                                emphasizeSelectedSlice: false
+                            )
+                        }
+                        .frame(width: 140, height: 140)
+                        .padding(.top, 10)
+                        .matchedGeometryEffect(id: "fulfillmentGraph", in: graphNamespace)
                         
                         // labels
                         VStack(alignment: .leading, spacing: 6) {

@@ -90,6 +90,9 @@ struct PlanView: View {
         colorScheme == .dark ? Color(.secondaryLabel) : .black
     }
 
+    private var weeklyPlanningFieldHeight: CGFloat { 51 } // ~15% taller than current Step 1 field size
+    private var weeklyPlanningFieldFont: Font { .system(size: 21) } // ~15% larger than current Step 1 input text
+
     var body: some View {
         Group {
             if navigateToStep2 {
@@ -113,7 +116,9 @@ struct PlanView: View {
                     .italic()
                     .foregroundColor(.secondary)
                 TextField("My dreams, aspirations, and goals", text: $morningPowerQuestion)
+                    .font(weeklyPlanningFieldFont)
                     .textFieldStyle(.roundedBorder)
+                    .frame(height: weeklyPlanningFieldHeight)
                     .submitLabel(.next)
                     .focused($focusedField, equals: .morning)
                     .onSubmit { focusedField = .grateful }
@@ -131,7 +136,9 @@ struct PlanView: View {
                 Text("What am I grateful for?")
                     .font(.headline)
                 TextField("Health", text: $gratefulFor)
+                    .font(weeklyPlanningFieldFont)
                     .textFieldStyle(.roundedBorder)
+                    .frame(height: weeklyPlanningFieldHeight)
                     .submitLabel(.next)
                     .focused($focusedField, equals: .grateful)
                     .onSubmit { focusedField = .incantation }
@@ -152,7 +159,9 @@ struct PlanView: View {
                     .italic()
                     .foregroundColor(.secondary)
                 TextField("Where I focus improves", text: $incantation)
+                    .font(weeklyPlanningFieldFont)
                     .textFieldStyle(.roundedBorder)
+                    .frame(height: weeklyPlanningFieldHeight)
                     .submitLabel(.done)
                     .focused($focusedField, equals: .incantation)
                     .onSubmit {

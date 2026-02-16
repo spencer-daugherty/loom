@@ -1477,6 +1477,9 @@ struct FulfillmentInteractiveRadar: View {
     let onManualSelect: () -> Void
     let enableInteraction: Bool
     let useOriginalDotStyle: Bool
+    let customDotDiameter: CGFloat?
+    let showOutline: Bool
+    let emphasizeSelectedSlice: Bool
     @State private var pulseIndex: Int? = nil
 
     init(
@@ -1484,13 +1487,19 @@ struct FulfillmentInteractiveRadar: View {
         selectedIndex: Binding<Int>,
         onManualSelect: @escaping () -> Void,
         enableInteraction: Bool = true,
-        useOriginalDotStyle: Bool = false
+        useOriginalDotStyle: Bool = false,
+        customDotDiameter: CGFloat? = nil,
+        showOutline: Bool = true,
+        emphasizeSelectedSlice: Bool = true
     ) {
         self.metrics = metrics
         self._selectedIndex = selectedIndex
         self.onManualSelect = onManualSelect
         self.enableInteraction = enableInteraction
         self.useOriginalDotStyle = useOriginalDotStyle
+        self.customDotDiameter = customDotDiameter
+        self.showOutline = showOutline
+        self.emphasizeSelectedSlice = emphasizeSelectedSlice
     }
 
     var body: some View {
@@ -1504,6 +1513,8 @@ struct FulfillmentInteractiveRadar: View {
                 Color.clear
             } else {
                 let safeSelectedIndex = min(max(0, selectedIndex), count - 1)
+                let effectiveDotDiameter: CGFloat = customDotDiameter ?? (useOriginalDotStyle ? 14 : 20)
+                let dotShadowRadius: CGFloat = useOriginalDotStyle ? 7 : max(5, effectiveDotDiameter * 0.5)
 
                 let outerPoints: [CGPoint] = (0..<count).map { i in
                     let angle = Angle.degrees((Double(i) / Double(count)) * 360 - 90).radians
@@ -1514,7 +1525,7 @@ struct FulfillmentInteractiveRadar: View {
                     (metrics[i].0, segmentColor(i, selectedIndex: safeSelectedIndex), metrics[i].2)
                 }
                 let valuePoints: [CGPoint] = (0..<count).map { i in
-                    let ratio = max(0.1, min(metrics[i].2 / 100.0, 1.0))
+                    let ratio = max(0.2, min(metrics[i].2 / 100.0, 1.0))
                     let outer = outerPoints[i]
                     return CGPoint(
                         x: center.x + (outer.x - center.x) * ratio,
@@ -1526,8 +1537,8 @@ struct FulfillmentInteractiveRadar: View {
                     // Keep the radar internals identical to ContentView's graph style.
                     FulfillmentRadarGraph(
                         metrics: renderedMetrics,
-                        showOutline: true,
-                        dotDiameter: useOriginalDotStyle ? 14 : 20,
+                        showOutline: showOutline,
+                        dotDiameter: effectiveDotDiameter,
                         showDotOutline: false,
                         showDotShadow: false
                     )
@@ -1535,12 +1546,12 @@ struct FulfillmentInteractiveRadar: View {
                     ForEach(0..<count, id: \.self) { i in
                         Circle()
                             .fill(metrics[i].1)
-                            .frame(width: useOriginalDotStyle ? 14 : 20, height: useOriginalDotStyle ? 14 : 20)
+                            .frame(width: effectiveDotDiameter, height: effectiveDotDiameter)
                             .overlay(
                                 Circle().stroke(Color(.systemBackground), lineWidth: 2)
                             )
-                            .shadow(color: Color(.systemBackground).opacity(0.9), radius: useOriginalDotStyle ? 7 : 10, x: 0, y: 0)
-                            .scaleEffect(useOriginalDotStyle ? 1 : circleScale(for: i, selectedIndex: safeSelectedIndex))
+                            .shadow(color: Color(.systemBackground).opacity(0.9), radius: dotShadowRadius, x: 0, y: 0)
+                            .scaleEffect((useOriginalDotStyle || !emphasizeSelectedSlice) ? 1 : circleScale(for: i, selectedIndex: safeSelectedIndex))
                             .animation(.easeInOut(duration: 0.18), value: pulseIndex)
                             .animation(.easeInOut(duration: 0.18), value: selectedIndex)
                             .position(valuePoints[i])
@@ -1575,6 +1586,7 @@ struct FulfillmentInteractiveRadar: View {
     }
 
     private func segmentColor(_ index: Int, selectedIndex: Int) -> Color {
+        guard emphasizeSelectedSlice else { return metrics[index].1 }
         if index == selectedIndex {
             return metrics[index].1
         }

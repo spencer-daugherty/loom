@@ -36,7 +36,7 @@ struct FulfillmentRadarGraph: View {
                 }
                 // compute data polygon vertices
                 let filledPoints: [CGPoint] = outerPoints.enumerated().map { i, pt in
-                    let ratio = max(0.1, min(metrics[i].2 / 100, 1))
+                    let ratio = max(0.2, min(metrics[i].2 / 100, 1))
                     return CGPoint(x: half + (pt.x - half)*ratio,
                                    y: half + (pt.y - half)*ratio)
                 }
@@ -138,7 +138,7 @@ private struct DarkModeInvertImage: ViewModifier {
 
 // Animated background of thin wind lines flowing left-to-right on the left side of the logo
 // Animated background of thin wind lines flowing left-to-right on the left side of the logo
-private struct WindLinesBackground: View {
+struct WindLinesBackground: View {
     let colors: [Color]
 
     private let lineCount: Int = 30
@@ -399,6 +399,7 @@ struct LoadingSplashView: View {
     @State private var splashRadarSelectedIndex: Int = 0
 
     @Environment(\.colorScheme) private var colorScheme
+    @State private var isTransitioningOut = false
 
     init(
         metrics: [(String, Color, Double)],
@@ -451,7 +452,8 @@ struct LoadingSplashView: View {
 
             TimelineView(.animation) { context in
                 let t = context.date.timeIntervalSinceReferenceDate
-                let animatedMetrics = pulsedMetrics(at: t * 0.45)
+                let animatedMetrics = isTransitioningOut ? metrics : pulsedMetrics(at: t * 0.45)
+                let rotationDegrees = isTransitioningOut ? 0.0 : (t * Double(337.5))
                 HStack(spacing: 12) {
                     Color.clear
                         .frame(width: 45, height: 45)
@@ -464,16 +466,20 @@ struct LoadingSplashView: View {
                         .transition(.opacity)
                         .modifier(DarkModeInvertImage())
 
-                    FulfillmentInteractiveRadar(
-                        metrics: animatedMetrics,
-                        selectedIndex: $splashRadarSelectedIndex,
-                        onManualSelect: {},
-                        enableInteraction: false
-                    )
-                    .matchedGeometryEffect(id: "fulfillmentGraph", in: namespace)
-                    .rotationEffect(.degrees(t * Double(337.5)))
+                    ZStack {
+                        FulfillmentInteractiveRadar(
+                            metrics: animatedMetrics,
+                            selectedIndex: $splashRadarSelectedIndex,
+                            onManualSelect: {},
+                            enableInteraction: false,
+                            customDotDiameter: 10,
+                            showOutline: false,
+                            emphasizeSelectedSlice: false
+                        )
+                        .rotationEffect(.degrees(rotationDegrees))
+                    }
                     .frame(width: 45, height: 45)
-                    .padding(.leading, 6)
+                    .matchedGeometryEffect(id: "fulfillmentGraph", in: namespace)
                 }
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(24)
@@ -489,6 +495,10 @@ struct LoadingSplashView: View {
             try? await Task.sleep(nanoseconds: UInt64(minimumDisplayDuration * 1_000_000_000))
             if let isPresented = isPresented {
                 if isPresented.wrappedValue {
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        isTransitioningOut = true
+                    }
+                    try? await Task.sleep(nanoseconds: 180_000_000)
                     isPresented.wrappedValue = false
                 }
             } else {

@@ -1058,12 +1058,85 @@ struct AccountView: View {
 struct RecentlyDeletedView: View {
     @Environment(\.modelContext) private var context
     @Query(sort: \RecentlyDeletedItem.deletedAt, order: .reverse) private var items: [RecentlyDeletedItem]
+    @Query(sort: \Fulfillment.category, order: .forward) private var fulfillments: [Fulfillment]
     @State private var showRecoverFailedAlert = false
+    @State private var showCategoryRecoverySheet = false
+    @State private var pendingRecoveryItem: RecentlyDeletedItem?
+    @State private var missingCategoryName: String = ""
+    @State private var selectedRecoveryCategory: String = ""
+    private func entityTypeMatches(_ item: RecentlyDeletedItem, _ typeName: String) -> Bool {
+        item.entityType == typeName || item.entityType.hasSuffix(".\(typeName)")
+    }
     private var visibleItems: [RecentlyDeletedItem] {
         items.filter {
-            $0.entityType != "OutcomesMeasure" &&
-            $0.entityType != "OutcomesMeasureEntry" &&
-            $0.entityType != "ActionBlocksReflectionOutcomeContribution"
+            !entityTypeMatches($0, "OutcomesMeasure") &&
+            !entityTypeMatches($0, "OutcomesMeasureEntry") &&
+            !entityTypeMatches($0, "ActionBlocksReflectionOutcomeContribution") &&
+            !entityTypeMatches($0, "PlannedChunk") &&
+            !entityTypeMatches($0, "PlanChunkSelection") &&
+            !entityTypeMatches($0, "OutcomeAnalyticsEvent") &&
+            !entityTypeMatches($0, "PassionFulfillmentJoin")
+        }
+    }
+    private var availableCategories: [String] {
+        let names = fulfillments
+            .map(\.category)
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        return Array(Set(names)).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+    private func displayTitle(for item: RecentlyDeletedItem) -> String {
+        if entityTypeMatches(item, "DrivingForceArchive") {
+            let raw = item.titleText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !raw.isEmpty, raw != "DrivingForceArchive" {
+                return raw
+            }
+            if let payload = item.payloadJSON,
+               let data = payload.data(using: .utf8),
+               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                let vision = ((object["visionSnapshot"] as? String) ?? (object["vision_snapshot"] as? String) ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let purpose = ((object["purposeSnapshot"] as? String) ?? (object["purpose_snapshot"] as? String) ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if !vision.isEmpty { return vision }
+                if !purpose.isEmpty { return purpose }
+            }
+            return "Driving Force"
+        }
+        return item.titleText
+    }
+    private func displaySubtitle(for item: RecentlyDeletedItem) -> String {
+        if entityTypeMatches(item, "DrivingForceArchive") {
+            return "Driving Force"
+        }
+        return item.subtitleText
+    }
+    private func normalizeLegacyRecentlyDeletedRows() {
+        var changed = false
+        for item in items where entityTypeMatches(item, "DrivingForceArchive") {
+            if item.subtitleText != "Driving Force" {
+                item.subtitleText = "Driving Force"
+                changed = true
+            }
+            let trimmed = item.titleText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed == "DrivingForceArchive" || trimmed.isEmpty {
+                if let payload = item.payloadJSON,
+                   let data = payload.data(using: .utf8),
+                   let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    let vision = (object["visionSnapshot"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    let purpose = (object["purposeSnapshot"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    let newTitle = !vision.isEmpty ? vision : (!purpose.isEmpty ? purpose : "Driving Force")
+                    if item.titleText != newTitle {
+                        item.titleText = newTitle
+                        changed = true
+                    }
+                } else if item.titleText != "Driving Force" {
+                    item.titleText = "Driving Force"
+                    changed = true
+                }
+            }
+        }
+        if changed {
+            try? context.save()
         }
     }
 
@@ -1092,9 +1165,9 @@ struct RecentlyDeletedView: View {
                 } else {
                     ForEach(visibleItems) { item in
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(item.titleText)
+                            Text(displayTitle(for: item))
                                 .font(.body)
-                            Text(item.subtitleText)
+                            Text(displaySubtitle(for: item))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                             HStack {
@@ -1117,9 +1190,18 @@ struct RecentlyDeletedView: View {
                         }
                         .swipeActions(edge: .leading, allowsFullSwipe: true) {
                             Button("Recover") {
-                                if RecentlyDeletedStore.restore(item, in: context) {
+                                switch RecentlyDeletedStore.restore(item, in: context) {
+                                case .restored:
                                     try? context.save()
-                                } else {
+                                case .needsCategoryMapping(let missingCategory):
+                                    missingCategoryName = missingCategory
+                                    pendingRecoveryItem = item
+                                    selectedRecoveryCategory = availableCategories.first ?? ""
+                                    showCategoryRecoverySheet = !selectedRecoveryCategory.isEmpty
+                                    if selectedRecoveryCategory.isEmpty {
+                                        showRecoverFailedAlert = true
+                                    }
+                                case .failed:
                                     showRecoverFailedAlert = true
                                 }
                             }
@@ -1135,8 +1217,80 @@ struct RecentlyDeletedView: View {
         } message: {
             Text("This item cannot be automatically recovered yet.")
         }
+        .sheet(isPresented: $showCategoryRecoverySheet) {
+            NavigationStack {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("This category is no longer available. What new category is this associated with?")
+                        .font(.headline)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 0)
+                        .padding(.horizontal, 16)
+
+                    if !missingCategoryName.isEmpty {
+                        Text("Previous category: \(missingCategoryName)")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.horizontal, 16)
+                    }
+
+                    Picker("Category", selection: $selectedRecoveryCategory) {
+                        ForEach(availableCategories, id: \.self) { category in
+                            Text(category)
+                                .foregroundColor(FulfillmentCategoryTheme.color(for: category))
+                                .fontWeight(category.caseInsensitiveCompare(selectedRecoveryCategory) == .orderedSame ? .bold : .regular)
+                                .tag(category)
+                            }
+                    }
+                    .pickerStyle(.wheel)
+                    .frame(maxHeight: 240)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 4)
+
+                    HStack(spacing: 12) {
+                        Button("Cancel", role: .cancel) {
+                            showCategoryRecoverySheet = false
+                            pendingRecoveryItem = nil
+                            missingCategoryName = ""
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
+                        .frame(maxWidth: .infinity, minHeight: 48)
+
+                        Button("Recover") {
+                            guard let item = pendingRecoveryItem else {
+                                showCategoryRecoverySheet = false
+                                return
+                            }
+                            switch RecentlyDeletedStore.restore(item, in: context, categoryOverride: selectedRecoveryCategory) {
+                            case .restored:
+                                try? context.save()
+                            case .needsCategoryMapping, .failed:
+                                showRecoverFailedAlert = true
+                            }
+                            showCategoryRecoverySheet = false
+                            pendingRecoveryItem = nil
+                            missingCategoryName = ""
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                        .disabled(selectedRecoveryCategory.isEmpty)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 0)
+                    .padding(.bottom, 0)
+                }
+            }
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
+        }
         .onAppear {
             RecentlyDeletedStore.purgeExpired(in: context)
+            normalizeLegacyRecentlyDeletedRows()
         }
     }
 }
@@ -1564,56 +1718,10 @@ struct ManageRawDataView: View {
     }
 
     var body: some View {
-        List(selection: $selection) {
-            Toggle("Developer", isOn: $showDeveloperData)
-
-            ForEach(items) { item in
-                NavigationLink {
-                    DataPrinterDetailView(item: item)
-                } label: {
-                    DataPrinterRow(item)
-                }
-                .tag(item.id)
-            }
-        }
+        rawDataList
         .listStyle(.plain)
         .toolbar {
-            ToolbarItemGroup(placement: .bottomBar) {
-                if editMode?.wrappedValue == .active {
-                    Button {
-                        if selection.count == items.count {
-                            selection.removeAll()
-                        } else {
-                            selection = Set(items.map { $0.id })
-                        }
-                    } label: {
-                        Text(selection.count == items.count ? "Deselect All" : "Select All")
-                    }
-
-                    Spacer()
-
-                    Button {
-                        showingDeleteAlert = true
-                    } label: {
-                        Text("Delete (\(selection.count))")
-                    }
-                    .foregroundColor(.red)
-                    .disabled(selection.isEmpty)
-                }
-            }
-
-            ToolbarItem(placement: .navigationBarTrailing) {
-                HStack {
-                    Button {
-                        showingFilterSheet = true
-                    } label: {
-                        Image(systemName: "line.3.horizontal.decrease.circle")
-                            .foregroundColor(selectedFilters.isEmpty ? .gray : .blue)
-                    }
-
-                    EditButton()
-                }
-            }
+            rawDataToolbarContent
         }
         .navigationTitle("Manage Raw Data")
         .alert("Permanently delete selected items?", isPresented: $showingDeleteAlert) {
@@ -1633,6 +1741,61 @@ struct ManageRawDataView: View {
         .onChange(of: showDeveloperData) { _, isOn in
             if !isOn {
                 selectedFilters.subtract(developerFilterIDs)
+            }
+        }
+    }
+
+    private var rawDataList: some View {
+        List(selection: $selection) {
+            Toggle("Developer", isOn: $showDeveloperData)
+
+            ForEach(items) { item in
+                NavigationLink {
+                    DataPrinterDetailView(item: item)
+                } label: {
+                    DataPrinterRow(item)
+                }
+                .tag(item.id)
+            }
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var rawDataToolbarContent: some ToolbarContent {
+        ToolbarItemGroup(placement: .bottomBar) {
+            if editMode?.wrappedValue == .active {
+                Button {
+                    if selection.count == items.count {
+                        selection.removeAll()
+                    } else {
+                        selection = Set(items.map { $0.id })
+                    }
+                } label: {
+                    Text(selection.count == items.count ? "Deselect All" : "Select All")
+                }
+
+                Spacer()
+
+                Button {
+                    showingDeleteAlert = true
+                } label: {
+                    Text("Delete (\(selection.count))")
+                }
+                .foregroundStyle(selection.isEmpty ? Color.secondary : Color.red)
+                .disabled(selection.isEmpty)
+            }
+        }
+
+        ToolbarItem(placement: .navigationBarTrailing) {
+            HStack {
+                Button {
+                    showingFilterSheet = true
+                } label: {
+                    Image(systemName: "line.3.horizontal.decrease.circle")
+                        .foregroundColor(selectedFilters.isEmpty ? .gray : .blue)
+                }
+
+                EditButton()
             }
         }
     }
@@ -1701,6 +1864,12 @@ private struct ManageFulfillmentCategoriesView: View {
     @Query(sort: \FulfillmentRoles.updatedAt, order: .forward) private var allRoles: [FulfillmentRoles]
     @Query(sort: \FulfillmentFocus.updatedAt, order: .forward) private var allFocuses: [FulfillmentFocus]
     @Query(sort: \FulfillmentResources.updatedAt, order: .forward) private var allResources: [FulfillmentResources]
+    @Query(sort: \PassionFulfillmentJoin.id, order: .forward) private var allPassionJoins: [PassionFulfillmentJoin]
+    @Query(sort: \Passion.emotion, order: .forward) private var allPassions: [Passion]
+    @Query(sort: \ActivePlanState.id, order: .forward) private var activePlanStates: [ActivePlanState]
+    @Query(sort: \PlannedChunk.updatedAt, order: .reverse) private var allPlannedChunks: [PlannedChunk]
+    @Query(sort: \PlannedChunkAction.createdAt, order: .reverse) private var allPlannedActions: [PlannedChunkAction]
+    @Query(sort: \Outcomes.updatedAt, order: .reverse) private var allOutcomes: [Outcomes]
     @Query(sort: \PlanLabel.category, order: .forward) private var labels: [PlanLabel]
     @State private var categoryColorKeys: [String: String] = [:]
     @State private var selectedCategoryForColor: String = ""
@@ -1710,6 +1879,7 @@ private struct ManageFulfillmentCategoriesView: View {
     @State private var isAddingCategory: Bool = false
     @State private var newCategoryText: String = ""
     @State private var showMinimumCategoryAlert: Bool = false
+    @State private var showCannotDeleteCategoryPopup: Bool = false
     @FocusState private var isAddCategoryFocused: Bool
 
     private var categories: [String] {
@@ -1723,73 +1893,9 @@ private struct ManageFulfillmentCategoriesView: View {
     var body: some View {
         List {
             ForEach(categories, id: \.self) { category in
-                if isDeleteMode {
-                    Button {
-                        toggleDeleteSelection(for: category)
-                    } label: {
-                        HStack(spacing: 12) {
-                            Circle()
-                                .fill(fulfillmentCategoryColor(for: category, colorKeys: categoryColorKeys))
-                                .overlay(
-                                    Circle()
-                                        .stroke(Color(.darkGray), lineWidth: 2.4)
-                                )
-                                .frame(width: 26, height: 26)
-
-                            Text(category)
-                                .fontWeight(.bold)
-                                .foregroundStyle(.primary)
-                            Spacer()
-                            Image(systemName: categoriesMarkedForDelete.contains(category) ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(categoriesMarkedForDelete.contains(category) ? .red : .secondary)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                } else {
-                    HStack(spacing: 12) {
-                        Button {
-                            selectedCategoryForColor = category
-                            showColorPicker = true
-                        } label: {
-                            Circle()
-                                .fill(fulfillmentCategoryColor(for: category, colorKeys: categoryColorKeys))
-                                .overlay(
-                                    Circle()
-                                        .stroke(Color(.darkGray), lineWidth: 2.4)
-                                )
-                                .frame(width: 26, height: 26)
-                        }
-                        .buttonStyle(.plain)
-
-                        NavigationLink {
-                            FulfillmentCategoryLabelsView(category: category)
-                        } label: {
-                            Text(category)
-                                .fontWeight(.bold)
-                        }
-                    }
-                }
+                categoryRow(category)
             }
-
-            if !isDeleteMode && categories.count < 7 {
-                if isAddingCategory {
-                    HStack(spacing: 10) {
-                        Image(systemName: "plus.circle")
-                            .foregroundStyle(.blue)
-                        TextField("Add category", text: $newCategoryText)
-                            .focused($isAddCategoryFocused)
-                            .submitLabel(.done)
-                            .onSubmit { commitAddCategory() }
-                    }
-                    .padding(.vertical, 4)
-                } else {
-                    Button("+ Add Category") {
-                        isAddingCategory = true
-                        isAddCategoryFocused = true
-                    }
-                    .foregroundStyle(.blue)
-                }
-            }
+            addCategoryRow
         }
         .listStyle(.plain)
         .navigationTitle("Manage Fulfillment Categories")
@@ -1808,7 +1914,8 @@ private struct ManageFulfillmentCategoriesView: View {
                     Button("Delete") {
                         deleteMarkedCategories()
                     }
-                    .foregroundStyle(.red)
+                    .foregroundStyle(categoriesMarkedForDelete.isEmpty ? Color.secondary : Color.red)
+                    .disabled(categoriesMarkedForDelete.isEmpty)
                 } else {
                     Button("Edit") {
                         isDeleteMode = true
@@ -1832,13 +1939,18 @@ private struct ManageFulfillmentCategoriesView: View {
         } message: {
             Text("At least 3 categories must remain.")
         }
+        .alert("Can't change category", isPresented: $showCannotDeleteCategoryPopup) {
+            Button("Return", role: .cancel) {}
+        } message: {
+            Text("This category has an ongoing action block, chunk, or outcome.")
+        }
         .sheet(isPresented: $showColorPicker) {
             FulfillmentCategoryColorPickerView(
                 category: selectedCategoryForColor,
-                currentColorKey: categoryColorKeys[selectedCategoryForColor]
-                    ?? FulfillmentCategoryTheme.defaultColorKeys()[selectedCategoryForColor]
-                    ?? FulfillmentCategoryTheme.palette.first?.key
-                    ?? "blue",
+                currentColorKey: FulfillmentCategoryTheme.colorKey(
+                    for: selectedCategoryForColor,
+                    colorKeys: categoryColorKeys
+                ),
                 onSelect: { newColorKey in
                     applyColorSelection(newColorKey, for: selectedCategoryForColor)
                     showColorPicker = false
@@ -1846,6 +1958,76 @@ private struct ManageFulfillmentCategoriesView: View {
             )
             .presentationDetents([.medium])
             .presentationDragIndicator(.visible)
+        }
+    }
+
+    @ViewBuilder
+    private func categoryRow(_ category: String) -> some View {
+        if isDeleteMode {
+            Button {
+                toggleDeleteSelection(for: category)
+            } label: {
+                HStack(spacing: 12) {
+                    categoryColorDot(for: category)
+                    Text(category)
+                        .fontWeight(.regular)
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Image(systemName: categoriesMarkedForDelete.contains(category) ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(categoriesMarkedForDelete.contains(category) ? .red : .secondary)
+                }
+            }
+            .buttonStyle(.plain)
+        } else {
+            HStack(spacing: 12) {
+                Button {
+                    selectedCategoryForColor = category
+                    showColorPicker = true
+                } label: {
+                    categoryColorDot(for: category)
+                }
+                .buttonStyle(.plain)
+
+                NavigationLink {
+                    FulfillmentCategoryLabelsView(category: category)
+                } label: {
+                    Text(category)
+                        .fontWeight(.regular)
+                }
+            }
+        }
+    }
+
+    private func categoryColorDot(for category: String) -> some View {
+        Circle()
+            .fill(fulfillmentCategoryColor(for: category, colorKeys: categoryColorKeys))
+            .overlay(
+                Circle()
+                    .stroke(Color(.systemGray3), lineWidth: 1.2)
+            )
+            .frame(width: 26, height: 26)
+    }
+
+    @ViewBuilder
+    private var addCategoryRow: some View {
+        if !isDeleteMode && categories.count < 7 {
+            if isAddingCategory {
+                HStack(spacing: 10) {
+                    Image(systemName: "plus.circle")
+                        .foregroundStyle(.blue)
+                    TextField("Add category", text: $newCategoryText)
+                        .focused($isAddCategoryFocused)
+                        .submitLabel(.done)
+                        .onSubmit { commitAddCategory() }
+                }
+                .padding(.vertical, 4)
+            } else {
+                Button("+ Add Category") {
+                    isAddingCategory = true
+                    isAddCategoryFocused = true
+                }
+                .foregroundStyle(.blue)
+            }
         }
     }
 
@@ -1924,12 +2106,18 @@ private struct ManageFulfillmentCategoriesView: View {
             return
         }
 
+        if categoriesMarkedForDelete.contains(where: { hasOngoingUsage(in: $0) }) {
+            showCannotDeleteCategoryPopup = true
+            return
+        }
+
         let fulfillmentByCategory = Dictionary(grouping: fulfillments, by: \.category)
         let idsToDelete = Set(categoriesMarkedForDelete.compactMap { category in
             fulfillmentByCategory[category]?.first?.category_id
         })
 
         for item in fulfillments where categoriesMarkedForDelete.contains(item.category) {
+            archiveCategoryIfNeeded(record: item)
             context.delete(item)
         }
         for label in labels where categoriesMarkedForDelete.contains(label.category) {
@@ -1956,21 +2144,103 @@ private struct ManageFulfillmentCategoriesView: View {
         isDeleteMode = false
         categoriesMarkedForDelete.removeAll()
     }
+
+    private func hasOngoingUsage(in category: String) -> Bool {
+        let categoryTrimmed = category.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !categoryTrimmed.isEmpty else { return false }
+
+        let activeWeeks = Set(
+            activePlanStates
+                .filter(\.isActive)
+                .compactMap(\.weekStart)
+                .map { Calendar.current.startOfDay(for: $0) }
+        )
+        let activeChunks = allPlannedChunks.filter {
+            $0.category.caseInsensitiveCompare(categoryTrimmed) == .orderedSame &&
+            activeWeeks.contains(Calendar.current.startOfDay(for: $0.weekStart))
+        }
+        if !activeChunks.isEmpty {
+            return true
+        }
+
+        let activeChunkIDs = Set(activeChunks.map(\.id))
+        if !activeChunkIDs.isEmpty && allPlannedActions.contains(where: { activeChunkIDs.contains($0.plannedChunkId) }) {
+            return true
+        }
+
+        return allOutcomes.contains {
+            $0.category.caseInsensitiveCompare(categoryTrimmed) == .orderedSame
+        }
+    }
+
+    private func archiveCategoryIfNeeded(record: Fulfillment) {
+        let rolesForCategory = allRoles
+            .filter { $0.category_id == record.category_id }
+            .sorted { $0.rank < $1.rank }
+        let fociForCategory = allFocuses
+            .filter { $0.category_id == record.category_id }
+            .sorted { $0.rank < $1.rank }
+        let resourcesForCategory = allResources
+            .filter { $0.category_id == record.category_id }
+            .sorted { $0.rank < $1.rank }
+        let joinsForCategory = allPassionJoins.filter { $0.category_id == record.category_id }
+        let passionsById = Dictionary(uniqueKeysWithValues: allPassions.map { ($0.passion_id, $0) })
+        let passionNames = joinsForCategory.compactMap { passionsById[$0.passion_id]?.emotion.capitalized }
+
+        let hasAnyValue =
+            !record.category_identitiy.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+            !record.category_vision.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+            !record.category_purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+            !rolesForCategory.isEmpty ||
+            !fociForCategory.isEmpty ||
+            !resourcesForCategory.isEmpty ||
+            !passionNames.isEmpty
+
+        guard hasAnyValue else { return }
+        context.insert(
+            ReplacedFulfillmentCategoryArchive(
+                category_id: record.category_id,
+                category: record.category,
+                category_identitiy: record.category_identitiy,
+                category_vision: record.category_vision,
+                category_purpose: record.category_purpose,
+                rolesCSV: rolesForCategory.map(\.role).joined(separator: "|||"),
+                fociCSV: fociForCategory.map(\.activity).joined(separator: "|||"),
+                resourcesCSV: resourcesForCategory.map(\.resource).joined(separator: "|||"),
+                passionsCSV: passionNames.joined(separator: "|||"),
+                replacedAt: .now
+            )
+        )
+    }
 }
 
 private struct FulfillmentCategoryLabelsView: View {
     @Environment(\.modelContext) private var context
+    @Query private var activePlanStates: [ActivePlanState]
     @Query(sort: \Fulfillment.category, order: .forward) private var allFulfillments: [Fulfillment]
     @Query(sort: \FulfillmentArchive.category, order: .forward) private var allFulfillmentArchives: [FulfillmentArchive]
+    @Query(sort: \FulfillmentRoles.updatedAt, order: .forward) private var allRoles: [FulfillmentRoles]
+    @Query(sort: \FulfillmentFocus.updatedAt, order: .forward) private var allFoci: [FulfillmentFocus]
+    @Query(sort: \FulfillmentResources.updatedAt, order: .forward) private var allResources: [FulfillmentResources]
+    @Query(sort: \PassionFulfillmentJoin.id, order: .forward) private var allPassionJoins: [PassionFulfillmentJoin]
+    @Query(sort: \Passion.emotion, order: .forward) private var allPassions: [Passion]
     @Query(sort: \PlanLabel.label, order: .forward) private var allLabels: [PlanLabel]
     @Query(sort: \PlanChunkSelection.updatedAt, order: .reverse) private var allChunkSelections: [PlanChunkSelection]
     @Query(sort: \PlannedChunk.updatedAt, order: .reverse) private var allPlannedChunks: [PlannedChunk]
+    @Query(sort: \PlannedChunkAction.createdAt, order: .reverse) private var allPlannedActions: [PlannedChunkAction]
     @Query(sort: \Outcomes.updatedAt, order: .reverse) private var allOutcomes: [Outcomes]
     @Query(sort: \OutcomesArchive.updatedAt, order: .reverse) private var allOutcomeArchives: [OutcomesArchive]
     @State private var currentCategory: String
     @State private var isEditingCategoryName: Bool = false
     @State private var editedCategoryName: String = ""
+    @State private var pendingCategoryName: String = ""
+    @State private var isConfiguringNewCategoryLabels: Bool = false
+    @State private var sourceCategoryForNewCategory: String = ""
+    @State private var pendingNewCategoryLabels: [String] = ["", "", ""]
+    @State private var showRenameChoicePopup: Bool = false
+    @State private var showCannotChangeCategoryPopup: Bool = false
     @State private var showCategoryRenameAlert: Bool = false
+    @State private var showNewCategoryLabelsAlert: Bool = false
     @State private var isAddingLabel: Bool = false
     @State private var newLabelText: String = ""
     @State private var editingLabelID: UUID?
@@ -1986,6 +2256,7 @@ private struct FulfillmentCategoryLabelsView: View {
     private enum LabelField: Hashable {
         case add
         case edit(UUID)
+        case required(Int)
     }
 
     private var labelsForCategory: [PlanLabel] {
@@ -2000,35 +2271,133 @@ private struct FulfillmentCategoryLabelsView: View {
             ?? UUID()
     }
 
+    private var displayedCategoryTitle: String {
+        isConfiguringNewCategoryLabels ? pendingCategoryName : currentCategory
+    }
+
+    private var canSubmitCategoryRename: Bool {
+        guard isEditingCategoryName else { return true }
+        let trimmed = editedCategoryName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        return trimmed.caseInsensitiveCompare(currentCategory) != .orderedSame
+    }
+
     var body: some View {
         List {
-            Section("Category") {
-                HStack(spacing: 10) {
-                    if isEditingCategoryName {
-                        TextField("Category", text: $editedCategoryName)
-                            .focused($isCategoryNameFieldFocused)
-                            .submitLabel(.done)
-                            .onSubmit { commitCategoryRename() }
-                    } else {
-                        Text(currentCategory)
-                            .fontWeight(.semibold)
+            categorySection
+            labelsSection
+        }
+        .listStyle(.insetGrouped)
+        .navigationTitle(displayedCategoryTitle)
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(isConfiguringNewCategoryLabels)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                if isConfiguringNewCategoryLabels {
+                    Button("Cancel") {
+                        cancelNewCategorySetup()
                     }
-                    Spacer()
-                    Button(isEditingCategoryName ? "Save" : "Edit") {
+                }
+            }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                if isConfiguringNewCategoryLabels {
+                    Button("Save") {
+                        if canFinalizeNewCategorySetup {
+                            finalizeNewCategorySetup()
+                        } else {
+                            showNewCategoryLabelsAlert = true
+                        }
+                    }
+                    .foregroundStyle(canFinalizeNewCategorySetup ? Color.accentColor : .secondary)
+                }
+            }
+        }
+        .alert("Unable to rename category", isPresented: $showCategoryRenameAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("A category with that name already exists.")
+        }
+        .alert("Please choose:", isPresented: $showRenameChoicePopup) {
+            Button("**Same category, new name**") {
+                applyCategorySaveSelection(.updatedName)
+            }
+            Button("**New category**") {
+                applyCategorySaveSelection(.newCategory)
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        .alert("Can't change category", isPresented: $showCannotChangeCategoryPopup) {
+            Button("Return", role: .cancel) {}
+        } message: {
+            Text("This category has an ongoing action block, chunk, or outcome.")
+        }
+        .alert("Minimum 3 labels required", isPresented: $showMinimumLabelsAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Each category must keep at least 3 labels.")
+        }
+        .alert("Add 3 labels", isPresented: $showNewCategoryLabelsAlert) {
+            Button("Return", role: .cancel) {}
+        } message: {
+            Text("Please add 3 or more labels for your new category before saving.")
+        }
+        .onChange(of: focusedField) { _, newValue in
+            if isAddingLabel, newValue != .add, !isConfiguringNewCategoryLabels {
+                isAddingLabel = false
+                newLabelText = ""
+            }
+        }
+    }
+
+    private var categorySection: some View {
+        Section("Category") {
+            HStack(spacing: 10) {
+                if isEditingCategoryName {
+                    TextField("Category", text: $editedCategoryName)
+                        .focused($isCategoryNameFieldFocused)
+                        .submitLabel(.done)
+                        .onSubmit {
+                            if canSubmitCategoryRename {
+                                beginCategorySaveFlow()
+                            }
+                        }
+                } else {
+                    Text(displayedCategoryTitle)
+                        .fontWeight(.regular)
+                }
+                Spacer()
+                if !isConfiguringNewCategoryLabels {
+                    Button(isEditingCategoryName ? "Update" : "Edit") {
                         if isEditingCategoryName {
-                            commitCategoryRename()
+                            beginCategorySaveFlow()
                         } else {
                             editedCategoryName = currentCategory
                             isEditingCategoryName = true
                             isCategoryNameFieldFocused = true
                         }
                     }
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(isEditingCategoryName ? (canSubmitCategoryRename ? .blue : .secondary) : .blue)
+                    .disabled(isEditingCategoryName && !canSubmitCategoryRename)
                 }
-                .padding(.vertical, 2)
             }
+            .padding(.vertical, 2)
+        }
+    }
 
-            Section("Labels") {
+    @ViewBuilder
+    private var labelsSection: some View {
+        Section("Labels") {
+            if isConfiguringNewCategoryLabels {
+                ForEach(0..<max(3, pendingNewCategoryLabels.count), id: \.self) { idx in
+                    requiredLabelRow(idx)
+                }
+                Button("+ Add Label") {
+                    pendingNewCategoryLabels.append("")
+                    focusedField = .required(max(0, pendingNewCategoryLabels.count - 1))
+                }
+                .foregroundStyle(.blue)
+                .padding(.vertical, 4)
+            } else {
                 ForEach(labelsForCategory, id: \.labelId) { label in
                     if editingLabelID == label.labelId {
                         TextField("Edit label", text: $editingText)
@@ -2037,7 +2406,7 @@ private struct FulfillmentCategoryLabelsView: View {
                             .onSubmit { commitEdit(label) }
                     } else {
                         Text(label.label)
-                            .fontWeight(.semibold)
+                            .fontWeight(.regular)
                             .onTapGesture { startEditing(label) }
                             .swipeActions {
                                 Button(role: .destructive) {
@@ -2050,51 +2419,67 @@ private struct FulfillmentCategoryLabelsView: View {
                     }
                 }
 
-                if isAddingLabel {
-                    HStack {
-                        TextField("Add label", text: $newLabelText)
-                            .focused($focusedField, equals: .add)
-                            .submitLabel(.done)
-                            .onSubmit { commitAdd() }
-                        Spacer()
-                    }
-                    .padding(.vertical, 4)
+                addLabelRow
+            }
+        }
+    }
+
+    private func requiredLabelBinding(_ idx: Int) -> Binding<String> {
+        return Binding(
+            get: { pendingNewCategoryLabels[idx] },
+            set: { pendingNewCategoryLabels[idx] = $0 }
+        )
+    }
+
+    private func requiredLabelRow(_ idx: Int) -> some View {
+        TextField("Label \(idx + 1)", text: requiredLabelBinding(idx))
+            .focused($focusedField, equals: .required(idx))
+            .submitLabel(idx >= max(2, pendingNewCategoryLabels.count - 1) ? .done : .next)
+            .onSubmit {
+                if idx < max(2, pendingNewCategoryLabels.count - 1) {
+                    focusedField = .required(idx + 1)
                 } else {
-                    Button("+ Add Label") {
-                        withAnimation {
-                            isAddingLabel = true
-                            focusedField = .add
-                        }
-                    }
-                    .foregroundStyle(.blue)
-                    .padding(.vertical, 4)
+                    focusedField = nil
                 }
             }
+    }
+
+    private var canFinalizeNewCategorySetup: Bool {
+        let firstThreeFilled = pendingNewCategoryLabels.prefix(3).allSatisfy {
+            !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
-        .listStyle(.insetGrouped)
-        .navigationTitle(currentCategory)
-        .navigationBarTitleDisplayMode(.inline)
-        .alert("Unable to rename category", isPresented: $showCategoryRenameAlert) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("A category with that name already exists.")
-        }
-        .alert("Minimum 3 labels required", isPresented: $showMinimumLabelsAlert) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("Each category must keep at least 3 labels.")
-        }
-        .onChange(of: focusedField) { _, newValue in
-            if isAddingLabel, newValue != .add {
-                isAddingLabel = false
-                newLabelText = ""
+        let normalized = pendingNewCategoryLabels
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty }
+        return firstThreeFilled && normalized.count >= 3 && Set(normalized).count == normalized.count
+    }
+
+    @ViewBuilder
+    private var addLabelRow: some View {
+        if isAddingLabel {
+            HStack {
+                TextField("Add label", text: $newLabelText)
+                    .focused($focusedField, equals: .add)
+                    .submitLabel(.done)
+                    .onSubmit { commitAdd() }
+                Spacer()
             }
-        }
-        .onChange(of: isCategoryNameFieldFocused) { _, focused in
-            if !focused, isEditingCategoryName {
-                commitCategoryRename()
+            .padding(.vertical, 4)
+        } else {
+            Button("+ Add Label") {
+                withAnimation {
+                    isAddingLabel = true
+                    focusedField = .add
+                }
             }
+            .foregroundStyle(.blue)
+            .padding(.vertical, 4)
         }
+    }
+
+    private enum CategorySaveSelection {
+        case updatedName
+        case newCategory
     }
 
     private func startEditing(_ label: PlanLabel) {
@@ -2169,7 +2554,7 @@ private struct FulfillmentCategoryLabelsView: View {
         }
     }
 
-    private func commitCategoryRename() {
+    private func beginCategorySaveFlow() {
         let trimmed = editedCategoryName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             isEditingCategoryName = false
@@ -2196,32 +2581,133 @@ private struct FulfillmentCategoryLabelsView: View {
             return
         }
 
-        for fulfillment in allFulfillments where fulfillment.category == currentCategory {
+        pendingCategoryName = trimmed
+        showRenameChoicePopup = true
+    }
+
+    private func applyCategorySaveSelection(_ selection: CategorySaveSelection) {
+        let trimmed = pendingCategoryName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        switch selection {
+        case .updatedName:
+            commitCategoryRename(to: trimmed, updateEverywhere: true)
+            FulfillmentCategoryTheme.saveCategoryAlias(from: currentCategory, to: trimmed)
+        case .newCategory:
+            guard !hasOngoingUsage(in: currentCategory) else {
+                showCannotChangeCategoryPopup = true
+                return
+            }
+            sourceCategoryForNewCategory = currentCategory
+            pendingCategoryName = trimmed
+            pendingNewCategoryLabels = ["", "", ""]
+            isConfiguringNewCategoryLabels = true
+            isEditingCategoryName = false
+            editedCategoryName = ""
+            DispatchQueue.main.async {
+                focusedField = .required(0)
+            }
+        }
+    }
+
+    private func hasOngoingUsage(in category: String) -> Bool {
+        let categoryTrimmed = category.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !categoryTrimmed.isEmpty else { return false }
+
+        let activeWeeks = Set(
+            activePlanStates
+                .filter(\.isActive)
+                .compactMap(\.weekStart)
+                .map { Calendar.current.startOfDay(for: $0) }
+        )
+        let activeChunks = allPlannedChunks.filter {
+            $0.category.caseInsensitiveCompare(categoryTrimmed) == .orderedSame &&
+            activeWeeks.contains(Calendar.current.startOfDay(for: $0.weekStart))
+        }
+        if !activeChunks.isEmpty {
+            return true
+        }
+
+        let activeChunkIDs = Set(activeChunks.map(\.id))
+        if !activeChunkIDs.isEmpty && allPlannedActions.contains(where: { activeChunkIDs.contains($0.plannedChunkId) }) {
+            return true
+        }
+
+        let hasOutcome = allOutcomes.contains {
+            $0.category.caseInsensitiveCompare(categoryTrimmed) == .orderedSame
+        }
+        return hasOutcome
+    }
+
+    private func commitCategoryRename(to trimmed: String, updateEverywhere: Bool) {
+        let sourceCategory = currentCategory
+        commitCategoryRename(
+            to: trimmed,
+            updateEverywhere: updateEverywhere,
+            sourceCategory: sourceCategory,
+            replacementLabels: nil
+        )
+    }
+
+    private func commitCategoryRename(
+        to trimmed: String,
+        updateEverywhere: Bool,
+        sourceCategory: String,
+        replacementLabels: [String]?
+    ) {
+        for fulfillment in allFulfillments where fulfillment.category == sourceCategory {
+            if !updateEverywhere {
+                archiveAndResetCategory(record: fulfillment)
+            }
             fulfillment.category = trimmed
         }
-        for archive in allFulfillmentArchives where archive.category == currentCategory {
-            archive.category = trimmed
+        if !updateEverywhere, let replacementLabels {
+            let categoryId =
+                allFulfillments.first(where: { $0.category == trimmed })?.category_id ??
+                allFulfillments.first(where: { $0.category == sourceCategory })?.category_id ??
+                UUID()
+            for label in allLabels where label.category == sourceCategory {
+                context.delete(label)
+            }
+            let sourceTag = "cat-\(categoryId.uuidString)"
+            for value in replacementLabels {
+                let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                guard !normalized.isEmpty else { continue }
+                context.insert(
+                    PlanLabel(
+                        label: normalized,
+                        categoryId: categoryId,
+                        category: trimmed,
+                        source: sourceTag
+                    )
+                )
+            }
+        } else {
+            for label in allLabels where label.category == sourceCategory {
+                label.category = trimmed
+            }
         }
-        for label in allLabels where label.category == currentCategory {
-            label.category = trimmed
-        }
-        for selection in allChunkSelections where selection.category == currentCategory {
-            selection.category = trimmed
-        }
-        for chunk in allPlannedChunks where chunk.category == currentCategory {
-            chunk.category = trimmed
-        }
-        for outcome in allOutcomes where outcome.category == currentCategory {
-            outcome.category = trimmed
-        }
-        for archive in allOutcomeArchives where archive.category == currentCategory {
-            archive.category = trimmed
+        if updateEverywhere {
+            for archive in allFulfillmentArchives where archive.category == sourceCategory {
+                archive.category = trimmed
+            }
+            for selection in allChunkSelections where selection.category == sourceCategory {
+                selection.category = trimmed
+            }
+            for chunk in allPlannedChunks where chunk.category == sourceCategory {
+                chunk.category = trimmed
+            }
+            for outcome in allOutcomes where outcome.category == sourceCategory {
+                outcome.category = trimmed
+            }
+            for archive in allOutcomeArchives where archive.category == sourceCategory {
+                archive.category = trimmed
+            }
         }
         // Intentionally do not mutate completed archives or completed action block archives:
         // those records are historical snapshots and should stay locked in time.
 
         var map = FulfillmentCategoryTheme.persistedColorKeys()
-        if let existing = map.removeValue(forKey: currentCategory) {
+        if let existing = map.removeValue(forKey: sourceCategory) {
             map[trimmed] = existing
             FulfillmentCategoryTheme.persistColorKeys(map)
         }
@@ -2230,6 +2716,86 @@ private struct FulfillmentCategoryLabelsView: View {
         currentCategory = trimmed
         isEditingCategoryName = false
         editedCategoryName = ""
+        pendingCategoryName = ""
+    }
+
+    private func cancelNewCategorySetup() {
+        isConfiguringNewCategoryLabels = false
+        pendingNewCategoryLabels = ["", "", ""]
+        pendingCategoryName = ""
+        focusedField = nil
+    }
+
+    private func finalizeNewCategorySetup() {
+        let cleaned = pendingNewCategoryLabels
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let normalized = cleaned.map { $0.lowercased() }
+        guard canFinalizeNewCategorySetup, normalized.count >= 3 else {
+            showNewCategoryLabelsAlert = true
+            return
+        }
+        commitCategoryRename(
+            to: pendingCategoryName,
+            updateEverywhere: false,
+            sourceCategory: sourceCategoryForNewCategory,
+            replacementLabels: normalized
+        )
+        isConfiguringNewCategoryLabels = false
+        sourceCategoryForNewCategory = ""
+        pendingNewCategoryLabels = ["", "", ""]
+        focusedField = nil
+    }
+
+    private func archiveAndResetCategory(record: Fulfillment) {
+        let rolesForCategory = allRoles
+            .filter { $0.category_id == record.category_id }
+            .sorted { $0.rank < $1.rank }
+        let fociForCategory = allFoci
+            .filter { $0.category_id == record.category_id }
+            .sorted { $0.rank < $1.rank }
+        let resourcesForCategory = allResources
+            .filter { $0.category_id == record.category_id }
+            .sorted { $0.rank < $1.rank }
+        let joinsForCategory = allPassionJoins.filter { $0.category_id == record.category_id }
+        let passionsById = Dictionary(uniqueKeysWithValues: allPassions.map { ($0.passion_id, $0) })
+        let passionNames = joinsForCategory.compactMap { passionsById[$0.passion_id]?.emotion.capitalized }
+
+        let hasAnyValue =
+            !record.category_identitiy.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+            !record.category_vision.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+            !record.category_purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+            !rolesForCategory.isEmpty ||
+            !fociForCategory.isEmpty ||
+            !resourcesForCategory.isEmpty ||
+            !passionNames.isEmpty
+
+        if hasAnyValue {
+            context.insert(
+                ReplacedFulfillmentCategoryArchive(
+                    category_id: record.category_id,
+                    category: record.category,
+                    category_identitiy: record.category_identitiy,
+                    category_vision: record.category_vision,
+                    category_purpose: record.category_purpose,
+                    rolesCSV: rolesForCategory.map(\.role).joined(separator: "|||"),
+                    fociCSV: fociForCategory.map(\.activity).joined(separator: "|||"),
+                    resourcesCSV: resourcesForCategory.map(\.resource).joined(separator: "|||"),
+                    passionsCSV: passionNames.joined(separator: "|||"),
+                    replacedAt: .now
+                )
+            )
+        }
+
+        for row in rolesForCategory { context.delete(row) }
+        for row in fociForCategory { context.delete(row) }
+        for row in resourcesForCategory { context.delete(row) }
+        for row in joinsForCategory { context.delete(row) }
+
+        record.category_identitiy = ""
+        record.category_vision = ""
+        record.category_purpose = ""
+        record.updatedAt = .now
     }
 }
 
@@ -2258,6 +2824,8 @@ private struct FulfillmentCategoryColorPickerView: View {
                                     .foregroundStyle(.blue)
                             }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 }
@@ -2326,6 +2894,7 @@ private struct DemoPlanViewContainer: View {
             FulfillmentFocusArchive.self,
             FulfillmentResources.self,
             FulfillmentResourcesArchive.self,
+            ReplacedFulfillmentCategoryArchive.self,
             Outcomes.self,
             OutcomesArchive.self,
             OutcomesMeasure.self,
