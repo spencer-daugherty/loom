@@ -140,6 +140,7 @@ private struct DarkModeInvertImage: ViewModifier {
 // Animated background of thin wind lines flowing left-to-right on the left side of the logo
 struct WindLinesBackground: View {
     let colors: [Color]
+    @State private var animationStartDate: Date = .now
 
     private let lineCount: Int = 30
     private let leftInset: CGFloat = 0
@@ -176,6 +177,7 @@ struct WindLinesBackground: View {
                     startX + 40,
                     centerX - logoWidth / 2 - logoMargin - rightStopInset
                 )
+                let startupElapsed = context.date.timeIntervalSince(animationStartDate)
 
                 Canvas { ctx, sz in
                     let t = context.date.timeIntervalSinceReferenceDate
@@ -219,6 +221,14 @@ struct WindLinesBackground: View {
                         let L = endX - startX
                         if L <= 1 { continue }
 
+                        // Startup reveal: lines grow left -> right with slight per-line delays.
+                        let lineDelay = rand(i * 83 + 17, 0.00, 0.36)
+                        let lineRevealDuration = rand(i * 89 + 23, 0.62, 1.05)
+                        let rawReveal = (startupElapsed - lineDelay) / lineRevealDuration
+                        let revealProgress = max(0.0, min(rawReveal, 1.0))
+                        if revealProgress <= 0.0 { continue }
+                        let revealEdgeX = startX + L * CGFloat(revealProgress)
+
                         // Animation params
                         let speed = rand(i * 13 + 1, 0.15, 0.35)
                         let phase = rand(i * 17 + 3, 0.0, 1.0)
@@ -251,8 +261,9 @@ struct WindLinesBackground: View {
                         for j in 0...samples {
                             let twoPi: Double = 2.0 * Double.pi
 
-                            let s = Double(j) / Double(samples)
-                            let x = startX + CGFloat(s) * L
+                            let localS = Double(j) / Double(samples)
+                            let s = localS * revealProgress
+                            let x = startX + CGFloat(localS) * (revealEdgeX - startX)
 
                             let diff = (s - posFrac) / sigma
                             let envelope = exp(-pow(diff, 2) * 2)
@@ -337,7 +348,7 @@ struct WindLinesBackground: View {
                             with: .linearGradient(
                                 tailGradient,
                                 startPoint: CGPoint(x: startX, y: baseY),
-                                endPoint: CGPoint(x: endX,  y: endY)
+                                endPoint: CGPoint(x: revealEdgeX, y: baseY + (endY - baseY) * CGFloat(revealProgress))
                             ),
                             lineWidth: 10
                         )
@@ -357,10 +368,10 @@ struct WindLinesBackground: View {
                         ])
 
                         let gradStart = CGPoint(x: startX, y: baseY)
-                        let gradEnd   = CGPoint(x: endX,  y: endY)
+                        let gradEnd   = CGPoint(x: revealEdgeX, y: baseY + (endY - baseY) * CGFloat(revealProgress))
 
                         // Clip blur so glow doesn't "cap" and look like expansion at the end
-                        let clipRect = CGRect(x: startX, y: 0, width: L, height: sz.height)
+                        let clipRect = CGRect(x: startX, y: 0, width: max(1, revealEdgeX - startX), height: sz.height)
 
                         ctx.drawLayer { layer in
                             layer.clip(to: Path(clipRect))
@@ -386,6 +397,9 @@ struct WindLinesBackground: View {
             }
         }
         .allowsHitTesting(false)
+        .onAppear {
+            animationStartDate = .now
+        }
     }
 }
 
