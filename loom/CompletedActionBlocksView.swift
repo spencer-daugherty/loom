@@ -137,7 +137,7 @@ struct CompletedActionBlocksListView: View {
                 pendingDeleteSession = nil
             }
         } message: {
-            Text("Are you sure you want to delete this item? It will be available for 30 days in account management.")
+            Text("Are you sure you want to delete this item? It will be available for 30 days in Account Manager.")
         }
     }
 }
@@ -986,7 +986,7 @@ private struct CompletedAttachmentsSheet: View {
                     pendingDelete = nil
                 }
             } message: {
-                Text("Are you sure you want to delete this item? It will be available for 30 days in account management.")
+                Text("Are you sure you want to delete this item? It will be available for 30 days in Account Manager.")
             }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {

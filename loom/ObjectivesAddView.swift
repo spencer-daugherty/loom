@@ -407,7 +407,7 @@ struct ObjectivesAddView: View {
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Are you sure you want to delete this outcome? It will be available for 30 days in account management.")
+                Text("Are you sure you want to delete this outcome? It will be available for 30 days in Account Manager.")
             }
         }
         .interactiveDismissDisabled(outcome != nil ? hasChanges : showDeleteButton)

@@ -448,22 +448,24 @@ struct ObjectivesView: View {
     }
 
     private func latestMeasure(for outcome: Outcomes) -> OutcomesMeasure? {
-        if let latestEntry = outcomeMeasureEntries
-            .filter({ $0.outcome_id == outcome.outcome_id })
-            .max(by: { $0.measuredAt < $1.measuredAt }) {
-            return OutcomesMeasure(
-                outcome_id: outcome.outcome_id,
-                measure: latestEntry.measure,
-                measuredAt: latestEntry.measuredAt,
-                measure_amt: latestEntry.measure_amt,
-                measure_updated: .now,
-                direction: nil,
-                format: latestEntry.format,
-                unit: latestEntry.unit,
-                decimalPlaces: latestEntry.decimalPlaces
-            )
-        }
-        return outcomeMeasures.first { $0.outcome_id == outcome.outcome_id }
+        let snapshot = outcomeMeasures.first { $0.outcome_id == outcome.outcome_id }
+        let latestEntry = outcomeMeasureEntries
+            .filter { $0.outcome_id == outcome.outcome_id }
+            .max(by: { $0.measuredAt < $1.measuredAt })
+
+        guard snapshot != nil || latestEntry != nil else { return nil }
+
+        return OutcomesMeasure(
+            outcome_id: outcome.outcome_id,
+            measure: latestEntry?.measure ?? snapshot?.measure ?? 0,
+            measuredAt: latestEntry?.measuredAt ?? snapshot?.measuredAt ?? .now,
+            measure_amt: snapshot?.measure_amt ?? latestEntry?.measure_amt ?? 0,
+            measure_updated: snapshot?.measure_updated ?? .now,
+            direction: nil,
+            format: snapshot?.format ?? latestEntry?.format,
+            unit: snapshot?.unit ?? latestEntry?.unit,
+            decimalPlaces: snapshot?.decimalPlaces ?? latestEntry?.decimalPlaces
+        )
     }
 
     private func startMeasure(for outcome: Outcomes, latestMeasure: OutcomesMeasure?) -> Double? {
@@ -989,7 +991,7 @@ struct CompletedOutcomeDetailView: View {
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Are you sure you want to delete this outcome? It will be available for 30 days in account management.")
+                Text("Are you sure you want to delete this outcome? It will be available for 30 days in Account Manager.")
             }
             .sheet(item: $insightDetailSheet) { sheet in
                 switch sheet {

@@ -98,6 +98,7 @@ struct OutcomeView: View {
     @State private var changeTargetDateDraft: Date = .now
 
     @Query(sort: \OutcomesMeasureEntry.measuredAt, order: .forward) private var allMeasureEntries: [OutcomesMeasureEntry]
+    @Query(sort: \OutcomesMeasure.measure_updated, order: .reverse) private var allMeasureSnapshots: [OutcomesMeasure]
     @Query(sort: \OutcomeAnalyticsEvent.occurredAt, order: .forward) private var allOutcomeEvents: [OutcomeAnalyticsEvent]
     @Query(sort: \ActionBlocksReflectionOutcomeContribution.completedAt, order: .reverse) private var allContributingActions: [ActionBlocksReflectionOutcomeContribution]
     @Query(sort: \QuickCompletedCaptureItem.completedAt, order: .reverse) private var quickCompletedCaptureItems: [QuickCompletedCaptureItem]
@@ -155,14 +156,18 @@ struct OutcomeView: View {
     }
 
     private var hasChanges: Bool {
-        let measureChanged = if let outcomeMeasure {
-            isMeasurable != (outcomeMeasure.measure_amt != 0) ||
-            (isMeasurable && measureGoal != String(outcomeMeasure.measure_amt)) ||
-            (isMeasurable && measureFormat.rawValue != (outcomeMeasure.format ?? ObjectivesAddView.MeasureFormat.number.rawValue)) ||
-            (isMeasurable && measureUnit != (outcomeMeasure.unit ?? ObjectivesAddView.UnitOption.defaultUnit)) ||
-            (isMeasurable && measureDecimalPlaces != (outcomeMeasure.decimalPlaces ?? 0))
+        let measureChanged: Bool
+        if let snapshot = latestOutcomeMeasureSnapshot {
+            let snapshotPlaces = min(3, max(0, snapshot.decimalPlaces ?? 0))
+            let expectedGoalString = groupedDecimalStringOutcome(snapshot.measure_amt, fractionDigits: snapshotPlaces)
+            measureChanged =
+            isMeasurable != (snapshot.measure_amt != 0) ||
+            (isMeasurable && measureGoal != expectedGoalString) ||
+            (isMeasurable && measureFormat.rawValue != (snapshot.format ?? ObjectivesAddView.MeasureFormat.number.rawValue)) ||
+            (isMeasurable && measureUnit != (snapshot.unit ?? ObjectivesAddView.UnitOption.defaultUnit)) ||
+            (isMeasurable && measureDecimalPlaces != (snapshot.decimalPlaces ?? 0))
         } else {
-            isMeasurable
+            measureChanged = isMeasurable
         }
 
         return goal != outcome.outcome ||
@@ -301,20 +306,24 @@ struct OutcomeView: View {
         allMeasureEntries.filter { $0.outcome_id == outcome.outcome_id }.sorted { $0.measuredAt < $1.measuredAt }
     }
 
+    private var latestOutcomeMeasureSnapshot: OutcomesMeasure? {
+        allMeasureSnapshots.first { $0.outcome_id == outcome.outcome_id }
+    }
+
     private var outcomeEvents: [OutcomeAnalyticsEvent] {
         allOutcomeEvents.filter { $0.outcome_id == outcome.outcome_id }
     }
 
     private var currentMeasureValue: Double? {
-        outcomeMeasureEntries.last?.measure ?? outcomeMeasure?.measure
+        outcomeMeasureEntries.last?.measure ?? latestOutcomeMeasureSnapshot?.measure
     }
 
     private var currentGoalValue: Double? {
-        outcomeMeasureEntries.last?.measure_amt ?? outcomeMeasure?.measure_amt
+        outcomeMeasureEntries.last?.measure_amt ?? latestOutcomeMeasureSnapshot?.measure_amt
     }
 
     private var startMeasureValue: Double? {
-        outcomeMeasureEntries.first?.measure ?? outcomeMeasure?.measure
+        outcomeMeasureEntries.first?.measure ?? latestOutcomeMeasureSnapshot?.measure
     }
 
     private var isGoalMetNow: Bool {
@@ -615,7 +624,7 @@ struct OutcomeView: View {
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Are you sure you want to delete this outcome? It will be available for 30 days in account management.")
+                Text("Are you sure you want to delete this outcome? It will be available for 30 days in Account Manager.")
             }
             .alert("Goal Met", isPresented: $isShowingGoalMetConfirmAlert) {
                 Button("Not Yet", role: .cancel) {}
@@ -1000,7 +1009,7 @@ struct OutcomeView: View {
             )
         }
 
-        if let snapshot = outcomeMeasure {
+        if let snapshot = latestOutcomeMeasureSnapshot {
             RecentlyDeletedStore.trash(snapshot, in: modelContext)
         }
         for row in outcomeMeasureEntries {
@@ -1242,12 +1251,13 @@ struct OutcomeView: View {
         measureGoal = groupedDecimalStringOutcome(newGoalValue, fractionDigits: places)
 
         try? modelContext.save()
+        hydrateMeasureFromLatestEntry()
     }
 
     private func hydrateMeasureFromLatestEntry() {
         let entries = allMeasureEntries.filter { $0.outcome_id == outcome.outcome_id }
         let latest = entries.max(by: { $0.measuredAt < $1.measuredAt })
-        let snapshot = outcomeMeasure
+        let snapshot = latestOutcomeMeasureSnapshot
 
         let goalSource = snapshot?.measure_amt ?? latest?.measure_amt ?? 0
         let currentSource = latest?.measure ?? snapshot?.measure ?? 0
