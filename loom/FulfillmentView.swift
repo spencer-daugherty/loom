@@ -292,17 +292,15 @@ struct FulfillmentView: View {
                 }
                 .frame(width: leftWidth, alignment: .leading)
 
-                ZStack(alignment: .topTrailing) {
-                    FulfillmentInteractiveRadar(
-                        metrics: fulfillmentMetrics,
-                        selectedIndex: $highlightedCategoryIndex,
-                        onManualSelect: {
-                            radarAutoRotatePausedUntil = Date().addingTimeInterval(20)
-                        }
-                    )
-                    .frame(width: graphWidth, height: graphWidth, alignment: .topTrailing)
-                }
-                .frame(width: baseGraphWidth, height: baseGraphWidth, alignment: .topTrailing)
+                FulfillmentInteractiveRadar(
+                    metrics: fulfillmentMetrics,
+                    selectedIndex: $highlightedCategoryIndex,
+                    onManualSelect: {
+                        radarAutoRotatePausedUntil = Date().addingTimeInterval(20)
+                    }
+                )
+                .frame(width: graphWidth, height: graphWidth)
+                .frame(width: baseGraphWidth, height: 245, alignment: .center)
 
                 Spacer(minLength: 0)
             }
