@@ -122,6 +122,7 @@ struct PassionsSectionView: View {
 
 struct FulfillmentView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.colorScheme) private var colorScheme
 
     @Query private var fulfillments: [Fulfillment]
     @Query private var roles: [FulfillmentRoles]
@@ -129,8 +130,15 @@ struct FulfillmentView: View {
     @Query private var resources: [FulfillmentResources]
     @Query private var passionJoins: [PassionFulfillmentJoin]
     @Query private var passions: [Passion]
+    @Query(sort: \ReplacedFulfillmentCategoryArchive.replacedAt, order: .reverse)
+    private var replacedCategoryArchives: [ReplacedFulfillmentCategoryArchive]
 
     @State private var expandedCardID: String? = nil
+    @State private var showPreviousCategories = false
+    @State private var pendingDeletePrevious: ReplacedFulfillmentCategoryArchive?
+    @State private var showDeletePreviousAlert = false
+    @State private var expandedPreviousID: UUID? = nil
+    @State private var previousCardSwipeOffset: [UUID: CGFloat] = [:]
     @State private var isAddingRole = false
     @State private var newRoleText = ""
     @State private var isAddingFocus = false
@@ -213,6 +221,8 @@ struct FulfillmentView: View {
                                 record: record
                             )
                         }
+
+                        previousCategoriesSection
                         Spacer()
                     }
                     .padding()
@@ -261,6 +271,244 @@ struct FulfillmentView: View {
             .presentationDetents([.medium])
             .presentationDragIndicator(.visible)
         }
+        .alert("Move to Recently Deleted?", isPresented: $showDeletePreviousAlert, presenting: pendingDeletePrevious) { snapshot in
+            Button("Cancel", role: .cancel) {
+                pendingDeletePrevious = nil
+            }
+            Button("Delete", role: .destructive) {
+                RecentlyDeletedStore.trash(snapshot, in: modelContext)
+                try? modelContext.save()
+                pendingDeletePrevious = nil
+            }
+        } message: { _ in
+            Text("This item will be available for 30 days in account management.")
+        }
+    }
+
+    private var previousCategoriesSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if !replacedCategoryArchives.isEmpty {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showPreviousCategories.toggle()
+                        if !showPreviousCategories {
+                            expandedPreviousID = nil
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: showPreviousCategories ? "chevron.up" : "chevron.down")
+                            .font(.caption2.weight(.semibold))
+                        Text("Previous Categories")
+                            .font(.caption2.weight(.semibold))
+                    }
+                    .foregroundStyle(colorScheme == .dark ? Color(.systemGray2) : .black)
+                    .padding(.vertical, 5)
+                    .padding(.horizontal, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color(.systemGray4))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.black.opacity(0.15), lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                if showPreviousCategories {
+                    ForEach(replacedCategoryArchives, id: \.id) { archive in
+                        previousCategorySwipeContainer(for: archive)
+                    }
+                }
+            }
+        }
+    }
+
+    private func previousCategorySwipeContainer(for archive: ReplacedFulfillmentCategoryArchive) -> some View {
+        let offset = previousCardSwipeOffset[archive.id] ?? 0
+        return ZStack(alignment: .trailing) {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.red)
+            HStack {
+                Spacer(minLength: 0)
+                Button("Delete", role: .destructive) {
+                    pendingDeletePrevious = archive
+                    showDeletePreviousAlert = true
+                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 16)
+            }
+            previousCategoryCard(archive)
+                .offset(x: offset)
+                .gesture(
+                    DragGesture(minimumDistance: 10, coordinateSpace: .local)
+                        .onChanged { value in
+                            if value.translation.width < 0 {
+                                previousCardSwipeOffset[archive.id] = max(-104, value.translation.width)
+                            } else if (previousCardSwipeOffset[archive.id] ?? 0) < 0 {
+                                previousCardSwipeOffset[archive.id] = min(0, value.translation.width - 104)
+                            }
+                        }
+                        .onEnded { value in
+                            let shouldOpen = value.translation.width < -48 || (previousCardSwipeOffset[archive.id] ?? 0) < -52
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                previousCardSwipeOffset[archive.id] = shouldOpen ? -104 : 0
+                            }
+                        }
+                )
+                .onTapGesture {
+                    if (previousCardSwipeOffset[archive.id] ?? 0) < 0 {
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            previousCardSwipeOffset[archive.id] = 0
+                        }
+                    }
+                }
+        }
+        .frame(maxWidth: .infinity)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private func previousCategoryCard(_ archive: ReplacedFulfillmentCategoryArchive) -> some View {
+        let roles = csvItems(from: archive.rolesCSV)
+        let fociValues = csvItems(from: archive.fociCSV)
+        let resourcesValues = csvItems(from: archive.resourcesCSV)
+        let passionValues = csvItems(from: archive.passionsCSV)
+        let isExpanded = (expandedPreviousID == archive.id)
+        let hasVision = !archive.category_vision.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasPurpose = !archive.category_purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasIdentity = !archive.category_identitiy.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let completionCount = [hasVision, hasPurpose, hasIdentity, !roles.isEmpty, !fociValues.isEmpty, !resourcesValues.isEmpty, !passionValues.isEmpty].filter { $0 }.count
+        let iconName: String = {
+            switch completionCount {
+            case 0: return "battery.0"
+            case 1...2: return "battery.25"
+            case 3...4: return "battery.50"
+            case 5: return "battery.75"
+            default: return "battery.100"
+            }
+        }()
+
+        return VStack(spacing: 0) {
+            HStack {
+                Image(systemName: iconName)
+                    .foregroundColor(.white)
+                Text(archive.category)
+                    .font(.headline)
+                    .fontWeight(.black)
+                    .foregroundColor(.white)
+                Spacer(minLength: 8)
+                Text("Replaced \(replacementDateText(archive.replacedAt))")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.white.opacity(0.9))
+                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                    .foregroundColor(.white)
+            }
+            .padding()
+            .background(Color(.systemGray2))
+            .contentShape(Rectangle())
+            .onTapGesture {
+                withAnimation(.easeInOut) {
+                    if isExpanded {
+                        expandedPreviousID = nil
+                    } else {
+                        expandedPreviousID = archive.id
+                        expandedCardID = nil
+                    }
+                }
+            }
+
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Vision")
+                        .font(.headline)
+                        .foregroundColor(.black)
+                    Text(archive.category_vision.isEmpty ? "No vision saved." : archive.category_vision)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+
+                    Text("Purpose")
+                        .font(.headline)
+                        .foregroundColor(.black)
+                    Text(archive.category_purpose.isEmpty ? "No purpose saved." : archive.category_purpose)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+
+                    Text("Roles")
+                        .font(.headline)
+                        .foregroundColor(.black)
+                    readOnlyRows(values: roles)
+
+                    Text("Focus")
+                        .font(.headline)
+                        .foregroundColor(.black)
+                    readOnlyRows(values: fociValues)
+
+                    Text("Resources")
+                        .font(.headline)
+                        .foregroundColor(.black)
+                    readOnlyRows(values: resourcesValues)
+
+                    Text("Passions")
+                        .font(.headline)
+                        .foregroundColor(.black)
+                    readOnlyRows(values: passionValues)
+                }
+                .padding(16)
+                .background(Color(.systemGray6))
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color(.systemGray3), lineWidth: 1)
+        )
+    }
+
+    private func readOnlyRows(values: [String]) -> some View {
+        VStack(spacing: 0) {
+            if values.isEmpty {
+                Text("No items saved.")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 10)
+                    .padding(.horizontal, 10)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+            } else {
+                ForEach(values.indices, id: \.self) { index in
+                    Text(values[index])
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 10)
+                        .padding(.horizontal, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color(.secondarySystemBackground))
+                        )
+                }
+            }
+        }
+    }
+
+    private func replacementDateText(_ date: Date) -> String {
+        let nowYear = Calendar.current.component(.year, from: .now)
+        let year = Calendar.current.component(.year, from: date)
+        if nowYear == year {
+            return date.formatted(.dateTime.month().day())
+        }
+        return date.formatted(.dateTime.month().day().year())
+    }
+
+    private func csvItems(from value: String) -> [String] {
+        value
+            .components(separatedBy: "|||")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
     }
 
     private var fulfillmentRadarHeader: some View {
@@ -430,6 +678,9 @@ struct FulfillmentView: View {
                 .onTapGesture {
                     withAnimation(.easeInOut) {
                         expandedCardID = isExpanded ? nil : id
+                        if expandedCardID != nil {
+                            expandedPreviousID = nil
+                        }
                     }
                 }
 
@@ -1044,86 +1295,110 @@ private struct FulfillmentTrendsView: View {
     }
 }
 
-private struct FulfillmentInteractiveRadar: View {
+struct FulfillmentInteractiveRadar: View {
     let metrics: [(String, Color, Double)]
     @Binding var selectedIndex: Int
     let onManualSelect: () -> Void
+    let enableInteraction: Bool
+    let useOriginalDotStyle: Bool
     @State private var pulseIndex: Int? = nil
+
+    init(
+        metrics: [(String, Color, Double)],
+        selectedIndex: Binding<Int>,
+        onManualSelect: @escaping () -> Void,
+        enableInteraction: Bool = true,
+        useOriginalDotStyle: Bool = false
+    ) {
+        self.metrics = metrics
+        self._selectedIndex = selectedIndex
+        self.onManualSelect = onManualSelect
+        self.enableInteraction = enableInteraction
+        self.useOriginalDotStyle = useOriginalDotStyle
+    }
 
     var body: some View {
         GeometryReader { geo in
             let size = min(geo.size.width, geo.size.height)
             let center = CGPoint(x: size / 2, y: size / 2)
             let radius = size / 2
-            let count = max(metrics.count, 1)
+            let count = metrics.count
 
-            let outerPoints: [CGPoint] = (0..<count).map { i in
-                let angle = Angle.degrees((Double(i) / Double(count)) * 360 - 90).radians
-                return CGPoint(x: center.x + cos(angle) * radius, y: center.y + sin(angle) * radius)
-            }
+            if count == 0 {
+                Color.clear
+            } else {
+                let safeSelectedIndex = min(max(0, selectedIndex), count - 1)
 
-            let renderedMetrics: [(String, Color, Double)] = (0..<count).map { i in
-                (metrics[i].0, segmentColor(i), metrics[i].2)
-            }
-            let valuePoints: [CGPoint] = (0..<count).map { i in
-                let ratio = max(0, min(metrics[i].2 / 100.0, 1.0))
-                let outer = outerPoints[i]
-                return CGPoint(
-                    x: center.x + (outer.x - center.x) * ratio,
-                    y: center.y + (outer.y - center.y) * ratio
-                )
-            }
-
-            ZStack {
-                // Keep the radar internals identical to ContentView's graph style.
-                FulfillmentRadarGraph(
-                    metrics: renderedMetrics,
-                    showOutline: true,
-                    dotDiameter: 20,
-                    showDotOutline: false,
-                    showDotShadow: false
-                )
-
-                ForEach(0..<count, id: \.self) { i in
-                    Circle()
-                        .fill(metrics[i].1)
-                        .frame(width: 20, height: 20)
-                        .overlay(
-                            Circle().stroke(Color(.systemBackground), lineWidth: 2)
-                        )
-                        .shadow(color: Color.white.opacity(0.9), radius: 10, x: 0, y: 0)
-                        .scaleEffect(circleScale(for: i))
-                        .animation(.easeInOut(duration: 0.18), value: pulseIndex)
-                        .animation(.easeInOut(duration: 0.18), value: selectedIndex)
-                        .position(valuePoints[i])
+                let outerPoints: [CGPoint] = (0..<count).map { i in
+                    let angle = Angle.degrees((Double(i) / Double(count)) * 360 - 90).radians
+                    return CGPoint(x: center.x + cos(angle) * radius, y: center.y + sin(angle) * radius)
                 }
 
-                ForEach(0..<count, id: \.self) { i in
-                    let next = (i + 1) % count
-                    sliceTapShape(center: center, p1: outerPoints[i], p2: outerPoints[next])
-                        .fill(Color.clear)
-                        .contentShape(sliceTapShape(center: center, p1: outerPoints[i], p2: outerPoints[next]))
-                        .onTapGesture {
-                            selectSlice(i)
-                        }
+                let renderedMetrics: [(String, Color, Double)] = (0..<count).map { i in
+                    (metrics[i].0, segmentColor(i, selectedIndex: safeSelectedIndex), metrics[i].2)
+                }
+                let valuePoints: [CGPoint] = (0..<count).map { i in
+                    let ratio = max(0, min(metrics[i].2 / 100.0, 1.0))
+                    let outer = outerPoints[i]
+                    return CGPoint(
+                        x: center.x + (outer.x - center.x) * ratio,
+                        y: center.y + (outer.y - center.y) * ratio
+                    )
                 }
 
-                // Larger, invisible tap targets around dots for easier selection.
-                ForEach(0..<count, id: \.self) { i in
-                    Circle()
-                        .fill(Color.clear)
-                        .frame(width: 44, height: 44)
-                        .contentShape(Circle())
-                        .position(valuePoints[i])
-                        .onTapGesture {
-                            selectSlice(i)
+                ZStack {
+                    // Keep the radar internals identical to ContentView's graph style.
+                    FulfillmentRadarGraph(
+                        metrics: renderedMetrics,
+                        showOutline: true,
+                        dotDiameter: useOriginalDotStyle ? 14 : 20,
+                        showDotOutline: false,
+                        showDotShadow: false
+                    )
+
+                    ForEach(0..<count, id: \.self) { i in
+                        Circle()
+                            .fill(metrics[i].1)
+                            .frame(width: useOriginalDotStyle ? 14 : 20, height: useOriginalDotStyle ? 14 : 20)
+                            .overlay(
+                                Circle().stroke(Color(.systemBackground), lineWidth: 2)
+                            )
+                            .shadow(color: Color.white.opacity(0.9), radius: useOriginalDotStyle ? 7 : 10, x: 0, y: 0)
+                            .scaleEffect(useOriginalDotStyle ? 1 : circleScale(for: i, selectedIndex: safeSelectedIndex))
+                            .animation(.easeInOut(duration: 0.18), value: pulseIndex)
+                            .animation(.easeInOut(duration: 0.18), value: selectedIndex)
+                            .position(valuePoints[i])
+                    }
+
+                    if enableInteraction {
+                        ForEach(0..<count, id: \.self) { i in
+                            let next = (i + 1) % count
+                            sliceTapShape(center: center, p1: outerPoints[i], p2: outerPoints[next])
+                                .fill(Color.clear)
+                                .contentShape(sliceTapShape(center: center, p1: outerPoints[i], p2: outerPoints[next]))
+                                .onTapGesture {
+                                    selectSlice(i)
+                                }
                         }
+
+                        // Larger, invisible tap targets around dots for easier selection.
+                        ForEach(0..<count, id: \.self) { i in
+                            Circle()
+                                .fill(Color.clear)
+                                .frame(width: 44, height: 44)
+                                .contentShape(Circle())
+                                .position(valuePoints[i])
+                                .onTapGesture {
+                                    selectSlice(i)
+                                }
+                        }
+                    }
                 }
             }
         }
     }
 
-    private func segmentColor(_ index: Int) -> Color {
+    private func segmentColor(_ index: Int, selectedIndex: Int) -> Color {
         if index == selectedIndex {
             return metrics[index].1
         }
@@ -1154,7 +1429,7 @@ private struct FulfillmentInteractiveRadar: View {
         }
     }
 
-    private func circleScale(for index: Int) -> CGFloat {
+    private func circleScale(for index: Int, selectedIndex: Int) -> CGFloat {
         if pulseIndex == index { return 1.35 }
         if selectedIndex == index { return 1.20 }
         return 1.0

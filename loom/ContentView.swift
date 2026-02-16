@@ -25,6 +25,7 @@ struct ContentView: View {
     @State private var pressedOutcome: Outcomes? = nil
     @State private var showVisionPurposePopup: Bool = false
     @State private var pressedCategoryTitle: String? = nil
+    @State private var fulfillmentRadarSelectedIndex: Int = 0
     @Environment(\.colorScheme) private var colorScheme
     @Namespace private var graphNamespace
     @State private var showSplash: Bool = true
@@ -73,88 +74,93 @@ struct ContentView: View {
     
     var body: some View {
         NavigationStack(path: $navPath) {
-            GeometryReader { proxy in
-                ZStack {
-                    // Background
-                    Color(.systemGroupedBackground)
-                        .edgesIgnoringSafeArea(.all)
-                    
-                    // Main content pinned to top
-                    VStack(spacing: 10) {
-                        header
-                        
-                        VStack(spacing: 16) {
-                            drivingForceSection
-                            fulfillmentSection
-                            objectivesSection
-                        }
-                        .padding(.horizontal)
-                        
-                        Spacer(minLength: 0)   // <-- this is the real “pin to bottom”
-                        
-                        footer
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    
-                    // Loading Splash Overlay
-                    if showSplash {
-                        LoadingSplashView(
-                            metrics: fulfillmentMetrics,
-                            namespace: graphNamespace
-                        )
-                        .transition(.opacity)
-                        .zIndex(2)
-                    }
+            ZStack {
+                Color(.systemGroupedBackground)
+                    .ignoresSafeArea()
 
-                    if let emotion = pressedEmotion {
-                        PassionPopupOverlay(
-                            emotionTitle: displayTitle(for: emotion),
-                            items: passions(for: emotion)
-                        )
-                        .allowsHitTesting(false)
-                        .transition(.scale(scale: 0.9).combined(with: .opacity))
-                        .zIndex(1)
-                        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: pressedEmotion)
-                    } else if showVisionPurposePopup {
-                        VisionPurposePopupOverlay(
-                            vision: (drivingForces.first?.ultimateVision ?? ""),
-                            purpose: (drivingForces.first?.ultimatePurpose ?? "")
-                        )
-                        .allowsHitTesting(false)
-                        .transition(.scale(scale: 0.9).combined(with: .opacity))
-                        .zIndex(1)
-                        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: showVisionPurposePopup)
+                GeometryReader { proxy in
+                    ZStack {
+                        // Background
+                        Color(.systemGroupedBackground)
+                            .edgesIgnoringSafeArea(.all)
+
+                        // Main content pinned to top
+                        VStack(spacing: 10) {
+                            header
+
+                            VStack(spacing: 16) {
+                                drivingForceSection
+                                fulfillmentSection
+                                objectivesSection
+                            }
+                            .padding(.horizontal)
+
+                            Spacer(minLength: 0)   // <-- this is the real “pin to bottom”
+
+                            footer
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                        // Loading Splash Overlay
+                        if showSplash {
+                            LoadingSplashView(
+                                metrics: fulfillmentMetrics,
+                                namespace: graphNamespace
+                            )
+                            .transition(.opacity)
+                            .zIndex(2)
+                        }
+
+                        if let emotion = pressedEmotion {
+                            PassionPopupOverlay(
+                                emotionTitle: displayTitle(for: emotion),
+                                items: passions(for: emotion)
+                            )
+                            .allowsHitTesting(false)
+                            .transition(.scale(scale: 0.9).combined(with: .opacity))
+                            .zIndex(1)
+                            .animation(.spring(response: 0.3, dampingFraction: 0.85), value: pressedEmotion)
+                        } else if showVisionPurposePopup {
+                            VisionPurposePopupOverlay(
+                                vision: (drivingForces.first?.ultimateVision ?? ""),
+                                purpose: (drivingForces.first?.ultimatePurpose ?? "")
+                            )
+                            .allowsHitTesting(false)
+                            .transition(.scale(scale: 0.9).combined(with: .opacity))
+                            .zIndex(1)
+                            .animation(.spring(response: 0.3, dampingFraction: 0.85), value: showVisionPurposePopup)
+                        }
+                        else if let selectedOutcome = pressedOutcome {
+                            OutcomePopupOverlay(
+                                outcome: selectedOutcome,
+                                measure: latestMeasure(for: selectedOutcome)
+                            )
+                            .allowsHitTesting(false)
+                            .transition(.scale(scale: 0.9).combined(with: .opacity))
+                            .zIndex(1)
+                            .animation(.spring(response: 0.3, dampingFraction: 0.85), value: pressedOutcome)
+                        }
+                        else if let category = pressedCategoryTitle {
+                            CategoryFulfillmentPopupOverlay(
+                                category: category,
+                                tint: categoryBackgroundColor(for: category),
+                                titleColor: categoryTextColor(for: category),
+                                vision: recordForCategory(category)?.category_vision ?? "",
+                                purpose: recordForCategory(category)?.category_purpose ?? "",
+                                roles: rolesForCategory(category).map { $0.role },
+                                foci: fociForCategory(category).map { $0.activity },
+                                resources: resourcesForCategory(category).map { $0.resource },
+                                passions: passionsForCategory(category)
+                            )
+                            .allowsHitTesting(false)
+                            .transition(.scale(scale: 0.9).combined(with: .opacity))
+                            .zIndex(1)
+                            .animation(.spring(response: 0.3, dampingFraction: 0.85), value: pressedCategoryTitle)
+                        }
                     }
-                    else if let selectedOutcome = pressedOutcome {
-                        OutcomePopupOverlay(
-                            outcome: selectedOutcome,
-                            measure: latestMeasure(for: selectedOutcome)
-                        )
-                        .allowsHitTesting(false)
-                        .transition(.scale(scale: 0.9).combined(with: .opacity))
-                        .zIndex(1)
-                        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: pressedOutcome)
-                    }
-                    else if let category = pressedCategoryTitle {
-                        CategoryFulfillmentPopupOverlay(
-                            category: category,
-                            tint: categoryBackgroundColor(for: category),
-                            titleColor: categoryTextColor(for: category),
-                            vision: recordForCategory(category)?.category_vision ?? "",
-                            purpose: recordForCategory(category)?.category_purpose ?? "",
-                            roles: rolesForCategory(category).map { $0.role },
-                            foci: fociForCategory(category).map { $0.activity },
-                            resources: resourcesForCategory(category).map { $0.resource },
-                            passions: passionsForCategory(category)
-                        )
-                        .allowsHitTesting(false)
-                        .transition(.scale(scale: 0.9).combined(with: .opacity))
-                        .zIndex(1)
-                        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: pressedCategoryTitle)
-                    }
+                    .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
+                    .clipped()
                 }
-                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
-                .clipped()
             }
             .ignoresSafeArea(.keyboard)
         }
@@ -330,10 +336,55 @@ struct ContentView: View {
         return min(4, count)
     }
 
-    private func completionCount(for categoryTitle: String) -> Int {
-        guard let record = fulfillments.first(where: { $0.category == categoryTitle }) else {
-            return 0
+    private func categoryKey(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !trimmed.isEmpty else { return "" }
+        let andNormalized = trimmed.replacingOccurrences(of: "&", with: " and ")
+        let cleaned = andNormalized.replacingOccurrences(
+            of: "[^a-z0-9]+",
+            with: " ",
+            options: .regularExpression
+        )
+        return cleaned
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+    }
+
+    private var orderedFulfillmentRecords: [Fulfillment] {
+        let defaults: [(String, UUID)] = [
+            ("Career & Business", PlanLabelSeeder.categoryIDs["Career & Business"]!),
+            ("Leadership & Impact", PlanLabelSeeder.categoryIDs["Leadership & Impact"]!),
+            ("Wealth & Lifestyle", PlanLabelSeeder.categoryIDs["Wealth & Lifestyle"]!),
+            ("Mind & Meaning", PlanLabelSeeder.categoryIDs["Mind & Meaning"]!),
+            ("Love & Relationships", PlanLabelSeeder.categoryIDs["Love & Relationships"]!),
+            ("Health & Vitality", PlanLabelSeeder.categoryIDs["Health & Vitality"]!)
+        ]
+
+        var byID = Dictionary(uniqueKeysWithValues: fulfillments.map { ($0.category_id, $0) })
+        var ordered: [Fulfillment] = []
+        var seen = Set<String>()
+        for (_, id) in defaults {
+            if let record = byID.removeValue(forKey: id) {
+                let key = categoryKey(record.category)
+                guard !key.isEmpty, !seen.contains(key) else { continue }
+                ordered.append(record)
+                seen.insert(key)
+            }
         }
+        let extras = byID.values
+            .sorted { $0.updatedAt > $1.updatedAt }
+            .filter { row in
+                let key = categoryKey(row.category)
+                guard !key.isEmpty, !seen.contains(key) else { return false }
+                seen.insert(key)
+                return true
+            }
+            .sorted { $0.category.localizedCaseInsensitiveCompare($1.category) == .orderedAscending }
+        ordered.append(contentsOf: extras)
+        return Array(ordered.prefix(7))
+    }
+
+    private func completionCount(for record: Fulfillment) -> Int {
         let hasVision = !record.category_vision.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let hasPurpose = !record.category_purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let hasRole = roles.contains { $0.category_id == record.category_id }
@@ -344,8 +395,8 @@ struct ContentView: View {
         return [hasVision, hasPurpose, hasRole, hasFocus, hasResource, hasPassion].filter { $0 }.count
     }
 
-    private func batteryPercentage(for categoryTitle: String) -> Double {
-        let count = completionCount(for: categoryTitle)
+    private func batteryPercentage(for record: Fulfillment) -> Double {
+        let count = completionCount(for: record)
         switch count {
         case 0: return 0
         case 1...2: return 25
@@ -382,38 +433,10 @@ struct ContentView: View {
     }
 
     private var fulfillmentMetrics: [(String, Color, Double)] {
-        let defaults: [(String, UUID)] = [
-            ("Career & Business", PlanLabelSeeder.categoryIDs["Career & Business"]!),
-            ("Leadership & Impact", PlanLabelSeeder.categoryIDs["Leadership & Impact"]!),
-            ("Wealth & Lifestyle", PlanLabelSeeder.categoryIDs["Wealth & Lifestyle"]!),
-            ("Mind & Meaning", PlanLabelSeeder.categoryIDs["Mind & Meaning"]!),
-            ("Love & Relationships", PlanLabelSeeder.categoryIDs["Love & Relationships"]!),
-            ("Health & Vitality", PlanLabelSeeder.categoryIDs["Health & Vitality"]!)
-        ]
-
-        var rows: [(String, Color, Double)] = defaults.map { fallback, id in
-            let title = fulfillments.first(where: { $0.category_id == id })?.category ?? fallback
-            return (title, FulfillmentCategoryTheme.color(for: title), batteryPercentage(for: title))
+        orderedFulfillmentRecords.map { record in
+            let title = record.category
+            return (title, FulfillmentCategoryTheme.color(for: title), batteryPercentage(for: record))
         }
-
-        let knownIDs = Set(defaults.map(\.1))
-        let extraTitles = fulfillments
-            .filter { !knownIDs.contains($0.category_id) }
-            .map { $0.category.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        let defaultTitleSet = Set(rows.map { $0.0.lowercased() })
-        var seen = Set<String>()
-        let extras = extraTitles
-            .filter { title in
-                let key = title.lowercased()
-                guard !defaultTitleSet.contains(key), !seen.contains(key) else { return false }
-                seen.insert(key)
-                return true
-            }
-            .map { ($0, FulfillmentCategoryTheme.color(for: $0), batteryPercentage(for: $0)) }
-            .sorted { $0.0.localizedCaseInsensitiveCompare($1.0) == .orderedAscending }
-        rows.append(contentsOf: extras)
-        return rows
     }
 
     private var header: some View {
@@ -729,7 +752,13 @@ struct ContentView: View {
                     )
                 } else {
                     HStack(alignment: .center, spacing: 16) {
-                        FulfillmentRadarGraph(metrics: fulfillmentMetrics)
+                        FulfillmentInteractiveRadar(
+                            metrics: fulfillmentMetrics,
+                            selectedIndex: $fulfillmentRadarSelectedIndex,
+                            onManualSelect: {},
+                            enableInteraction: false,
+                            useOriginalDotStyle: true
+                        )
                             .matchedGeometryEffect(id: "fulfillmentGraph", in: graphNamespace)
                             .frame(width: 140, height: 140)
                             .padding(.top, 10)
