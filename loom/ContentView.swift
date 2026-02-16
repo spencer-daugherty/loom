@@ -201,17 +201,17 @@ struct ContentView: View {
     }
 
     private func ensureFulfillmentCategoriesExist() {
-        let titles = [
-            "Career & Business",
-            "Leadership & Impact",
-            "Wealth & Lifestyle",
-            "Mind & Meaning",
-            "Love & Relationships",
-            "Health & Vitality",
+        let defaults: [(String, UUID)] = [
+            ("Career & Business", PlanLabelSeeder.categoryIDs["Career & Business"]!),
+            ("Leadership & Impact", PlanLabelSeeder.categoryIDs["Leadership & Impact"]!),
+            ("Wealth & Lifestyle", PlanLabelSeeder.categoryIDs["Wealth & Lifestyle"]!),
+            ("Mind & Meaning", PlanLabelSeeder.categoryIDs["Mind & Meaning"]!),
+            ("Love & Relationships", PlanLabelSeeder.categoryIDs["Love & Relationships"]!),
+            ("Health & Vitality", PlanLabelSeeder.categoryIDs["Health & Vitality"]!)
         ]
         var insertedAny = false
-        for title in titles where !fulfillments.contains(where: { $0.category == title }) {
-            modelContext.insert(Fulfillment(category: title))
+        for (title, id) in defaults where !fulfillments.contains(where: { $0.category_id == id }) {
+            modelContext.insert(Fulfillment(category_id: id, category: title))
             insertedAny = true
         }
         if insertedAny {
@@ -382,14 +382,38 @@ struct ContentView: View {
     }
 
     private var fulfillmentMetrics: [(String, Color, Double)] {
-        [
-            ("Career & Business",    FulfillmentCategoryTheme.color(for: "Career & Business"),    batteryPercentage(for: "Career & Business")),
-            ("Leadership & Impact",  FulfillmentCategoryTheme.color(for: "Leadership & Impact"),  batteryPercentage(for: "Leadership & Impact")),
-            ("Wealth & Lifestyle",   FulfillmentCategoryTheme.color(for: "Wealth & Lifestyle"),   batteryPercentage(for: "Wealth & Lifestyle")),
-            ("Mind & Meaning",       FulfillmentCategoryTheme.color(for: "Mind & Meaning"),       batteryPercentage(for: "Mind & Meaning")),
-            ("Love & Relationships", FulfillmentCategoryTheme.color(for: "Love & Relationships"), batteryPercentage(for: "Love & Relationships")),
-            ("Health & Vitality",    FulfillmentCategoryTheme.color(for: "Health & Vitality"),    batteryPercentage(for: "Health & Vitality"))
+        let defaults: [(String, UUID)] = [
+            ("Career & Business", PlanLabelSeeder.categoryIDs["Career & Business"]!),
+            ("Leadership & Impact", PlanLabelSeeder.categoryIDs["Leadership & Impact"]!),
+            ("Wealth & Lifestyle", PlanLabelSeeder.categoryIDs["Wealth & Lifestyle"]!),
+            ("Mind & Meaning", PlanLabelSeeder.categoryIDs["Mind & Meaning"]!),
+            ("Love & Relationships", PlanLabelSeeder.categoryIDs["Love & Relationships"]!),
+            ("Health & Vitality", PlanLabelSeeder.categoryIDs["Health & Vitality"]!)
         ]
+
+        var rows: [(String, Color, Double)] = defaults.map { fallback, id in
+            let title = fulfillments.first(where: { $0.category_id == id })?.category ?? fallback
+            return (title, FulfillmentCategoryTheme.color(for: title), batteryPercentage(for: title))
+        }
+
+        let knownIDs = Set(defaults.map(\.1))
+        let extraTitles = fulfillments
+            .filter { !knownIDs.contains($0.category_id) }
+            .map { $0.category.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let defaultTitleSet = Set(rows.map { $0.0.lowercased() })
+        var seen = Set<String>()
+        let extras = extraTitles
+            .filter { title in
+                let key = title.lowercased()
+                guard !defaultTitleSet.contains(key), !seen.contains(key) else { return false }
+                seen.insert(key)
+                return true
+            }
+            .map { ($0, FulfillmentCategoryTheme.color(for: $0), batteryPercentage(for: $0)) }
+            .sorted { $0.0.localizedCaseInsensitiveCompare($1.0) == .orderedAscending }
+        rows.append(contentsOf: extras)
+        return rows
     }
 
     private var header: some View {
@@ -712,14 +736,7 @@ struct ContentView: View {
                         
                         // labels
                         VStack(alignment: .leading, spacing: 6) {
-                            let metrics: [(String, Color, Double)] = [
-                                ("Career & Business",    FulfillmentCategoryTheme.color(for: "Career & Business"),    80),
-                                ("Leadership & Impact",  FulfillmentCategoryTheme.color(for: "Leadership & Impact"),  65),
-                                ("Wealth & Lifestyle",   FulfillmentCategoryTheme.color(for: "Wealth & Lifestyle"),   90),
-                                ("Mind & Meaning",       FulfillmentCategoryTheme.color(for: "Mind & Meaning"),       75),
-                                ("Love & Relationships", FulfillmentCategoryTheme.color(for: "Love & Relationships"), 85),
-                                ("Health & Vitality",    FulfillmentCategoryTheme.color(for: "Health & Vitality"),    70)
-                            ]
+                            let metrics = fulfillmentMetrics
                             ForEach(metrics, id: \.0) { metric in
                                 Text(metric.0)
                                     .foregroundColor(metric.1)

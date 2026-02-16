@@ -8,17 +8,19 @@ import UIKit
 fileprivate struct CategoryDef: Identifiable {
     let id: String
     let title: String
-    let iconName: String
+    let categoryID: UUID
 }
 
-fileprivate let categories: [CategoryDef] = [
-    .init(id: "career",     title: "Career & Business",    iconName: "battery.25"),
-    .init(id: "leadership", title: "Leadership & Impact",  iconName: "battery.25"),
-    .init(id: "wealth",     title: "Wealth & Lifestyle",   iconName: "battery.25"),
-    .init(id: "mind",       title: "Mind & Meaning",       iconName: "battery.25"),
-    .init(id: "love",       title: "Love & Relationships", iconName: "battery.25"),
-    .init(id: "health",     title: "Health & Vitality",    iconName: "battery.25"),
+fileprivate let defaultCategoryDefs: [CategoryDef] = [
+    .init(id: "career",     title: "Career & Business",    categoryID: PlanLabelSeeder.categoryIDs["Career & Business"]!),
+    .init(id: "leadership", title: "Leadership & Impact",  categoryID: PlanLabelSeeder.categoryIDs["Leadership & Impact"]!),
+    .init(id: "wealth",     title: "Wealth & Lifestyle",   categoryID: PlanLabelSeeder.categoryIDs["Wealth & Lifestyle"]!),
+    .init(id: "mind",       title: "Mind & Meaning",       categoryID: PlanLabelSeeder.categoryIDs["Mind & Meaning"]!),
+    .init(id: "love",       title: "Love & Relationships", categoryID: PlanLabelSeeder.categoryIDs["Love & Relationships"]!),
+    .init(id: "health",     title: "Health & Vitality",    categoryID: PlanLabelSeeder.categoryIDs["Health & Vitality"]!),
 ]
+
+fileprivate let defaultFulfillmentCategoryTitles: [String] = defaultCategoryDefs.map(\.title)
 
 fileprivate func estimatedListRowHeight() -> CGFloat {
     #if canImport(UIKit)
@@ -141,6 +143,45 @@ struct FulfillmentView: View {
     @FocusState private var focusedField: Field?
     private enum Field { case vision, purpose, role, focus, resource }
     private let radarTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
+    private func categoryKey(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !trimmed.isEmpty else { return "" }
+        let andNormalized = trimmed.replacingOccurrences(of: "&", with: " and ")
+        let cleaned = andNormalized.replacingOccurrences(
+            of: "[^a-z0-9]+",
+            with: " ",
+            options: .regularExpression
+        )
+        let collapsed = cleaned
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+        return collapsed
+    }
+
+    private var orderedFulfillments: [Fulfillment] {
+        var byID = Dictionary(uniqueKeysWithValues: fulfillments.map { ($0.category_id, $0) })
+        var ordered: [Fulfillment] = []
+        var seenTitleKeys = Set<String>()
+        for def in defaultCategoryDefs {
+            if let record = byID.removeValue(forKey: def.categoryID) {
+                let key = categoryKey(record.category)
+                guard !key.isEmpty, !seenTitleKeys.contains(key) else { continue }
+                ordered.append(record)
+                seenTitleKeys.insert(key)
+            }
+        }
+        let extras = byID.values
+            .sorted { $0.updatedAt > $1.updatedAt }
+            .filter { row in
+                let key = categoryKey(row.category)
+                guard !key.isEmpty, !seenTitleKeys.contains(key) else { return false }
+                seenTitleKeys.insert(key)
+                return true
+            }
+            .sorted { $0.category.localizedCaseInsensitiveCompare($1.category) == .orderedAscending }
+        ordered.append(contentsOf: extras)
+        return Array(ordered.prefix(7))
+    }
 
     var body: some View {
         ScrollView {
@@ -161,13 +202,15 @@ struct FulfillmentView: View {
                         .background(Color(.systemGray6))
 
                     VStack(spacing: 16) {
-                        ForEach(categories) { cat in
+                        ForEach(orderedFulfillments, id: \.category_id) { record in
+                            let title = record.category
                             card(
-                                id: cat.id,
-                                title: cat.title,
-                                iconName: batteryIconName(for: cat.title),
-                                color: FulfillmentCategoryTheme.color(for: cat.title),
-                                lightColor: FulfillmentCategoryTheme.lightColor(for: cat.title)
+                                id: record.category_id.uuidString,
+                                title: title,
+                                iconName: batteryIconName(for: record),
+                                color: FulfillmentCategoryTheme.color(for: title),
+                                lightColor: FulfillmentCategoryTheme.lightColor(for: title),
+                                record: record
                             )
                         }
                         Spacer()
@@ -201,9 +244,10 @@ struct FulfillmentView: View {
             ensureCategoryRecordsExist()
         }
         .onReceive(radarTimer) { _ in
-            guard !categories.isEmpty else { return }
+            guard !orderedFulfillments.isEmpty else { return }
             guard Date() >= radarAutoRotatePausedUntil else { return }
-            highlightedCategoryIndex = (highlightedCategoryIndex + 1) % categories.count
+            if highlightedCategoryIndex >= orderedFulfillments.count { highlightedCategoryIndex = 0 }
+            highlightedCategoryIndex = (highlightedCategoryIndex + 1) % orderedFulfillments.count
         }
         .sheet(isPresented: $isShowingInstructions) {
             VStack(alignment: .leading, spacing: 12) {
@@ -225,22 +269,27 @@ struct FulfillmentView: View {
             let baseGraphWidth = max(120, width * 0.40)
             let graphWidth = baseGraphWidth * 1.2
             let leftWidth = max(120, width - baseGraphWidth - 28)
-            let selected = categories[highlightedCategoryIndex]
-            let selectedScore = radarScore(for: selected.title)
+            if orderedFulfillments.isEmpty {
+                EmptyView()
+            } else {
+                let selectedIndex = min(max(0, highlightedCategoryIndex), max(0, orderedFulfillments.count - 1))
+                let selected = orderedFulfillments[selectedIndex]
+                let selectedTitle = selected.category
+                let selectedScore = Int(round((batteryPercentage(for: selected) / 100.0) * 5.0))
 
-            HStack(alignment: .center, spacing: 12) {
+                HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
-                        Text(selected.title)
+                        Text(selectedTitle)
                             .font(.headline)
                             .fontWeight(.bold)
-                            .foregroundStyle(FulfillmentCategoryTheme.color(for: selected.title))
+                            .foregroundStyle(FulfillmentCategoryTheme.color(for: selectedTitle))
                             .lineLimit(2)
                     Text("Tap radar slice to focus")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
                     RoundedRectangle(cornerRadius: 10)
-                        .fill(FulfillmentCategoryTheme.color(for: selected.title))
+                        .fill(FulfillmentCategoryTheme.color(for: selectedTitle))
                         .frame(width: 92, height: 58)
                         .overlay {
                             Text("\(selectedScore)/5")
@@ -295,6 +344,7 @@ struct FulfillmentView: View {
                 .frame(width: baseGraphWidth, height: 245, alignment: .center)
 
                 Spacer(minLength: 0)
+                }
             }
         }
         .frame(height: 245)
@@ -303,8 +353,7 @@ struct FulfillmentView: View {
 
     private func commitInlineIfNeeded() {
         guard let openID = expandedCardID,
-              let cat = categories.first(where: { $0.id == openID }),
-              let record = fulfillmentRecord(for: cat.title)
+              let record = orderedFulfillments.first(where: { $0.category_id.uuidString == openID })
         else { return }
 
         if isAddingRole {
@@ -329,8 +378,7 @@ struct FulfillmentView: View {
     
     private func commitInlineExcluding(_ keepOpen: Field?) {
         guard let openID = expandedCardID,
-              let cat = categories.first(where: { $0.id == openID }),
-              let record = fulfillmentRecord(for: cat.title)
+              let record = orderedFulfillments.first(where: { $0.category_id.uuidString == openID })
         else { return }
 
         if isAddingRole && keepOpen != .role {
@@ -359,9 +407,9 @@ struct FulfillmentView: View {
         title: String,
         iconName: String,
         color: Color,
-        lightColor: Color
+        lightColor: Color,
+        record: Fulfillment
     ) -> some View {
-        if let record = fulfillmentRecord(for: title) {
             let isExpanded = (expandedCardID == id)
 
             VStack(spacing: 0) {
@@ -571,14 +619,11 @@ struct FulfillmentView: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: 16))
             .shadow(color: Color.black.opacity(0.1), radius: 6, x: 0, y: 3)
-        } else {
-            EmptyView()
-        }
     }
 
     // MARK: - Completion Helpers
-    private func batteryIconName(for categoryTitle: String) -> String {
-        let count = completionCount(for: categoryTitle)
+    private func batteryIconName(for record: Fulfillment) -> String {
+        let count = completionCount(for: record)
         switch count {
         case 0: return "battery.0"
         case 1...2: return "battery.25"
@@ -588,10 +633,7 @@ struct FulfillmentView: View {
         }
     }
 
-    private func completionCount(for categoryTitle: String) -> Int {
-        guard let record = fulfillments.first(where: { $0.category == categoryTitle }) else {
-            return 0
-        }
+    private func completionCount(for record: Fulfillment) -> Int {
         let hasVision = !record.category_vision.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let hasPurpose = !record.category_purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let hasRole = roles.contains { $0.category_id == record.category_id }
@@ -602,34 +644,31 @@ struct FulfillmentView: View {
         return [hasVision, hasPurpose, hasRole, hasFocus, hasResource, hasPassion].filter { $0 }.count
     }
 
-    private func isCategoryComplete(_ categoryTitle: String) -> Bool {
-        completionCount(for: categoryTitle) == 6
-    }
-
     private var fulfillmentMetrics: [(String, Color, Double)] {
-        categories.map { cat in
-            let pct = (Double(radarScore(for: cat.title)) / 5.0) * 100.0
-            return (cat.title, FulfillmentCategoryTheme.color(for: cat.title), pct)
+        orderedFulfillments.map { record in
+            let title = record.category
+            let pct = batteryPercentage(for: record)
+            return (title, FulfillmentCategoryTheme.color(for: title), pct)
         }
     }
 
-    private func radarScore(for categoryTitle: String) -> Int {
-        let raw = completionCount(for: categoryTitle)
-        let scaled = Int(round((Double(raw) / 6.0) * 5.0))
-        return min(5, max(0, scaled))
+    private func batteryPercentage(for record: Fulfillment) -> Double {
+        let count = completionCount(for: record)
+        switch count {
+        case 0: return 0
+        case 1...2: return 25
+        case 3...4: return 50
+        case 5: return 75
+        default: return 100
+        }
     }
 
     // MARK: - Data Helpers
 
-    private func fulfillmentRecord(for category: String) -> Fulfillment? {
-        fulfillments.first(where: { $0.category == category })
-    }
-
     private func ensureCategoryRecordsExist() {
         var insertedAny = false
-        for cat in categories where fulfillmentRecord(for: cat.title) == nil {
-            let f = Fulfillment(category: cat.title)
-            modelContext.insert(f)
+        for def in defaultCategoryDefs where !fulfillments.contains(where: { $0.category_id == def.categoryID }) {
+            modelContext.insert(Fulfillment(category_id: def.categoryID, category: def.title))
             insertedAny = true
         }
         if insertedAny {
@@ -850,28 +889,21 @@ private struct FulfillmentTrendRow: Identifiable {
 }
 
 private struct FulfillmentTrendsView: View {
-    private let rows: [FulfillmentTrendRow] = FulfillmentTrendsView.buildRows()
+    @Query(sort: \Fulfillment.updatedAt, order: .forward) private var fulfillments: [Fulfillment]
     private let months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-    private var categoryStyleScale: KeyValuePairs<String, Color> {
-        [
-            "Career & Business": FulfillmentCategoryTheme.color(for: "Career & Business"),
-            "Leadership & Impact": FulfillmentCategoryTheme.color(for: "Leadership & Impact"),
-            "Wealth & Lifestyle": FulfillmentCategoryTheme.color(for: "Wealth & Lifestyle"),
-            "Mind & Meaning": FulfillmentCategoryTheme.color(for: "Mind & Meaning"),
-            "Love & Relationships": FulfillmentCategoryTheme.color(for: "Love & Relationships"),
-            "Health & Vitality": FulfillmentCategoryTheme.color(for: "Health & Vitality")
-        ]
+    private var categoryTitles: [String] {
+        let titles = fulfillments.map(\.category)
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        if titles.isEmpty {
+            return defaultFulfillmentCategoryTitles
+        }
+        return Array(Set(titles)).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
-
-    private var colorScale: [String: Color] {
-        [
-            "Career & Business": FulfillmentCategoryTheme.color(for: "Career & Business"),
-            "Leadership & Impact": FulfillmentCategoryTheme.color(for: "Leadership & Impact"),
-            "Wealth & Lifestyle": FulfillmentCategoryTheme.color(for: "Wealth & Lifestyle"),
-            "Mind & Meaning": FulfillmentCategoryTheme.color(for: "Mind & Meaning"),
-            "Love & Relationships": FulfillmentCategoryTheme.color(for: "Love & Relationships"),
-            "Health & Vitality": FulfillmentCategoryTheme.color(for: "Health & Vitality")
-        ]
+    private var rows: [FulfillmentTrendRow] {
+        buildRows(categoryTitles: categoryTitles, months: months)
+    }
+    private var categoryRange: [Color] {
+        categoryTitles.map { FulfillmentCategoryTheme.color(for: $0) }
     }
 
     var body: some View {
@@ -886,7 +918,7 @@ private struct FulfillmentTrendsView: View {
                     .foregroundStyle(by: .value("Category", row.category))
                     .interpolationMethod(.catmullRom)
                 }
-                .chartForegroundStyleScale(categoryStyleScale)
+                .chartForegroundStyleScale(domain: categoryTitles, range: categoryRange)
                 .chartXScale(domain: 0...11)
                 .chartXAxis {
                     AxisMarks(values: Array(0...11)) { value in
@@ -997,17 +1029,7 @@ private struct FulfillmentTrendsView: View {
             .frame(width: width, height: height)
     }
 
-    private static func buildRows() -> [FulfillmentTrendRow] {
-        let months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-        let categoryTitles = [
-            "Career & Business",
-            "Leadership & Impact",
-            "Wealth & Lifestyle",
-            "Mind & Meaning",
-            "Love & Relationships",
-            "Health & Vitality"
-        ]
-
+    private func buildRows(categoryTitles: [String], months: [String]) -> [FulfillmentTrendRow] {
         return months.enumerated().flatMap { monthIndex, month in
             categoryTitles.enumerated().map { categoryIndex, category in
                 // Deterministic but varied whole-number values in 1...5.

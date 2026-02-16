@@ -23,93 +23,98 @@ struct FulfillmentRadarGraph: View {
             let radius = half
             let center = CGPoint(x: half, y: half)
             let count  = metrics.count
+            let sideCount = max(3, count)
 
-            // compute outer hexagon vertices
-            let outerPoints: [CGPoint] = (0..<count).map { i in
-                let angle = Angle.degrees(Double(i)/Double(count)*360 - 90).radians
-                return CGPoint(x: half + cos(angle)*radius,
-                               y: half + sin(angle)*radius)
-            }
-            // compute data polygon vertices
-            let filledPoints: [CGPoint] = outerPoints.enumerated().map { i, pt in
-                let ratio = max(0, min(metrics[i].2 / 100, 1))
-                return CGPoint(x: half + (pt.x - half)*ratio,
-                               y: half + (pt.y - half)*ratio)
-            }
-
-            // build the net path
-            let webPath = Path { path in
-                guard let first = filledPoints.first else { return }
-                path.move(to: first)
-                for p in filledPoints.dropFirst() { path.addLine(to: p) }
-                path.closeSubpath()
-            }
-
-            // angular gradient stops for netting (50% opacity), thinner bands
-            let stops: [Gradient.Stop] = {
-                let countD: Double = Double(count)
-                let frac: Double = 1.0 / countD
-                let shrink: Double = frac * 0.3
-                var s: [Gradient.Stop] = []
-                s.reserveCapacity(count * 2 + 1)
-                for i in 0..<count {
-                    let iD: Double = Double(i)
-                    let base: Double = iD / countD
-                    let start: Double = max(base - shrink, 0)
-                    let end: Double = min(base + shrink, 1)
-                    let color = metrics[i].1.opacity(0.5)
-                    s.append(.init(color: color, location: start))
-                    s.append(.init(color: color, location: end))
+            if count == 0 {
+                Color.clear
+            } else {
+                // compute outer polygon vertices (one side per category)
+                let outerPoints: [CGPoint] = (0..<count).map { i in
+                    let angle = Angle.degrees(Double(i)/Double(count)*360 - 90).radians
+                    return CGPoint(x: half + cos(angle)*radius,
+                                   y: half + sin(angle)*radius)
                 }
-                let endColor = metrics[0].1.opacity(0.5)
-                s.append(.init(color: endColor, location: 1.0))
-                return s
-            }()
+                // compute data polygon vertices
+                let filledPoints: [CGPoint] = outerPoints.enumerated().map { i, pt in
+                    let ratio = max(0, min(metrics[i].2 / 100, 1))
+                    return CGPoint(x: half + (pt.x - half)*ratio,
+                                   y: half + (pt.y - half)*ratio)
+                }
 
-            ZStack {
-                // Netting
-                webPath
-                    .fill(
-                        AngularGradient(
-                            gradient: .init(stops: stops),
-                            center: .center,
-                            startAngle: .degrees(-90),
-                            endAngle: .degrees(270)
-                        )
-                    )
+                // build the net path
+                let webPath = Path { path in
+                    guard let first = filledPoints.first else { return }
+                    path.move(to: first)
+                    for p in filledPoints.dropFirst() { path.addLine(to: p) }
+                    path.closeSubpath()
+                }
 
-                // Outermost hexagon outline (optional)
-                if showOutline {
-                    Path { path in
-                        for j in 0..<6 {
-                            let a = Angle.degrees(Double(j)/6*360 - 90).radians
-                            let pt = CGPoint(
-                                x: center.x + cos(a)*radius,
-                                y: center.y + sin(a)*radius
-                            )
-                            if j == 0 { path.move(to: pt) }
-                            else      { path.addLine(to: pt) }
-                        }
-                        path.closeSubpath()
+                // angular gradient stops for netting (50% opacity), thinner bands
+                let stops: [Gradient.Stop] = {
+                    let countD: Double = Double(count)
+                    let frac: Double = 1.0 / countD
+                    let shrink: Double = frac * 0.3
+                    var s: [Gradient.Stop] = []
+                    s.reserveCapacity(count * 2 + 1)
+                    for i in 0..<count {
+                        let iD: Double = Double(i)
+                        let base: Double = iD / countD
+                        let start: Double = max(base - shrink, 0)
+                        let end: Double = min(base + shrink, 1)
+                        let color = metrics[i].1.opacity(0.5)
+                        s.append(.init(color: color, location: start))
+                        s.append(.init(color: color, location: end))
                     }
-                    .stroke(Color(.separator).opacity(0.5), lineWidth: 4)
-                }
+                    let endColor = metrics[0].1.opacity(0.5)
+                    s.append(.init(color: endColor, location: 1.0))
+                    return s
+                }()
 
-                // Data dots with white outline and glow
-                ForEach(filledPoints.indices, id: \.self) { i in
-                    let scale = max(0.1, dotDiameter / 14)
-                    Circle()
-                        .fill(metrics[i].1)
-                        .frame(width: dotDiameter, height: dotDiameter)
-                        .overlay {
-                            if showDotOutline {
-                                Circle().stroke(Color(.systemBackground), lineWidth: 2 * scale)
+                ZStack {
+                    // Netting
+                    webPath
+                        .fill(
+                            AngularGradient(
+                                gradient: .init(stops: stops),
+                                center: .center,
+                                startAngle: .degrees(-90),
+                                endAngle: .degrees(270)
+                            )
+                        )
+
+                    // Outermost polygon outline (optional)
+                    if showOutline {
+                        Path { path in
+                            for j in 0..<sideCount {
+                                let a = Angle.degrees(Double(j)/Double(sideCount)*360 - 90).radians
+                                let pt = CGPoint(
+                                    x: center.x + cos(a)*radius,
+                                    y: center.y + sin(a)*radius
+                                )
+                                if j == 0 { path.move(to: pt) }
+                                else      { path.addLine(to: pt) }
                             }
+                            path.closeSubpath()
                         }
-                        .shadow(color: showDotShadow ? Color.white.opacity(0.9) : Color.clear,
-                                radius: showDotShadow ? 10 * scale : 0,
-                                x: 0, y: 0)
-                        .position(filledPoints[i])
+                        .stroke(Color(.separator).opacity(0.5), lineWidth: 4)
+                    }
+
+                    // Data dots with white outline and glow
+                    ForEach(filledPoints.indices, id: \.self) { i in
+                        let scale = max(0.1, dotDiameter / 14)
+                        Circle()
+                            .fill(metrics[i].1)
+                            .frame(width: dotDiameter, height: dotDiameter)
+                            .overlay {
+                                if showDotOutline {
+                                    Circle().stroke(Color(.systemBackground), lineWidth: 2 * scale)
+                                }
+                            }
+                            .shadow(color: showDotShadow ? Color.white.opacity(0.9) : Color.clear,
+                                    radius: showDotShadow ? 10 * scale : 0,
+                                    x: 0, y: 0)
+                            .position(filledPoints[i])
+                    }
                 }
             }
         }
@@ -492,4 +497,3 @@ struct LoadingSplashView: View {
         }
     }
 }
-

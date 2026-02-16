@@ -996,6 +996,13 @@ struct AccountView: View {
                         fileAttachmentCount: filesAndLinks.filter { $0.kind == .file }.count
                     )
                 )
+                if let chunkCategory = chunk?.category, !chunkCategory.isEmpty {
+                    FulfillmentCategoryTheme.saveCompletedActionBlockChunkColorKey(
+                        FulfillmentCategoryTheme.colorKey(for: chunkCategory),
+                        archiveId: archive.id,
+                        chunkId: action.plannedChunkId
+                    )
+                }
                 migratedActions += 1
             }
 
@@ -1952,15 +1959,29 @@ private struct ManageFulfillmentCategoriesView: View {
 }
 
 private struct FulfillmentCategoryLabelsView: View {
-    let category: String
     @Environment(\.modelContext) private var context
+    @Query(sort: \Fulfillment.category, order: .forward) private var allFulfillments: [Fulfillment]
+    @Query(sort: \FulfillmentArchive.category, order: .forward) private var allFulfillmentArchives: [FulfillmentArchive]
     @Query(sort: \PlanLabel.label, order: .forward) private var allLabels: [PlanLabel]
+    @Query(sort: \PlanChunkSelection.updatedAt, order: .reverse) private var allChunkSelections: [PlanChunkSelection]
+    @Query(sort: \PlannedChunk.updatedAt, order: .reverse) private var allPlannedChunks: [PlannedChunk]
+    @Query(sort: \Outcomes.updatedAt, order: .reverse) private var allOutcomes: [Outcomes]
+    @Query(sort: \OutcomesArchive.updatedAt, order: .reverse) private var allOutcomeArchives: [OutcomesArchive]
+    @State private var currentCategory: String
+    @State private var isEditingCategoryName: Bool = false
+    @State private var editedCategoryName: String = ""
+    @State private var showCategoryRenameAlert: Bool = false
     @State private var isAddingLabel: Bool = false
     @State private var newLabelText: String = ""
     @State private var editingLabelID: UUID?
     @State private var editingText: String = ""
     @State private var showMinimumLabelsAlert: Bool = false
     @FocusState private var focusedField: LabelField?
+    @FocusState private var isCategoryNameFieldFocused: Bool
+
+    init(category: String) {
+        _currentCategory = State(initialValue: category)
+    }
 
     private enum LabelField: Hashable {
         case add
@@ -1969,18 +1990,44 @@ private struct FulfillmentCategoryLabelsView: View {
 
     private var labelsForCategory: [PlanLabel] {
         allLabels
-            .filter { $0.category == category }
+            .filter { $0.category == currentCategory }
             .sorted { $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending }
     }
 
     private var categoryID: UUID {
         labelsForCategory.first?.categoryId
-            ?? PlanLabelSeeder.categoryIDs[category]
+            ?? PlanLabelSeeder.categoryIDs[currentCategory]
             ?? UUID()
     }
 
     var body: some View {
         List {
+            Section("Category") {
+                HStack(spacing: 10) {
+                    if isEditingCategoryName {
+                        TextField("Category", text: $editedCategoryName)
+                            .focused($isCategoryNameFieldFocused)
+                            .submitLabel(.done)
+                            .onSubmit { commitCategoryRename() }
+                    } else {
+                        Text(currentCategory)
+                            .fontWeight(.semibold)
+                    }
+                    Spacer()
+                    Button(isEditingCategoryName ? "Save" : "Edit") {
+                        if isEditingCategoryName {
+                            commitCategoryRename()
+                        } else {
+                            editedCategoryName = currentCategory
+                            isEditingCategoryName = true
+                            isCategoryNameFieldFocused = true
+                        }
+                    }
+                    .foregroundStyle(.blue)
+                }
+                .padding(.vertical, 2)
+            }
+
             Section("Labels") {
                 ForEach(labelsForCategory, id: \.labelId) { label in
                     if editingLabelID == label.labelId {
@@ -2025,8 +2072,13 @@ private struct FulfillmentCategoryLabelsView: View {
             }
         }
         .listStyle(.insetGrouped)
-        .navigationTitle(category)
+        .navigationTitle(currentCategory)
         .navigationBarTitleDisplayMode(.inline)
+        .alert("Unable to rename category", isPresented: $showCategoryRenameAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("A category with that name already exists.")
+        }
         .alert("Minimum 3 labels required", isPresented: $showMinimumLabelsAlert) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -2036,6 +2088,11 @@ private struct FulfillmentCategoryLabelsView: View {
             if isAddingLabel, newValue != .add {
                 isAddingLabel = false
                 newLabelText = ""
+            }
+        }
+        .onChange(of: isCategoryNameFieldFocused) { _, focused in
+            if !focused, isEditingCategoryName {
+                commitCategoryRename()
             }
         }
     }
@@ -2068,7 +2125,7 @@ private struct FulfillmentCategoryLabelsView: View {
 
         label.label = normalized
         label.labelSourceKey = candidateKey
-        label.category = category
+        label.category = currentCategory
         label.categoryId = categoryID
         try? context.save()
         editingLabelID = nil
@@ -2089,7 +2146,7 @@ private struct FulfillmentCategoryLabelsView: View {
         let label = PlanLabel(
             label: normalized,
             categoryId: categoryID,
-            category: category,
+            category: currentCategory,
             source: "default"
         )
         context.insert(label)
@@ -2110,6 +2167,69 @@ private struct FulfillmentCategoryLabelsView: View {
             editingLabelID = nil
             editingText = ""
         }
+    }
+
+    private func commitCategoryRename() {
+        let trimmed = editedCategoryName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            isEditingCategoryName = false
+            editedCategoryName = ""
+            return
+        }
+        if trimmed.caseInsensitiveCompare(currentCategory) == .orderedSame {
+            currentCategory = trimmed
+            isEditingCategoryName = false
+            editedCategoryName = ""
+            return
+        }
+
+        let duplicateInFulfillment = allFulfillments.contains {
+            $0.category.caseInsensitiveCompare(trimmed) == .orderedSame &&
+            $0.category.caseInsensitiveCompare(currentCategory) != .orderedSame
+        }
+        let duplicateInLabels = allLabels.contains {
+            $0.category.caseInsensitiveCompare(trimmed) == .orderedSame &&
+            $0.category.caseInsensitiveCompare(currentCategory) != .orderedSame
+        }
+        if duplicateInFulfillment || duplicateInLabels {
+            showCategoryRenameAlert = true
+            return
+        }
+
+        for fulfillment in allFulfillments where fulfillment.category == currentCategory {
+            fulfillment.category = trimmed
+        }
+        for archive in allFulfillmentArchives where archive.category == currentCategory {
+            archive.category = trimmed
+        }
+        for label in allLabels where label.category == currentCategory {
+            label.category = trimmed
+        }
+        for selection in allChunkSelections where selection.category == currentCategory {
+            selection.category = trimmed
+        }
+        for chunk in allPlannedChunks where chunk.category == currentCategory {
+            chunk.category = trimmed
+        }
+        for outcome in allOutcomes where outcome.category == currentCategory {
+            outcome.category = trimmed
+        }
+        for archive in allOutcomeArchives where archive.category == currentCategory {
+            archive.category = trimmed
+        }
+        // Intentionally do not mutate completed archives or completed action block archives:
+        // those records are historical snapshots and should stay locked in time.
+
+        var map = FulfillmentCategoryTheme.persistedColorKeys()
+        if let existing = map.removeValue(forKey: currentCategory) {
+            map[trimmed] = existing
+            FulfillmentCategoryTheme.persistColorKeys(map)
+        }
+
+        try? context.save()
+        currentCategory = trimmed
+        isEditingCategoryName = false
+        editedCategoryName = ""
     }
 }
 

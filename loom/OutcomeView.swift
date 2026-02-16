@@ -66,7 +66,7 @@ struct OutcomeView: View {
     @State private var startNow: Bool
     @State private var startDate: Date
     @State private var endDate: Date
-    @State private var selectedCategory: ObjectivesAddView.Category
+    @State private var selectedCategoryName: String
     @State private var isShowingDeleteOutcomeAlert = false
     @State private var isShowingAddMeasureSheet = false
     @State private var isShowingUpdateGoalSheet = false
@@ -102,6 +102,7 @@ struct OutcomeView: View {
     @Query(sort: \QuickCompletedCaptureItem.completedAt, order: .reverse) private var quickCompletedCaptureItems: [QuickCompletedCaptureItem]
     @Query private var allReflectionActions: [ActionBlocksReflectionArchiveAction]
     @Query private var allReflectionOutcomes: [ActionBlocksReflectionArchiveOutcome]
+    @Query(sort: \Fulfillment.category, order: .forward) private var fulfillments: [Fulfillment]
     @Query private var allReflectionArchives: [ActionBlocksReflectionArchive]
 
     private struct CompletedActionCandidate: Identifiable {
@@ -119,6 +120,19 @@ struct OutcomeView: View {
         colorScheme == .dark ? .black : .primary
     }
 
+    private var categoryOptions: [String] {
+        let titles = fulfillments
+            .map(\.category)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        var unique = Array(Set(titles)).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+        let current = selectedCategoryName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !current.isEmpty && !unique.contains(where: { $0.caseInsensitiveCompare(current) == .orderedSame }) {
+            unique.insert(current, at: 0)
+        }
+        return unique
+    }
+
     init(outcome: Outcomes, outcomeMeasure: OutcomesMeasure?) {
         self.outcome = outcome
         self.outcomeMeasure = outcomeMeasure
@@ -128,7 +142,7 @@ struct OutcomeView: View {
         _startNow = State(initialValue: outcome.start == outcome.updatedAt)
         _startDate = State(initialValue: outcome.start)
         _endDate = State(initialValue: outcome.end)
-        _selectedCategory = State(initialValue: ObjectivesAddView.Category(rawValue: outcome.category) ?? .placeholder)
+        _selectedCategoryName = State(initialValue: outcome.category)
 
         if let outcomeMeasure {
             _isMeasurable = State(initialValue: outcomeMeasure.measure_amt != 0)
@@ -168,7 +182,7 @@ struct OutcomeView: View {
             startDate != outcome.start ||
             endDate != outcome.end ||
             startNow != (outcome.start == outcome.updatedAt) ||
-            selectedCategory.rawValue != outcome.category ||
+            selectedCategoryName != outcome.category ||
             measureChanged
     }
 
@@ -181,7 +195,7 @@ struct OutcomeView: View {
     }
 
     private var isSaveDisabled: Bool {
-        goal.isEmpty || selectedCategory == .placeholder || (isMeasurable && (measureGoal.isEmpty || parseFormattedDecimalOutcome(measureGoal) == nil))
+        goal.isEmpty || selectedCategoryName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (isMeasurable && (measureGoal.isEmpty || parseFormattedDecimalOutcome(measureGoal) == nil))
     }
 
     private var daysLeft: Int {
@@ -353,7 +367,7 @@ struct OutcomeView: View {
                 Text(goal.isEmpty ? "Goal" : goal)
                     .font(.title3)
                     .fontWeight(.semibold)
-                    .foregroundColor(categoryColor(for: selectedCategory.rawValue))
+                    .foregroundColor(categoryColor(for: selectedCategoryName))
                     .lineLimit(3)
                 Text(reasons)
                     .font(.subheadline)
@@ -376,7 +390,7 @@ struct OutcomeView: View {
                     .padding(.horizontal, 10)
                     .background(
                         RoundedRectangle(cornerRadius: 8)
-                            .fill(lightenedCategoryColor(for: selectedCategory.rawValue))
+                            .fill(lightenedCategoryColor(for: selectedCategoryName))
                     )
                     .frame(height: 44)
 
@@ -555,7 +569,10 @@ struct OutcomeView: View {
                 isShowingDatePicker: $isShowingTargetDatePicker
             )
             outcomeMeasureSection
-            CategorySection(selectedCategory: $selectedCategory)
+            OutcomeCategorySection(
+                selectedCategoryName: $selectedCategoryName,
+                categories: categoryOptions
+            )
             Section {
                 if showCompleteButton {
                     Button("Complete") {
@@ -975,6 +992,10 @@ struct OutcomeView: View {
             journalNext: ""
         )
         modelContext.insert(archive)
+        FulfillmentCategoryTheme.saveCompletedOutcomeColorKey(
+            FulfillmentCategoryTheme.colorKey(for: outcome.category),
+            archiveId: archive.id
+        )
 
         for row in contributingActionsForOutcome {
             modelContext.insert(
@@ -1124,7 +1145,7 @@ struct OutcomeView: View {
             ? (measureFormat == .dollars ? (measureDecimalPlaces == 2 ? 2 : 0) : measureDecimalPlaces)
             : nil
 
-        outcome.category = selectedCategory.rawValue
+        outcome.category = selectedCategoryName
         outcome.updatedAt = .now
         outcome.outcome = goal
         outcome.reasons = reasons
@@ -1435,5 +1456,24 @@ private struct OutcomeStartedOnSection: View {
                     .foregroundColor(.secondary)
             }
         }
+    }
+}
+
+private struct OutcomeCategorySection: View {
+    @Binding var selectedCategoryName: String
+    let categories: [String]
+
+    var body: some View {
+        Picker("Category", selection: $selectedCategoryName) {
+            ForEach(categories, id: \.self) { category in
+                Text(category)
+                    .foregroundColor(FulfillmentCategoryTheme.color(for: category))
+                    .fontWeight(category.caseInsensitiveCompare(selectedCategoryName) == .orderedSame ? .bold : .regular)
+                    .tag(category)
+            }
+        }
+        .pickerStyle(.wheel)
+        .frame(maxHeight: 100)
+        .listRowBackground(Color.clear)
     }
 }

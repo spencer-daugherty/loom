@@ -11,6 +11,8 @@ struct FulfillmentCategoryTheme {
     }
 
     static let userDefaultsKey = "fulfillment_category_color_prefs_v1"
+    private static let completedOutcomeColorKeyByArchiveKey = "completed_outcome_color_key_by_archive_v1"
+    private static let completedActionBlockChunkColorKeyByArchiveChunkKey = "completed_action_block_chunk_color_key_v1"
 
     static let palette: [PaletteOption] = [
         PaletteOption(key: "blue", name: "Blue", color: .blue),
@@ -73,6 +75,15 @@ struct FulfillmentCategoryTheme {
         return palette.first(where: { $0.key == key })?.color ?? .gray
     }
 
+    static func colorKey(for category: String, colorKeys: [String: String]? = nil) -> String {
+        let map = colorKeys ?? persistedColorKeys()
+        return map[category] ?? defaultColorKeys()[category] ?? "blue"
+    }
+
+    static func color(forKey key: String) -> Color {
+        palette.first(where: { $0.key == key })?.color ?? .gray
+    }
+
     static func lightColor(for category: String) -> Color {
         #if canImport(UIKit)
         let base = UIColor(color(for: category))
@@ -92,5 +103,46 @@ struct FulfillmentCategoryTheme {
         return color(for: category)
         #endif
     }
-}
 
+    static func lightColor(forKey key: String) -> Color {
+        #if canImport(UIKit)
+        let base = UIColor(color(forKey: key))
+        return Color(UIColor { trait in
+            var red: CGFloat = 0
+            var green: CGFloat = 0
+            var blue: CGFloat = 0
+            var alpha: CGFloat = 0
+            base.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+            let factor: CGFloat = trait.userInterfaceStyle == .dark ? 0.4 : 0.8
+            red += (1.0 - red) * factor
+            green += (1.0 - green) * factor
+            blue += (1.0 - blue) * factor
+            return UIColor(red: red, green: green, blue: blue, alpha: alpha)
+        })
+        #else
+        return color(forKey: key)
+        #endif
+    }
+
+    static func saveCompletedOutcomeColorKey(_ colorKey: String, archiveId: UUID) {
+        var map = UserDefaults.standard.dictionary(forKey: completedOutcomeColorKeyByArchiveKey) as? [String: String] ?? [:]
+        map[archiveId.uuidString] = colorKey
+        UserDefaults.standard.set(map, forKey: completedOutcomeColorKeyByArchiveKey)
+    }
+
+    static func completedOutcomeColorKey(archiveId: UUID) -> String? {
+        let map = UserDefaults.standard.dictionary(forKey: completedOutcomeColorKeyByArchiveKey) as? [String: String] ?? [:]
+        return map[archiveId.uuidString]
+    }
+
+    static func saveCompletedActionBlockChunkColorKey(_ colorKey: String, archiveId: UUID, chunkId: UUID) {
+        var map = UserDefaults.standard.dictionary(forKey: completedActionBlockChunkColorKeyByArchiveChunkKey) as? [String: String] ?? [:]
+        map["\(archiveId.uuidString)|\(chunkId.uuidString)"] = colorKey
+        UserDefaults.standard.set(map, forKey: completedActionBlockChunkColorKeyByArchiveChunkKey)
+    }
+
+    static func completedActionBlockChunkColorKey(archiveId: UUID, chunkId: UUID) -> String? {
+        let map = UserDefaults.standard.dictionary(forKey: completedActionBlockChunkColorKeyByArchiveChunkKey) as? [String: String] ?? [:]
+        return map["\(archiveId.uuidString)|\(chunkId.uuidString)"]
+    }
+}

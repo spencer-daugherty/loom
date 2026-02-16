@@ -718,6 +718,12 @@ struct CompletedActionBlocksDetailView: View {
     }
 
     private func chunkAccent(for chunkId: UUID) -> Color {
+        if let key = FulfillmentCategoryTheme.completedActionBlockChunkColorKey(archiveId: session.id, chunkId: chunkId) {
+            return FulfillmentCategoryTheme.color(forKey: key)
+        }
+        if let category = actionsByChunk[chunkId]?.first?.chunkCategory, !category.isEmpty {
+            return FulfillmentCategoryTheme.color(for: category)
+        }
         let palette: [Color] = [.blue, .mint, .orange, .indigo, .teal, .pink, .green]
         let index = abs(chunkId.hashValue) % palette.count
         return palette[index]

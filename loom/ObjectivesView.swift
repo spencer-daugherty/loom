@@ -433,8 +433,22 @@ struct ObjectivesView: View {
         FulfillmentCategoryTheme.color(for: category)
     }
 
+    private func categoryColor(for archive: CompletedOutcomeArchive) -> Color {
+        if let key = FulfillmentCategoryTheme.completedOutcomeColorKey(archiveId: archive.id) {
+            return FulfillmentCategoryTheme.color(forKey: key)
+        }
+        return FulfillmentCategoryTheme.color(for: archive.category)
+    }
+
     private func lightenedCategoryColor(for category: String) -> Color {
         FulfillmentCategoryTheme.lightColor(for: category)
+    }
+
+    private func lightenedCategoryColor(for archive: CompletedOutcomeArchive) -> Color {
+        if let key = FulfillmentCategoryTheme.completedOutcomeColorKey(archiveId: archive.id) {
+            return FulfillmentCategoryTheme.lightColor(forKey: key)
+        }
+        return FulfillmentCategoryTheme.lightColor(for: archive.category)
     }
 
     private func daysUntil(_ date: Date) -> Int {
@@ -596,8 +610,22 @@ struct OutcomeRow: View {
         FulfillmentCategoryTheme.color(for: category)
     }
 
+    private func categoryColor(for archive: CompletedOutcomeArchive) -> Color {
+        if let key = FulfillmentCategoryTheme.completedOutcomeColorKey(archiveId: archive.id) {
+            return FulfillmentCategoryTheme.color(forKey: key)
+        }
+        return FulfillmentCategoryTheme.color(for: archive.category)
+    }
+
     private func lightenedCategoryColor(for category: String) -> Color {
         FulfillmentCategoryTheme.lightColor(for: category)
+    }
+
+    private func lightenedCategoryColor(for archive: CompletedOutcomeArchive) -> Color {
+        if let key = FulfillmentCategoryTheme.completedOutcomeColorKey(archiveId: archive.id) {
+            return FulfillmentCategoryTheme.lightColor(forKey: key)
+        }
+        return FulfillmentCategoryTheme.lightColor(for: archive.category)
     }
 
     private func daysUntil(_ date: Date) -> Int {
@@ -650,7 +678,7 @@ struct CompletedOutcomeRow: View {
                 Text(archive.outcome)
                     .font(.title3)
                     .fontWeight(.semibold)
-                    .foregroundColor(categoryColor(for: archive.category))
+                    .foregroundColor(categoryColor(for: archive))
                     .multilineTextAlignment(.leading)
                     .lineLimit(3)
                 Text(archive.reasons)
@@ -673,7 +701,7 @@ struct CompletedOutcomeRow: View {
                     .padding(.horizontal, 10)
                     .background(
                         RoundedRectangle(cornerRadius: 8)
-                            .fill(lightenedCategoryColor(for: archive.category))
+                            .fill(lightenedCategoryColor(for: archive))
                     )
                     .frame(height: 44)
 
@@ -758,8 +786,22 @@ struct CompletedOutcomeRow: View {
         FulfillmentCategoryTheme.color(for: category)
     }
 
+    private func categoryColor(for archive: CompletedOutcomeArchive) -> Color {
+        if let key = FulfillmentCategoryTheme.completedOutcomeColorKey(archiveId: archive.id) {
+            return FulfillmentCategoryTheme.color(forKey: key)
+        }
+        return FulfillmentCategoryTheme.color(for: archive.category)
+    }
+
     private func lightenedCategoryColor(for category: String) -> Color {
         FulfillmentCategoryTheme.lightColor(for: category)
+    }
+
+    private func lightenedCategoryColor(for archive: CompletedOutcomeArchive) -> Color {
+        if let key = FulfillmentCategoryTheme.completedOutcomeColorKey(archiveId: archive.id) {
+            return FulfillmentCategoryTheme.lightColor(forKey: key)
+        }
+        return FulfillmentCategoryTheme.lightColor(for: archive.category)
     }
 
     private var successLevelNumber: Int {

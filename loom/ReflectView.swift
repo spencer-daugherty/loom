@@ -1109,6 +1109,13 @@ struct ReflectView: View {
                     fileAttachmentCount: filesAndLinks.filter { $0.kind == .file }.count
                 )
             )
+            if let chunkCategory = chunk?.category, !chunkCategory.isEmpty {
+                FulfillmentCategoryTheme.saveCompletedActionBlockChunkColorKey(
+                    FulfillmentCategoryTheme.colorKey(for: chunkCategory),
+                    archiveId: archive.id,
+                    chunkId: action.plannedChunkId
+                )
+            }
         }
 
         let outcomeByID = Dictionary(uniqueKeysWithValues: outcomes.map { ($0.outcome_id, $0) })
