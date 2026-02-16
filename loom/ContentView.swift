@@ -18,6 +18,7 @@ private struct DarkModeInvertImage: ViewModifier {
 }
 
 struct ContentView: View {
+    @AppStorage("enable_projects_feature") private var enableProjectsFeature = false
     @State private var isPresentingCaptureView = false
     @State private var pressedEmotion: String? = nil
     @State private var pressedOutcome: Outcomes? = nil
@@ -763,47 +764,49 @@ struct ContentView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                    // Right: two folder icons
-                    VStack(spacing: 8) {
-                        ZStack {
-                            Image(systemName: "doc.fill")
-                                .resizable()
-                                .scaledToFit()
-                                .frame(height: 65)
-                                .foregroundColor(Color.gray.opacity(0.2))
+                    if enableProjectsFeature {
+                        // Right: two folder icons
+                        VStack(spacing: 8) {
+                            ZStack {
+                                Image(systemName: "doc.fill")
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(height: 65)
+                                    .foregroundColor(Color.gray.opacity(0.2))
 
-                            Text("+ Add Project")
-                                .font(.caption2)
-                                .bold()
-                                .foregroundColor(.primary)
-                                .multilineTextAlignment(.center)
-                                .lineLimit(2)
-                                .truncationMode(.tail)
-                                .frame(width: 50)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .offset(y: 10)
+                                Text("+ Add Project")
+                                    .font(.caption2)
+                                    .bold()
+                                    .foregroundColor(.primary)
+                                    .multilineTextAlignment(.center)
+                                    .lineLimit(2)
+                                    .truncationMode(.tail)
+                                    .frame(width: 50)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .offset(y: 10)
+                            }
+
+                            ZStack {
+                                Image(systemName: "doc.fill")
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(height: 65)
+                                    .foregroundColor(Color.gray.opacity(0.2))
+
+                                Text("+ Add Project")
+                                    .font(.caption2)
+                                    .bold()
+                                    .foregroundColor(.primary)
+                                    .multilineTextAlignment(.center)
+                                    .lineLimit(2)
+                                    .truncationMode(.tail)
+                                    .frame(width: 50)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .offset(y: 10)
+                            }
                         }
-
-                        ZStack {
-                            Image(systemName: "doc.fill")
-                                .resizable()
-                                .scaledToFit()
-                                .frame(height: 65)
-                                .foregroundColor(Color.gray.opacity(0.2))
-
-                            Text("+ Add Project")
-                                .font(.caption2)
-                                .bold()
-                                .foregroundColor(.primary)
-                                .multilineTextAlignment(.center)
-                                .lineLimit(2)
-                                .truncationMode(.tail)
-                                .frame(width: 50)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .offset(y: 10)
-                        }
+                        .frame(width: 60, alignment: .trailing)
                     }
-                    .frame(width: 60, alignment: .trailing)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 12)

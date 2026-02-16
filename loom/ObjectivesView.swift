@@ -5,6 +5,7 @@ import Charts
 struct ObjectivesView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.modelContext) private var modelContext
+    @AppStorage("enable_projects_feature") private var enableProjectsFeature = false
     @Query(sort: \Outcomes.rank, order: .forward) private var outcomes: [Outcomes]
     @Query(sort: \OutcomesMeasure.measuredAt, order: .reverse) private var outcomeMeasures: [OutcomesMeasure]
     @Query(sort: \OutcomesMeasureEntry.measuredAt, order: .forward) private var outcomeMeasureEntries: [OutcomesMeasureEntry]
@@ -200,46 +201,48 @@ struct ObjectivesView: View {
                     }
                     .padding(.horizontal)
 
-                    // Projects Header
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Projects")
-                                .font(.title2)
-                                .fontWeight(.bold)
-                            HStack {
-                                Button(action: {}) {
-                                    Text("Prioritize")
-                                        .font(.subheadline)
-                                        .foregroundColor(.blue)
-                                        .padding(.vertical, 4)
-                                        .padding(.horizontal, 8)
-                                }
-                                Button(action: {}) {
-                                    Text("Days left")
-                                        .font(.subheadline)
-                                        .foregroundColor(.blue)
-                                        .padding(.vertical, 4)
-                                        .padding(.horizontal, 8)
+                    if enableProjectsFeature {
+                        // Projects Header
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Projects")
+                                    .font(.title2)
+                                    .fontWeight(.bold)
+                                HStack {
+                                    Button(action: {}) {
+                                        Text("Prioritize")
+                                            .font(.subheadline)
+                                            .foregroundColor(.blue)
+                                            .padding(.vertical, 4)
+                                            .padding(.horizontal, 8)
+                                    }
+                                    Button(action: {}) {
+                                        Text("Days left")
+                                            .font(.subheadline)
+                                            .foregroundColor(.blue)
+                                            .padding(.vertical, 4)
+                                            .padding(.horizontal, 8)
+                                    }
                                 }
                             }
+                            Spacer()
                         }
-                        Spacer()
-                    }
-                    .padding(.horizontal)
+                        .padding(.horizontal)
 
-                    // Projects Placeholder
-                    OutcomesSectionCard {
-                        VStack(spacing: 8) {
-                            Button(action: {}) {
-                                Text("Add Project")
-                                    .font(.body)
-                                    .foregroundColor(.blue)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 4)
+                        // Projects Placeholder
+                        OutcomesSectionCard {
+                            VStack(spacing: 8) {
+                                Button(action: {}) {
+                                    Text("Add Project")
+                                        .font(.body)
+                                        .foregroundColor(.blue)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 4)
+                                }
                             }
                         }
+                        .padding(.horizontal)
                     }
-                    .padding(.horizontal)
                 }
                 .padding(.bottom, 20)
             }

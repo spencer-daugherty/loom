@@ -437,6 +437,7 @@ struct ModelFilter: Identifiable, Hashable {
 // MARK: - Main View
 struct AccountView: View {
     @Environment(\.modelContext) private var context
+    @AppStorage("enable_projects_feature") private var enableProjectsFeature = false
     @State private var showingMigrationResultAlert = false
     @State private var migrationResultMessage = ""
 
@@ -477,6 +478,10 @@ struct AccountView: View {
                         Text("Manage Raw Data")
                     }
                 }
+            }
+
+            Section {
+                Toggle("Enable Projects", isOn: $enableProjectsFeature)
             }
         }
         .listStyle(.plain)
