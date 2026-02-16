@@ -33,6 +33,7 @@ struct CaptureView: View {
     @State private var duplicateMessage: String = "Duplicate: action is already entered"
     @State private var highlightedDuplicateItemID: UUID? = nil
     @State private var duplicateResetWorkItem: DispatchWorkItem? = nil
+    @State private var isSearchMode: Bool = false
 
     private enum FocusField: Hashable {
         case newInput
@@ -41,8 +42,20 @@ struct CaptureView: View {
 
     private var displayItems: [RollingCaptureItem] {
         // After auto-unhide runs, anything due will have isGhost=false, so filtering is straightforward.
-        let base = isGhostOn ? allItems : allItems.filter { !$0.isGhost }
-        return base.sorted {
+        let base: [RollingCaptureItem]
+        if isSearchMode {
+            base = allItems
+        } else {
+            base = isGhostOn ? allItems : allItems.filter { !$0.isGhost }
+        }
+        let filtered: [RollingCaptureItem]
+        if isSearchMode {
+            let query = normalizedActionText(input)
+            filtered = query.isEmpty ? base : base.filter { normalizedActionText($0.text).contains(query) }
+        } else {
+            filtered = base
+        }
+        return filtered.sorted {
             if $0.isGhost != $1.isGhost { return $0.isGhost && !$1.isGhost }
             return $0.createdAt > $1.createdAt
         }
@@ -74,144 +87,41 @@ struct CaptureView: View {
                 (colorScheme == .dark ? Color(.systemGroupedBackground) : Color.white).ignoresSafeArea()
                 VStack(spacing: 12) {
                     ScrollViewReader { proxy in
-                        List {
-                            ForEach(displayItems) { item in
-                                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                    TextField(
-                                        "Action",
-                                        text: Binding(
-                                            get: { item.text },
-                                            set: { newValue in
-                                                renameItemInline(item, to: newValue)
-                                            }
-                                        )
-                                    )
-                                    .font(.body.weight(.medium))
-                                    .textFieldStyle(.plain)
-                                    .focused($focusedField, equals: .item(item.id))
-                                    .submitLabel(.done)
-                                    .onSubmit {
-                                        focusedField = .newInput
-                                    }
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                                    if let d = item.unhiddenAt {
-                                        Text("Unhidden " + formatShortDate(d))
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    } else if item.isGhost, let scheduled = item.unhideDate {
-                                        Text("Hidden until " + formatShortDate(scheduled))
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                                .padding(8)
-                                .padding(.vertical, 2)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
-                                .overlay {
-                                    if item.isGhost {
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .stroke(style: StrokeStyle(lineWidth: 2, dash: [6]))
-                                            .foregroundStyle(.blue)
-                                    } else if highlightedDuplicateItemID == item.id {
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .stroke(Color.red.opacity(0.85), lineWidth: 1.5)
-                                    }
-                                }
-                                .padding(.vertical, 1)
-                                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
-                                .listRowSeparator(.hidden)
-                                .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                                    Button {
-                                        quickCompleteItem(item)
-                                    } label: {
-                                        Text("Quick Complete")
-                                    }
-                                    .tint(.green)
-                                }
-                            }
-                            .onDelete(perform: deleteItems)
-
-                            if !completedItems.isEmpty {
-                                Button {
-                                    withAnimation(.easeInOut(duration: 0.2)) {
-                                        showCompletedList.toggle()
-                                    }
-                                } label: {
-                                    HStack(spacing: 6) {
-                                        Image(systemName: showCompletedList ? "chevron.up" : "chevron.down")
-                                            .font(.caption2.weight(.semibold))
-                                        Text("Quickly Completed")
-                                            .font(.caption2.weight(.semibold))
-                                    }
-                                    .foregroundStyle(colorScheme == .dark ? Color.white.opacity(0.68) : .black)
-                                    .padding(.vertical, 5)
-                                    .padding(.horizontal, 8)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .fill(Color(.systemGray4))
-                                    )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .stroke(Color.black.opacity(0.15), lineWidth: 1)
-                                    )
-                                }
-                                .buttonStyle(.plain)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .id("completed-toggle")
-                                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 0, trailing: 16))
-                                .listRowSeparator(.hidden)
-
-                                if showCompletedList {
-                                    ForEach(Array(completedItems.enumerated()), id: \.element.id) { index, item in
-                                        let row = HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                            Text(item.text)
-                                                .font(.body.weight(.medium))
-                                                .foregroundStyle(.secondary)
-                                                .strikethrough(true, color: .secondary)
-                                                .frame(maxWidth: .infinity, alignment: .leading)
-                                        }
-                                        .padding(8)
-                                        .padding(.vertical, 2)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
-                                        .padding(.vertical, 1)
-                                        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
-                                        .listRowSeparator(.hidden)
-                                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                            Button {
-                                                recaptureCompletedItem(item)
-                                            } label: {
-                                                Text("Recapture")
-                                            }
-                                            .tint(.gray)
-                                        }
-                                        if index == 0 {
-                                            row.id("completed-list-start")
-                                        } else {
-                                            row
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        .listRowSpacing(4)
-                        .listStyle(.plain)
-                        .scrollContentBackground(.hidden)
-                        .onChange(of: showCompletedList) { _, isShowing in
-                            guard isShowing else { return }
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                withAnimation(.easeInOut(duration: 0.25)) {
-                                    proxy.scrollTo("completed-list-start", anchor: .top)
-                                }
-                            }
-                        }
+                        captureList(proxy: proxy)
                     }
                 }
                 .background(Color.clear)
                 .navigationTitle("Rolling Capture")
                 .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        if isSearchMode {
+                            Button("Return") {
+                                isSearchMode = false
+                                input = ""
+                                if focusedField == .newInput {
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                                        focusedField = nil
+                                    }
+                                }
+                            }
+                            .foregroundStyle(.blue)
+                        } else {
+                            Button {
+                                isSearchMode = true
+                                input = ""
+                                focusedField = .newInput
+                            } label: {
+                                Image(systemName: "magnifyingglass")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundStyle(.primary)
+                                    .padding(8)
+                                    .background(.ultraThinMaterial, in: Circle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
                     .onAppear {
                         runAutoUnhideIfNeeded()
                         dedupeCaptureItemsIfNeeded()
@@ -251,153 +161,299 @@ struct CaptureView: View {
                     }
                 }
                 .safeAreaInset(edge: .bottom) {
-                    VStack(alignment: .trailing, spacing: 8) {
-                        if isGhostOn && !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            HStack {
-                                Spacer()
-                                Button(action: {
-                                    if let existing = selectedUnhideDate {
-                                        datePickerTempDate = existing
-                                    } else {
-                                        datePickerTempDate = earliestUnhideDate
-                                    }
-                                    DispatchQueue.main.async {
-                                        focusedField = nil
-                                    }
-                                    isDatePickerPresented = true
-                                }) {
-                                    HStack(spacing: 6) {
-                                        Text(
-                                            selectedUnhideDate != nil
-                                            ? "Hide Action Until " + formatShortDate(selectedUnhideDate!)
-                                            : "Hide Action Until"
-                                        )
-                                        .font(.subheadline)
-                                        .foregroundStyle(selectedUnhideDate != nil ? Color.white : Color.primary)
-                                        Image(systemName: "chevron.down")
-                                            .font(.subheadline.weight(.semibold))
-                                            .foregroundStyle(selectedUnhideDate != nil ? Color.white : Color.secondary)
-                                    }
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 8)
-                                    .background(
-                                        (selectedUnhideDate != nil ? Color.blue : Color(.secondarySystemBackground))
-                                    )
-                                    .clipShape(Capsule())
-                                    .overlay {
-                                        if selectedUnhideDate == nil {
-                                            Capsule()
-                                                .stroke(colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.3), lineWidth: 1)
-                                        }
-                                    }
-                                }
-                                .popover(isPresented: $isDatePickerPresented) {
-                                    VStack(spacing: 0) {
-
-                                        VStack(alignment: .leading, spacing: 0) {
-                                            DatePicker(
-                                                "Hide Action Until",
-                                                selection: $datePickerTempDate,
-                                                in: earliestUnhideDate...,
-                                                displayedComponents: .date
-                                            )
-                                            .datePickerStyle(.graphical)
-                                            .padding(.bottom, 0)
-
-                                            HStack {
-                                                Spacer(minLength: 0)
-                                                Button(action: {
-                                                    selectedUnhideDate = datePickerTempDate
-                                                    isDatePickerPresented = false
-                                                }) {
-                                                    Text("Set Date")
-                                                        .font(.headline)
-                                                        .foregroundStyle(Color.white)
-                                                        .padding(.horizontal, 16)
-                                                        .padding(.vertical, 10)
-                                                        .background(Color.blue)
-                                                        .clipShape(Capsule())
-                                                }
-                                            }
-                                            .padding(.top, -8)
-                                        }
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 0)
-                                    }
-                                    .padding(.bottom, 8)
-                                    .background(
-                                        GeometryReader { proxy in
-                                            Color.clear
-                                                .preference(key: PopoverHeightPreferenceKey.self, value: proxy.size.height)
-                                        }
-                                    )
-                                    .onPreferenceChange(PopoverHeightPreferenceKey.self) { h in
-                                        popoverDetentHeight = max(520, h + 24)
-                                    }
-                                    .presentationDetents([.height(popoverDetentHeight)])
-                                    .presentationDragIndicator(.visible)
-                                }
-                            }
-                            .padding(.horizontal)
-                        }
-
-                        HStack(spacing: 12) {
-                            TextField("Add an action…", text: $input)
-                                .textInputAutocapitalization(.sentences)
-                                .autocorrectionDisabled(false)
-                                .focused($focusedField, equals: .newInput)
-                                .submitLabel(.done)
-                                .onSubmit(addItem)
-                                .padding(12)
-                                .background(Color(.secondarySystemBackground))
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 10)
-                                        .stroke(
-                                            shouldHighlightDuplicateInput
-                                            ? Color.red.opacity(0.85)
-                                            : (colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.3)),
-                                            lineWidth: shouldHighlightDuplicateInput ? 1.5 : 1
-                                        )
-                                )
-                                .layoutPriority(1)
-                                .frame(maxWidth: .infinity)
-
-                            Toggle(isOn: $isGhostOn) {
-                                EmptyView()
-                            }
-                            .toggleStyle(.automatic)
-                            .labelsHidden()
-                            .frame(width: 60)
-
-                            Image(systemName: "clock.arrow.trianglehead.clockwise.rotate.90.path.dotted")
-                                .font(.system(size: 24, weight: .semibold))
-                                .foregroundStyle(isGhostOn ? .blue : .secondary)
-                                .accessibilityHidden(true)
-                        }
-                        .overlay(alignment: .top) {
-                            if showDuplicateHint {
-                                Text(duplicateMessage)
-                                    .font(.footnote)
-                                    .fontWeight(.bold)
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 8)
-                                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 10)
-                                            .stroke(Color.black.opacity(0.12), lineWidth: 1)
-                                    )
-                                    .offset(y: -58)
-                                    .transition(.opacity)
-                            }
-                        }
-                        .padding(.horizontal, 24)
-                        .padding(.bottom, 24)
-                    }
-                    .ignoresSafeArea(edges: .bottom)
+                    captureBottomInset
                 }
             }
         }
+    }
+
+    private func captureList(proxy: ScrollViewProxy) -> some View {
+        List {
+            ForEach(displayItems) { item in
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    TextField(
+                        "Action",
+                        text: Binding(
+                            get: { item.text },
+                            set: { newValue in
+                                renameItemInline(item, to: newValue)
+                            }
+                        )
+                    )
+                    .font(.body.weight(.medium))
+                    .textFieldStyle(.plain)
+                    .focused($focusedField, equals: .item(item.id))
+                    .submitLabel(.done)
+                    .onSubmit {
+                        focusedField = .newInput
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    if let d = item.unhiddenAt {
+                        Text("Unhidden " + formatShortDate(d))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else if item.isGhost, let scheduled = item.unhideDate {
+                        Text("Hidden until " + formatShortDate(scheduled))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(8)
+                .padding(.vertical, 2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+                .overlay {
+                    if item.isGhost {
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(style: StrokeStyle(lineWidth: 2, dash: [6]))
+                            .foregroundStyle(.blue)
+                    } else if highlightedDuplicateItemID == item.id {
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.red.opacity(0.85), lineWidth: 1.5)
+                    }
+                }
+                .padding(.vertical, 1)
+                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                .listRowSeparator(.hidden)
+                .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                    Button {
+                        quickCompleteItem(item)
+                    } label: {
+                        Text("Quick Complete")
+                    }
+                    .tint(.green)
+                }
+            }
+            .onDelete(perform: deleteItems)
+
+            if !completedItems.isEmpty {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showCompletedList.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: showCompletedList ? "chevron.up" : "chevron.down")
+                            .font(.caption2.weight(.semibold))
+                        Text("Quickly Completed")
+                            .font(.caption2.weight(.semibold))
+                    }
+                    .foregroundStyle(colorScheme == .dark ? Color.white.opacity(0.68) : .black)
+                    .padding(.vertical, 5)
+                    .padding(.horizontal, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color(.systemGray4))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.black.opacity(0.15), lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .id("completed-toggle")
+                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 0, trailing: 16))
+                .listRowSeparator(.hidden)
+
+                if showCompletedList {
+                    ForEach(Array(completedItems.enumerated()), id: \.element.id) { index, item in
+                        let row = HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(item.text)
+                                .font(.body.weight(.medium))
+                                .foregroundStyle(.secondary)
+                                .strikethrough(true, color: .secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .padding(8)
+                        .padding(.vertical, 2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+                        .padding(.vertical, 1)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                        .listRowSeparator(.hidden)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button {
+                                recaptureCompletedItem(item)
+                            } label: {
+                                Text("Recapture")
+                            }
+                            .tint(.gray)
+                        }
+                        if index == 0 {
+                            row.id("completed-list-start")
+                        } else {
+                            row
+                        }
+                    }
+                }
+            }
+        }
+        .listRowSpacing(4)
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .onChange(of: showCompletedList) { _, isShowing in
+            guard isShowing else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    proxy.scrollTo("completed-list-start", anchor: .top)
+                }
+            }
+        }
+    }
+
+    private var captureBottomInset: some View {
+        VStack(alignment: .trailing, spacing: 8) {
+            if !isSearchMode && isGhostOn && !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                HStack {
+                    Spacer()
+                    Button(action: {
+                        if let existing = selectedUnhideDate {
+                            datePickerTempDate = existing
+                        } else {
+                            datePickerTempDate = earliestUnhideDate
+                        }
+                        DispatchQueue.main.async {
+                            focusedField = nil
+                        }
+                        isDatePickerPresented = true
+                    }) {
+                        HStack(spacing: 6) {
+                            Text(
+                                selectedUnhideDate != nil
+                                ? "Hide Action Until " + formatShortDate(selectedUnhideDate!)
+                                : "Hide Action Until"
+                            )
+                            .font(.subheadline)
+                            .foregroundStyle(selectedUnhideDate != nil ? Color.white : Color.primary)
+                            Image(systemName: "chevron.down")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(selectedUnhideDate != nil ? Color.white : Color.secondary)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(
+                            (selectedUnhideDate != nil ? Color.blue : Color(.secondarySystemBackground))
+                        )
+                        .clipShape(Capsule())
+                        .overlay {
+                            if selectedUnhideDate == nil {
+                                Capsule()
+                                    .stroke(colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.3), lineWidth: 1)
+                            }
+                        }
+                    }
+                    .popover(isPresented: $isDatePickerPresented) {
+                        VStack(spacing: 0) {
+
+                            VStack(alignment: .leading, spacing: 0) {
+                                DatePicker(
+                                    "Hide Action Until",
+                                    selection: $datePickerTempDate,
+                                    in: earliestUnhideDate...,
+                                    displayedComponents: .date
+                                )
+                                .datePickerStyle(.graphical)
+                                .padding(.bottom, 0)
+
+                                HStack {
+                                    Spacer(minLength: 0)
+                                    Button(action: {
+                                        selectedUnhideDate = datePickerTempDate
+                                        isDatePickerPresented = false
+                                    }) {
+                                        Text("Set Date")
+                                            .font(.headline)
+                                            .foregroundStyle(Color.white)
+                                            .padding(.horizontal, 16)
+                                            .padding(.vertical, 10)
+                                            .background(Color.blue)
+                                            .clipShape(Capsule())
+                                    }
+                                }
+                                .padding(.top, -8)
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 0)
+                        }
+                        .padding(.bottom, 8)
+                        .background(
+                            GeometryReader { proxy in
+                                Color.clear
+                                    .preference(key: PopoverHeightPreferenceKey.self, value: proxy.size.height)
+                            }
+                        )
+                        .onPreferenceChange(PopoverHeightPreferenceKey.self) { h in
+                            popoverDetentHeight = max(520, h + 24)
+                        }
+                        .presentationDetents([.height(popoverDetentHeight)])
+                        .presentationDragIndicator(.visible)
+                    }
+                }
+                .padding(.horizontal)
+            }
+
+            HStack(spacing: 12) {
+                TextField(isSearchMode ? "Search for an action..." : "Add an action…", text: $input)
+                    .textInputAutocapitalization(.sentences)
+                    .autocorrectionDisabled(false)
+                    .focused($focusedField, equals: .newInput)
+                    .submitLabel(.done)
+                    .onSubmit {
+                        if !isSearchMode {
+                            addItem()
+                        }
+                    }
+                    .padding(12)
+                    .background(Color(.secondarySystemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(
+                                shouldHighlightDuplicateInput
+                                ? Color.red.opacity(0.85)
+                                : (colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.3)),
+                                lineWidth: shouldHighlightDuplicateInput ? 1.5 : 1
+                            )
+                    )
+                    .layoutPriority(1)
+                    .frame(maxWidth: .infinity)
+
+                if !isSearchMode {
+                    Toggle(isOn: $isGhostOn) {
+                        EmptyView()
+                    }
+                    .toggleStyle(.automatic)
+                    .labelsHidden()
+                    .frame(width: 60)
+
+                    Image(systemName: "clock.arrow.trianglehead.clockwise.rotate.90.path.dotted")
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundStyle(isGhostOn ? .blue : .secondary)
+                        .accessibilityHidden(true)
+                }
+            }
+            .overlay(alignment: .top) {
+                if showDuplicateHint && !isSearchMode {
+                    Text(duplicateMessage)
+                        .font(.footnote)
+                        .fontWeight(.bold)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(Color.black.opacity(0.12), lineWidth: 1)
+                        )
+                        .offset(y: -58)
+                        .transition(.opacity)
+                }
+            }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 24)
+        }
+        .ignoresSafeArea(edges: .bottom)
     }
 
     private func addItem() {
