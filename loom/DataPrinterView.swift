@@ -1691,6 +1691,9 @@ struct ManageRawDataView: View {
 private struct ManageFulfillmentCategoriesView: View {
     @Query(sort: \Fulfillment.category, order: .forward) private var fulfillments: [Fulfillment]
     @Query(sort: \PlanLabel.category, order: .forward) private var labels: [PlanLabel]
+    @State private var categoryColorKeys: [String: String] = [:]
+    @State private var selectedCategoryForColor: String = ""
+    @State private var showColorPicker: Bool = false
 
     private var categories: [String] {
         let fromFulfillment = fulfillments.map(\.category)
@@ -1703,18 +1706,24 @@ private struct ManageFulfillmentCategoriesView: View {
     var body: some View {
         List {
             ForEach(categories, id: \.self) { category in
-                NavigationLink {
-                    FulfillmentCategoryLabelsView(category: category)
-                } label: {
-                    HStack(spacing: 12) {
+                HStack(spacing: 12) {
+                    Button {
+                        selectedCategoryForColor = category
+                        showColorPicker = true
+                    } label: {
                         Circle()
-                            .fill(fulfillmentCategoryColor(for: category))
+                            .fill(fulfillmentCategoryColor(for: category, colorKeys: categoryColorKeys))
                             .overlay(
                                 Circle()
                                     .stroke(Color(.darkGray), lineWidth: 2.4)
                             )
                             .frame(width: 26, height: 26)
+                    }
+                    .buttonStyle(.plain)
 
+                    NavigationLink {
+                        FulfillmentCategoryLabelsView(category: category)
+                    } label: {
                         Text(category)
                             .fontWeight(.bold)
                     }
@@ -1723,6 +1732,43 @@ private struct ManageFulfillmentCategoriesView: View {
         }
         .listStyle(.plain)
         .navigationTitle("Manage Fulfillment Categories")
+        .onAppear {
+            categoryColorKeys = resolvedFulfillmentCategoryColorKeys(for: categories)
+            persistFulfillmentCategoryColorKeys(categoryColorKeys)
+        }
+        .sheet(isPresented: $showColorPicker) {
+            FulfillmentCategoryColorPickerView(
+                category: selectedCategoryForColor,
+                currentColorKey: categoryColorKeys[selectedCategoryForColor]
+                    ?? defaultFulfillmentCategoryColorKeys()[selectedCategoryForColor]
+                    ?? FulfillmentCategoryPalette.all.first?.key
+                    ?? "blue",
+                onSelect: { newColorKey in
+                    applyColorSelection(newColorKey, for: selectedCategoryForColor)
+                    showColorPicker = false
+                }
+            )
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
+        }
+    }
+
+    private func applyColorSelection(_ newColorKey: String, for category: String) {
+        guard !category.isEmpty else { return }
+        var map = categoryColorKeys
+        let defaults = defaultFulfillmentCategoryColorKeys()
+        let currentColorKey = map[category] ?? defaults[category] ?? "blue"
+        if currentColorKey == newColorKey { return }
+
+        if let otherCategory = map.first(where: { $0.key != category && $0.value == newColorKey })?.key {
+            map[otherCategory] = currentColorKey
+        } else if let otherCategory = defaults.first(where: { $0.key != category && (map[$0.key] ?? $0.value) == newColorKey })?.key {
+            map[otherCategory] = currentColorKey
+        }
+
+        map[category] = newColorKey
+        categoryColorKeys = map
+        persistFulfillmentCategoryColorKeys(map)
     }
 }
 
@@ -1888,16 +1934,134 @@ private struct FulfillmentCategoryLabelsView: View {
     }
 }
 
-private func fulfillmentCategoryColor(for category: String) -> Color {
-    switch category {
-    case "Career & Business": return .blue
-    case "Leadership & Impact": return .indigo
-    case "Wealth & Lifestyle": return .green
-    case "Mind & Meaning": return .purple
-    case "Love & Relationships": return .red
-    case "Health & Vitality": return .orange
-    default: return .gray
+private struct FulfillmentCategoryColorPickerView: View {
+    let category: String
+    let currentColorKey: String
+    let onSelect: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(FulfillmentCategoryPalette.all, id: \.key) { option in
+                    Button {
+                        onSelect(option.key)
+                    } label: {
+                        HStack(spacing: 12) {
+                            Circle()
+                                .fill(option.color)
+                                .frame(width: 22, height: 22)
+                            Text(option.name)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            if option.key == currentColorKey {
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(.blue)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .navigationTitle(category)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Close") {
+                        dismiss()
+                    }
+                }
+            }
+        }
     }
+}
+
+private enum FulfillmentCategoryPalette {
+    struct Option {
+        let key: String
+        let name: String
+        let color: Color
+    }
+
+    static let all: [Option] = [
+        Option(key: "blue", name: "Blue", color: .blue),
+        Option(key: "indigo", name: "Indigo", color: .indigo),
+        Option(key: "green", name: "Green", color: .green),
+        Option(key: "purple", name: "Purple", color: .purple),
+        Option(key: "red", name: "Red", color: .red),
+        Option(key: "orange", name: "Orange", color: .orange),
+        Option(
+            key: "yellow",
+            name: "Yellow",
+            color: Color(red: 0.65, green: 0.47, blue: 0.00) // dark yellow for white-text contrast
+        ),
+        Option(
+            key: "pink",
+            name: "Pink",
+            color: Color(red: 0.74, green: 0.20, blue: 0.47) // dark pink for white-text contrast
+        )
+    ]
+
+    static func color(for key: String) -> Color {
+        all.first(where: { $0.key == key })?.color ?? .gray
+    }
+}
+
+private let fulfillmentCategoryColorPrefsKey = "fulfillment_category_color_prefs_v1"
+
+private func defaultFulfillmentCategoryColorKeys() -> [String: String] {
+    [
+        "Career & Business": "blue",
+        "Leadership & Impact": "indigo",
+        "Wealth & Lifestyle": "green",
+        "Mind & Meaning": "purple",
+        "Love & Relationships": "red",
+        "Health & Vitality": "orange"
+    ]
+}
+
+private func persistedFulfillmentCategoryColorKeys() -> [String: String] {
+    UserDefaults.standard.dictionary(forKey: fulfillmentCategoryColorPrefsKey) as? [String: String] ?? [:]
+}
+
+private func persistFulfillmentCategoryColorKeys(_ map: [String: String]) {
+    UserDefaults.standard.set(map, forKey: fulfillmentCategoryColorPrefsKey)
+}
+
+private func resolvedFulfillmentCategoryColorKeys(for categories: [String]) -> [String: String] {
+    let defaults = defaultFulfillmentCategoryColorKeys()
+    let persisted = persistedFulfillmentCategoryColorKeys()
+    var map = defaults.merging(persisted) { _, rhs in rhs }
+    let palette = FulfillmentCategoryPalette.all.map(\.key)
+    var used = Set<String>()
+
+    for category in categories {
+        let current = map[category]
+        if let current, palette.contains(current), !used.contains(current) {
+            used.insert(current)
+            continue
+        }
+
+        if let candidate = palette.first(where: { !used.contains($0) }) {
+            map[category] = candidate
+            used.insert(candidate)
+        } else if let fallback = defaults[category] {
+            map[category] = fallback
+        } else {
+            map[category] = "blue"
+        }
+    }
+    return map
+}
+
+private func fulfillmentCategoryColor(for category: String, colorKeys: [String: String]? = nil) -> Color {
+    let map = colorKeys ?? resolvedFulfillmentCategoryColorKeys(for: [category])
+    let key = map[category] ?? defaultFulfillmentCategoryColorKeys()[category] ?? "blue"
+    return FulfillmentCategoryPalette.color(for: key)
+}
+
+private func fulfillmentCategoryColor(for category: String) -> Color {
+    fulfillmentCategoryColor(for: category, colorKeys: persistedFulfillmentCategoryColorKeys())
 }
 
 private struct DemoPlanViewContainer: View {
