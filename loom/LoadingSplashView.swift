@@ -151,7 +151,7 @@ struct WindLinesBackground: View {
     private let verticalBandFraction: Double = 0.4
 
     // Tuning knobs
-    private let verticalShift: CGFloat = 14
+    private let verticalShift: CGFloat = 0
     private let rightStopInset: CGFloat = 16
 
     // Funnel tuning (gradual across the whole line)
@@ -203,10 +203,10 @@ struct WindLinesBackground: View {
                         // Start Y (unchanged)
                         let baseY: CGFloat = CGFloat(clampedFrac) * sz.height + verticalShift
 
-                        // End Y: perfectly even distribution across the logo height
-                        let minPad: CGFloat = 2
-                        let topY = (logoTop + verticalShift) + minPad
-                        let bottomY = (logoBottom + verticalShift) - minPad
+                        // End Y: distribute around the logo midpoint so right-side lines visually center on logo middle.
+                        let centerSpread: CGFloat = logoHeight * 0.42
+                        let topY = logoCenter - centerSpread / 2
+                        let bottomY = logoCenter + centerSpread / 2
                         let span = max(1, bottomY - topY)
 
                         let endFrac: CGFloat =
@@ -454,37 +454,39 @@ struct LoadingSplashView: View {
                 let t = context.date.timeIntervalSinceReferenceDate
                 let animatedMetrics = isTransitioningOut ? metrics : pulsedMetrics(at: t * 0.45)
                 let rotationDegrees = isTransitioningOut ? 0.0 : (t * Double(337.5))
-                HStack(spacing: 12) {
-                    Color.clear
+                GeometryReader { geo in
+                    HStack(spacing: 12) {
+                        Color.clear
+                            .frame(width: 45, height: 45)
+
+                        Image("logo")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(height: 48)
+                            .opacity(0.95)
+                            .transition(.opacity)
+                            .modifier(DarkModeInvertImage())
+
+                        ZStack {
+                            FulfillmentInteractiveRadar(
+                                metrics: animatedMetrics,
+                                selectedIndex: $splashRadarSelectedIndex,
+                                onManualSelect: {},
+                                enableInteraction: false,
+                                customDotDiameter: 10,
+                                showOutline: false,
+                                emphasizeSelectedSlice: false
+                            )
+                            .rotationEffect(.degrees(rotationDegrees))
+                        }
                         .frame(width: 45, height: 45)
-
-                    Image("logo")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(height: 48)
-                        .opacity(0.95)
-                        .transition(.opacity)
-                        .modifier(DarkModeInvertImage())
-
-                    ZStack {
-                        FulfillmentInteractiveRadar(
-                            metrics: animatedMetrics,
-                            selectedIndex: $splashRadarSelectedIndex,
-                            onManualSelect: {},
-                            enableInteraction: false,
-                            customDotDiameter: 10,
-                            showOutline: false,
-                            emphasizeSelectedSlice: false
-                        )
-                        .rotationEffect(.degrees(rotationDegrees))
+                        .matchedGeometryEffect(id: "fulfillmentGraph", in: namespace)
                     }
-                    .frame(width: 45, height: 45)
-                    .matchedGeometryEffect(id: "fulfillmentGraph", in: namespace)
+                    .position(x: geo.size.width / 2, y: geo.size.height / 2)
                 }
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(24)
             }
         }
+        .ignoresSafeArea()
         .overlay(alignment: .bottom) {
             Text("Version: 0.1.0-alpha")
                 .font(.caption2)
