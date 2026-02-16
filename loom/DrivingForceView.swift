@@ -21,6 +21,7 @@ enum Field: Hashable {
 struct DrivingForceView: View {
     let autoOpenCreateVision: Bool
     @Environment(\.modelContext) private var context
+    @Environment(\.colorScheme) private var colorScheme
     @Query(sort: \DrivingForce.updatedAt, order: .reverse) private var drivingForces: [DrivingForce]
     @Query(sort: \DrivingForceArchive.archivedAt, order: .reverse) private var drivingForceArchives: [DrivingForceArchive]
     
@@ -48,6 +49,8 @@ struct DrivingForceView: View {
         sort: \Passion.date,
         order: .forward
     ) private var justPassions: [Passion]
+    @Query(sort: \PassionFulfillmentJoin.id, order: .forward)
+    private var passionJoins: [PassionFulfillmentJoin]
     
     // Consolidated passion categories
     private var passionQueries: [PassionCategory] {
@@ -70,6 +73,7 @@ struct DrivingForceView: View {
     @State private var editorCursorSeed: Int = 0
     @State private var editorShouldFocus: Bool = false
     @State private var didAutoOpenCreateVision: Bool = false
+    @State private var showDrivingForceTrends: Bool = false
     @FocusState private var focusedField: Field?
 
     private enum DrivingForceEditor: String, Identifiable {
@@ -129,7 +133,7 @@ struct DrivingForceView: View {
     var body: some View {
         List {
             drivingForceInsightsHeader
-                .listRowInsets(EdgeInsets(top: 0, leading: -16, bottom: 8, trailing: -16))
+                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 8, trailing: 0))
                 .listRowBackground(Color.clear)
 
             AnyView(drivingForceSections)
@@ -156,6 +160,9 @@ struct DrivingForceView: View {
             maybeAutoOpenCreateVision()
         }
         .sheet(isPresented: $isShowingInstructions, content: instructionsSheet)
+        .navigationDestination(isPresented: $showDrivingForceTrends) {
+            DrivingForceTrendsView()
+        }
         .alert("Delete Historic Item?", isPresented: deleteHistoricBinding, actions: deleteHistoricActions, message: deleteHistoricMessage)
     }
 
@@ -293,58 +300,75 @@ struct DrivingForceView: View {
     }
 
     private var drivingForceInsightsHeader: some View {
-        HStack(alignment: .top, spacing: 16) {
+        HStack(alignment: .center, spacing: 16) {
             VStack(alignment: .leading, spacing: 12) {
-                passionSignalRow(icon: "heart.fill", label: "Love", value: min(4, lovePassions.count))
-                passionSignalRow(icon: "lock.fill", label: "Vows", value: min(4, vowsPassions.count))
-                passionSignalRow(icon: "bolt.fill", label: "Thrill", value: min(4, thrillPassions.count))
-                passionSignalRow(icon: "shield.fill", label: "Hate", value: min(4, justPassions.count))
+                passionSignalRow(icon: "heart.fill", label: "Love", value: usagePoints(for: "love"))
+                passionSignalRow(icon: "lock.fill", label: "Vows", value: usagePoints(for: "vows"))
+                passionSignalRow(icon: "bolt.fill", label: "Thrill", value: usagePoints(for: "thrill"))
+                passionSignalRow(icon: "shield.fill", label: "Hate", value: usagePoints(for: "just"))
+
+                Button {
+                    showDrivingForceTrends = true
+                } label: {
+                    Text("Show trends")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.blue)
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
 
             VStack(alignment: .leading, spacing: 4) {
+                Spacer(minLength: 0)
+
                 VStack(alignment: .leading, spacing: 3) {
                     Text("analyzed:")
                         .font(.caption)
                         .fontWeight(.bold)
                         .foregroundStyle(.gray)
-                    Text("• Action Done")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
                     Text("• Outcome Completion")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                     Text("• Reflection Reports")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                    Text("• Action Done")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                     Text("• Momentum")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
-
-                Spacer(minLength: 0)
-
-                HStack {
-                    Spacer()
-                    NavigationLink {
-                        DrivingForceTrendsView()
-                    } label: {
-                        Text("Show trends")
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.blue)
-                    }
-                    .buttonStyle(.plain)
-                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity, minHeight: 238, maxHeight: 238, alignment: .topLeading)
+        .padding(.horizontal, 30)
+        .padding(.vertical, 30)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            Color(.systemGray6)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(colorScheme == .dark ? Color(.secondarySystemBackground) : Color(.systemBackground))
         )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.black.opacity(0.08), lineWidth: 1)
+        )
+        .overlay(alignment: .topTrailing) {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(colorScheme == .dark ? Color.white : Color.black, lineWidth: 3)
+                .frame(width: 92, height: 58)
+                .overlay {
+                    Text("\(totalPassionSignalScore)/16")
+                        .font(.system(size: 26, weight: .bold))
+                        .foregroundStyle(.primary)
+                }
+                .padding(.top, 30)
+                .padding(.trailing, 30)
+        }
     }
 
     private func passionSignalCircle(icon: String, value: Int) -> some View {
@@ -383,10 +407,35 @@ struct DrivingForceView: View {
         HStack(spacing: 10) {
             passionSignalCircle(icon: icon, value: value)
             Text(label)
-                .font(.subheadline.weight(.semibold))
+                .font(.title2.weight(.semibold))
                 .foregroundStyle(.primary)
                 .lineLimit(1)
         }
+    }
+
+    private func usagePoints(for emotionKey: String) -> Int {
+        let ids: Set<UUID>
+        switch emotionKey {
+        case "love":
+            ids = Set(lovePassions.map(\.passion_id))
+        case "vows":
+            ids = Set(vowsPassions.map(\.passion_id))
+        case "thrill":
+            ids = Set(thrillPassions.map(\.passion_id))
+        case "just":
+            ids = Set(justPassions.map(\.passion_id))
+        default:
+            ids = []
+        }
+        let count = passionJoins.filter { ids.contains($0.passion_id) }.count
+        return min(4, count)
+    }
+
+    private var totalPassionSignalScore: Int {
+        usagePoints(for: "love")
+        + usagePoints(for: "vows")
+        + usagePoints(for: "thrill")
+        + usagePoints(for: "just")
     }
 
     @ViewBuilder
@@ -463,13 +512,7 @@ struct DrivingForceView: View {
     @ViewBuilder
     private var historicRowsSection: some View {
         if isShowingHistoric {
-            if historicRows.isEmpty {
-                Section {
-                    Text("No historic ultimate vision/purpose snapshots yet.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            } else {
+            if !historicRows.isEmpty {
                 Section {
                     ForEach(historicRows) { row in
                         historicRowView(row)
