@@ -72,85 +72,90 @@ struct ContentView: View {
     
     var body: some View {
         NavigationStack(path: $navPath) {
-            ZStack {
-                // Background
-                Color(.systemGroupedBackground)
-                    .edgesIgnoringSafeArea(.all)
-                
-                // Main content pinned to top
-                VStack(spacing: 10) {
-                    header
-
-                    VStack(spacing: 16) {
-                        drivingForceSection
-                        fulfillmentSection
-                        objectivesSection
+            GeometryReader { proxy in
+                ZStack {
+                    // Background
+                    Color(.systemGroupedBackground)
+                        .edgesIgnoringSafeArea(.all)
+                    
+                    // Main content pinned to top
+                    VStack(spacing: 10) {
+                        header
+                        
+                        VStack(spacing: 16) {
+                            drivingForceSection
+                            fulfillmentSection
+                            objectivesSection
+                        }
+                        .padding(.horizontal)
+                        
+                        Spacer(minLength: 0)   // <-- this is the real “pin to bottom”
+                        
+                        footer
                     }
-                    .padding(.horizontal)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    
+                    // Loading Splash Overlay
+                    if showSplash {
+                        LoadingSplashView(
+                            metrics: fulfillmentMetrics,
+                            namespace: graphNamespace
+                        )
+                        .transition(.opacity)
+                        .zIndex(2)
+                    }
 
-                    Spacer(minLength: 0)   // <-- this is the real “pin to bottom”
-
-                    footer
+                    if let emotion = pressedEmotion {
+                        PassionPopupOverlay(
+                            emotionTitle: displayTitle(for: emotion),
+                            items: passions(for: emotion)
+                        )
+                        .allowsHitTesting(false)
+                        .transition(.scale(scale: 0.9).combined(with: .opacity))
+                        .zIndex(1)
+                        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: pressedEmotion)
+                    } else if showVisionPurposePopup {
+                        VisionPurposePopupOverlay(
+                            vision: (drivingForces.first?.ultimateVision ?? ""),
+                            purpose: (drivingForces.first?.ultimatePurpose ?? "")
+                        )
+                        .allowsHitTesting(false)
+                        .transition(.scale(scale: 0.9).combined(with: .opacity))
+                        .zIndex(1)
+                        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: showVisionPurposePopup)
+                    }
+                    else if let selectedOutcome = pressedOutcome {
+                        OutcomePopupOverlay(
+                            outcome: selectedOutcome,
+                            measure: latestMeasure(for: selectedOutcome)
+                        )
+                        .allowsHitTesting(false)
+                        .transition(.scale(scale: 0.9).combined(with: .opacity))
+                        .zIndex(1)
+                        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: pressedOutcome)
+                    }
+                    else if let category = pressedCategoryTitle {
+                        CategoryFulfillmentPopupOverlay(
+                            category: category,
+                            tint: categoryBackgroundColor(for: category),
+                            titleColor: categoryTextColor(for: category),
+                            vision: recordForCategory(category)?.category_vision ?? "",
+                            purpose: recordForCategory(category)?.category_purpose ?? "",
+                            roles: rolesForCategory(category).map { $0.role },
+                            foci: fociForCategory(category).map { $0.activity },
+                            resources: resourcesForCategory(category).map { $0.resource },
+                            passions: passionsForCategory(category)
+                        )
+                        .allowsHitTesting(false)
+                        .transition(.scale(scale: 0.9).combined(with: .opacity))
+                        .zIndex(1)
+                        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: pressedCategoryTitle)
+                    }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                
-                // Loading Splash Overlay
-                if showSplash {
-                    LoadingSplashView(
-                        metrics: fulfillmentMetrics,
-                        namespace: graphNamespace
-                    )
-                    .transition(.opacity)
-                    .zIndex(2)
-                }
-
-                if let emotion = pressedEmotion {
-                    PassionPopupOverlay(
-                        emotionTitle: displayTitle(for: emotion),
-                        items: passions(for: emotion)
-                    )
-                    .allowsHitTesting(false)
-                    .transition(.scale(scale: 0.9).combined(with: .opacity))
-                    .zIndex(1)
-                    .animation(.spring(response: 0.3, dampingFraction: 0.85), value: pressedEmotion)
-                } else if showVisionPurposePopup {
-                    VisionPurposePopupOverlay(
-                        vision: (drivingForces.first?.ultimateVision ?? ""),
-                        purpose: (drivingForces.first?.ultimatePurpose ?? "")
-                    )
-                    .allowsHitTesting(false)
-                    .transition(.scale(scale: 0.9).combined(with: .opacity))
-                    .zIndex(1)
-                    .animation(.spring(response: 0.3, dampingFraction: 0.85), value: showVisionPurposePopup)
-                }
-                else if let selectedOutcome = pressedOutcome {
-                    OutcomePopupOverlay(
-                        outcome: selectedOutcome,
-                        measure: latestMeasure(for: selectedOutcome)
-                    )
-                    .allowsHitTesting(false)
-                    .transition(.scale(scale: 0.9).combined(with: .opacity))
-                    .zIndex(1)
-                    .animation(.spring(response: 0.3, dampingFraction: 0.85), value: pressedOutcome)
-                }
-                else if let category = pressedCategoryTitle {
-                    CategoryFulfillmentPopupOverlay(
-                        category: category,
-                        tint: categoryBackgroundColor(for: category),
-                        titleColor: categoryTextColor(for: category),
-                        vision: recordForCategory(category)?.category_vision ?? "",
-                        purpose: recordForCategory(category)?.category_purpose ?? "",
-                        roles: rolesForCategory(category).map { $0.role },
-                        foci: fociForCategory(category).map { $0.activity },
-                        resources: resourcesForCategory(category).map { $0.resource },
-                        passions: passionsForCategory(category)
-                    )
-                    .allowsHitTesting(false)
-                    .transition(.scale(scale: 0.9).combined(with: .opacity))
-                    .zIndex(1)
-                    .animation(.spring(response: 0.3, dampingFraction: 0.85), value: pressedCategoryTitle)
-                }
+                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
+                .clipped()
             }
+            .ignoresSafeArea(.keyboard)
         }
         .navigationDestination(for: ContentView.PlayDestination.self) { destination in
             switch destination {
@@ -167,6 +172,10 @@ struct ContentView: View {
             case .action:
                 ActionView()
             }
+        }
+        .sheet(isPresented: $isPresentingCaptureView) {
+            CaptureView()
+                .presentationDragIndicator(.visible)
         }
         .onChange(of: isActivePlan) { _, newValue in
             // When Plan Step 5 activates the plan, automatically launch ActionView.
@@ -187,7 +196,7 @@ struct ContentView: View {
             }
         }
         .tint(Color.accentColor)
-        .ignoresSafeArea(.keyboard, edges: .bottom)
+        .ignoresSafeArea(.keyboard)
     }
 
     private func ensureFulfillmentCategoriesExist() {
@@ -479,10 +488,6 @@ struct ContentView: View {
         }
         .frame(maxWidth: .infinity)
         .background(Color.clear)
-        .sheet(isPresented: $isPresentingCaptureView) {
-            CaptureView()
-                .presentationDragIndicator(.visible)
-        }
     }
 
     // MARK: - Extracted Sections to reduce body complexity
