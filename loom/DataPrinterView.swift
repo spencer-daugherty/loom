@@ -456,13 +456,13 @@ struct AccountView: View {
                     }
                 }
 
-                HStack {
-                    Text("Manage Fulfillment Categories")
-                        .foregroundStyle(.secondary)
-                    Spacer()
+                NavigationLink {
+                    ManageFulfillmentCategoriesView()
+                } label: {
+                    HStack {
+                        Text("Manage Fulfillment Categories")
+                    }
                 }
-                .contentShape(Rectangle())
-                .allowsHitTesting(false)
 
                 NavigationLink {
                     CompletedActionBlocksListView()
@@ -1685,6 +1685,218 @@ struct ManageRawDataView: View {
         }
         try? context.save()
         selection.removeAll()
+    }
+}
+
+private struct ManageFulfillmentCategoriesView: View {
+    @Query(sort: \Fulfillment.category, order: .forward) private var fulfillments: [Fulfillment]
+    @Query(sort: \PlanLabel.category, order: .forward) private var labels: [PlanLabel]
+
+    private var categories: [String] {
+        let fromFulfillment = fulfillments.map(\.category)
+        let fromLabels = labels.map(\.category)
+        return Array(Set(fromFulfillment + fromLabels))
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    var body: some View {
+        List {
+            ForEach(categories, id: \.self) { category in
+                NavigationLink {
+                    FulfillmentCategoryLabelsView(category: category)
+                } label: {
+                    HStack(spacing: 12) {
+                        Circle()
+                            .fill(fulfillmentCategoryColor(for: category))
+                            .overlay(
+                                Circle()
+                                    .stroke(Color(.darkGray), lineWidth: 2.4)
+                            )
+                            .frame(width: 26, height: 26)
+
+                        Text(category)
+                            .fontWeight(.bold)
+                    }
+                }
+            }
+        }
+        .listStyle(.plain)
+        .navigationTitle("Manage Fulfillment Categories")
+    }
+}
+
+private struct FulfillmentCategoryLabelsView: View {
+    let category: String
+    @Environment(\.modelContext) private var context
+    @Query(sort: \PlanLabel.label, order: .forward) private var allLabels: [PlanLabel]
+    @State private var isAddingLabel: Bool = false
+    @State private var newLabelText: String = ""
+    @State private var editingLabelID: UUID?
+    @State private var editingText: String = ""
+    @State private var showMinimumLabelsAlert: Bool = false
+    @FocusState private var focusedField: LabelField?
+
+    private enum LabelField: Hashable {
+        case add
+        case edit(UUID)
+    }
+
+    private var labelsForCategory: [PlanLabel] {
+        allLabels
+            .filter { $0.category == category }
+            .sorted { $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending }
+    }
+
+    private var categoryID: UUID {
+        labelsForCategory.first?.categoryId
+            ?? PlanLabelSeeder.categoryIDs[category]
+            ?? UUID()
+    }
+
+    var body: some View {
+        List {
+            Section("Labels") {
+                ForEach(labelsForCategory, id: \.labelId) { label in
+                    if editingLabelID == label.labelId {
+                        TextField("Edit label", text: $editingText)
+                            .focused($focusedField, equals: .edit(label.labelId))
+                            .submitLabel(.done)
+                            .onSubmit { commitEdit(label) }
+                    } else {
+                        Text(label.label)
+                            .fontWeight(.semibold)
+                            .onTapGesture { startEditing(label) }
+                            .swipeActions {
+                                Button(role: .destructive) {
+                                    attemptDelete(label)
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
+                            .tint(.red)
+                    }
+                }
+
+                if isAddingLabel {
+                    HStack {
+                        TextField("Add label", text: $newLabelText)
+                            .focused($focusedField, equals: .add)
+                            .submitLabel(.done)
+                            .onSubmit { commitAdd() }
+                        Spacer()
+                    }
+                    .padding(.vertical, 4)
+                } else {
+                    Button("+ Add Label") {
+                        withAnimation {
+                            isAddingLabel = true
+                            focusedField = .add
+                        }
+                    }
+                    .foregroundStyle(.blue)
+                    .padding(.vertical, 4)
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .navigationTitle(category)
+        .navigationBarTitleDisplayMode(.inline)
+        .alert("Minimum 3 labels required", isPresented: $showMinimumLabelsAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Each category must keep at least 3 labels.")
+        }
+        .onChange(of: focusedField) { _, newValue in
+            if isAddingLabel, newValue != .add {
+                isAddingLabel = false
+                newLabelText = ""
+            }
+        }
+    }
+
+    private func startEditing(_ label: PlanLabel) {
+        isAddingLabel = false
+        newLabelText = ""
+        editingLabelID = label.labelId
+        editingText = label.label
+        focusedField = .edit(label.labelId)
+    }
+
+    private func commitEdit(_ label: PlanLabel) {
+        let trimmed = editingText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            attemptDelete(label)
+            return
+        }
+
+        let normalized = trimmed.lowercased()
+        if normalized == label.label {
+            editingLabelID = nil
+            return
+        }
+        let candidateKey = "\(label.source)|\(normalized)"
+        if allLabels.contains(where: { $0.labelId != label.labelId && $0.labelSourceKey == candidateKey }) {
+            editingLabelID = nil
+            return
+        }
+
+        label.label = normalized
+        label.labelSourceKey = candidateKey
+        label.category = category
+        label.categoryId = categoryID
+        try? context.save()
+        editingLabelID = nil
+    }
+
+    private func commitAdd() {
+        let trimmed = newLabelText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        let normalized = trimmed.lowercased()
+        let candidateKey = "default|\(normalized)"
+        if allLabels.contains(where: { $0.labelSourceKey == candidateKey }) {
+            isAddingLabel = false
+            newLabelText = ""
+            return
+        }
+
+        let label = PlanLabel(
+            label: normalized,
+            categoryId: categoryID,
+            category: category,
+            source: "default"
+        )
+        context.insert(label)
+        try? context.save()
+
+        isAddingLabel = false
+        newLabelText = ""
+    }
+
+    private func attemptDelete(_ label: PlanLabel) {
+        guard labelsForCategory.count > 3 else {
+            showMinimumLabelsAlert = true
+            return
+        }
+        context.delete(label)
+        try? context.save()
+        if editingLabelID == label.labelId {
+            editingLabelID = nil
+            editingText = ""
+        }
+    }
+}
+
+private func fulfillmentCategoryColor(for category: String) -> Color {
+    switch category {
+    case "Career & Business": return .blue
+    case "Leadership & Impact": return .indigo
+    case "Wealth & Lifestyle": return .green
+    case "Mind & Meaning": return .purple
+    case "Love & Relationships": return .red
+    case "Health & Vitality": return .orange
+    default: return .gray
     }
 }
 

@@ -141,6 +141,8 @@ enum PlanLabelSeeder {
     ]
 
     static func seedDefaultsIfNeeded(in context: ModelContext) {
+        normalizeAllLabelsToLowercase(in: context)
+
         // Fast check: if any default labels exist, assume seeded.
         let existingDefaultCount = (try? context.fetchCount(
             FetchDescriptor<PlanLabel>(predicate: #Predicate { $0.source == "default" })
@@ -174,5 +176,41 @@ enum PlanLabelSeeder {
         }
 
         try? context.save()
+    }
+
+    /// Ensures all stored labels are lowercase and keeps labelSourceKey consistent.
+    /// If a lowercase key collision exists, keeps the first row and removes duplicates.
+    static func normalizeAllLabelsToLowercase(in context: ModelContext) {
+        let all = (try? context.fetch(FetchDescriptor<PlanLabel>())) ?? []
+        guard !all.isEmpty else { return }
+
+        var keptByKey: [String: PlanLabel] = [:]
+        var didChange = false
+
+        for label in all {
+            let normalized = label.label.lowercased()
+            let normalizedKey = "\(label.source)|\(normalized)"
+
+            if let kept = keptByKey[normalizedKey], kept.labelId != label.labelId {
+                context.delete(label)
+                didChange = true
+                continue
+            }
+
+            if label.label != normalized {
+                label.label = normalized
+                didChange = true
+            }
+            if label.labelSourceKey != normalizedKey {
+                label.labelSourceKey = normalizedKey
+                didChange = true
+            }
+
+            keptByKey[normalizedKey] = label
+        }
+
+        if didChange {
+            try? context.save()
+        }
     }
 }
