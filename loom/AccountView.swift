@@ -439,6 +439,8 @@ struct AccountView: View {
     @Environment(\.modelContext) private var context
     @AppStorage("enable_projects_feature") private var enableProjectsFeature = false
     @AppStorage("blank_homepage_mode") private var blankHomepageMode = false
+    @State private var showDeleteAllDataSheet = false
+    @State private var deleteAllConfirmationCode = ""
 
     var body: some View {
         List {
@@ -487,6 +489,13 @@ struct AccountView: View {
 
                 Toggle("Enable Projects", isOn: $enableProjectsFeature)
                 Toggle("Blank Homepage", isOn: $blankHomepageMode)
+                Button {
+                    deleteAllConfirmationCode = ""
+                    showDeleteAllDataSheet = true
+                } label: {
+                    Text("Delete All Data")
+                        .foregroundStyle(.red)
+                }
             } header: {
                 HStack {
                     Spacer()
@@ -499,6 +508,107 @@ struct AccountView: View {
         .navigationTitle("Account Manager")
         .onAppear {
             RecentlyDeletedStore.purgeExpired(in: context)
+        }
+        .sheet(isPresented: $showDeleteAllDataSheet) {
+            NavigationStack {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("WARNING: Delete All Data")
+                        .font(.headline.weight(.bold))
+
+                    Text("This will permanently delete all your data and it won't be recoverable. If you would like to continue please enter \"1234\" below and click \"Permanently Delete All Data\".")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    TextField("1234", text: $deleteAllConfirmationCode)
+                        .textFieldStyle(.roundedBorder)
+                        .keyboardType(.numberPad)
+
+                    VStack(spacing: 10) {
+                        Button("Return") {
+                            showDeleteAllDataSheet = false
+                        }
+                        .buttonStyle(.bordered)
+                        .frame(maxWidth: .infinity)
+
+                        Button("Permanently Delete All Data", role: .destructive) {
+                            permanentlyDeleteAllData()
+                            showDeleteAllDataSheet = false
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .frame(maxWidth: .infinity)
+                        .disabled(deleteAllConfirmationCode != "1234")
+                    }
+                    .padding(.top, 4)
+
+                    Spacer(minLength: 0)
+                }
+                .padding(16)
+            }
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
+        }
+    }
+
+    private func permanentlyDeleteAllData() {
+        deleteAllRows(DrivingForce.self)
+        deleteAllRows(DrivingForceArchive.self)
+        deleteAllRows(Passion.self)
+        deleteAllRows(PassionArchive.self)
+        deleteAllRows(PassionFulfillmentJoin.self)
+        deleteAllRows(PassionFulfillmentJoinArchive.self)
+        deleteAllRows(Fulfillment.self)
+        deleteAllRows(FulfillmentArchive.self)
+        deleteAllRows(FulfillmentRoles.self)
+        deleteAllRows(FulfillmentRolesArchive.self)
+        deleteAllRows(FulfillmentFocus.self)
+        deleteAllRows(FulfillmentFocusArchive.self)
+        deleteAllRows(FulfillmentResources.self)
+        deleteAllRows(FulfillmentResourcesArchive.self)
+        deleteAllRows(ReplacedFulfillmentCategoryArchive.self)
+        deleteAllRows(Outcomes.self)
+        deleteAllRows(OutcomesArchive.self)
+        deleteAllRows(OutcomesMeasure.self)
+        deleteAllRows(OutcomesMeasureArchive.self)
+        deleteAllRows(OutcomesMeasureEntry.self)
+        deleteAllRows(OutcomeAnalyticsEvent.self)
+        deleteAllRows(CompletedOutcomeArchive.self)
+        deleteAllRows(CompletedOutcomeContributionArchive.self)
+        deleteAllRows(CompletedOutcomeMeasurePointArchive.self)
+        deleteAllRows(WeeklyMindsetEntry.Fields.self)
+        deleteAllRows(ActivePlanState.self)
+        deleteAllRows(RollingCaptureItem.self)
+        deleteAllRows(QuickCompletedCaptureItem.self)
+        deleteAllRows(RecentlyDeletedItem.self)
+        deleteAllRows(PlannedChunkActionAdHocMarker.self)
+        deleteAllRows(ActionBlocksReflectionArchive.self)
+        deleteAllRows(ActionBlocksReflectionArchiveAction.self)
+        deleteAllRows(ActionBlocksReflectionArchiveOutcome.self)
+        deleteAllRows(ActionBlocksReflectionOutcomeContribution.self)
+        deleteAllRows(PlanLabel.self)
+        deleteAllRows(PlanChunkSelection.self)
+        deleteAllRows(PlannedChunk.self)
+        deleteAllRows(PlannedChunkAction.self)
+        deleteAllRows(PlannedChunkStepFourState.self)
+        deleteAllRows(PlannedChunkOutcomeLink.self)
+        deleteAllRows(PlannedChunkActionDefineState.self)
+        deleteAllRows(PlannedChunkActionExecutionState.self)
+        deleteAllRows(LeverageResource.self)
+        deleteAllRows(PlannedChunkActionLeverageSelection.self)
+        deleteAllRows(SensitivityPlaceCatalogItem.self)
+        deleteAllRows(PlannedChunkActionSensitivityPlaceLink.self)
+        deleteAllRows(PlannedChunkActionNote.self)
+        deleteAllRows(PlannedChunkActionAttachment.self)
+        deleteAllRows(PlannedChunkActionLeverageItem.self)
+        deleteAllRows(PlannedChunkActionSensitivityPlace.self)
+        try? context.save()
+    }
+
+    private func deleteAllRows<T: PersistentModel>(_ type: T.Type) {
+        let descriptor = FetchDescriptor<T>()
+        guard let rows = try? context.fetch(descriptor) else { return }
+        for row in rows {
+            context.delete(row)
         }
     }
 }

@@ -37,6 +37,7 @@ struct loomApp: App {
                 FulfillmentFocusArchive.self,
                 FulfillmentResources.self,
                 FulfillmentResourcesArchive.self,
+                ReplacedFulfillmentCategoryArchive.self,
                 Outcomes.self,
                 OutcomesArchive.self,
                 OutcomesMeasure.self,

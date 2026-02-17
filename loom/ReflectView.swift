@@ -58,6 +58,7 @@ struct ReflectView: View {
     @State private var contributionOutcomeIndex: Int = 0
     @State private var contributionTempSelection: Set<UUID> = []
     @State private var contributionSelectionsByOutcome: [UUID: Set<UUID>] = [:]
+    @State private var celebrationRadarSelectedIndex: Int = 0
 
     @Namespace private var reflectionNamespace
 
@@ -516,24 +517,19 @@ struct ReflectView: View {
                 let radarX: CGFloat = geo.size.width * 0.76
                 let radarY: CGFloat = geo.size.height * focusYFraction
 
-                ReflectionLoadingStyleLinesBackground(
-                    colors: palette,
-                    focusXFraction: 0.76,
-                    focusYFraction: focusYFraction,
-                    radarDiameter: radarDiameter
-                )
+                WindLinesBackground(colors: palette)
                 .ignoresSafeArea()
 
                 TimelineView(.animation) { context in
                     let t = context.date.timeIntervalSinceReferenceDate
                     let pulse = loadingStylePulsedMetrics(at: t * 0.45)
                     ZStack {
-                        FulfillmentRadarGraph(
+                        FulfillmentInteractiveRadar(
                             metrics: pulse,
-                            showOutline: false,
-                            dotDiameter: 12,
-                            showDotOutline: false,
-                            showDotShadow: true
+                            selectedIndex: $celebrationRadarSelectedIndex,
+                            onManualSelect: {},
+                            enableInteraction: false,
+                            customDotDiameter: 10
                         )
                         .matchedGeometryEffect(id: "reflect-radar", in: reflectionNamespace)
                         .frame(width: radarDiameter, height: radarDiameter)

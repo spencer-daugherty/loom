@@ -337,6 +337,47 @@ final class FulfillmentResourcesArchive {
 }
 
 @Model
+final class ReplacedFulfillmentCategoryArchive {
+  @Attribute(.unique) var id: UUID
+  var category_id: UUID
+  var category: String
+  var category_identitiy: String
+  var category_vision: String
+  var category_purpose: String
+  var rolesCSV: String
+  var fociCSV: String
+  var resourcesCSV: String
+  var passionsCSV: String
+  var replacedAt: Date
+
+  init(
+    id: UUID = .init(),
+    category_id: UUID,
+    category: String = "",
+    category_identitiy: String = "",
+    category_vision: String = "",
+    category_purpose: String = "",
+    rolesCSV: String = "",
+    fociCSV: String = "",
+    resourcesCSV: String = "",
+    passionsCSV: String = "",
+    replacedAt: Date = .init()
+  ) {
+    self.id = id
+    self.category_id = category_id
+    self.category = category
+    self.category_identitiy = category_identitiy
+    self.category_vision = category_vision
+    self.category_purpose = category_purpose
+    self.rolesCSV = rolesCSV
+    self.fociCSV = fociCSV
+    self.resourcesCSV = resourcesCSV
+    self.passionsCSV = passionsCSV
+    self.replacedAt = replacedAt
+  }
+}
+
+@Model
 final class Outcomes {
     @Attribute(.unique) var outcome_id: UUID
     var category: String

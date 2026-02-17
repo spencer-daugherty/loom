@@ -69,6 +69,17 @@ struct ContentView: View {
     private var isActiveActionFlow: Bool {
         isActivePlan || (hasChunkStoredActionsThisWeek && !hasCompletedReflectionThisWeek)
     }
+
+    private var splashMetrics: [(String, Color, Double)] {
+        [
+            ("Career & Business", FulfillmentCategoryTheme.color(for: "Career & Business"), 20),
+            ("Leadership & Impact", FulfillmentCategoryTheme.color(for: "Leadership & Impact"), 20),
+            ("Wealth & Lifestyle", FulfillmentCategoryTheme.color(for: "Wealth & Lifestyle"), 20),
+            ("Mind & Meaning", FulfillmentCategoryTheme.color(for: "Mind & Meaning"), 20),
+            ("Love & Relationships", FulfillmentCategoryTheme.color(for: "Love & Relationships"), 20),
+            ("Health & Vitality", FulfillmentCategoryTheme.color(for: "Health & Vitality"), 20),
+        ]
+    }
     
     private func daysUntil(_ endDate: Date) -> Int {
         let calendar = Calendar.current
@@ -159,28 +170,9 @@ struct ContentView: View {
                             }
                             .environment(\.contentCardDensity, cardDensity)
 
-                            if !showSplash {
-                                footer
-                            }
+                            footer
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                        // Loading Splash Overlay
-                        if showSplash {
-                            LoadingSplashView(
-                                metrics: fulfillmentMetrics,
-                                namespace: graphNamespace,
-                                minimumDisplayDuration: 3.0,
-                                onMinimumElapsed: {
-                                    Task { @MainActor in
-                                        splashMinimumElapsed = true
-                                        dismissSplashIfReady()
-                                    }
-                                }
-                            )
-                            .transition(.opacity)
-                            .zIndex(2)
-                        }
 
                         if let emotion = pressedEmotion {
                             PassionPopupOverlay(
@@ -230,6 +222,24 @@ struct ContentView: View {
                         }
                     }
                     .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
+                }
+                .opacity(showSplash ? 0.001 : 1)
+                .allowsHitTesting(!showSplash)
+
+                if showSplash {
+                    LoadingSplashView(
+                        metrics: splashMetrics,
+                        namespace: graphNamespace,
+                        minimumDisplayDuration: 3.0,
+                        onMinimumElapsed: {
+                            Task { @MainActor in
+                                splashMinimumElapsed = true
+                                dismissSplashIfReady()
+                            }
+                        }
+                    )
+                    .transition(.opacity)
+                    .zIndex(2)
                 }
             }
             .ignoresSafeArea(.keyboard)
@@ -871,7 +881,12 @@ struct ContentView: View {
                         }
                         .frame(width: 140, height: 140)
                         .padding(.top, 10)
-                        .matchedGeometryEffect(id: "fulfillmentGraph", in: graphNamespace)
+                        .matchedGeometryEffect(
+                            id: "fulfillmentGraph",
+                            in: graphNamespace,
+                            properties: .position,
+                            anchor: .center
+                        )
                         
                         // labels
                         VStack(alignment: .leading, spacing: 6) {

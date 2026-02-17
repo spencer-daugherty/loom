@@ -1519,12 +1519,6 @@ struct ActionView: View {
             },
             onOpenAttachments: {
                 attachmentsActionID = ActionSheetID(id: action.id)
-            },
-            onSwipeDone: { nextStatus in
-                setStatus(for: action.id, to: nextStatus)
-            },
-            onSwipeRecapture: { nextStatus in
-                setStatus(for: action.id, to: nextStatus)
             }
         )
     }
@@ -1657,14 +1651,36 @@ struct ActionView: View {
         }
         // Display-only ordering rule:
         // - "In progress" actions are pinned to the top inside each chunk.
-        // - Base order remains `sortOrder`, so when status changes away from in-progress
-        //   the action naturally returns to its previous list position.
+        // - "Done" actions are pinned to the bottom inside each chunk.
+        // - Base order remains `sortOrder`, so when status changes away from these
+        //   pinned statuses the action naturally returns to its previous list position.
         for chunkId in result.keys {
             result[chunkId]?.sort { lhs, rhs in
-                let lhsInProgress = (executionByAction[lhs.id]?.status ?? .noAction) == .inProgress
-                let rhsInProgress = (executionByAction[rhs.id]?.status ?? .noAction) == .inProgress
-                if lhsInProgress != rhsInProgress {
-                    return lhsInProgress && !rhsInProgress
+                let lhsStatus = executionByAction[lhs.id]?.status ?? .noAction
+                let rhsStatus = executionByAction[rhs.id]?.status ?? .noAction
+
+                let lhsRank: Int
+                switch lhsStatus {
+                case .inProgress:
+                    lhsRank = 0
+                case .done:
+                    lhsRank = 2
+                default:
+                    lhsRank = 1
+                }
+
+                let rhsRank: Int
+                switch rhsStatus {
+                case .inProgress:
+                    rhsRank = 0
+                case .done:
+                    rhsRank = 2
+                default:
+                    rhsRank = 1
+                }
+
+                if lhsRank != rhsRank {
+                    return lhsRank < rhsRank
                 }
                 if lhs.sortOrder != rhs.sortOrder {
                     return lhs.sortOrder < rhs.sortOrder
@@ -3268,8 +3284,6 @@ private struct ActionSwipeRow: View {
     let onOpenLeverage: () -> Void
     let onOpenSensitivity: () -> Void
     let onOpenAttachments: () -> Void
-    let onSwipeDone: (ActionExecutionStatus) -> Void
-    let onSwipeRecapture: (ActionExecutionStatus) -> Void
 
     @State private var localStatus: ActionExecutionStatus
     @State private var localIsMust: Bool
@@ -3294,9 +3308,7 @@ private struct ActionSwipeRow: View {
         onOpenClock: @escaping () -> Void,
         onOpenLeverage: @escaping () -> Void,
         onOpenSensitivity: @escaping () -> Void,
-        onOpenAttachments: @escaping () -> Void,
-        onSwipeDone: @escaping (ActionExecutionStatus) -> Void,
-        onSwipeRecapture: @escaping (ActionExecutionStatus) -> Void
+        onOpenAttachments: @escaping () -> Void
     ) {
         self.actionId = actionId
         self.text = text
@@ -3318,8 +3330,6 @@ private struct ActionSwipeRow: View {
         self.onOpenLeverage = onOpenLeverage
         self.onOpenSensitivity = onOpenSensitivity
         self.onOpenAttachments = onOpenAttachments
-        self.onSwipeDone = onSwipeDone
-        self.onSwipeRecapture = onSwipeRecapture
         _localStatus = State(initialValue: status)
         _localIsMust = State(initialValue: isMust)
     }
@@ -3327,6 +3337,8 @@ private struct ActionSwipeRow: View {
     private var rowAccent: Color {
         minutes == nil ? Color(.systemGray) : accent
     }
+
+    private var isSwipeInteracting: Bool { false }
 
     private var effectiveStatus: ActionExecutionStatus {
         localStatus
@@ -3360,6 +3372,7 @@ private struct ActionSwipeRow: View {
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
             Button {
+                guard !isSwipeInteracting else { return }
                 onOpenStatus()
             } label: {
                 Group {
@@ -3449,29 +3462,6 @@ private struct ActionSwipeRow: View {
                 .stroke(effectiveStatus == .inProgress ? rowAccent : Color.black.opacity(0.12), lineWidth: effectiveStatus == .inProgress ? 3 : 1)
         )
         .contentShape(Rectangle())
-        .swipeActions(edge: .leading, allowsFullSwipe: false) {
-            Button {
-                let next: ActionExecutionStatus = effectiveStatus == .done ? .noAction : .done
-                localStatus = next
-                onSwipeDone(next)
-            } label: {
-                Text(effectiveStatus == .done ? "Unmark" : "Mark Done")
-            }
-            .tint(.black)
-        }
-        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            Button {
-                let next: ActionExecutionStatus = effectiveStatus == .carriedToCapture ? .noAction : .carriedToCapture
-                localStatus = next
-                onSwipeRecapture(next)
-            } label: {
-                Label(
-                    effectiveStatus == .carriedToCapture ? "Unmark" : "Recapture",
-                    systemImage: effectiveStatus == .carriedToCapture ? "xmark" : "arrow.right"
-                )
-            }
-            .tint(.gray)
-        }
         .onChange(of: status) { _, newValue in
             localStatus = newValue
         }
@@ -3499,6 +3489,7 @@ private struct ActionSwipeRow: View {
         onTap: @escaping () -> Void
     ) -> some View {
         Button {
+            guard !isSwipeInteracting else { return }
             onTap()
         } label: {
             Image(systemName: systemName)
@@ -3511,6 +3502,7 @@ private struct ActionSwipeRow: View {
 
     private func clockButton(minutes: Int?, tint: Color, isEnabled: Bool = true, onTap: @escaping () -> Void) -> some View {
         Button {
+            guard !isSwipeInteracting else { return }
             onTap()
         } label: {
             HStack(spacing: 6) {

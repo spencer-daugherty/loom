@@ -2,6 +2,34 @@ import Foundation
 import SwiftData
 
 enum RecentlyDeletedStore {
+    private struct DrivingForceArchiveSnapshot: Codable {
+        var id: UUID
+        var visionSnapshot: String
+        var purposeSnapshot: String
+        var updatedAt: Date
+        var archivedAt: Date
+    }
+
+    private struct ReplacedFulfillmentCategoryArchiveSnapshot: Codable {
+        var id: UUID
+        var category_id: UUID
+        var category: String
+        var category_identitiy: String
+        var category_vision: String
+        var category_purpose: String
+        var rolesCSV: String
+        var fociCSV: String
+        var resourcesCSV: String
+        var passionsCSV: String
+        var replacedAt: Date
+    }
+
+    enum RestoreResult {
+        case restored
+        case needsCategoryMapping(missingCategory: String)
+        case failed
+    }
+
     private struct ReflectionArchiveActionSnapshot: Codable {
         var id: UUID
         var archiveId: UUID
@@ -217,7 +245,11 @@ enum RecentlyDeletedStore {
         context.delete(model)
     }
 
-    static func restore(_ item: RecentlyDeletedItem, in context: ModelContext) -> Bool {
+    static func restore(
+        _ item: RecentlyDeletedItem,
+        in context: ModelContext,
+        categoryOverride: String? = nil
+    ) -> RestoreResult {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
 
@@ -228,12 +260,20 @@ enum RecentlyDeletedStore {
                 let data = payload.data(using: .utf8),
                 let decoded = try? decoder.decode(OutcomeSnapshot.self, from: data),
                 let outcomeUUID = UUID(uuidString: item.entityID)
-            else { return false }
+            else { return .failed }
+
+            guard let finalCategory = resolveCategory(
+                requested: decoded.category,
+                categoryOverride: categoryOverride,
+                in: context
+            ) else {
+                return .needsCategoryMapping(missingCategory: decoded.category)
+            }
 
             context.insert(
                 Outcomes(
                     outcome_id: outcomeUUID,
-                    category: decoded.category,
+                    category: finalCategory,
                     updatedAt: .now,
                     outcome: decoded.outcome,
                     reasons: decoded.reasons,
@@ -300,7 +340,7 @@ enum RecentlyDeletedStore {
             }
 
             context.delete(item)
-            return true
+            return .restored
 
         case "RollingCaptureItem":
             guard
@@ -308,13 +348,13 @@ enum RecentlyDeletedStore {
                 let data = payload.data(using: .utf8),
                 let decoded = try? decoder.decode(CaptureSnapshot.self, from: data),
                 let id = UUID(uuidString: item.entityID)
-            else { return false }
+            else { return .failed }
 
             let normalized = decoded.text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             let existingCapture = (try? context.fetch(FetchDescriptor<RollingCaptureItem>())) ?? []
             if existingCapture.contains(where: { $0.text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == normalized }) {
                 context.delete(item)
-                return true
+                return .restored
             }
 
             let finalID: UUID = existingCapture.contains(where: { $0.id == id }) ? UUID() : id
@@ -330,26 +370,34 @@ enum RecentlyDeletedStore {
                 )
             )
             context.delete(item)
-            return true
+            return .restored
 
         case "CompletedOutcomeArchive":
             guard
                 let payload = item.payloadJSON,
                 let data = payload.data(using: .utf8),
                 let decoded = try? decoder.decode(CompletedOutcomeArchiveSnapshot.self, from: data)
-            else { return false }
+            else { return .failed }
+
+            guard let finalCategory = resolveCategory(
+                requested: decoded.category,
+                categoryOverride: categoryOverride,
+                in: context
+            ) else {
+                return .needsCategoryMapping(missingCategory: decoded.category)
+            }
 
             let existingArchives = (try? context.fetch(FetchDescriptor<CompletedOutcomeArchive>())) ?? []
             if existingArchives.contains(where: { $0.id == decoded.id }) {
                 context.delete(item)
-                return true
+                return .restored
             }
 
             context.insert(
                 CompletedOutcomeArchive(
                     id: decoded.id,
                     originalOutcomeId: decoded.originalOutcomeId,
-                    category: decoded.category,
+                    category: finalCategory,
                     outcome: decoded.outcome,
                     reasons: decoded.reasons,
                     start: decoded.start,
@@ -397,14 +445,62 @@ enum RecentlyDeletedStore {
             }
 
             context.delete(item)
-            return true
+            return .restored
+
+        case "DrivingForceArchive":
+            guard
+                let payload = item.payloadJSON,
+                let data = payload.data(using: .utf8),
+                let decoded = try? decoder.decode(DrivingForceArchiveSnapshot.self, from: data)
+            else { return .failed }
+
+            let allRows = (try? context.fetch(FetchDescriptor<DrivingForceArchive>())) ?? []
+            let finalID = allRows.contains(where: { $0.id == decoded.id }) ? UUID() : decoded.id
+            context.insert(
+                DrivingForceArchive(
+                    id: finalID,
+                    visionSnapshot: decoded.visionSnapshot,
+                    purposeSnapshot: decoded.purposeSnapshot,
+                    updatedAt: decoded.updatedAt,
+                    archivedAt: decoded.archivedAt
+                )
+            )
+            context.delete(item)
+            return .restored
+
+        case "ReplacedFulfillmentCategoryArchive":
+            guard
+                let payload = item.payloadJSON,
+                let data = payload.data(using: .utf8),
+                let decoded = try? decoder.decode(ReplacedFulfillmentCategoryArchiveSnapshot.self, from: data)
+            else { return .failed }
+
+            let existing = (try? context.fetch(FetchDescriptor<ReplacedFulfillmentCategoryArchive>())) ?? []
+            let finalID = existing.contains(where: { $0.id == decoded.id }) ? UUID() : decoded.id
+            context.insert(
+                ReplacedFulfillmentCategoryArchive(
+                    id: finalID,
+                    category_id: decoded.category_id,
+                    category: decoded.category,
+                    category_identitiy: decoded.category_identitiy,
+                    category_vision: decoded.category_vision,
+                    category_purpose: decoded.category_purpose,
+                    rolesCSV: decoded.rolesCSV,
+                    fociCSV: decoded.fociCSV,
+                    resourcesCSV: decoded.resourcesCSV,
+                    passionsCSV: decoded.passionsCSV,
+                    replacedAt: decoded.replacedAt
+                )
+            )
+            context.delete(item)
+            return .restored
 
         case "PlannedChunkActionAttachment":
             guard
                 let payload = item.payloadJSON,
                 let data = payload.data(using: .utf8),
                 let decoded = try? decoder.decode(ActionAttachmentSnapshot.self, from: data)
-            else { return false }
+            else { return .failed }
 
             let allLive = (try? context.fetch(FetchDescriptor<PlannedChunkActionAttachment>())) ?? []
             let duplicate = allLive.contains {
@@ -438,14 +534,14 @@ enum RecentlyDeletedStore {
             }
 
             context.delete(item)
-            return true
+            return .restored
 
         case "PlannedChunkActionNote":
             guard
                 let payload = item.payloadJSON,
                 let data = payload.data(using: .utf8),
                 let decoded = try? decoder.decode(ActionNoteSnapshot.self, from: data)
-            else { return false }
+            else { return .failed }
 
             let allNotes = (try? context.fetch(FetchDescriptor<PlannedChunkActionNote>())) ?? []
             let dayKey = {
@@ -475,14 +571,34 @@ enum RecentlyDeletedStore {
             }
 
             context.delete(item)
-            return true
+            return .restored
 
         case "ActionBlocksReflectionArchive":
             guard
                 let payload = item.payloadJSON,
                 let data = payload.data(using: .utf8),
                 let decoded = try? decoder.decode(ReflectionArchiveSnapshot.self, from: data)
-            else { return false }
+            else { return .failed }
+
+            let resolvedCategoryByOriginal: [String: String] = {
+                let categories = Set(decoded.actions.map(\.chunkCategory) + decoded.outcomes.map(\.category))
+                var result: [String: String] = [:]
+                for original in categories {
+                    guard let resolved = resolveCategory(
+                        requested: original,
+                        categoryOverride: categoryOverride,
+                        in: context
+                    ) else {
+                        return [:]
+                    }
+                    result[original] = resolved
+                }
+                return result
+            }()
+            if resolvedCategoryByOriginal.isEmpty && !(decoded.actions.isEmpty && decoded.outcomes.isEmpty) {
+                let missing = (decoded.actions.map(\.chunkCategory) + decoded.outcomes.map(\.category)).first ?? "Unknown"
+                return .needsCategoryMapping(missingCategory: missing)
+            }
 
             let existingArchives = (try? context.fetch(FetchDescriptor<ActionBlocksReflectionArchive>())) ?? []
             if !existingArchives.contains(where: { $0.id == decoded.id }) {
@@ -511,7 +627,7 @@ enum RecentlyDeletedStore {
                         plannedChunkId: row.plannedChunkId,
                         plannedChunkActionId: row.plannedChunkActionId,
                         chunkLabel: row.chunkLabel,
-                        chunkCategory: row.chunkCategory,
+                        chunkCategory: resolvedCategoryByOriginal[row.chunkCategory] ?? row.chunkCategory,
                         resultText: row.resultText,
                         purposeText: row.purposeText,
                         actionText: row.actionText,
@@ -539,7 +655,7 @@ enum RecentlyDeletedStore {
                         plannedChunkId: row.plannedChunkId,
                         outcomeId: row.outcomeId,
                         outcomeText: row.outcomeText,
-                        category: row.category
+                        category: resolvedCategoryByOriginal[row.category] ?? row.category
                     )
                 )
             }
@@ -601,11 +717,35 @@ enum RecentlyDeletedStore {
             }
 
             context.delete(item)
-            return true
+            return .restored
 
         default:
-            return false
+            return .failed
         }
+    }
+
+    private static func resolveCategory(
+        requested: String,
+        categoryOverride: String?,
+        in context: ModelContext
+    ) -> String? {
+        let trimmedRequested = requested.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedOverride = categoryOverride?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !trimmedOverride.isEmpty {
+            return trimmedOverride
+        }
+
+        let allFulfillments = (try? context.fetch(FetchDescriptor<Fulfillment>())) ?? []
+        let available = allFulfillments.map(\.category)
+        if available.contains(where: { $0.caseInsensitiveCompare(trimmedRequested) == .orderedSame }) {
+            return available.first(where: { $0.caseInsensitiveCompare(trimmedRequested) == .orderedSame }) ?? trimmedRequested
+        }
+
+        if let aliased = FulfillmentCategoryTheme.categoryAlias(for: trimmedRequested),
+           available.contains(where: { $0.caseInsensitiveCompare(aliased) == .orderedSame }) {
+            return available.first(where: { $0.caseInsensitiveCompare(aliased) == .orderedSame }) ?? aliased
+        }
+        return nil
     }
 
     static func purgeExpired(in context: ModelContext) {
@@ -635,6 +775,7 @@ enum RecentlyDeletedStore {
         if let m = model as? RollingCaptureItem { return m.id.uuidString }
         if let m = model as? CompletedOutcomeArchive { return m.id.uuidString }
         if let m = model as? ActionBlocksReflectionArchive { return m.id.uuidString }
+        if let m = model as? ReplacedFulfillmentCategoryArchive { return m.id.uuidString }
         if let m = model as? RecentlyDeletedItem { return m.id.uuidString }
 
         let mirror = Mirror(reflecting: model)
@@ -650,6 +791,16 @@ enum RecentlyDeletedStore {
         if let m = model as? CompletedOutcomeArchive { return m.outcome }
         if let m = model as? ActionBlocksReflectionArchive {
             return "Action Blocks • \(shortDate(m.startedAt)) - \(shortDate(m.completedAt))"
+        }
+        if let m = model as? DrivingForceArchive {
+            let vision = m.visionSnapshot.trimmingCharacters(in: .whitespacesAndNewlines)
+            let purpose = m.purposeSnapshot.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !vision.isEmpty { return vision }
+            if !purpose.isEmpty { return purpose }
+            return "Driving Force"
+        }
+        if let m = model as? ReplacedFulfillmentCategoryArchive {
+            return m.category
         }
 
         let mirror = Mirror(reflecting: model)
@@ -674,6 +825,12 @@ enum RecentlyDeletedStore {
         }
         if model is ActionBlocksReflectionArchive {
             return "Completed Action Blocks"
+        }
+        if model is DrivingForceArchive {
+            return "Driving Force"
+        }
+        if model is ReplacedFulfillmentCategoryArchive {
+            return "Previous Category"
         }
         return String(describing: type(of: model))
     }
@@ -946,6 +1103,38 @@ enum RecentlyDeletedStore {
                 plannedChunkActionId: m.plannedChunkActionId,
                 noteText: m.noteText,
                 updatedAt: m.updatedAt
+            )
+            if let data = try? encoder.encode(snapshot) {
+                return String(data: data, encoding: .utf8)
+            }
+        }
+
+        if let m = model as? DrivingForceArchive {
+            let snapshot = DrivingForceArchiveSnapshot(
+                id: m.id,
+                visionSnapshot: m.visionSnapshot,
+                purposeSnapshot: m.purposeSnapshot,
+                updatedAt: m.updatedAt,
+                archivedAt: m.archivedAt
+            )
+            if let data = try? encoder.encode(snapshot) {
+                return String(data: data, encoding: .utf8)
+            }
+        }
+
+        if let m = model as? ReplacedFulfillmentCategoryArchive {
+            let snapshot = ReplacedFulfillmentCategoryArchiveSnapshot(
+                id: m.id,
+                category_id: m.category_id,
+                category: m.category,
+                category_identitiy: m.category_identitiy,
+                category_vision: m.category_vision,
+                category_purpose: m.category_purpose,
+                rolesCSV: m.rolesCSV,
+                fociCSV: m.fociCSV,
+                resourcesCSV: m.resourcesCSV,
+                passionsCSV: m.passionsCSV,
+                replacedAt: m.replacedAt
             )
             if let data = try? encoder.encode(snapshot) {
                 return String(data: data, encoding: .utf8)

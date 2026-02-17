@@ -465,7 +465,8 @@ struct LoadingSplashView: View {
     private func centeredSplashRow(
         metrics: [(String, Color, Double)],
         rotationDegrees: Double,
-        radarScale: CGFloat
+        radarScale: CGFloat,
+        radarOpacity: Double
     ) -> some View {
         GeometryReader { geo in
             HStack(spacing: 12) {
@@ -494,7 +495,13 @@ struct LoadingSplashView: View {
                 }
                 .frame(width: 45, height: 45)
                 .scaleEffect(radarScale)
-                .matchedGeometryEffect(id: "fulfillmentGraph", in: namespace)
+                .opacity(radarOpacity)
+                .matchedGeometryEffect(
+                    id: "fulfillmentGraph",
+                    in: namespace,
+                    properties: .position,
+                    anchor: .center
+                )
             }
             .position(x: geo.size.width / 2, y: geo.size.height / 2)
         }
@@ -516,21 +523,36 @@ struct LoadingSplashView: View {
                     let animatedMetrics = isTransitioningOut ? metrics : pulsedMetrics(at: t * 0.45)
                     let rotationDegrees = isTransitioningOut ? 0.0 : (t * Double(337.5))
                     let startupElapsed = context.date.timeIntervalSince(splashStartDate)
-                    let firstLineCompletion: Double = 0.62
-                    let radarGrowDuration: Double = 0.42
-                    let radarGrowProgress = max(0.0, min((startupElapsed - firstLineCompletion) / radarGrowDuration, 1.0))
-                    let radarScale = 0.78 + (0.22 * radarGrowProgress)
+                    let radarIntroDelay: Double = 1.0
+                    let radarGrowDuration: Double = 0.26
+                    let radarPopDuration: Double = 0.24
+
+                    let introRaw = (startupElapsed - radarIntroDelay) / radarGrowDuration
+                    let intro = max(0.0, min(introRaw, 1.0))
+                    let easedIntro = 1.0 - pow(1.0 - intro, 3.0) // easeOut cubic
+
+                    let baseScale = CGFloat(0.05 + (0.95 * easedIntro))
+                    let popStart = radarIntroDelay + radarGrowDuration
+                    let popRaw = (startupElapsed - popStart) / radarPopDuration
+                    let pop = max(0.0, min(popRaw, 1.0))
+                    let popPulse = sin(pop * .pi) * 0.10 // slight overshoot, then settle
+
+                    let radarScale = baseScale * CGFloat(1.0 + popPulse)
+                    let radarOpacity = isTransitioningOut ? 1.0 : easedIntro
+
                     centeredSplashRow(
                         metrics: animatedMetrics,
                         rotationDegrees: rotationDegrees,
-                        radarScale: radarScale
+                        radarScale: radarScale,
+                        radarOpacity: radarOpacity
                     )
                 }
             } else {
                 centeredSplashRow(
                     metrics: metrics,
                     rotationDegrees: 0,
-                    radarScale: 0.78
+                    radarScale: 0.05,
+                    radarOpacity: 0
                 )
             }
         }
@@ -558,10 +580,10 @@ struct LoadingSplashView: View {
             try? await Task.sleep(nanoseconds: UInt64(minimumDisplayDuration * 1_000_000_000))
             if let isPresented = isPresented {
                 if isPresented.wrappedValue {
-                    withAnimation(.easeOut(duration: 0.18)) {
+                    withAnimation(.linear(duration: 0.22)) {
                         isTransitioningOut = true
                     }
-                    try? await Task.sleep(nanoseconds: 180_000_000)
+                    try? await Task.sleep(nanoseconds: 220_000_000)
                     isPresented.wrappedValue = false
                 }
             } else {

@@ -115,9 +115,15 @@ struct CaptureView: View {
                             .foregroundStyle(.blue)
                         } else {
                             Button {
+                                // Force keyboard to rebuild so submit label immediately switches to `.search`.
+                                if focusedField == .newInput {
+                                    focusedField = nil
+                                }
                                 isSearchMode = true
                                 input = ""
-                                focusedField = .newInput
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                                    focusedField = .newInput
+                                }
                             } label: {
                                 Image(systemName: "magnifyingglass")
                                     .font(.system(size: 16, weight: .semibold))
@@ -407,7 +413,7 @@ struct CaptureView: View {
                     .textInputAutocapitalization(.sentences)
                     .autocorrectionDisabled(false)
                     .focused($focusedField, equals: .newInput)
-                    .submitLabel(.done)
+                    .submitLabel(isSearchMode ? .search : .done)
                     .onSubmit {
                         if !isSearchMode {
                             addItem()
