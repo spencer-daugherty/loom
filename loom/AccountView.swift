@@ -437,10 +437,15 @@ struct ModelFilter: Identifiable, Hashable {
 // MARK: - Main View
 struct AccountView: View {
     @Environment(\.modelContext) private var context
+    @Query private var fulfillments: [Fulfillment]
     @AppStorage("enable_projects_feature") private var enableProjectsFeature = false
     @AppStorage("blank_homepage_mode") private var blankHomepageMode = false
     @State private var showDeleteAllDataSheet = false
     @State private var deleteAllConfirmationCode = ""
+
+    private var isFulfillmentEmptyState: Bool {
+        blankHomepageMode || fulfillments.isEmpty
+    }
 
     var body: some View {
         List {
@@ -456,10 +461,17 @@ struct AccountView: View {
                 NavigationLink {
                     ManageFulfillmentCategoriesView()
                 } label: {
-                    HStack {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text("Manage Fulfillment Categories")
+                            .foregroundStyle(isFulfillmentEmptyState ? .secondary : .primary)
+                        if isFulfillmentEmptyState {
+                            Text("Complete Fulfillment first")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
+                .disabled(isFulfillmentEmptyState)
 
                 NavigationLink {
                     CompletedActionBlocksListView()

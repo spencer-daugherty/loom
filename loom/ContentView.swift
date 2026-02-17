@@ -734,7 +734,11 @@ struct ContentView: View {
             : Color(.secondarySystemBackground)
 
         return NavigationLink {
-            DrivingForceView(autoOpenCreateVision: isDrivingForceEmptyState)
+            if isDrivingForceEmptyState {
+                DrivingForceStartView()
+            } else {
+                DrivingForceView(autoOpenCreateVision: false)
+            }
         } label: {
             SectionCard(
                 iconName: "infinity",
