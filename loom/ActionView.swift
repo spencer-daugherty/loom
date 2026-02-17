@@ -77,6 +77,7 @@ struct ActionView: View {
     @State private var showCompleteHint: Bool = false
     @State private var showReflectionFlow: Bool = false
     @State private var dismissActionViewAfterReflect: Bool = false
+    @State private var deferredPersistor = ActionDeferredPersistor()
     private let weekStart: Date
 
     init() {
@@ -457,7 +458,7 @@ struct ActionView: View {
     private var hasMustsFilterButton: Bool {
         if onlyMusts { return true }
         return filteredActionsForVisibility(excluding: [.musts]).contains {
-            defineStateByActionID[$0.id]?.isMust == true
+            isMust(for: $0.id, defineByAction: defineStateByActionID)
         }
     }
     private var canExpandDurationSelection: Bool {
@@ -893,6 +894,8 @@ struct ActionView: View {
             handleScrollOffsetChange(y)
         }
         .onDisappear {
+            let pending = deferredPersistor.takePendingAndCancel()
+            applyDeferredWrites(statuses: pending.statuses, musts: pending.musts)
             autosaveTask?.cancel()
             persistNow()
         }
@@ -1333,7 +1336,7 @@ struct ActionView: View {
                     }
                     let totalMustMinutes = activeActions.reduce(0) { partial, action in
                         let st = defineByAction[action.id]
-                        guard st?.isMust == true else { return partial }
+                        guard isMust(for: action.id, defineByAction: defineByAction) else { return partial }
                         return partial + (st?.timeEstimateMinutes ?? 0)
                     }
 
@@ -1488,7 +1491,7 @@ struct ActionView: View {
             status: status,
             accent: accent,
             colorScheme: colorScheme,
-            isMust: defineState?.isMust ?? false,
+            isMust: isMust(for: action.id, defineState: defineState),
             minutes: defineState?.timeEstimateMinutes,
             hasLeverage: hasLeverage,
             leverageIconName: leverageIconName,
@@ -1502,12 +1505,8 @@ struct ActionView: View {
             onOpenStatus: {
                 actionStatusActionID = ActionSheetID(id: action.id)
             },
-            onToggleMust: {
-                upsertDefineState(forActionId: action.id) { st in
-                    st.isMust.toggle()
-                    st.updatedAt = .now
-                }
-                scheduleAutosave()
+            onToggleMust: { nextMust in
+                scheduleMustPersist(for: action.id, isMust: nextMust)
             },
             onOpenClock: {
                 durationActionID = ActionSheetID(id: action.id)
@@ -1521,13 +1520,11 @@ struct ActionView: View {
             onOpenAttachments: {
                 attachmentsActionID = ActionSheetID(id: action.id)
             },
-            onSwipeDone: {
-                let current = status
-                setStatus(for: action.id, to: current == .done ? .noAction : .done)
+            onSwipeDone: { nextStatus in
+                setStatus(for: action.id, to: nextStatus)
             },
-            onSwipeRecapture: {
-                let current = status
-                setStatus(for: action.id, to: current == .carriedToCapture ? .noAction : .carriedToCapture)
+            onSwipeRecapture: { nextStatus in
+                setStatus(for: action.id, to: nextStatus)
             }
         )
     }
@@ -1658,6 +1655,23 @@ struct ActionView: View {
                 result[action.plannedChunkId, default: []].append(action)
             }
         }
+        // Display-only ordering rule:
+        // - "In progress" actions are pinned to the top inside each chunk.
+        // - Base order remains `sortOrder`, so when status changes away from in-progress
+        //   the action naturally returns to its previous list position.
+        for chunkId in result.keys {
+            result[chunkId]?.sort { lhs, rhs in
+                let lhsInProgress = (executionByAction[lhs.id]?.status ?? .noAction) == .inProgress
+                let rhsInProgress = (executionByAction[rhs.id]?.status ?? .noAction) == .inProgress
+                if lhsInProgress != rhsInProgress {
+                    return lhsInProgress && !rhsInProgress
+                }
+                if lhs.sortOrder != rhs.sortOrder {
+                    return lhs.sortOrder < rhs.sortOrder
+                }
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
+        }
         return result
     }
 
@@ -1675,7 +1689,7 @@ struct ActionView: View {
         let define = defineByAction[action.id]
         let status = executionByAction[action.id]?.status ?? .noAction
 
-        if !excludedFacets.contains(.musts) && onlyMusts && (define?.isMust != true) { return false }
+        if !excludedFacets.contains(.musts) && onlyMusts && !isMust(for: action.id, defineByAction: defineByAction) { return false }
 
         if !excludedFacets.contains(.place) && !selectedPlaceIDs.isEmpty {
             let selected = placesByAction[action.id] ?? []
@@ -1755,7 +1769,15 @@ struct ActionView: View {
     }
 
     private func status(for actionId: UUID) -> ActionExecutionStatus {
-        executionStateByActionID[actionId]?.status ?? .noAction
+        return executionStateByActionID[actionId]?.status ?? .noAction
+    }
+
+    private func isMust(for actionId: UUID, defineByAction: [UUID: PlannedChunkActionDefineState]) -> Bool {
+        return defineByAction[actionId]?.isMust ?? false
+    }
+
+    private func isMust(for actionId: UUID, defineState: PlannedChunkActionDefineState?) -> Bool {
+        return defineState?.isMust ?? false
     }
 
     private func setStatus(for actionId: UUID, to newStatus: ActionExecutionStatus) {
@@ -1766,12 +1788,41 @@ struct ActionView: View {
                 return
             }
         }
+        scheduleStatusPersist(for: actionId, status: newStatus)
+    }
 
-        upsertExecutionState(forActionId: actionId) { state in
-            state.status = newStatus
-            state.updatedAt = .now
+    private func scheduleStatusPersist(for actionId: UUID, status newStatus: ActionExecutionStatus) {
+        deferredPersistor.enqueueStatus(for: actionId, status: newStatus, delayNanos: 220_000_000) { @MainActor statuses, musts in
+            self.applyDeferredWrites(statuses: statuses, musts: musts)
         }
-        scheduleAutosave()
+    }
+
+    private func scheduleMustPersist(for actionId: UUID, isMust: Bool) {
+        deferredPersistor.enqueueMust(for: actionId, isMust: isMust, delayNanos: 220_000_000) { @MainActor statuses, musts in
+            self.applyDeferredWrites(statuses: statuses, musts: musts)
+        }
+    }
+
+    private func applyDeferredWrites(statuses: [UUID: ActionExecutionStatus], musts: [UUID: Bool]) {
+        if !statuses.isEmpty {
+            for (actionId, newStatus) in statuses {
+                upsertExecutionState(forActionId: actionId) { state in
+                    state.status = newStatus
+                    state.updatedAt = .now
+                }
+            }
+        }
+        if !musts.isEmpty {
+            for (actionId, isMust) in musts {
+                upsertDefineState(forActionId: actionId) { st in
+                    st.isMust = isMust
+                    st.updatedAt = .now
+                }
+            }
+        }
+        if !statuses.isEmpty || !musts.isEmpty {
+            scheduleAutosave()
+        }
     }
 
     private func actionFont(status: ActionExecutionStatus) -> Font {
@@ -2270,7 +2321,7 @@ struct ActionView: View {
     private func scheduleAutosave() {
         autosaveTask?.cancel()
         autosaveTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 250_000_000)
+            try? await Task.sleep(nanoseconds: 700_000_000)
             persistNow()
         }
     }
@@ -2306,6 +2357,57 @@ private enum FilterChipKind: Hashable {
     case leveragedOnly
     case attachments
     case inProgressOnly
+}
+
+private final class ActionDeferredPersistor {
+    private var pendingStatuses: [UUID: ActionExecutionStatus] = [:]
+    private var pendingMusts: [UUID: Bool] = [:]
+    private var flushTask: Task<Void, Never>? = nil
+
+    func enqueueStatus(
+        for actionId: UUID,
+        status: ActionExecutionStatus,
+        delayNanos: UInt64,
+        flush: @escaping @MainActor (_ statuses: [UUID: ActionExecutionStatus], _ musts: [UUID: Bool]) -> Void
+    ) {
+        pendingStatuses[actionId] = status
+        scheduleFlush(delayNanos: delayNanos, flush: flush)
+    }
+
+    func enqueueMust(
+        for actionId: UUID,
+        isMust: Bool,
+        delayNanos: UInt64,
+        flush: @escaping @MainActor (_ statuses: [UUID: ActionExecutionStatus], _ musts: [UUID: Bool]) -> Void
+    ) {
+        pendingMusts[actionId] = isMust
+        scheduleFlush(delayNanos: delayNanos, flush: flush)
+    }
+
+    func takePendingAndCancel() -> (statuses: [UUID: ActionExecutionStatus], musts: [UUID: Bool]) {
+        flushTask?.cancel()
+        flushTask = nil
+        let snapshot = (pendingStatuses, pendingMusts)
+        pendingStatuses.removeAll()
+        pendingMusts.removeAll()
+        return snapshot
+    }
+
+    private func scheduleFlush(
+        delayNanos: UInt64,
+        flush: @escaping @MainActor (_ statuses: [UUID: ActionExecutionStatus], _ musts: [UUID: Bool]) -> Void
+    ) {
+        flushTask?.cancel()
+        flushTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: delayNanos)
+            guard let self, !Task.isCancelled else { return }
+            let statuses = self.pendingStatuses
+            let musts = self.pendingMusts
+            self.pendingStatuses.removeAll()
+            self.pendingMusts.removeAll()
+            await flush(statuses, musts)
+        }
+    }
 }
 
 private struct ActionSheetID: Identifiable, Hashable {
@@ -3072,7 +3174,6 @@ private struct InlineActionEditor: View {
     let onCommit: (String) -> Void
 
     @State private var text: String
-    @State private var commitTask: Task<Void, Never>? = nil
     @FocusState private var isFocused: Bool
 
     init(
@@ -3103,9 +3204,8 @@ private struct InlineActionEditor: View {
                     .strikethrough(strike, color: textColor)
                     .lineLimit(3)
                     .focused($isFocused)
-                    .onChange(of: text) { _, _ in
-                        scheduleCommit()
-                    }
+                    .submitLabel(.done)
+                    .onSubmit { onCommit(text) }
             } else {
                 Text(text)
                     .font(font)
@@ -3131,8 +3231,9 @@ private struct InlineActionEditor: View {
         .onChange(of: isFocused) { _, nowFocused in
             if nowFocused {
                 if focusedActionID != actionId { focusedActionID = actionId }
-            } else if focusedActionID == actionId {
-                focusedActionID = nil
+            } else {
+                onCommit(text)
+                if focusedActionID == actionId { focusedActionID = nil }
             }
         }
         .onAppear {
@@ -3141,15 +3242,6 @@ private struct InlineActionEditor: View {
             }
         }
         .onDisappear {
-            commitTask?.cancel()
-            onCommit(text)
-        }
-    }
-
-    private func scheduleCommit() {
-        commitTask?.cancel()
-        commitTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 350_000_000)
             onCommit(text)
         }
     }
@@ -3171,15 +3263,67 @@ private struct ActionSwipeRow: View {
     @Binding var focusedActionID: UUID?
     let onCommitText: (String) -> Void
     let onOpenStatus: () -> Void
-    let onToggleMust: () -> Void
+    let onToggleMust: (Bool) -> Void
     let onOpenClock: () -> Void
     let onOpenLeverage: () -> Void
     let onOpenSensitivity: () -> Void
     let onOpenAttachments: () -> Void
-    let onSwipeDone: () -> Void
-    let onSwipeRecapture: () -> Void
+    let onSwipeDone: (ActionExecutionStatus) -> Void
+    let onSwipeRecapture: (ActionExecutionStatus) -> Void
 
     @GestureState private var dragOffset: CGFloat = 0
+    @State private var localStatus: ActionExecutionStatus
+    @State private var localIsMust: Bool
+
+    init(
+        actionId: UUID,
+        text: String,
+        status: ActionExecutionStatus,
+        accent: Color,
+        colorScheme: ColorScheme,
+        isMust: Bool,
+        minutes: Int?,
+        hasLeverage: Bool,
+        leverageIconName: String,
+        hasSensitivity: Bool,
+        hasAttachments: Bool,
+        highlightStatusBox: Bool,
+        focusedActionID: Binding<UUID?>,
+        onCommitText: @escaping (String) -> Void,
+        onOpenStatus: @escaping () -> Void,
+        onToggleMust: @escaping (Bool) -> Void,
+        onOpenClock: @escaping () -> Void,
+        onOpenLeverage: @escaping () -> Void,
+        onOpenSensitivity: @escaping () -> Void,
+        onOpenAttachments: @escaping () -> Void,
+        onSwipeDone: @escaping (ActionExecutionStatus) -> Void,
+        onSwipeRecapture: @escaping (ActionExecutionStatus) -> Void
+    ) {
+        self.actionId = actionId
+        self.text = text
+        self.status = status
+        self.accent = accent
+        self.colorScheme = colorScheme
+        self.isMust = isMust
+        self.minutes = minutes
+        self.hasLeverage = hasLeverage
+        self.leverageIconName = leverageIconName
+        self.hasSensitivity = hasSensitivity
+        self.hasAttachments = hasAttachments
+        self.highlightStatusBox = highlightStatusBox
+        self._focusedActionID = focusedActionID
+        self.onCommitText = onCommitText
+        self.onOpenStatus = onOpenStatus
+        self.onToggleMust = onToggleMust
+        self.onOpenClock = onOpenClock
+        self.onOpenLeverage = onOpenLeverage
+        self.onOpenSensitivity = onOpenSensitivity
+        self.onOpenAttachments = onOpenAttachments
+        self.onSwipeDone = onSwipeDone
+        self.onSwipeRecapture = onSwipeRecapture
+        _localStatus = State(initialValue: status)
+        _localIsMust = State(initialValue: isMust)
+    }
 
     private var dragX: CGFloat {
         max(-180, min(180, dragOffset))
@@ -3197,12 +3341,20 @@ private struct ActionSwipeRow: View {
         minutes == nil ? Color(.systemGray) : accent
     }
 
+    private var effectiveStatus: ActionExecutionStatus {
+        localStatus
+    }
+
+    private var effectiveIsMust: Bool {
+        localIsMust
+    }
+
     private var isInactive: Bool {
-        status == .done || status == .carriedToCapture || status == .notNeeded
+        effectiveStatus == .done || effectiveStatus == .carriedToCapture || effectiveStatus == .notNeeded
     }
 
     private var inactiveTint: Color {
-        switch status {
+        switch effectiveStatus {
         case .leveraged:
             return Color.primary.opacity(0.45)
         case .done, .carriedToCapture, .notNeeded:
@@ -3219,7 +3371,7 @@ private struct ActionSwipeRow: View {
     }
 
     private var rowGesture: some Gesture {
-        DragGesture(minimumDistance: 20)
+        DragGesture(minimumDistance: 10)
             .updating($dragOffset) { value, state, _ in
                 let horizontal = value.translation.width
                 let vertical = value.translation.height
@@ -3237,9 +3389,13 @@ private struct ActionSwipeRow: View {
                 let triggerThreshold: CGFloat = 150
 
                 if horizontal >= triggerThreshold {
-                    onSwipeDone()
+                    let next: ActionExecutionStatus = effectiveStatus == .done ? .noAction : .done
+                    localStatus = next
+                    onSwipeDone(next)
                 } else if horizontal <= -triggerThreshold {
-                    onSwipeRecapture()
+                    let next: ActionExecutionStatus = effectiveStatus == .carriedToCapture ? .noAction : .carriedToCapture
+                    localStatus = next
+                    onSwipeRecapture(next)
                 }
             }
     }
@@ -3250,17 +3406,17 @@ private struct ActionSwipeRow: View {
                 .fill(Color(.tertiarySystemFill))
 
             HStack {
-                Text(status == .done ? "Unmark" : "Mark Done")
+                Text(effectiveStatus == .done ? "Unmark" : "Mark Done")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.black)
                     .padding(.leading, 14)
                     .opacity(rowOffset > 12 ? 1 : 0)
                 Spacer()
                 HStack(spacing: 6) {
-                    Text(status == .carriedToCapture ? "Unmark" : "Recapture")
+                    Text(effectiveStatus == .carriedToCapture ? "Unmark" : "Recapture")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.gray)
-                    if status != .carriedToCapture {
+                    if effectiveStatus != .carriedToCapture {
                         Image(systemName: "arrow.right")
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(.gray)
@@ -3277,10 +3433,10 @@ private struct ActionSwipeRow: View {
                     onOpenStatus()
                 } label: {
                     Group {
-                        if status.icon.isEmpty {
+                        if effectiveStatus.icon.isEmpty {
                             Color.clear.frame(width: 14, height: 14)
                         } else {
-                            Image(systemName: status.icon)
+                            Image(systemName: effectiveStatus.icon)
                                 .font(.system(size: 14, weight: .semibold))
                                 .foregroundStyle(.gray)
                         }
@@ -3310,11 +3466,15 @@ private struct ActionSwipeRow: View {
 
                     HStack(spacing: 18) {
                         iconButton(
-                            systemName: isMust ? "star.square.fill" : "star.square",
-                            isOn: isMust,
+                            systemName: effectiveIsMust ? "star.square.fill" : "star.square",
+                            isOn: effectiveIsMust,
                             tint: iconTint,
                             isEnabled: !isInactive,
-                            onTap: onToggleMust
+                            onTap: {
+                                let next = !effectiveIsMust
+                                localIsMust = next
+                                onToggleMust(next)
+                            }
                         )
 
                         clockButton(
@@ -3358,10 +3518,16 @@ private struct ActionSwipeRow: View {
         }
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .stroke(status == .inProgress ? rowAccent : Color.black.opacity(0.12), lineWidth: status == .inProgress ? 3 : 1)
+                .stroke(effectiveStatus == .inProgress ? rowAccent : Color.black.opacity(0.12), lineWidth: effectiveStatus == .inProgress ? 3 : 1)
         )
         .contentShape(Rectangle())
-        .highPriorityGesture(rowGesture)
+        .simultaneousGesture(rowGesture)
+        .onChange(of: status) { _, newValue in
+            localStatus = newValue
+        }
+        .onChange(of: isMust) { _, newValue in
+            localIsMust = newValue
+        }
     }
 
     private func actionFont(status: ActionExecutionStatus) -> Font {
