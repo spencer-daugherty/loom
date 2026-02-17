@@ -37,6 +37,13 @@ struct CaptureView: View {
     @State private var highlightedDuplicateItemID: UUID? = nil
     @State private var duplicateResetWorkItem: DispatchWorkItem? = nil
     @State private var isSearchMode: Bool = false
+    @State private var showFullTextEditorSheet: Bool = false
+    @State private var editingItemID: UUID?
+    @State private var editingItemText: String = ""
+    @State private var editingItemOriginalText: String = ""
+    @State private var isFullTextEditorFocused: Bool = false
+    @State private var fullTextEditorCursorSeed: Int = 0
+    @State private var fullTextEditorHeight: CGFloat = 160
 
     private enum FocusField: Hashable {
         case newInput
@@ -90,6 +97,10 @@ struct CaptureView: View {
 
     private func normalizedActionText(_ text: String) -> String {
         text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private func shouldShowMoreButton(for text: String) -> Bool {
+        text.contains("\n") || text.count > 42
     }
 
     private func formatShortDate(_ date: Date) -> String {
@@ -173,7 +184,7 @@ struct CaptureView: View {
                 }
                 .onChange(of: focusedField) { _, newValue in
                     if newValue == nil {
-                        if isDatePickerPresented { return }
+                        if isDatePickerPresented || showFullTextEditorSheet { return }
                         DispatchQueue.main.async {
                             focusedField = .newInput
                         }
@@ -219,6 +230,20 @@ struct CaptureView: View {
                         focusedField = .newInput
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
+
+                    if shouldShowMoreButton(for: item.text) {
+                        Button("Show more") {
+                            focusedField = nil
+                            editingItemID = item.id
+                            editingItemText = item.text
+                            editingItemOriginalText = item.text
+                            fullTextEditorCursorSeed &+= 1
+                            showFullTextEditorSheet = true
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.blue)
+                        .buttonStyle(.plain)
+                    }
 
                     if let d = item.unhiddenAt {
                         Text("Unhidden " + formatShortDate(d))
@@ -325,6 +350,68 @@ struct CaptureView: View {
         .listRowSpacing(4)
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
+        .sheet(isPresented: $showFullTextEditorSheet) {
+            let hasChanges = editingItemText != editingItemOriginalText
+            NavigationStack {
+                List {
+                    CaptureEditorTextView(
+                        text: $editingItemText,
+                        isFocused: $isFullTextEditorFocused,
+                        cursorSeed: fullTextEditorCursorSeed,
+                        dynamicHeight: $fullTextEditorHeight
+                    )
+                    .frame(height: max(160, fullTextEditorHeight))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                }
+                .navigationTitle("Edit Action")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button(hasChanges ? "Cancel" : "Close") {
+                            isFullTextEditorFocused = false
+                            showFullTextEditorSheet = false
+                            editingItemID = nil
+                            editingItemText = ""
+                            editingItemOriginalText = ""
+                        }
+                        .foregroundColor(hasChanges ? .red : .primary)
+                    }
+                    if hasChanges {
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button("Update") {
+                                guard let id = editingItemID,
+                                      let item = allItems.first(where: { $0.id == id }) else {
+                                    isFullTextEditorFocused = false
+                                    showFullTextEditorSheet = false
+                                    editingItemID = nil
+                                    editingItemText = ""
+                                    editingItemOriginalText = ""
+                                    return
+                                }
+                                renameItemInline(item, to: editingItemText)
+                                scheduleInlineEditSave()
+                                isFullTextEditorFocused = false
+                                showFullTextEditorSheet = false
+                                editingItemID = nil
+                                editingItemText = ""
+                                editingItemOriginalText = ""
+                            }
+                            .foregroundColor(.blue)
+                        }
+                    }
+                }
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+            .onAppear {
+                focusedField = nil
+                fullTextEditorCursorSeed &+= 1
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.07) {
+                    isFullTextEditorFocused = true
+                }
+            }
+        }
         .onChange(of: showCompletedList) { _, isShowing in
             guard isShowing else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
@@ -671,3 +758,97 @@ struct CaptureView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.8, execute: workItem)
     }
 }
+
+#if canImport(UIKit)
+private struct CaptureEditorTextView: UIViewRepresentable {
+    @Binding var text: String
+    @Binding var isFocused: Bool
+    var cursorSeed: Int
+    @Binding var dynamicHeight: CGFloat
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        var parent: CaptureEditorTextView
+        var lastCursorSeed: Int = -1
+
+        init(parent: CaptureEditorTextView) {
+            self.parent = parent
+        }
+
+        func textViewDidChange(_ textView: UITextView) {
+            parent.text = textView.text
+            parent.updateHeight(for: textView)
+        }
+
+        func textViewDidBeginEditing(_ textView: UITextView) {
+            parent.isFocused = true
+        }
+
+        func textViewDidEndEditing(_ textView: UITextView) {
+            parent.isFocused = false
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    func makeUIView(context: Context) -> UITextView {
+        let view = UITextView()
+        view.backgroundColor = .clear
+        view.font = UIFont.preferredFont(forTextStyle: .body)
+        view.delegate = context.coordinator
+        view.textContainerInset = UIEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
+        view.textContainer.lineFragmentPadding = 0
+        view.textContainer.widthTracksTextView = true
+        view.textContainer.lineBreakMode = .byWordWrapping
+        view.textContainer.maximumNumberOfLines = 0
+        view.isDirectionalLockEnabled = true
+        view.alwaysBounceHorizontal = false
+        view.showsHorizontalScrollIndicator = false
+        view.isScrollEnabled = false
+        return view
+    }
+
+    func updateUIView(_ uiView: UITextView, context: Context) {
+        context.coordinator.parent = self
+        if uiView.text != text {
+            uiView.text = text
+        }
+        if isFocused {
+            if !uiView.isFirstResponder {
+                uiView.becomeFirstResponder()
+            }
+            if context.coordinator.lastCursorSeed != cursorSeed {
+                uiView.selectedRange = NSRange(location: (uiView.text as NSString).length, length: 0)
+                context.coordinator.lastCursorSeed = cursorSeed
+            }
+        } else if uiView.isFirstResponder {
+            uiView.resignFirstResponder()
+        }
+        updateHeight(for: uiView)
+    }
+
+    private func updateHeight(for textView: UITextView) {
+        let measuredWidth = max(textView.bounds.width, UIScreen.main.bounds.width - 48)
+        let fitting = CGSize(width: measuredWidth, height: .greatestFiniteMagnitude)
+        let target = textView.sizeThatFits(fitting).height
+        if abs(dynamicHeight - target) > 1 {
+            DispatchQueue.main.async {
+                dynamicHeight = target
+            }
+        }
+    }
+}
+#else
+private struct CaptureEditorTextView: View {
+    @Binding var text: String
+    @Binding var isFocused: Bool
+    var cursorSeed: Int
+    @Binding var dynamicHeight: CGFloat
+
+    var body: some View {
+        TextEditor(text: $text)
+            .padding(.horizontal, 8)
+    }
+}
+#endif

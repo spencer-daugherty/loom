@@ -34,6 +34,7 @@ struct ContentView: View {
     @State private var splashPreparationStarted: Bool = false
     @State private var measuredCardHeights: [String: CGFloat] = [:]
     @State private var showPlayBlockedHint: Bool = false
+    @State private var playBlockedHintKind: PlayBlockedHintKind = .drivingAndFulfillmentForObjectives
     @State private var highlightDrivingRequirement: Bool = false
     @State private var highlightFulfillmentRequirement: Bool = false
     @State private var playBlockedResetWorkItem: DispatchWorkItem? = nil
@@ -54,6 +55,11 @@ struct ContentView: View {
         case plan
         case action
         var id: String { rawValue }
+    }
+
+    private enum PlayBlockedHintKind {
+        case drivingAndFulfillmentForObjectives
+        case drivingForFulfillment
     }
 
     private var isActivePlan: Bool {
@@ -651,7 +657,7 @@ struct ContentView: View {
         }
         .overlay(alignment: .top) {
             if showPlayBlockedHint {
-                Text("Please complete both your Driving Force and Fulfillment categories at a minimum to create Objectives.")
+                playBlockedHintText(for: playBlockedHintKind)
                     .font(.footnote)
                     .fontWeight(.bold)
                     .multilineTextAlignment(.center)
@@ -671,9 +677,22 @@ struct ContentView: View {
     }
 
     private func triggerPlayBlockedFeedback() {
+        triggerPlayBlockedFeedback(
+            kind: .drivingAndFulfillmentForObjectives,
+            highlightDriving: isDrivingForceEmptyState,
+            highlightFulfillment: isFulfillmentEmptyState
+        )
+    }
+
+    private func triggerPlayBlockedFeedback(
+        kind: PlayBlockedHintKind,
+        highlightDriving: Bool,
+        highlightFulfillment: Bool
+    ) {
         playBlockedResetWorkItem?.cancel()
-        highlightDrivingRequirement = isDrivingForceEmptyState
-        highlightFulfillmentRequirement = isFulfillmentEmptyState
+        playBlockedHintKind = kind
+        highlightDrivingRequirement = highlightDriving
+        highlightFulfillmentRequirement = highlightFulfillment
         withAnimation(.easeInOut(duration: 0.15)) {
             showPlayBlockedHint = true
         }
@@ -687,6 +706,23 @@ struct ContentView: View {
         }
         playBlockedResetWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.9, execute: workItem)
+    }
+
+    private func playBlockedHintText(for kind: PlayBlockedHintKind) -> Text {
+        switch kind {
+        case .drivingAndFulfillmentForObjectives:
+            return Text("Please complete both your ")
+                + Text(Image(systemName: "infinity"))
+                + Text(" Driving Force and ")
+                + Text(Image(systemName: "trophy"))
+                + Text(" Fulfillment categories at a minimum to create Objectives.")
+        case .drivingForFulfillment:
+            return Text("Please complete your ")
+                + Text(Image(systemName: "infinity"))
+                + Text(" Driving Force to continue to ")
+                + Text(Image(systemName: "trophy"))
+                + Text(" Fulfillment.")
+        }
     }
 
     // MARK: - Extracted Sections to reduce body complexity
@@ -966,6 +1002,19 @@ struct ContentView: View {
         }
         .buttonStyle(.plain)
         .frame(maxHeight: .infinity)
+        .overlay {
+            if isDrivingForceEmptyState {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        triggerPlayBlockedFeedback(
+                            kind: .drivingForFulfillment,
+                            highlightDriving: true,
+                            highlightFulfillment: false
+                        )
+                    }
+            }
+        }
         .overlay(
             RoundedRectangle(cornerRadius: 16)
                 .stroke(highlightFulfillmentRequirement ? Color.red.opacity(0.9) : Color.clear, lineWidth: 2)

@@ -67,24 +67,33 @@ struct CompletedActionBlocksListView: View {
 
     var body: some View {
         List {
-            ForEach(filteredSessions) { session in
-                NavigationLink {
-                    CompletedActionBlocksDetailView(session: session)
-                } label: {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Started: \(session.startedAt.formatted(date: .abbreviated, time: .omitted))")
-                            .font(.subheadline)
-                        Text("Ended: \(session.completedAt.formatted(date: .abbreviated, time: .omitted))")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+            if filteredSessions.isEmpty {
+                Text("No completed action blocks.")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            } else {
+                ForEach(filteredSessions) { session in
+                    NavigationLink {
+                        CompletedActionBlocksDetailView(session: session)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Started: \(session.startedAt.formatted(date: .abbreviated, time: .omitted))")
+                                .font(.subheadline)
+                            Text("Ended: \(session.completedAt.formatted(date: .abbreviated, time: .omitted))")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 8)
                     }
-                    .padding(.vertical, 8)
-                }
-                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                    Button("Delete", role: .destructive) {
-                        pendingDeleteSession = session
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        Button("Delete", role: .destructive) {
+                            pendingDeleteSession = session
+                        }
+                        .tint(.red)
                     }
-                    .tint(.red)
                 }
             }
         }

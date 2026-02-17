@@ -1443,6 +1443,8 @@ private struct ManageFulfillmentCategoriesView: View {
     @State private var categoriesMarkedForDelete: Set<String> = []
     @State private var isAddingCategory: Bool = false
     @State private var newCategoryText: String = ""
+    @State private var showNewCategoryDestination: Bool = false
+    @State private var newCategoryToOpen: String = ""
     @State private var showMinimumCategoryAlert: Bool = false
     @State private var showCannotDeleteCategoryPopup: Bool = false
     @FocusState private var isAddCategoryFocused: Bool
@@ -1481,7 +1483,7 @@ private struct ManageFulfillmentCategoriesView: View {
                     }
                     .foregroundStyle(categoriesMarkedForDelete.isEmpty ? Color.secondary : Color.red)
                     .disabled(categoriesMarkedForDelete.isEmpty)
-                } else {
+                } else if !categories.isEmpty {
                     Button("Edit") {
                         isDeleteMode = true
                         categoriesMarkedForDelete.removeAll()
@@ -1523,6 +1525,17 @@ private struct ManageFulfillmentCategoriesView: View {
             )
             .presentationDetents([.medium])
             .presentationDragIndicator(.visible)
+        }
+        .navigationDestination(isPresented: $showNewCategoryDestination) {
+            FulfillmentCategoryLabelsView(category: newCategoryToOpen, startAsNewCategorySetup: true)
+                .onDisappear {
+                    newCategoryToOpen = ""
+                }
+        }
+        .onChange(of: showNewCategoryDestination) { _, isPresented in
+            if !isPresented {
+                newCategoryToOpen = ""
+            }
         }
     }
 
@@ -1631,37 +1644,11 @@ private struct ManageFulfillmentCategoriesView: View {
             return
         }
 
-        let categoryID = UUID()
-        let fulfillment = Fulfillment(
-            category_id: categoryID,
-            category: trimmed,
-            category_identitiy: "",
-            category_vision: "",
-            category_purpose: ""
-        )
-        context.insert(fulfillment)
-
-        for seed in ["label 1", "label 2", "label 3"] {
-            context.insert(
-                PlanLabel(
-                    label: seed,
-                    categoryId: categoryID,
-                    category: trimmed,
-                    source: "default"
-                )
-            )
-        }
-
-        var map = categoryColorKeys
-        let used = Set(map.values)
-        let nextColor = FulfillmentCategoryTheme.palette.map(\.key).first(where: { !used.contains($0) }) ?? "blue"
-        map[trimmed] = nextColor
-        categoryColorKeys = map
-        persistFulfillmentCategoryColorKeys(map)
-
-        try? context.save()
+        // Draft only: do not persist anything until labels setup Save is tapped.
         isAddingCategory = false
         newCategoryText = ""
+        newCategoryToOpen = trimmed
+        showNewCategoryDestination = true
     }
 
     private func deleteMarkedCategories() {
@@ -1780,6 +1767,7 @@ private struct ManageFulfillmentCategoriesView: View {
 }
 
 private struct FulfillmentCategoryLabelsView: View {
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
     @Query private var activePlanStates: [ActivePlanState]
     @Query(sort: \Fulfillment.category, order: .forward) private var allFulfillments: [Fulfillment]
@@ -1811,11 +1799,23 @@ private struct FulfillmentCategoryLabelsView: View {
     @State private var editingLabelID: UUID?
     @State private var editingText: String = ""
     @State private var showMinimumLabelsAlert: Bool = false
+    @State private var showNewCategoryLabelsInlineHint: Bool = false
+    @State private var labelsInlineHintText: String = "Minimum of 3 lables required"
+    @State private var inlineHintWorkItem: DispatchWorkItem?
+    @State private var highlightedRequiredDuplicateIndices: Set<Int> = []
+    @State private var highlightedLabelIDs: Set<UUID> = []
+    @State private var highlightAddLabelRow: Bool = false
     @FocusState private var focusedField: LabelField?
     @FocusState private var isCategoryNameFieldFocused: Bool
+    private let startAsNewCategorySetup: Bool
 
-    init(category: String) {
+    init(category: String, startAsNewCategorySetup: Bool = false) {
         _currentCategory = State(initialValue: category)
+        self.startAsNewCategorySetup = startAsNewCategorySetup
+        _isConfiguringNewCategoryLabels = State(initialValue: startAsNewCategorySetup)
+        _sourceCategoryForNewCategory = State(initialValue: category)
+        _pendingCategoryName = State(initialValue: category)
+        _pendingNewCategoryLabels = State(initialValue: ["", "", ""])
     }
 
     private enum LabelField: Hashable {
@@ -1831,7 +1831,8 @@ private struct FulfillmentCategoryLabelsView: View {
     }
 
     private var categoryID: UUID {
-        labelsForCategory.first?.categoryId
+        allFulfillments.first(where: { $0.category == currentCategory })?.category_id
+            ?? labelsForCategory.first?.categoryId
             ?? PlanLabelSeeder.categoryIDs[currentCategory]
             ?? UUID()
     }
@@ -1862,6 +1863,7 @@ private struct FulfillmentCategoryLabelsView: View {
                     Button("Cancel") {
                         cancelNewCategorySetup()
                     }
+                    .foregroundStyle(.red)
                 }
             }
             ToolbarItem(placement: .navigationBarTrailing) {
@@ -1870,10 +1872,11 @@ private struct FulfillmentCategoryLabelsView: View {
                         if canFinalizeNewCategorySetup {
                             finalizeNewCategorySetup()
                         } else {
-                            showNewCategoryLabelsAlert = true
+                            triggerNewCategoryLabelsValidationFeedback()
                         }
                     }
-                    .foregroundStyle(canFinalizeNewCategorySetup ? Color.accentColor : .secondary)
+                    .disabled(!canFinalizeNewCategorySetup)
+                    .foregroundStyle(canFinalizeNewCategorySetup ? .blue : .secondary)
                 }
             }
         }
@@ -1906,7 +1909,36 @@ private struct FulfillmentCategoryLabelsView: View {
         } message: {
             Text("Please add 3 or more labels for your new category before saving.")
         }
+        .safeAreaInset(edge: .bottom) {
+            if showNewCategoryLabelsInlineHint {
+                Text(labelsInlineHintText)
+                    .font(.footnote.weight(.bold))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color.black.opacity(0.12), lineWidth: 1)
+                    )
+                    .padding(.bottom, 8)
+            }
+        }
+        .onAppear {
+            if startAsNewCategorySetup {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    focusedField = .required(0)
+                }
+            }
+        }
         .onChange(of: focusedField) { _, newValue in
+            if case .required(let idx) = focusedField,
+               newValue != .required(idx),
+               !validateRequiredLabel(at: idx) {
+                DispatchQueue.main.async {
+                    focusedField = .required(idx)
+                }
+                return
+            }
             if case .edit(let editingID) = focusedField,
                newValue != .edit(editingID),
                let current = allLabels.first(where: { $0.labelId == editingID }) {
@@ -1967,6 +1999,7 @@ private struct FulfillmentCategoryLabelsView: View {
                 }
                 .foregroundStyle(.blue)
                 .padding(.vertical, 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 ForEach(labelsForCategory, id: \.labelId) { label in
                     if editingLabelID == label.labelId {
@@ -1974,9 +2007,22 @@ private struct FulfillmentCategoryLabelsView: View {
                             .focused($focusedField, equals: .edit(label.labelId))
                             .submitLabel(.done)
                             .onSubmit { commitEdit(label) }
+                            .padding(.vertical, 6)
+                            .padding(.horizontal, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(highlightedLabelIDs.contains(label.labelId) ? Color.red.opacity(0.9) : Color.clear, lineWidth: 1.5)
+                            )
                     } else {
                         Text(label.label)
                             .fontWeight(.regular)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 6)
+                            .padding(.horizontal, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(highlightedLabelIDs.contains(label.labelId) ? Color.red.opacity(0.9) : Color.clear, lineWidth: 1.5)
+                            )
                             .onTapGesture { startEditing(label) }
                             .swipeActions {
                                 Button(role: .destructive) {
@@ -2005,7 +2051,14 @@ private struct FulfillmentCategoryLabelsView: View {
         TextField("Label \(idx + 1)", text: requiredLabelBinding(idx))
             .focused($focusedField, equals: .required(idx))
             .submitLabel(idx >= max(2, pendingNewCategoryLabels.count - 1) ? .done : .next)
+            .padding(.vertical, 6)
+            .padding(.horizontal, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(highlightedRequiredDuplicateIndices.contains(idx) ? Color.red.opacity(0.9) : Color.clear, lineWidth: 1.5)
+            )
             .onSubmit {
+                guard validateRequiredLabel(at: idx) else { return }
                 if idx < max(2, pendingNewCategoryLabels.count - 1) {
                     focusedField = .required(idx + 1)
                 } else {
@@ -2015,13 +2068,18 @@ private struct FulfillmentCategoryLabelsView: View {
     }
 
     private var canFinalizeNewCategorySetup: Bool {
-        let firstThreeFilled = pendingNewCategoryLabels.prefix(3).allSatisfy {
-            !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }
-        let normalized = pendingNewCategoryLabels
+        let normalizedFirstThree = pendingNewCategoryLabels
+            .prefix(3)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+        guard normalizedFirstThree.count == 3 else { return false }
+        guard normalizedFirstThree.allSatisfy({ !$0.isEmpty }) else { return false }
+        guard Set(normalizedFirstThree).count == normalizedFirstThree.count else { return false }
+
+        // Do not allow duplicates anywhere in the list if user adds more than 3 labels.
+        let normalizedAll = pendingNewCategoryLabels
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
             .filter { !$0.isEmpty }
-        return firstThreeFilled && normalized.count >= 3 && Set(normalized).count == normalized.count
+        return Set(normalizedAll).count == normalizedAll.count
     }
 
     @ViewBuilder
@@ -2032,6 +2090,12 @@ private struct FulfillmentCategoryLabelsView: View {
                     .focused($focusedField, equals: .add)
                     .submitLabel(.done)
                     .onSubmit { commitAdd() }
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(highlightAddLabelRow ? Color.red.opacity(0.9) : Color.clear, lineWidth: 1.5)
+                    )
                 Spacer()
             }
             .padding(.vertical, 4)
@@ -2053,6 +2117,7 @@ private struct FulfillmentCategoryLabelsView: View {
     }
 
     private func startEditing(_ label: PlanLabel) {
+        clearDuplicateHighlights()
         isAddingLabel = false
         newLabelText = ""
         editingLabelID = label.labelId
@@ -2070,14 +2135,21 @@ private struct FulfillmentCategoryLabelsView: View {
         let normalized = trimmed.lowercased()
         if normalized == label.label {
             editingLabelID = nil
+            clearDuplicateHighlights()
             return
         }
-        if allLabels.contains(where: {
+        let duplicates = allLabels.filter {
             $0.labelId != label.labelId &&
-            $0.categoryId == label.categoryId &&
             $0.label.caseInsensitiveCompare(normalized) == .orderedSame
-        }) {
-            editingLabelID = nil
+        }
+        if !duplicates.isEmpty {
+            let categoryName = duplicates.first?.category ?? currentCategory
+            var ids = Set(duplicates.map(\.labelId))
+            ids.insert(label.labelId)
+            triggerDuplicateValidationFeedback(
+                message: "Duplicate label under category \(categoryName)",
+                labelIDs: ids
+            )
             return
         }
 
@@ -2088,6 +2160,7 @@ private struct FulfillmentCategoryLabelsView: View {
         label.categoryId = categoryID
         try? context.save()
         editingLabelID = nil
+        clearDuplicateHighlights()
     }
 
     private func commitAdd() {
@@ -2095,12 +2168,17 @@ private struct FulfillmentCategoryLabelsView: View {
         guard !trimmed.isEmpty else { return }
 
         let normalized = trimmed.lowercased()
-        if allLabels.contains(where: {
-            $0.categoryId == categoryID &&
+        let duplicates = allLabels.filter {
             $0.label.caseInsensitiveCompare(normalized) == .orderedSame
-        }) {
-            isAddingLabel = false
-            newLabelText = ""
+        }
+        if !duplicates.isEmpty {
+            let categoryName = duplicates.first?.category ?? currentCategory
+            let ids = Set(duplicates.filter { $0.category == currentCategory }.map(\.labelId))
+            triggerDuplicateValidationFeedback(
+                message: "Duplicate label under category \(categoryName)",
+                labelIDs: ids,
+                highlightAddRow: true
+            )
             return
         }
 
@@ -2115,6 +2193,7 @@ private struct FulfillmentCategoryLabelsView: View {
 
         isAddingLabel = false
         newLabelText = ""
+        clearDuplicateHighlights()
     }
 
     private func attemptDelete(_ label: PlanLabel) {
@@ -2296,6 +2375,10 @@ private struct FulfillmentCategoryLabelsView: View {
     }
 
     private func cancelNewCategorySetup() {
+        if startAsNewCategorySetup {
+            dismiss()
+            return
+        }
         isConfiguringNewCategoryLabels = false
         pendingNewCategoryLabels = ["", "", ""]
         pendingCategoryName = ""
@@ -2311,16 +2394,156 @@ private struct FulfillmentCategoryLabelsView: View {
             showNewCategoryLabelsAlert = true
             return
         }
-        commitCategoryRename(
-            to: pendingCategoryName,
-            updateEverywhere: false,
-            sourceCategory: sourceCategoryForNewCategory,
-            replacementLabels: normalized
-        )
+        if startAsNewCategorySetup {
+            guard !allFulfillments.contains(where: { $0.category.caseInsensitiveCompare(currentCategory) == .orderedSame }) else {
+                showCategoryRenameAlert = true
+                return
+            }
+
+            let newCategoryID = UUID()
+            context.insert(
+                Fulfillment(
+                    category_id: newCategoryID,
+                    category: currentCategory,
+                    category_identitiy: "",
+                    category_vision: "",
+                    category_purpose: ""
+                )
+            )
+
+            let sourceTag = "cat-\(newCategoryID.uuidString)"
+            for value in normalized {
+                context.insert(
+                    PlanLabel(
+                        label: value,
+                        categoryId: newCategoryID,
+                        category: currentCategory,
+                        source: sourceTag
+                    )
+                )
+            }
+
+            assignDefaultColorIfNeeded(for: currentCategory)
+            try? context.save()
+            isConfiguringNewCategoryLabels = false
+            pendingNewCategoryLabels = ["", "", ""]
+            focusedField = nil
+            dismiss()
+            return
+        } else {
+            commitCategoryRename(
+                to: pendingCategoryName,
+                updateEverywhere: false,
+                sourceCategory: sourceCategoryForNewCategory,
+                replacementLabels: normalized
+            )
+        }
         isConfiguringNewCategoryLabels = false
         sourceCategoryForNewCategory = ""
         pendingNewCategoryLabels = ["", "", ""]
         focusedField = nil
+    }
+
+    private func triggerNewCategoryLabelsValidationFeedback() {
+        labelsInlineHintText = "Minimum of 3 lables required"
+        inlineHintWorkItem?.cancel()
+        highlightedRequiredDuplicateIndices = Set((0..<min(3, pendingNewCategoryLabels.count)).filter {
+            pendingNewCategoryLabels[$0].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        })
+        if highlightedRequiredDuplicateIndices.isEmpty {
+            highlightedRequiredDuplicateIndices = Set([0, 1, 2].filter { pendingNewCategoryLabels.indices.contains($0) })
+        }
+        withAnimation(.easeInOut(duration: 0.15)) {
+            showNewCategoryLabelsInlineHint = true
+        }
+        let workItem = DispatchWorkItem {
+            clearDuplicateHighlights()
+            withAnimation(.easeInOut(duration: 0.15)) {
+                showNewCategoryLabelsInlineHint = false
+            }
+        }
+        inlineHintWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8, execute: workItem)
+    }
+
+    private func validateRequiredLabel(at idx: Int) -> Bool {
+        guard pendingNewCategoryLabels.indices.contains(idx) else { return true }
+        let current = pendingNewCategoryLabels[idx].trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !current.isEmpty else { return true }
+
+        let pendingDuplicateIndices = Set(
+            pendingNewCategoryLabels.enumerated().compactMap { pair in
+                let otherIdx = pair.offset
+                let otherValue = pair.element.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                return (otherIdx != idx && !otherValue.isEmpty && otherValue == current) ? otherIdx : nil
+            }
+        )
+        if !pendingDuplicateIndices.isEmpty {
+            var allIdx = pendingDuplicateIndices
+            allIdx.insert(idx)
+            triggerDuplicateValidationFeedback(
+                message: "Duplicate label under category \(displayedCategoryTitle)",
+                requiredIndices: allIdx
+            )
+            return false
+        }
+
+        if let existingMatch = allLabels.first(where: {
+            $0.label.caseInsensitiveCompare(current) == .orderedSame
+        }) {
+            triggerDuplicateValidationFeedback(
+                message: "Duplicate label under category \(existingMatch.category)",
+                requiredIndices: Set([idx])
+            )
+            return false
+        }
+        highlightedRequiredDuplicateIndices.remove(idx)
+        return true
+    }
+
+    private func triggerDuplicateValidationFeedback(
+        message: String,
+        requiredIndices: Set<Int> = [],
+        labelIDs: Set<UUID> = [],
+        highlightAddRow: Bool = false
+    ) {
+        labelsInlineHintText = message
+        highlightedRequiredDuplicateIndices = requiredIndices
+        highlightedLabelIDs = labelIDs
+        self.highlightAddLabelRow = highlightAddRow
+        inlineHintWorkItem?.cancel()
+        withAnimation(.easeInOut(duration: 0.15)) {
+            showNewCategoryLabelsInlineHint = true
+        }
+        let workItem = DispatchWorkItem {
+            clearDuplicateHighlights()
+            withAnimation(.easeInOut(duration: 0.15)) {
+                showNewCategoryLabelsInlineHint = false
+            }
+        }
+        inlineHintWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8, execute: workItem)
+    }
+
+    private func clearDuplicateHighlights() {
+        highlightedRequiredDuplicateIndices.removeAll()
+        highlightedLabelIDs.removeAll()
+        highlightAddLabelRow = false
+    }
+
+    private func assignDefaultColorIfNeeded(for category: String) {
+        let trimmed = category.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        var map = FulfillmentCategoryTheme.persistedColorKeys()
+        guard map[trimmed] == nil else { return }
+
+        let existingCategories = Set(allFulfillments.map(\.category) + allLabels.map(\.category))
+        let defaults = FulfillmentCategoryTheme.defaultColorKeys()
+        let used = Set(existingCategories.map { map[$0] ?? defaults[$0] ?? "blue" })
+        let nextColor = FulfillmentCategoryTheme.palette.map(\.key).first(where: { !used.contains($0) }) ?? "blue"
+        map[trimmed] = nextColor
+        FulfillmentCategoryTheme.persistColorKeys(map)
     }
 
     private func archiveAndResetCategory(record: Fulfillment) {
