@@ -651,7 +651,7 @@ struct ContentView: View {
         }
         .overlay(alignment: .top) {
             if showPlayBlockedHint {
-                Text("Please complete both your Driving Force and Fulfillment categories at a minimum to start.")
+                Text("Please complete both your Driving Force and Fulfillment categories at a minimum to create Objectives.")
                     .font(.footnote)
                     .fontWeight(.bold)
                     .multilineTextAlignment(.center)
@@ -1145,6 +1145,15 @@ struct ContentView: View {
         }
         .buttonStyle(.plain)
         .frame(maxHeight: .infinity)
+        .overlay {
+            if !canOpenPlanOrActionFlow {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        triggerPlayBlockedFeedback()
+                    }
+            }
+        }
     }
 }
 

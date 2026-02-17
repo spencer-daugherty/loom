@@ -22,14 +22,6 @@ fileprivate let defaultCategoryDefs: [CategoryDef] = [
 
 fileprivate let defaultFulfillmentCategoryTitles: [String] = defaultCategoryDefs.map(\.title)
 
-fileprivate func estimatedListRowHeight() -> CGFloat {
-    #if canImport(UIKit)
-    return UIFont.preferredFont(forTextStyle: .body).lineHeight + 30
-    #else
-    return 56
-    #endif
-}
-
 struct PassionsSectionView: View {
     @Environment(\.modelContext) private var modelContext
     @Query private var passions: [Passion]
@@ -53,52 +45,64 @@ struct PassionsSectionView: View {
                     .font(.headline)
                     .foregroundColor(.black)
             }
-            
-            List {
-                ForEach(categoryPassions, id: \.passion_id) { passion in
-                    Text("\(passion.emotion.capitalized): \(passion.passion)")
-                }
-                
-                HStack {
-                    Button(isSelectingPassion ? "Done" : "Connect Passion") {
-                        withAnimation { isSelectingPassion.toggle() }
+
+            if categoryPassions.isEmpty {
+                Text("No passions connected yet.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(categoryPassions, id: \.passion_id) { passion in
+                        Text("\(passion.emotion.capitalized): \(passion.passion)")
+                            .font(.subheadline)
+                            .padding(.vertical, 8)
+                            .padding(.horizontal, 10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
                     }
-                    .foregroundColor(.blue)
-                    Spacer()
                 }
-                .padding(.vertical, 4)
-                .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
             }
-            .listStyle(.plain)
-            .scrollDisabled(true)
-            .environment(\.editMode, .constant(.active))
-            .frame(height: CGFloat(categoryPassions.count + 1) * estimatedListRowHeight())
-            
-            if isSelectingPassion {
-                List {
-                    ForEach(passions, id: \.passion_id) { passion in
-                        Button(action: {
-                            togglePassion(passion)
-                        }) {
-                            HStack {
-                                Text("\(passion.emotion.capitalized): \(passion.passion)")
-                                Spacer()
-                                if categoryPassions.contains(where: { $0.passion_id == passion.passion_id }) {
-                                    Image(systemName: "checkmark")
-                                        .foregroundColor(.blue)
-                                }
+
+            Button("Connect Passion") {
+                isSelectingPassion = true
+            }
+            .foregroundColor(.blue)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .sheet(isPresented: $isSelectingPassion) {
+                NavigationStack {
+                    List {
+                        ForEach(passions, id: \.passion_id) { passion in
+                            Button {
+                                togglePassion(passion)
+                            } label: {
+                                HStack {
+                                    Text("\(passion.emotion.capitalized): \(passion.passion)")
+                                        .foregroundStyle(.primary)
+                                    Spacer()
+                                    if categoryPassions.contains(where: { $0.passion_id == passion.passion_id }) {
+                                        Image(systemName: "checkmark")
+                                            .foregroundColor(.blue)
+                                    }
+                                    }
+                                .contentShape(Rectangle())
                             }
+                            .buttonStyle(.plain)
                         }
-                        .foregroundColor(.primary)
+                    }
+                    .navigationTitle("Connect Passions to \(record.category)")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button("Done") { isSelectingPassion = false }
+                        }
                     }
                 }
-                .listStyle(.plain)
-                .scrollDisabled(true)
-                .frame(height: CGFloat(passions.count) * estimatedListRowHeight())
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.gray.opacity(0.4))
-                )
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
             }
         }
     }
@@ -145,11 +149,21 @@ struct FulfillmentView: View {
     @State private var newFocusText = ""
     @State private var isAddingResource = false
     @State private var newResourceText = ""
+    @State private var editingRecordID: UUID?
+    @State private var editingText: String = ""
+    @State private var editingOriginalText: String = ""
+    @State private var editingField: EditableField?
+    @State private var isEditSheetTextFocused: Bool = false
+    @State private var editSheetCursorSeed: Int = 0
     @State private var isShowingInstructions = false
     @State private var highlightedCategoryIndex: Int = 0
     @State private var radarAutoRotatePausedUntil: Date = .distantPast
     @FocusState private var focusedField: Field?
-    private enum Field { case vision, purpose, role, focus, resource }
+    private enum Field { case role, focus, resource }
+    private enum EditableField: Identifiable {
+        case vision, purpose
+        var id: String { self == .vision ? "vision" : "purpose" }
+    }
     private let radarTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
     private func categoryKey(_ raw: String) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -241,7 +255,7 @@ struct FulfillmentView: View {
                 .buttonStyle(.plain)
             }
             ToolbarItemGroup(placement: .keyboard) {
-                if focusedField == .purpose {
+                if editingField == nil {
                     Spacer(minLength: 0)
                     Button("Done") { focusedField = nil }
                 }
@@ -258,6 +272,76 @@ struct FulfillmentView: View {
         }
         .sheet(isPresented: $isShowingInstructions) {
             fulfillmentInstructionsSheet()
+        }
+        .sheet(item: $editingField) { field in
+            let hasChanges = editingText != editingOriginalText
+            let categoryPrefix: String = {
+                guard let recordID = editingRecordID,
+                      let record = fulfillments.first(where: { $0.category_id == recordID }) else {
+                    return "Category"
+                }
+                return record.category
+            }()
+            NavigationStack {
+                List {
+                    Section(field == .vision ? "\(categoryPrefix) Vision" : "\(categoryPrefix) Purpose") {
+                        FulfillmentEditorTextView(
+                            text: $editingText,
+                            isFocused: $isEditSheetTextFocused,
+                            cursorSeed: editSheetCursorSeed
+                        )
+                        .frame(height: 140)
+                    }
+                }
+                .navigationTitle(field == .vision ? "Edit Vision" : "Edit Purpose")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button(hasChanges ? "Cancel" : "Close") {
+                            isEditSheetTextFocused = false
+                            editingField = nil
+                            editingRecordID = nil
+                            editingText = ""
+                            editingOriginalText = ""
+                        }
+                        .foregroundColor(hasChanges ? .red : .primary)
+                    }
+                    if hasChanges {
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button("Update") {
+                                guard let recordID = editingRecordID,
+                                      let record = fulfillments.first(where: { $0.category_id == recordID }) else {
+                                    isEditSheetTextFocused = false
+                                    editingField = nil
+                                    editingRecordID = nil
+                                    editingText = ""
+                                    editingOriginalText = ""
+                                    return
+                                }
+                                if field == .vision {
+                                    updateVision(record: record, newText: editingText)
+                                } else {
+                                    updatePurpose(record: record, newText: editingText)
+                                }
+                                isEditSheetTextFocused = false
+                                editingField = nil
+                                editingRecordID = nil
+                                editingText = ""
+                                editingOriginalText = ""
+                            }
+                            .foregroundColor(.blue)
+                        }
+                    }
+                }
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+            .onAppear {
+                editSheetCursorSeed &+= 1
+                DispatchQueue.main.async {
+                    isEditSheetTextFocused = true
+                }
+            }
         }
         .alert("Move to Recently Deleted?", isPresented: $showDeletePreviousAlert, presenting: pendingDeletePrevious) { snapshot in
             Button("Cancel", role: .cancel) {
@@ -858,38 +942,60 @@ struct FulfillmentView: View {
                 }
 
                 if isExpanded {
+                    let rolesForRecord = getRoles(for: record)
+                    let rolesRows = rolesForRecord.count + ((isAddingRole || rolesForRecord.count < 3) ? 1 : 0)
+                    let fociForRecord = getFoci(for: record)
+                    let fociRows = fociForRecord.count + ((isAddingFocus || fociForRecord.count < 3) ? 1 : 0)
+                    let resourcesForRecord = getResources(for: record)
+                    let resourcesRows = resourcesForRecord.count + 1
+
                     VStack(alignment: .leading, spacing: 16) {
                     Text("Vision")
                         .font(.headline)
                         .foregroundColor(.black)
-                    TextField(
-                        "Fit, strong, flexible and CALM",
-                        text: Binding(
-                            get: { record.category_vision },
-                            set: { new in updateVision(record: record, newText: new) }
-                        )
-                    )
-                    .textFieldStyle(.roundedBorder)
-                    .focused($focusedField, equals: .vision)
+                    Text(record.category_vision.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "No vision yet." : record.category_vision)
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+                    Button("Edit Vision") {
+                        editingRecordID = record.category_id
+                        editingText = record.category_vision
+                        editingOriginalText = record.category_vision
+                        isEditSheetTextFocused = false
+                        editSheetCursorSeed &+= 1
+                        editingField = .vision
+                    }
+                    .foregroundColor(.blue)
 
                     Text("Purpose")
                         .font(.headline)
                         .foregroundColor(.black)
-                    TextEditor(
-                        text: Binding(
-                            get: { record.category_purpose },
-                            set: { new in updatePurpose(record: record, newText: new) }
-                        )
-                    )
-                    .frame(minHeight: 100)
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.4)))
-                    .focused($focusedField, equals: .purpose)
+                    Text(record.category_purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "No purpose yet." : record.category_purpose)
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+                    Button("Edit Purpose") {
+                        editingRecordID = record.category_id
+                        editingText = record.category_purpose
+                        editingOriginalText = record.category_purpose
+                        isEditSheetTextFocused = false
+                        editSheetCursorSeed &+= 1
+                        editingField = .purpose
+                    }
+                    .foregroundColor(.blue)
 
                     Text("Roles")
                         .font(.headline)
                         .foregroundColor(.black)
                     List {
-                        let rolesForRecord = getRoles(for: record)
                         ForEach(getRoles(for: record), id: \.id) { r in
                             Text(r.role)
                         }
@@ -929,15 +1035,14 @@ struct FulfillmentView: View {
                         }
                     }
                     .listStyle(.plain)
-                    .scrollDisabled(true)
+                    .scrollDisabled(rolesRows <= 3)
                     .environment(\.editMode, .constant(.active))
-                    .frame(height: CGFloat(getRoles(for: record).count + (isAddingRole ? 1 : 1)) * estimatedListRowHeight())
+                    .frame(minHeight: CGFloat(max(rolesRows, 1)) * 56, maxHeight: 220)
 
                     Text("Three-to-Thrive")
                         .font(.headline)
                         .foregroundColor(.black)
                     List {
-                        let fociForRecord = getFoci(for: record)
                         ForEach(getFoci(for: record), id: \.id) { f in
                             Text(f.activity)
                         }
@@ -977,15 +1082,15 @@ struct FulfillmentView: View {
                         }
                     }
                     .listStyle(.plain)
-                    .scrollDisabled(true)
+                    .scrollDisabled(fociRows <= 3)
                     .environment(\.editMode, .constant(.active))
-                    .frame(height: CGFloat(getFoci(for: record).count + (isAddingFocus ? 1 : 1)) * estimatedListRowHeight())
+                    .frame(minHeight: CGFloat(max(fociRows, 1)) * 56, maxHeight: 220)
 
                     Text("Resources")
                         .font(.headline)
                         .foregroundColor(.black)
                     List {
-                        ForEach(getResources(for: record), id: \.id) { res in
+                        ForEach(resourcesForRecord, id: \.id) { res in
                             Text(res.resource)
                         }
                         .onMove { from, to in
@@ -1024,9 +1129,9 @@ struct FulfillmentView: View {
                         }
                     }
                     .listStyle(.plain)
-                    .scrollDisabled(true)
+                    .scrollDisabled(resourcesRows <= 4)
                     .environment(\.editMode, .constant(.active))
-                    .frame(height: CGFloat(getResources(for: record).count + (isAddingResource ? 1 : 1)) * estimatedListRowHeight())
+                    .frame(minHeight: CGFloat(max(resourcesRows, 1)) * 56, maxHeight: 260)
 
                     PassionsSectionView(record: record)
                     }
@@ -1609,3 +1714,75 @@ struct FulfillmentInteractiveRadar: View {
         return 1.0
     }
 }
+
+#if canImport(UIKit)
+private struct FulfillmentEditorTextView: UIViewRepresentable {
+    @Binding var text: String
+    @Binding var isFocused: Bool
+    var cursorSeed: Int
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        var parent: FulfillmentEditorTextView
+        var lastCursorSeed: Int = -1
+
+        init(parent: FulfillmentEditorTextView) {
+            self.parent = parent
+        }
+
+        func textViewDidChange(_ textView: UITextView) {
+            parent.text = textView.text
+        }
+
+        func textViewDidBeginEditing(_ textView: UITextView) {
+            parent.isFocused = true
+        }
+
+        func textViewDidEndEditing(_ textView: UITextView) {
+            parent.isFocused = false
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    func makeUIView(context: Context) -> UITextView {
+        let view = UITextView()
+        view.backgroundColor = .clear
+        view.font = UIFont.preferredFont(forTextStyle: .body)
+        view.delegate = context.coordinator
+        view.textContainerInset = .zero
+        view.textContainer.lineFragmentPadding = 0
+        return view
+    }
+
+    func updateUIView(_ uiView: UITextView, context: Context) {
+        context.coordinator.parent = self
+        if uiView.text != text {
+            uiView.text = text
+        }
+
+        if isFocused {
+            if !uiView.isFirstResponder {
+                uiView.becomeFirstResponder()
+            }
+            if context.coordinator.lastCursorSeed != cursorSeed {
+                uiView.selectedRange = NSRange(location: (uiView.text as NSString).length, length: 0)
+                context.coordinator.lastCursorSeed = cursorSeed
+            }
+        } else if uiView.isFirstResponder {
+            uiView.resignFirstResponder()
+        }
+    }
+}
+#else
+private struct FulfillmentEditorTextView: View {
+    @Binding var text: String
+    @Binding var isFocused: Bool
+    var cursorSeed: Int
+
+    var body: some View {
+        TextEditor(text: $text)
+    }
+}
+#endif

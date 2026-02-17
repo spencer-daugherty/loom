@@ -1,5 +1,8 @@
 import SwiftUI
 import SwiftData
+#if canImport(UIKit)
+import UIKit
+#endif
 
 private struct PopoverHeightPreferenceKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
@@ -69,6 +72,21 @@ struct CaptureView: View {
     }
 
     private var earliestUnhideDate: Date { Calendar.current.date(byAdding: .day, value: 7, to: Date())! }
+    private var ghostClockIconName: String {
+        #if canImport(UIKit)
+        let candidates = [
+            "clock.arrow.trianglehead.clockwise.rotate.90.path.dotted",
+            "clock.arrow.circlepath",
+            "clock"
+        ]
+        for name in candidates where UIImage(systemName: name) != nil {
+            return name
+        }
+        return "clock"
+        #else
+        return "clock"
+        #endif
+    }
 
     private func normalizedActionText(_ text: String) -> String {
         text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -408,46 +426,62 @@ struct CaptureView: View {
                 .padding(.horizontal)
             }
 
-            HStack(spacing: 12) {
-                TextField(isSearchMode ? "Search for an action..." : "Add an action…", text: $input)
-                    .textInputAutocapitalization(.sentences)
-                    .autocorrectionDisabled(false)
-                    .focused($focusedField, equals: .newInput)
-                    .submitLabel(isSearchMode ? .search : .done)
-                    .onSubmit {
-                        if !isSearchMode {
-                            addItem()
+            GeometryReader { geo in
+                let totalWidth = geo.size.width
+                let sidePadding = min(24, max(14, totalWidth * 0.06))
+                let spacing = min(12, max(8, totalWidth * 0.025))
+                let textPadding = min(12, max(9, totalWidth * 0.028))
+                let toggleWidth = min(60, max(46, totalWidth * 0.15))
+                let iconSize = min(24, max(20, totalWidth * 0.06))
+                let iconSlotWidth = iconSize + 4
+                let controlsWidth: CGFloat = isSearchMode ? 0 : (toggleWidth + iconSlotWidth + spacing)
+                let usable = totalWidth - (sidePadding * 2)
+                let textWidth = max(140, usable - controlsWidth - (isSearchMode ? 0 : spacing))
+
+                HStack(spacing: spacing) {
+                    TextField(isSearchMode ? "Search for an action..." : "Add an action…", text: $input)
+                        .textInputAutocapitalization(.sentences)
+                        .autocorrectionDisabled(false)
+                        .focused($focusedField, equals: .newInput)
+                        .submitLabel(isSearchMode ? .search : .done)
+                        .onSubmit {
+                            if !isSearchMode {
+                                addItem()
+                            }
                         }
-                    }
-                    .padding(12)
-                    .background(Color(.secondarySystemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10)
-                            .stroke(
-                                shouldHighlightDuplicateInput
-                                ? Color.red.opacity(0.85)
-                                : (colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.3)),
-                                lineWidth: shouldHighlightDuplicateInput ? 1.5 : 1
-                            )
-                    )
-                    .layoutPriority(1)
-                    .frame(maxWidth: .infinity)
+                        .padding(textPadding)
+                        .background(Color(.secondarySystemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(
+                                    shouldHighlightDuplicateInput
+                                    ? Color.red.opacity(0.85)
+                                    : (colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.3)),
+                                    lineWidth: shouldHighlightDuplicateInput ? 1.5 : 1
+                                )
+                        )
+                        .frame(width: textWidth, alignment: .leading)
 
-                if !isSearchMode {
-                    Toggle(isOn: $isGhostOn) {
-                        EmptyView()
-                    }
-                    .toggleStyle(.automatic)
-                    .labelsHidden()
-                    .frame(width: 60)
+                    if !isSearchMode {
+                        Toggle(isOn: $isGhostOn) {
+                            EmptyView()
+                        }
+                        .toggleStyle(.automatic)
+                        .labelsHidden()
+                        .frame(width: toggleWidth)
 
-                    Image(systemName: "clock.arrow.trianglehead.clockwise.rotate.90.path.dotted")
-                        .font(.system(size: 24, weight: .semibold))
-                        .foregroundStyle(isGhostOn ? .blue : .secondary)
-                        .accessibilityHidden(true)
+                        Image(systemName: ghostClockIconName)
+                            .font(.system(size: iconSize, weight: .semibold))
+                            .foregroundStyle(isGhostOn ? .blue : .secondary)
+                            .frame(width: iconSlotWidth)
+                            .accessibilityHidden(true)
+                    }
                 }
+                .padding(.horizontal, sidePadding)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             }
+            .frame(height: 64)
             .overlay(alignment: .top) {
                 if showDuplicateHint && !isSearchMode {
                     Text(duplicateMessage)
@@ -464,7 +498,6 @@ struct CaptureView: View {
                         .transition(.opacity)
                 }
             }
-            .padding(.horizontal, 24)
             .padding(.bottom, 24)
         }
         .ignoresSafeArea(edges: .bottom)
