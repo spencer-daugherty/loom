@@ -514,38 +514,45 @@ struct AccountView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     Text("WARNING: Delete All Data")
                         .font(.headline.weight(.bold))
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .multilineTextAlignment(.center)
 
                     Text("This will permanently delete all your data and it won't be recoverable. If you would like to continue please enter \"1234\" below and click \"Permanently Delete All Data\".")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .multilineTextAlignment(.center)
 
                     TextField("1234", text: $deleteAllConfirmationCode)
                         .textFieldStyle(.roundedBorder)
                         .keyboardType(.numberPad)
 
                     VStack(spacing: 10) {
-                        Button("Return") {
-                            showDeleteAllDataSheet = false
-                        }
-                        .buttonStyle(.bordered)
-                        .frame(maxWidth: .infinity)
-
                         Button("Permanently Delete All Data", role: .destructive) {
                             permanentlyDeleteAllData()
                             showDeleteAllDataSheet = false
                         }
                         .buttonStyle(.borderedProminent)
-                        .frame(maxWidth: .infinity)
+                        .tint(.red)
+                        .controlSize(.large)
+                        .frame(maxWidth: .infinity, minHeight: 44)
                         .disabled(deleteAllConfirmationCode != "1234")
+
+                        Button("Return") {
+                            showDeleteAllDataSheet = false
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.gray)
+                        .controlSize(.large)
+                        .frame(maxWidth: .infinity, minHeight: 44)
                     }
                     .padding(.top, 4)
-
-                    Spacer(minLength: 0)
                 }
                 .padding(16)
             }
-            .presentationDetents([.medium])
+            .presentationDetents([.height(320)])
             .presentationDragIndicator(.visible)
         }
     }

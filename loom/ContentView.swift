@@ -70,7 +70,7 @@ struct ContentView: View {
         isActivePlan || (hasChunkStoredActionsThisWeek && !hasCompletedReflectionThisWeek)
     }
 
-    private var splashMetrics: [(String, Color, Double)] {
+    private var splashMetricsFallback: [(String, Color, Double)] {
         [
             ("Career & Business", FulfillmentCategoryTheme.color(for: "Career & Business"), 20),
             ("Leadership & Impact", FulfillmentCategoryTheme.color(for: "Leadership & Impact"), 20),
@@ -79,6 +79,10 @@ struct ContentView: View {
             ("Love & Relationships", FulfillmentCategoryTheme.color(for: "Love & Relationships"), 20),
             ("Health & Vitality", FulfillmentCategoryTheme.color(for: "Health & Vitality"), 20),
         ]
+    }
+
+    private var splashMetrics: [(String, Color, Double)] {
+        fulfillmentMetrics.isEmpty ? splashMetricsFallback : fulfillmentMetrics
     }
     
     private func daysUntil(_ endDate: Date) -> Int {
@@ -884,7 +888,7 @@ struct ContentView: View {
                         .matchedGeometryEffect(
                             id: "fulfillmentGraph",
                             in: graphNamespace,
-                            properties: .position,
+                            properties: .frame,
                             anchor: .center
                         )
                         
