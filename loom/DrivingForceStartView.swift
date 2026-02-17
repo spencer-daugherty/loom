@@ -61,10 +61,6 @@ struct DrivingForceStartView: View {
         ("just", "Hate")
     ]
 
-    private var progressValue: Double {
-        Double(step.rawValue + 1) / Double(Step.allCases.count)
-    }
-
     private var currentDrivingForce: DrivingForce? {
         drivingForces.first
     }
@@ -87,31 +83,24 @@ struct DrivingForceStartView: View {
         bucketOrder.first(where: { missingCount(draftPassions[$0.key] ?? []) > 0 })?.key
     }
 
+    private var isScrollableStep: Bool {
+        step == .passions || step == .summary
+    }
+
     var body: some View {
         ScrollViewReader { proxy in
             ZStack {
-                Color(.secondarySystemBackground)
+                Color(.systemGroupedBackground)
                     .ignoresSafeArea()
 
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 14) {
-                        header
-
-                        switch step {
-                        case .intro:
-                            introStep
-                        case .vision:
-                            visionStep
-                        case .purpose:
-                            purposeStep
-                        case .passions:
-                            passionsStep
-                        case .summary:
-                            summaryStep(proxy: proxy)
+                Group {
+                    if isScrollableStep {
+                        ScrollView {
+                            mainContent(proxy: proxy)
                         }
+                    } else {
+                        mainContent(proxy: proxy)
                     }
-                    .padding(.horizontal)
-                    .padding(.bottom, 100)
                 }
             }
             .safeAreaInset(edge: .bottom) {
@@ -119,7 +108,7 @@ struct DrivingForceStartView: View {
                     .padding(.horizontal)
                     .padding(.top, 8)
                     .padding(.bottom, 10)
-                    .background(Color(.secondarySystemBackground))
+                    .background(Color(.systemGroupedBackground))
             }
             .onChange(of: step) { _, newStep in
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
@@ -140,118 +129,133 @@ struct DrivingForceStartView: View {
                 }
             }
         }
-        .navigationTitle("Driving Force")
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(step != .intro)
         .onAppear(perform: loadFromPersistentData)
-        .overlay(alignment: .bottomTrailing) {
-            if focusedField != nil {
-                Button("Done") {
-                    focusedField = nil
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .padding(.trailing, 16)
-                .padding(.bottom, 72)
+    }
+
+    @ViewBuilder
+    private func mainContent(proxy: ScrollViewProxy) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            header
+
+            switch step {
+            case .intro:
+                introStep
+            case .vision:
+                visionStep
+            case .purpose:
+                purposeStep
+            case .passions:
+                passionsStep
+            case .summary:
+                summaryStep(proxy: proxy)
             }
         }
+        .padding(.horizontal)
+        .padding(.bottom, 100)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(spacing: 1) {
+            if step != .intro {
+                progressStrip
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
             Text(stepTitle)
-                .font(.title3.weight(.bold))
-            progressStrip
+                .font(.largeTitle)
+                .fontWeight(.bold)
+                .frame(maxWidth: .infinity, alignment: .center)
             if showValidationHint {
                 Text(validationHintText)
                     .font(.footnote.weight(.semibold))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 8)
-                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                    .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 10))
                     .overlay(
                         RoundedRectangle(cornerRadius: 10)
                             .stroke(Color.black.opacity(0.12), lineWidth: 1)
                     )
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.top, 8)
             }
         }
-        .padding(12)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var footer: some View {
         HStack(spacing: 10) {
             if step == .intro {
-                Button("Start") {
+                Button {
                     step = .vision
+                } label: {
+                    Text("Start")
+                        .frame(maxWidth: .infinity)
+                        .contentShape(Rectangle())
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-                .foregroundStyle(Color.primary)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color(.secondarySystemBackground))
-                )
-                .buttonStyle(.plain)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.black.opacity(0.12), lineWidth: 1)
-                }
+                .buttonStyle(.borderedProminent)
                 .frame(maxWidth: .infinity)
             } else if step == .summary {
-                Button("Back") {
+                Button {
                     step = .passions
+                } label: {
+                    Text("Back")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .contentShape(Rectangle())
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
                 .foregroundStyle(Color.primary)
                 .background(
                     RoundedRectangle(cornerRadius: 8)
-                        .fill(Color(.secondarySystemBackground))
+                        .fill(Color(.systemGray5))
                 )
                 .buttonStyle(.plain)
                 .overlay {
                     RoundedRectangle(cornerRadius: 8)
                         .stroke(Color.black.opacity(0.12), lineWidth: 1)
                 }
+                .frame(maxWidth: .infinity)
 
-                Button("Save & Continue") {
+                Button {
                     finalizeAndContinue()
+                } label: {
+                    Text("Continue")
+                        .frame(maxWidth: .infinity)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.borderedProminent)
                 .frame(maxWidth: .infinity)
                 .disabled(!summaryCanSave)
             } else {
-                Button("Back") {
+                Button {
                     step = Step(rawValue: max(0, step.rawValue - 1)) ?? .intro
+                } label: {
+                    Text("Back")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .contentShape(Rectangle())
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
                 .foregroundStyle(Color.primary)
                 .background(
                     RoundedRectangle(cornerRadius: 8)
-                        .fill(Color(.secondarySystemBackground))
+                        .fill(Color(.systemGray5))
                 )
                 .buttonStyle(.plain)
                 .overlay {
                     RoundedRectangle(cornerRadius: 8)
                         .stroke(Color.black.opacity(0.12), lineWidth: 1)
                 }
+                .frame(maxWidth: .infinity)
 
-                Button("Next") {
+                Button {
                     advanceFromCurrentStep()
+                } label: {
+                    Text("Next")
+                        .frame(maxWidth: .infinity)
+                        .contentShape(Rectangle())
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-                .foregroundStyle(Color.primary)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color(.secondarySystemBackground))
-                )
-                .buttonStyle(.plain)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.black.opacity(0.12), lineWidth: 1)
-                }
+                .buttonStyle(.borderedProminent)
                 .frame(maxWidth: .infinity)
             }
         }
@@ -273,17 +277,15 @@ struct DrivingForceStartView: View {
     }
 
     private var progressStrip: some View {
-        GeometryReader { proxy in
-            let width = proxy.size.width
-            ZStack(alignment: .leading) {
+        HStack(spacing: 6) {
+            ForEach(1...Step.allCases.count, id: \.self) { index in
                 Capsule()
-                    .fill(Color(.secondarySystemBackground))
-                Capsule()
-                    .fill(Color.blue)
-                    .frame(width: width * progressValue)
+                    .fill(index <= (step.rawValue + 1) ? Color.accentColor : Color(.systemGray4))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 4)
             }
         }
-        .frame(height: 8)
+        .frame(maxWidth: .infinity)
     }
 
     private var introStep: some View {
@@ -296,7 +298,7 @@ struct DrivingForceStartView: View {
                 .foregroundStyle(.secondary)
         }
         .padding(14)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+        .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var visionStep: some View {
@@ -323,7 +325,7 @@ struct DrivingForceStartView: View {
             .font(.subheadline.weight(.semibold))
         }
         .padding(14)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+        .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var purposeStep: some View {
@@ -350,7 +352,7 @@ struct DrivingForceStartView: View {
             .font(.subheadline.weight(.semibold))
         }
         .padding(14)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+        .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var passionsStep: some View {
@@ -361,7 +363,7 @@ struct DrivingForceStartView: View {
             }
         }
         .padding(14)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+        .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
     }
 
     private func summaryStep(proxy: ScrollViewProxy) -> some View {
@@ -424,7 +426,7 @@ struct DrivingForceStartView: View {
                         }
                     }
                     .padding(10)
-                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                    .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 10))
                 }
             }
         }
@@ -444,7 +446,7 @@ struct DrivingForceStartView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(12)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+        .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
     }
 
     private func inlineMissing(_ text: String) -> some View {
@@ -457,7 +459,7 @@ struct DrivingForceStartView: View {
         ZStack(alignment: .topLeading) {
             DrivingForceStartTextView(text: text)
                 .frame(minHeight: 170)
-                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+                .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
                 .overlay(
                     RoundedRectangle(cornerRadius: 12)
                         .stroke(Color.black.opacity(0.12), lineWidth: 1)
@@ -503,7 +505,7 @@ struct DrivingForceStartView: View {
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 8)
-                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                    .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 10))
                 Button("Add") {
                     addChip(from: bucketKey)
                 }
@@ -511,7 +513,7 @@ struct DrivingForceStartView: View {
             }
         }
         .padding(12)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+        .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
     }
 
     private func bindingForBucketEntry(_ key: String) -> Binding<String> {
@@ -749,7 +751,7 @@ private struct SwipeChipPill: View {
             }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 7)
-                .background(Color(.secondarySystemBackground), in: Capsule())
+                .background(Color(.systemGroupedBackground), in: Capsule())
             .offset(x: dragX)
             .gesture(
                 DragGesture(minimumDistance: 10)
