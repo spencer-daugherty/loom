@@ -100,6 +100,7 @@ struct DrivingForceStartView: View {
                         }
                     } else {
                         mainContent(proxy: proxy)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     }
                 }
             }
@@ -276,11 +277,23 @@ struct DrivingForceStartView: View {
         }
     }
 
+    private var progressCurrentStep: Int {
+        switch step {
+        case .vision: return 1
+        case .purpose: return 2
+        case .passions: return 3
+        case .summary: return 4
+        case .intro: return 0
+        }
+    }
+
+    private let progressTotalSteps: Int = 4
+
     private var progressStrip: some View {
         HStack(spacing: 6) {
-            ForEach(1...Step.allCases.count, id: \.self) { index in
+            ForEach(1...progressTotalSteps, id: \.self) { index in
                 Capsule()
-                    .fill(index <= (step.rawValue + 1) ? Color.accentColor : Color(.systemGray4))
+                    .fill(index <= progressCurrentStep ? Color.accentColor : Color(.systemGray4))
                     .frame(maxWidth: .infinity)
                     .frame(height: 4)
             }
@@ -456,22 +469,19 @@ struct DrivingForceStartView: View {
     }
 
     private func multiLineEditor(text: Binding<String>, placeholder: String) -> some View {
-        ZStack(alignment: .topLeading) {
-            DrivingForceStartTextView(text: text)
-                .frame(minHeight: 170)
-                .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(Color.black.opacity(0.12), lineWidth: 1)
-                )
-            if text.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text(placeholder)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 16)
-                    .allowsHitTesting(false)
-            }
-        }
+        TextField(placeholder, text: text, axis: .vertical)
+            .font(.system(size: 19))
+            .textInputAutocapitalization(.sentences)
+            .autocorrectionDisabled(false)
+            .lineLimit(2...10)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(minHeight: 88, alignment: .topLeading)
+            .background(Color.white, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color.black.opacity(0.12), lineWidth: 1)
+            )
     }
 
     private func passionBucketSection(_ bucketKey: String, title: String) -> some View {
@@ -778,57 +788,3 @@ private struct SwipeChipPill: View {
         .frame(height: 36)
     }
 }
-
-#if canImport(UIKit)
-private struct DrivingForceStartTextView: UIViewRepresentable {
-    @Binding var text: String
-
-    final class Coordinator: NSObject, UITextViewDelegate {
-        var parent: DrivingForceStartTextView
-
-        init(parent: DrivingForceStartTextView) {
-            self.parent = parent
-        }
-
-        func textViewDidChange(_ textView: UITextView) {
-            parent.text = textView.text
-        }
-    }
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(parent: self)
-    }
-
-    func makeUIView(context: Context) -> UITextView {
-        let view = UITextView()
-        view.backgroundColor = .clear
-        view.font = UIFont.preferredFont(forTextStyle: .body)
-        view.delegate = context.coordinator
-        view.textContainerInset = UIEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
-        view.textContainer.lineFragmentPadding = 0
-        view.textContainer.widthTracksTextView = true
-        view.textContainer.lineBreakMode = .byWordWrapping
-        view.autocapitalizationType = .sentences
-        view.autocorrectionType = .yes
-        return view
-    }
-
-    func updateUIView(_ uiView: UITextView, context: Context) {
-        context.coordinator.parent = self
-        if uiView.text != text {
-            uiView.text = text
-        }
-    }
-}
-#else
-private struct DrivingForceStartTextView: View {
-    @Binding var text: String
-
-    var body: some View {
-        TextEditor(text: $text)
-            .textInputAutocapitalization(.sentences)
-            .autocorrectionDisabled(false)
-            .padding(8)
-    }
-}
-#endif
