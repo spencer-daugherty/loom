@@ -61,6 +61,13 @@ struct CaptureView: View {
         }
     }
 
+    private var displayCompletedItems: [QuickCompletedCaptureItem] {
+        if !isSearchMode { return completedItems }
+        let query = normalizedActionText(input)
+        if query.isEmpty { return completedItems }
+        return completedItems.filter { normalizedActionText($0.text).contains(query) }
+    }
+
     private var earliestUnhideDate: Date { Calendar.current.date(byAdding: .day, value: 7, to: Date())! }
 
     private func normalizedActionText(_ text: String) -> String {
@@ -227,14 +234,15 @@ struct CaptureView: View {
             }
             .onDelete(perform: deleteItems)
 
-            if !completedItems.isEmpty {
+            if !displayCompletedItems.isEmpty {
                 Button {
+                    guard !isSearchMode else { return }
                     withAnimation(.easeInOut(duration: 0.2)) {
                         showCompletedList.toggle()
                     }
                 } label: {
                     HStack(spacing: 6) {
-                        Image(systemName: showCompletedList ? "chevron.up" : "chevron.down")
+                        Image(systemName: (isSearchMode || showCompletedList) ? "chevron.up" : "chevron.down")
                             .font(.caption2.weight(.semibold))
                         Text("Quickly Completed")
                             .font(.caption2.weight(.semibold))
@@ -257,8 +265,8 @@ struct CaptureView: View {
                 .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 0, trailing: 16))
                 .listRowSeparator(.hidden)
 
-                if showCompletedList {
-                    ForEach(Array(completedItems.enumerated()), id: \.element.id) { index, item in
+                if isSearchMode || showCompletedList {
+                    ForEach(Array(displayCompletedItems.enumerated()), id: \.element.id) { index, item in
                         let row = HStack(alignment: .firstTextBaseline, spacing: 8) {
                             Text(item.text)
                                 .font(.body.weight(.medium))

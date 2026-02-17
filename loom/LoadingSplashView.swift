@@ -417,6 +417,8 @@ struct LoadingSplashView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var isTransitioningOut = false
     @State private var splashStartDate: Date = .now
+    @State private var hasStartedMotion: Bool = false
+    @State private var startupTask: Task<Void, Never>? = nil
 
     init(
         metrics: [(String, Color, Double)],
@@ -459,54 +461,77 @@ struct LoadingSplashView: View {
         }
     }
 
+    @ViewBuilder
+    private func centeredSplashRow(
+        metrics: [(String, Color, Double)],
+        rotationDegrees: Double,
+        radarScale: CGFloat
+    ) -> some View {
+        GeometryReader { geo in
+            HStack(spacing: 12) {
+                Color.clear
+                    .frame(width: 45, height: 45)
+
+                Image("logo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(height: 48)
+                    .opacity(0.95)
+                    .transition(.opacity)
+                    .modifier(DarkModeInvertImage())
+
+                ZStack {
+                    FulfillmentInteractiveRadar(
+                        metrics: metrics,
+                        selectedIndex: $splashRadarSelectedIndex,
+                        onManualSelect: {},
+                        enableInteraction: false,
+                        customDotDiameter: 10,
+                        showOutline: false,
+                        emphasizeSelectedSlice: false
+                    )
+                    .rotationEffect(.degrees(rotationDegrees))
+                }
+                .frame(width: 45, height: 45)
+                .scaleEffect(radarScale)
+                .matchedGeometryEffect(id: "fulfillmentGraph", in: namespace)
+            }
+            .position(x: geo.size.width / 2, y: geo.size.height / 2)
+        }
+    }
+
     var body: some View {
         ZStack {
             (colorScheme == .dark ? Color.black : Color(.systemGroupedBackground))
                 .ignoresSafeArea()
 
-            WindLinesBackground(colors: metrics.map { $0.1 }, animationStartDate: splashStartDate)
-                .ignoresSafeArea()
+            if hasStartedMotion {
+                WindLinesBackground(colors: metrics.map { $0.1 }, animationStartDate: splashStartDate)
+                    .ignoresSafeArea()
+            }
 
-            TimelineView(.animation) { context in
-                let t = context.date.timeIntervalSinceReferenceDate
-                let animatedMetrics = isTransitioningOut ? metrics : pulsedMetrics(at: t * 0.45)
-                let rotationDegrees = isTransitioningOut ? 0.0 : (t * Double(337.5))
-                let startupElapsed = context.date.timeIntervalSince(splashStartDate)
-                let firstLineCompletion: Double = 0.62
-                let radarGrowDuration: Double = 0.42
-                let radarGrowProgress = max(0.0, min((startupElapsed - firstLineCompletion) / radarGrowDuration, 1.0))
-                let radarScale = 0.78 + (0.22 * radarGrowProgress)
-                GeometryReader { geo in
-                    HStack(spacing: 12) {
-                        Color.clear
-                            .frame(width: 45, height: 45)
-
-                        Image("logo")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(height: 48)
-                            .opacity(0.95)
-                            .transition(.opacity)
-                            .modifier(DarkModeInvertImage())
-
-                        ZStack {
-                            FulfillmentInteractiveRadar(
-                                metrics: animatedMetrics,
-                                selectedIndex: $splashRadarSelectedIndex,
-                                onManualSelect: {},
-                                enableInteraction: false,
-                                customDotDiameter: 10,
-                                showOutline: false,
-                                emphasizeSelectedSlice: false
-                            )
-                            .rotationEffect(.degrees(rotationDegrees))
-                        }
-                        .frame(width: 45, height: 45)
-                        .scaleEffect(radarScale)
-                        .matchedGeometryEffect(id: "fulfillmentGraph", in: namespace)
-                    }
-                    .position(x: geo.size.width / 2, y: geo.size.height / 2)
+            if hasStartedMotion {
+                TimelineView(.animation) { context in
+                    let t = context.date.timeIntervalSinceReferenceDate
+                    let animatedMetrics = isTransitioningOut ? metrics : pulsedMetrics(at: t * 0.45)
+                    let rotationDegrees = isTransitioningOut ? 0.0 : (t * Double(337.5))
+                    let startupElapsed = context.date.timeIntervalSince(splashStartDate)
+                    let firstLineCompletion: Double = 0.62
+                    let radarGrowDuration: Double = 0.42
+                    let radarGrowProgress = max(0.0, min((startupElapsed - firstLineCompletion) / radarGrowDuration, 1.0))
+                    let radarScale = 0.78 + (0.22 * radarGrowProgress)
+                    centeredSplashRow(
+                        metrics: animatedMetrics,
+                        rotationDegrees: rotationDegrees,
+                        radarScale: radarScale
+                    )
                 }
+            } else {
+                centeredSplashRow(
+                    metrics: metrics,
+                    rotationDegrees: 0,
+                    radarScale: 0.78
+                )
             }
         }
         .ignoresSafeArea()
@@ -517,7 +542,17 @@ struct LoadingSplashView: View {
                 .padding(.bottom, 10) // sits above the home indicator
         }
         .onAppear {
-            splashStartDate = .now
+            hasStartedMotion = false
+            startupTask?.cancel()
+            startupTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 120_000_000)
+                splashStartDate = .now
+                hasStartedMotion = true
+            }
+        }
+        .onDisappear {
+            startupTask?.cancel()
+            startupTask = nil
         }
         .task {
             try? await Task.sleep(nanoseconds: UInt64(minimumDisplayDuration * 1_000_000_000))
