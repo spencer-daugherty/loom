@@ -3271,7 +3271,6 @@ private struct ActionSwipeRow: View {
     let onSwipeDone: (ActionExecutionStatus) -> Void
     let onSwipeRecapture: (ActionExecutionStatus) -> Void
 
-    @GestureState private var dragOffset: CGFloat = 0
     @State private var localStatus: ActionExecutionStatus
     @State private var localIsMust: Bool
 
@@ -3325,18 +3324,6 @@ private struct ActionSwipeRow: View {
         _localIsMust = State(initialValue: isMust)
     }
 
-    private var dragX: CGFloat {
-        max(-180, min(180, dragOffset))
-    }
-
-    private var rowOffset: CGFloat {
-        dragX
-    }
-
-    private var isSwipeInteracting: Bool {
-        abs(rowOffset) > 8
-    }
-
     private var rowAccent: Color {
         minutes == nil ? Color(.systemGray) : accent
     }
@@ -3370,158 +3357,121 @@ private struct ActionSwipeRow: View {
         isInactive ? inactiveTint : accent
     }
 
-    private var rowGesture: some Gesture {
-        DragGesture(minimumDistance: 10)
-            .updating($dragOffset) { value, state, _ in
-                let horizontal = value.translation.width
-                let vertical = value.translation.height
-                if abs(horizontal) > abs(vertical) {
-                    state = horizontal
-                }
-            }
-            .onEnded { value in
-                let horizontal = value.translation.width
-                let vertical = value.translation.height
-                guard abs(horizontal) > abs(vertical) else {
-                    return
-                }
-
-                let triggerThreshold: CGFloat = 150
-
-                if horizontal >= triggerThreshold {
-                    let next: ActionExecutionStatus = effectiveStatus == .done ? .noAction : .done
-                    localStatus = next
-                    onSwipeDone(next)
-                } else if horizontal <= -triggerThreshold {
-                    let next: ActionExecutionStatus = effectiveStatus == .carriedToCapture ? .noAction : .carriedToCapture
-                    localStatus = next
-                    onSwipeRecapture(next)
-                }
-            }
-    }
-
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Color(.tertiarySystemFill))
-
-            HStack {
-                Text(effectiveStatus == .done ? "Unmark" : "Mark Done")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.black)
-                    .padding(.leading, 14)
-                    .opacity(rowOffset > 12 ? 1 : 0)
-                Spacer()
-                HStack(spacing: 6) {
-                    Text(effectiveStatus == .carriedToCapture ? "Unmark" : "Recapture")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.gray)
-                    if effectiveStatus != .carriedToCapture {
-                        Image(systemName: "arrow.right")
+        HStack(alignment: .center, spacing: 10) {
+            Button {
+                onOpenStatus()
+            } label: {
+                Group {
+                    if effectiveStatus.icon.isEmpty {
+                        Color.clear.frame(width: 14, height: 14)
+                    } else {
+                        Image(systemName: effectiveStatus.icon)
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(.gray)
                     }
                 }
-                .opacity(rowOffset < -12 ? 1 : 0)
-                Spacer().frame(width: 14)
+                .frame(width: 30, height: 30)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(highlightStatusBox ? Color.red.opacity(0.25) : Color(.tertiarySystemFill))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(highlightStatusBox ? Color.red : Color.clear, lineWidth: 2)
+                )
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .buttonStyle(.plain)
 
-            HStack(alignment: .center, spacing: 10) {
-                Button {
-                    guard !isSwipeInteracting else { return }
-                    onOpenStatus()
-                } label: {
-                    Group {
-                        if effectiveStatus.icon.isEmpty {
-                            Color.clear.frame(width: 14, height: 14)
-                        } else {
-                            Image(systemName: effectiveStatus.icon)
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(.gray)
+            VStack(alignment: .leading, spacing: 8) {
+                InlineActionEditor(
+                    actionId: actionId,
+                    sourceText: text,
+                    font: actionFont(status: effectiveStatus),
+                    textColor: inactiveTint,
+                    strike: effectiveStatus == .done || effectiveStatus == .carriedToCapture || effectiveStatus == .notNeeded,
+                    focusedActionID: $focusedActionID,
+                    onCommit: onCommitText
+                )
+
+                HStack(spacing: 18) {
+                    iconButton(
+                        systemName: effectiveIsMust ? "star.square.fill" : "star.square",
+                        isOn: effectiveIsMust,
+                        tint: iconTint,
+                        isEnabled: !isInactive,
+                        onTap: {
+                            let next = !effectiveIsMust
+                            localIsMust = next
+                            onToggleMust(next)
                         }
-                    }
-                    .frame(width: 30, height: 30)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(highlightStatusBox ? Color.red.opacity(0.25) : Color(.tertiarySystemFill))
                     )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(highlightStatusBox ? Color.red : Color.clear, lineWidth: 2)
+
+                    clockButton(
+                        minutes: minutes,
+                        tint: isInactive ? inactiveTint : rowAccent,
+                        isEnabled: !isInactive,
+                        onTap: onOpenClock
+                    )
+
+                    iconButton(
+                        systemName: leverageIconName,
+                        isOn: hasLeverage,
+                        tint: iconTint,
+                        isEnabled: !isInactive,
+                        onTap: onOpenLeverage
+                    )
+
+                    iconButton(
+                        systemName: hasSensitivity ? "gearshape.fill" : "gearshape",
+                        isOn: hasSensitivity,
+                        tint: iconTint,
+                        isEnabled: !isInactive,
+                        onTap: onOpenSensitivity
+                    )
+
+                    iconButton(
+                        systemName: hasAttachments ? "paperclip.badge.ellipsis" : "paperclip",
+                        isOn: hasAttachments,
+                        tint: iconTint,
+                        isEnabled: !isInactive,
+                        onTap: onOpenAttachments
                     )
                 }
-                .buttonStyle(.plain)
-
-                VStack(alignment: .leading, spacing: 8) {
-                    InlineActionEditor(
-                        actionId: actionId,
-                        sourceText: text,
-                        font: actionFont(status: status),
-                        textColor: inactiveTint,
-                        strike: status == .done || status == .carriedToCapture || status == .notNeeded,
-                        focusedActionID: $focusedActionID,
-                        onCommit: onCommitText
-                    )
-
-                    HStack(spacing: 18) {
-                        iconButton(
-                            systemName: effectiveIsMust ? "star.square.fill" : "star.square",
-                            isOn: effectiveIsMust,
-                            tint: iconTint,
-                            isEnabled: !isInactive,
-                            onTap: {
-                                let next = !effectiveIsMust
-                                localIsMust = next
-                                onToggleMust(next)
-                            }
-                        )
-
-                        clockButton(
-                            minutes: minutes,
-                            tint: isInactive ? inactiveTint : rowAccent,
-                            isEnabled: !isInactive,
-                            onTap: onOpenClock
-                        )
-
-                        iconButton(
-                            systemName: leverageIconName,
-                            isOn: hasLeverage,
-                            tint: iconTint,
-                            isEnabled: !isInactive,
-                            onTap: onOpenLeverage
-                        )
-
-                        iconButton(
-                            systemName: hasSensitivity ? "gearshape.fill" : "gearshape",
-                            isOn: hasSensitivity,
-                            tint: iconTint,
-                            isEnabled: !isInactive,
-                            onTap: onOpenSensitivity
-                        )
-
-                        iconButton(
-                            systemName: hasAttachments ? "paperclip.badge.ellipsis" : "paperclip",
-                            isOn: hasAttachments,
-                            tint: iconTint,
-                            isEnabled: !isInactive,
-                            onTap: onOpenAttachments
-                        )
-                    }
-                    .font(.system(size: 19, weight: .semibold))
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .font(.system(size: 19, weight: .semibold))
             }
-            .padding(10)
-            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
-            .offset(x: rowOffset)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .padding(10)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
         .overlay(
             RoundedRectangle(cornerRadius: 10)
                 .stroke(effectiveStatus == .inProgress ? rowAccent : Color.black.opacity(0.12), lineWidth: effectiveStatus == .inProgress ? 3 : 1)
         )
         .contentShape(Rectangle())
-        .simultaneousGesture(rowGesture)
+        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+            Button {
+                let next: ActionExecutionStatus = effectiveStatus == .done ? .noAction : .done
+                localStatus = next
+                onSwipeDone(next)
+            } label: {
+                Text(effectiveStatus == .done ? "Unmark" : "Mark Done")
+            }
+            .tint(.black)
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button {
+                let next: ActionExecutionStatus = effectiveStatus == .carriedToCapture ? .noAction : .carriedToCapture
+                localStatus = next
+                onSwipeRecapture(next)
+            } label: {
+                Label(
+                    effectiveStatus == .carriedToCapture ? "Unmark" : "Recapture",
+                    systemImage: effectiveStatus == .carriedToCapture ? "xmark" : "arrow.right"
+                )
+            }
+            .tint(.gray)
+        }
         .onChange(of: status) { _, newValue in
             localStatus = newValue
         }
@@ -3549,7 +3499,6 @@ private struct ActionSwipeRow: View {
         onTap: @escaping () -> Void
     ) -> some View {
         Button {
-            guard !isSwipeInteracting else { return }
             onTap()
         } label: {
             Image(systemName: systemName)
@@ -3562,7 +3511,6 @@ private struct ActionSwipeRow: View {
 
     private func clockButton(minutes: Int?, tint: Color, isEnabled: Bool = true, onTap: @escaping () -> Void) -> some View {
         Button {
-            guard !isSwipeInteracting else { return }
             onTap()
         } label: {
             HStack(spacing: 6) {
