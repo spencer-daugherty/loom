@@ -19,8 +19,6 @@ struct ObjectivesView: View {
     @State private var showUpcoming = false
     @State private var showCompletedOutcomesPlaceholder = false
     @State private var hasAutoOpenedAddOutcome = false
-    private let oneTimeTargetPassedDemoFlag = "one_time_outcome_target_passed_demo_v1_done"
-    private let oneTimeUnmeasurablePassedDemoFlag = "one_time_outcome_unmeasurable_target_passed_demo_v1_done"
     private var sortSheetHeight: CGFloat {
         let rows = CGFloat(activeOutcomesForSort.count)
         return min(max(260, rows * 56 + 140), 620)
@@ -310,123 +308,11 @@ struct ObjectivesView: View {
                     navigationAction = .addOutcome
                 }
             }
-            seedOneTimeTargetPassedDemoOutcomeIfNeeded()
-            seedOneTimeUnmeasurablePassedDemoOutcomeIfNeeded()
         }
     }
 
     private func hideKeyboard() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-    }
-
-    private func seedOneTimeTargetPassedDemoOutcomeIfNeeded() {
-        guard UserDefaults.standard.bool(forKey: oneTimeTargetPassedDemoFlag) == false else { return }
-
-        let calendar = Calendar.current
-        let now = Date()
-        let start = calendar.startOfDay(for: calendar.date(byAdding: .day, value: -20, to: now) ?? now)
-        let end = calendar.startOfDay(for: calendar.date(byAdding: .day, value: -3, to: now) ?? now)
-
-        let existing = outcomes.contains {
-            $0.outcome == "Demo: Target Passed (Goal Not Met)" && $0.reasons == "One-time seeded demo outcome."
-        }
-        guard !existing else {
-            UserDefaults.standard.set(true, forKey: oneTimeTargetPassedDemoFlag)
-            return
-        }
-
-        let newOutcomeID = UUID()
-        let newOutcome = Outcomes(
-            outcome_id: newOutcomeID,
-            category: "Health & Vitality",
-            updatedAt: .now,
-            outcome: "Demo: Target Passed (Goal Not Met)",
-            reasons: "One-time seeded demo outcome.",
-            start: start,
-            end: end,
-            rank: (outcomes.map(\.rank).max() ?? 0) + 1,
-            format: ObjectivesAddView.MeasureFormat.number.rawValue
-        )
-        modelContext.insert(newOutcome)
-
-        let goal: Double = 200
-        let startMeasure: Double = 150
-        let latestMeasure: Double = 170 // not met yet (direction is up from 150 -> 200)
-
-        modelContext.insert(
-            OutcomesMeasure(
-                outcome_id: newOutcomeID,
-                measure: latestMeasure,
-                measuredAt: .now,
-                measure_amt: goal,
-                measure_updated: .now,
-                direction: nil,
-                format: ObjectivesAddView.MeasureFormat.number.rawValue,
-                unit: ObjectivesAddView.UnitOption.defaultUnit,
-                decimalPlaces: 0
-            )
-        )
-
-        modelContext.insert(
-            OutcomesMeasureEntry(
-                outcome_id: newOutcomeID,
-                measure: startMeasure,
-                measure_amt: goal,
-                measuredAt: start,
-                createdAt: start,
-                format: ObjectivesAddView.MeasureFormat.number.rawValue,
-                unit: ObjectivesAddView.UnitOption.defaultUnit,
-                decimalPlaces: 0
-            )
-        )
-
-        modelContext.insert(
-            OutcomesMeasureEntry(
-                outcome_id: newOutcomeID,
-                measure: latestMeasure,
-                measure_amt: goal,
-                measuredAt: calendar.startOfDay(for: calendar.date(byAdding: .day, value: -1, to: now) ?? now),
-                createdAt: .now,
-                format: ObjectivesAddView.MeasureFormat.number.rawValue,
-                unit: ObjectivesAddView.UnitOption.defaultUnit,
-                decimalPlaces: 0
-            )
-        )
-
-        try? modelContext.save()
-        UserDefaults.standard.set(true, forKey: oneTimeTargetPassedDemoFlag)
-    }
-
-    private func seedOneTimeUnmeasurablePassedDemoOutcomeIfNeeded() {
-        guard UserDefaults.standard.bool(forKey: oneTimeUnmeasurablePassedDemoFlag) == false else { return }
-
-        let calendar = Calendar.current
-        let now = Date()
-        let start = calendar.startOfDay(for: calendar.date(byAdding: .day, value: -35, to: now) ?? now)
-        let end = calendar.startOfDay(for: calendar.date(byAdding: .day, value: -5, to: now) ?? now)
-
-        let existing = outcomes.contains {
-            $0.outcome == "Demo: Past Target (Unmeasurable)" && $0.reasons == "One-time seeded unmeasurable demo outcome."
-        }
-        guard !existing else {
-            UserDefaults.standard.set(true, forKey: oneTimeUnmeasurablePassedDemoFlag)
-            return
-        }
-
-        let newOutcome = Outcomes(
-            outcome_id: UUID(),
-            category: "Mind & Meaning",
-            updatedAt: .now,
-            outcome: "Demo: Past Target (Unmeasurable)",
-            reasons: "One-time seeded unmeasurable demo outcome.",
-            start: start,
-            end: end,
-            rank: (outcomes.map(\.rank).max() ?? 0) + 2,
-            format: nil
-        )
-        modelContext.insert(newOutcome)
-        try? modelContext.save()
-        UserDefaults.standard.set(true, forKey: oneTimeUnmeasurablePassedDemoFlag)
     }
 
     private func categoryColor(for category: String) -> Color {

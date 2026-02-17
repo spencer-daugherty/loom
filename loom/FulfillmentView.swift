@@ -250,9 +250,6 @@ struct FulfillmentView: View {
         .onChange(of: focusedField) { _, new in
             commitInlineExcluding(new)
         }
-        .task {
-            ensureCategoryRecordsExist()
-        }
         .onReceive(radarTimer) { _ in
             guard !orderedFulfillments.isEmpty else { return }
             guard Date() >= radarAutoRotatePausedUntil else { return }
@@ -1091,17 +1088,6 @@ struct FulfillmentView: View {
     }
 
     // MARK: - Data Helpers
-
-    private func ensureCategoryRecordsExist() {
-        var insertedAny = false
-        for def in defaultCategoryDefs where !fulfillments.contains(where: { $0.category_id == def.categoryID }) {
-            modelContext.insert(Fulfillment(category_id: def.categoryID, category: def.title))
-            insertedAny = true
-        }
-        if insertedAny {
-            try? modelContext.save()
-        }
-    }
 
     private func updateVision(record: Fulfillment, newText: String) {
         guard record.category_vision != newText else { return }

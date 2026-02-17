@@ -33,6 +33,10 @@ struct ContentView: View {
     @State private var splashPreparationFinished: Bool = false
     @State private var splashPreparationStarted: Bool = false
     @State private var measuredCardHeights: [String: CGFloat] = [:]
+    @State private var showPlayBlockedHint: Bool = false
+    @State private var highlightDrivingRequirement: Bool = false
+    @State private var highlightFulfillmentRequirement: Bool = false
+    @State private var playBlockedResetWorkItem: DispatchWorkItem? = nil
     @Environment(\.modelContext) private var modelContext
 
     // Model-derived state
@@ -68,6 +72,22 @@ struct ContentView: View {
 
     private var isActiveActionFlow: Bool {
         isActivePlan || (hasChunkStoredActionsThisWeek && !hasCompletedReflectionThisWeek)
+    }
+
+    private var isDrivingForceEmptyState: Bool {
+        let ultimateVision = drivingForces.first?.ultimateVision ?? ""
+        let ultimatePurpose = drivingForces.first?.ultimatePurpose ?? ""
+        return blankHomepageMode ||
+            ultimateVision.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+            ultimatePurpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var isFulfillmentEmptyState: Bool {
+        blankHomepageMode || fulfillmentMetrics.isEmpty
+    }
+
+    private var canOpenPlanOrActionFlow: Bool {
+        !isDrivingForceEmptyState && !isFulfillmentEmptyState
     }
 
     private var splashMetricsFallback: [(String, Color, Double)] {
@@ -303,9 +323,8 @@ struct ContentView: View {
 
     @MainActor
     private func runStartupPreparation() async {
-        // 1) Core singleton + category seeding.
-        _ = ActivePlanState.fetchOrCreate(in: modelContext)
-        ensureFulfillmentCategoriesExist()
+        // 1) Read-only startup warmup (no first-launch data insertion).
+        warmupFetch(ActivePlanState.self)
         await Task.yield()
 
         // 2) Housekeeping.
@@ -331,25 +350,6 @@ struct ContentView: View {
         _ = try? modelContext.fetch(descriptor)
     }
 
-    private func ensureFulfillmentCategoriesExist() {
-        let defaults: [(String, UUID)] = [
-            ("Career & Business", PlanLabelSeeder.categoryIDs["Career & Business"]!),
-            ("Leadership & Impact", PlanLabelSeeder.categoryIDs["Leadership & Impact"]!),
-            ("Wealth & Lifestyle", PlanLabelSeeder.categoryIDs["Wealth & Lifestyle"]!),
-            ("Mind & Meaning", PlanLabelSeeder.categoryIDs["Mind & Meaning"]!),
-            ("Love & Relationships", PlanLabelSeeder.categoryIDs["Love & Relationships"]!),
-            ("Health & Vitality", PlanLabelSeeder.categoryIDs["Health & Vitality"]!)
-        ]
-        var insertedAny = false
-        for (title, id) in defaults where !fulfillments.contains(where: { $0.category_id == id }) {
-            modelContext.insert(Fulfillment(category_id: id, category: title))
-            insertedAny = true
-        }
-        if insertedAny {
-            try? modelContext.save()
-        }
-    }
-    
     @Query(sort: \DrivingForce.updatedAt, order: .reverse)
     private var drivingForces: [DrivingForce]
     
@@ -629,13 +629,18 @@ struct ContentView: View {
                 .buttonStyle(.plain)
 
                 Button(action: {
+                    guard canOpenPlanOrActionFlow else {
+                        triggerPlayBlockedFeedback()
+                        return
+                    }
                     playSheetDestination = isActiveActionFlow ? .action : .plan
                 }) {
                     Image(systemName: isActiveActionFlow ? "forward.fill" : "play.fill")
                         .font(.title)
                         .foregroundColor(Color(.systemBackground))
                         .frame(width: 60, height: 60)
-                        .background(Color.accentColor)
+                        .background(canOpenPlanOrActionFlow ? Color.accentColor : Color(.systemGray3))
+                        .opacity(canOpenPlanOrActionFlow ? 1.0 : 0.62)
                         .clipShape(Circle())
                 }
                 .buttonStyle(.plain)
@@ -644,18 +649,50 @@ struct ContentView: View {
             .padding(.top, 6)
             .padding(.bottom, 0)
         }
+        .overlay(alignment: .top) {
+            if showPlayBlockedHint {
+                Text("Please complete both your Driving Force and Fulfillment categories at a minimum to start.")
+                    .font(.footnote)
+                    .fontWeight(.bold)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color.black.opacity(0.12), lineWidth: 1)
+                    )
+                    .offset(y: -56)
+                    .transition(.opacity)
+            }
+        }
         .frame(maxWidth: .infinity)
         .background(Color.clear)
+    }
+
+    private func triggerPlayBlockedFeedback() {
+        playBlockedResetWorkItem?.cancel()
+        highlightDrivingRequirement = isDrivingForceEmptyState
+        highlightFulfillmentRequirement = isFulfillmentEmptyState
+        withAnimation(.easeInOut(duration: 0.15)) {
+            showPlayBlockedHint = true
+        }
+
+        let workItem = DispatchWorkItem {
+            highlightDrivingRequirement = false
+            highlightFulfillmentRequirement = false
+            withAnimation(.easeInOut(duration: 0.15)) {
+                showPlayBlockedHint = false
+            }
+        }
+        playBlockedResetWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.9, execute: workItem)
     }
 
     // MARK: - Extracted Sections to reduce body complexity
     private var drivingForceSection: some View {
         let ultimateVision = drivingForces.first?.ultimateVision ?? ""
         let ultimatePurpose = drivingForces.first?.ultimatePurpose ?? ""
-        let isDrivingForceEmptyState =
-            blankHomepageMode ||
-            ultimateVision.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-            ultimatePurpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let drivingForceCardBackground: Color = isDrivingForceEmptyState
             ? Color(.systemGray5)
             : Color(.secondarySystemBackground)
@@ -826,10 +863,13 @@ struct ContentView: View {
             }
         }
         .buttonStyle(.plain)
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(highlightDrivingRequirement ? Color.red.opacity(0.9) : Color.clear, lineWidth: 2)
+        )
     }
 
     private var fulfillmentSection: some View {
-        let isFulfillmentEmptyState = blankHomepageMode
         let fulfillmentCardBackground: Color = isFulfillmentEmptyState
             ? Color(.systemGray5)
             : Color(.secondarySystemBackground)
@@ -926,6 +966,10 @@ struct ContentView: View {
         }
         .buttonStyle(.plain)
         .frame(maxHeight: .infinity)
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(highlightFulfillmentRequirement ? Color.red.opacity(0.9) : Color.clear, lineWidth: 2)
+        )
     }
 
     private var objectivesSection: some View {
