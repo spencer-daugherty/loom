@@ -15,6 +15,8 @@ struct AddState {
 }
 
 enum Field: Hashable {
+    case vision
+    case purpose
     case passion(String)
 }
 
@@ -56,7 +58,7 @@ struct DrivingForceView: View {
     private var passionQueries: [PassionCategory] {
         [
             PassionCategory(emotion: "love", title: "Love", prompt: "What do I love?", query: lovePassions),
-            PassionCategory(emotion: "vows", title: "Vows", prompt: "What am I committed to?", query: vowsPassions),
+            PassionCategory(emotion: "vows", title: "Vow", prompt: "What am I committed to?", query: vowsPassions),
             PassionCategory(emotion: "thrill", title: "Thrill", prompt: "What excites me?", query: thrillPassions),
             PassionCategory(emotion: "just", title: "Hate", prompt: "What do I hate?", query: justPassions)
         ]
@@ -64,6 +66,8 @@ struct DrivingForceView: View {
     
     @State private var visionText: String = ""
     @State private var purposeText: String = ""
+    @State private var visionTextDraft: String = ""
+    @State private var purposeTextDraft: String = ""
     @State private var addStates: [String: AddState] = [:]
     @State private var isShowingInstructions: Bool = false
     @State private var isShowingHistoric = false
@@ -145,19 +149,40 @@ struct DrivingForceView: View {
             AnyView(historicRowsSection)
         }
         .listStyle(.insetGrouped)
+        .listRowSpacing(4)
         .toolbar { topToolbar }
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                if focusedField == .vision || focusedField == .purpose {
+                    Spacer()
+                    Button("Done") {
+                        focusedField = nil
+                        hideKeyboard()
+                    }
+                }
+            }
+        }
         .navigationTitle("Driving Force")
         .background(backgroundTapDismiss)
-        .sheet(item: $activeEditor, content: editorSheet)
         .task {
             if let existing = drivingForces.first {
                 visionText = existing.ultimateVision
                 purposeText = existing.ultimatePurpose
+                visionTextDraft = existing.ultimateVision
+                purposeTextDraft = existing.ultimatePurpose
             }
             maybeAutoOpenCreateVision()
         }
         .onAppear {
             maybeAutoOpenCreateVision()
+        }
+        .onChange(of: focusedField) { oldValue, newValue in
+            if oldValue == .vision && newValue != .vision {
+                saveVisionInline()
+            }
+            if oldValue == .purpose && newValue != .purpose {
+                savePurposeInline()
+            }
         }
         .sheet(isPresented: $isShowingInstructions, content: instructionsSheet)
         .navigationDestination(isPresented: $showDrivingForceTrends) {
@@ -588,16 +613,18 @@ struct DrivingForceView: View {
 
     @ViewBuilder
     private var drivingForceSections: some View {
-        readOnlyDrivingForceSection(
+        inlineDrivingForceSection(
             title: "Ultimate Vision",
-            text: visionText,
-            editor: .vision
+            placeholder: visionPlaceholder,
+            text: $visionTextDraft,
+            focus: .vision
         )
 
-        readOnlyDrivingForceSection(
+        inlineDrivingForceSection(
             title: "Ultimate Purpose",
-            text: purposeText,
-            editor: .purpose
+            placeholder: purposePlaceholder,
+            text: $purposeTextDraft,
+            focus: .purpose
         )
     }
 
@@ -700,28 +727,23 @@ struct DrivingForceView: View {
         }
     }
 
-    private func readOnlyDrivingForceSection(
+    private func inlineDrivingForceSection(
         title: String,
-        text: String,
-        editor: DrivingForceEditor
+        placeholder: String,
+        text: Binding<String>,
+        focus: Field
     ) -> some View {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let buttonTitle: String = trimmed.isEmpty
-            ? (editor == .vision ? "Create Ultimate Vision" : "Create Ultimate Purpose")
-            : "Edit"
         return Section(title) {
-            if !trimmed.isEmpty {
-                Text(text)
-                    .foregroundStyle(.primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 10)
-            }
-
-            Button(buttonTitle) {
-                activeEditor = editor
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .foregroundStyle(.blue)
+            TextField(placeholder, text: text, axis: .vertical)
+                .font(.system(size: 19))
+                .textInputAutocapitalization(.sentences)
+                .autocorrectionDisabled(false)
+                .lineLimit(2...10)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .frame(minHeight: 88, alignment: .topLeading)
+                .background((colorScheme == .dark ? Color(.secondarySystemBackground) : Color.white), in: RoundedRectangle(cornerRadius: 12))
+                .focused($focusedField, equals: focus)
         }
         .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
     }
@@ -749,7 +771,7 @@ struct DrivingForceView: View {
         guard hasMissingVision || hasMissingPurpose else { return }
         didAutoOpenCreateVision = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            activeEditor = .vision
+            focusedField = .vision
         }
     }
     
@@ -787,6 +809,20 @@ struct DrivingForceView: View {
         return editorDraftText.trimmingCharacters(in: .whitespacesAndNewlines) != current.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private func saveVisionInline() {
+        let trimmed = visionTextDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed != visionText.trimmingCharacters(in: .whitespacesAndNewlines) else { return }
+        editorDraftText = visionTextDraft
+        saveEditorChanges(.vision)
+    }
+
+    private func savePurposeInline() {
+        let trimmed = purposeTextDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed != purposeText.trimmingCharacters(in: .whitespacesAndNewlines) else { return }
+        editorDraftText = purposeTextDraft
+        saveEditorChanges(.purpose)
+    }
+
     private func saveEditorChanges(_ editor: DrivingForceEditor) {
         let now = Date()
         let trimmedDraft = editorDraftText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -804,6 +840,7 @@ struct DrivingForceView: View {
                 )
                 existing.ultimateVision = trimmedDraft
                 visionText = trimmedDraft
+                visionTextDraft = trimmedDraft
             case .purpose:
                 context.insert(
                     DrivingForceArchive(
@@ -815,6 +852,7 @@ struct DrivingForceView: View {
                 )
                 existing.ultimatePurpose = trimmedDraft
                 purposeText = trimmedDraft
+                purposeTextDraft = trimmedDraft
             }
             existing.updatedAt = now
         } else {
@@ -828,6 +866,8 @@ struct DrivingForceView: View {
             context.insert(created)
             visionText = created.ultimateVision
             purposeText = created.ultimatePurpose
+            visionTextDraft = created.ultimateVision
+            purposeTextDraft = created.ultimatePurpose
         }
 
         try? context.save()
@@ -849,6 +889,7 @@ struct DrivingForceView: View {
                 )
                 existing.ultimateVision = archive.visionSnapshot
                 visionText = archive.visionSnapshot
+                visionTextDraft = archive.visionSnapshot
             case .purpose:
                 context.insert(
                     DrivingForceArchive(
@@ -860,14 +901,17 @@ struct DrivingForceView: View {
                 )
                 existing.ultimatePurpose = archive.purposeSnapshot
                 purposeText = archive.purposeSnapshot
+                purposeTextDraft = archive.purposeSnapshot
             }
             existing.updatedAt = now
         } else {
             switch kind {
             case .vision:
                 visionText = archive.visionSnapshot
+                visionTextDraft = archive.visionSnapshot
             case .purpose:
                 purposeText = archive.purposeSnapshot
+                purposeTextDraft = archive.purposeSnapshot
             }
             context.insert(DrivingForce(
                 ultimateVision: visionText,
@@ -1021,11 +1065,35 @@ struct PassionEditor: View {
     @State private var editText: String = ""
     
     var body: some View {
-        Section(category.title) {
+        Section {
+            if addState.isAdding {
+                TextField("Add \(category.title)", text: Binding(
+                    get: { addState.newText },
+                    set: { onAddStateChange(addStateWithNewText($0)) }
+                ))
+                .focused($focusedField, equals: .passion(category.emotion))
+                .submitLabel(.done)
+                .textInputAutocapitalization(.sentences)
+                .autocorrectionDisabled(false)
+                .onSubmit { onCommit(addState.newText) }
+                .padding(.vertical, 4)
+            } else {
+                Button("+ Add \(category.title)") {
+                    withAnimation {
+                        onAddStateChange(AddState(isAdding: true))
+                        focusedField = .passion(category.emotion)
+                    }
+                }
+                .foregroundStyle(.blue)
+                .padding(.vertical, 4)
+            }
+
             ForEach(category.query, id: \.id) { passion in
                 if editingPassion?.id == passion.id {
                     TextField("Edit passion", text: $editText)
                         .focused($focusedField, equals: .passion(category.emotion))
+                        .textInputAutocapitalization(.sentences)
+                        .autocorrectionDisabled(false)
                         .submitLabel(.done)
                         .onSubmit {
                             commitEdit(passion: passion)
@@ -1045,28 +1113,14 @@ struct PassionEditor: View {
                         .tint(.red)
                 }
             }
-            
-            if addState.isAdding {
-                HStack {
-                    TextField(category.prompt, text: Binding(
-                        get: { addState.newText },
-                        set: { onAddStateChange(addStateWithNewText($0)) }
-                    ))
-                    .focused($focusedField, equals: .passion(category.emotion))
-                    .submitLabel(.done)
-                    .onSubmit { onCommit(addState.newText) }
-                    Spacer()
-                }
-                .padding(.vertical, 4)
-            } else {
-                Button("Add Item") {
-                    withAnimation {
-                        onAddStateChange(AddState(isAdding: true))
-                        focusedField = .passion(category.emotion)
-                    }
-                }
-                .foregroundColor(.blue)
-                .padding(.vertical, 4)
+        } header: {
+            HStack(spacing: 8) {
+                Text(category.title.uppercased())
+                Spacer(minLength: 8)
+                Text(category.prompt)
+                    .italic()
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
         }
         .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
