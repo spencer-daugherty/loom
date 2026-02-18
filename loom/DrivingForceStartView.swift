@@ -226,13 +226,19 @@ struct DrivingForceStartView: View {
     private var header: some View {
         VStack(spacing: 1) {
             if step == .intro {
-                Image("DrivingForceGraphic")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 420)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .padding(.bottom, 2)
+                ZStack {
+                    IntroRouteLinesView()
+                        .padding(.horizontal, -24)
+                        .allowsHitTesting(false)
+                    Image("DrivingForceGraphic")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 420)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .frame(height: 420)
+                .padding(.bottom, 2)
             }
             if step != .intro {
                 progressStrip
@@ -1062,5 +1068,191 @@ private struct SwipeChipPill: View {
         }
         .frame(maxWidth: .infinity)
         .frame(height: 36)
+    }
+}
+
+private struct IntroRouteLinesView: View {
+    private let lineCount: Int = 10
+    @State private var animationStartDate: Date = .now
+
+    // Match LoadingSplashView palette behavior closely
+    private let colors: [Color] = [.blue, .green, .orange, .pink, .teal, .red]
+
+    // Deterministic pseudo-random helper (same style as LoadingSplashView)
+    private func rand(_ seed: Int, _ a: Double, _ b: Double) -> Double {
+        let seedD = Double(seed)
+        let x = sin(seedD * 12.9898) * 43758.5453
+        let u = x - floor(x)
+        return a + (b - a) * u
+    }
+
+    private func smoothstep(_ a: CGFloat, _ b: CGFloat, _ x: CGFloat) -> CGFloat {
+        let t = min(max((x - a) / (b - a), 0), 1)
+        return t * t * (3 - 2 * t)
+    }
+
+    private func smoothstepD(_ a: Double, _ b: Double, _ x: Double) -> Double {
+        let tt = min(max((x - a) / (b - a), 0), 1)
+        return tt * tt * (3 - 2 * tt)
+    }
+
+    // Routed centerline: starts top-left, goes down, then smoothly turns right.
+    private func routedPoint(s: CGFloat, size: CGSize, laneOffset: CGFloat) -> CGPoint {
+        // Endpoints spread across a horizontal band (LoadingSplash-like area, not a single point).
+        let endBandCenter = min(size.height * 0.58, 334) // moved up 2%
+        let endBandHalfSpan: CGFloat = 11.968 // 15% tighter than prior 14.08
+        let normalizedLane = max(-1.0, min(1.0, laneOffset / 70.0))
+        let startY = endBandCenter + normalizedLane * (endBandHalfSpan * 1.2) // 20% taller spread on left/start
+        let endYOffset: CGFloat = size.height * 0.01
+        let endY = endBandCenter + normalizedLane * endBandHalfSpan + endYOffset
+        let start = CGPoint(x: -28 + laneOffset * 0.35, y: startY)
+        let turn  = CGPoint(x: size.width * 0.26 + laneOffset * 0.05, y: endY + laneOffset * 0.03)
+        let end   = CGPoint(x: size.width * 0.55, y: endY)
+
+        let split: CGFloat = 0.55
+        if s <= split {
+            let u = s / split
+            let curveU = pow(u, 0.88)
+            let x = start.x + (turn.x - start.x) * pow(curveU, 2.8) // keeps path near left longer
+            let y = start.y + (turn.y - start.y) * smoothstep(0, 1, curveU)
+            return CGPoint(x: x, y: y)
+        } else {
+            let u = (s - split) / (1 - split)
+            let curveU = smoothstep(0, 1, u)
+            let x = turn.x + (end.x - turn.x) * curveU
+            let y = turn.y + (end.y - turn.y) * smoothstep(0, 1, u)
+            return CGPoint(x: x, y: y)
+        }
+    }
+
+    var body: some View {
+        TimelineView(.animation) { context in
+            Canvas { ctx, size in
+                let t = context.date.timeIntervalSinceReferenceDate
+                let startupElapsed = context.date.timeIntervalSince(animationStartDate)
+
+                for i in 0..<lineCount {
+                    let color = colors[i % colors.count]
+
+                    // Vertical lane distribution like LoadingSplash, to preserve rich layering
+                    let localFracBase = (Double(i) + 0.5) / Double(lineCount)
+                    let jitter = rand(i * 19 + 7, -0.03, 0.03)
+                    let laneFrac = min(max(localFracBase + jitter, 0.0), 1.0)
+                    let laneOffset = CGFloat((laneFrac - 0.5) * 140.0)
+
+                    // Match LoadingSplash startup reveal timing exactly
+                    let lineDelay = rand(i * 83 + 17, 0.00, 0.36)
+                    let lineRevealDuration = rand(i * 89 + 23, 0.62, 1.05)
+                    let rawReveal = (startupElapsed - lineDelay) / lineRevealDuration
+                    let revealProgress = max(0.0, min(rawReveal, 1.0))
+                    if revealProgress <= 0.0 { continue }
+
+                    // LoadingSplash-style movement parameters
+                    let speed = rand(i * 13 + 1, 0.15, 0.35)
+                    let phase = rand(i * 17 + 3, 0.0, 1.0)
+                    let posFrac = (t * speed + phase).truncatingRemainder(dividingBy: 1)
+
+                    let amp = rand(i * 23 + 5, 10.0, 40.0)
+                    let freq = rand(i * 29 + 9, 2.0, 6.0)
+                    let sigma = rand(i * 31 + 11, 0.08, 0.16)
+                    let wobblePhase = rand(i * 37 + 13, 0.0, 2 * .pi)
+                    let chop1 = rand(i * 41 + 101, 6.0, 12.0)
+                    let chop2 = rand(i * 47 + 103, 12.0, 22.0)
+                    let chopPhase1 = rand(i * 53 + 107, 0.0, 2 * .pi)
+                    let chopPhase2 = rand(i * 59 + 109, 0.0, 2 * .pi)
+                    let timeScale: Double = 0.8 + rand(i * 61 + 113, 0.0, 0.8)
+                    let oceanTime: Double = t * timeScale
+
+                    var path = Path()
+                    let samples = 96
+                    let twoPi = 2.0 * Double.pi
+
+                    for j in 0...samples {
+                        let localS = Double(j) / Double(samples)
+                        let s = localS * revealProgress
+                        let sCG = CGFloat(s)
+                        var p = routedPoint(s: sCG, size: size, laneOffset: laneOffset)
+
+                        // Same wiggle stack as LoadingSplash, applied around routed centerline
+                        let diff = (s - posFrac) / sigma
+                        let envelope = exp(-pow(diff, 2) * 2)
+                        let pulseArg = twoPi * (s * freq - oceanTime * speed * 0.6) + wobblePhase
+                        let pulse = sin(pulseArg) * amp * envelope
+                        let swellArg = twoPi * (s * (freq * 0.45) + oceanTime * speed * 0.25) + wobblePhase * 0.7
+                        let swell = sin(swellArg) * (amp * 0.55)
+                        let chopAArg = twoPi * (s * chop1 - oceanTime * speed * 1.2) + chopPhase1
+                        let chopBArg = twoPi * (s * chop2 + oceanTime * speed * 1.7) + chopPhase2
+                        let chop = sin(chopAArg) * (amp * 0.18) + sin(chopBArg) * (amp * 0.10)
+                        let edge = sin(Double.pi * s)
+                        let wiggle = (pulse + swell + chop) * edge * 0.5
+
+                        // Move perpendicular-ish by perturbing y primarily (as in LoadingSplash)
+                        p.y += CGFloat(wiggle)
+
+                        if j == 0 { path.move(to: p) } else { path.addLine(to: p) }
+                    }
+
+                    // Tail fade (same strategy as LoadingSplash)
+                    let tailStartFrac: Double = 0.90
+                    let baseOpacity: Double = 0.125
+                    let tailGradient = Gradient(stops: [
+                        .init(color: color.opacity(baseOpacity), location: 0.0),
+                        .init(color: color.opacity(baseOpacity), location: tailStartFrac),
+                        .init(color: color.opacity(baseOpacity * 0.75), location: min(tailStartFrac + 0.03, 1.0)),
+                        .init(color: color.opacity(baseOpacity * 0.45), location: min(tailStartFrac + 0.06, 1.0)),
+                        .init(color: color.opacity(baseOpacity * 0.22), location: min(tailStartFrac + 0.085, 1.0)),
+                        .init(color: color.opacity(0.0), location: 1.0),
+                    ])
+
+                    let startPt = routedPoint(s: 0, size: size, laneOffset: laneOffset)
+                    let endPt = routedPoint(s: CGFloat(revealProgress), size: size, laneOffset: laneOffset)
+
+                    // Constant width across full path
+                    ctx.stroke(
+                        path,
+                        with: .linearGradient(tailGradient, startPoint: startPt, endPoint: endPt),
+                        lineWidth: 10
+                    )
+
+                    // Glow pulse layer (same style as LoadingSplash)
+                    let tailFactorAtGlow = 1.0 - smoothstepD(tailStartFrac, 1.0, posFrac)
+                    let glowPeak = 0.45 * tailFactorAtGlow
+                    let glowHalfWidth = sigma * 0.8
+                    let startStop = max(0.0, posFrac - glowHalfWidth)
+                    let endStop = min(1.0, posFrac + glowHalfWidth)
+                    let gradient = Gradient(stops: [
+                        .init(color: color.opacity(0.0), location: startStop),
+                        .init(color: color.opacity(glowPeak), location: posFrac),
+                        .init(color: color.opacity(0.0), location: endStop),
+                    ])
+
+                    // Clip blur like LoadingSplash so glow doesn't "cap" visually at reveal edge.
+                    let revealX = startPt.x + (endPt.x - startPt.x)
+                    let clipRect = CGRect(x: min(startPt.x, revealX), y: 0, width: max(1, abs(revealX - startPt.x) + 120), height: size.height)
+
+                    ctx.drawLayer { layer in
+                        layer.clip(to: Path(clipRect))
+                        layer.addFilter(.blur(radius: 7))
+                        layer.stroke(
+                            path,
+                            with: .linearGradient(gradient, startPoint: startPt, endPoint: endPt),
+                            lineWidth: 12
+                        )
+                    }
+                    ctx.drawLayer { layer in
+                        layer.clip(to: Path(clipRect))
+                        layer.addFilter(.blur(radius: 2))
+                        layer.stroke(
+                            path,
+                            with: .linearGradient(gradient, startPoint: startPt, endPoint: endPt),
+                            lineWidth: 6
+                        )
+                    }
+                }
+            }
+        }
+        .onAppear {
+            animationStartDate = .now
+        }
     }
 }
