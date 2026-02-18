@@ -25,9 +25,12 @@ struct DrivingForceStartView: View {
     ]
     @State private var showNeedIdeasVision = false
     @State private var showNeedIdeasPurpose = false
+    @State private var showNeedIdeasPassions = false
     @State private var validationHintText: String = ""
     @State private var showValidationHint = false
     @State private var hintWorkItem: DispatchWorkItem?
+    @State private var shouldHighlightStepValidation = false
+    @State private var invalidPassionKeys = Set<String>()
     @State private var addingPassionBuckets: Set<String> = []
 
     @FocusState private var focusedField: Field?
@@ -84,71 +87,121 @@ struct DrivingForceStartView: View {
         bucketOrder.first(where: { missingCount(draftPassions[$0.key] ?? []) > 0 })?.key
     }
 
+    private var missingPassionKeys: [String] {
+        bucketOrder
+            .map(\.key)
+            .filter { missingCount(draftPassions[$0] ?? []) > 0 }
+    }
+
+    private var isVisionInvalid: Bool {
+        visionTrimmed.isEmpty
+    }
+
+    private var isPurposeInvalid: Bool {
+        purposeTrimmed.isEmpty
+    }
+
+    private var isPassionsInvalid: Bool {
+        !missingPassionKeys.isEmpty
+    }
+
+    private var isNextDisabled: Bool {
+        switch step {
+        case .vision: return isVisionInvalid
+        case .purpose: return isPurposeInvalid
+        case .passions: return isPassionsInvalid
+        default: return false
+        }
+    }
+
     private var isScrollableStep: Bool {
         step == .summary
     }
 
-    var body: some View {
-        ScrollViewReader { proxy in
-            ZStack {
-                Color(.systemGroupedBackground)
-                    .ignoresSafeArea()
+    private var contentBottomPadding: CGFloat {
+        step == .summary ? 100 : 0
+    }
 
-                Group {
-                    if isScrollableStep {
-                        ScrollView {
-                            mainContent(proxy: proxy)
-                        }
-                    } else {
-                        mainContent(proxy: proxy)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    var body: some View {
+        ZStack {
+            Color(.systemGroupedBackground)
+                .ignoresSafeArea()
+
+            Group {
+                if isScrollableStep {
+                    ScrollView {
+                        mainContent
                     }
-                }
-            }
-            .safeAreaInset(edge: .bottom) {
-                footer
-                    .padding(.horizontal)
-                    .padding(.top, 8)
-                    .padding(.bottom, 10)
-                    .background(Color(.systemGroupedBackground))
-            }
-            .onChange(of: step) { _, newStep in
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
-                    switch newStep {
-                    case .vision:
-                        focusedField = .vision
-                    case .purpose:
-                        focusedField = .purpose
-                    case .passions:
-                        if let key = firstIncompleteBucket {
-                            focusedField = .passion(key)
-                        } else {
-                            focusedField = .passion("love")
-                        }
-                    default:
-                        focusedField = nil
-                    }
-                }
-            }
-            .onChange(of: focusedField) { _, newValue in
-                if case .some(.passion(let key)) = newValue {
-                    addingPassionBuckets = [key]
                 } else {
-                    addingPassionBuckets = []
-                    for key in bucketOrder.map(\.key) {
-                        entryText[key] = ""
-                    }
+                    mainContent
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 }
             }
         }
+        .safeAreaInset(edge: .bottom) {
+            footer
+                .padding(.horizontal)
+                .padding(.top, 8)
+                .padding(.bottom, 10)
+                .background(Color(.systemGroupedBackground))
+        }
+        .onChange(of: step) { _, newStep in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
+                switch newStep {
+                case .vision:
+                    focusedField = .vision
+                case .purpose:
+                    focusedField = .purpose
+                case .passions:
+                    if let key = firstIncompleteBucket {
+                        focusedField = .passion(key)
+                    } else {
+                        focusedField = .passion("love")
+                    }
+                default:
+                    focusedField = nil
+                }
+            }
+        }
+        .onChange(of: focusedField) { _, newValue in
+            if case .some(.passion(let key)) = newValue {
+                addingPassionBuckets = [key]
+            } else {
+                addingPassionBuckets = []
+                for key in bucketOrder.map(\.key) {
+                    entryText[key] = ""
+                }
+            }
+        }
+        .onChange(of: visionText) { _, _ in clearStepValidationIfResolved() }
+        .onChange(of: purposeText) { _, _ in clearStepValidationIfResolved() }
+        .onChange(of: draftPassions) { _, _ in clearStepValidationIfResolved() }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(step != .intro)
         .onAppear(perform: loadFromPersistentData)
+        .overlay(alignment: .bottom) {
+            if showValidationHint {
+                Text(validationHintText)
+                    .font(.footnote)
+                    .fontWeight(.bold)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(10)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color.black.opacity(0.12), lineWidth: 1)
+                    )
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 56)
+                    .transition(.opacity)
+            }
+        }
     }
 
     @ViewBuilder
-    private func mainContent(proxy: ScrollViewProxy) -> some View {
+    private var mainContent: some View {
         VStack(alignment: .leading, spacing: 14) {
             header
 
@@ -162,16 +215,25 @@ struct DrivingForceStartView: View {
             case .passions:
                 passionsStep
             case .summary:
-                summaryStep(proxy: proxy)
+                summaryStep
             }
         }
         .padding(.horizontal)
-        .padding(.bottom, 100)
+        .padding(.bottom, contentBottomPadding)
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     private var header: some View {
         VStack(spacing: 1) {
+            if step == .intro {
+                Image("DrivingForceGraphic")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 420)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .padding(.bottom, 2)
+            }
             if step != .intro {
                 progressStrip
                     .frame(maxWidth: .infinity, alignment: .center)
@@ -180,19 +242,6 @@ struct DrivingForceStartView: View {
                 .font(.largeTitle)
                 .fontWeight(.bold)
                 .frame(maxWidth: .infinity, alignment: .center)
-            if showValidationHint {
-                Text(validationHintText)
-                    .font(.footnote.weight(.semibold))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 10))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10)
-                            .stroke(Color.black.opacity(0.12), lineWidth: 1)
-                    )
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.top, 8)
-            }
         }
     }
 
@@ -261,13 +310,21 @@ struct DrivingForceStartView: View {
                 .frame(maxWidth: .infinity)
 
                 Button {
-                    advanceFromCurrentStep()
+                    if isNextDisabled {
+                        triggerStepValidationFeedback()
+                    } else {
+                        shouldHighlightStepValidation = false
+                        invalidPassionKeys = []
+                        showValidationHint = false
+                        advanceFromCurrentStep()
+                    }
                 } label: {
                     Text("Next")
                         .frame(maxWidth: .infinity)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.borderedProminent)
+                .tint(isNextDisabled ? Color(.systemGray3) : .accentColor)
                 .frame(maxWidth: .infinity)
             }
         }
@@ -332,26 +389,45 @@ struct DrivingForceStartView: View {
 
             multiLineEditor(
                 text: $visionText,
-                placeholder: "Write your ultimate vision..."
+                placeholder: "Write your ultimate vision...",
+                showError: shouldHighlightStepValidation && isVisionInvalid
             )
             .focused($focusedField, equals: .vision)
 
-            DisclosureGroup("Need ideas?", isExpanded: $showNeedIdeasVision) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("• Who do I want to become?")
-                    Text("• What experiences do I want to have?")
-                    Text("• What impact do I want to make?")
-                    Text("Example:")
-                        .font(.subheadline.weight(.semibold))
-                        .padding(.top, 4)
-                    Text("\"I live a life of purpose, growth, and freedom. I build meaningful work that creates value for others while giving me time, financial independence, and the ability to choose how I live. I am healthy, energized, and surrounded by strong relationships, and I continue to learn, lead, and make a positive impact.\"")
-                        .italic()
+            VStack(alignment: .leading, spacing: 6) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showNeedIdeasVision.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text("Need ideas?")
+                        Image(systemName: showNeedIdeasVision ? "chevron.up" : "chevron.down")
+                            .font(.caption2.weight(.semibold))
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.blue)
                 }
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .padding(.top, 4)
+                .buttonStyle(.plain)
+
+                if showNeedIdeasVision {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("• Who do I want to become?")
+                        Text("• What experiences do I want to have?")
+                        Text("• What impact do I want to make?")
+                        Text("Example:")
+                            .font(.subheadline.weight(.semibold))
+                            .padding(.top, 4)
+                        Text("\"I live a life of purpose, growth, and freedom. I build meaningful work that creates value for others while giving me time, financial independence, and the ability to choose how I live. I am healthy, energized, and surrounded by strong relationships, and I continue to learn, lead, and make a positive impact.\"")
+                            .italic()
+                    }
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(10)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                    .padding(.top, 2)
+                }
             }
-            .font(.subheadline.weight(.semibold))
         }
         .padding(14)
         .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
@@ -364,26 +440,45 @@ struct DrivingForceStartView: View {
 
             multiLineEditor(
                 text: $purposeText,
-                placeholder: "Write your purpose..."
+                placeholder: "Write your purpose...",
+                showError: shouldHighlightStepValidation && isPurposeInvalid
             )
             .focused($focusedField, equals: .purpose)
 
-            DisclosureGroup("Need ideas?", isExpanded: $showNeedIdeasPurpose) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("• Why is this essential to me?")
-                    Text("• Who does this impact?")
-                    Text("• What does this give me emotionally?")
-                    Text("Example:")
-                        .font(.subheadline.weight(.semibold))
-                        .padding(.top, 4)
-                    Text("\"Because I don’t want to waste my life reacting to circumstances or other people’s expectations. I want to use my full potential, create something meaningful, support the people I love, and live with confidence, fulfillment, and peace.\"")
-                        .italic()
+            VStack(alignment: .leading, spacing: 6) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showNeedIdeasPurpose.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text("Need ideas?")
+                        Image(systemName: showNeedIdeasPurpose ? "chevron.up" : "chevron.down")
+                            .font(.caption2.weight(.semibold))
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.blue)
                 }
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .padding(.top, 4)
+                .buttonStyle(.plain)
+
+                if showNeedIdeasPurpose {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("• Why is this essential to me?")
+                        Text("• Who does this impact?")
+                        Text("• What does this give me emotionally?")
+                        Text("Example:")
+                            .font(.subheadline.weight(.semibold))
+                            .padding(.top, 4)
+                        Text("\"Because I don’t want to waste my life reacting to circumstances or other people’s expectations. I want to use my full potential, create something meaningful, support the people I love, and live with confidence, fulfillment, and peace.\"")
+                            .italic()
+                    }
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(10)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                    .padding(.top, 2)
+                }
             }
-            .font(.subheadline.weight(.semibold))
         }
         .padding(14)
         .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
@@ -392,6 +487,7 @@ struct DrivingForceStartView: View {
     private var passionsStep: some View {
         List {
             ForEach(bucketOrder, id: \.key) { bucket in
+                let shouldOutlineBucket = shouldHighlightStepValidation && invalidPassionKeys.contains(bucket.key)
                 Section {
                     if addingPassionBuckets.contains(bucket.key) {
                         TextField("Add \(bucket.title)", text: bindingForBucketEntry(bucket.key))
@@ -402,6 +498,7 @@ struct DrivingForceStartView: View {
                             .onSubmit {
                                 savePassionEntry(bucket.key)
                             }
+                            .listRowBackground(bucketValidationRowBackground(isInvalid: shouldOutlineBucket))
                     } else {
                         Button("+ Add \(bucket.title)") {
                             addingPassionBuckets = [bucket.key]
@@ -409,11 +506,13 @@ struct DrivingForceStartView: View {
                             focusedField = .passion(bucket.key)
                         }
                         .foregroundStyle(.blue)
+                        .listRowBackground(bucketValidationRowBackground(isInvalid: shouldOutlineBucket))
                     }
 
                     let values = draftPassions[bucket.key] ?? []
                     ForEach(values, id: \.self) { value in
                         Text(value)
+                            .listRowBackground(bucketValidationRowBackground(isInvalid: shouldOutlineBucket))
                     }
                     .onDelete { offsets in
                         deletePassions(at: offsets, in: bucket.key)
@@ -421,6 +520,7 @@ struct DrivingForceStartView: View {
                 } header: {
                     HStack(spacing: 8) {
                         Text(bucket.title)
+                            .foregroundStyle(.primary)
                         Spacer(minLength: 8)
                         Text(passionPrompt(for: bucket.key))
                             .italic()
@@ -429,47 +529,116 @@ struct DrivingForceStartView: View {
                     }
                 }
             }
+
+            Section {
+                VStack(alignment: .leading, spacing: 6) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            showNeedIdeasPassions.toggle()
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text("Need ideas?")
+                            Image(systemName: showNeedIdeasPassions ? "chevron.up" : "chevron.down")
+                                .font(.caption2.weight(.semibold))
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.blue)
+                    }
+                    .buttonStyle(.plain)
+
+                    if showNeedIdeasPassions {
+                        VStack(alignment: .leading, spacing: 10) {
+                            passionIdeasGroup(
+                                title: "Love",
+                                items: [
+                                    "Time with family and close relationships",
+                                    "Learning, growth, and self-improvement",
+                                    "Building and creating something meaningful"
+                                ]
+                            )
+                            passionIdeasGroup(
+                                title: "Vows (Commitments)",
+                                items: [
+                                    "Always act with integrity",
+                                    "Take full responsibility for my life",
+                                    "Keep growing and becoming better"
+                                ]
+                            )
+                            passionIdeasGroup(
+                                title: "Thrill (Excitement)",
+                                items: [
+                                    "Achieving difficult goals",
+                                    "Solving hard problems",
+                                    "Taking risks and pursuing new opportunities"
+                                ]
+                            )
+                            passionIdeasGroup(
+                                title: "Hate",
+                                items: [
+                                    "Wasted potential",
+                                    "Dishonesty and manipulation",
+                                    "Laziness and excuses"
+                                ]
+                            )
+                        }
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .padding(10)
+                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                        .padding(.top, 2)
+                    }
+                }
+            }
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
     }
 
-    private func summaryStep(proxy: ScrollViewProxy) -> some View {
+    private func passionIdeasGroup(title: String, items: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+            ForEach(items, id: \.self) { item in
+                Text("• \(item)")
+            }
+        }
+    }
+
+    private func bucketValidationRowBackground(isInvalid: Bool) -> some View {
+        RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .fill(Color.white)
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(isInvalid ? Color.red.opacity(0.82) : Color.clear, lineWidth: isInvalid ? 1.6 : 0)
+            )
+    }
+
+    private var summaryStep: some View {
         VStack(alignment: .leading, spacing: 12) {
             summaryCard(title: "Ultimate Vision", body: visionTrimmed, onEdit: {
                 step = .vision
             })
-            if visionTrimmed.isEmpty {
-                inlineMissing("Add your vision")
-            }
 
             summaryCard(title: "Ultimate Purpose", body: purposeTrimmed, onEdit: {
                 step = .purpose
             })
-            if purposeTrimmed.isEmpty {
-                inlineMissing("Add your purpose")
-            }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("Passions")
-                    .font(.headline)
+                HStack {
+                    Text("Passions")
+                        .font(.headline)
+                    Spacer()
+                    Button("Edit") {
+                        step = .passions
+                    }
+                    .font(.caption.weight(.semibold))
+                }
                 ForEach(bucketOrder, id: \.key) { bucket in
                     let items = draftPassions[bucket.key] ?? []
-                    let missing = missingCount(items)
                     VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text(bucket.title)
-                                .font(.subheadline.weight(.semibold))
-                            Spacer()
-                            Button("Edit") {
-                                step = .passions
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-                                    proxy.scrollTo("bucket-\(bucket.key)", anchor: .top)
-                                    focusedField = .passion(bucket.key)
-                                }
-                            }
-                            .font(.caption.weight(.semibold))
-                        }
+                        Text(bucket.title)
+                            .font(.subheadline.weight(.semibold))
                         if items.isEmpty {
                             Text("No items added.")
                                 .font(.caption)
@@ -477,26 +646,13 @@ struct DrivingForceStartView: View {
                         } else {
                             FlowChips(values: items)
                         }
-                        if missing > 0 {
-                            HStack(spacing: 8) {
-                                Text("Add \(missing) more")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                Button("Fix") {
-                                    step = .passions
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-                                        proxy.scrollTo("bucket-\(bucket.key)", anchor: .top)
-                                        focusedField = .passion(bucket.key)
-                                    }
-                                }
-                                .font(.caption.weight(.semibold))
-                            }
-                        }
                     }
                     .padding(10)
                     .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 10))
                 }
             }
+            .padding(12)
+            .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
         }
     }
 
@@ -517,13 +673,7 @@ struct DrivingForceStartView: View {
         .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
     }
 
-    private func inlineMissing(_ text: String) -> some View {
-        Text(text)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.secondary)
-    }
-
-    private func multiLineEditor(text: Binding<String>, placeholder: String) -> some View {
+    private func multiLineEditor(text: Binding<String>, placeholder: String, showError: Bool = false) -> some View {
         TextField(placeholder, text: text, axis: .vertical)
             .font(.system(size: 19))
             .textInputAutocapitalization(.sentences)
@@ -535,7 +685,7 @@ struct DrivingForceStartView: View {
             .background(Color.white, in: RoundedRectangle(cornerRadius: 12))
             .overlay(
                 RoundedRectangle(cornerRadius: 12)
-                    .stroke(Color.black.opacity(0.12), lineWidth: 1)
+                    .stroke(showError ? Color.red.opacity(0.8) : Color.black.opacity(0.12), lineWidth: showError ? 1.6 : 1)
             )
     }
 
@@ -674,10 +824,8 @@ struct DrivingForceStartView: View {
     private func advanceFromCurrentStep() {
         switch step {
         case .vision:
-            saveVisionIfChanged()
             step = .purpose
         case .purpose:
-            savePurposeIfChanged()
             step = .passions
         case .passions:
             // Do not gate on passions step itself.
@@ -804,6 +952,48 @@ struct DrivingForceStartView: View {
         }
         hintWorkItem = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.6, execute: work)
+    }
+
+    private func triggerStepValidationFeedback() {
+        hintWorkItem?.cancel()
+        shouldHighlightStepValidation = true
+        invalidPassionKeys = Set(missingPassionKeys)
+
+        switch step {
+        case .vision:
+            validationHintText = "Please complete your Ultimate Vision"
+        case .purpose:
+            validationHintText = "Please complete your Ultimate Purpose"
+        case .passions:
+            validationHintText = "Please add at least 2 items in each Passion category"
+        default:
+            validationHintText = "Please complete required fields"
+        }
+
+        withAnimation(.easeInOut(duration: 0.15)) {
+            showValidationHint = true
+        }
+
+        let work = DispatchWorkItem {
+            shouldHighlightStepValidation = false
+            invalidPassionKeys = []
+            withAnimation(.easeInOut(duration: 0.15)) {
+                showValidationHint = false
+            }
+        }
+        hintWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8, execute: work)
+    }
+
+    private func clearStepValidationIfResolved() {
+        guard showValidationHint || shouldHighlightStepValidation else { return }
+        guard !isNextDisabled else { return }
+        hintWorkItem?.cancel()
+        shouldHighlightStepValidation = false
+        invalidPassionKeys = []
+        withAnimation(.easeInOut(duration: 0.15)) {
+            showValidationHint = false
+        }
     }
 }
 
