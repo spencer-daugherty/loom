@@ -77,6 +77,7 @@ struct FulfillmentStartView: View {
         var visionIndex: Int
         var purposeIndex: Int
         var deepIndex: Int
+        var passionIndex: Int?
         var priorityCategoryIDs: [UUID]
         var selectedCategoryNames: [String]
         var customCategoryNames: [String]
@@ -112,6 +113,9 @@ struct FulfillmentStartView: View {
     @State private var step: Step = .intro
     @State private var visionIndex: Int = 0
     @State private var purposeIndex: Int = 0
+    @State private var roleIndex: Int = 0
+    @State private var passionIndex: Int = 0
+    @State private var didOpenPriorities = false
     @State private var priorityCategoryIDs: [UUID] = []
     @State private var deepIndex: Int = 0
 
@@ -136,6 +140,9 @@ struct FulfillmentStartView: View {
 
     @State private var showNeedIdeasVision = false
     @State private var showNeedIdeasPurpose = false
+    @State private var showNeedIdeasRoles = false
+    @State private var showNeedIdeasLittleWins = false
+    @State private var showNeedIdeasResources = false
     @State private var showNeedHelpCategories = false
 
     @State private var showValidationHint = false
@@ -146,6 +153,7 @@ struct FulfillmentStartView: View {
     @State private var usesDraftPersistence = false
     @State private var highlightInvalid = false
     @State private var invalidCategoryIDs = Set<UUID>()
+    @State private var isAllSummaryExpanded = false
 
     @FocusState private var focusedField: Field?
     private enum Field: Hashable {
@@ -161,8 +169,8 @@ struct FulfillmentStartView: View {
         case createCategories
         case visionSweep
         case purposeSweep
-        case priorities
         case roles
+        case priorities
         case littleWins
         case resources
         case passions
@@ -174,8 +182,8 @@ struct FulfillmentStartView: View {
             case .createCategories: return "Create Categories"
             case .visionSweep: return "Define Vision"
             case .purposeSweep: return "Define Purpose"
-            case .priorities: return "Choose Your Focus"
             case .roles: return "Identify Roles"
+            case .priorities: return "Choose Your Focus"
             case .littleWins: return "List Little Wins"
             case .resources: return "Note Resources"
             case .passions: return "Passions"
@@ -216,6 +224,22 @@ struct FulfillmentStartView: View {
         return orderedFulfillments[purposeIndex]
     }
 
+    private var roleCategoryIDs: [UUID] {
+        orderedFulfillments.map(\.category_id)
+    }
+
+    private var currentRoleRecord: Fulfillment? {
+        guard roleCategoryIDs.indices.contains(roleIndex) else { return nil }
+        let categoryID = roleCategoryIDs[roleIndex]
+        return orderedFulfillments.first(where: { $0.category_id == categoryID })
+    }
+
+    private var currentPassionRecord: Fulfillment? {
+        guard roleCategoryIDs.indices.contains(passionIndex) else { return nil }
+        let categoryID = roleCategoryIDs[passionIndex]
+        return orderedFulfillments.first(where: { $0.category_id == categoryID })
+    }
+
     private var deepCategoryIDs: [UUID] {
         priorityCategoryIDs
     }
@@ -231,8 +255,8 @@ struct FulfillmentStartView: View {
         case .createCategories: return 1
         case .visionSweep: return 2
         case .purposeSweep: return 3
-        case .priorities: return 4
-        case .roles: return 5
+        case .roles: return 4
+        case .priorities: return 5
         case .littleWins: return 6
         case .resources: return 7
         case .passions: return 8
@@ -265,12 +289,15 @@ struct FulfillmentStartView: View {
         case .createCategories:
             return !canStartOnboarding
         case .priorities:
-            return !(2...3).contains(priorityCategoryIDs.count)
+            return priorityCategoryIDs.isEmpty
         case .littleWins:
             guard let record = currentDeepRecord else { return true }
-            return getFoci(for: record).count != 3
-        case .passions:
+            return getFoci(for: record).isEmpty
+        case .resources:
             guard let record = currentDeepRecord else { return true }
+            return getResources(for: record).isEmpty
+        case .passions:
+            guard let record = currentPassionRecord else { return true }
             return selectedPassions(for: record.category_id).isEmpty
         default:
             return false
@@ -279,10 +306,11 @@ struct FulfillmentStartView: View {
 
     private var summaryCanComplete: Bool {
         guard !(orderedFulfillments.isEmpty) else { return false }
-        guard (2...3).contains(priorityCategoryIDs.count) else { return false }
-        for id in priorityCategoryIDs {
+        guard !priorityCategoryIDs.isEmpty else { return false }
+        for id in roleCategoryIDs {
             guard let record = orderedFulfillments.first(where: { $0.category_id == id }) else { return false }
-            if getFoci(for: record).count != 3 { return false }
+            if priorityCategoryIDs.contains(id), getFoci(for: record).isEmpty { return false }
+            if priorityCategoryIDs.contains(id), getResources(for: record).isEmpty { return false }
             if selectedPassions(for: id).isEmpty { return false }
         }
         return true
@@ -843,7 +871,7 @@ struct FulfillmentStartView: View {
         VStack(alignment: .leading, spacing: 10) {
             if let record = currentPurposeRecord {
                 categoryHeader(record.category, index: purposeIndex + 1, total: orderedFulfillments.count)
-                Text("Why is success in this area an absolute must?")
+                Text("Why does improving this area truly matter?")
                     .font(.headline)
 
                 multiLineEditor(
@@ -851,7 +879,7 @@ struct FulfillmentStartView: View {
                         get: { purposeDrafts[record.category_id] ?? record.category_purpose },
                         set: { purposeDrafts[record.category_id] = $0 }
                     ),
-                    placeholder: "Short and emotional..."
+                    placeholder: "Keep it simple and clear..."
                 )
                 .focused($focusedField, equals: .purpose)
 
@@ -890,16 +918,17 @@ struct FulfillmentStartView: View {
                         .background(rowSurfaceColor, in: RoundedRectangle(cornerRadius: 10))
                         .overlay(
                             RoundedRectangle(cornerRadius: 10)
-                                .stroke(selected ? Color.blue.opacity(0.6) : Color.clear, lineWidth: 1)
+                                .stroke(
+                                    selected
+                                        ? Color.blue.opacity(0.6)
+                                        : (highlightInvalid && priorityCategoryIDs.isEmpty ? Color.red.opacity(0.85) : Color.clear),
+                                    lineWidth: (selected || (highlightInvalid && priorityCategoryIDs.isEmpty)) ? 1.5 : 1
+                                )
                         )
                     }
                     .buttonStyle(.plain)
                 }
             }
-
-            Text("Selected: \(priorityCategoryIDs.count)")
-                .font(.caption)
-                .foregroundStyle((2...3).contains(priorityCategoryIDs.count) ? Color.secondary : Color.red)
         }
         .padding(14)
         .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
@@ -907,35 +936,37 @@ struct FulfillmentStartView: View {
 
     private var rolesStep: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if let record = currentDeepRecord {
-                categoryHeader(record.category, index: deepIndex + 1, total: deepCategoryIDs.count)
-                Text("Who do you need to become in this area?")
+            if let record = currentRoleRecord {
+                categoryHeader(record.category, index: roleIndex + 1, total: roleCategoryIDs.count)
+                Text("Who do you want to be in this area of your life?")
                     .font(.headline)
 
                 VStack(spacing: 0) {
-                    if addingRole {
-                        TextField("Add Role", text: $roleEntry)
-                            .focused($focusedField, equals: .role)
-                            .textInputAutocapitalization(.sentences)
-                            .autocorrectionDisabled(false)
-                            .submitLabel(.done)
-                            .onSubmit {
-                                commitRole(record)
+                    if getRoles(for: record).count < 3 {
+                        if addingRole {
+                            TextField("Add Role", text: $roleEntry)
+                                .focused($focusedField, equals: .role)
+                                .textInputAutocapitalization(.sentences)
+                                .autocorrectionDisabled(false)
+                                .submitLabel(.done)
+                                .onSubmit {
+                                    commitRole(record)
+                                }
+                                .padding(.vertical, 10)
+                                .padding(.horizontal, 10)
+                                .background(rowSurfaceColor)
+                        } else {
+                            Button("+ Add Role") {
+                                addingRole = true
+                                roleEntry = ""
+                                focusedField = .role
                             }
+                            .foregroundStyle(.blue)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.vertical, 10)
                             .padding(.horizontal, 10)
                             .background(rowSurfaceColor)
-                    } else {
-                        Button("+ Add Role") {
-                            addingRole = true
-                            roleEntry = ""
-                            focusedField = .role
                         }
-                        .foregroundStyle(.blue)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 10)
-                        .padding(.horizontal, 10)
-                        .background(rowSurfaceColor)
                     }
 
                     ForEach(getRoles(for: record), id: \.id) { item in
@@ -948,6 +979,7 @@ struct FulfillmentStartView: View {
                                 }
                             } label: {
                                 Image(systemName: "trash")
+                                    .foregroundStyle(.red)
                             }
                             .buttonStyle(.plain)
                         }
@@ -958,12 +990,48 @@ struct FulfillmentStartView: View {
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 10))
 
-                Button("Skip for now") {
-                    advanceFromCurrentStep()
+                VStack(alignment: .leading, spacing: 6) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            showNeedIdeasRoles.toggle()
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text("Need help?")
+                            Image(systemName: showNeedIdeasRoles ? "chevron.up" : "chevron.down")
+                                .font(.caption2.weight(.semibold))
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.blue)
+                    }
+                    .buttonStyle(.plain)
+
+                    if showNeedIdeasRoles {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Roles define your identity.")
+                                .fontWeight(.bold)
+                            Text("They guide how you think, act, and make decisions before results show up. Instead of focusing only on goals, focus on the person who naturally creates those outcomes.")
+                            Text("Choose identities that feel empowering and motivating. These should reflect the best version of yourself in this area.")
+                            Text("You can update these anytime as you evolve.")
+                            Text("Examples:")
+                                .fontWeight(.bold)
+                            Text("• Athlete").italic()
+                            Text("• Wealth Builder").italic()
+                            Text("• Focused Student").italic()
+                            Text("• Loving Partner").italic()
+                            Text("• Empowering Leader").italic()
+                            Text("• Energized Creator").italic()
+                            Text("• Community Contributor").italic()
+                            Text("• Prayer Warrior").italic()
+                        }
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(10)
+                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                    }
                 }
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.blue)
-                .buttonStyle(.plain)
             }
         }
         .padding(14)
@@ -983,11 +1051,11 @@ struct FulfillmentStartView: View {
     @ViewBuilder
     private func littleWinsContent(for record: Fulfillment) -> some View {
         let fociItems = getFoci(for: record)
-        let isInvalid = highlightInvalid && fociItems.count != 3
+        let isInvalid = highlightInvalid && fociItems.isEmpty
         let rowBackground = isInvalid ? Color.red.opacity(0.08) : rowSurfaceColor
 
         categoryHeader(record.category, index: deepIndex + 1, total: deepCategoryIDs.count)
-        Text("What small, repeatable wins will move this area forward?")
+        Text("What small, repeatable wins can move this area forward?")
             .font(.headline)
 
         VStack(spacing: 0) {
@@ -1024,6 +1092,7 @@ struct FulfillmentStartView: View {
                         }
                     } label: {
                         Image(systemName: "trash")
+                            .foregroundStyle(.red)
                     }
                     .buttonStyle(.plain)
                 }
@@ -1038,24 +1107,59 @@ struct FulfillmentStartView: View {
                 .stroke(isInvalid ? Color.red.opacity(0.85) : Color.clear, lineWidth: 1.5)
         )
 
-        Text("Exactly 3 required")
-            .font(.caption)
-            .foregroundStyle(fociItems.count == 3 ? Color.secondary : Color.red)
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showNeedIdeasLittleWins.toggle()
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Text("Need Help?")
+                    Image(systemName: showNeedIdeasLittleWins ? "chevron.up" : "chevron.down")
+                        .font(.caption2.weight(.semibold))
+                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.blue)
+            }
+            .buttonStyle(.plain)
+
+            if showNeedIdeasLittleWins {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Small actions create momentum.")
+                        .fontWeight(.bold)
+                    Text("Focus on a few easy, high-impact 1-3 actions you can do consistently.")
+                    Text("These should be simple enough that you can follow through even on busy or low-energy days.")
+                    Text("Examples:")
+                        .fontWeight(.bold)
+                    Text("• Stretch or walk").italic()
+                    Text("• Pray or journal").italic()
+                    Text("• Review budget").italic()
+                    Text("• Call loved one").italic()
+                    Text("• Read for 10 min").italic()
+                }
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(10)
+                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+            }
+        }
     }
 
     private var resourcesStep: some View {
         VStack(alignment: .leading, spacing: 12) {
             if let record = currentDeepRecord {
+                let resourcesItems = getResources(for: record)
+                let isInvalid = highlightInvalid && resourcesItems.isEmpty
+                let rowBackground = isInvalid ? Color.red.opacity(0.08) : rowSurfaceColor
+
                 categoryHeader(record.category, index: deepIndex + 1, total: deepCategoryIDs.count)
-                Text("Who and what can help you grow in this area?")
+                Text("What people, tools, or environments can help you improve this area?")
                     .font(.headline)
 
-                Text("People • Tools • Communities • Knowledge")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
                 VStack(spacing: 0) {
-                    if addingResource {
+                    if addingResource, resourcesItems.count < 3 {
                         TextField("Add Resource", text: $resourceEntry)
                             .focused($focusedField, equals: .resource)
                             .textInputAutocapitalization(.sentences)
@@ -1066,8 +1170,8 @@ struct FulfillmentStartView: View {
                             }
                             .padding(.vertical, 10)
                             .padding(.horizontal, 10)
-                            .background(rowSurfaceColor)
-                    } else {
+                            .background(rowBackground)
+                    } else if resourcesItems.count < 3 {
                         Button("+ Add Resource") {
                             addingResource = true
                             resourceEntry = ""
@@ -1077,35 +1181,74 @@ struct FulfillmentStartView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.vertical, 10)
                         .padding(.horizontal, 10)
-                        .background(rowSurfaceColor)
+                        .background(rowBackground)
                     }
 
-                    ForEach(getResources(for: record), id: \.id) { item in
+                    ForEach(resourcesItems, id: \.id) { item in
                         HStack {
                             Text(item.resource)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             Button(role: .destructive) {
-                                if let idx = getResources(for: record).firstIndex(where: { $0.id == item.id }) {
+                                if let idx = resourcesItems.firstIndex(where: { $0.id == item.id }) {
                                     deleteResources(at: IndexSet(integer: idx), record: record)
                                 }
                             } label: {
                                 Image(systemName: "trash")
+                                    .foregroundStyle(.red)
                             }
                             .buttonStyle(.plain)
                         }
                         .padding(.vertical, 10)
                         .padding(.horizontal, 10)
-                        .background(rowSurfaceColor)
+                        .background(rowBackground)
                     }
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(isInvalid ? Color.red.opacity(0.85) : Color.clear, lineWidth: 1.5)
+                )
 
-                Button("Skip for now") {
-                    advanceFromCurrentStep()
+                VStack(alignment: .leading, spacing: 6) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            showNeedIdeasResources.toggle()
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text("Need Help?")
+                            Image(systemName: showNeedIdeasResources ? "chevron.up" : "chevron.down")
+                                .font(.caption2.weight(.semibold))
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.blue)
+                    }
+                    .buttonStyle(.plain)
+
+                    if showNeedIdeasResources {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Strong support makes success easier.")
+                                .fontWeight(.bold)
+                            Text("Focus on 1–3 people, tools, or environments that support consistent growth.")
+                            Text("Choose resources that reduce friction and make the right behavior more automatic.")
+                            Text("Examples:")
+                                .fontWeight(.bold)
+                            Text("• Great gym").italic()
+                            Text("• Accountability partner").italic()
+                            Text("• Mentor or coach").italic()
+                            Text("• Budgeting app").italic()
+                            Text("• Supportive community").italic()
+                            Text("• Quiet workspace").italic()
+                            Text("• State park nearby").italic()
+                        }
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(10)
+                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                    }
                 }
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.blue)
-                .buttonStyle(.plain)
             }
         }
         .padding(14)
@@ -1114,8 +1257,8 @@ struct FulfillmentStartView: View {
 
     private var passionsStep: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if let record = currentDeepRecord {
-                categoryHeader(record.category, index: deepIndex + 1, total: deepCategoryIDs.count)
+            if let record = currentPassionRecord {
+                categoryHeader(record.category, index: passionIndex + 1, total: roleCategoryIDs.count)
                 Text("What passions drive you to improve this area?")
                     .font(.headline)
 
@@ -1126,7 +1269,7 @@ struct FulfillmentStartView: View {
                             togglePassion(passion, for: record.category_id)
                         } label: {
                             HStack {
-                                Text("\(passion.emotion.capitalized): \(passion.passion)")
+                                Text("\(displayEmotionLabel(for: passion.emotion)): \(passion.passion)")
                                     .foregroundStyle(.primary)
                                     .multilineTextAlignment(.leading)
                                 Spacer()
@@ -1147,10 +1290,6 @@ struct FulfillmentStartView: View {
                     RoundedRectangle(cornerRadius: 10)
                         .stroke(highlightInvalid && selectedPassions(for: record.category_id).isEmpty ? Color.red.opacity(0.85) : Color.clear, lineWidth: 1.5)
                 )
-
-                Text("At least 1 required")
-                    .font(.caption)
-                    .foregroundStyle(selectedPassions(for: record.category_id).isEmpty ? Color.red : Color.secondary)
             }
         }
         .padding(14)
@@ -1159,57 +1298,160 @@ struct FulfillmentStartView: View {
 
     private var summaryStep: some View {
         VStack(alignment: .leading, spacing: 12) {
-            summaryCard(title: "Categories", body: "\(orderedFulfillments.count) created") {
-                step = .visionSweep
-                visionIndex = 0
+            summarySection(title: "Categories (* Increased Focus)") {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(orderedFulfillments, id: \.category_id) { record in
+                        let isFocus = priorityCategoryIDs.contains(record.category_id)
+                        Text(isFocus ? "\(record.category) *" : record.category)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(fulfillmentCategoryColor(for: record.category))
+                    }
+                }
+            } onEdit: {
+                step = .createCategories
             }
 
-            summaryCard(title: "Priority Categories", body: priorityCategoryNamesText) {
+            summarySection(title: "Increased Focus Areas") {
+                let focused = orderedFulfillments.filter { priorityCategoryIDs.contains($0.category_id) }
+                if focused.isEmpty {
+                    Text("None selected")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                } else {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(focused, id: \.category_id) { record in
+                            categoryDetailsBlock(
+                                record: record,
+                                includeVisionPurpose: false,
+                                markAsFocus: true,
+                                includeLittleWinsResources: true,
+                                includePassions: false
+                            )
+                        }
+                    }
+                }
+            } onEdit: {
                 step = .priorities
             }
 
-            summaryCard(title: "Key Focus Areas", body: focusSummaryText) {
-                step = .littleWins
-                deepIndex = 0
-            }
+            summarySection(title: "All") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            isAllSummaryExpanded.toggle()
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Spacer(minLength: 0)
+                            Text(isAllSummaryExpanded ? "Hide" : "Show")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.blue)
+                            Image(systemName: isAllSummaryExpanded ? "chevron.up" : "chevron.down")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.blue)
+                        }
+                    }
+                    .buttonStyle(.plain)
 
-            summaryCard(title: "High-level Structure", body: structureSummaryText) {
+                    if isAllSummaryExpanded {
+                        VStack(alignment: .leading, spacing: 10) {
+                            ForEach(orderedFulfillments, id: \.category_id) { record in
+                                categoryDetailsBlock(
+                                    record: record,
+                                    includeVisionPurpose: true,
+                                    markAsFocus: false,
+                                    includeLittleWinsResources: false,
+                                    includePassions: true
+                                )
+                            }
+                        }
+                    }
+                }
+            } onEdit: {
                 step = .roles
                 deepIndex = 0
             }
         }
     }
 
-    private var priorityCategoryNamesText: String {
-        let names = priorityCategoryIDs.compactMap { id in
-            orderedFulfillments.first(where: { $0.category_id == id })?.category
-        }
-        return names.isEmpty ? "None selected" : names.joined(separator: ", ")
-    }
+    @ViewBuilder
+    private func categoryDetailsBlock(
+        record: Fulfillment,
+        includeVisionPurpose: Bool,
+        markAsFocus: Bool,
+        includeLittleWinsResources: Bool,
+        includePassions: Bool
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(markAsFocus ? "\(record.category) *" : record.category)
+                .foregroundStyle(fulfillmentCategoryColor(for: record.category))
+            .font(.subheadline.weight(.semibold))
 
-    private var focusSummaryText: String {
-        var total = 0
-        for id in priorityCategoryIDs {
-            if let record = orderedFulfillments.first(where: { $0.category_id == id }) {
-                total += getFoci(for: record).count
+            if includeVisionPurpose {
+                summarySubBullet(title: "Vision", values: [record.category_vision])
+                summarySubBullet(title: "Purpose", values: [record.category_purpose])
+            }
+
+            summaryNestedBullets(title: "Roles", values: getRoles(for: record).map(\.role))
+            if includeLittleWinsResources {
+                summaryNestedBullets(title: "Little Wins", values: getFoci(for: record).map(\.activity))
+                summaryNestedBullets(title: "Resources", values: getResources(for: record).map(\.resource))
+            }
+            if includePassions {
+                summaryNestedBullets(
+                    title: "Passions",
+                    values: selectedPassions(for: record.category_id).map { "\(displayEmotionLabel(for: $0.emotion)): \($0.passion)" }
+                )
             }
         }
-        return "\(total) focus areas defined"
     }
 
-    private var structureSummaryText: String {
-        var roleCount = 0
-        var resourceCount = 0
-        var passionCount = 0
+    @ViewBuilder
+    private func summarySubBullet(title: String, values: [String]) -> some View {
+        let cleaned = values
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
 
-        for id in priorityCategoryIDs {
-            guard let record = orderedFulfillments.first(where: { $0.category_id == id }) else { continue }
-            roleCount += getRoles(for: record).count
-            resourceCount += getResources(for: record).count
-            passionCount += selectedPassions(for: id).count
+        if !cleaned.isEmpty {
+            HStack(alignment: .top, spacing: 6) {
+                Text("•")
+                    .foregroundStyle(.secondary)
+                Text("\(title):")
+                    .font(.subheadline.weight(.semibold))
+                Text(cleaned.joined(separator: ", "))
+                    .font(.subheadline)
+            }
+            .padding(.leading, 12)
         }
+    }
 
-        return "\(roleCount) roles • \(resourceCount) resources • \(passionCount) passion links"
+    @ViewBuilder
+    private func summaryNestedBullets(title: String, values: [String]) -> some View {
+        let cleaned = values
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        if !cleaned.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .top, spacing: 6) {
+                    Text("•")
+                        .foregroundStyle(.secondary)
+                    Text("\(title):")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .padding(.leading, 12)
+
+                ForEach(cleaned, id: \.self) { value in
+                    HStack(alignment: .top, spacing: 6) {
+                        Text("◦")
+                            .foregroundStyle(.secondary)
+                        Text(value)
+                            .font(.subheadline)
+                    }
+                    .padding(.leading, 30)
+                }
+            }
+        }
     }
 
     private var visionIdeasExpander: some View {
@@ -1237,15 +1479,15 @@ struct FulfillmentStartView: View {
                     Text("You can refine this anytime. Start simple.")
                     Text("Examples:")
                         .fontWeight(.bold)
-                    Text("• I feel confident, energized, and in control of this area.")
+                    Text("• I am healthy, energized, and strong, with habits that support long-term vitality and resilience.")
                         .italic()
-                    Text("• I consistently make progress and handle challenges with clarity.")
+                    Text("• I feel calm, focused, and in control of this area, which allows me to show up fully in the rest of my life.")
                         .italic()
-                    Text("• I have strong systems and habits that support long-term success.")
+                    Text("• I consistently grow and improve, creating stability, balance, and confidence in this area.")
                         .italic()
-                    Text("• I experience balance, stability, and steady growth.")
+                    Text("• I experience freedom and momentum here, knowing I’m building a strong foundation for my future.")
                         .italic()
-                    Text("• I feel proud of how I show up and the results I create.")
+                    Text("• This area of my life supports my happiness, creativity, and overall sense of fulfillment.")
                         .italic()
                 }
                 .font(.subheadline)
@@ -1275,12 +1517,29 @@ struct FulfillmentStartView: View {
 
             if showNeedIdeasPurpose {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("• Why this area matters deeply")
-                    Text("• What it changes in your life")
-                    Text("• Why it must happen")
+                    Text("Purpose is your deeper reason. It keeps you consistent when motivation fades.")
+                        .fontWeight(.bold)
+                    Text("Think about why this matters and how your life improves when this area strengthens. When strong, everything feels easier.")
+                    Text("You can refine this anytime. Start simple.")
+                    Text("Examples:")
+                        .fontWeight(.bold)
+                    Text("• This fuels my energy and confidence so I can show up fully every day.")
+                        .italic()
+                    Text("• This gives me stability and peace of mind instead of constant stress.")
+                        .italic()
+                    Text("• Success here creates freedom and momentum across the rest of my life.")
+                        .italic()
+                    Text("• I want to feel proud of who I am in this area.")
+                        .italic()
+                    Text("• Neglecting this always leads to bigger problems later, so it’s a must.")
+                        .italic()
+                    Text("• This helps me feel grounded, focused, and fulfilled instead of reactive.")
+                        .italic()
                 }
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(10)
                 .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
             }
@@ -1305,7 +1564,11 @@ struct FulfillmentStartView: View {
             .foregroundStyle(.secondary)
     }
 
-    private func summaryCard(title: String, body: String, onEdit: @escaping () -> Void) -> some View {
+    private func summarySection<Content: View>(
+        title: String,
+        @ViewBuilder content: () -> Content,
+        onEdit: @escaping () -> Void
+    ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(title)
@@ -1314,7 +1577,7 @@ struct FulfillmentStartView: View {
                 Button("Edit", action: onEdit)
                     .font(.caption.weight(.semibold))
             }
-            Text(body)
+            content()
                 .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -1357,24 +1620,35 @@ struct FulfillmentStartView: View {
                 step = .visionSweep
                 visionIndex = max(orderedFulfillments.count - 1, 0)
             }
-        case .priorities:
-            step = .purposeSweep
-            purposeIndex = max(orderedFulfillments.count - 1, 0)
         case .roles:
+            if roleIndex > 0 {
+                roleIndex -= 1
+            } else {
+                step = .purposeSweep
+                purposeIndex = max(orderedFulfillments.count - 1, 0)
+            }
+        case .priorities:
+            step = .roles
+            roleIndex = max(roleCategoryIDs.count - 1, 0)
+        case .littleWins:
             if deepIndex > 0 {
                 deepIndex -= 1
-                step = .passions
+                step = .resources
             } else {
                 step = .priorities
             }
-        case .littleWins:
-            step = .roles
         case .resources:
             step = .littleWins
         case .passions:
-            step = .resources
+            if passionIndex > 0 {
+                passionIndex -= 1
+            } else {
+                step = .resources
+                deepIndex = max(deepCategoryIDs.count - 1, 0)
+            }
         case .summary:
             step = .passions
+            passionIndex = max(roleCategoryIDs.count - 1, 0)
         case .intro:
             dismiss()
         }
@@ -1386,19 +1660,31 @@ struct FulfillmentStartView: View {
             syncSelectedCategoriesIntoFulfillment()
             visionIndex = 0
             purposeIndex = 0
+            roleIndex = 0
             deepIndex = 0
+            passionIndex = 0
+            didOpenPriorities = false
             step = .visionSweep
         case .visionSweep:
             moveVisionForward(saveCurrent: true)
         case .purposeSweep:
             movePurposeForward(saveCurrent: true)
-        case .priorities:
-            deepIndex = 0
-            step = .roles
         case .roles:
-            if let record = currentDeepRecord, addingRole {
+            if let record = currentRoleRecord, addingRole {
                 commitRole(record)
             }
+            if roleIndex < roleCategoryIDs.count - 1 {
+                roleIndex += 1
+            } else {
+                step = .priorities
+                deepIndex = 0
+                if !didOpenPriorities {
+                    priorityCategoryIDs.removeAll()
+                    didOpenPriorities = true
+                }
+            }
+        case .priorities:
+            deepIndex = 0
             step = .littleWins
         case .littleWins:
             if let record = currentDeepRecord, addingFocus {
@@ -1409,11 +1695,16 @@ struct FulfillmentStartView: View {
             if let record = currentDeepRecord, addingResource {
                 commitResource(record)
             }
-            step = .passions
-        case .passions:
             if deepIndex < deepCategoryIDs.count - 1 {
                 deepIndex += 1
-                step = .roles
+                step = .littleWins
+            } else {
+                passionIndex = 0
+                step = .passions
+            }
+        case .passions:
+            if passionIndex < roleCategoryIDs.count - 1 {
+                passionIndex += 1
             } else {
                 step = .summary
             }
@@ -1445,7 +1736,8 @@ struct FulfillmentStartView: View {
         if purposeIndex < orderedFulfillments.count - 1 {
             purposeIndex += 1
         } else {
-            step = .priorities
+            roleIndex = 0
+            step = .roles
         }
     }
 
@@ -1453,8 +1745,12 @@ struct FulfillmentStartView: View {
         if priorityCategoryIDs.contains(id) {
             priorityCategoryIDs.removeAll { $0 == id }
         } else {
-            guard priorityCategoryIDs.count < 3 else { return }
             priorityCategoryIDs.append(id)
+        }
+        if !priorityCategoryIDs.isEmpty {
+            highlightInvalid = false
+            invalidCategoryIDs.removeAll()
+            showValidationHint = false
         }
         persistDraftIfNeeded()
     }
@@ -1493,13 +1789,14 @@ struct FulfillmentStartView: View {
         visionDrafts = Dictionary(uniqueKeysWithValues: orderedFulfillments.map { ($0.category_id, $0.category_vision) })
         purposeDrafts = Dictionary(uniqueKeysWithValues: orderedFulfillments.map { ($0.category_id, $0.category_purpose) })
 
-        if priorityCategoryIDs.isEmpty {
-            priorityCategoryIDs = Array(orderedFulfillments.prefix(2).map(\.category_id))
-        } else {
-            priorityCategoryIDs = priorityCategoryIDs.filter { id in
-                orderedFulfillments.contains(where: { $0.category_id == id })
-            }
+        priorityCategoryIDs = priorityCategoryIDs.filter { id in
+            orderedFulfillments.contains(where: { $0.category_id == id })
         }
+        visionIndex = min(visionIndex, max(orderedFulfillments.count - 1, 0))
+        purposeIndex = min(purposeIndex, max(orderedFulfillments.count - 1, 0))
+        roleIndex = min(roleIndex, max(roleCategoryIDs.count - 1, 0))
+        deepIndex = min(deepIndex, max(deepCategoryIDs.count - 1, 0))
+        passionIndex = min(passionIndex, max(roleCategoryIDs.count - 1, 0))
     }
 
     private func addCategory() {
@@ -1732,6 +2029,7 @@ struct FulfillmentStartView: View {
             visionIndex: visionIndex,
             purposeIndex: purposeIndex,
             deepIndex: deepIndex,
+            passionIndex: passionIndex,
             priorityCategoryIDs: priorityCategoryIDs,
             selectedCategoryNames: selectedCategoryNames,
             customCategoryNames: customCategoryNames,
@@ -1811,6 +2109,7 @@ struct FulfillmentStartView: View {
         visionIndex = 0
         purposeIndex = 0
         deepIndex = 0
+        passionIndex = 0
         step = .intro
         visionDrafts = Dictionary(uniqueKeysWithValues: draft.visionDrafts.compactMap { key, value in
             guard let id = UUID(uuidString: key) else { return nil }
@@ -1982,15 +2281,20 @@ struct FulfillmentStartView: View {
                 ? "Each color can only be used once."
                 : "Create at least 3 life categories."
         case .priorities:
-            validationHintText = "Choose 2 or 3 priority categories."
+            validationHintText = "Choose 1 or more areas than need increased focus."
         case .littleWins:
-            validationHintText = "Add exactly 3 focus areas to continue."
+            validationHintText = "List 1 or more small wins to continue."
+            if let record = currentDeepRecord {
+                invalidCategoryIDs.insert(record.category_id)
+            }
+        case .resources:
+            validationHintText = "List 1 or more resources to continue."
             if let record = currentDeepRecord {
                 invalidCategoryIDs.insert(record.category_id)
             }
         case .passions:
             validationHintText = "Connect at least 1 passion to continue."
-            if let record = currentDeepRecord {
+            if let record = currentPassionRecord {
                 invalidCategoryIDs.insert(record.category_id)
             }
         default:
@@ -2009,6 +2313,8 @@ struct FulfillmentStartView: View {
         let work = DispatchWorkItem {
             withAnimation(.easeInOut(duration: 0.15)) {
                 showValidationHint = false
+                highlightInvalid = false
+                invalidCategoryIDs.removeAll()
             }
         }
         hintWorkItem = work
@@ -2058,9 +2364,18 @@ struct FulfillmentStartView: View {
 
     private func addRole(text: String, record: Fulfillment) {
         guard !text.isEmpty else { return }
-        guard getRoles(for: record).count < 3 else { return }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        guard getRoles(for: record).count < 3 else {
+            triggerHint("You can add up to 3 roles.")
+            return
+        }
+        guard !roleExists(trimmed) else {
+            triggerHint("Duplicate role is already entered.")
+            return
+        }
         let nextRank = (getRoles(for: record).map(\.rank).max() ?? 0) + 1
-        let r = FulfillmentRoles(category_id: record.category_id, role: text, rank: nextRank)
+        let r = FulfillmentRoles(category_id: record.category_id, role: trimmed, rank: nextRank)
         modelContext.insert(r)
         if nextRank == 1 {
             let archive = FulfillmentArchive(
@@ -2077,6 +2392,14 @@ struct FulfillmentStartView: View {
             record.updatedAt = Date()
         }
         persistDraftIfNeeded()
+    }
+
+    private func roleExists(_ text: String) -> Bool {
+        let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return false }
+        return roles.contains { role in
+            role.role.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == normalized
+        }
     }
 
     private func deleteRoles(at offsets: IndexSet, record: Fulfillment) {
@@ -2103,12 +2426,28 @@ struct FulfillmentStartView: View {
     }
 
     private func addFocus(text: String, record: Fulfillment) {
-        guard !text.isEmpty else { return }
-        guard getFoci(for: record).count < 3 else { return }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        guard getFoci(for: record).count < 3 else {
+            triggerHint("You can add up to 3 little wins.")
+            return
+        }
+        guard !focusExists(trimmed) else {
+            triggerHint("Duplicate little win is already entered.")
+            return
+        }
         let nextRank = (getFoci(for: record).map(\.rank).max() ?? 0) + 1
-        let f = FulfillmentFocus(category_id: record.category_id, activity: text, rank: nextRank)
+        let f = FulfillmentFocus(category_id: record.category_id, activity: trimmed, rank: nextRank)
         modelContext.insert(f)
         persistDraftIfNeeded()
+    }
+
+    private func focusExists(_ text: String) -> Bool {
+        let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return false }
+        return foci.contains { row in
+            row.activity.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == normalized
+        }
     }
 
     private func deleteFoci(at offsets: IndexSet, record: Fulfillment) {
@@ -2135,11 +2474,28 @@ struct FulfillmentStartView: View {
     }
 
     private func addResource(text: String, record: Fulfillment) {
-        guard !text.isEmpty else { return }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        guard getResources(for: record).count < 3 else {
+            triggerHint("You can add up to 3 resources.")
+            return
+        }
+        guard !resourceExists(trimmed) else {
+            triggerHint("Duplicate resource is already entered.")
+            return
+        }
         let nextRank = (getResources(for: record).map(\.rank).max() ?? 0) + 1
-        let r = FulfillmentResources(category_id: record.category_id, resource: text, rank: nextRank)
+        let r = FulfillmentResources(category_id: record.category_id, resource: trimmed, rank: nextRank)
         modelContext.insert(r)
         persistDraftIfNeeded()
+    }
+
+    private func resourceExists(_ text: String) -> Bool {
+        let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return false }
+        return resources.contains { row in
+            row.resource.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == normalized
+        }
     }
 
     private func deleteResources(at offsets: IndexSet, record: Fulfillment) {
@@ -2171,6 +2527,14 @@ struct FulfillmentStartView: View {
     private func selectedPassions(for categoryID: UUID) -> [Passion] {
         let ids = selectedPassionIDs(for: categoryID)
         return passions.filter { ids.contains($0.passion_id) }
+    }
+
+    private func displayEmotionLabel(for raw: String) -> String {
+        switch raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "just": return "Hate"
+        case "vows": return "Vow"
+        default: return raw.capitalized
+        }
     }
 
     private func togglePassion(_ passion: Passion, for categoryID: UUID) {

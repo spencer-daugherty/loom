@@ -59,7 +59,7 @@ struct PassionsSectionView: View {
             } else {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(categoryPassions, id: \.passion_id) { passion in
-                        Text("\(passion.emotion.capitalized): \(passion.passion)")
+                        Text("\(displayEmotionLabel(for: passion.emotion)): \(passion.passion)")
                             .font(.subheadline)
                             .padding(.vertical, 8)
                             .padding(.horizontal, 10)
@@ -82,7 +82,7 @@ struct PassionsSectionView: View {
                                 togglePassion(passion)
                             } label: {
                                 HStack {
-                                    Text("\(passion.emotion.capitalized): \(passion.passion)")
+                                    Text("\(displayEmotionLabel(for: passion.emotion)): \(passion.passion)")
                                         .foregroundStyle(.primary)
                                     Spacer()
                                     if categoryPassions.contains(where: { $0.passion_id == passion.passion_id }) {
@@ -124,6 +124,14 @@ struct PassionsSectionView: View {
             modelContext.insert(join)
         }
     }
+
+    private func displayEmotionLabel(for raw: String) -> String {
+        switch raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "just": return "Hate"
+        case "vows": return "Vow"
+        default: return raw.capitalized
+        }
+    }
 }
 
 struct FulfillmentView: View {
@@ -151,21 +159,15 @@ struct FulfillmentView: View {
     @State private var newFocusText = ""
     @State private var isAddingResource = false
     @State private var newResourceText = ""
-    @State private var editingRecordID: UUID?
-    @State private var editingText: String = ""
-    @State private var editingOriginalText: String = ""
-    @State private var editingField: EditableField?
-    @State private var isEditSheetTextFocused: Bool = false
-    @State private var editSheetCursorSeed: Int = 0
+    @State private var visionDrafts: [UUID: String] = [:]
+    @State private var purposeDrafts: [UUID: String] = [:]
     @State private var isShowingInstructions = false
     @State private var highlightedCategoryIndex: Int = 0
     @State private var radarAutoRotatePausedUntil: Date = .distantPast
     @FocusState private var focusedField: Field?
+    @FocusState private var focusedVisionCategoryID: UUID?
+    @FocusState private var focusedPurposeCategoryID: UUID?
     private enum Field { case role, focus, resource }
-    private enum EditableField: Identifiable {
-        case vision, purpose
-        var id: String { self == .vision ? "vision" : "purpose" }
-    }
     private let radarTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
     private func categoryKey(_ raw: String) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -257,14 +259,24 @@ struct FulfillmentView: View {
                 .buttonStyle(.plain)
             }
             ToolbarItemGroup(placement: .keyboard) {
-                if editingField == nil {
-                    Spacer(minLength: 0)
-                    Button("Done") { focusedField = nil }
+                Spacer(minLength: 0)
+                Button("Done") {
+                    commitVisionDraft(for: focusedVisionCategoryID)
+                    commitPurposeDraft(for: focusedPurposeCategoryID)
+                    focusedVisionCategoryID = nil
+                    focusedPurposeCategoryID = nil
+                    focusedField = nil
                 }
             }
         }
         .onChange(of: focusedField) { _, new in
             commitInlineExcluding(new)
+        }
+        .onChange(of: focusedVisionCategoryID) { old, _ in
+            commitVisionDraft(for: old)
+        }
+        .onChange(of: focusedPurposeCategoryID) { old, _ in
+            commitPurposeDraft(for: old)
         }
         .onReceive(radarTimer) { _ in
             guard !orderedFulfillments.isEmpty else { return }
@@ -274,76 +286,6 @@ struct FulfillmentView: View {
         }
         .sheet(isPresented: $isShowingInstructions) {
             fulfillmentInstructionsSheet()
-        }
-        .sheet(item: $editingField) { field in
-            let hasChanges = editingText != editingOriginalText
-            let categoryPrefix: String = {
-                guard let recordID = editingRecordID,
-                      let record = fulfillments.first(where: { $0.category_id == recordID }) else {
-                    return "Category"
-                }
-                return record.category
-            }()
-            NavigationStack {
-                List {
-                    Section(field == .vision ? "\(categoryPrefix) Vision" : "\(categoryPrefix) Purpose") {
-                        FulfillmentEditorTextView(
-                            text: $editingText,
-                            isFocused: $isEditSheetTextFocused,
-                            cursorSeed: editSheetCursorSeed
-                        )
-                        .frame(height: 140)
-                    }
-                }
-                .navigationTitle(field == .vision ? "Edit Vision" : "Edit Purpose")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        Button(hasChanges ? "Cancel" : "Close") {
-                            isEditSheetTextFocused = false
-                            editingField = nil
-                            editingRecordID = nil
-                            editingText = ""
-                            editingOriginalText = ""
-                        }
-                        .foregroundColor(hasChanges ? .red : .primary)
-                    }
-                    if hasChanges {
-                        ToolbarItem(placement: .navigationBarTrailing) {
-                            Button("Update") {
-                                guard let recordID = editingRecordID,
-                                      let record = fulfillments.first(where: { $0.category_id == recordID }) else {
-                                    isEditSheetTextFocused = false
-                                    editingField = nil
-                                    editingRecordID = nil
-                                    editingText = ""
-                                    editingOriginalText = ""
-                                    return
-                                }
-                                if field == .vision {
-                                    updateVision(record: record, newText: editingText)
-                                } else {
-                                    updatePurpose(record: record, newText: editingText)
-                                }
-                                isEditSheetTextFocused = false
-                                editingField = nil
-                                editingRecordID = nil
-                                editingText = ""
-                                editingOriginalText = ""
-                            }
-                            .foregroundColor(.blue)
-                        }
-                    }
-                }
-            }
-            .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.visible)
-            .onAppear {
-                editSheetCursorSeed &+= 1
-                DispatchQueue.main.async {
-                    isEditSheetTextFocused = true
-                }
-            }
         }
         .alert("Move to Recently Deleted?", isPresented: $showDeletePreviousAlert, presenting: pendingDeletePrevious) { snapshot in
             Button("Cancel", role: .cancel) {
@@ -416,121 +358,108 @@ struct FulfillmentView: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
 
-                Divider().opacity(0.45)
+                fulfillmentInstructionSectionTitle("Set Fulfillment Areas")
+                fulfillmentInstructionBody("Design the most important areas of your life.")
+                fulfillmentInstructionBody("These are core categories that drive fulfillment. When they're out of balance, life is harder.")
+                fulfillmentInstructionBody("They're never finished. You continually improve them to stay moving forward.")
 
-                fulfillmentInstructionSectionTitle("1. Choose Your Fulfillment Categories")
-                fulfillmentInstructionBody("Start with broad, high-impact areas of life that must grow for your life to feel meaningful and balanced.")
-                fulfillmentInstructionBody("Most people use 5–7 categories.\nExamples include:")
-                fulfillmentInstructionBullets([
-                    "Career & Business",
-                    "Leadership & Impact",
-                    "Wealth & Lifestyle",
-                    "Mind & Meaning",
-                    "Love & Relationships",
-                    "Health & Vitality"
-                ])
-                fulfillmentInstructionBody("Your categories should be:")
-                fulfillmentInstructionBullets([
-                    "Broad enough to last years",
-                    "Clear enough to guide decisions",
-                    "Important enough that neglect hurts your life"
-                ])
-                fulfillmentInstructionBody("If you don’t improve in this area, your quality of life will suffer.\nIf you grow in this area, your fulfillment increases.")
+                fulfillmentInstructionSectionTitle("Create Categories")
+                fulfillmentInstructionBody("What 3-7 areas of your life must you consistently improve to succeed?")
+                fulfillmentInstructionLabel("Need help?")
+                fulfillmentInstructionBody("Fulfillment Areas are the key parts of your life you continually strengthen and maintain.")
+                fulfillmentInstructionBody("They are not one-time goals. When these areas are strong, life feels stable and balanced. When neglected, progress in other areas becomes harder.")
+                fulfillmentInstructionBody("Every action you take will connect to one of these areas, helping you focus on what truly matters instead of reacting to what feels urgent.")
+                fulfillmentInstructionBody("Start simple. You can refine or change them anytime.")
 
-                Divider().opacity(0.45)
-
-                fulfillmentInstructionSectionTitle("2. Vision")
-                fulfillmentInstructionBody("What do you ultimately want this area of your life to look like?\nThink long-term. Imagine your ideal future.")
-                fulfillmentInstructionLabel("Focus on:")
-                fulfillmentInstructionBullets([
-                    "How your life looks",
-                    "How you feel",
-                    "What success in this area means"
-                ])
-                fulfillmentInstructionLabel("Example:")
-                fulfillmentInstructionExample("Strong, energized, confident, and physically capable in every stage of life.")
-
-                Divider().opacity(0.45)
-
-                fulfillmentInstructionSectionTitle("3. Purpose")
-                fulfillmentInstructionBody("Why is this area an absolute must for you?\nThis creates emotional drive. Without purpose, action fades.")
-                fulfillmentInstructionLabel("Consider:")
-                fulfillmentInstructionBullets([
-                    "Why this matters",
-                    "What this gives you",
-                    "Who this impacts",
-                    "How you will feel when you improve"
-                ])
-                fulfillmentInstructionBody("This is your fuel when motivation is low.")
-
-                Divider().opacity(0.45)
-
-                fulfillmentInstructionSectionTitle("4. Roles")
-                fulfillmentInstructionBody("Who are you being in this area of life?\nRoles shape identity and behavior.")
-                fulfillmentInstructionLabel("Think about:")
-                fulfillmentInstructionBullets([
-                    "The person you want to become",
-                    "How you show up for others",
-                    "The standards you hold yourself to"
-                ])
-                fulfillmentInstructionLabel("Examples:")
-                fulfillmentInstructionExample("Leader, Provider, Builder, Mentor, Creator, Partner.")
-
-                Divider().opacity(0.45)
-
-                fulfillmentInstructionSectionTitle("5. Little Wins")
-                fulfillmentInstructionBody("These are the three highest-impact habits in this category.")
-                fulfillmentInstructionBody("They should be:")
-                fulfillmentInstructionBullets([
-                    "Simple",
-                    "Repeatable",
-                    "Weekly or daily",
-                    "High leverage"
-                ])
-                fulfillmentInstructionBody("These drive consistent momentum even when life is busy.")
-                fulfillmentInstructionLabel("Examples:")
-                fulfillmentInstructionExample("Health & Vitality\n• 10k steps\n• Strength training\n• Deep breathing\n\nWealth & Lifestyle\n• Budget review\n• Financial learning\n• Strategic planning.")
-
-                Divider().opacity(0.45)
-
-                fulfillmentInstructionSectionTitle("6. Resources")
-                fulfillmentInstructionBody("What people, tools, or systems help you grow here?")
+                fulfillmentInstructionSectionTitle("Define Vision")
+                fulfillmentInstructionBody("What does your ideal life look like in this area?")
+                fulfillmentInstructionLabel("Need ideas?")
+                fulfillmentInstructionBody("This is not a goal. It’s the long-term direction you want in this area.")
+                fulfillmentInstructionBody("Focus on how your life feels, how you show up, and what success looks like.")
+                fulfillmentInstructionBody("You can refine this anytime. Start simple.")
                 fulfillmentInstructionLabel("Examples:")
                 fulfillmentInstructionBullets([
-                    "Mentors",
-                    "Books or courses",
-                    "Apps or tools",
-                    "Networks",
-                    "Coaches or communities"
+                    "I am healthy, energized, and strong, with habits that support long-term vitality and resilience.",
+                    "I feel calm, focused, and in control of this area, which allows me to show up fully in the rest of my life.",
+                    "I consistently grow and improve, creating stability, balance, and confidence in this area.",
+                    "I experience freedom and momentum here, knowing I’m building a strong foundation for my future.",
+                    "This area of my life supports my happiness, creativity, and overall sense of fulfillment."
                 ])
-                fulfillmentInstructionBody("This prevents trying to do everything alone.")
 
-                Divider().opacity(0.45)
-
-                fulfillmentInstructionSectionTitle("7. Connect to Your Passions")
-                fulfillmentInstructionBody("Each category should link to your Driving Force.")
-                fulfillmentInstructionLabel("Ask:")
+                fulfillmentInstructionSectionTitle("Define Purpose")
+                fulfillmentInstructionBody("Why does improving this area truly matter?")
+                fulfillmentInstructionLabel("Need ideas?")
+                fulfillmentInstructionBody("Purpose is your deeper reason. It keeps you consistent when motivation fades.")
+                fulfillmentInstructionBody("Think about why this matters and how your life improves when this area strengthens. When strong, everything feels easier.")
+                fulfillmentInstructionBody("You can refine this anytime. Start simple.")
+                fulfillmentInstructionLabel("Examples:")
                 fulfillmentInstructionBullets([
-                    "Which Love does this category express?",
-                    "Which Thrills does it activate?",
-                    "Which Vows does it support?",
-                    "Which Hates does it help you fight?"
+                    "This fuels my energy and confidence so I can show up fully every day.",
+                    "This gives me stability and peace of mind instead of constant stress.",
+                    "Success here creates freedom and momentum across the rest of my life.",
+                    "I want to feel proud of who I am in this area.",
+                    "Neglecting this always leads to bigger problems later, so it’s a must.",
+                    "This helps me feel grounded, focused, and fulfilled instead of reactive."
                 ])
-                fulfillmentInstructionBody("This connection creates emotional leverage and long-term consistency.")
-                fulfillmentInstructionBody("When your categories connect to your passions, progress becomes meaningful.")
 
-                Divider().opacity(0.45)
-
-                fulfillmentInstructionSectionTitle("Key Reminder")
-                fulfillmentInstructionBody("Your Fulfillment Categories are your life operating system.")
-                fulfillmentInstructionBody("They guide:")
+                fulfillmentInstructionSectionTitle("Identify Roles")
+                fulfillmentInstructionBody("Who do you want to be in this area of your life?")
+                fulfillmentInstructionLabel("Need help?")
+                fulfillmentInstructionBody("Roles define your identity.")
+                fulfillmentInstructionBody("They guide how you think, act, and make decisions before results show up. Instead of focusing only on goals, focus on the person who naturally creates those outcomes.")
+                fulfillmentInstructionBody("Choose identities that feel empowering and motivating. These should reflect the best version of yourself in this area.")
+                fulfillmentInstructionBody("You can update these anytime as you evolve.")
+                fulfillmentInstructionLabel("Examples:")
                 fulfillmentInstructionBullets([
-                    "Your long-term goals",
-                    "Your weekly planning",
-                    "Your daily actions",
-                    "Your growth and identity"
+                    "Athlete",
+                    "Wealth Builder",
+                    "Focused Student",
+                    "Loving Partner",
+                    "Empowering Leader",
+                    "Energized Creator",
+                    "Community Contributor",
+                    "Prayer Warrior"
                 ])
-                fulfillmentInstructionBody("Review them regularly.\nRefine them yearly.\n\nClarity here makes everything else easier.")
+
+                fulfillmentInstructionSectionTitle("Choose Your Focus")
+                fulfillmentInstructionBody("Which areas would improve your life the most right now?")
+                fulfillmentInstructionBody("Choose 1 or more areas than need increased focus.")
+
+                fulfillmentInstructionSectionTitle("List Little Wins")
+                fulfillmentInstructionBody("What small, repeatable wins can move this area forward?")
+                fulfillmentInstructionLabel("Need Help?")
+                fulfillmentInstructionBody("Small actions create momentum.")
+                fulfillmentInstructionBody("Focus on a few easy, high-impact 1-3 actions you can do consistently.")
+                fulfillmentInstructionBody("These should be simple enough that you can follow through even on busy or low-energy days.")
+                fulfillmentInstructionLabel("Examples:")
+                fulfillmentInstructionBullets([
+                    "Stretch or walk",
+                    "Pray or journal",
+                    "Review budget",
+                    "Call loved one",
+                    "Read for 10 min"
+                ])
+
+                fulfillmentInstructionSectionTitle("Note Resources")
+                fulfillmentInstructionBody("What people, tools, or environments can help you improve this area?")
+                fulfillmentInstructionLabel("Need Help?")
+                fulfillmentInstructionBody("Strong support makes success easier.")
+                fulfillmentInstructionBody("Focus on 1–3 people, tools, or environments that support consistent growth.")
+                fulfillmentInstructionBody("Choose resources that reduce friction and make the right behavior more automatic.")
+                fulfillmentInstructionLabel("Examples:")
+                fulfillmentInstructionBullets([
+                    "Great gym",
+                    "Accountability partner",
+                    "Mentor or coach",
+                    "Budgeting app",
+                    "Supportive community",
+                    "Quiet workspace",
+                    "State park nearby"
+                ])
+
+                fulfillmentInstructionSectionTitle("Passions")
+                fulfillmentInstructionBody("What passions drive you to improve this area?")
+
             }
             .padding()
         }
@@ -955,44 +884,26 @@ struct FulfillmentView: View {
                     Text("Vision")
                         .font(.headline)
                         .foregroundColor(.black)
-                    Text(record.category_vision.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "No vision yet." : record.category_vision)
-                        .font(.subheadline)
-                        .foregroundStyle(.primary)
-                        .lineLimit(nil)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(10)
+                    TextEditor(text: visionBinding(for: record))
+                        .focused($focusedVisionCategoryID, equals: record.category_id)
+                        .textInputAutocapitalization(.sentences)
+                        .autocorrectionDisabled(false)
+                        .scrollContentBackground(.hidden)
+                        .frame(minHeight: 120)
+                        .padding(8)
                         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
-                    Button("Edit Vision") {
-                        editingRecordID = record.category_id
-                        editingText = record.category_vision
-                        editingOriginalText = record.category_vision
-                        isEditSheetTextFocused = false
-                        editSheetCursorSeed &+= 1
-                        editingField = .vision
-                    }
-                    .foregroundColor(.blue)
 
                     Text("Purpose")
                         .font(.headline)
                         .foregroundColor(.black)
-                    Text(record.category_purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "No purpose yet." : record.category_purpose)
-                        .font(.subheadline)
-                        .foregroundStyle(.primary)
-                        .lineLimit(nil)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(10)
+                    TextEditor(text: purposeBinding(for: record))
+                        .focused($focusedPurposeCategoryID, equals: record.category_id)
+                        .textInputAutocapitalization(.sentences)
+                        .autocorrectionDisabled(false)
+                        .scrollContentBackground(.hidden)
+                        .frame(minHeight: 120)
+                        .padding(8)
                         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
-                    Button("Edit Purpose") {
-                        editingRecordID = record.category_id
-                        editingText = record.category_purpose
-                        editingOriginalText = record.category_purpose
-                        isEditSheetTextFocused = false
-                        editSheetCursorSeed &+= 1
-                        editingField = .purpose
-                    }
-                    .foregroundColor(.blue)
 
                     Text("Roles")
                         .font(.headline)
@@ -1195,6 +1106,42 @@ struct FulfillmentView: View {
     }
 
     // MARK: - Data Helpers
+
+    private func visionBinding(for record: Fulfillment) -> Binding<String> {
+        Binding(
+            get: { visionDrafts[record.category_id] ?? record.category_vision },
+            set: { newValue in
+                visionDrafts[record.category_id] = newValue
+            }
+        )
+    }
+
+    private func purposeBinding(for record: Fulfillment) -> Binding<String> {
+        Binding(
+            get: { purposeDrafts[record.category_id] ?? record.category_purpose },
+            set: { newValue in
+                purposeDrafts[record.category_id] = newValue
+            }
+        )
+    }
+
+    private func commitVisionDraft(for categoryID: UUID?) {
+        guard let categoryID,
+              let draft = visionDrafts[categoryID],
+              let record = fulfillments.first(where: { $0.category_id == categoryID })
+        else { return }
+        updateVision(record: record, newText: draft)
+        visionDrafts[categoryID] = record.category_vision
+    }
+
+    private func commitPurposeDraft(for categoryID: UUID?) {
+        guard let categoryID,
+              let draft = purposeDrafts[categoryID],
+              let record = fulfillments.first(where: { $0.category_id == categoryID })
+        else { return }
+        updatePurpose(record: record, newText: draft)
+        purposeDrafts[categoryID] = record.category_purpose
+    }
 
     private func updateVision(record: Fulfillment, newText: String) {
         guard record.category_vision != newText else { return }
