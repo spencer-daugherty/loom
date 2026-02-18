@@ -163,7 +163,7 @@ struct FulfillmentStartView: View {
         case purposeSweep
         case priorities
         case roles
-        case threeToThrive
+        case littleWins
         case resources
         case passions
         case summary
@@ -176,7 +176,7 @@ struct FulfillmentStartView: View {
             case .purposeSweep: return "Define Purpose"
             case .priorities: return "Choose Your Focus"
             case .roles: return "Identify Roles"
-            case .threeToThrive: return "List Little Wins"
+            case .littleWins: return "List Little Wins"
             case .resources: return "Note Resources"
             case .passions: return "Passions"
             case .summary: return "Summary"
@@ -233,7 +233,7 @@ struct FulfillmentStartView: View {
         case .purposeSweep: return 3
         case .priorities: return 4
         case .roles: return 5
-        case .threeToThrive: return 6
+        case .littleWins: return 6
         case .resources: return 7
         case .passions: return 8
         case .summary: return 9
@@ -253,7 +253,7 @@ struct FulfillmentStartView: View {
 
     private var isScrollableStep: Bool {
         switch step {
-        case .createCategories, .roles, .threeToThrive, .resources, .passions, .summary:
+        case .createCategories, .roles, .littleWins, .resources, .passions, .summary:
             return true
         default:
             return false
@@ -266,7 +266,7 @@ struct FulfillmentStartView: View {
             return !canStartOnboarding
         case .priorities:
             return !(2...3).contains(priorityCategoryIDs.count)
-        case .threeToThrive:
+        case .littleWins:
             guard let record = currentDeepRecord else { return true }
             return getFoci(for: record).count != 3
         case .passions:
@@ -480,7 +480,7 @@ struct FulfillmentStartView: View {
                 case .visionSweep: focusedField = .vision
                 case .purposeSweep: focusedField = .purpose
                 case .roles: focusedField = addingRole ? .role : nil
-                case .threeToThrive: focusedField = addingFocus ? .focus : nil
+                case .littleWins: focusedField = addingFocus ? .focus : nil
                 case .resources: focusedField = addingResource ? .resource : nil
                 default: focusedField = nil
                 }
@@ -506,8 +506,8 @@ struct FulfillmentStartView: View {
                 prioritiesStep
             case .roles:
                 rolesStep
-            case .threeToThrive:
-                threeToThriveStep
+            case .littleWins:
+                littleWinsStep
             case .resources:
                 resourcesStep
             case .passions:
@@ -713,7 +713,7 @@ struct FulfillmentStartView: View {
 
                         Text(category)
                             .font(.system(size: 20))
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(fulfillmentCategoryColor(for: category))
 
                         Spacer()
                         if isConflicting {
@@ -828,7 +828,7 @@ struct FulfillmentStartView: View {
                         get: { visionDrafts[record.category_id] ?? record.category_vision },
                         set: { visionDrafts[record.category_id] = $0 }
                     ),
-                    placeholder: "One or two sentences..."
+                    placeholder: "Keep it simple and clear..."
                 )
                 .focused($focusedField, equals: .vision)
 
@@ -875,7 +875,7 @@ struct FulfillmentStartView: View {
                     } label: {
                         HStack {
                             Text(record.category)
-                                .foregroundStyle(.primary)
+                                .foregroundStyle(fulfillmentCategoryColor(for: record.category))
                             Spacer()
                             if selected {
                                 Image(systemName: "checkmark.circle.fill")
@@ -970,10 +970,10 @@ struct FulfillmentStartView: View {
         .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
     }
 
-    private var threeToThriveStep: some View {
+    private var littleWinsStep: some View {
         VStack(alignment: .leading, spacing: 12) {
             if let record = currentDeepRecord {
-                threeToThriveContent(for: record)
+                littleWinsContent(for: record)
             }
         }
         .padding(14)
@@ -981,7 +981,7 @@ struct FulfillmentStartView: View {
     }
 
     @ViewBuilder
-    private func threeToThriveContent(for record: Fulfillment) -> some View {
+    private func littleWinsContent(for record: Fulfillment) -> some View {
         let fociItems = getFoci(for: record)
         let isInvalid = highlightInvalid && fociItems.count != 3
         let rowBackground = isInvalid ? Color.red.opacity(0.08) : rowSurfaceColor
@@ -1169,7 +1169,7 @@ struct FulfillmentStartView: View {
             }
 
             summaryCard(title: "Key Focus Areas", body: focusSummaryText) {
-                step = .threeToThrive
+                step = .littleWins
                 deepIndex = 0
             }
 
@@ -1231,9 +1231,22 @@ struct FulfillmentStartView: View {
 
             if showNeedIdeasVision {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("• Keep it to 1–2 lines")
-                    Text("• Focus on the future state")
-                    Text("• Prioritize clarity over detail")
+                    Text("This is not a goal. It’s the long-term direction you want in this area.")
+                        .fontWeight(.bold)
+                    Text("Focus on how your life feels, how you show up, and what success looks like.")
+                    Text("You can refine this anytime. Start simple.")
+                    Text("Examples:")
+                        .fontWeight(.bold)
+                    Text("• I feel confident, energized, and in control of this area.")
+                        .italic()
+                    Text("• I consistently make progress and handle challenges with clarity.")
+                        .italic()
+                    Text("• I have strong systems and habits that support long-term success.")
+                        .italic()
+                    Text("• I experience balance, stability, and steady growth.")
+                        .italic()
+                    Text("• I feel proud of how I show up and the results I create.")
+                        .italic()
                 }
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -1278,6 +1291,7 @@ struct FulfillmentStartView: View {
         HStack {
             Text(title)
                 .font(.headline)
+                .foregroundStyle(fulfillmentCategoryColor(for: title))
             Spacer(minLength: 8)
             Text("\(index)/\(max(total, 1))")
                 .font(.caption)
@@ -1331,7 +1345,11 @@ struct FulfillmentStartView: View {
         case .createCategories:
             step = .intro
         case .visionSweep:
-            step = .createCategories
+            if visionIndex > 0 {
+                visionIndex -= 1
+            } else {
+                step = .createCategories
+            }
         case .purposeSweep:
             if purposeIndex > 0 {
                 purposeIndex -= 1
@@ -1349,10 +1367,10 @@ struct FulfillmentStartView: View {
             } else {
                 step = .priorities
             }
-        case .threeToThrive:
+        case .littleWins:
             step = .roles
         case .resources:
-            step = .threeToThrive
+            step = .littleWins
         case .passions:
             step = .resources
         case .summary:
@@ -1366,6 +1384,9 @@ struct FulfillmentStartView: View {
         switch step {
         case .createCategories:
             syncSelectedCategoriesIntoFulfillment()
+            visionIndex = 0
+            purposeIndex = 0
+            deepIndex = 0
             step = .visionSweep
         case .visionSweep:
             moveVisionForward(saveCurrent: true)
@@ -1378,8 +1399,8 @@ struct FulfillmentStartView: View {
             if let record = currentDeepRecord, addingRole {
                 commitRole(record)
             }
-            step = .threeToThrive
-        case .threeToThrive:
+            step = .littleWins
+        case .littleWins:
             if let record = currentDeepRecord, addingFocus {
                 commitFocus(record)
             }
@@ -1786,10 +1807,11 @@ struct FulfillmentStartView: View {
         }
         categoryColorKeys = mergedColors
         priorityCategoryIDs = draft.priorityCategoryIDs
-        visionIndex = draft.visionIndex
-        purposeIndex = draft.purposeIndex
-        deepIndex = draft.deepIndex
-        step = Step(rawValue: draft.stepRawValue) ?? .intro
+        // Always reopen onboarding at the beginning screen.
+        visionIndex = 0
+        purposeIndex = 0
+        deepIndex = 0
+        step = .intro
         visionDrafts = Dictionary(uniqueKeysWithValues: draft.visionDrafts.compactMap { key, value in
             guard let id = UUID(uuidString: key) else { return nil }
             return (id, value)
@@ -1961,7 +1983,7 @@ struct FulfillmentStartView: View {
                 : "Create at least 3 life categories."
         case .priorities:
             validationHintText = "Choose 2 or 3 priority categories."
-        case .threeToThrive:
+        case .littleWins:
             validationHintText = "Add exactly 3 focus areas to continue."
             if let record = currentDeepRecord {
                 invalidCategoryIDs.insert(record.category_id)

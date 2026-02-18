@@ -478,7 +478,7 @@ struct FulfillmentView: View {
 
                 Divider().opacity(0.45)
 
-                fulfillmentInstructionSectionTitle("5. Three-to-Thrive")
+                fulfillmentInstructionSectionTitle("5. Little Wins")
                 fulfillmentInstructionBody("These are the three highest-impact habits in this category.")
                 fulfillmentInstructionBody("They should be:")
                 fulfillmentInstructionBullets([
@@ -815,7 +815,7 @@ struct FulfillmentView: View {
                         Text("• Action block completion")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
-                        Text("• Three-to-Thrive consistency")
+                        Text("• Little Wins consistency")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                         Text("• Category engagement")
@@ -1041,7 +1041,7 @@ struct FulfillmentView: View {
                     .environment(\.editMode, .constant(.active))
                     .frame(minHeight: CGFloat(max(rolesRows, 1)) * 56, maxHeight: 220)
 
-                    Text("Three-to-Thrive")
+                    Text("Little Wins")
                         .font(.headline)
                         .foregroundColor(.black)
                     List {

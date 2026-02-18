@@ -1650,8 +1650,8 @@ struct CategoryFulfillmentPopupOverlay: View {
             sectionHeader("Roles")
             bulletList(roles)
 
-            // Three-to-Thrive
-            sectionHeader("Three-to-Thrive")
+            // Little Wins
+            sectionHeader("Little Wins")
             bulletList(foci)
 
             // Resources
