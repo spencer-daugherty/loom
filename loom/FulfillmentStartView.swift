@@ -31,6 +31,66 @@ fileprivate let fulfillmentStartSelectableDefaultCategories: [String] = [
 ]
 
 struct FulfillmentStartView: View {
+    private static let draftStorageKey = "fulfillment_start_onboarding_draft_v1"
+
+    private struct DraftFulfillmentRow: Codable {
+        var categoryID: UUID
+        var updatedAt: Date
+        var category: String
+        var identity: String
+        var vision: String
+        var purpose: String
+    }
+
+    private struct DraftRoleRow: Codable {
+        var id: UUID
+        var categoryID: UUID
+        var updatedAt: Date
+        var role: String
+        var rank: Int
+    }
+
+    private struct DraftFocusRow: Codable {
+        var id: UUID
+        var categoryID: UUID
+        var updatedAt: Date
+        var activity: String
+        var rank: Int
+    }
+
+    private struct DraftResourceRow: Codable {
+        var id: UUID
+        var categoryID: UUID
+        var updatedAt: Date
+        var resource: String
+        var rank: Int
+    }
+
+    private struct DraftPassionJoinRow: Codable {
+        var id: UUID
+        var passionID: UUID
+        var categoryID: UUID
+    }
+
+    private struct DraftState: Codable {
+        var stepRawValue: Int
+        var visionIndex: Int
+        var purposeIndex: Int
+        var deepIndex: Int
+        var priorityCategoryIDs: [UUID]
+        var selectedCategoryNames: [String]
+        var customCategoryNames: [String]
+        var deletedDefaultCategoryNames: [String]
+        var categoryColorKeys: [String: String]
+        var visionDrafts: [String: String]
+        var purposeDrafts: [String: String]
+        var fulfillments: [DraftFulfillmentRow]
+        var roles: [DraftRoleRow]
+        var foci: [DraftFocusRow]
+        var resources: [DraftResourceRow]
+        var passionJoins: [DraftPassionJoinRow]
+    }
+
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
@@ -45,6 +105,7 @@ struct FulfillmentStartView: View {
     @Query(sort: \PlannedChunk.updatedAt, order: .reverse) private var allPlannedChunks: [PlannedChunk]
     @Query(sort: \PlannedChunkAction.createdAt, order: .reverse) private var allPlannedActions: [PlannedChunkAction]
     @Query(sort: \Outcomes.updatedAt, order: .reverse) private var allOutcomes: [Outcomes]
+    @Query(sort: \PlanLabel.category, order: .forward) private var planLabels: [PlanLabel]
 
     @State private var navigateToFulfillment = false
 
@@ -56,6 +117,7 @@ struct FulfillmentStartView: View {
 
     @State private var visionDrafts: [UUID: String] = [:]
     @State private var purposeDrafts: [UUID: String] = [:]
+    @State private var fulfillmentSnapshot: [Fulfillment] = []
     @State private var roleEntry: String = ""
     @State private var focusEntry: String = ""
     @State private var resourceEntry: String = ""
@@ -81,6 +143,7 @@ struct FulfillmentStartView: View {
     @State private var hintWorkItem: DispatchWorkItem?
     @State private var previousAutosaveEnabled: Bool = true
     @State private var didFinalizeOnboarding = false
+    @State private var usesDraftPersistence = false
     @State private var highlightInvalid = false
     @State private var invalidCategoryIDs = Set<UUID>()
 
@@ -122,8 +185,9 @@ struct FulfillmentStartView: View {
     }
 
     private var orderedFulfillments: [Fulfillment] {
+        let baseRows = fulfillmentSnapshot.isEmpty ? fulfillments : fulfillmentSnapshot
         if !selectedCategoryNames.isEmpty {
-            let all = fulfillments
+            let all = baseRows
             let mapped = selectedCategoryNames.compactMap { selectedName in
                 all.first { record in
                     categoryKey(record.category) == categoryKey(selectedName)
@@ -131,7 +195,7 @@ struct FulfillmentStartView: View {
             }
             if !mapped.isEmpty { return mapped }
         }
-        var byID = Dictionary(uniqueKeysWithValues: fulfillments.map { ($0.category_id, $0) })
+        var byID = Dictionary(uniqueKeysWithValues: baseRows.map { ($0.category_id, $0) })
         var ordered: [Fulfillment] = []
         for def in fulfillmentStartDefaultCategoryDefs {
             if let row = byID.removeValue(forKey: def.categoryID) {
@@ -335,14 +399,58 @@ struct FulfillmentStartView: View {
         .navigationBarBackButtonHidden(step != .intro)
         .onAppear {
             previousAutosaveEnabled = modelContext.autosaveEnabled
-            modelContext.autosaveEnabled = false
-            loadFromPersistentData()
+            usesDraftPersistence = fulfillments.isEmpty
+            modelContext.autosaveEnabled = usesDraftPersistence ? false : previousAutosaveEnabled
+            if usesDraftPersistence, restoreDraftIfAvailable() {
+                refreshFulfillmentSnapshot()
+            } else {
+                if !usesDraftPersistence {
+                    clearDraft()
+                }
+                loadFromPersistentData()
+            }
         }
         .onDisappear {
             if !didFinalizeOnboarding {
+                persistDraft()
+            }
+            if usesDraftPersistence && !didFinalizeOnboarding {
                 modelContext.rollback()
             }
             modelContext.autosaveEnabled = previousAutosaveEnabled
+        }
+        .onChange(of: step) { _, _ in
+            persistDraftIfNeeded()
+        }
+        .onChange(of: visionIndex) { _, _ in
+            persistDraftIfNeeded()
+        }
+        .onChange(of: purposeIndex) { _, _ in
+            persistDraftIfNeeded()
+        }
+        .onChange(of: deepIndex) { _, _ in
+            persistDraftIfNeeded()
+        }
+        .onChange(of: selectedCategoryNames) { _, _ in
+            persistDraftIfNeeded()
+        }
+        .onChange(of: customCategoryNames) { _, _ in
+            persistDraftIfNeeded()
+        }
+        .onChange(of: deletedDefaultCategoryNames) { _, _ in
+            persistDraftIfNeeded()
+        }
+        .onChange(of: categoryColorKeys) { _, _ in
+            persistDraftIfNeeded()
+        }
+        .onChange(of: priorityCategoryIDs) { _, _ in
+            persistDraftIfNeeded()
+        }
+        .onChange(of: visionDrafts) { _, _ in
+            persistDraftIfNeeded()
+        }
+        .onChange(of: purposeDrafts) { _, _ in
+            persistDraftIfNeeded()
         }
         .navigationDestination(isPresented: $navigateToFulfillment) {
             FulfillmentView()
@@ -562,6 +670,8 @@ struct FulfillmentStartView: View {
                 .foregroundStyle(.secondary)
             Text("These are core categories that drive fulfillment. When they're out of balance, life is harder.")
                 .foregroundStyle(.secondary)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
             Text("They're never finished. You continually improve them to stay moving forward.")
                 .foregroundStyle(.secondary)
         }
@@ -1345,18 +1455,22 @@ struct FulfillmentStartView: View {
             guard priorityCategoryIDs.count < 3 else { return }
             priorityCategoryIDs.append(id)
         }
+        persistDraftIfNeeded()
     }
 
     // MARK: - Data load & finalize
 
     private func loadFromPersistentData() {
-        let existingCategories = Array(
-            Set(
-                fulfillments
-                    .map { $0.category.trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .filter { !$0.isEmpty }
-            )
-        ).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+        refreshFulfillmentSnapshot()
+        let sourceRows = fulfillmentSnapshot.isEmpty ? fulfillments : fulfillmentSnapshot
+        let categoriesFromFulfillment = sourceRows
+            .map { $0.category.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let categoriesFromLabels = planLabels
+            .map { $0.category.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let existingCategories = Array(Set(categoriesFromFulfillment + categoriesFromLabels))
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
         selectedCategoryNames = existingCategories
         customCategoryNames = existingCategories.filter { !fulfillmentStartSelectableDefaultCategories.contains($0) }
         var map = FulfillmentCategoryTheme.persistedColorKeys()
@@ -1365,8 +1479,11 @@ struct FulfillmentStartView: View {
             for (idx, category) in availableCategoryNames.enumerated() {
                 let trimmed = category.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmed.isEmpty else { continue }
-                // Normalize the step-1 list into a deterministic rotating sequence.
-                map[trimmed] = cycleKeys[idx % cycleKeys.count]
+                // Preserve user-managed color assignments from AccountView.
+                // Only assign a fallback color when none exists yet.
+                if map[trimmed] == nil {
+                    map[trimmed] = cycleKeys[idx % cycleKeys.count]
+                }
             }
         }
         categoryColorKeys = map
@@ -1400,6 +1517,7 @@ struct FulfillmentStartView: View {
         toggleCategorySelection(trimmed, forceSelected: true)
         addingCategory = false
         newCategoryText = ""
+        persistDraftIfNeeded()
     }
 
     private func deleteCategory(_ record: Fulfillment) {
@@ -1419,6 +1537,8 @@ struct FulfillmentStartView: View {
         }
         selectedCategoryNames.removeAll { $0.caseInsensitiveCompare(category) == .orderedSame }
         categoryColorKeys.removeValue(forKey: category)
+        applyCategorySelectionToLiveDataIfNeeded()
+        persistDraftIfNeeded()
     }
 
     private func attemptRemoveCategoryFromStepList(_ category: String) {
@@ -1437,6 +1557,7 @@ struct FulfillmentStartView: View {
         for category in missing {
             assignDefaultColorIfNeeded(for: category)
         }
+        persistDraftIfNeeded()
     }
 
     private func hasOngoingUsage(in category: String) -> Bool {
@@ -1482,13 +1603,28 @@ struct FulfillmentStartView: View {
             }
             assignDefaultColorIfNeeded(for: category)
         } else {
-            selectedCategoryNames.removeAll { $0 == category }
+            if hasOngoingUsage(in: category) {
+                triggerHint("This category has an ongoing action block, chunk, or outcome.")
+                return
+            }
+            selectedCategoryNames.removeAll { $0.caseInsensitiveCompare(category) == .orderedSame }
         }
+        applyCategorySelectionToLiveDataIfNeeded()
+        persistDraftIfNeeded()
     }
 
-    private func syncSelectedCategoriesIntoFulfillment() {
+    private func applyCategorySelectionToLiveDataIfNeeded() {
+        guard !usesDraftPersistence else { return }
+        insertSelectedCategoriesIntoLiveData()
+        pruneUnselectedCategoriesFromLiveData()
+        try? modelContext.save()
+        refreshFulfillmentSnapshot()
+    }
+
+    private func insertSelectedCategoriesIntoLiveData() {
+        let sourceRows = fulfillments
         for category in selectedCategoryNames {
-            let exists = fulfillments.contains {
+            let exists = sourceRows.contains {
                 categoryKey($0.category) == categoryKey(category)
             }
             guard !exists else { continue }
@@ -1503,7 +1639,261 @@ struct FulfillmentStartView: View {
                 )
             )
         }
+    }
+
+    private func pruneUnselectedCategoriesFromLiveData() {
+        let selectedKeys = Set(
+            selectedCategoryNames.map { categoryKey($0) }
+        )
+        let rowsToDelete = fulfillments.filter { !selectedKeys.contains(categoryKey($0.category)) }
+        let unselectedCategoryNames = Set(
+            (fulfillments.map(\.category) + planLabels.map(\.category))
+                .filter { !selectedKeys.contains(categoryKey($0)) }
+        )
+        guard !rowsToDelete.isEmpty || !unselectedCategoryNames.isEmpty else { return }
+
+        let idsToDelete = Set(rowsToDelete.map(\.category_id))
+        for role in roles where idsToDelete.contains(role.category_id) {
+            modelContext.delete(role)
+        }
+        for focus in foci where idsToDelete.contains(focus.category_id) {
+            modelContext.delete(focus)
+        }
+        for resource in resources where idsToDelete.contains(resource.category_id) {
+            modelContext.delete(resource)
+        }
+        for join in passionJoins where idsToDelete.contains(join.category_id) {
+            modelContext.delete(join)
+        }
+        for label in planLabels where unselectedCategoryNames.contains(where: { $0.caseInsensitiveCompare(label.category) == .orderedSame }) {
+            modelContext.delete(label)
+        }
+        for row in rowsToDelete {
+            modelContext.delete(row)
+        }
+    }
+
+    private func syncSelectedCategoriesIntoFulfillment() {
+        refreshFulfillmentSnapshot()
+        let sourceRows = fulfillmentSnapshot.isEmpty ? fulfillments : fulfillmentSnapshot
+        for category in selectedCategoryNames {
+            let exists = sourceRows.contains {
+                categoryKey($0.category) == categoryKey(category)
+            }
+            guard !exists else { continue }
+            modelContext.insert(
+                Fulfillment(
+                    category_id: UUID(),
+                    updatedAt: Date(),
+                    category: category,
+                    category_identitiy: "",
+                    category_vision: "",
+                    category_purpose: ""
+                )
+            )
+        }
+        refreshFulfillmentSnapshot()
         loadFromPersistentData()
+        persistDraftIfNeeded()
+    }
+
+    private func refreshFulfillmentSnapshot() {
+        let descriptor = FetchDescriptor<Fulfillment>()
+        if let rows = try? modelContext.fetch(descriptor) {
+            fulfillmentSnapshot = rows
+        }
+    }
+
+    private func persistDraftIfNeeded() {
+        guard !didFinalizeOnboarding else { return }
+        persistDraft()
+    }
+
+    private func persistDraft() {
+        let rows = orderedFulfillments
+        let rowIDs = Set(rows.map(\.category_id))
+        let rolesRows = roles.filter { rowIDs.contains($0.category_id) }
+        let fociRows = foci.filter { rowIDs.contains($0.category_id) }
+        let resourcesRows = resources.filter { rowIDs.contains($0.category_id) }
+        let joinRows = passionJoins.filter { rowIDs.contains($0.category_id) }
+
+        let draft = DraftState(
+            stepRawValue: step.rawValue,
+            visionIndex: visionIndex,
+            purposeIndex: purposeIndex,
+            deepIndex: deepIndex,
+            priorityCategoryIDs: priorityCategoryIDs,
+            selectedCategoryNames: selectedCategoryNames,
+            customCategoryNames: customCategoryNames,
+            deletedDefaultCategoryNames: Array(deletedDefaultCategoryNames),
+            categoryColorKeys: categoryColorKeys,
+            visionDrafts: Dictionary(uniqueKeysWithValues: visionDrafts.map { ($0.key.uuidString, $0.value) }),
+            purposeDrafts: Dictionary(uniqueKeysWithValues: purposeDrafts.map { ($0.key.uuidString, $0.value) }),
+            fulfillments: rows.map {
+                DraftFulfillmentRow(
+                    categoryID: $0.category_id,
+                    updatedAt: $0.updatedAt,
+                    category: $0.category,
+                    identity: $0.category_identitiy,
+                    vision: $0.category_vision,
+                    purpose: $0.category_purpose
+                )
+            },
+            roles: rolesRows.map {
+                DraftRoleRow(
+                    id: $0.id,
+                    categoryID: $0.category_id,
+                    updatedAt: $0.updatedAt,
+                    role: $0.role,
+                    rank: $0.rank
+                )
+            },
+            foci: fociRows.map {
+                DraftFocusRow(
+                    id: $0.id,
+                    categoryID: $0.category_id,
+                    updatedAt: $0.updatedAt,
+                    activity: $0.activity,
+                    rank: $0.rank
+                )
+            },
+            resources: resourcesRows.map {
+                DraftResourceRow(
+                    id: $0.id,
+                    categoryID: $0.category_id,
+                    updatedAt: $0.updatedAt,
+                    resource: $0.resource,
+                    rank: $0.rank
+                )
+            },
+            passionJoins: joinRows.map {
+                DraftPassionJoinRow(
+                    id: $0.id,
+                    passionID: $0.passion_id,
+                    categoryID: $0.category_id
+                )
+            }
+        )
+
+        guard let data = try? JSONEncoder().encode(draft) else { return }
+        UserDefaults.standard.set(data, forKey: Self.draftStorageKey)
+    }
+
+    private func restoreDraftIfAvailable() -> Bool {
+        guard let data = UserDefaults.standard.data(forKey: Self.draftStorageKey),
+              let draft = try? JSONDecoder().decode(DraftState.self, from: data) else {
+            return false
+        }
+
+        hydrateDraftIntoContext(draft)
+
+        selectedCategoryNames = draft.selectedCategoryNames
+        customCategoryNames = draft.customCategoryNames
+        deletedDefaultCategoryNames = Set(draft.deletedDefaultCategoryNames)
+        // Keep latest persisted category colors from AccountView and only fill gaps from draft.
+        var mergedColors = FulfillmentCategoryTheme.persistedColorKeys()
+        for (category, key) in draft.categoryColorKeys where mergedColors[category] == nil {
+            mergedColors[category] = key
+        }
+        categoryColorKeys = mergedColors
+        priorityCategoryIDs = draft.priorityCategoryIDs
+        visionIndex = draft.visionIndex
+        purposeIndex = draft.purposeIndex
+        deepIndex = draft.deepIndex
+        step = Step(rawValue: draft.stepRawValue) ?? .intro
+        visionDrafts = Dictionary(uniqueKeysWithValues: draft.visionDrafts.compactMap { key, value in
+            guard let id = UUID(uuidString: key) else { return nil }
+            return (id, value)
+        })
+        purposeDrafts = Dictionary(uniqueKeysWithValues: draft.purposeDrafts.compactMap { key, value in
+            guard let id = UUID(uuidString: key) else { return nil }
+            return (id, value)
+        })
+        return true
+    }
+
+    private func hydrateDraftIntoContext(_ draft: DraftState) {
+        modelContext.rollback()
+
+        let existingFulfillments = (try? modelContext.fetch(FetchDescriptor<Fulfillment>())) ?? []
+        for row in existingFulfillments {
+            modelContext.delete(row)
+        }
+        let existingRoles = (try? modelContext.fetch(FetchDescriptor<FulfillmentRoles>())) ?? []
+        for row in existingRoles {
+            modelContext.delete(row)
+        }
+        let existingFoci = (try? modelContext.fetch(FetchDescriptor<FulfillmentFocus>())) ?? []
+        for row in existingFoci {
+            modelContext.delete(row)
+        }
+        let existingResources = (try? modelContext.fetch(FetchDescriptor<FulfillmentResources>())) ?? []
+        for row in existingResources {
+            modelContext.delete(row)
+        }
+        let existingJoins = (try? modelContext.fetch(FetchDescriptor<PassionFulfillmentJoin>())) ?? []
+        for row in existingJoins {
+            modelContext.delete(row)
+        }
+
+        for row in draft.fulfillments {
+            modelContext.insert(
+                Fulfillment(
+                    category_id: row.categoryID,
+                    updatedAt: row.updatedAt,
+                    category: row.category,
+                    category_identitiy: row.identity,
+                    category_vision: row.vision,
+                    category_purpose: row.purpose
+                )
+            )
+        }
+        for row in draft.roles {
+            modelContext.insert(
+                FulfillmentRoles(
+                    id: row.id,
+                    category_id: row.categoryID,
+                    updatedAt: row.updatedAt,
+                    role: row.role,
+                    rank: row.rank
+                )
+            )
+        }
+        for row in draft.foci {
+            modelContext.insert(
+                FulfillmentFocus(
+                    id: row.id,
+                    category_id: row.categoryID,
+                    updatedAt: row.updatedAt,
+                    activity: row.activity,
+                    rank: row.rank
+                )
+            )
+        }
+        for row in draft.resources {
+            modelContext.insert(
+                FulfillmentResources(
+                    id: row.id,
+                    category_id: row.categoryID,
+                    updatedAt: row.updatedAt,
+                    resource: row.resource,
+                    rank: row.rank
+                )
+            )
+        }
+        for row in draft.passionJoins {
+            modelContext.insert(
+                PassionFulfillmentJoin(
+                    id: row.id,
+                    passion_id: row.passionID,
+                    category_id: row.categoryID
+                )
+            )
+        }
+    }
+
+    private func clearDraft() {
+        UserDefaults.standard.removeObject(forKey: Self.draftStorageKey)
     }
 
     private func assignDefaultColorIfNeeded(for category: String) {
@@ -1533,6 +1923,7 @@ struct FulfillmentStartView: View {
         map[category] = colorKey
         FulfillmentCategoryTheme.persistColorKeys(map)
         categoryColorKeys = map
+        persistDraftIfNeeded()
     }
 
     private func fulfillmentCategoryColor(for category: String) -> Color {
@@ -1563,6 +1954,7 @@ struct FulfillmentStartView: View {
         }
         try? modelContext.save()
         didFinalizeOnboarding = true
+        clearDraft()
 
         navigateToFulfillment = true
     }
@@ -1628,6 +2020,7 @@ struct FulfillmentStartView: View {
         modelContext.insert(archive)
         record.category_vision = newText
         record.updatedAt = Date()
+        persistDraftIfNeeded()
     }
 
     private func updatePurpose(record: Fulfillment, newText: String) {
@@ -1644,6 +2037,7 @@ struct FulfillmentStartView: View {
         modelContext.insert(archive)
         record.category_purpose = newText
         record.updatedAt = Date()
+        persistDraftIfNeeded()
     }
 
     private func getRoles(for f: Fulfillment) -> [FulfillmentRoles] {
@@ -1671,6 +2065,7 @@ struct FulfillmentStartView: View {
             record.category_identitiy = text
             record.updatedAt = Date()
         }
+        persistDraftIfNeeded()
     }
 
     private func deleteRoles(at offsets: IndexSet, record: Fulfillment) {
@@ -1688,6 +2083,7 @@ struct FulfillmentStartView: View {
             modelContext.insert(archive)
             RecentlyDeletedStore.trash(r, in: modelContext)
         }
+        persistDraftIfNeeded()
     }
 
     private func getFoci(for f: Fulfillment) -> [FulfillmentFocus] {
@@ -1701,6 +2097,7 @@ struct FulfillmentStartView: View {
         let nextRank = (getFoci(for: record).map(\.rank).max() ?? 0) + 1
         let f = FulfillmentFocus(category_id: record.category_id, activity: text, rank: nextRank)
         modelContext.insert(f)
+        persistDraftIfNeeded()
     }
 
     private func deleteFoci(at offsets: IndexSet, record: Fulfillment) {
@@ -1718,6 +2115,7 @@ struct FulfillmentStartView: View {
             modelContext.insert(archive)
             RecentlyDeletedStore.trash(f, in: modelContext)
         }
+        persistDraftIfNeeded()
     }
 
     private func getResources(for f: Fulfillment) -> [FulfillmentResources] {
@@ -1730,6 +2128,7 @@ struct FulfillmentStartView: View {
         let nextRank = (getResources(for: record).map(\.rank).max() ?? 0) + 1
         let r = FulfillmentResources(category_id: record.category_id, resource: text, rank: nextRank)
         modelContext.insert(r)
+        persistDraftIfNeeded()
     }
 
     private func deleteResources(at offsets: IndexSet, record: Fulfillment) {
@@ -1747,6 +2146,7 @@ struct FulfillmentStartView: View {
             modelContext.insert(archive)
             RecentlyDeletedStore.trash(r, in: modelContext)
         }
+        persistDraftIfNeeded()
     }
 
     private func selectedPassionIDs(for categoryID: UUID) -> Set<UUID> {
@@ -1776,6 +2176,7 @@ struct FulfillmentStartView: View {
             )
             modelContext.insert(join)
         }
+        persistDraftIfNeeded()
     }
 
     // MARK: - Inline commit helpers

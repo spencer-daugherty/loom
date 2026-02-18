@@ -749,11 +749,17 @@ enum RecentlyDeletedStore {
     }
 
     static func purgeExpired(in context: ModelContext) {
-        let rows = (try? context.fetch(FetchDescriptor<RecentlyDeletedItem>())) ?? []
         let now = Date()
+        var descriptor = FetchDescriptor<RecentlyDeletedItem>(
+            predicate: #Predicate<RecentlyDeletedItem> { $0.purgeAt <= now }
+        )
+        descriptor.includePendingChanges = false
+        let rows = (try? context.fetch(descriptor)) ?? []
+        guard !rows.isEmpty else { return }
         for row in rows where row.purgeAt <= now {
             context.delete(row)
         }
+        try? context.save()
     }
 
     static func permanentlyDelete(_ item: RecentlyDeletedItem, in context: ModelContext) {
