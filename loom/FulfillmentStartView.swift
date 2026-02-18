@@ -668,12 +668,16 @@ struct FulfillmentStartView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Design the most important areas of your life.")
                 .foregroundStyle(.secondary)
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
             Text("These are core categories that drive fulfillment. When they're out of balance, life is harder.")
                 .foregroundStyle(.secondary)
-                .lineLimit(3)
+                .lineLimit(nil)
                 .fixedSize(horizontal: false, vertical: true)
             Text("They're never finished. You continually improve them to stay moving forward.")
                 .foregroundStyle(.secondary)
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(14)
         .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
@@ -1553,6 +1557,15 @@ struct FulfillmentStartView: View {
         let missing = missingDefaultCategories
         deletedDefaultCategoryNames = deletedDefaultCategoryNames.filter { deleted in
             !missing.contains(where: { $0.caseInsensitiveCompare(deleted) == .orderedSame })
+        }
+        let cycleKeys = onboardingColorCycleKeys
+        if !cycleKeys.isEmpty {
+            var map = FulfillmentCategoryTheme.persistedColorKeys()
+            for (idx, category) in fulfillmentStartSelectableDefaultCategories.enumerated() {
+                map[category] = cycleKeys[idx % cycleKeys.count]
+            }
+            FulfillmentCategoryTheme.persistColorKeys(map)
+            categoryColorKeys = map
         }
         for category in missing {
             assignDefaultColorIfNeeded(for: category)
