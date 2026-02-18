@@ -28,6 +28,7 @@ struct DrivingForceStartView: View {
     @State private var validationHintText: String = ""
     @State private var showValidationHint = false
     @State private var hintWorkItem: DispatchWorkItem?
+    @State private var addingPassionBuckets: Set<String> = []
 
     @FocusState private var focusedField: Field?
     private enum Field: Hashable {
@@ -56,7 +57,7 @@ struct DrivingForceStartView: View {
 
     private let bucketOrder: [(key: String, title: String)] = [
         ("love", "Love"),
-        ("vows", "Vows"),
+        ("vows", "Vow"),
         ("thrill", "Thrill"),
         ("just", "Hate")
     ]
@@ -84,7 +85,7 @@ struct DrivingForceStartView: View {
     }
 
     private var isScrollableStep: Bool {
-        step == .passions || step == .summary
+        step == .summary
     }
 
     var body: some View {
@@ -126,6 +127,16 @@ struct DrivingForceStartView: View {
                         }
                     default:
                         focusedField = nil
+                    }
+                }
+            }
+            .onChange(of: focusedField) { _, newValue in
+                if case .some(.passion(let key)) = newValue {
+                    addingPassionBuckets = [key]
+                } else {
+                    addingPassionBuckets = []
+                    for key in bucketOrder.map(\.key) {
+                        entryText[key] = ""
                     }
                 }
             }
@@ -330,6 +341,11 @@ struct DrivingForceStartView: View {
                     Text("• Who do I want to become?")
                     Text("• What experiences do I want to have?")
                     Text("• What impact do I want to make?")
+                    Text("Example:")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.top, 4)
+                    Text("\"I live a life of purpose, growth, and freedom. I build meaningful work that creates value for others while giving me time, financial independence, and the ability to choose how I live. I am healthy, energized, and surrounded by strong relationships, and I continue to learn, lead, and make a positive impact.\"")
+                        .italic()
                 }
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -357,6 +373,11 @@ struct DrivingForceStartView: View {
                     Text("• Why is this essential to me?")
                     Text("• Who does this impact?")
                     Text("• What does this give me emotionally?")
+                    Text("Example:")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.top, 4)
+                    Text("\"Because I don’t want to waste my life reacting to circumstances or other people’s expectations. I want to use my full potential, create something meaningful, support the people I love, and live with confidence, fulfillment, and peace.\"")
+                        .italic()
                 }
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -369,14 +390,48 @@ struct DrivingForceStartView: View {
     }
 
     private var passionsStep: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        List {
             ForEach(bucketOrder, id: \.key) { bucket in
-                passionBucketSection(bucket.key, title: bucket.title)
-                    .id("bucket-\(bucket.key)")
+                Section {
+                    if addingPassionBuckets.contains(bucket.key) {
+                        TextField("Add \(bucket.title)", text: bindingForBucketEntry(bucket.key))
+                            .focused($focusedField, equals: .passion(bucket.key))
+                            .textInputAutocapitalization(.sentences)
+                            .autocorrectionDisabled(false)
+                            .submitLabel(.done)
+                            .onSubmit {
+                                savePassionEntry(bucket.key)
+                            }
+                    } else {
+                        Button("+ Add \(bucket.title)") {
+                            addingPassionBuckets = [bucket.key]
+                            entryText[bucket.key] = ""
+                            focusedField = .passion(bucket.key)
+                        }
+                        .foregroundStyle(.blue)
+                    }
+
+                    let values = draftPassions[bucket.key] ?? []
+                    ForEach(values, id: \.self) { value in
+                        Text(value)
+                    }
+                    .onDelete { offsets in
+                        deletePassions(at: offsets, in: bucket.key)
+                    }
+                } header: {
+                    HStack(spacing: 8) {
+                        Text(bucket.title)
+                        Spacer(minLength: 8)
+                        Text(passionPrompt(for: bucket.key))
+                            .italic()
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
         }
-        .padding(14)
-        .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
     }
 
     private func summaryStep(proxy: ScrollViewProxy) -> some View {
@@ -493,6 +548,24 @@ struct DrivingForceStartView: View {
                 Spacer()
             }
 
+            if addingPassionBuckets.contains(bucketKey) {
+                TextField("New \(title)", text: bindingForBucketEntry(bucketKey))
+                    .focused($focusedField, equals: .passion(bucketKey))
+                    .textInputAutocapitalization(.sentences)
+                    .autocorrectionDisabled(false)
+                    .submitLabel(.done)
+                    .onSubmit {
+                        savePassionEntry(bucketKey)
+                    }
+            } else {
+                Button("+ New \(title)") {
+                    addingPassionBuckets = [bucketKey]
+                    entryText[bucketKey] = ""
+                    focusedField = .passion(bucketKey)
+                }
+                .foregroundStyle(.blue)
+            }
+
             if values.isEmpty {
                 EmptyView()
             } else {
@@ -502,24 +575,6 @@ struct DrivingForceStartView: View {
                         removeChip(value, from: bucketKey)
                     }
                 )
-            }
-
-            HStack(spacing: 8) {
-                TextField("Add item", text: bindingForBucketEntry(bucketKey))
-                    .focused($focusedField, equals: .passion(bucketKey))
-                    .textInputAutocapitalization(.sentences)
-                    .autocorrectionDisabled(false)
-                    .submitLabel(.done)
-                    .onSubmit {
-                        addChip(from: bucketKey)
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 10))
-                Button("Add") {
-                    addChip(from: bucketKey)
-                }
-                .buttonStyle(.borderedProminent)
             }
         }
         .padding(12)
@@ -572,6 +627,19 @@ struct DrivingForceStartView: View {
         try? context.save()
     }
 
+    private func savePassionEntry(_ bucketKey: String) {
+        let raw = entryText[bucketKey] ?? ""
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            addingPassionBuckets.remove(bucketKey)
+            entryText[bucketKey] = ""
+            return
+        }
+        addChip(from: bucketKey)
+        addingPassionBuckets.remove(bucketKey)
+        focusedField = nil
+    }
+
     private func removeChip(_ value: String, from bucketKey: String) {
         var current = draftPassions[bucketKey] ?? []
         guard let idx = current.firstIndex(where: { $0.caseInsensitiveCompare(value) == .orderedSame }) else { return }
@@ -592,6 +660,14 @@ struct DrivingForceStartView: View {
             context.insert(archive)
             RecentlyDeletedStore.trash(model, in: context)
             try? context.save()
+        }
+    }
+
+    private func deletePassions(at offsets: IndexSet, in bucketKey: String) {
+        let values = draftPassions[bucketKey] ?? []
+        for index in offsets {
+            guard values.indices.contains(index) else { continue }
+            removeChip(values[index], from: bucketKey)
         }
     }
 
@@ -703,6 +779,16 @@ struct DrivingForceStartView: View {
 
     private func bucketTitle(for key: String) -> String {
         bucketOrder.first(where: { $0.key == key })?.title ?? key.capitalized
+    }
+
+    private func passionPrompt(for key: String) -> String {
+        switch key {
+        case "love": return "What do I love?"
+        case "vows": return "What am I committed to?"
+        case "thrill": return "What excites me?"
+        case "just": return "What do I hate?"
+        default: return ""
+        }
     }
 
     private func triggerHint(_ text: String) {
