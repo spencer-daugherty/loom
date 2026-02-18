@@ -4,6 +4,7 @@ import SwiftData
 struct DrivingForceStartView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
 
     @Query(sort: \DrivingForce.updatedAt, order: .reverse) private var drivingForces: [DrivingForce]
     @Query(sort: \Passion.date, order: .forward) private var passions: [Passion]
@@ -116,6 +117,14 @@ struct DrivingForceStartView: View {
 
     private var isScrollableStep: Bool {
         step == .summary
+    }
+
+    private var editorSurfaceColor: Color {
+        colorScheme == .dark ? Color(.secondarySystemBackground) : .white
+    }
+
+    private var rowSurfaceColor: Color {
+        colorScheme == .dark ? Color(.secondarySystemBackground) : .white
     }
 
     private var contentBottomPadding: CGFloat {
@@ -591,13 +600,15 @@ struct DrivingForceStartView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .padding(10)
-                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                        .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 10))
                         .padding(.top, 2)
                     }
                 }
+                .listRowBackground(Color(.systemGroupedBackground))
             }
         }
         .listStyle(.insetGrouped)
+        .listRowSpacing(4)
         .scrollContentBackground(.hidden)
     }
 
@@ -613,7 +624,7 @@ struct DrivingForceStartView: View {
 
     private func bucketValidationRowBackground(isInvalid: Bool) -> some View {
         RoundedRectangle(cornerRadius: 10, style: .continuous)
-            .fill(Color.white)
+            .fill(rowSurfaceColor)
             .overlay(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .stroke(isInvalid ? Color.red.opacity(0.82) : Color.clear, lineWidth: isInvalid ? 1.6 : 0)
@@ -650,7 +661,13 @@ struct DrivingForceStartView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         } else {
-                            FlowChips(values: items)
+                            VStack(alignment: .leading, spacing: 3) {
+                                ForEach(items, id: \.self) { item in
+                                    Text("• \(item)")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.primary)
+                                }
+                            }
                         }
                     }
                     .padding(10)
@@ -688,10 +705,10 @@ struct DrivingForceStartView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
             .frame(minHeight: 88, alignment: .topLeading)
-            .background(Color.white, in: RoundedRectangle(cornerRadius: 12))
+            .background(editorSurfaceColor, in: RoundedRectangle(cornerRadius: 12))
             .overlay(
                 RoundedRectangle(cornerRadius: 12)
-                    .stroke(showError ? Color.red.opacity(0.8) : Color.black.opacity(0.12), lineWidth: showError ? 1.6 : 1)
+                    .stroke(showError ? Color.red.opacity(0.8) : Color(.separator).opacity(0.5), lineWidth: showError ? 1.6 : 1)
             )
     }
 
