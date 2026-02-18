@@ -256,6 +256,23 @@ struct FulfillmentStartView: View {
         return contentHeight + 28
     }
 
+    private var missingDefaultCategories: [String] {
+        fulfillmentStartSelectableDefaultCategories.filter { defaultName in
+            !availableCategoryNames.contains(where: { $0.caseInsensitiveCompare(defaultName) == .orderedSame })
+        }
+    }
+
+    private var availableDefaultCategoryCount: Int {
+        fulfillmentStartSelectableDefaultCategories.reduce(0) { count, defaultName in
+            let exists = availableCategoryNames.contains(where: { $0.caseInsensitiveCompare(defaultName) == .orderedSame })
+            return count + (exists ? 1 : 0)
+        }
+    }
+
+    private var shouldShowRefreshButton: Bool {
+        availableDefaultCategoryCount < fulfillmentStartSelectableDefaultCategories.count
+    }
+
     private var onboardingColorCycleKeys: [String] {
         ["blue", "indigo", "green", "purple", "red", "orange"]
     }
@@ -292,7 +309,7 @@ struct FulfillmentStartView: View {
         }
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 6) {
-                if step == .createCategories, !deletedDefaultCategoryNames.isEmpty {
+                if step == .createCategories, shouldShowRefreshButton {
                     Button("refresh") {
                         restoreDeletedDefaultCategories()
                     }
@@ -557,6 +574,7 @@ struct FulfillmentStartView: View {
             List {
                 ForEach(availableCategoryNames, id: \.self) { category in
                     let selected = selectedCategoryNames.contains(category)
+                    let isConflicting = conflictingSelectedCategories.contains(category)
                     HStack(spacing: 8) {
                         Button {
                             colorPickerCategory = category
@@ -568,8 +586,8 @@ struct FulfillmentStartView: View {
                                 .overlay(
                                     Circle()
                                         .stroke(
-                                            conflictingSelectedCategories.contains(category) ? Color.red : Color(.systemGray4),
-                                            lineWidth: conflictingSelectedCategories.contains(category) ? 2 : 1
+                                            isConflicting ? Color.red : Color(.systemGray4),
+                                            lineWidth: isConflicting ? 2 : 1
                                         )
                                 )
                         }
@@ -580,6 +598,11 @@ struct FulfillmentStartView: View {
                             .foregroundStyle(.primary)
 
                         Spacer()
+                        if isConflicting {
+                            Circle()
+                                .fill(Color.red)
+                                .frame(width: 6, height: 6)
+                        }
 
                         Button {
                             toggleCategorySelection(category)
@@ -1395,9 +1418,11 @@ struct FulfillmentStartView: View {
     }
 
     private func restoreDeletedDefaultCategories() {
-        let deleted = deletedDefaultCategoryNames
-        deletedDefaultCategoryNames.removeAll()
-        for category in deleted {
+        let missing = missingDefaultCategories
+        deletedDefaultCategoryNames = deletedDefaultCategoryNames.filter { deleted in
+            !missing.contains(where: { $0.caseInsensitiveCompare(deleted) == .orderedSame })
+        }
+        for category in missing {
             assignDefaultColorIfNeeded(for: category)
         }
     }
