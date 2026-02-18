@@ -17,6 +17,19 @@ fileprivate let fulfillmentStartDefaultCategoryDefs: [FulfillmentStartCategoryDe
     .init(id: "health", title: "Health & Vitality", categoryID: PlanLabelSeeder.categoryIDs["Health & Vitality"]!),
 ]
 
+fileprivate let fulfillmentStartSelectableDefaultCategories: [String] = [
+    "Career & Business",
+    "Health & Energy",
+    "Learning & Education",
+    "Wealth & Finance",
+    "Faith & Spirituality",
+    "Love & Relationships",
+    "Lifestyle & Experiences",
+    "Mindset & Resilience",
+    "Service & Impact",
+    "Home & Life"
+]
+
 struct FulfillmentStartView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
@@ -48,9 +61,16 @@ struct FulfillmentStartView: View {
     @State private var addingResource = false
     @State private var addingCategory = false
     @State private var newCategoryText = ""
+    @State private var selectedCategoryNames: [String] = []
+    @State private var customCategoryNames: [String] = []
+    @State private var deletedDefaultCategoryNames: Set<String> = []
+    @State private var categoryColorKeys: [String: String] = [:]
+    @State private var colorPickerCategory: String = ""
+    @State private var showColorPicker = false
 
     @State private var showNeedIdeasVision = false
     @State private var showNeedIdeasPurpose = false
+    @State private var showNeedHelpCategories = false
 
     @State private var showValidationHint = false
     @State private var validationHintText = ""
@@ -96,6 +116,15 @@ struct FulfillmentStartView: View {
     }
 
     private var orderedFulfillments: [Fulfillment] {
+        if !selectedCategoryNames.isEmpty {
+            let all = fulfillments
+            let mapped = selectedCategoryNames.compactMap { selectedName in
+                all.first { record in
+                    categoryKey(record.category) == categoryKey(selectedName)
+                }
+            }
+            if !mapped.isEmpty { return mapped }
+        }
         var byID = Dictionary(uniqueKeysWithValues: fulfillments.map { ($0.category_id, $0) })
         var ordered: [Fulfillment] = []
         for def in fulfillmentStartDefaultCategoryDefs {
@@ -190,12 +219,42 @@ struct FulfillmentStartView: View {
     }
 
     private var canStartOnboarding: Bool {
-        let names = orderedFulfillments
-            .map { $0.category.trimmingCharacters(in: .whitespacesAndNewlines) }
+        let names = selectedCategoryNames
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-        guard names.count >= 3 else { return false }
+        guard (3...7).contains(names.count) else { return false }
         let uniqueCount = Set(names.map { $0.lowercased() }).count
         return uniqueCount == names.count
+    }
+
+    private var availableCategoryNames: [String] {
+        let defaults = fulfillmentStartSelectableDefaultCategories.filter { !deletedDefaultCategoryNames.contains($0) }
+        let custom = customCategoryNames.filter { !fulfillmentStartSelectableDefaultCategories.contains($0) }
+        return defaults + custom
+    }
+
+    private var createCategoriesListHeight: CGFloat {
+        let baseRows = availableCategoryNames.count + 1 // + custom row/input row
+        let contentHeight = CGFloat(baseRows) * 56 + 14
+        return contentHeight + 28
+    }
+
+    private var onboardingColorCycleKeys: [String] {
+        ["blue", "indigo", "green", "purple", "red", "orange"]
+    }
+
+    private func categoryKey(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !trimmed.isEmpty else { return "" }
+        let andNormalized = trimmed.replacingOccurrences(of: "&", with: " and ")
+        let cleaned = andNormalized.replacingOccurrences(
+            of: "[^a-z0-9]+",
+            with: " ",
+            options: .regularExpression
+        )
+        return cleaned
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
     }
 
     var body: some View {
@@ -215,11 +274,23 @@ struct FulfillmentStartView: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            footer
-                .padding(.horizontal)
-                .padding(.top, 8)
-                .padding(.bottom, 10)
-                .background(Color(.systemGroupedBackground))
+            VStack(spacing: 6) {
+                if step == .createCategories, !deletedDefaultCategoryNames.isEmpty {
+                    Button("refresh") {
+                        restoreDeletedDefaultCategories()
+                    }
+                    .font(.subheadline)
+                    .foregroundStyle(.gray)
+                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                }
+
+                footer
+            }
+            .padding(.horizontal)
+            .padding(.top, 8)
+            .padding(.bottom, 10)
+            .background(Color(.systemGroupedBackground))
         }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
@@ -438,73 +509,126 @@ struct FulfillmentStartView: View {
 
     private var createCategoriesStep: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Create your categories first, then move into fast alignment.")
-                .foregroundStyle(.secondary)
+            Text("What areas of your life must you consistently improve to succeed?")
+                .fontWeight(.bold)
+                .foregroundStyle(.primary)
 
-            VStack(spacing: 0) {
-                ForEach(orderedFulfillments, id: \.category_id) { record in
+            List {
+                ForEach(availableCategoryNames, id: \.self) { category in
+                    let selected = selectedCategoryNames.contains(category)
                     HStack(spacing: 8) {
-                        TextField(
-                            "Category",
-                            text: Binding(
-                                get: { record.category },
-                                set: { newValue in
-                                    record.category = newValue
-                                    record.updatedAt = Date()
-                                    try? modelContext.save()
-                                }
-                            )
-                        )
-                        .textInputAutocapitalization(.words)
-                        .autocorrectionDisabled(false)
-                        .submitLabel(.done)
-
-                        Button(role: .destructive) {
-                            deleteCategory(record)
+                        Button {
+                            colorPickerCategory = category
+                            showColorPicker = true
                         } label: {
-                            Image(systemName: "minus.circle.fill")
+                            Circle()
+                                .fill(fulfillmentCategoryColor(for: category))
+                                .frame(width: 22, height: 22)
+                                .overlay(
+                                    Circle()
+                                        .stroke(Color(.systemGray4), lineWidth: 1)
+                                )
                         }
                         .buttonStyle(.plain)
-                        .disabled(orderedFulfillments.count <= 3)
+
+                        Text(category)
+                            .font(.system(size: 20))
+                            .foregroundStyle(.primary)
+
+                        Spacer()
+
+                        Button {
+                            toggleCategorySelection(category)
+                        } label: {
+                            Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(selected ? Color.blue : Color.secondary)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .padding(.vertical, 10)
-                    .padding(.horizontal, 10)
-                    .background(rowSurfaceColor)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        toggleCategorySelection(category)
+                    }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        Button(role: .destructive) {
+                            removeCategoryFromStepList(category)
+                        } label: {
+                            Text("Delete")
+                        }
+                        .tint(.red)
+                    }
+                    .listRowBackground(rowSurfaceColor)
                 }
 
                 if addingCategory {
-                    TextField("New Category", text: $newCategoryText)
+                    TextField("Custom Category", text: $newCategoryText)
+                        .font(.system(size: 20))
                         .textInputAutocapitalization(.words)
                         .autocorrectionDisabled(false)
                         .submitLabel(.done)
                         .onSubmit(addCategory)
-                        .padding(.vertical, 10)
-                        .padding(.horizontal, 10)
-                        .background(rowSurfaceColor)
+                        .listRowBackground(rowSurfaceColor)
                 } else {
-                    Button("+ Add Category") {
+                    Button("+ Custom Category") {
                         addingCategory = true
                         newCategoryText = ""
                     }
+                    .font(.system(size: 20, weight: .regular))
                     .foregroundStyle(.blue)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 10)
-                    .padding(.horizontal, 10)
-                    .background(rowSurfaceColor)
+                    .listRowBackground(rowSurfaceColor)
                 }
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .environment(\.defaultMinListRowHeight, 56)
+            .frame(height: createCategoriesListHeight)
             .clipShape(RoundedRectangle(cornerRadius: 10))
-            .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(canStartOnboarding ? Color.clear : Color.red.opacity(0.35), lineWidth: canStartOnboarding ? 0 : 1)
-            )
 
-            Text("Minimum 3 unique categories")
-                .font(.caption)
-                .foregroundStyle(canStartOnboarding ? Color.secondary : Color.red)
+            VStack(alignment: .leading, spacing: 6) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showNeedHelpCategories.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text("Need help?")
+                        Image(systemName: showNeedHelpCategories ? "chevron.up" : "chevron.down")
+                            .font(.caption2.weight(.semibold))
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.blue)
+                }
+                .buttonStyle(.plain)
+
+                if showNeedHelpCategories {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Fulfillment Areas are the key parts of your life you continually strengthen and maintain.")
+                        Text("They are not one-time goals. When these areas are strong, life feels stable and balanced. When neglected, progress in other areas becomes harder.")
+                        Text("Every action you take will connect to one of these areas, helping you focus on what truly matters instead of reacting to what feels urgent.")
+                        Text("Start simple. You can refine or change them anytime.")
+                    }
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(10)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                    .padding(.top, 2)
+                }
+            }
         }
         .padding(14)
         .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+        .sheet(isPresented: $showColorPicker) {
+            FulfillmentStartColorPickerSheet(
+                category: colorPickerCategory,
+                currentColorKey: FulfillmentCategoryTheme.colorKey(for: colorPickerCategory, colorKeys: categoryColorKeys),
+                onSelect: { colorKey in
+                    applyColorSelection(for: colorPickerCategory, colorKey: colorKey)
+                }
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
     }
 
     private var visionSweepStep: some View {
@@ -1084,6 +1208,7 @@ struct FulfillmentStartView: View {
     private func advanceFromCurrentStep() {
         switch step {
         case .createCategories:
+            syncSelectedCategoriesIntoFulfillment()
             step = .visionSweep
         case .visionSweep:
             moveVisionForward(saveCurrent: true)
@@ -1160,6 +1285,28 @@ struct FulfillmentStartView: View {
     // MARK: - Data load & finalize
 
     private func loadFromPersistentData() {
+        let existingCategories = Array(
+            Set(
+                fulfillments
+                    .map { $0.category.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+            )
+        ).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+        selectedCategoryNames = existingCategories
+        customCategoryNames = existingCategories.filter { !fulfillmentStartSelectableDefaultCategories.contains($0) }
+        var map = FulfillmentCategoryTheme.persistedColorKeys()
+        let cycleKeys = onboardingColorCycleKeys
+        if !cycleKeys.isEmpty {
+            for (idx, category) in availableCategoryNames.enumerated() {
+                let trimmed = category.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { continue }
+                // Normalize the step-1 list into a deterministic rotating sequence.
+                map[trimmed] = cycleKeys[idx % cycleKeys.count]
+            }
+        }
+        categoryColorKeys = map
+        FulfillmentCategoryTheme.persistColorKeys(map)
+
         visionDrafts = Dictionary(uniqueKeysWithValues: orderedFulfillments.map { ($0.category_id, $0.category_vision) })
         purposeDrafts = Dictionary(uniqueKeysWithValues: orderedFulfillments.map { ($0.category_id, $0.category_purpose) })
 
@@ -1179,23 +1326,13 @@ struct FulfillmentStartView: View {
             newCategoryText = ""
             return
         }
-        let duplicate = orderedFulfillments.contains {
-            $0.category.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == trimmed.lowercased()
-        }
+        let duplicate = availableCategoryNames.contains { $0.lowercased() == trimmed.lowercased() }
         guard !duplicate else {
             triggerHint("Duplicate category name.")
             return
         }
-        let record = Fulfillment(
-            category_id: UUID(),
-            updatedAt: Date(),
-            category: trimmed,
-            category_identitiy: "",
-            category_vision: "",
-            category_purpose: ""
-        )
-        modelContext.insert(record)
-        try? modelContext.save()
+        customCategoryNames.append(trimmed)
+        toggleCategorySelection(trimmed, forceSelected: true)
         addingCategory = false
         newCategoryText = ""
     }
@@ -1207,6 +1344,107 @@ struct FulfillmentStartView: View {
         }
         RecentlyDeletedStore.trash(record, in: modelContext)
         try? modelContext.save()
+    }
+
+    private func removeCategoryFromStepList(_ category: String) {
+        if fulfillmentStartSelectableDefaultCategories.contains(category) {
+            deletedDefaultCategoryNames.insert(category)
+        } else {
+            customCategoryNames.removeAll { $0.caseInsensitiveCompare(category) == .orderedSame }
+        }
+        selectedCategoryNames.removeAll { $0.caseInsensitiveCompare(category) == .orderedSame }
+        categoryColorKeys.removeValue(forKey: category)
+    }
+
+    private func restoreDeletedDefaultCategories() {
+        let deleted = deletedDefaultCategoryNames
+        deletedDefaultCategoryNames.removeAll()
+        for category in deleted {
+            assignDefaultColorIfNeeded(for: category)
+        }
+    }
+
+    private func toggleCategorySelection(_ category: String, forceSelected: Bool? = nil) {
+        let shouldSelect: Bool
+        if let forceSelected {
+            shouldSelect = forceSelected
+        } else {
+            shouldSelect = !selectedCategoryNames.contains(category)
+        }
+
+        if shouldSelect {
+            guard selectedCategoryNames.count < 7 else { return }
+            if !selectedCategoryNames.contains(category) {
+                selectedCategoryNames.append(category)
+            }
+            assignDefaultColorIfNeeded(for: category)
+        } else {
+            selectedCategoryNames.removeAll { $0 == category }
+        }
+    }
+
+    private func syncSelectedCategoriesIntoFulfillment() {
+        for category in selectedCategoryNames {
+            let exists = fulfillments.contains {
+                categoryKey($0.category) == categoryKey(category)
+            }
+            guard !exists else { continue }
+            modelContext.insert(
+                Fulfillment(
+                    category_id: UUID(),
+                    updatedAt: Date(),
+                    category: category,
+                    category_identitiy: "",
+                    category_vision: "",
+                    category_purpose: ""
+                )
+            )
+        }
+        try? modelContext.save()
+        loadFromPersistentData()
+    }
+
+    private func assignDefaultColorIfNeeded(for category: String) {
+        let trimmed = category.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        var map = FulfillmentCategoryTheme.persistedColorKeys()
+        guard map[trimmed] == nil else {
+            categoryColorKeys = map
+            return
+        }
+        let cycleKeys = onboardingColorCycleKeys
+        guard !cycleKeys.isEmpty else { return }
+        let ordered = availableCategoryNames
+        let idx = ordered.firstIndex(where: { $0.caseInsensitiveCompare(trimmed) == .orderedSame }) ?? ordered.count
+        let nextColor = cycleKeys[idx % cycleKeys.count]
+        map[trimmed] = nextColor
+        FulfillmentCategoryTheme.persistColorKeys(map)
+        categoryColorKeys = map
+    }
+
+    private func applyColorSelection(for category: String, colorKey: String) {
+        var map = FulfillmentCategoryTheme.persistedColorKeys()
+        let resolvedBefore = map[category] ?? FulfillmentCategoryTheme.defaultColorKeys()[category] ?? "blue"
+        if let other = map.first(where: { $0.key != category && $0.value == colorKey })?.key {
+            map[other] = resolvedBefore
+        }
+        map[category] = colorKey
+        FulfillmentCategoryTheme.persistColorKeys(map)
+        categoryColorKeys = map
+    }
+
+    private func fulfillmentCategoryColor(for category: String) -> Color {
+        let key = categoryColorKeys[category] ?? rotatedColorKey(for: category)
+        return FulfillmentCategoryTheme.color(forKey: key)
+    }
+
+    private func rotatedColorKey(for category: String) -> String {
+        let cycleKeys = onboardingColorCycleKeys
+        guard !cycleKeys.isEmpty else { return "blue" }
+        if let idx = availableCategoryNames.firstIndex(where: { $0.caseInsensitiveCompare(category) == .orderedSame }) {
+            return cycleKeys[idx % cycleKeys.count]
+        }
+        return cycleKeys.first ?? "blue"
     }
 
     private func finalizeAndContinue() {
@@ -1234,7 +1472,7 @@ struct FulfillmentStartView: View {
 
         switch step {
         case .createCategories:
-            validationHintText = "Add at least 3 unique category names."
+            validationHintText = "Create at least 3 life categories."
         case .priorities:
             validationHintText = "Choose 2 or 3 priority categories."
         case .threeToThrive:
@@ -1657,5 +1895,47 @@ private struct FulfillmentIntroRouteLinesView: View {
 #Preview {
     NavigationStack {
         FulfillmentStartView()
+    }
+}
+
+private struct FulfillmentStartColorPickerSheet: View {
+    let category: String
+    let currentColorKey: String
+    let onSelect: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(FulfillmentCategoryTheme.palette, id: \.key) { option in
+                    Button {
+                        onSelect(option.key)
+                    } label: {
+                        HStack(spacing: 12) {
+                            Circle()
+                                .fill(option.color)
+                                .frame(width: 22, height: 22)
+                            Text(option.name)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            if option.key == currentColorKey {
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(.blue)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .navigationTitle(category)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Close") { dismiss() }
+                }
+            }
+        }
     }
 }
