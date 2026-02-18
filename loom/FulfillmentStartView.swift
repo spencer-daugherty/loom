@@ -288,6 +288,19 @@ struct FulfillmentStartView: View {
         switch step {
         case .createCategories:
             return !canStartOnboarding
+        case .visionSweep:
+            guard let record = currentVisionRecord else { return true }
+            let text = (visionDrafts[record.category_id] ?? record.category_vision)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return text.isEmpty
+        case .purposeSweep:
+            guard let record = currentPurposeRecord else { return true }
+            let text = (purposeDrafts[record.category_id] ?? record.category_purpose)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return text.isEmpty
+        case .roles:
+            guard let record = currentRoleRecord else { return true }
+            return getRoles(for: record).isEmpty
         case .priorities:
             return priorityCategoryIDs.isEmpty
         case .littleWins:
@@ -847,6 +860,10 @@ struct FulfillmentStartView: View {
     private var visionSweepStep: some View {
         VStack(alignment: .leading, spacing: 10) {
             if let record = currentVisionRecord {
+                let isInvalid = highlightInvalid &&
+                    (visionDrafts[record.category_id] ?? record.category_vision)
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .isEmpty
                 categoryHeader(record.category, index: visionIndex + 1, total: orderedFulfillments.count)
                 Text("What does your ideal life look like in this area?")
                     .font(.headline)
@@ -856,7 +873,8 @@ struct FulfillmentStartView: View {
                         get: { visionDrafts[record.category_id] ?? record.category_vision },
                         set: { visionDrafts[record.category_id] = $0 }
                     ),
-                    placeholder: "Keep it simple and clear..."
+                    placeholder: "Keep it simple and clear...",
+                    showError: isInvalid
                 )
                 .focused($focusedField, equals: .vision)
 
@@ -870,6 +888,10 @@ struct FulfillmentStartView: View {
     private var purposeSweepStep: some View {
         VStack(alignment: .leading, spacing: 10) {
             if let record = currentPurposeRecord {
+                let isInvalid = highlightInvalid &&
+                    (purposeDrafts[record.category_id] ?? record.category_purpose)
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .isEmpty
                 categoryHeader(record.category, index: purposeIndex + 1, total: orderedFulfillments.count)
                 Text("Why does improving this area truly matter?")
                     .font(.headline)
@@ -879,7 +901,8 @@ struct FulfillmentStartView: View {
                         get: { purposeDrafts[record.category_id] ?? record.category_purpose },
                         set: { purposeDrafts[record.category_id] = $0 }
                     ),
-                    placeholder: "Keep it simple and clear..."
+                    placeholder: "Keep it simple and clear...",
+                    showError: isInvalid
                 )
                 .focused($focusedField, equals: .purpose)
 
@@ -937,12 +960,14 @@ struct FulfillmentStartView: View {
     private var rolesStep: some View {
         VStack(alignment: .leading, spacing: 12) {
             if let record = currentRoleRecord {
+                let rolesItems = getRoles(for: record)
+                let isInvalid = highlightInvalid && rolesItems.isEmpty
                 categoryHeader(record.category, index: roleIndex + 1, total: roleCategoryIDs.count)
                 Text("Who do you want to be in this area of your life?")
                     .font(.headline)
 
                 VStack(spacing: 0) {
-                    if getRoles(for: record).count < 3 {
+                    if rolesItems.count < 3 {
                         if addingRole {
                             TextField("Add Role", text: $roleEntry)
                                 .focused($focusedField, equals: .role)
@@ -954,7 +979,7 @@ struct FulfillmentStartView: View {
                                 }
                                 .padding(.vertical, 10)
                                 .padding(.horizontal, 10)
-                                .background(rowSurfaceColor)
+                                .background(isInvalid ? Color.red.opacity(0.08) : rowSurfaceColor)
                         } else {
                             Button("+ Add Role") {
                                 addingRole = true
@@ -965,16 +990,16 @@ struct FulfillmentStartView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.vertical, 10)
                             .padding(.horizontal, 10)
-                            .background(rowSurfaceColor)
+                            .background(isInvalid ? Color.red.opacity(0.08) : rowSurfaceColor)
                         }
                     }
 
-                    ForEach(getRoles(for: record), id: \.id) { item in
+                    ForEach(rolesItems, id: \.id) { item in
                         HStack {
                             Text(item.role)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             Button(role: .destructive) {
-                                if let idx = getRoles(for: record).firstIndex(where: { $0.id == item.id }) {
+                                if let idx = rolesItems.firstIndex(where: { $0.id == item.id }) {
                                     deleteRoles(at: IndexSet(integer: idx), record: record)
                                 }
                             } label: {
@@ -985,10 +1010,14 @@ struct FulfillmentStartView: View {
                         }
                         .padding(.vertical, 10)
                         .padding(.horizontal, 10)
-                        .background(rowSurfaceColor)
+                        .background(isInvalid ? Color.red.opacity(0.08) : rowSurfaceColor)
                     }
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(isInvalid ? Color.red.opacity(0.85) : Color.clear, lineWidth: 1.5)
+                )
 
                 VStack(alignment: .leading, spacing: 6) {
                     Button {
@@ -2280,6 +2309,21 @@ struct FulfillmentStartView: View {
             validationHintText = hasCreateCategoriesColorConflict
                 ? "Each color can only be used once."
                 : "Create at least 3 life categories."
+        case .visionSweep:
+            validationHintText = "Add a vision to continue."
+            if let record = currentVisionRecord {
+                invalidCategoryIDs.insert(record.category_id)
+            }
+        case .purposeSweep:
+            validationHintText = "Add a purpose to continue."
+            if let record = currentPurposeRecord {
+                invalidCategoryIDs.insert(record.category_id)
+            }
+        case .roles:
+            validationHintText = "List 1 or more roles to continue."
+            if let record = currentRoleRecord {
+                invalidCategoryIDs.insert(record.category_id)
+            }
         case .priorities:
             validationHintText = "Choose 1 or more areas than need increased focus."
         case .littleWins:
