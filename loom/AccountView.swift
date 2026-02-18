@@ -440,6 +440,7 @@ struct AccountView: View {
     @Query private var fulfillments: [Fulfillment]
     @AppStorage("enable_projects_feature") private var enableProjectsFeature = false
     @AppStorage("blank_homepage_mode") private var blankHomepageMode = false
+    @AppStorage("setup_homepage_mode") private var setupHomepageMode = false
     @State private var showDeleteAllDataSheet = false
     @State private var deleteAllConfirmationCode = ""
 
@@ -501,6 +502,7 @@ struct AccountView: View {
 
                 Toggle("Enable Projects", isOn: $enableProjectsFeature)
                 Toggle("Blank Homepage", isOn: $blankHomepageMode)
+                Toggle("Setup Homepage", isOn: $setupHomepageMode)
                 Button {
                     deleteAllConfirmationCode = ""
                     showDeleteAllDataSheet = true

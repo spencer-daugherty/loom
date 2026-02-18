@@ -20,6 +20,7 @@ private struct DarkModeInvertImage: ViewModifier {
 struct ContentView: View {
     @AppStorage("enable_projects_feature") private var enableProjectsFeature = false
     @AppStorage("blank_homepage_mode") private var blankHomepageMode = false
+    @AppStorage("setup_homepage_mode") private var setupHomepageMode = false
     @State private var isPresentingCaptureView = false
     @State private var pressedEmotion: String? = nil
     @State private var pressedOutcome: Outcomes? = nil
@@ -66,20 +67,28 @@ struct ContentView: View {
         isActivePlan
     }
 
-    private var isDrivingForceEmptyState: Bool {
+    private var hasDrivingForceData: Bool {
         let ultimateVision = drivingForces.first?.ultimateVision ?? ""
         let ultimatePurpose = drivingForces.first?.ultimatePurpose ?? ""
-        return blankHomepageMode ||
-            ultimateVision.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-            ultimatePurpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return !ultimateVision.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            !ultimatePurpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var shouldShowBlankHomepageAppearance: Bool {
+        blankHomepageMode || setupHomepageMode
+    }
+
+    private var isDrivingForceEmptyState: Bool {
+        shouldShowBlankHomepageAppearance || !hasDrivingForceData
     }
 
     private var isFulfillmentEmptyState: Bool {
-        blankHomepageMode || fulfillmentMetrics.isEmpty
+        shouldShowBlankHomepageAppearance || fulfillmentMetrics.isEmpty
     }
 
     private var canOpenPlanOrActionFlow: Bool {
-        !isDrivingForceEmptyState && !isFulfillmentEmptyState
+        if setupHomepageMode { return true }
+        return !isDrivingForceEmptyState && !isFulfillmentEmptyState
     }
 
     private var splashMetricsFallback: [(String, Color, Double)] {
@@ -901,7 +910,11 @@ struct ContentView: View {
             : Color(.secondarySystemBackground)
 
         return NavigationLink {
-            FulfillmentView()
+            if isFulfillmentEmptyState {
+                FulfillmentStartView()
+            } else {
+                FulfillmentView()
+            }
         } label: {
             SectionCard(
                 iconName: "trophy",
@@ -993,7 +1006,7 @@ struct ContentView: View {
         .buttonStyle(.plain)
         .frame(maxHeight: .infinity)
         .overlay {
-            if isDrivingForceEmptyState {
+            if isDrivingForceEmptyState && !setupHomepageMode {
                 Color.clear
                     .contentShape(Rectangle())
                     .onTapGesture {
@@ -1012,7 +1025,7 @@ struct ContentView: View {
     }
 
     private var objectivesSection: some View {
-        let isObjectivesEmptyState = blankHomepageMode || (outcomes.isEmpty && !enableProjectsFeature)
+        let isObjectivesEmptyState = shouldShowBlankHomepageAppearance || (outcomes.isEmpty && !enableProjectsFeature)
         let objectivesCardBackground: Color = isObjectivesEmptyState
             ? Color(.systemGray5)
             : Color(.secondarySystemBackground)

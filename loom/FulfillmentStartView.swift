@@ -37,7 +37,7 @@ struct FulfillmentStartView: View {
                     .frame(height: 420)
                     .padding(.bottom, 2)
 
-                    Text("Set Your Fulfillment Categories")
+                    Text("Set Fulfillment Areas")
                         .font(.largeTitle)
                         .fontWeight(.bold)
                         .frame(maxWidth: .infinity, alignment: .center)
