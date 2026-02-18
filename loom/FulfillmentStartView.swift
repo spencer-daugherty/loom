@@ -172,12 +172,12 @@ struct FulfillmentStartView: View {
             switch self {
             case .intro: return "Set Fulfillment Areas"
             case .createCategories: return "Create Categories"
-            case .visionSweep: return "Fast Vision Sweep"
-            case .purposeSweep: return "Fast Purpose Sweep"
-            case .priorities: return "Select Priority Categories"
-            case .roles: return "Roles"
-            case .threeToThrive: return "Three-to-Thrive"
-            case .resources: return "Resources"
+            case .visionSweep: return "Define Vision"
+            case .purposeSweep: return "Define Purpose"
+            case .priorities: return "Choose Your Focus"
+            case .roles: return "Identify Roles"
+            case .threeToThrive: return "List Little Wins"
+            case .resources: return "Note Resources"
             case .passions: return "Passions"
             case .summary: return "Summary"
             }
@@ -615,7 +615,7 @@ struct FulfillmentStartView: View {
                 Button {
                     finalizeAndContinue()
                 } label: {
-                    Text("Start Building Momentum")
+                    Text("Continue")
                         .frame(maxWidth: .infinity)
                         .contentShape(Rectangle())
                 }
@@ -819,7 +819,6 @@ struct FulfillmentStartView: View {
     private var visionSweepStep: some View {
         VStack(alignment: .leading, spacing: 10) {
             if let record = currentVisionRecord {
-                phaseSubtext("Phase 1: Quick Alignment")
                 categoryHeader(record.category, index: visionIndex + 1, total: orderedFulfillments.count)
                 Text("What does your ideal life look like in this area?")
                     .font(.headline)
@@ -833,13 +832,6 @@ struct FulfillmentStartView: View {
                 )
                 .focused($focusedField, equals: .vision)
 
-                Button("Skip and return later") {
-                    moveVisionForward(saveCurrent: false)
-                }
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.blue)
-                .buttonStyle(.plain)
-
                 visionIdeasExpander
             }
         }
@@ -850,7 +842,6 @@ struct FulfillmentStartView: View {
     private var purposeSweepStep: some View {
         VStack(alignment: .leading, spacing: 10) {
             if let record = currentPurposeRecord {
-                phaseSubtext("Phase 1: Quick Alignment")
                 categoryHeader(record.category, index: purposeIndex + 1, total: orderedFulfillments.count)
                 Text("Why is success in this area an absolute must?")
                     .font(.headline)
@@ -864,13 +855,6 @@ struct FulfillmentStartView: View {
                 )
                 .focused($focusedField, equals: .purpose)
 
-                Button("Skip and return later") {
-                    movePurposeForward(saveCurrent: false)
-                }
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.blue)
-                .buttonStyle(.plain)
-
                 purposeIdeasExpander
             }
         }
@@ -880,10 +864,8 @@ struct FulfillmentStartView: View {
 
     private var prioritiesStep: some View {
         VStack(alignment: .leading, spacing: 12) {
-            phaseSubtext("Phase 2: Prioritization")
-            Text("Most people try to improve everything and fail. Choose the 2–3 areas where progress will change your life the most.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+            Text("Which areas would improve your life the most right now?")
+                .font(.headline)
 
             VStack(spacing: 8) {
                 ForEach(orderedFulfillments, id: \.category_id) { record in
@@ -926,7 +908,6 @@ struct FulfillmentStartView: View {
     private var rolesStep: some View {
         VStack(alignment: .leading, spacing: 12) {
             if let record = currentDeepRecord {
-                phaseSubtext("Phase 3: Deep Design")
                 categoryHeader(record.category, index: deepIndex + 1, total: deepCategoryIDs.count)
                 Text("Who do you need to become in this area?")
                     .font(.headline)
@@ -1005,9 +986,8 @@ struct FulfillmentStartView: View {
         let isInvalid = highlightInvalid && fociItems.count != 3
         let rowBackground = isInvalid ? Color.red.opacity(0.08) : rowSurfaceColor
 
-        phaseSubtext("Phase 3: Deep Design")
         categoryHeader(record.category, index: deepIndex + 1, total: deepCategoryIDs.count)
-        Text("What 3 focus areas will create the most impact here?")
+        Text("What small, repeatable wins will move this area forward?")
             .font(.headline)
 
         VStack(spacing: 0) {
@@ -1066,7 +1046,6 @@ struct FulfillmentStartView: View {
     private var resourcesStep: some View {
         VStack(alignment: .leading, spacing: 12) {
             if let record = currentDeepRecord {
-                phaseSubtext("Phase 3: Deep Design")
                 categoryHeader(record.category, index: deepIndex + 1, total: deepCategoryIDs.count)
                 Text("Who and what can help you grow in this area?")
                     .font(.headline)
@@ -1136,9 +1115,8 @@ struct FulfillmentStartView: View {
     private var passionsStep: some View {
         VStack(alignment: .leading, spacing: 12) {
             if let record = currentDeepRecord {
-                phaseSubtext("Phase 3: Deep Design")
                 categoryHeader(record.category, index: deepIndex + 1, total: deepCategoryIDs.count)
-                Text("Connect passions from your Driving Force.")
+                Text("What passions drive you to improve this area?")
                     .font(.headline)
 
                 VStack(spacing: 8) {
@@ -1181,8 +1159,6 @@ struct FulfillmentStartView: View {
 
     private var summaryStep: some View {
         VStack(alignment: .leading, spacing: 12) {
-            phaseSubtext("Phase 4: Completion")
-
             summaryCard(title: "Categories", body: "\(orderedFulfillments.count) created") {
                 step = .visionSweep
                 visionIndex = 0
