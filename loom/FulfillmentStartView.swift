@@ -611,13 +611,78 @@ struct FulfillmentStartView: View {
     private var progressStrip: some View {
         HStack(spacing: 6) {
             ForEach(1...progressTotalSteps, id: \.self) { index in
-                Capsule()
-                    .fill(index <= progressCurrentStep ? Color.accentColor : Color(.systemGray4))
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 4)
+                progressSegment(for: index)
             }
         }
         .frame(maxWidth: .infinity)
+        .animation(.easeInOut(duration: 0.22), value: progressCurrentStep)
+        .animation(.easeInOut(duration: 0.22), value: nestedProgressFraction ?? 0)
+        .animation(.easeInOut(duration: 0.22), value: nestedProgressFraction != nil)
+    }
+
+    private func progressSegment(for index: Int) -> some View {
+        ZStack(alignment: .leading) {
+            Capsule()
+                .fill(primarySegmentColor(for: index))
+
+            if index == progressCurrentStep, let nested = nestedProgressFraction {
+                GeometryReader { geo in
+                    let clamped = max(0.0, min(1.0, nested))
+                    let available = max(geo.size.width, 0)
+                    let fillWidth = max(available * clamped, 0)
+                    Capsule()
+                        .fill(Color.accentColor.opacity(colorScheme == .dark ? 0.82 : 0.75))
+                        .frame(width: fillWidth, height: geo.size.height)
+                        .position(
+                            x: fillWidth / 2,
+                            y: geo.size.height / 2
+                        )
+                        .opacity(0.9)
+                }
+                .allowsHitTesting(false)
+                .transition(.opacity)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 4)
+    }
+
+    private func primarySegmentColor(for index: Int) -> Color {
+        if index < progressCurrentStep {
+            return .accentColor
+        }
+        if index == progressCurrentStep {
+            // Keep active multi-page step neutral until fully completed.
+            return (nestedProgressFraction != nil) ? Color(.systemGray4) : .accentColor
+        }
+        return Color(.systemGray4)
+    }
+
+    private var nestedProgressFraction: CGFloat? {
+        switch step {
+        case .visionSweep:
+            let total = orderedFulfillments.count
+            guard total > 1 else { return nil }
+            return CGFloat(visionIndex + 1) / CGFloat(total)
+        case .purposeSweep:
+            let total = orderedFulfillments.count
+            guard total > 1 else { return nil }
+            return CGFloat(purposeIndex + 1) / CGFloat(total)
+        case .roles:
+            let total = roleCategoryIDs.count
+            guard total > 1 else { return nil }
+            return CGFloat(roleIndex + 1) / CGFloat(total)
+        case .littleWins, .resources:
+            let total = deepCategoryIDs.count
+            guard total > 1 else { return nil }
+            return CGFloat(deepIndex + 1) / CGFloat(total)
+        case .passions:
+            let total = roleCategoryIDs.count
+            guard total > 1 else { return nil }
+            return CGFloat(passionIndex + 1) / CGFloat(total)
+        default:
+            return nil
+        }
     }
 
     private var footer: some View {
