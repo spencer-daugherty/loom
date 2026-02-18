@@ -19,11 +19,11 @@ fileprivate let fulfillmentStartDefaultCategoryDefs: [FulfillmentStartCategoryDe
 
 fileprivate let fulfillmentStartSelectableDefaultCategories: [String] = [
     "Career & Business",
-    "Health & Energy",
-    "Learning & Education",
-    "Wealth & Finance",
     "Faith & Spirituality",
+    "Wealth & Finance",
+    "Learning & Education",
     "Love & Relationships",
+    "Health & Energy",
     "Lifestyle & Experiences",
     "Mindset & Resilience",
     "Service & Impact",
@@ -75,6 +75,8 @@ struct FulfillmentStartView: View {
     @State private var showValidationHint = false
     @State private var validationHintText = ""
     @State private var hintWorkItem: DispatchWorkItem?
+    @State private var previousAutosaveEnabled: Bool = true
+    @State private var didFinalizeOnboarding = false
     @State private var highlightInvalid = false
     @State private var invalidCategoryIDs = Set<UUID>()
 
@@ -224,7 +226,22 @@ struct FulfillmentStartView: View {
             .filter { !$0.isEmpty }
         guard (3...7).contains(names.count) else { return false }
         let uniqueCount = Set(names.map { $0.lowercased() }).count
-        return uniqueCount == names.count
+        guard uniqueCount == names.count else { return false }
+        return !hasCreateCategoriesColorConflict
+    }
+
+    private var conflictingSelectedCategories: Set<String> {
+        var grouped: [String: [String]] = [:]
+        for category in selectedCategoryNames {
+            let colorKey = categoryColorKeys[category] ?? rotatedColorKey(for: category)
+            grouped[colorKey, default: []].append(category)
+        }
+        let duplicates = grouped.values.filter { $0.count > 1 }.flatMap { $0 }
+        return Set(duplicates)
+    }
+
+    private var hasCreateCategoriesColorConflict: Bool {
+        !conflictingSelectedCategories.isEmpty
     }
 
     private var availableCategoryNames: [String] {
@@ -295,13 +312,24 @@ struct FulfillmentStartView: View {
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(step != .intro)
-        .onAppear(perform: loadFromPersistentData)
+        .onAppear {
+            previousAutosaveEnabled = modelContext.autosaveEnabled
+            modelContext.autosaveEnabled = false
+            loadFromPersistentData()
+        }
+        .onDisappear {
+            if !didFinalizeOnboarding {
+                modelContext.rollback()
+            }
+            modelContext.autosaveEnabled = previousAutosaveEnabled
+        }
         .navigationDestination(isPresented: $navigateToFulfillment) {
             FulfillmentView()
         }
         .overlay(alignment: .bottom) {
-            if showValidationHint {
-                Text(validationHintText)
+            let persistentColorConflict = step == .createCategories && hasCreateCategoriesColorConflict
+            if persistentColorConflict || showValidationHint {
+                Text(persistentColorConflict ? "Each color can only be used once." : validationHintText)
                     .font(.footnote)
                     .fontWeight(.bold)
                     .multilineTextAlignment(.center)
@@ -388,6 +416,19 @@ struct FulfillmentStartView: View {
             if step != .intro {
                 progressStrip
                     .frame(maxWidth: .infinity, alignment: .center)
+            }
+            if step == .intro {
+                HStack(spacing: 6) {
+                    Image(systemName: "clock.fill")
+                        .font(.caption)
+                    Text("~7 minutes")
+                        .font(.caption.weight(.bold))
+                }
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color(.systemGray5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .frame(maxWidth: .infinity, alignment: .center)
             }
 
             Text(step.title)
@@ -509,7 +550,7 @@ struct FulfillmentStartView: View {
 
     private var createCategoriesStep: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("What areas of your life must you consistently improve to succeed?")
+            Text("What 3-7 areas of your life must you consistently improve to succeed?")
                 .fontWeight(.bold)
                 .foregroundStyle(.primary)
 
@@ -526,7 +567,10 @@ struct FulfillmentStartView: View {
                                 .frame(width: 22, height: 22)
                                 .overlay(
                                     Circle()
-                                        .stroke(Color(.systemGray4), lineWidth: 1)
+                                        .stroke(
+                                            conflictingSelectedCategories.contains(category) ? Color.red : Color(.systemGray4),
+                                            lineWidth: conflictingSelectedCategories.contains(category) ? 2 : 1
+                                        )
                                 )
                         }
                         .buttonStyle(.plain)
@@ -779,7 +823,6 @@ struct FulfillmentStartView: View {
                             Button(role: .destructive) {
                                 if let idx = getRoles(for: record).firstIndex(where: { $0.id == item.id }) {
                                     deleteRoles(at: IndexSet(integer: idx), record: record)
-                                    try? modelContext.save()
                                 }
                             } label: {
                                 Image(systemName: "trash")
@@ -857,7 +900,6 @@ struct FulfillmentStartView: View {
                     Button(role: .destructive) {
                         if let idx = fociItems.firstIndex(where: { $0.id == item.id }) {
                             deleteFoci(at: IndexSet(integer: idx), record: record)
-                            try? modelContext.save()
                         }
                     } label: {
                         Image(systemName: "trash")
@@ -925,7 +967,6 @@ struct FulfillmentStartView: View {
                             Button(role: .destructive) {
                                 if let idx = getResources(for: record).firstIndex(where: { $0.id == item.id }) {
                                     deleteResources(at: IndexSet(integer: idx), record: record)
-                                    try? modelContext.save()
                                 }
                             } label: {
                                 Image(systemName: "trash")
@@ -964,7 +1005,6 @@ struct FulfillmentStartView: View {
                         let isSelected = selectedPassionIDs(for: record.category_id).contains(passion.passion_id)
                         Button {
                             togglePassion(passion, for: record.category_id)
-                            try? modelContext.save()
                         } label: {
                             HStack {
                                 Text("\(passion.emotion.capitalized): \(passion.passion)")
@@ -1248,7 +1288,6 @@ struct FulfillmentStartView: View {
         if saveCurrent, let record = currentVisionRecord {
             let text = (visionDrafts[record.category_id] ?? record.category_vision).trimmingCharacters(in: .whitespacesAndNewlines)
             updateVision(record: record, newText: text)
-            try? modelContext.save()
         }
 
         if visionIndex < orderedFulfillments.count - 1 {
@@ -1263,7 +1302,6 @@ struct FulfillmentStartView: View {
         if saveCurrent, let record = currentPurposeRecord {
             let text = (purposeDrafts[record.category_id] ?? record.category_purpose).trimmingCharacters(in: .whitespacesAndNewlines)
             updatePurpose(record: record, newText: text)
-            try? modelContext.save()
         }
 
         if purposeIndex < orderedFulfillments.count - 1 {
@@ -1400,7 +1438,6 @@ struct FulfillmentStartView: View {
                 )
             )
         }
-        try? modelContext.save()
         loadFromPersistentData()
     }
 
@@ -1460,6 +1497,7 @@ struct FulfillmentStartView: View {
             updatePurpose(record: record, newText: purpose)
         }
         try? modelContext.save()
+        didFinalizeOnboarding = true
 
         navigateToFulfillment = true
     }
@@ -1472,7 +1510,9 @@ struct FulfillmentStartView: View {
 
         switch step {
         case .createCategories:
-            validationHintText = "Create at least 3 life categories."
+            validationHintText = hasCreateCategoriesColorConflict
+                ? "Each color can only be used once."
+                : "Create at least 3 life categories."
         case .priorities:
             validationHintText = "Choose 2 or 3 priority categories."
         case .threeToThrive:
@@ -1684,7 +1724,6 @@ struct FulfillmentStartView: View {
             return
         }
         addRole(text: trimmed, record: record)
-        try? modelContext.save()
         addingRole = false
         roleEntry = ""
         focusedField = nil
@@ -1699,7 +1738,6 @@ struct FulfillmentStartView: View {
             return
         }
         addFocus(text: trimmed, record: record)
-        try? modelContext.save()
         addingFocus = false
         focusEntry = ""
         focusedField = nil
@@ -1714,7 +1752,6 @@ struct FulfillmentStartView: View {
             return
         }
         addResource(text: trimmed, record: record)
-        try? modelContext.save()
         addingResource = false
         resourceEntry = ""
         focusedField = nil

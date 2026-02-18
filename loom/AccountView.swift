@@ -569,6 +569,16 @@ struct AccountView: View {
             .presentationDetents([.height(320)])
             .presentationDragIndicator(.visible)
         }
+        .onChange(of: blankHomepageMode) { _, isOn in
+            if isOn, setupHomepageMode {
+                setupHomepageMode = false
+            }
+        }
+        .onChange(of: setupHomepageMode) { _, isOn in
+            if isOn, blankHomepageMode {
+                blankHomepageMode = false
+            }
+        }
     }
 
     private func permanentlyDeleteAllData() {

@@ -253,6 +253,19 @@ struct DrivingForceStartView: View {
                 progressStrip
                     .frame(maxWidth: .infinity, alignment: .center)
             }
+            if step == .intro {
+                HStack(spacing: 6) {
+                    Image(systemName: "clock.fill")
+                        .font(.caption)
+                    Text("~4 minutes")
+                        .font(.caption.weight(.bold))
+                }
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color(.systemGray5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .frame(maxWidth: .infinity, alignment: .center)
+            }
             Text(stepTitle)
                 .font(.largeTitle)
                 .fontWeight(.bold)
