@@ -1,5 +1,14 @@
 import SwiftUI
 
+fileprivate let fallbackFulfillmentMetrics: [(String, Color, Double)] = [
+    ("Area 1", FulfillmentCategoryTheme.color(for: "Career & Business"), 20),
+    ("Area 2", FulfillmentCategoryTheme.color(for: "Leadership & Impact"), 20),
+    ("Area 3", FulfillmentCategoryTheme.color(for: "Wealth & Lifestyle"), 20),
+    ("Area 4", FulfillmentCategoryTheme.color(for: "Mind & Meaning"), 20),
+    ("Area 5", FulfillmentCategoryTheme.color(for: "Love & Relationships"), 20),
+    ("Area 6", FulfillmentCategoryTheme.color(for: "Health & Vitality"), 20),
+]
+
 // Reusable radar graph used in both the splash screen and the Fulfillment card
 struct FulfillmentRadarGraph: View {
     let metrics: [(String, Color, Double)] // (title, color, percentage 0...100)
@@ -9,7 +18,7 @@ struct FulfillmentRadarGraph: View {
     let showDotShadow: Bool
 
     init(metrics: [(String, Color, Double)], showOutline: Bool = true, dotDiameter: CGFloat = 14, showDotOutline: Bool = true, showDotShadow: Bool = true) {
-        self.metrics = metrics
+        self.metrics = metrics.isEmpty ? fallbackFulfillmentMetrics : metrics
         self.showOutline = showOutline
         self.dotDiameter = dotDiameter
         self.showDotOutline = showDotOutline
@@ -143,7 +152,7 @@ struct WindLinesBackground: View {
     let animationStartDate: Date
 
     init(colors: [Color], animationStartDate: Date = .distantPast) {
-        self.colors = colors
+        self.colors = colors.isEmpty ? fallbackFulfillmentMetrics.map { $0.1 } : colors
         self.animationStartDate = animationStartDate
     }
 
@@ -437,9 +446,12 @@ struct LoadingSplashView: View {
     // Pulsing configuration
     private let amplitude: Double = 180 // 10x more dramatic pulsing
     private let speed: Double = 1.6    // pulse speed multiplier
+    private var effectiveMetrics: [(String, Color, Double)] {
+        metrics.isEmpty ? fallbackFulfillmentMetrics : metrics
+    }
 
     private func pulsedMetrics(at time: TimeInterval) -> [(String, Color, Double)] {
-        metrics.enumerated().map { idx, tuple in
+        effectiveMetrics.enumerated().map { idx, tuple in
             let base = tuple.2
 
             // Deterministic per-slice variation to avoid correlated motion
@@ -513,14 +525,14 @@ struct LoadingSplashView: View {
                 .ignoresSafeArea()
 
             if hasStartedMotion {
-                WindLinesBackground(colors: metrics.map { $0.1 }, animationStartDate: splashStartDate)
+                WindLinesBackground(colors: effectiveMetrics.map { $0.1 }, animationStartDate: splashStartDate)
                     .ignoresSafeArea()
             }
 
             if hasStartedMotion {
                 TimelineView(.animation) { context in
                     let t = context.date.timeIntervalSinceReferenceDate
-                    let animatedMetrics = isTransitioningOut ? metrics : pulsedMetrics(at: t * 0.45)
+                    let animatedMetrics = isTransitioningOut ? effectiveMetrics : pulsedMetrics(at: t * 0.45)
                     let rotationDegrees = isTransitioningOut ? 0.0 : (t * Double(337.5))
                     let startupElapsed = context.date.timeIntervalSince(splashStartDate)
                     let radarIntroDelay: Double = 1.0
@@ -549,7 +561,7 @@ struct LoadingSplashView: View {
                 }
             } else {
                 centeredSplashRow(
-                    metrics: metrics,
+                    metrics: effectiveMetrics,
                     rotationDegrees: 0,
                     radarScale: 0.05,
                     radarOpacity: 0

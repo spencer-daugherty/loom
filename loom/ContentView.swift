@@ -93,12 +93,12 @@ struct ContentView: View {
 
     private var splashMetricsFallback: [(String, Color, Double)] {
         [
-            ("Career & Business", FulfillmentCategoryTheme.color(for: "Career & Business"), 20),
-            ("Leadership & Impact", FulfillmentCategoryTheme.color(for: "Leadership & Impact"), 20),
-            ("Wealth & Lifestyle", FulfillmentCategoryTheme.color(for: "Wealth & Lifestyle"), 20),
-            ("Mind & Meaning", FulfillmentCategoryTheme.color(for: "Mind & Meaning"), 20),
-            ("Love & Relationships", FulfillmentCategoryTheme.color(for: "Love & Relationships"), 20),
-            ("Health & Vitality", FulfillmentCategoryTheme.color(for: "Health & Vitality"), 20),
+            ("Area 1", FulfillmentCategoryTheme.color(for: "Career & Business"), 20),
+            ("Area 2", FulfillmentCategoryTheme.color(for: "Leadership & Impact"), 20),
+            ("Area 3", FulfillmentCategoryTheme.color(for: "Wealth & Lifestyle"), 20),
+            ("Area 4", FulfillmentCategoryTheme.color(for: "Mind & Meaning"), 20),
+            ("Area 5", FulfillmentCategoryTheme.color(for: "Love & Relationships"), 20),
+            ("Area 6", FulfillmentCategoryTheme.color(for: "Health & Vitality"), 20),
         ]
     }
 

@@ -20,7 +20,9 @@ fileprivate let defaultCategoryDefs: [CategoryDef] = [
     .init(id: "health",     title: "Health & Vitality",    categoryID: PlanLabelSeeder.categoryIDs["Health & Vitality"]!),
 ]
 
-fileprivate let defaultFulfillmentCategoryTitles: [String] = defaultCategoryDefs.map(\.title)
+fileprivate let defaultFulfillmentCategoryTitles: [String] = [
+    "Area 1", "Area 2", "Area 3", "Area 4", "Area 5", "Area 6"
+]
 
 struct PassionsSectionView: View {
     @Environment(\.modelContext) private var modelContext
@@ -1563,6 +1565,15 @@ private struct FulfillmentTrendsView: View {
 }
 
 struct FulfillmentInteractiveRadar: View {
+    private static let fallbackMetrics: [(String, Color, Double)] = [
+        ("Area 1", FulfillmentCategoryTheme.color(for: "Career & Business"), 20),
+        ("Area 2", FulfillmentCategoryTheme.color(for: "Leadership & Impact"), 20),
+        ("Area 3", FulfillmentCategoryTheme.color(for: "Wealth & Lifestyle"), 20),
+        ("Area 4", FulfillmentCategoryTheme.color(for: "Mind & Meaning"), 20),
+        ("Area 5", FulfillmentCategoryTheme.color(for: "Love & Relationships"), 20),
+        ("Area 6", FulfillmentCategoryTheme.color(for: "Health & Vitality"), 20),
+    ]
+
     let metrics: [(String, Color, Double)]
     @Binding var selectedIndex: Int
     let onManualSelect: () -> Void
@@ -1583,7 +1594,7 @@ struct FulfillmentInteractiveRadar: View {
         showOutline: Bool = true,
         emphasizeSelectedSlice: Bool = true
     ) {
-        self.metrics = metrics
+        self.metrics = metrics.isEmpty ? Self.fallbackMetrics : metrics
         self._selectedIndex = selectedIndex
         self.onManualSelect = onManualSelect
         self.enableInteraction = enableInteraction

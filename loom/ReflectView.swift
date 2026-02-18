@@ -992,12 +992,12 @@ struct ReflectView: View {
 
     private func loadingStylePulsedMetrics(at time: TimeInterval) -> [(String, Color, Double)] {
         let base: [(String, Color, Double)] = [
-            ("Career & Business", FulfillmentCategoryTheme.color(for: "Career & Business"), 80),
-            ("Leadership & Impact", FulfillmentCategoryTheme.color(for: "Leadership & Impact"), 65),
-            ("Wealth & Lifestyle", FulfillmentCategoryTheme.color(for: "Wealth & Lifestyle"), 90),
-            ("Mind & Meaning", FulfillmentCategoryTheme.color(for: "Mind & Meaning"), 75),
-            ("Love & Relationships", FulfillmentCategoryTheme.color(for: "Love & Relationships"), 85),
-            ("Health & Vitality", FulfillmentCategoryTheme.color(for: "Health & Vitality"), 70),
+            ("Area 1", FulfillmentCategoryTheme.color(for: "Career & Business"), 80),
+            ("Area 2", FulfillmentCategoryTheme.color(for: "Leadership & Impact"), 65),
+            ("Area 3", FulfillmentCategoryTheme.color(for: "Wealth & Lifestyle"), 90),
+            ("Area 4", FulfillmentCategoryTheme.color(for: "Mind & Meaning"), 75),
+            ("Area 5", FulfillmentCategoryTheme.color(for: "Love & Relationships"), 85),
+            ("Area 6", FulfillmentCategoryTheme.color(for: "Health & Vitality"), 70),
         ]
         let amplitude: Double = 180
         let speed: Double = 1.6
