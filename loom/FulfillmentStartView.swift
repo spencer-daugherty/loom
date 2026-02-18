@@ -41,6 +41,10 @@ struct FulfillmentStartView: View {
     @Query private var resources: [FulfillmentResources]
     @Query private var passions: [Passion]
     @Query private var passionJoins: [PassionFulfillmentJoin]
+    @Query(sort: \ActivePlanState.id, order: .forward) private var activePlanStates: [ActivePlanState]
+    @Query(sort: \PlannedChunk.updatedAt, order: .reverse) private var allPlannedChunks: [PlannedChunk]
+    @Query(sort: \PlannedChunkAction.createdAt, order: .reverse) private var allPlannedActions: [PlannedChunkAction]
+    @Query(sort: \Outcomes.updatedAt, order: .reverse) private var allOutcomes: [Outcomes]
 
     @State private var navigateToFulfillment = false
 
@@ -618,7 +622,7 @@ struct FulfillmentStartView: View {
                     }
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                         Button(role: .destructive) {
-                            removeCategoryFromStepList(category)
+                            attemptRemoveCategoryFromStepList(category)
                         } label: {
                             Text("Delete")
                         }
@@ -1417,6 +1421,14 @@ struct FulfillmentStartView: View {
         categoryColorKeys.removeValue(forKey: category)
     }
 
+    private func attemptRemoveCategoryFromStepList(_ category: String) {
+        if hasOngoingUsage(in: category) {
+            triggerHint("This category has an ongoing action block, chunk, or outcome.")
+            return
+        }
+        removeCategoryFromStepList(category)
+    }
+
     private func restoreDeletedDefaultCategories() {
         let missing = missingDefaultCategories
         deletedDefaultCategoryNames = deletedDefaultCategoryNames.filter { deleted in
@@ -1424,6 +1436,34 @@ struct FulfillmentStartView: View {
         }
         for category in missing {
             assignDefaultColorIfNeeded(for: category)
+        }
+    }
+
+    private func hasOngoingUsage(in category: String) -> Bool {
+        let categoryTrimmed = category.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !categoryTrimmed.isEmpty else { return false }
+
+        let activeWeeks = Set(
+            activePlanStates
+                .filter(\.isActive)
+                .compactMap(\.weekStart)
+                .map { Calendar.current.startOfDay(for: $0) }
+        )
+        let activeChunks = allPlannedChunks.filter {
+            $0.category.caseInsensitiveCompare(categoryTrimmed) == .orderedSame &&
+            activeWeeks.contains(Calendar.current.startOfDay(for: $0.weekStart))
+        }
+        if !activeChunks.isEmpty {
+            return true
+        }
+
+        let activeChunkIDs = Set(activeChunks.map(\.id))
+        if !activeChunkIDs.isEmpty && allPlannedActions.contains(where: { activeChunkIDs.contains($0.plannedChunkId) }) {
+            return true
+        }
+
+        return allOutcomes.contains {
+            $0.category.caseInsensitiveCompare(categoryTrimmed) == .orderedSame
         }
     }
 
