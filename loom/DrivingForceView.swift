@@ -293,99 +293,61 @@ struct DrivingForceView: View {
                     .font(.headline.weight(.semibold))
                     .frame(maxWidth: .infinity, alignment: .center)
 
-                instructionSectionTitle("1. Ultimate Vision")
-                instructionBody("Describe the life you want to create overall.\nImagine there are no limits.")
-                instructionLabel("Focus on:")
+                instructionSectionTitle("Set Your Driving Force")
+                instructionBody("This isn’t long-term goals.")
+                instructionBody("It’s who you are: your values, principles, and high-level direction that tends to stay stable over time.")
+                instructionBody("Wording can evolve, but the themes should remain a compass.")
+
+                instructionSectionTitle("Ultimate Vision")
+                instructionLabel("Need ideas?")
                 instructionBullets([
-                    "The person you want to become",
-                    "The experiences you want to have",
-                    "The impact you want to make",
-                    "The lifestyle and environment you want"
+                    "Who do I want to become?",
+                    "What experiences do I want to have?",
+                    "What impact do I want to make?"
                 ])
-                instructionBody("Write in present tense. Be bold and specific.")
                 instructionLabel("Example:")
-                instructionExample("“I create meaningful experiences, build powerful businesses, and live a life of adventure, love, and freedom.”")
+                instructionExample("“I live a life of purpose, growth, and freedom. I build meaningful work that creates value for others while giving me time, financial independence, and the ability to choose how I live. I am healthy, energized, and surrounded by strong relationships, and I continue to learn, lead, and make a positive impact.”")
 
-                Divider().opacity(0.45)
-
-                instructionSectionTitle("2. Ultimate Purpose")
-                instructionBody("Why must this vision happen?\nThis is your emotional fuel.")
-                instructionLabel("Focus on:")
+                instructionSectionTitle("Ultimate Purpose")
+                instructionLabel("Need ideas?")
                 instructionBullets([
-                    "How you want to feel",
-                    "Why this life matters to you",
-                    "Who you want to help",
-                    "What this will give you"
+                    "Why is this essential to me?",
+                    "Who does this impact?",
+                    "What does this give me emotionally?"
                 ])
-                instructionBody("If your vision is the destination, your purpose is the reason you keep going.")
                 instructionLabel("Example:")
-                instructionExample("“To use my gifts to serve others, honor God, provide for my family, and live with energy, discipline, and impact.”")
+                instructionExample("“Because I don’t want to waste my life reacting to circumstances or other people’s expectations. I want to use my full potential, create something meaningful, support the people I love, and live with confidence, fulfillment, and peace.”")
 
-                Divider().opacity(0.45)
-
-                instructionSectionTitle("3. Passions")
-                instructionBody("Passions drive daily behavior.\nList anything that creates strong emotion and motivates action.")
-                instructionBody("You will update and refine these over time.")
-
-                Divider().opacity(0.45)
+                instructionSectionTitle("Passions")
+                instructionLabel("Need ideas?")
 
                 instructionSubsection("Love")
-                instructionBody("What brings deep joy and meaning?")
-                instructionLabel("Examples:")
                 instructionBullets([
-                    "Celebrating with loved ones",
-                    "Making a difference",
-                    "Nature and movement",
-                    "Growth and connection"
+                    "Time with family and close relationships",
+                    "Learning, growth, and self-improvement",
+                    "Building and creating something meaningful"
                 ])
 
-                Divider().opacity(0.45)
-
-                instructionSubsection("Thrill")
-                instructionBody("What energizes and excites you?")
-                instructionLabel("Examples:")
+                instructionSubsection("Vows (Commitments)")
                 instructionBullets([
-                    "Big challenges",
-                    "Travel and adventure",
-                    "New experiences",
-                    "Working with smart people"
+                    "Always act with integrity",
+                    "Take full responsibility for my life",
+                    "Keep growing and becoming better"
                 ])
 
-                Divider().opacity(0.45)
-
-                instructionSubsection("Vows")
-                instructionBody("What are your commitments and non-negotiables?")
-                instructionLabel("Examples:")
+                instructionSubsection("Thrill (Excitement)")
                 instructionBullets([
-                    "Discipline and hard work",
-                    "Faith and integrity",
-                    "Providing and protecting",
-                    "Health and excellence"
+                    "Achieving difficult goals",
+                    "Solving hard problems",
+                    "Taking risks and pursuing new opportunities"
                 ])
-
-                Divider().opacity(0.45)
 
                 instructionSubsection("Hate")
-                instructionBody("What will you not tolerate in your life?")
-                instructionLabel("Examples:")
                 instructionBullets([
-                    "Laziness",
-                    "Entitlement",
-                    "Injustice",
-                    "Anxiety or negativity"
+                    "Wasted potential",
+                    "Dishonesty and manipulation",
+                    "Laziness and excuses"
                 ])
-
-                Divider().opacity(0.45)
-
-                instructionSectionTitle("How to Write Strong Entries")
-                instructionBullets([
-                    "Be honest, not impressive",
-                    "Use short and specific phrases",
-                    "Focus on emotions and action",
-                    "Choose what truly drives you",
-                    "You can refine this anytime"
-                ])
-                instructionBody("Your Driving Force will guide your goals, habits, and decisions.")
             }
             .padding()
         }

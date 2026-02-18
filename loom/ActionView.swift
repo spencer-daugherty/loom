@@ -802,17 +802,12 @@ struct ActionView: View {
         .sheet(item: $attachmentsActionID) { wrapper in
             AttachmentsSheet(
                 attachments: attachmentsByActionID[wrapper.id] ?? [],
-                noteText: Binding(
-                    get: { notesByActionID[wrapper.id]?.noteText ?? "" },
-                    set: { newValue in
-                        upsertNote(forActionId: wrapper.id) { n in
-                            n.noteText = newValue
-                            n.updatedAt = .now
-                        }
-                        scheduleAutosave()
+                initialNoteText: notesByActionID[wrapper.id]?.noteText ?? "",
+                onSaveNote: { newValue in
+                    upsertNote(forActionId: wrapper.id) { n in
+                        n.noteText = newValue
+                        n.updatedAt = .now
                     }
-                ),
-                onSaveNote: {
                     scheduleAutosave()
                 },
                 onAddLink: { link in
@@ -2956,8 +2951,8 @@ private struct SensitivitySheet: View {
 
 private struct AttachmentsSheet: View {
     let attachments: [PlannedChunkActionAttachment]
-    @Binding var noteText: String
-    let onSaveNote: () -> Void
+    let initialNoteText: String
+    let onSaveNote: (String) -> Void
     let onAddLink: (String) -> Void
     let onAddFile: (URL, Data, String) -> Void
     let onDeleteAttachment: (UUID) -> Void
@@ -2968,6 +2963,8 @@ private struct AttachmentsSheet: View {
     @State private var isNewLinkMode: Bool = false
     @FocusState private var isNewLinkFocused: Bool
     @State private var isFileImporterPresented: Bool = false
+    @State private var noteText: String = ""
+    @State private var hasSavedNote: Bool = false
 
     var body: some View {
         NavigationStack {
@@ -3079,13 +3076,26 @@ private struct AttachmentsSheet: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
+                        commitNoteIfNeeded()
                         commitInlineLink()
-                        onSaveNote()
                         dismiss()
                     }
                 }
             }
+            .onAppear {
+                noteText = initialNoteText
+                hasSavedNote = false
+            }
+            .onDisappear {
+                commitNoteIfNeeded()
+            }
         }
+    }
+
+    private func commitNoteIfNeeded() {
+        guard !hasSavedNote else { return }
+        hasSavedNote = true
+        onSaveNote(noteText)
     }
 
     private func commitInlineLink() {

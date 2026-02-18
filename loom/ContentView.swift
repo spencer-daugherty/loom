@@ -43,10 +43,6 @@ struct ContentView: View {
     // Model-derived state
     @Query(sort: \ActivePlanState.id, order: .forward)
     private var activePlanStates: [ActivePlanState]
-    @Query(sort: \PlannedChunkAction.createdAt, order: .reverse)
-    private var allPlannedActions: [PlannedChunkAction]
-    @Query(sort: \ActionBlocksReflectionArchive.completedAt, order: .reverse)
-    private var reflectionArchives: [ActionBlocksReflectionArchive]
 
     @State private var navPath: [PlayDestination] = []
     @State private var playSheetDestination: PlayDestination? = nil
@@ -66,18 +62,8 @@ struct ContentView: View {
         activePlanStates.first?.isActive ?? false
     }
 
-    private var hasChunkStoredActionsThisWeek: Bool {
-        let week = WeeklyMindsetEntry.weekStart(for: Date())
-        return allPlannedActions.contains { Calendar.current.isDate($0.weekStart, inSameDayAs: week) }
-    }
-
-    private var hasCompletedReflectionThisWeek: Bool {
-        let week = WeeklyMindsetEntry.weekStart(for: Date())
-        return reflectionArchives.contains { Calendar.current.isDate($0.weekStart, inSameDayAs: week) }
-    }
-
     private var isActiveActionFlow: Bool {
-        isActivePlan || (hasChunkStoredActionsThisWeek && !hasCompletedReflectionThisWeek)
+        isActivePlan
     }
 
     private var isDrivingForceEmptyState: Bool {
