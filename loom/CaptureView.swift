@@ -928,6 +928,7 @@ struct CaptureView: View {
             List {
                 recurringSection()
                 dueDatesSection()
+                dataSourcesSection()
             }
             .listStyle(.plain)
             .navigationTitle("Capture Settings")
@@ -1100,6 +1101,27 @@ struct CaptureView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .listSectionSeparator(.hidden, edges: .bottom)
+    }
+
+    private func dataSourcesSection() -> some View {
+        Section("Data Sources & Access") {
+            VStack(spacing: 8) {
+                ForEach(["Apple Reminders", "Microsoft To Do", "Google Tasks"], id: \.self) { source in
+                    HStack {
+                        Text(source)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                    .padding(8)
+                    .padding(.vertical, 2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+                }
+            }
+            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+            .listRowSeparator(.hidden)
+            .allowsHitTesting(false)
+        }
     }
 
     private func repeatEditorSheet() -> some View {
