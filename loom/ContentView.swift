@@ -39,7 +39,9 @@ struct ContentView: View {
     @State private var highlightDrivingRequirement: Bool = false
     @State private var highlightFulfillmentRequirement: Bool = false
     @State private var playBlockedResetWorkItem: DispatchWorkItem? = nil
+    @State private var drivingCardBounceOn = false
     @Environment(\.modelContext) private var modelContext
+    private let drivingBounceTimer = Timer.publish(every: 3.0, on: .main, in: .common).autoconnect()
 
     // Model-derived state
     @Query(sort: \ActivePlanState.id, order: .forward)
@@ -84,6 +86,26 @@ struct ContentView: View {
 
     private var isFulfillmentEmptyState: Bool {
         shouldShowBlankHomepageAppearance || fulfillmentMetrics.isEmpty
+    }
+
+    private var isObjectivesEmptyState: Bool {
+        shouldShowBlankHomepageAppearance || (outcomes.isEmpty && !enableProjectsFeature)
+    }
+
+    private var areOnboardingPromptsVisible: Bool {
+        isDrivingForceEmptyState && isFulfillmentEmptyState && isObjectivesEmptyState
+    }
+
+    private var shouldShowDrivingOnboardingPulse: Bool {
+        areOnboardingPromptsVisible
+    }
+
+    private var shouldShowFulfillmentOnboardingPulse: Bool {
+        !isDrivingForceEmptyState && isFulfillmentEmptyState
+    }
+
+    private var shouldShowAnyOnboardingBounce: Bool {
+        shouldShowDrivingOnboardingPulse || shouldShowFulfillmentOnboardingPulse
     }
 
     private var canOpenPlanOrActionFlow: Bool {
@@ -297,6 +319,20 @@ struct ContentView: View {
         }
         .onAppear {
             beginStartupPreparationIfNeeded()
+            if shouldShowAnyOnboardingBounce {
+                bounceDrivingCardOnce()
+            }
+        }
+        .onChange(of: shouldShowAnyOnboardingBounce) { _, shouldShow in
+            if shouldShow {
+                bounceDrivingCardOnce()
+            } else {
+                drivingCardBounceOn = false
+            }
+        }
+        .onReceive(drivingBounceTimer) { _ in
+            guard shouldShowAnyOnboardingBounce else { return }
+            bounceDrivingCardOnce()
         }
         .tint(Color.accentColor)
         .ignoresSafeArea(.keyboard)
@@ -710,7 +746,7 @@ struct ContentView: View {
                 + Text(Image(systemName: "infinity"))
                 + Text(" Driving Force and ")
                 + Text(Image(systemName: "trophy"))
-                + Text(" Fulfillment categories at a minimum to create Objectives.")
+                + Text(" Fulfillment areas at a minimum to create Action Blocks.")
         case .drivingForFulfillment:
             return Text("Please complete your ")
                 + Text(Image(systemName: "infinity"))
@@ -729,10 +765,12 @@ struct ContentView: View {
             : Color(.secondarySystemBackground)
 
         return NavigationLink {
-            if isDrivingForceEmptyState {
-                DrivingForceStartView()
-            } else {
-                DrivingForceView(autoOpenCreateVision: false)
+            Group {
+                if isDrivingForceEmptyState {
+                    DrivingForceStartView()
+                } else {
+                    DrivingForceView(autoOpenCreateVision: false)
+                }
             }
         } label: {
             SectionCard(
@@ -898,6 +936,22 @@ struct ContentView: View {
             }
         }
         .buttonStyle(.plain)
+        .scaleEffect(
+            shouldShowDrivingOnboardingPulse
+                ? (drivingCardBounceOn ? 1.012 : 1.0)
+                : 1.0
+        )
+        .offset(
+            y: shouldShowDrivingOnboardingPulse
+                ? (drivingCardBounceOn ? -3 : 0)
+                : 0
+        )
+        .animation(
+            shouldShowDrivingOnboardingPulse
+                ? .easeInOut(duration: 0.20)
+                : .default,
+            value: drivingCardBounceOn
+        )
         .overlay(
             RoundedRectangle(cornerRadius: 16)
                 .stroke(highlightDrivingRequirement ? Color.red.opacity(0.9) : Color.clear, lineWidth: 2)
@@ -910,10 +964,12 @@ struct ContentView: View {
             : Color(.secondarySystemBackground)
 
         return NavigationLink {
-            if isFulfillmentEmptyState {
-                FulfillmentStartView()
-            } else {
-                FulfillmentView()
+            Group {
+                if isFulfillmentEmptyState {
+                    FulfillmentStartView()
+                } else {
+                    FulfillmentView()
+                }
             }
         } label: {
             SectionCard(
@@ -1004,6 +1060,22 @@ struct ContentView: View {
             }
         }
         .buttonStyle(.plain)
+        .scaleEffect(
+            shouldShowFulfillmentOnboardingPulse
+                ? (drivingCardBounceOn ? 1.012 : 1.0)
+                : 1.0
+        )
+        .offset(
+            y: shouldShowFulfillmentOnboardingPulse
+                ? (drivingCardBounceOn ? -3 : 0)
+                : 0
+        )
+        .animation(
+            shouldShowFulfillmentOnboardingPulse
+                ? .easeInOut(duration: 0.20)
+                : .default,
+            value: drivingCardBounceOn
+        )
         .frame(maxHeight: .infinity)
         .overlay {
             if isDrivingForceEmptyState && !setupHomepageMode {
@@ -1025,7 +1097,6 @@ struct ContentView: View {
     }
 
     private var objectivesSection: some View {
-        let isObjectivesEmptyState = shouldShowBlankHomepageAppearance || (outcomes.isEmpty && !enableProjectsFeature)
         let objectivesCardBackground: Color = isObjectivesEmptyState
             ? Color(.systemGray5)
             : Color(.secondarySystemBackground)
@@ -1204,6 +1275,17 @@ struct ContentView: View {
                     .onTapGesture {
                         triggerPlayBlockedFeedback()
                     }
+            }
+        }
+    }
+
+    private func bounceDrivingCardOnce() {
+        drivingCardBounceOn = false
+        DispatchQueue.main.async {
+            guard shouldShowAnyOnboardingBounce else { return }
+            drivingCardBounceOn = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+                drivingCardBounceOn = false
             }
         }
     }

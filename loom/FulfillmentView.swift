@@ -874,11 +874,22 @@ struct FulfillmentView: View {
 
                 if isExpanded {
                     let rolesForRecord = getRoles(for: record)
-                    let rolesRows = rolesForRecord.count + ((isAddingRole || rolesForRecord.count < 3) ? 1 : 0)
+                    let showsRoleInputRow = isAddingRole || rolesForRecord.count < 3
                     let fociForRecord = getFoci(for: record)
-                    let fociRows = fociForRecord.count + ((isAddingFocus || fociForRecord.count < 3) ? 1 : 0)
+                    let showsFocusInputRow = isAddingFocus || fociForRecord.count < 3
                     let resourcesForRecord = getResources(for: record)
-                    let resourcesRows = resourcesForRecord.count + 1
+                    let rolesContentHeight = estimatedListContentHeight(
+                        items: rolesForRecord.map(\.role),
+                        hasInputRow: showsRoleInputRow
+                    )
+                    let fociContentHeight = estimatedListContentHeight(
+                        items: fociForRecord.map(\.activity),
+                        hasInputRow: showsFocusInputRow
+                    )
+                    let resourcesContentHeight = estimatedListContentHeight(
+                        items: resourcesForRecord.map(\.resource),
+                        hasInputRow: true
+                    )
 
                     VStack(alignment: .leading, spacing: 16) {
                     Text("Vision")
@@ -911,6 +922,8 @@ struct FulfillmentView: View {
                     List {
                         ForEach(getRoles(for: record), id: \.id) { r in
                             Text(r.role)
+                                .lineLimit(nil)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         .onMove { from, to in
                             moveRoles(from: from, to: to, record: record)
@@ -948,9 +961,9 @@ struct FulfillmentView: View {
                         }
                     }
                     .listStyle(.plain)
-                    .scrollDisabled(rolesRows <= 3)
+                    .scrollDisabled(rolesContentHeight <= 220)
                     .environment(\.editMode, .constant(.active))
-                    .frame(minHeight: CGFloat(max(rolesRows, 1)) * 56, maxHeight: 220)
+                    .frame(height: min(rolesContentHeight, 220))
 
                     Text("Little Wins")
                         .font(.headline)
@@ -958,6 +971,8 @@ struct FulfillmentView: View {
                     List {
                         ForEach(getFoci(for: record), id: \.id) { f in
                             Text(f.activity)
+                                .lineLimit(nil)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         .onMove { from, to in
                             moveFoci(from: from, to: to, record: record)
@@ -995,9 +1010,9 @@ struct FulfillmentView: View {
                         }
                     }
                     .listStyle(.plain)
-                    .scrollDisabled(fociRows <= 3)
+                    .scrollDisabled(fociContentHeight <= 220)
                     .environment(\.editMode, .constant(.active))
-                    .frame(minHeight: CGFloat(max(fociRows, 1)) * 56, maxHeight: 220)
+                    .frame(height: min(fociContentHeight, 220))
 
                     Text("Resources")
                         .font(.headline)
@@ -1005,6 +1020,8 @@ struct FulfillmentView: View {
                     List {
                         ForEach(resourcesForRecord, id: \.id) { res in
                             Text(res.resource)
+                                .lineLimit(nil)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         .onMove { from, to in
                             moveResources(from: from, to: to, record: record)
@@ -1042,9 +1059,9 @@ struct FulfillmentView: View {
                         }
                     }
                     .listStyle(.plain)
-                    .scrollDisabled(resourcesRows <= 4)
+                    .scrollDisabled(resourcesContentHeight <= 260)
                     .environment(\.editMode, .constant(.active))
-                    .frame(minHeight: CGFloat(max(resourcesRows, 1)) * 56, maxHeight: 260)
+                    .frame(height: min(resourcesContentHeight, 260))
 
                     PassionsSectionView(record: record)
                     }
@@ -1061,6 +1078,39 @@ struct FulfillmentView: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: 16))
             .shadow(color: Color.black.opacity(0.1), radius: 6, x: 0, y: 3)
+    }
+
+    private func estimatedListContentHeight(items: [String], hasInputRow: Bool) -> CGFloat {
+        let textRowsHeight = items.reduce(CGFloat.zero) { partial, item in
+            partial + estimatedListTextRowHeight(item)
+        }
+        let inputRowHeight: CGFloat = hasInputRow ? 52 : 0
+        // Keep one row visible even when there are no items yet.
+        return max(textRowsHeight + inputRowHeight, 56)
+    }
+
+    private func estimatedListTextRowHeight(_ text: String) -> CGFloat {
+        let measured = estimatedTextHeight(for: text, width: 220)
+        // Includes row insets and room for edit controls.
+        return max(56, measured + 26)
+    }
+
+    private func estimatedTextHeight(for text: String, width: CGFloat) -> CGFloat {
+#if canImport(UIKit)
+        let font = UIFont.preferredFont(forTextStyle: .body)
+        let attrs: [NSAttributedString.Key: Any] = [.font: font]
+        let rect = NSString(string: text).boundingRect(
+            with: CGSize(width: width, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: attrs,
+            context: nil
+        )
+        return ceil(rect.height)
+#else
+        _ = text
+        _ = width
+        return 20
+#endif
     }
 
     // MARK: - Completion Helpers
