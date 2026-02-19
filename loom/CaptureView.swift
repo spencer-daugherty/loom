@@ -80,7 +80,6 @@ struct CaptureView: View {
     @State private var showCompletedList: Bool = false
     @State private var showDuplicateHint: Bool = false
     @State private var shouldHighlightDuplicateInput: Bool = false
-    @State private var longPressingCaptureItemID: UUID?
     @State private var duplicateMessage: String = "Duplicate: action is already entered"
     @State private var highlightedDuplicateItemID: UUID? = nil
     @State private var duplicateResetWorkItem: DispatchWorkItem? = nil
@@ -451,7 +450,6 @@ struct CaptureView: View {
                         )
                         .font(.body.weight(.medium))
                         .textFieldStyle(.plain)
-                        .disabled(longPressingCaptureItemID == item.id)
                         .focused($focusedField, equals: .item(item.id))
                         .submitLabel(.done)
                         .onSubmit {
@@ -511,19 +509,6 @@ struct CaptureView: View {
                     }
                     .tint(.green)
                 }
-                .onLongPressGesture(
-                    minimumDuration: 0.45,
-                    pressing: { pressing in
-                        longPressingCaptureItemID = pressing ? item.id : nil
-                        if pressing {
-                            focusedField = nil
-                        }
-                    },
-                    perform: {
-                        openEditActionSheet(for: item)
-                        longPressingCaptureItemID = nil
-                    }
-                )
             }
             .onDelete(perform: deleteItems)
 
