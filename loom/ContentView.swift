@@ -41,7 +41,7 @@ struct ContentView: View {
     @State private var playBlockedResetWorkItem: DispatchWorkItem? = nil
     @State private var drivingCardBounceOn = false
     @Environment(\.modelContext) private var modelContext
-    private let drivingBounceTimer = Timer.publish(every: 3.0, on: .main, in: .common).autoconnect()
+    private let drivingBounceTimer = Timer.publish(every: 2.0, on: .main, in: .common).autoconnect()
 
     // Model-derived state
     @Query(sort: \ActivePlanState.id, order: .forward)
@@ -746,7 +746,7 @@ struct ContentView: View {
                 + Text(Image(systemName: "infinity"))
                 + Text(" Driving Force and ")
                 + Text(Image(systemName: "trophy"))
-                + Text(" Fulfillment areas at a minimum to create Action Blocks.")
+                + Text(" Fulfillment areas to continue.")
         case .drivingForFulfillment:
             return Text("Please complete your ")
                 + Text(Image(systemName: "infinity"))

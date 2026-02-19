@@ -151,8 +151,13 @@ struct FulfillmentView: View {
     @State private var showPreviousCategories = false
     @State private var pendingDeletePrevious: ReplacedFulfillmentCategoryArchive?
     @State private var showDeletePreviousAlert = false
+    @State private var showRecoverPreviousAlert = false
+    @State private var recoverPreviousAlertMessage = ""
+    @State private var pendingRecoverPrevious: ReplacedFulfillmentCategoryArchive?
+    @State private var showRecoverColorPicker = false
+    @State private var recoverColorOptions: [String] = []
+    @State private var selectedRecoverColorKey: String = ""
     @State private var expandedPreviousID: UUID? = nil
-    @State private var previousCardSwipeOffset: [UUID: CGFloat] = [:]
     @State private var isAddingRole = false
     @State private var newRoleText = ""
     @State private var isAddingFocus = false
@@ -241,6 +246,7 @@ struct FulfillmentView: View {
                         }
 
                         previousCategoriesSection
+
                         Spacer()
                     }
                     .padding()
@@ -299,44 +305,112 @@ struct FulfillmentView: View {
         } message: { _ in
             Text("This item will be available for 30 days in account management.")
         }
+        .alert("Can't Recover Area", isPresented: $showRecoverPreviousAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(recoverPreviousAlertMessage)
+        }
+        .sheet(isPresented: $showRecoverColorPicker) {
+            NavigationStack {
+                List {
+                    ForEach(recoverColorOptions, id: \.self) { key in
+                        Button {
+                            selectedRecoverColorKey = key
+                        } label: {
+                            HStack(spacing: 10) {
+                                Circle()
+                                    .fill(FulfillmentCategoryTheme.color(forKey: key))
+                                    .frame(width: 16, height: 16)
+                                Text(FulfillmentCategoryTheme.palette.first(where: { $0.key == key })?.name ?? key.capitalized)
+                                    .foregroundStyle(.primary)
+                                Spacer()
+                                if selectedRecoverColorKey == key {
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(.blue)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .navigationTitle("Select New Color")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button("Cancel") {
+                            showRecoverColorPicker = false
+                            pendingRecoverPrevious = nil
+                        }
+                    }
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("Recover") {
+                            guard let archive = pendingRecoverPrevious else { return }
+                            recoverPreviousCategory(archive, colorOverride: selectedRecoverColorKey)
+                            showRecoverColorPicker = false
+                            pendingRecoverPrevious = nil
+                        }
+                        .disabled(selectedRecoverColorKey.isEmpty)
+                    }
+                }
+            }
+            .presentationDetents([
+                .height(min(420, max(200, 130 + CGFloat(recoverColorOptions.count) * 52)))
+            ])
+            .presentationDragIndicator(.visible)
+        }
     }
 
     private var previousCategoriesSection: some View {
         VStack(alignment: .leading, spacing: 4) {
-            if !replacedCategoryArchives.isEmpty {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        showPreviousCategories.toggle()
-                        if !showPreviousCategories {
-                            expandedPreviousID = nil
+            HStack(alignment: .center, spacing: 8) {
+                if !replacedCategoryArchives.isEmpty {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            showPreviousCategories.toggle()
+                            if !showPreviousCategories {
+                                expandedPreviousID = nil
+                            }
                         }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: showPreviousCategories ? "chevron.up" : "chevron.down")
+                                .font(.caption2.weight(.semibold))
+                            Text("Previous Areas")
+                                .font(.caption2.weight(.semibold))
+                        }
+                        .foregroundStyle(colorScheme == .dark ? Color(.systemGray2) : .black)
+                        .padding(.vertical, 5)
+                        .padding(.horizontal, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color(.systemGray4))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.black.opacity(0.15), lineWidth: 1)
+                        )
                     }
+                    .buttonStyle(.plain)
+                }
+
+                Spacer(minLength: 0)
+
+                NavigationLink {
+                    ManageFulfillmentCategoriesView()
                 } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: showPreviousCategories ? "chevron.up" : "chevron.down")
-                            .font(.caption2.weight(.semibold))
-                        Text("Previous Categories")
-                            .font(.caption2.weight(.semibold))
-                    }
-                    .foregroundStyle(colorScheme == .dark ? Color(.systemGray2) : .black)
-                    .padding(.vertical, 5)
-                    .padding(.horizontal, 8)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color(.systemGray4))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.black.opacity(0.15), lineWidth: 1)
-                    )
+                    Text("Manage Fulfillment Areas")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.blue)
                 }
                 .buttonStyle(.plain)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxWidth: .infinity)
 
-                if showPreviousCategories {
-                    ForEach(replacedCategoryArchives, id: \.id) { archive in
-                        previousCategorySwipeContainer(for: archive)
-                    }
+            if !replacedCategoryArchives.isEmpty, showPreviousCategories {
+                ForEach(replacedCategoryArchives, id: \.id) { archive in
+                    previousCategoryCard(archive)
                 }
             }
         }
@@ -353,7 +427,7 @@ struct FulfillmentView: View {
                 HStack(spacing: 6) {
                     Text("Account")
                     Image(systemName: "person.circle")
-                    Text("→ Manage Fulfillment Categories")
+                    Text("→ Manage Fulfillment Areas")
                 }
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
@@ -514,51 +588,6 @@ struct FulfillmentView: View {
         }
     }
 
-    private func previousCategorySwipeContainer(for archive: ReplacedFulfillmentCategoryArchive) -> some View {
-        let offset = previousCardSwipeOffset[archive.id] ?? 0
-        return ZStack(alignment: .trailing) {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.red)
-            HStack {
-                Spacer(minLength: 0)
-                Button("Delete", role: .destructive) {
-                    pendingDeletePrevious = archive
-                    showDeletePreviousAlert = true
-                }
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 16)
-            }
-            previousCategoryCard(archive)
-                .offset(x: offset)
-                .gesture(
-                    DragGesture(minimumDistance: 10, coordinateSpace: .local)
-                        .onChanged { value in
-                            if value.translation.width < 0 {
-                                previousCardSwipeOffset[archive.id] = max(-104, value.translation.width)
-                            } else if (previousCardSwipeOffset[archive.id] ?? 0) < 0 {
-                                previousCardSwipeOffset[archive.id] = min(0, value.translation.width - 104)
-                            }
-                        }
-                        .onEnded { value in
-                            let shouldOpen = value.translation.width < -48 || (previousCardSwipeOffset[archive.id] ?? 0) < -52
-                            withAnimation(.easeOut(duration: 0.2)) {
-                                previousCardSwipeOffset[archive.id] = shouldOpen ? -104 : 0
-                            }
-                        }
-                )
-                .onTapGesture {
-                    if (previousCardSwipeOffset[archive.id] ?? 0) < 0 {
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            previousCardSwipeOffset[archive.id] = 0
-                        }
-                    }
-                }
-        }
-        .frame(maxWidth: .infinity)
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
-
     private func previousCategoryCard(_ archive: ReplacedFulfillmentCategoryArchive) -> some View {
         let roles = csvItems(from: archive.rolesCSV)
         let fociValues = csvItems(from: archive.fociCSV)
@@ -647,6 +676,26 @@ struct FulfillmentView: View {
                         .font(.headline)
                         .foregroundColor(.black)
                     readOnlyRows(values: passionValues)
+
+                    HStack {
+                        Button("Recover") {
+                            handleRecoverTapped(for: archive)
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.blue)
+                        .opacity(recoverButtonOpacity(for: archive))
+
+                        Spacer(minLength: 0)
+                        Button(role: .destructive) {
+                            pendingDeletePrevious = archive
+                            showDeletePreviousAlert = true
+                        } label: {
+                            Image(systemName: "trash")
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(.red)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
                 .padding(16)
                 .background(Color(.systemGray6))
@@ -697,6 +746,181 @@ struct FulfillmentView: View {
             .components(separatedBy: "|||")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+    }
+
+    private func recoverPreviousCategory(_ archive: ReplacedFulfillmentCategoryArchive, colorOverride: String? = nil) {
+        switch recoverEligibility(for: archive, colorOverride: colorOverride) {
+        case .allowed:
+            break
+        case .needsColorSelection(let available):
+            pendingRecoverPrevious = archive
+            recoverColorOptions = available
+            selectedRecoverColorKey = available.first ?? ""
+            showRecoverColorPicker = true
+            return
+        case .blocked(let message):
+            recoverPreviousAlertMessage = message
+            showRecoverPreviousAlert = true
+            return
+        }
+
+        let restored = Fulfillment(
+            category_id: archive.category_id,
+            updatedAt: .now,
+            category: archive.category,
+            category_identitiy: archive.category_identitiy,
+            category_vision: archive.category_vision,
+            category_purpose: archive.category_purpose
+        )
+        modelContext.insert(restored)
+
+        let roleValues = csvItems(from: archive.rolesCSV)
+        for (idx, value) in roleValues.enumerated() {
+            modelContext.insert(
+                FulfillmentRoles(
+                    category_id: archive.category_id,
+                    role: value,
+                    rank: idx
+                )
+            )
+        }
+
+        let focusValues = csvItems(from: archive.fociCSV)
+        for (idx, value) in focusValues.enumerated() {
+            modelContext.insert(
+                FulfillmentFocus(
+                    category_id: archive.category_id,
+                    activity: value,
+                    rank: idx
+                )
+            )
+        }
+
+        let resourceValues = csvItems(from: archive.resourcesCSV)
+        for (idx, value) in resourceValues.enumerated() {
+            modelContext.insert(
+                FulfillmentResources(
+                    category_id: archive.category_id,
+                    resource: value,
+                    rank: idx
+                )
+            )
+        }
+
+        let desiredPassionKeys = Set(csvItems(from: archive.passionsCSV).map(normalizedPassionKey))
+        if !desiredPassionKeys.isEmpty {
+            var existingJoinPassionIDs = Set(
+                passionJoins
+                    .filter { $0.category_id == archive.category_id }
+                    .map(\.passion_id)
+            )
+            for passion in passions {
+                let raw = normalizedPassionKey(passion.emotion)
+                if desiredPassionKeys.contains(raw) {
+                    if !existingJoinPassionIDs.contains(passion.passion_id) {
+                        modelContext.insert(
+                            PassionFulfillmentJoin(
+                                passion_id: passion.passion_id,
+                                category_id: archive.category_id
+                            )
+                        )
+                        existingJoinPassionIDs.insert(passion.passion_id)
+                    }
+                }
+            }
+        }
+
+        var colorMap = FulfillmentCategoryTheme.persistedColorKeys()
+        let restoredColorKey = colorOverride ?? FulfillmentCategoryTheme.colorKey(for: archive.category, colorKeys: colorMap)
+        colorMap[archive.category] = restoredColorKey
+        FulfillmentCategoryTheme.persistColorKeys(colorMap)
+
+        if expandedPreviousID == archive.id {
+            expandedPreviousID = nil
+        }
+        modelContext.delete(archive)
+        try? modelContext.save()
+    }
+
+    private enum RecoverEligibility {
+        case allowed
+        case needsColorSelection([String])
+        case blocked(String)
+    }
+
+    private func recoverEligibility(for archive: ReplacedFulfillmentCategoryArchive, colorOverride: String? = nil) -> RecoverEligibility {
+        if fulfillments.contains(where: { $0.category_id == archive.category_id }) {
+            return .blocked("An active area with this identity already exists.")
+        }
+
+        let activeCategoryKeys = Set(
+            fulfillments
+                .map { categoryKey($0.category) }
+                .filter { !$0.isEmpty }
+        )
+
+        if activeCategoryKeys.count > 6 {
+            return .blocked("Recovery is only available when there are 6 or fewer active areas.")
+        }
+
+        let archiveCategoryKey = categoryKey(archive.category)
+        if !archiveCategoryKey.isEmpty && activeCategoryKeys.contains(archiveCategoryKey) {
+            return .blocked("An active area with this name already exists.")
+        }
+
+        let colorMap = FulfillmentCategoryTheme.persistedColorKeys()
+        let usedColorKeys = Set(
+            fulfillments.map { FulfillmentCategoryTheme.colorKey(for: $0.category, colorKeys: colorMap) }
+        )
+        let desiredColorKey = colorOverride ?? FulfillmentCategoryTheme.colorKey(for: archive.category, colorKeys: colorMap)
+        let hasColorConflict = usedColorKeys.contains(desiredColorKey)
+        if hasColorConflict {
+            let available = FulfillmentCategoryTheme.palette.map(\.key).filter { !usedColorKeys.contains($0) }
+            if available.isEmpty {
+                return .blocked("No colors are available. Free up a color in active areas, then try again.")
+            }
+            return .needsColorSelection(available)
+        }
+        return .allowed
+    }
+
+    private func handleRecoverTapped(for archive: ReplacedFulfillmentCategoryArchive) {
+        switch recoverEligibility(for: archive) {
+        case .allowed:
+            recoverPreviousCategory(archive)
+        case .needsColorSelection(let available):
+            pendingRecoverPrevious = archive
+            recoverColorOptions = available
+            selectedRecoverColorKey = available.first ?? ""
+            showRecoverColorPicker = true
+        case .blocked(let message):
+            recoverPreviousAlertMessage = message
+            showRecoverPreviousAlert = true
+        }
+    }
+
+    private func isRecoverBlocked(for archive: ReplacedFulfillmentCategoryArchive) -> Bool {
+        if case .blocked = recoverEligibility(for: archive) {
+            return true
+        }
+        return false
+    }
+
+    private func recoverButtonOpacity(for archive: ReplacedFulfillmentCategoryArchive) -> Double {
+        isRecoverBlocked(for: archive) ? 0.45 : 1.0
+    }
+
+    private func normalizedPassionKey(_ raw: String) -> String {
+        let prefix = raw
+            .split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+            .first
+            .map(String.init) ?? raw
+        let key = prefix.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch key {
+        case "just", "hate": return "hate"
+        case "vows", "vow": return "vow"
+        default: return key
+        }
     }
 
     private var fulfillmentRadarHeader: some View {

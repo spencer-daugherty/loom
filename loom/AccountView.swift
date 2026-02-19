@@ -463,7 +463,7 @@ struct AccountView: View {
                     ManageFulfillmentCategoriesView()
                 } label: {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Manage Fulfillment Categories")
+                        Text("Manage Fulfillment Areas")
                             .foregroundStyle(isFulfillmentEmptyState ? .secondary : .primary)
                         if isFulfillmentEmptyState {
                             Text("Complete Fulfillment first")
@@ -1447,7 +1447,7 @@ struct ManageRawDataView: View {
     }
 }
 
-private struct ManageFulfillmentCategoriesView: View {
+struct ManageFulfillmentCategoriesView: View {
     @Environment(\.modelContext) private var context
     @Query(sort: \Fulfillment.category, order: .forward) private var fulfillments: [Fulfillment]
     @Query(sort: \FulfillmentRoles.updatedAt, order: .forward) private var allRoles: [FulfillmentRoles]
@@ -1471,6 +1471,7 @@ private struct ManageFulfillmentCategoriesView: View {
     @State private var newCategoryToOpen: String = ""
     @State private var showMinimumCategoryAlert: Bool = false
     @State private var showCannotDeleteCategoryPopup: Bool = false
+    @State private var showArchiveCompletePopup: Bool = false
     @FocusState private var isAddCategoryFocused: Bool
 
     private var categories: [String] {
@@ -1489,7 +1490,7 @@ private struct ManageFulfillmentCategoriesView: View {
             addCategoryRow
         }
         .listStyle(.plain)
-        .navigationTitle("Manage Fulfillment Categories")
+        .navigationTitle("Manage Fulfillment Areas")
         .navigationBarBackButtonHidden(isDeleteMode)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
@@ -1502,7 +1503,7 @@ private struct ManageFulfillmentCategoriesView: View {
             }
             ToolbarItem(placement: .navigationBarTrailing) {
                 if isDeleteMode {
-                    Button("Delete") {
+                    Button("Archive") {
                         deleteMarkedCategories()
                     }
                     .foregroundStyle(categoriesMarkedForDelete.isEmpty ? Color.secondary : Color.red)
@@ -1525,15 +1526,20 @@ private struct ManageFulfillmentCategoriesView: View {
                 newCategoryText = ""
             }
         }
-        .alert("Minimum 3 categories required", isPresented: $showMinimumCategoryAlert) {
+        .alert("Minimum 3 areas required", isPresented: $showMinimumCategoryAlert) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text("At least 3 categories must remain.")
+            Text("At least 3 areas must remain.")
         }
-        .alert("Can't change category", isPresented: $showCannotDeleteCategoryPopup) {
+        .alert("Can't change area", isPresented: $showCannotDeleteCategoryPopup) {
             Button("Return", role: .cancel) {}
         } message: {
-            Text("This category has an ongoing action block, chunk, or outcome.")
+            Text("This area has an ongoing action block, chunk, or outcome.")
+        }
+        .alert("Archived", isPresented: $showArchiveCompletePopup) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Archived areas are stored in the Fulfillment page and can be recovered anytime")
         }
         .sheet(isPresented: $showColorPicker) {
             FulfillmentCategoryColorPickerView(
@@ -1617,14 +1623,14 @@ private struct ManageFulfillmentCategoriesView: View {
                 HStack(spacing: 10) {
                     Image(systemName: "plus.circle")
                         .foregroundStyle(.blue)
-                    TextField("Add category", text: $newCategoryText)
+                    TextField("Add area", text: $newCategoryText)
                         .focused($isAddCategoryFocused)
                         .submitLabel(.done)
                         .onSubmit { commitAddCategory() }
                 }
                 .padding(.vertical, 4)
             } else {
-                Button("+ Add Category") {
+                Button("+ Add Area") {
                     isAddingCategory = true
                     isAddCategoryFocused = true
                 }
@@ -1719,6 +1725,7 @@ private struct ManageFulfillmentCategoriesView: View {
         try? context.save()
         isDeleteMode = false
         categoriesMarkedForDelete.removeAll()
+        showArchiveCompletePopup = true
     }
 
     private func hasOngoingUsage(in category: String) -> Bool {
@@ -1761,7 +1768,17 @@ private struct ManageFulfillmentCategoriesView: View {
             .sorted { $0.rank < $1.rank }
         let joinsForCategory = allPassionJoins.filter { $0.category_id == record.category_id }
         let passionsById = Dictionary(uniqueKeysWithValues: allPassions.map { ($0.passion_id, $0) })
-        let passionNames = joinsForCategory.compactMap { passionsById[$0.passion_id]?.emotion.capitalized }
+        let passionNames = joinsForCategory.compactMap { join -> String? in
+            guard let passion = passionsById[join.passion_id] else { return nil }
+            let emotion: String = {
+                switch passion.emotion.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+                case "just": return "Hate"
+                case "vows": return "Vow"
+                default: return passion.emotion.capitalized
+                }
+            }()
+            return "\(emotion): \(passion.passion)"
+        }
 
         let hasAnyValue =
             !record.category_identitiy.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
@@ -2582,7 +2599,17 @@ private struct FulfillmentCategoryLabelsView: View {
             .sorted { $0.rank < $1.rank }
         let joinsForCategory = allPassionJoins.filter { $0.category_id == record.category_id }
         let passionsById = Dictionary(uniqueKeysWithValues: allPassions.map { ($0.passion_id, $0) })
-        let passionNames = joinsForCategory.compactMap { passionsById[$0.passion_id]?.emotion.capitalized }
+        let passionNames = joinsForCategory.compactMap { join -> String? in
+            guard let passion = passionsById[join.passion_id] else { return nil }
+            let emotion: String = {
+                switch passion.emotion.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+                case "just": return "Hate"
+                case "vows": return "Vow"
+                default: return passion.emotion.capitalized
+                }
+            }()
+            return "\(emotion): \(passion.passion)"
+        }
 
         let hasAnyValue =
             !record.category_identitiy.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
