@@ -934,6 +934,93 @@ final class QuickCompletedCaptureItem {
 }
 
 @Model
+final class RecurringCaptureRule {
+  @Attribute(.unique) var id: UUID
+  var text: String
+  /// "week" | "month" | "year"
+  var repeatUnit: String
+  var intervalCount: Int
+  /// Calendar weekday 1...7 when repeatUnit == "week"
+  var weekday: Int?
+  /// Calendar day 1...31 when repeatUnit == "month" && monthlyPattern == "dayOfMonth"
+  var dayOfMonth: Int?
+  /// "dayOfMonth" | "ordinalWeekday" when repeatUnit == "month"
+  var monthlyPattern: String
+  /// "first" | "second" | "third" | "fourth" | "fifth" | "next_to_last" | "last"
+  var monthOrdinal: String?
+  /// "sunday"..."saturday" | "day" | "weekday" | "weekend_day"
+  var monthOrdinalWeekday: String?
+  /// Anchor date for interval-based repeats (e.g., bi-weekly, every 2 months, yearly on Apr 10).
+  var anchorDate: Date
+  var hour: Int
+  var minute: Int
+  var createdAt: Date
+  var nextRunAt: Date
+  var lastSentAt: Date?
+  /// Optional date when recurring should stop sending new actions.
+  var endDate: Date?
+  var isActive: Bool
+
+  init(
+    id: UUID = .init(),
+    text: String,
+    repeatUnit: String,
+    intervalCount: Int = 1,
+    weekday: Int? = nil,
+    dayOfMonth: Int? = nil,
+    monthlyPattern: String = "dayOfMonth",
+    monthOrdinal: String? = nil,
+    monthOrdinalWeekday: String? = nil,
+    anchorDate: Date = .now,
+    hour: Int,
+    minute: Int,
+    createdAt: Date = .now,
+    nextRunAt: Date,
+    lastSentAt: Date? = nil,
+    endDate: Date? = nil,
+    isActive: Bool = true
+  ) {
+    self.id = id
+    self.text = text
+    self.repeatUnit = repeatUnit
+    self.intervalCount = max(1, intervalCount)
+    self.weekday = weekday
+    self.dayOfMonth = dayOfMonth
+    self.monthlyPattern = monthlyPattern
+    self.monthOrdinal = monthOrdinal
+    self.monthOrdinalWeekday = monthOrdinalWeekday
+    self.anchorDate = anchorDate
+    self.hour = hour
+    self.minute = minute
+    self.createdAt = createdAt
+    self.nextRunAt = nextRunAt
+    self.lastSentAt = lastSentAt
+    self.endDate = endDate
+    self.isActive = isActive
+  }
+}
+
+@Model
+final class RecurringCaptureDispatch {
+  @Attribute(.unique) var id: UUID
+  var ruleID: UUID
+  var captureItemID: UUID
+  var sentAt: Date
+
+  init(
+    id: UUID = .init(),
+    ruleID: UUID,
+    captureItemID: UUID,
+    sentAt: Date = .now
+  ) {
+    self.id = id
+    self.ruleID = ruleID
+    self.captureItemID = captureItemID
+    self.sentAt = sentAt
+  }
+}
+
+@Model
 final class RecentlyDeletedItem {
     @Attribute(.unique) var id: UUID
     var entityType: String

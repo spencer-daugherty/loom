@@ -51,6 +51,8 @@ struct loomApp: App {
                 ActivePlanState.self,
                 RollingCaptureItem.self,
                 QuickCompletedCaptureItem.self,
+                RecurringCaptureRule.self,
+                RecurringCaptureDispatch.self,
                 RecentlyDeletedItem.self,
                 PlannedChunkActionAdHocMarker.self,
                 ActionBlocksReflectionArchive.self,

@@ -11,6 +11,49 @@ private struct PopoverHeightPreferenceKey: PreferenceKey {
     }
 }
 
+private struct AutoFocusRecurringTextField: UIViewRepresentable {
+    @Binding var text: String
+    var placeholder: String
+    var isFirstResponder: Bool
+    var onSubmit: () -> Void
+
+    final class Coordinator: NSObject, UITextFieldDelegate {
+        var parent: AutoFocusRecurringTextField
+        init(_ parent: AutoFocusRecurringTextField) { self.parent = parent }
+        @objc func textChanged(_ sender: UITextField) {
+            parent.text = sender.text ?? ""
+        }
+        func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+            parent.onSubmit()
+            return true
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeUIView(context: Context) -> UITextField {
+        let field = UITextField(frame: .zero)
+        field.placeholder = placeholder
+        field.delegate = context.coordinator
+        field.returnKeyType = .done
+        field.autocapitalizationType = .sentences
+        field.autocorrectionType = .yes
+        field.addTarget(context.coordinator, action: #selector(Coordinator.textChanged(_:)), for: .editingChanged)
+        return field
+    }
+
+    func updateUIView(_ uiView: UITextField, context: Context) {
+        if uiView.text != text { uiView.text = text }
+        if isFirstResponder {
+            if !uiView.isFirstResponder {
+                DispatchQueue.main.async { uiView.becomeFirstResponder() }
+            }
+        } else if uiView.isFirstResponder {
+            uiView.resignFirstResponder()
+        }
+    }
+}
+
 struct CaptureView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var colorScheme
@@ -20,6 +63,10 @@ struct CaptureView: View {
     private var allItems: [RollingCaptureItem]
     @Query(sort: \QuickCompletedCaptureItem.completedAt, order: .reverse)
     private var completedItems: [QuickCompletedCaptureItem]
+    @Query(sort: \RecurringCaptureRule.createdAt, order: .reverse)
+    private var recurringRules: [RecurringCaptureRule]
+    @Query(sort: \RecurringCaptureDispatch.sentAt, order: .reverse)
+    private var recurringDispatches: [RecurringCaptureDispatch]
 
     @State private var input: String = ""
     @State private var isGhostOn: Bool = false
@@ -41,12 +88,127 @@ struct CaptureView: View {
     @State private var editingItemID: UUID?
     @State private var editingItemText: String = ""
     @State private var editingItemOriginalText: String = ""
+    @State private var showRecurringSettingsSheet: Bool = false
+    @State private var recurringAddIsAdding: Bool = false
+    @State private var recurringAddText: String = ""
+    @State private var shouldFocusRecurringAddField: Bool = false
+    @State private var showRepeatEditorSheet: Bool = false
+    @State private var repeatEditorRuleID: UUID?
+    @State private var repeatDraftText: String = ""
+    @State private var repeatDraftUnit: RepeatUnit = .week
+    @State private var repeatDraftEvery: Int = 1
+    @State private var repeatDraftWeekday: Int = Calendar.current.component(.weekday, from: Date())
+    @State private var repeatDraftMonthlyPattern: MonthlyPattern = .dayOfMonth
+    @State private var repeatDraftDayOfMonth: Int = Calendar.current.component(.day, from: Date())
+    @State private var repeatDraftOrdinal: MonthlyOrdinal = .first
+    @State private var repeatDraftOrdinalWeekday: MonthlyWeekdayChoice = .monday
+    @State private var repeatDraftAnchorDate: Date = Date()
+    @State private var repeatDraftEndMode: RepeatEndMode = .never
+    @State private var repeatDraftEndDate: Date = Date()
     @FocusState private var isFullTextEditorFocused: Bool
+    @FocusState private var repeatEditorTextFocused: Bool
 
     private enum FocusField: Hashable {
         case newInput
         case item(UUID)
     }
+
+    private enum RepeatUnit: String, CaseIterable, Identifiable {
+        case week
+        case month
+        case year
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .week: return "Week"
+            case .month: return "Monthly"
+            case .year: return "Yearly"
+            }
+        }
+        var pluralLabel: String {
+            switch self {
+            case .week: return "Weeks"
+            case .month: return "Months"
+            case .year: return "Years"
+            }
+        }
+    }
+
+    private enum MonthlyPattern: String, CaseIterable, Identifiable {
+        case dayOfMonth
+        case ordinalWeekday
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .dayOfMonth: return "Each"
+            case .ordinalWeekday: return "On the..."
+            }
+        }
+    }
+
+    private enum RepeatEndMode: String, CaseIterable, Identifiable {
+        case never
+        case onDate
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .never: return "Never"
+            case .onDate: return "On Date"
+            }
+        }
+    }
+
+    private enum MonthlyOrdinal: String, CaseIterable, Identifiable {
+        case first
+        case second
+        case third
+        case fourth
+        case fifth
+        case nextToLast = "next_to_last"
+        case last
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .first: return "first"
+            case .second: return "second"
+            case .third: return "third"
+            case .fourth: return "fourth"
+            case .fifth: return "fifth"
+            case .nextToLast: return "next to last"
+            case .last: return "last"
+            }
+        }
+    }
+
+    private enum MonthlyWeekdayChoice: String, CaseIterable, Identifiable {
+        case sunday
+        case monday
+        case tuesday
+        case wednesday
+        case thursday
+        case friday
+        case saturday
+        case day
+        case weekday
+        case weekendDay = "weekend_day"
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .sunday: return "Sunday"
+            case .monday: return "Monday"
+            case .tuesday: return "Tuesday"
+            case .wednesday: return "Wednesday"
+            case .thursday: return "Thursday"
+            case .friday: return "Friday"
+            case .saturday: return "Saturday"
+            case .day: return "day"
+            case .weekday: return "weekday"
+            case .weekendDay: return "weekend day"
+            }
+        }
+    }
+
+    private let recurringDispatchTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
     private var displayItems: [RollingCaptureItem] {
         // After auto-unhide runs, anything due will have isGhost=false, so filtering is straightforward.
@@ -74,6 +236,10 @@ struct CaptureView: View {
         let query = normalizedActionText(input)
         if query.isEmpty { return completedItems }
         return completedItems.filter { normalizedActionText($0.text).contains(query) }
+    }
+
+    private var recurringDispatchItemIDs: Set<UUID> {
+        Set(recurringDispatches.map(\.captureItemID))
     }
 
     private var earliestUnhideDate: Date { Calendar.current.date(byAdding: .day, value: 7, to: Date())! }
@@ -128,6 +294,18 @@ struct CaptureView: View {
                 .navigationTitle("Rolling Capture")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button {
+                            showRecurringSettingsSheet = true
+                        } label: {
+                            Image(systemName: "gearshape")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(.primary)
+                                .padding(8)
+                                .background(.ultraThinMaterial, in: Circle())
+                        }
+                        .buttonStyle(.plain)
+                    }
                     ToolbarItem(placement: .navigationBarTrailing) {
                         if isSearchMode {
                             Button("Return") {
@@ -165,6 +343,7 @@ struct CaptureView: View {
                     .onAppear {
                         runAutoUnhideIfNeeded()
                         dedupeCaptureItemsIfNeeded()
+                        runRecurringDispatchIfNeeded()
 
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                             focusedField = .newInput
@@ -175,14 +354,18 @@ struct CaptureView: View {
                     if newPhase == .active {
                         runAutoUnhideIfNeeded()
                         dedupeCaptureItemsIfNeeded()
+                        runRecurringDispatchIfNeeded()
                     }
+                }
+                .onReceive(recurringDispatchTimer) { _ in
+                    runRecurringDispatchIfNeeded()
                 }
                 .onChange(of: allItems.map(\.id)) { _, _ in
                     dedupeCaptureItemsIfNeeded()
                 }
                 .onChange(of: focusedField) { _, newValue in
                     if newValue == nil {
-                        if isDatePickerPresented || showFullTextEditorSheet { return }
+                        if isDatePickerPresented || showFullTextEditorSheet || showRecurringSettingsSheet { return }
                         DispatchQueue.main.async {
                             focusedField = .newInput
                         }
@@ -205,12 +388,21 @@ struct CaptureView: View {
                 }
             }
         }
+        .sheet(isPresented: $showRecurringSettingsSheet) {
+            recurringSettingsSheet()
+        }
     }
 
     private func captureList(proxy: ScrollViewProxy) -> some View {
         List {
             ForEach(displayItems) { item in
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    if recurringDispatchItemIDs.contains(item.id) {
+                        Image(systemName: "repeat.circle")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+
                     TextField(
                         "Action",
                         text: Binding(
@@ -580,6 +772,822 @@ struct CaptureView: View {
             .padding(.bottom, 24)
         }
         .ignoresSafeArea(edges: .bottom)
+    }
+
+    private func recurringSettingsSheet() -> some View {
+        NavigationStack {
+            List {
+                Section("Recurring") {
+                    if recurringAddIsAdding {
+                        let hasAddText = !recurringAddText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        HStack(spacing: 12) {
+                            AutoFocusRecurringTextField(
+                                text: $recurringAddText,
+                                placeholder: "Add recurring action",
+                                isFirstResponder: shouldFocusRecurringAddField,
+                                onSubmit: { finishRecurringAddFromReturn() }
+                            )
+                            .frame(height: 22)
+
+                            if hasAddText {
+                                Button {
+                                    openRepeatEditorForNewRule()
+                                } label: {
+                                    HStack(spacing: 4) {
+                                        Text("Repeat")
+                                        Image(systemName: "chevron.up.chevron.down")
+                                    }
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.blue)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(8)
+                        .padding(.vertical, 2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+                        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                        .listRowSeparator(.hidden)
+                        .onAppear { focusRecurringAddField() }
+                    } else {
+                        Button("+ Add Recurring Action") {
+                            focusedField = nil
+                            withAnimation {
+                                recurringAddIsAdding = true
+                            }
+                            prepareRepeatDraftDefaults(using: recurringAddText)
+                            focusRecurringAddField()
+                        }
+                        .foregroundStyle(.blue)
+                        .padding(8)
+                        .padding(.vertical, 2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+                        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                        .listRowSeparator(.hidden)
+                    }
+
+                    ForEach(recurringRules.filter(\.isActive)) { rule in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(rule.text)
+                                .font(.body.weight(.medium))
+                            HStack(spacing: 8) {
+                                Text(repeatDescription(for: rule))
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                if let last = rule.lastSentAt {
+                                    Text("Last sent: \(formatDate(last))")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            Text("Next: \(formatDate(rule.nextRunAt))")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(8)
+                        .padding(.vertical, 2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+                        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                        .listRowSeparator(.hidden)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            openRepeatEditor(for: rule)
+                        }
+                        .swipeActions {
+                            Button(role: .destructive) {
+                                modelContext.delete(rule)
+                                try? modelContext.save()
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                        .tint(.red)
+                    }
+                }
+
+                Section("Deadlines") {
+                    Text("Deadline support is coming soon.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .listStyle(.plain)
+            .navigationTitle("Capture Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        resetRecurringAddUI()
+                        showRecurringSettingsSheet = false
+                    }
+                }
+            }
+            .onChange(of: recurringAddIsAdding) { _, isAdding in
+                if isAdding {
+                    focusRecurringAddField()
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .sheet(isPresented: $showRepeatEditorSheet) {
+            repeatEditorSheet()
+        }
+        .onDisappear {
+            if !showRepeatEditorSheet {
+                resetRecurringAddUI()
+            }
+        }
+    }
+
+    private func repeatEditorSheet() -> some View {
+        NavigationStack {
+            List {
+                Section {
+                    TextField("Recurring action", text: $repeatDraftText)
+                        .textInputAutocapitalization(.sentences)
+                        .autocorrectionDisabled(false)
+                        .focused($repeatEditorTextFocused)
+                        .submitLabel(.done)
+                        .onSubmit {
+                            repeatEditorTextFocused = false
+                        }
+                }
+
+                Section {
+                    HStack {
+                        Text("Frequency")
+                        Spacer()
+                        Menu {
+                            ForEach(RepeatUnit.allCases) { unit in
+                                Button(unit.label) {
+                                    repeatDraftUnit = unit
+                                    if unit == .week {
+                                        repeatDraftMonthlyPattern = .dayOfMonth
+                                    }
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(repeatDraftUnit.label)
+                                Image(systemName: "chevron.up.chevron.down")
+                            }
+                            .foregroundStyle(.blue)
+                        }
+                    }
+
+                    HStack(alignment: .center, spacing: 12) {
+                        Text("Every")
+                        Picker("Every", selection: $repeatDraftEvery) {
+                            ForEach(1..<31, id: \.self) { value in
+                                Text("\(value)").tag(value)
+                            }
+                        }
+                        .pickerStyle(.wheel)
+                        .frame(width: 84, height: 90)
+
+                        Text(everyUnitLabel(unit: repeatDraftUnit, count: repeatDraftEvery))
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
+
+                    if repeatDraftUnit == .week {
+                        HStack {
+                            Text("Day")
+                            Spacer()
+                            Menu {
+                                ForEach(1...7, id: \.self) { weekday in
+                                    Button(weekdayLabel(weekday)) {
+                                        repeatDraftWeekday = weekday
+                                    }
+                                }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Text(weekdayLabel(repeatDraftWeekday))
+                                    Image(systemName: "chevron.up.chevron.down")
+                                }
+                                .foregroundStyle(.blue)
+                            }
+                        }
+                    }
+
+                    if repeatDraftUnit == .month {
+                        Picker("Pattern", selection: $repeatDraftMonthlyPattern) {
+                            ForEach(MonthlyPattern.allCases) { pattern in
+                                Text(pattern.label).tag(pattern)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+
+                        if repeatDraftMonthlyPattern == .dayOfMonth {
+                            HStack(alignment: .center, spacing: 12) {
+                                Text("Each")
+                                Picker("Day", selection: $repeatDraftDayOfMonth) {
+                                    ForEach(1...31, id: \.self) { day in
+                                        Text("\(day)").tag(day)
+                                    }
+                                }
+                                .pickerStyle(.wheel)
+                                .frame(width: 84, height: 90)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .center)
+                        } else {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("On the...")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                HStack(spacing: 12) {
+                                    Picker("Ordinal", selection: $repeatDraftOrdinal) {
+                                        ForEach(MonthlyOrdinal.allCases) { ordinal in
+                                            Text(ordinal.label).tag(ordinal)
+                                        }
+                                    }
+                                    .pickerStyle(.wheel)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 110)
+
+                                    Picker("Weekday", selection: $repeatDraftOrdinalWeekday) {
+                                        ForEach(MonthlyWeekdayChoice.allCases) { choice in
+                                            Text(choice.label).tag(choice)
+                                        }
+                                    }
+                                    .pickerStyle(.wheel)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 110)
+                                }
+                            }
+                        }
+                    }
+
+                    if repeatDraftUnit == .year {
+                        DatePicker(
+                            "On",
+                            selection: $repeatDraftAnchorDate,
+                            displayedComponents: [.date]
+                        )
+                    }
+                } footer: {
+                    Text(repeatSummaryText())
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                Section("End Date") {
+                    HStack {
+                        Text("End Date")
+                        Spacer()
+                        Menu {
+                            ForEach(RepeatEndMode.allCases) { mode in
+                                Button(mode.label) {
+                                    repeatDraftEndMode = mode
+                                    if mode == .onDate {
+                                        clampRepeatDraftEndDateIfNeeded()
+                                    }
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(repeatDraftEndMode.label)
+                                Image(systemName: "chevron.up.chevron.down")
+                            }
+                            .foregroundStyle(.blue)
+                        }
+                    }
+
+                    if repeatDraftEndMode == .onDate {
+                        DatePicker(
+                            "End On",
+                            selection: Binding(
+                                get: { repeatDraftEndDate },
+                                set: { newValue in
+                                    let minimum = repeatDraftMinimumEndDate()
+                                    let normalized = Calendar.current.startOfDay(for: newValue)
+                                    repeatDraftEndDate = normalized < minimum ? minimum : normalized
+                                }
+                            ),
+                            in: repeatDraftMinimumEndDate()...,
+                            displayedComponents: [.date]
+                        )
+                        .datePickerStyle(.graphical)
+                    }
+                }
+            }
+            .navigationTitle("Repeat")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        cancelRepeatEditorChanges()
+                    }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        saveRepeatEditorChanges()
+                    }
+                }
+            }
+            .onAppear {
+                shouldFocusRecurringAddField = false
+                clampRepeatDraftEndDateIfNeeded()
+                if repeatEditorRuleID == nil {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        repeatEditorTextFocused = true
+                    }
+                }
+            }
+            .onChange(of: repeatDraftUnit) { _, _ in clampRepeatDraftEndDateIfNeeded() }
+            .onChange(of: repeatDraftEvery) { _, _ in clampRepeatDraftEndDateIfNeeded() }
+            .onChange(of: repeatDraftWeekday) { _, _ in clampRepeatDraftEndDateIfNeeded() }
+            .onChange(of: repeatDraftMonthlyPattern) { _, _ in clampRepeatDraftEndDateIfNeeded() }
+            .onChange(of: repeatDraftDayOfMonth) { _, _ in clampRepeatDraftEndDateIfNeeded() }
+            .onChange(of: repeatDraftOrdinal) { _, _ in clampRepeatDraftEndDateIfNeeded() }
+            .onChange(of: repeatDraftOrdinalWeekday) { _, _ in clampRepeatDraftEndDateIfNeeded() }
+            .onChange(of: repeatDraftAnchorDate) { _, _ in clampRepeatDraftEndDateIfNeeded() }
+        }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func finishRecurringAddFromReturn() {
+        let trimmed = recurringAddText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            resetRecurringAddUI()
+        } else {
+            recurringAddText = trimmed
+            openRepeatEditorForNewRule()
+        }
+    }
+
+    private func resetRecurringAddUI() {
+        recurringAddText = ""
+        recurringAddIsAdding = false
+        shouldFocusRecurringAddField = false
+        repeatEditorRuleID = nil
+        showRepeatEditorSheet = false
+        repeatEditorTextFocused = false
+    }
+
+    private func createRecurringRuleFromDraft(text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        repeatDraftText = trimmed
+        let now = Date()
+        let cal = Calendar.current
+        let anchor = cal.startOfDay(for: repeatDraftAnchorDate)
+        let next = nextRecurringDate(
+            for: repeatDraftUnit,
+            after: now,
+            interval: repeatDraftEvery,
+            anchorDate: anchor,
+            weekday: repeatDraftWeekday,
+            dayOfMonth: repeatDraftDayOfMonth,
+            monthlyPattern: repeatDraftMonthlyPattern,
+            ordinal: repeatDraftOrdinal,
+            ordinalWeekday: repeatDraftOrdinalWeekday
+        )
+        let rule = RecurringCaptureRule(
+            text: repeatDraftText,
+            repeatUnit: repeatDraftUnit.rawValue,
+            intervalCount: max(1, repeatDraftEvery),
+            weekday: repeatDraftWeekday,
+            dayOfMonth: repeatDraftDayOfMonth,
+            monthlyPattern: repeatDraftMonthlyPattern.rawValue,
+            monthOrdinal: repeatDraftOrdinal.rawValue,
+            monthOrdinalWeekday: repeatDraftOrdinalWeekday.rawValue,
+            anchorDate: anchor,
+            hour: 0,
+            minute: 0,
+            nextRunAt: next,
+            lastSentAt: nil,
+            endDate: repeatDraftEndMode == .onDate ? Calendar.current.startOfDay(for: repeatDraftEndDate) : nil
+        )
+        rule.isActive = true
+        modelContext.insert(rule)
+        try? modelContext.save()
+    }
+
+    private func focusRecurringAddField() {
+        shouldFocusRecurringAddField = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
+            shouldFocusRecurringAddField = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+            shouldFocusRecurringAddField = true
+        }
+    }
+
+    private func runRecurringDispatchIfNeeded() {
+        let now = Date()
+        let cal = Calendar.current
+        var hasMutations = false
+        for rule in recurringRules where rule.isActive {
+            if let end = rule.endDate, cal.startOfDay(for: now) > cal.startOfDay(for: end) {
+                rule.isActive = false
+                hasMutations = true
+                continue
+            }
+            var due = rule.nextRunAt
+            var sendCount = 0
+            while due <= now && sendCount < 24 {
+                if let end = rule.endDate, cal.startOfDay(for: due) > cal.startOfDay(for: end) {
+                    rule.isActive = false
+                    hasMutations = true
+                    break
+                }
+                let newItem = RollingCaptureItem(
+                    text: rule.text,
+                    isGhost: false,
+                    createdAt: due,
+                    unhideDate: nil,
+                    unhiddenAt: nil
+                )
+                modelContext.insert(newItem)
+                modelContext.insert(
+                    RecurringCaptureDispatch(
+                        ruleID: rule.id,
+                        captureItemID: newItem.id,
+                        sentAt: due
+                    )
+                )
+                rule.lastSentAt = due
+                due = nextRecurringDate(for: rule, after: due.addingTimeInterval(1))
+                sendCount += 1
+                hasMutations = true
+            }
+            if sendCount > 0 {
+                rule.nextRunAt = due
+            }
+        }
+        if hasMutations {
+            try? modelContext.save()
+        }
+    }
+
+    private func nextRecurringDate(
+        for rule: RecurringCaptureRule,
+        after date: Date
+    ) -> Date {
+        let unit = RepeatUnit(rawValue: rule.repeatUnit) ?? .week
+        return nextRecurringDate(
+            for: unit,
+            after: date,
+            interval: rule.intervalCount,
+            anchorDate: rule.anchorDate,
+            weekday: rule.weekday ?? Calendar.current.component(.weekday, from: rule.anchorDate),
+            dayOfMonth: rule.dayOfMonth ?? Calendar.current.component(.day, from: rule.anchorDate),
+            monthlyPattern: MonthlyPattern(rawValue: rule.monthlyPattern) ?? .dayOfMonth,
+            ordinal: MonthlyOrdinal(rawValue: rule.monthOrdinal ?? "") ?? .first,
+            ordinalWeekday: MonthlyWeekdayChoice(rawValue: rule.monthOrdinalWeekday ?? "") ?? .monday
+        )
+    }
+
+    private func nextRecurringDate(
+        for unit: RepeatUnit,
+        after date: Date,
+        interval: Int = 1,
+        anchorDate: Date = Date(),
+        weekday: Int = Calendar.current.component(.weekday, from: Date()),
+        dayOfMonth: Int = Calendar.current.component(.day, from: Date()),
+        monthlyPattern: MonthlyPattern = .dayOfMonth,
+        ordinal: MonthlyOrdinal = .first,
+        ordinalWeekday: MonthlyWeekdayChoice = .monday
+    ) -> Date {
+        let cal = Calendar.current
+        let safeInterval = max(1, interval)
+        let threshold = cal.startOfDay(for: date)
+
+        switch unit {
+        case .week:
+            var candidate = weeklyCandidate(
+                anchorDate: anchorDate,
+                weekday: weekday
+            )
+            var loops = 0
+            while candidate <= threshold && loops < 5000 {
+                candidate = cal.date(byAdding: .weekOfYear, value: safeInterval, to: candidate) ?? candidate.addingTimeInterval(86400 * 7)
+                loops += 1
+            }
+            return candidate
+        case .month:
+            var monthIndex = 0
+            var candidate = monthlyCandidate(
+                anchorDate: anchorDate,
+                monthOffset: monthIndex,
+                interval: safeInterval,
+                pattern: monthlyPattern,
+                dayOfMonth: dayOfMonth,
+                ordinal: ordinal,
+                ordinalWeekday: ordinalWeekday
+            )
+            while candidate <= threshold && monthIndex < 5000 {
+                monthIndex += 1
+                candidate = monthlyCandidate(
+                    anchorDate: anchorDate,
+                    monthOffset: monthIndex,
+                    interval: safeInterval,
+                    pattern: monthlyPattern,
+                    dayOfMonth: dayOfMonth,
+                    ordinal: ordinal,
+                    ordinalWeekday: ordinalWeekday
+                )
+            }
+            return candidate
+        case .year:
+            let anchor = cal.startOfDay(for: anchorDate)
+            let comps = cal.dateComponents([.month, .day], from: anchor)
+            var year = cal.component(.year, from: anchor)
+            var candidate = yearMonthDayDate(year: year, month: comps.month ?? 1, day: comps.day ?? 1)
+            while candidate <= threshold {
+                year += safeInterval
+                candidate = yearMonthDayDate(year: year, month: comps.month ?? 1, day: comps.day ?? 1)
+            }
+            return candidate
+        }
+    }
+
+    private func formatDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        formatter.setLocalizedDateFormatFromTemplate("MMM d, yyyy")
+        return formatter.string(from: date)
+    }
+
+    private func repeatDescription(for rule: RecurringCaptureRule) -> String {
+        let unit = RepeatUnit(rawValue: rule.repeatUnit) ?? .week
+        let every = max(1, rule.intervalCount)
+        switch unit {
+        case .week:
+            let day = weekdayLabel(rule.weekday ?? Calendar.current.component(.weekday, from: rule.anchorDate))
+            return every == 1 ? "Every week on \(day)" : "Every \(every) weeks on \(day)"
+        case .month:
+            let pattern = MonthlyPattern(rawValue: rule.monthlyPattern) ?? .dayOfMonth
+            if pattern == .dayOfMonth {
+                let day = rule.dayOfMonth ?? 1
+                return every == 1 ? "Every month on day \(day)" : "Every \(every) months on day \(day)"
+            }
+            let ordinal = MonthlyOrdinal(rawValue: rule.monthOrdinal ?? "") ?? .first
+            let wk = MonthlyWeekdayChoice(rawValue: rule.monthOrdinalWeekday ?? "") ?? .monday
+            return every == 1 ? "Every month on the \(ordinal.label) \(wk.label)" : "Every \(every) months on the \(ordinal.label) \(wk.label)"
+        case .year:
+            return every == 1 ? "Every year on \(formatDate(rule.anchorDate))" : "Every \(every) years on \(formatDate(rule.anchorDate))"
+        }
+    }
+
+    private func openRepeatEditorForNewRule() {
+        let trimmed = recurringAddText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        shouldFocusRecurringAddField = false
+        repeatEditorRuleID = nil
+        repeatDraftText = trimmed
+        showRepeatEditorSheet = true
+    }
+
+    private func openRepeatEditor(for rule: RecurringCaptureRule) {
+        shouldFocusRecurringAddField = false
+        loadRepeatDraft(from: rule)
+        repeatEditorRuleID = rule.id
+        showRepeatEditorSheet = true
+    }
+
+    private func saveRepeatEditorChanges() {
+        clampRepeatDraftEndDateIfNeeded()
+        let trimmed = repeatDraftText.trimmingCharacters(in: .whitespacesAndNewlines)
+        repeatDraftText = trimmed
+        if let existingID = repeatEditorRuleID {
+            guard let rule = recurringRules.first(where: { $0.id == existingID }) else {
+                showRepeatEditorSheet = false
+                return
+            }
+            if trimmed.isEmpty {
+                repeatEditorTextFocused = false
+                showRepeatEditorSheet = false
+                return
+            }
+            applyRepeatDraft(to: rule)
+            try? modelContext.save()
+            repeatEditorTextFocused = false
+            showRepeatEditorSheet = false
+            return
+        }
+
+        guard !trimmed.isEmpty else {
+            repeatEditorTextFocused = false
+            showRepeatEditorSheet = false
+            shouldFocusRecurringAddField = true
+            return
+        }
+        createRecurringRuleFromDraft(text: trimmed)
+        resetRecurringAddUI()
+    }
+
+    private func cancelRepeatEditorChanges() {
+        repeatEditorTextFocused = false
+        showRepeatEditorSheet = false
+        if repeatEditorRuleID == nil {
+            shouldFocusRecurringAddField = true
+        }
+    }
+
+    private func repeatDraftMinimumEndDate() -> Date {
+        let next = nextRecurringDate(
+            for: repeatDraftUnit,
+            after: Date(),
+            interval: repeatDraftEvery,
+            anchorDate: Calendar.current.startOfDay(for: repeatDraftAnchorDate),
+            weekday: repeatDraftWeekday,
+            dayOfMonth: repeatDraftDayOfMonth,
+            monthlyPattern: repeatDraftMonthlyPattern,
+            ordinal: repeatDraftOrdinal,
+            ordinalWeekday: repeatDraftOrdinalWeekday
+        )
+        return Calendar.current.startOfDay(for: next)
+    }
+
+    private func clampRepeatDraftEndDateIfNeeded() {
+        let minimum = repeatDraftMinimumEndDate()
+        let normalized = Calendar.current.startOfDay(for: repeatDraftEndDate)
+        repeatDraftEndDate = normalized < minimum ? minimum : normalized
+    }
+
+    private func prepareRepeatDraftDefaults(using text: String) {
+        let now = Date()
+        let cal = Calendar.current
+        repeatDraftText = text
+        repeatDraftUnit = .week
+        repeatDraftEvery = 1
+        repeatDraftWeekday = cal.component(.weekday, from: now)
+        repeatDraftMonthlyPattern = .dayOfMonth
+        repeatDraftDayOfMonth = cal.component(.day, from: now)
+        repeatDraftOrdinal = .first
+        repeatDraftOrdinalWeekday = .monday
+        repeatDraftAnchorDate = cal.startOfDay(for: now)
+        repeatDraftEndMode = .never
+        repeatDraftEndDate = cal.startOfDay(for: now)
+    }
+
+    private func loadRepeatDraft(from rule: RecurringCaptureRule) {
+        let cal = Calendar.current
+        repeatDraftText = rule.text
+        repeatDraftUnit = RepeatUnit(rawValue: rule.repeatUnit) ?? .week
+        repeatDraftEvery = max(1, rule.intervalCount)
+        repeatDraftWeekday = rule.weekday ?? cal.component(.weekday, from: rule.anchorDate)
+        repeatDraftMonthlyPattern = MonthlyPattern(rawValue: rule.monthlyPattern) ?? .dayOfMonth
+        repeatDraftDayOfMonth = rule.dayOfMonth ?? cal.component(.day, from: rule.anchorDate)
+        repeatDraftOrdinal = MonthlyOrdinal(rawValue: rule.monthOrdinal ?? "") ?? .first
+        repeatDraftOrdinalWeekday = MonthlyWeekdayChoice(rawValue: rule.monthOrdinalWeekday ?? "") ?? .monday
+        repeatDraftAnchorDate = cal.startOfDay(for: rule.anchorDate)
+        if let end = rule.endDate {
+            repeatDraftEndMode = .onDate
+            repeatDraftEndDate = cal.startOfDay(for: end)
+        } else {
+            repeatDraftEndMode = .never
+            repeatDraftEndDate = cal.startOfDay(for: Date())
+        }
+    }
+
+    private func applyRepeatDraft(to rule: RecurringCaptureRule) {
+        let cal = Calendar.current
+        rule.text = repeatDraftText
+        rule.repeatUnit = repeatDraftUnit.rawValue
+        rule.intervalCount = max(1, repeatDraftEvery)
+        rule.weekday = repeatDraftWeekday
+        rule.dayOfMonth = repeatDraftDayOfMonth
+        rule.monthlyPattern = repeatDraftMonthlyPattern.rawValue
+        rule.monthOrdinal = repeatDraftOrdinal.rawValue
+        rule.monthOrdinalWeekday = repeatDraftOrdinalWeekday.rawValue
+        rule.anchorDate = cal.startOfDay(for: repeatDraftAnchorDate)
+        rule.endDate = repeatDraftEndMode == .onDate ? cal.startOfDay(for: repeatDraftEndDate) : nil
+        let next = nextRecurringDate(for: rule, after: Date())
+        rule.nextRunAt = next
+        rule.isActive = true
+    }
+
+    private func repeatSummaryText() -> String {
+        let everyText = repeatDraftEvery == 1
+            ? "every \(everyUnitLabel(unit: repeatDraftUnit, count: 1).lowercased())"
+            : "every \(repeatDraftEvery) \(everyUnitLabel(unit: repeatDraftUnit, count: repeatDraftEvery).lowercased())"
+
+        switch repeatDraftUnit {
+        case .week:
+            return "Action will occur \(everyText) on \(weekdayLabel(repeatDraftWeekday))."
+        case .month:
+            if repeatDraftMonthlyPattern == .dayOfMonth {
+                return "Action will occur \(everyText) on day \(repeatDraftDayOfMonth)."
+            }
+            return "Action will occur \(everyText) on the \(repeatDraftOrdinal.label) \(repeatDraftOrdinalWeekday.label)."
+        case .year:
+            return "Action will occur \(everyText) on \(formatDate(repeatDraftAnchorDate))."
+        }
+    }
+
+    private func everyUnitLabel(unit: RepeatUnit, count: Int) -> String {
+        switch unit {
+        case .week:
+            return count == 1 ? "week" : "weeks"
+        case .month:
+            return count == 1 ? "month" : "months"
+        case .year:
+            return count == 1 ? "year" : "years"
+        }
+    }
+
+    private func weekdayLabel(_ weekday: Int) -> String {
+        let symbol = Calendar.current.weekdaySymbols
+        let idx = min(max(weekday, 1), 7) - 1
+        return symbol[idx]
+    }
+
+    private func weeklyCandidate(anchorDate: Date, weekday: Int) -> Date {
+        let cal = Calendar.current
+        let anchor = cal.startOfDay(for: anchorDate)
+        let baseWeek = cal.dateInterval(of: .weekOfYear, for: anchor)?.start ?? anchor
+        let offset = (weekday - cal.component(.weekday, from: baseWeek) + 7) % 7
+        return cal.date(byAdding: .day, value: offset, to: baseWeek) ?? anchor
+    }
+
+    private func monthlyCandidate(
+        anchorDate: Date,
+        monthOffset: Int,
+        interval: Int,
+        pattern: MonthlyPattern,
+        dayOfMonth: Int,
+        ordinal: MonthlyOrdinal,
+        ordinalWeekday: MonthlyWeekdayChoice
+    ) -> Date {
+        let cal = Calendar.current
+        let anchor = cal.startOfDay(for: anchorDate)
+        let shifted = cal.date(byAdding: .month, value: monthOffset * interval, to: anchor) ?? anchor
+        let comps = cal.dateComponents([.year, .month], from: shifted)
+        let year = comps.year ?? cal.component(.year, from: shifted)
+        let month = comps.month ?? cal.component(.month, from: shifted)
+        switch pattern {
+        case .dayOfMonth:
+            return yearMonthDayDate(year: year, month: month, day: dayOfMonth)
+        case .ordinalWeekday:
+            return monthlyOrdinalDate(year: year, month: month, ordinal: ordinal, weekdayChoice: ordinalWeekday)
+        }
+    }
+
+    private func yearMonthDayDate(year: Int, month: Int, day: Int) -> Date {
+        let cal = Calendar.current
+        let base = cal.date(from: DateComponents(year: year, month: month, day: 1)) ?? Date()
+        let range = cal.range(of: .day, in: .month, for: base) ?? 1..<2
+        let safeDay = min(max(day, 1), range.count)
+        return cal.date(from: DateComponents(year: year, month: month, day: safeDay)) ?? base
+    }
+
+    private func monthlyOrdinalDate(
+        year: Int,
+        month: Int,
+        ordinal: MonthlyOrdinal,
+        weekdayChoice: MonthlyWeekdayChoice
+    ) -> Date {
+        let cal = Calendar.current
+        let base = cal.date(from: DateComponents(year: year, month: month, day: 1)) ?? Date()
+        let dayRange = cal.range(of: .day, in: .month, for: base) ?? 1..<2
+        let allDates: [Date] = dayRange.compactMap { day in
+            cal.date(from: DateComponents(year: year, month: month, day: day))
+        }
+        let filtered: [Date] = allDates.filter { date in
+            switch weekdayChoice {
+            case .sunday: return cal.component(.weekday, from: date) == 1
+            case .monday: return cal.component(.weekday, from: date) == 2
+            case .tuesday: return cal.component(.weekday, from: date) == 3
+            case .wednesday: return cal.component(.weekday, from: date) == 4
+            case .thursday: return cal.component(.weekday, from: date) == 5
+            case .friday: return cal.component(.weekday, from: date) == 6
+            case .saturday: return cal.component(.weekday, from: date) == 7
+            case .day: return true
+            case .weekday:
+                let day = cal.component(.weekday, from: date)
+                return day != 1 && day != 7
+            case .weekendDay:
+                let day = cal.component(.weekday, from: date)
+                return day == 1 || day == 7
+            }
+        }
+        guard !filtered.isEmpty else { return base }
+
+        switch ordinal {
+        case .first:
+            return filtered.first ?? base
+        case .second:
+            return filtered.count > 1 ? filtered[1] : filtered.last ?? base
+        case .third:
+            return filtered.count > 2 ? filtered[2] : filtered.last ?? base
+        case .fourth:
+            return filtered.count > 3 ? filtered[3] : filtered.last ?? base
+        case .fifth:
+            return filtered.count > 4 ? filtered[4] : filtered.last ?? base
+        case .nextToLast:
+            return filtered.count > 1 ? filtered[filtered.count - 2] : filtered.last ?? base
+        case .last:
+            return filtered.last ?? base
+        }
     }
 
     private func addItem() {

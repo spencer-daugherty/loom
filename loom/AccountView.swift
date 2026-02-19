@@ -610,6 +610,8 @@ struct AccountView: View {
         deleteAllRows(ActivePlanState.self)
         deleteAllRows(RollingCaptureItem.self)
         deleteAllRows(QuickCompletedCaptureItem.self)
+        deleteAllRows(RecurringCaptureRule.self)
+        deleteAllRows(RecurringCaptureDispatch.self)
         deleteAllRows(RecentlyDeletedItem.self)
         deleteAllRows(PlannedChunkActionAdHocMarker.self)
         deleteAllRows(ActionBlocksReflectionArchive.self)
@@ -2753,6 +2755,8 @@ private struct DemoPlanViewContainer: View {
             ActivePlanState.self,
             RollingCaptureItem.self,
             QuickCompletedCaptureItem.self,
+            RecurringCaptureRule.self,
+            RecurringCaptureDispatch.self,
             PlannedChunkActionAdHocMarker.self,
             ActionBlocksReflectionArchive.self,
             ActionBlocksReflectionArchiveAction.self,
