@@ -1836,14 +1836,12 @@ private struct FulfillmentCategoryLabelsView: View {
     @State private var showRenameChoicePopup: Bool = false
     @State private var showCannotChangeCategoryPopup: Bool = false
     @State private var showCategoryRenameAlert: Bool = false
-    @State private var showNewCategoryLabelsAlert: Bool = false
     @State private var isAddingLabel: Bool = false
     @State private var newLabelText: String = ""
     @State private var editingLabelID: UUID?
     @State private var editingText: String = ""
-    @State private var showMinimumLabelsAlert: Bool = false
     @State private var showNewCategoryLabelsInlineHint: Bool = false
-    @State private var labelsInlineHintText: String = "Minimum of 3 lables required"
+    @State private var labelsInlineHintText: String = "Duplicate labels are not allowed"
     @State private var inlineHintWorkItem: DispatchWorkItem?
     @State private var highlightedRequiredDuplicateIndices: Set<Int> = []
     @State private var highlightedLabelIDs: Set<UUID> = []
@@ -1941,16 +1939,6 @@ private struct FulfillmentCategoryLabelsView: View {
             Button("Return", role: .cancel) {}
         } message: {
             Text("This category has an ongoing action block, chunk, or outcome.")
-        }
-        .alert("Minimum 3 labels required", isPresented: $showMinimumLabelsAlert) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("Each category must keep at least 3 labels.")
-        }
-        .alert("Add 3 labels", isPresented: $showNewCategoryLabelsAlert) {
-            Button("Return", role: .cancel) {}
-        } message: {
-            Text("Please add 3 or more labels for your new category before saving.")
         }
         .safeAreaInset(edge: .bottom) {
             if showNewCategoryLabelsInlineHint {
@@ -2111,14 +2099,6 @@ private struct FulfillmentCategoryLabelsView: View {
     }
 
     private var canFinalizeNewCategorySetup: Bool {
-        let normalizedFirstThree = pendingNewCategoryLabels
-            .prefix(3)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
-        guard normalizedFirstThree.count == 3 else { return false }
-        guard normalizedFirstThree.allSatisfy({ !$0.isEmpty }) else { return false }
-        guard Set(normalizedFirstThree).count == normalizedFirstThree.count else { return false }
-
-        // Do not allow duplicates anywhere in the list if user adds more than 3 labels.
         let normalizedAll = pendingNewCategoryLabels
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
             .filter { !$0.isEmpty }
@@ -2240,10 +2220,6 @@ private struct FulfillmentCategoryLabelsView: View {
     }
 
     private func attemptDelete(_ label: PlanLabel) {
-        guard labelsForCategory.count > 3 else {
-            showMinimumLabelsAlert = true
-            return
-        }
         context.delete(label)
         try? context.save()
         if editingLabelID == label.labelId {
@@ -2433,8 +2409,8 @@ private struct FulfillmentCategoryLabelsView: View {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         let normalized = cleaned.map { $0.lowercased() }
-        guard canFinalizeNewCategorySetup, normalized.count >= 3 else {
-            showNewCategoryLabelsAlert = true
+        guard canFinalizeNewCategorySetup else {
+            triggerNewCategoryLabelsValidationFeedback()
             return
         }
         if startAsNewCategorySetup {
@@ -2488,13 +2464,20 @@ private struct FulfillmentCategoryLabelsView: View {
     }
 
     private func triggerNewCategoryLabelsValidationFeedback() {
-        labelsInlineHintText = "Minimum of 3 lables required"
+        labelsInlineHintText = "Duplicate labels are not allowed"
         inlineHintWorkItem?.cancel()
-        highlightedRequiredDuplicateIndices = Set((0..<min(3, pendingNewCategoryLabels.count)).filter {
-            pendingNewCategoryLabels[$0].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        })
+        let normalized = pendingNewCategoryLabels.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+        var duplicateIdx = Set<Int>()
+        for idx in normalized.indices {
+            let value = normalized[idx]
+            guard !value.isEmpty else { continue }
+            if normalized.enumerated().contains(where: { $0.offset != idx && $0.element == value }) {
+                duplicateIdx.insert(idx)
+            }
+        }
+        highlightedRequiredDuplicateIndices = duplicateIdx
         if highlightedRequiredDuplicateIndices.isEmpty {
-            highlightedRequiredDuplicateIndices = Set([0, 1, 2].filter { pendingNewCategoryLabels.indices.contains($0) })
+            highlightedRequiredDuplicateIndices = Set(normalized.indices.filter { !normalized[$0].isEmpty })
         }
         withAnimation(.easeInOut(duration: 0.15)) {
             showNewCategoryLabelsInlineHint = true

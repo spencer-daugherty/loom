@@ -88,6 +88,15 @@ struct CaptureView: View {
     @State private var editingItemID: UUID?
     @State private var editingItemText: String = ""
     @State private var editingItemOriginalText: String = ""
+    @State private var editingItemIsGhost: Bool = false
+    @State private var editingItemHiddenUntil: Date = Calendar.current.startOfDay(for: Date())
+    @State private var editingItemOriginalHiddenUntil: Date = Calendar.current.startOfDay(for: Date())
+    @State private var editingItemDueDate: Date = Calendar.current.startOfDay(for: Date())
+    @State private var editingItemOriginalDueDate: Date = Calendar.current.startOfDay(for: Date())
+    @State private var editingItemHasDueDate: Bool = false
+    @State private var editingItemOriginalHasDueDate: Bool = false
+    @State private var editingItemAttentionDays: Int = 7
+    @State private var editingItemOriginalAttentionDays: Int = 7
     @State private var showRecurringSettingsSheet: Bool = false
     @AppStorage("capture_default_due_date_attention_days")
     private var dueDateAttentionDays: Int = 7
@@ -458,23 +467,34 @@ struct CaptureView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                    if shouldShowMoreButton(for: item.text) {
-                        Button("Show more") {
-                            openEditActionSheet(for: item)
-                        }
-                        .font(.caption)
-                        .foregroundStyle(.blue)
-                        .buttonStyle(.plain)
-                    }
-
-                    if let d = item.unhiddenAt {
-                        Text("Unhidden " + formatShortDate(d))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else if item.isGhost, let scheduled = item.unhideDate {
+                    if item.isGhost, let scheduled = item.unhideDate {
                         Text("Hidden until " + formatShortDate(scheduled))
                             .font(.caption)
                             .foregroundStyle(.secondary)
+
+                        Button {
+                            openEditActionSheet(for: item)
+                        } label: {
+                            Image(systemName: "ellipsis.rectangle")
+                                .font(.system(size: 24, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Button {
+                            openEditActionSheet(for: item)
+                        } label: {
+                            Image(systemName: "ellipsis.rectangle")
+                                .font(.system(size: 24, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+
+                        if let d = item.unhiddenAt {
+                            Text("Unhidden " + formatShortDate(d))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
                 .padding(8)
@@ -580,7 +600,12 @@ struct CaptureView: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .sheet(isPresented: $showFullTextEditorSheet) {
-            let hasChanges = editingItemText != editingItemOriginalText
+            let hasChanges =
+                editingItemText != editingItemOriginalText
+                || editingItemHasDueDate != editingItemOriginalHasDueDate
+                || (editingItemHasDueDate && Calendar.current.startOfDay(for: editingItemDueDate) != Calendar.current.startOfDay(for: editingItemOriginalDueDate))
+                || (editingItemHasDueDate && editingItemAttentionDays != editingItemOriginalAttentionDays)
+                || (editingItemIsGhost && Calendar.current.startOfDay(for: editingItemHiddenUntil) != Calendar.current.startOfDay(for: editingItemOriginalHiddenUntil))
             NavigationStack {
                 List {
                     TextEditor(text: $editingItemText)
@@ -588,6 +613,76 @@ struct CaptureView: View {
                         .textInputAutocapitalization(.sentences)
                         .autocorrectionDisabled(false)
                         .frame(height: 150)
+
+                    if editingItemIsGhost {
+                        HStack {
+                            Text("Hidden Until")
+                            Spacer()
+                            DatePicker(
+                                "",
+                                selection: $editingItemHiddenUntil,
+                                in: Calendar.current.startOfDay(for: Date())...,
+                                displayedComponents: .date
+                            )
+                            .labelsHidden()
+                            .datePickerStyle(.compact)
+                        }
+                    }
+
+                    HStack {
+                        Text("Due Date")
+                        Spacer()
+                        Menu {
+                            Button("No") { editingItemHasDueDate = false }
+                            Button("Yes") { editingItemHasDueDate = true }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(editingItemHasDueDate ? "Yes" : "No")
+                                Image(systemName: "chevron.up.chevron.down")
+                            }
+                            .foregroundStyle(.blue)
+                        }
+                    }
+
+                    if editingItemHasDueDate {
+                        HStack {
+                            Text("Set Due Date")
+                            Spacer()
+                            DatePicker(
+                                "",
+                                selection: $editingItemDueDate,
+                                in: Calendar.current.startOfDay(for: Date())...,
+                                displayedComponents: .date
+                            )
+                            .labelsHidden()
+                            .datePickerStyle(.compact)
+                        }
+
+                        HStack {
+                            Text("Attention")
+                            Spacer()
+                            Menu {
+                                ForEach(7...30, id: \.self) { value in
+                                    Button("\(value) days") {
+                                        editingItemAttentionDays = value
+                                    }
+                                }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Text("\(min(max(editingItemAttentionDays, 7), 30)) days")
+                                    Image(systemName: "chevron.up.chevron.down")
+                                }
+                                .foregroundStyle(.blue)
+                            }
+                        }
+
+                        Text(editingItemIsGhost
+                             ? "Attention triggers countdown to display and is unhidden."
+                             : "Attention triggers countdown to display.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
                 .navigationTitle("Edit Action")
                 .navigationBarTitleDisplayMode(.inline)
@@ -599,7 +694,10 @@ struct CaptureView: View {
                             editingItemID = nil
                             editingItemText = ""
                             editingItemOriginalText = ""
-                        }
+                            editingItemIsGhost = false
+                            editingItemHasDueDate = false
+                            editingItemOriginalHasDueDate = false
+                            }
                         .foregroundColor(hasChanges ? .red : .primary)
                     }
                     if hasChanges {
@@ -612,15 +710,26 @@ struct CaptureView: View {
                                     editingItemID = nil
                                     editingItemText = ""
                                     editingItemOriginalText = ""
+                                    editingItemIsGhost = false
+                                    editingItemHasDueDate = false
+                                    editingItemOriginalHasDueDate = false
                                     return
                                 }
                                 renameItemInline(item, to: editingItemText)
+                                item.dueDate = editingItemHasDueDate ? Calendar.current.startOfDay(for: editingItemDueDate) : nil
+                                item.dueDateAttentionDays = min(max(editingItemAttentionDays, 7), 30)
+                                if editingItemIsGhost {
+                                    item.unhideDate = Calendar.current.startOfDay(for: editingItemHiddenUntil)
+                                }
                                 scheduleInlineEditSave()
                                 isFullTextEditorFocused = false
                                 showFullTextEditorSheet = false
                                 editingItemID = nil
                                 editingItemText = ""
                                 editingItemOriginalText = ""
+                                editingItemIsGhost = false
+                                editingItemHasDueDate = false
+                                editingItemOriginalHasDueDate = false
                             }
                             .foregroundColor(.blue)
                         }
@@ -1450,6 +1559,9 @@ struct CaptureView: View {
 
     private func dueDate(for item: RollingCaptureItem) -> Date? {
         if item.isGhost { return nil }
+        if let explicit = item.dueDate {
+            return Calendar.current.startOfDay(for: explicit)
+        }
         guard let dispatch = recurringDispatchByItemID[item.id],
               let rule = recurringRuleByID[dispatch.ruleID] else {
             return nil
@@ -1464,7 +1576,8 @@ struct CaptureView: View {
         let cal = Calendar.current
         let today = cal.startOfDay(for: Date())
         let dayDelta = cal.dateComponents([.day], from: today, to: due).day ?? 0
-        guard dayDelta <= min(max(dueDateAttentionDays, 7), 30) else { return nil }
+        let attention = min(max(item.dueDateAttentionDays ?? dueDateAttentionDays, 7), 30)
+        guard dayDelta <= attention else { return nil }
         let visibleDays = max(0, dayDelta)
         let dayWord = visibleDays == 1 ? "day" : "days"
         return "Due in \(visibleDays) \(dayWord) on \(formatDueDate(due))"
@@ -1831,10 +1944,35 @@ struct CaptureView: View {
     }
 
     private func openEditActionSheet(for item: RollingCaptureItem) {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let resolvedDueDate = cal.startOfDay(
+            for: item.dueDate
+                ?? dueDate(for: item)
+                ?? cal.date(byAdding: .day, value: 7, to: today)
+                ?? today
+        )
+        let resolvedHiddenUntil = cal.startOfDay(
+            for: item.unhideDate
+                ?? cal.date(byAdding: .day, value: 7, to: today)
+                ?? today
+        )
+        let resolvedAttention = min(max(item.dueDateAttentionDays ?? dueDateAttentionDays, 7), 30)
+        let hasDueDate = item.dueDate != nil
+
         focusedField = nil
         editingItemID = item.id
         editingItemText = item.text
         editingItemOriginalText = item.text
+        editingItemIsGhost = item.isGhost
+        editingItemHiddenUntil = resolvedHiddenUntil
+        editingItemOriginalHiddenUntil = resolvedHiddenUntil
+        editingItemDueDate = resolvedDueDate
+        editingItemOriginalDueDate = resolvedDueDate
+        editingItemHasDueDate = hasDueDate
+        editingItemOriginalHasDueDate = hasDueDate
+        editingItemAttentionDays = resolvedAttention
+        editingItemOriginalAttentionDays = resolvedAttention
         showFullTextEditorSheet = true
     }
 

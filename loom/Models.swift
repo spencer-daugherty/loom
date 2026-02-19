@@ -891,6 +891,10 @@ final class RollingCaptureItem {
   var text: String
   var isGhost: Bool
   var createdAt: Date
+  /// Optional due date for countdown/attention display.
+  var dueDate: Date?
+  /// Optional per-item attention window (7...30 days) for due countdown display.
+  var dueDateAttentionDays: Int?
 
   /// When this ghost item should become visible.
   /// (Used only while `isGhost == true`.)
@@ -904,6 +908,8 @@ final class RollingCaptureItem {
     text: String,
     isGhost: Bool,
     createdAt: Date = .now,
+    dueDate: Date? = nil,
+    dueDateAttentionDays: Int? = nil,
     unhideDate: Date? = nil,
     unhiddenAt: Date? = nil
   ) {
@@ -911,6 +917,8 @@ final class RollingCaptureItem {
     self.text = text
     self.isGhost = isGhost
     self.createdAt = createdAt
+    self.dueDate = dueDate
+    self.dueDateAttentionDays = dueDateAttentionDays
     self.unhideDate = unhideDate
     self.unhiddenAt = unhiddenAt
   }
