@@ -940,6 +940,8 @@ final class RecurringCaptureRule {
   /// "week" | "month" | "year"
   var repeatUnit: String
   var intervalCount: Int
+  /// Number of days before each due date that item is sent to Capture (minimum 7).
+  var captureDaysBeforeDueDate: Int = 7
   /// Calendar weekday 1...7 when repeatUnit == "week"
   var weekday: Int?
   /// Calendar day 1...31 when repeatUnit == "month" && monthlyPattern == "dayOfMonth"
@@ -966,6 +968,7 @@ final class RecurringCaptureRule {
     text: String,
     repeatUnit: String,
     intervalCount: Int = 1,
+    captureDaysBeforeDueDate: Int = 7,
     weekday: Int? = nil,
     dayOfMonth: Int? = nil,
     monthlyPattern: String = "dayOfMonth",
@@ -984,6 +987,7 @@ final class RecurringCaptureRule {
     self.text = text
     self.repeatUnit = repeatUnit
     self.intervalCount = max(1, intervalCount)
+    self.captureDaysBeforeDueDate = max(7, captureDaysBeforeDueDate)
     self.weekday = weekday
     self.dayOfMonth = dayOfMonth
     self.monthlyPattern = monthlyPattern

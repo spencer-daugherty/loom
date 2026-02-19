@@ -89,6 +89,8 @@ struct CaptureView: View {
     @State private var editingItemText: String = ""
     @State private var editingItemOriginalText: String = ""
     @State private var showRecurringSettingsSheet: Bool = false
+    @AppStorage("capture_default_due_date_attention_days")
+    private var dueDateAttentionDays: Int = 7
     @State private var recurringAddIsAdding: Bool = false
     @State private var recurringAddText: String = ""
     @State private var shouldFocusRecurringAddField: Bool = false
@@ -97,6 +99,7 @@ struct CaptureView: View {
     @State private var repeatDraftText: String = ""
     @State private var repeatDraftUnit: RepeatUnit = .week
     @State private var repeatDraftEvery: Int = 1
+    @State private var repeatDraftCaptureLeadDays: Int = 7
     @State private var repeatDraftWeekday: Int = Calendar.current.component(.weekday, from: Date())
     @State private var repeatDraftMonthlyPattern: MonthlyPattern = .dayOfMonth
     @State private var repeatDraftDayOfMonth: Int = Calendar.current.component(.day, from: Date())
@@ -227,6 +230,18 @@ struct CaptureView: View {
         }
         return filtered.sorted {
             if $0.isGhost != $1.isGhost { return $0.isGhost && !$1.isGhost }
+            let lhsDueVisible = hasVisibleDueStatus(for: $0)
+            let rhsDueVisible = hasVisibleDueStatus(for: $1)
+            if lhsDueVisible != rhsDueVisible {
+                return lhsDueVisible && !rhsDueVisible
+            }
+            if lhsDueVisible, rhsDueVisible {
+                let lhsDueDate = dueDate(for: $0) ?? .distantFuture
+                let rhsDueDate = dueDate(for: $1) ?? .distantFuture
+                if lhsDueDate != rhsDueDate {
+                    return lhsDueDate < rhsDueDate
+                }
+            }
             return $0.createdAt > $1.createdAt
         }
     }
@@ -240,6 +255,20 @@ struct CaptureView: View {
 
     private var recurringDispatchItemIDs: Set<UUID> {
         Set(recurringDispatches.map(\.captureItemID))
+    }
+
+    private var recurringRuleByID: [UUID: RecurringCaptureRule] {
+        Dictionary(uniqueKeysWithValues: recurringRules.map { ($0.id, $0) })
+    }
+
+    private var recurringDispatchByItemID: [UUID: RecurringCaptureDispatch] {
+        var result: [UUID: RecurringCaptureDispatch] = [:]
+        for dispatch in recurringDispatches {
+            if result[dispatch.captureItemID] == nil {
+                result[dispatch.captureItemID] = dispatch
+            }
+        }
+        return result
     }
 
     private var earliestUnhideDate: Date { Calendar.current.date(byAdding: .day, value: 7, to: Date())! }
@@ -396,28 +425,36 @@ struct CaptureView: View {
     private func captureList(proxy: ScrollViewProxy) -> some View {
         List {
             ForEach(displayItems) { item in
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                HStack(alignment: .center, spacing: 8) {
                     if recurringDispatchItemIDs.contains(item.id) {
-                        Image(systemName: "repeat.circle")
+                        Image(systemName: "repeat")
                             .font(.system(size: 16, weight: .semibold))
                             .foregroundStyle(.secondary)
                     }
 
-                    TextField(
-                        "Action",
-                        text: Binding(
-                            get: { item.text },
-                            set: { newValue in
-                                renameItemInline(item, to: newValue)
-                            }
+                    VStack(alignment: .leading, spacing: 2) {
+                        if let dueStatus = dueDateStatusText(for: item) {
+                            Text(dueStatus)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        TextField(
+                            "Action",
+                            text: Binding(
+                                get: { item.text },
+                                set: { newValue in
+                                    renameItemInline(item, to: newValue)
+                                }
+                            )
                         )
-                    )
-                    .font(.body.weight(.medium))
-                    .textFieldStyle(.plain)
-                    .focused($focusedField, equals: .item(item.id))
-                    .submitLabel(.done)
-                    .onSubmit {
-                        focusedField = .newInput
+                        .font(.body.weight(.medium))
+                        .textFieldStyle(.plain)
+                        .focused($focusedField, equals: .item(item.id))
+                        .submitLabel(.done)
+                        .onSubmit {
+                            focusedField = .newInput
+                        }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -449,13 +486,20 @@ struct CaptureView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
                 .overlay {
-                    if item.isGhost {
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(style: StrokeStyle(lineWidth: 2, dash: [6]))
-                            .foregroundStyle(.blue)
-                    } else if highlightedDuplicateItemID == item.id {
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.red.opacity(0.85), lineWidth: 1.5)
+                    ZStack {
+                        if item.isGhost {
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(style: StrokeStyle(lineWidth: 2, dash: [6]))
+                                .foregroundStyle(.blue)
+                        }
+                        if hasVisibleDueStatus(for: item) && !item.isGhost {
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.secondary.opacity(0.85), lineWidth: 1.5)
+                        }
+                        if highlightedDuplicateItemID == item.id {
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.red.opacity(0.85), lineWidth: 1.5)
+                        }
                     }
                 }
                 .padding(.vertical, 1)
@@ -777,101 +821,8 @@ struct CaptureView: View {
     private func recurringSettingsSheet() -> some View {
         NavigationStack {
             List {
-                Section("Recurring") {
-                    if recurringAddIsAdding {
-                        let hasAddText = !recurringAddText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        HStack(spacing: 12) {
-                            AutoFocusRecurringTextField(
-                                text: $recurringAddText,
-                                placeholder: "Add recurring action",
-                                isFirstResponder: shouldFocusRecurringAddField,
-                                onSubmit: { finishRecurringAddFromReturn() }
-                            )
-                            .frame(height: 22)
-
-                            if hasAddText {
-                                Button {
-                                    openRepeatEditorForNewRule()
-                                } label: {
-                                    HStack(spacing: 4) {
-                                        Text("Repeat")
-                                        Image(systemName: "chevron.up.chevron.down")
-                                    }
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(.blue)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .padding(8)
-                        .padding(.vertical, 2)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
-                        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
-                        .listRowSeparator(.hidden)
-                        .onAppear { focusRecurringAddField() }
-                    } else {
-                        Button("+ Add Recurring Action") {
-                            focusedField = nil
-                            withAnimation {
-                                recurringAddIsAdding = true
-                            }
-                            prepareRepeatDraftDefaults(using: recurringAddText)
-                            focusRecurringAddField()
-                        }
-                        .foregroundStyle(.blue)
-                        .padding(8)
-                        .padding(.vertical, 2)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
-                        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
-                        .listRowSeparator(.hidden)
-                    }
-
-                    ForEach(recurringRules.filter(\.isActive)) { rule in
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(rule.text)
-                                .font(.body.weight(.medium))
-                            HStack(spacing: 8) {
-                                Text(repeatDescription(for: rule))
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                if let last = rule.lastSentAt {
-                                    Text("Last sent: \(formatDate(last))")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            Text("Next: \(formatDate(rule.nextRunAt))")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(8)
-                        .padding(.vertical, 2)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
-                        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
-                        .listRowSeparator(.hidden)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            openRepeatEditor(for: rule)
-                        }
-                        .swipeActions {
-                            Button(role: .destructive) {
-                                modelContext.delete(rule)
-                                try? modelContext.save()
-                            } label: {
-                                Label("Delete", systemImage: "trash")
-                            }
-                        }
-                        .tint(.red)
-                    }
-                }
-
-                Section("Deadlines") {
-                    Text("Deadline support is coming soon.")
-                        .foregroundStyle(.secondary)
-                }
+                recurringSection()
+                dueDatesSection()
             }
             .listStyle(.plain)
             .navigationTitle("Capture Settings")
@@ -900,6 +851,150 @@ struct CaptureView: View {
                 resetRecurringAddUI()
             }
         }
+    }
+
+    private func recurringSection() -> some View {
+        Section("Recurring") {
+            recurringAddRow()
+
+            ForEach(recurringRules.filter(\.isActive)) { rule in
+                recurringRuleRow(rule)
+            }
+        }
+    }
+
+    private func recurringAddRow() -> some View {
+        Group {
+            if recurringAddIsAdding {
+                let hasAddText = !recurringAddText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                HStack(spacing: 12) {
+                    AutoFocusRecurringTextField(
+                        text: $recurringAddText,
+                        placeholder: "Add recurring action",
+                        isFirstResponder: shouldFocusRecurringAddField,
+                        onSubmit: { finishRecurringAddFromReturn() }
+                    )
+                    .frame(height: 22)
+
+                    if hasAddText {
+                        Button {
+                            openRepeatEditorForNewRule()
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text("Repeat")
+                                Image(systemName: "chevron.up.chevron.down")
+                            }
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.blue)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(8)
+                .padding(.vertical, 2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                .listRowSeparator(.hidden)
+                .onAppear { focusRecurringAddField() }
+            } else {
+                Button("+ Add Recurring Action") {
+                    focusedField = nil
+                    withAnimation {
+                        recurringAddIsAdding = true
+                    }
+                    prepareRepeatDraftDefaults(using: recurringAddText)
+                    focusRecurringAddField()
+                }
+                .foregroundStyle(.blue)
+                .padding(8)
+                .padding(.vertical, 2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                .listRowSeparator(.hidden)
+            }
+        }
+    }
+
+    private func recurringRuleRow(_ rule: RecurringCaptureRule) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(rule.text)
+                .font(.body.weight(.medium))
+            HStack(spacing: 8) {
+                Text(repeatDescription(for: rule))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            if let last = rule.lastSentAt {
+                Text("Last: \(formatDate(last))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Text("Next: \(formatDate(rule.nextRunAt))")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text("Capture: \(max(7, rule.captureDaysBeforeDueDate)) days before due date")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(8)
+        .padding(.vertical, 2)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+        .listRowSeparator(.hidden)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            openRepeatEditor(for: rule)
+        }
+        .swipeActions {
+            Button(role: .destructive) {
+                modelContext.delete(rule)
+                try? modelContext.save()
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        }
+        .tint(.red)
+    }
+
+    private var dueDateAttentionBinding: Binding<Int> {
+        Binding(
+            get: { min(max(dueDateAttentionDays, 7), 30) },
+            set: { dueDateAttentionDays = min(max($0, 7), 30) }
+        )
+    }
+
+    private func dueDatesSection() -> some View {
+        Section {
+            HStack {
+                Text("Default Due Date Attention")
+                Spacer()
+                Picker("Default Due Date Attention", selection: dueDateAttentionBinding) {
+                    ForEach(7...30, id: \.self) { value in
+                        Text("\(value) days").tag(value)
+                    }
+                }
+                .pickerStyle(.wheel)
+                .frame(width: 110, height: 88)
+                .clipped()
+            }
+            .padding(8)
+            .padding(.vertical, 2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+            .listRowSeparator(.hidden)
+        } header: {
+            Text("Due Dates")
+        } footer: {
+            Text("Countdown will display and any hidden or repeated actions will be captured.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .listSectionSeparator(.hidden, edges: .bottom)
     }
 
     private func repeatEditorSheet() -> some View {
@@ -1074,6 +1169,26 @@ struct CaptureView: View {
                         .datePickerStyle(.graphical)
                     }
                 }
+
+                Section("Capture") {
+                    HStack {
+                        Text("Days Before Due Date")
+                        Spacer()
+                        Menu {
+                            ForEach(7...repeatDraftMaxCaptureLeadDays(), id: \.self) { value in
+                                Button("\(value)") {
+                                    repeatDraftCaptureLeadDays = value
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text("\(repeatDraftCaptureLeadDays)")
+                                Image(systemName: "chevron.up.chevron.down")
+                            }
+                            .foregroundStyle(.blue)
+                        }
+                    }
+                }
             }
             .navigationTitle("Repeat")
             .navigationBarTitleDisplayMode(.inline)
@@ -1092,6 +1207,7 @@ struct CaptureView: View {
             .onAppear {
                 shouldFocusRecurringAddField = false
                 clampRepeatDraftEndDateIfNeeded()
+                clampRepeatDraftCaptureLeadDaysIfNeeded()
                 if repeatEditorRuleID == nil {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                         repeatEditorTextFocused = true
@@ -1106,6 +1222,8 @@ struct CaptureView: View {
             .onChange(of: repeatDraftOrdinal) { _, _ in clampRepeatDraftEndDateIfNeeded() }
             .onChange(of: repeatDraftOrdinalWeekday) { _, _ in clampRepeatDraftEndDateIfNeeded() }
             .onChange(of: repeatDraftAnchorDate) { _, _ in clampRepeatDraftEndDateIfNeeded() }
+            .onChange(of: repeatDraftUnit) { _, _ in clampRepeatDraftCaptureLeadDaysIfNeeded() }
+            .onChange(of: repeatDraftEvery) { _, _ in clampRepeatDraftCaptureLeadDaysIfNeeded() }
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
@@ -1153,6 +1271,7 @@ struct CaptureView: View {
             text: repeatDraftText,
             repeatUnit: repeatDraftUnit.rawValue,
             intervalCount: max(1, repeatDraftEvery),
+            captureDaysBeforeDueDate: max(7, repeatDraftCaptureLeadDays),
             weekday: repeatDraftWeekday,
             dayOfMonth: repeatDraftDayOfMonth,
             monthlyPattern: repeatDraftMonthlyPattern.rawValue,
@@ -1192,7 +1311,10 @@ struct CaptureView: View {
             }
             var due = rule.nextRunAt
             var sendCount = 0
-            while due <= now && sendCount < 24 {
+            while sendCount < 24 {
+                let leadDays = max(7, rule.captureDaysBeforeDueDate)
+                let sendAt = cal.date(byAdding: .day, value: -leadDays, to: due) ?? due
+                if sendAt > now { break }
                 if let end = rule.endDate, cal.startOfDay(for: due) > cal.startOfDay(for: end) {
                     rule.isActive = false
                     hasMutations = true
@@ -1201,7 +1323,7 @@ struct CaptureView: View {
                 let newItem = RollingCaptureItem(
                     text: rule.text,
                     isGhost: false,
-                    createdAt: due,
+                    createdAt: sendAt,
                     unhideDate: nil,
                     unhiddenAt: nil
                 )
@@ -1210,10 +1332,10 @@ struct CaptureView: View {
                     RecurringCaptureDispatch(
                         ruleID: rule.id,
                         captureItemID: newItem.id,
-                        sentAt: due
+                        sentAt: sendAt
                     )
                 )
-                rule.lastSentAt = due
+                rule.lastSentAt = sendAt
                 due = nextRecurringDate(for: rule, after: due.addingTimeInterval(1))
                 sendCount += 1
                 hasMutations = true
@@ -1316,6 +1438,46 @@ struct CaptureView: View {
         return formatter.string(from: date)
     }
 
+    private func formatDueDate(_ date: Date) -> String {
+        let cal = Calendar.current
+        let currentYear = cal.component(.year, from: Date())
+        let year = cal.component(.year, from: date)
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        if year == currentYear {
+            formatter.setLocalizedDateFormatFromTemplate("E MMM d")
+        } else {
+            formatter.setLocalizedDateFormatFromTemplate("E MMM d, yyyy")
+        }
+        return formatter.string(from: date)
+    }
+
+    private func dueDate(for item: RollingCaptureItem) -> Date? {
+        if item.isGhost { return nil }
+        guard let dispatch = recurringDispatchByItemID[item.id],
+              let rule = recurringRuleByID[dispatch.ruleID] else {
+            return nil
+        }
+        let leadDays = max(7, rule.captureDaysBeforeDueDate)
+        let due = Calendar.current.date(byAdding: .day, value: leadDays, to: dispatch.sentAt) ?? dispatch.sentAt
+        return Calendar.current.startOfDay(for: due)
+    }
+
+    private func dueDateStatusText(for item: RollingCaptureItem) -> String? {
+        guard let due = dueDate(for: item) else { return nil }
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let dayDelta = cal.dateComponents([.day], from: today, to: due).day ?? 0
+        guard dayDelta <= min(max(dueDateAttentionDays, 7), 30) else { return nil }
+        let visibleDays = max(0, dayDelta)
+        let dayWord = visibleDays == 1 ? "day" : "days"
+        return "Due in \(visibleDays) \(dayWord) on \(formatDueDate(due))"
+    }
+
+    private func hasVisibleDueStatus(for item: RollingCaptureItem) -> Bool {
+        dueDateStatusText(for: item) != nil
+    }
+
     private func repeatDescription(for rule: RecurringCaptureRule) -> String {
         let unit = RepeatUnit(rawValue: rule.repeatUnit) ?? .week
         let every = max(1, rule.intervalCount)
@@ -1355,6 +1517,7 @@ struct CaptureView: View {
 
     private func saveRepeatEditorChanges() {
         clampRepeatDraftEndDateIfNeeded()
+        clampRepeatDraftCaptureLeadDaysIfNeeded()
         let trimmed = repeatDraftText.trimmingCharacters(in: .whitespacesAndNewlines)
         repeatDraftText = trimmed
         if let existingID = repeatEditorRuleID {
@@ -1413,12 +1576,30 @@ struct CaptureView: View {
         repeatDraftEndDate = normalized < minimum ? minimum : normalized
     }
 
+    private func repeatDraftMaxCaptureLeadDays() -> Int {
+        let interval = max(1, repeatDraftEvery)
+        switch repeatDraftUnit {
+        case .week:
+            return max(7, interval * 7)
+        case .month:
+            return max(7, interval * 31)
+        case .year:
+            return max(7, interval * 366)
+        }
+    }
+
+    private func clampRepeatDraftCaptureLeadDaysIfNeeded() {
+        let maxDays = repeatDraftMaxCaptureLeadDays()
+        repeatDraftCaptureLeadDays = min(max(7, repeatDraftCaptureLeadDays), maxDays)
+    }
+
     private func prepareRepeatDraftDefaults(using text: String) {
         let now = Date()
         let cal = Calendar.current
         repeatDraftText = text
         repeatDraftUnit = .week
         repeatDraftEvery = 1
+        repeatDraftCaptureLeadDays = 7
         repeatDraftWeekday = cal.component(.weekday, from: now)
         repeatDraftMonthlyPattern = .dayOfMonth
         repeatDraftDayOfMonth = cal.component(.day, from: now)
@@ -1434,6 +1615,7 @@ struct CaptureView: View {
         repeatDraftText = rule.text
         repeatDraftUnit = RepeatUnit(rawValue: rule.repeatUnit) ?? .week
         repeatDraftEvery = max(1, rule.intervalCount)
+        repeatDraftCaptureLeadDays = max(7, rule.captureDaysBeforeDueDate)
         repeatDraftWeekday = rule.weekday ?? cal.component(.weekday, from: rule.anchorDate)
         repeatDraftMonthlyPattern = MonthlyPattern(rawValue: rule.monthlyPattern) ?? .dayOfMonth
         repeatDraftDayOfMonth = rule.dayOfMonth ?? cal.component(.day, from: rule.anchorDate)
@@ -1447,6 +1629,7 @@ struct CaptureView: View {
             repeatDraftEndMode = .never
             repeatDraftEndDate = cal.startOfDay(for: Date())
         }
+        clampRepeatDraftCaptureLeadDaysIfNeeded()
     }
 
     private func applyRepeatDraft(to rule: RecurringCaptureRule) {
@@ -1454,6 +1637,7 @@ struct CaptureView: View {
         rule.text = repeatDraftText
         rule.repeatUnit = repeatDraftUnit.rawValue
         rule.intervalCount = max(1, repeatDraftEvery)
+        rule.captureDaysBeforeDueDate = max(7, repeatDraftCaptureLeadDays)
         rule.weekday = repeatDraftWeekday
         rule.dayOfMonth = repeatDraftDayOfMonth
         rule.monthlyPattern = repeatDraftMonthlyPattern.rawValue
