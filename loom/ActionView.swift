@@ -1337,7 +1337,7 @@ struct ActionView: View {
 
                     Divider().opacity(0.35)
                     HStack(alignment: .bottom) {
-                        if !isAnyFilterApplied {
+                        if !isAnyFilterApplied || isOnlyActiveOnlyFilterApplied {
                             addActionButton(for: chunk)
                         }
 
