@@ -455,7 +455,6 @@ struct PlanView: View {
                     .transition(.opacity)
             }
         }
-        .safeAreaPadding(.top)
         .safeAreaPadding(.bottom)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear {
@@ -494,6 +493,7 @@ struct PlanView: View {
         }
             }
         }
+        .toolbar(.hidden, for: .navigationBar)
     }
 
     private func saveStepOneAndAdvance() {
@@ -633,6 +633,7 @@ private struct PlanFlowHostView: View {
                 PlanStepFiveView(onBack: { step = 4 })
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
 
@@ -886,8 +887,8 @@ struct PlanStepTwoView: View {
             .padding(.bottom, 2)
         }
         .padding(.horizontal)
-        .safeAreaPadding(.top)
         .safeAreaPadding(.bottom)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .alert(
             "Have you captured everything?",
             isPresented: $isShowingNextConfirmation,
@@ -1385,8 +1386,8 @@ struct PlanStepThreeView: View {
                 .transition(.opacity)
             }
         }
-        .safeAreaPadding(.top)
         .safeAreaPadding(.bottom)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear {
             PlanLabelSeeder.seedDefaultsIfNeeded(in: modelContext)
             hasInitializedStep3State = false
@@ -2331,8 +2332,8 @@ struct PlanStepFourView: View {
                 .transition(.opacity)
             }
         }
-        .safeAreaPadding(.top)
         .safeAreaPadding(.bottom)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .sheet(isPresented: $isShowingInstructions) {
             StepFourInstructionsPopup()
                 .presentationDetents([.medium, .large])
@@ -3190,7 +3191,6 @@ struct PlanStepFiveView: View {
             }
         }
         .padding(.horizontal)
-        .safeAreaPadding(.top)
         .safeAreaPadding(.bottom)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .overlay {
