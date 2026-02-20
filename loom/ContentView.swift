@@ -1101,7 +1101,11 @@ struct ContentView: View {
             ? Color(.systemGray5)
             : Color(.secondarySystemBackground)
         return NavigationLink {
-            ObjectivesView(autoOpenAddOutcome: isObjectivesEmptyState)
+            if isObjectivesEmptyState {
+                ObjectivesStartView()
+            } else {
+                ObjectivesView(autoOpenAddOutcome: false)
+            }
         } label: {
             SectionCard(
                 iconName: "scope",
