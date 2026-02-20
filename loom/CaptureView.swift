@@ -3,6 +3,9 @@ import SwiftData
 #if canImport(UIKit)
 import UIKit
 #endif
+#if canImport(EventKit)
+import EventKit
+#endif
 
 private struct PopoverHeightPreferenceKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
@@ -83,7 +86,6 @@ struct CaptureView: View {
     @State private var duplicateMessage: String = "Duplicate: action is already entered"
     @State private var highlightedDuplicateItemID: UUID? = nil
     @State private var duplicateResetWorkItem: DispatchWorkItem? = nil
-    @State private var keyboardOverlapHeight: CGFloat = 0
     @State private var isSearchMode: Bool = false
     @State private var showFullTextEditorSheet: Bool = false
     @State private var editingItemID: UUID?
@@ -98,7 +100,17 @@ struct CaptureView: View {
     @State private var editingItemOriginalHasDueDate: Bool = false
     @State private var editingItemAttentionDays: Int = 7
     @State private var editingItemOriginalAttentionDays: Int = 7
+    @State private var editingItemSourceType: String? = nil
     @State private var showRecurringSettingsSheet: Bool = false
+    @State private var showAppleRemindersSheet: Bool = false
+    @State private var isSyncingAppleReminders: Bool = false
+    @State private var appleRemindersStatusMessage: String = ""
+    @AppStorage("capture_apple_reminders_connected")
+    private var appleRemindersConnected: Bool = false
+    @AppStorage("capture_apple_reminders_last_sync_unix")
+    private var appleRemindersLastSyncUnix: Double = 0
+    @AppStorage("capture_apple_reminders_initial_import_done")
+    private var appleRemindersInitialImportDone: Bool = false
     @AppStorage("capture_default_due_date_attention_days")
     private var dueDateAttentionDays: Int = 7
     @State private var recurringAddIsAdding: Bool = false
@@ -221,6 +233,11 @@ struct CaptureView: View {
         }
     }
 
+    private enum AppleReminderMutationAction {
+        case complete
+        case delete
+    }
+
     private let recurringDispatchTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
     private var displayItems: [RollingCaptureItem] {
@@ -300,17 +317,6 @@ struct CaptureView: View {
 
     private func normalizedActionText(_ text: String) -> String {
         text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    }
-
-    private func updateKeyboardOverlap(from notification: Notification) {
-        guard
-            let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
-        else { return }
-        let screenHeight = UIScreen.main.bounds.height
-        let overlap = max(0, screenHeight - frame.minY)
-        withAnimation(.easeOut(duration: 0.18)) {
-            keyboardOverlapHeight = overlap
-        }
     }
 
     private func shouldShowMoreButton(for text: String) -> Bool {
@@ -394,6 +400,9 @@ struct CaptureView: View {
                         runAutoUnhideIfNeeded()
                         dedupeCaptureItemsIfNeeded()
                         runRecurringDispatchIfNeeded()
+                        if appleRemindersConnected {
+                            syncAppleRemindersIntoCapture()
+                        }
 
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                             focusedField = .newInput
@@ -405,6 +414,9 @@ struct CaptureView: View {
                         runAutoUnhideIfNeeded()
                         dedupeCaptureItemsIfNeeded()
                         runRecurringDispatchIfNeeded()
+                        if appleRemindersConnected {
+                            syncAppleRemindersIntoCapture()
+                        }
                     }
                 }
                 .onReceive(recurringDispatchTimer) { _ in
@@ -433,14 +445,6 @@ struct CaptureView: View {
                         }
                     }
                 }
-                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
-                    updateKeyboardOverlap(from: notification)
-                }
-                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
-                    withAnimation(.easeOut(duration: 0.18)) {
-                        keyboardOverlapHeight = 0
-                    }
-                }
                 .safeAreaInset(edge: .bottom) {
                     captureBottomInset
                 }
@@ -455,6 +459,11 @@ struct CaptureView: View {
         List {
             ForEach(displayItems) { item in
                 HStack(alignment: .center, spacing: 8) {
+                    if item.sourceType == "apple_reminder" {
+                        Image(systemName: "link")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
                     if recurringDispatchItemIDs.contains(item.id) {
                         Image(systemName: "repeat")
                             .font(.system(size: 16, weight: .semibold))
@@ -465,7 +474,7 @@ struct CaptureView: View {
                         if let dueStatus = dueDateStatusText(for: item) {
                             Text(dueStatus)
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(dueDateStatusColor(for: item))
                         }
 
                         TextField(
@@ -703,6 +712,15 @@ struct CaptureView: View {
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
+
+                    if let sourceLabel = sourceDisplayName(for: editingItemSourceType) {
+                        HStack {
+                            Text("Source")
+                            Spacer()
+                            Text(sourceLabel)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
                 .navigationTitle("Edit Action")
                 .navigationBarTitleDisplayMode(.inline)
@@ -717,6 +735,7 @@ struct CaptureView: View {
                             editingItemIsGhost = false
                             editingItemHasDueDate = false
                             editingItemOriginalHasDueDate = false
+                            editingItemSourceType = nil
                             }
                         .foregroundColor(hasChanges ? .red : .primary)
                     }
@@ -733,6 +752,7 @@ struct CaptureView: View {
                                     editingItemIsGhost = false
                                     editingItemHasDueDate = false
                                     editingItemOriginalHasDueDate = false
+                                    editingItemSourceType = nil
                                     return
                                 }
                                 renameItemInline(item, to: editingItemText)
@@ -750,6 +770,7 @@ struct CaptureView: View {
                                 editingItemIsGhost = false
                                 editingItemHasDueDate = false
                                 editingItemOriginalHasDueDate = false
+                                editingItemSourceType = nil
                             }
                             .foregroundColor(.blue)
                         }
@@ -904,18 +925,21 @@ struct CaptureView: View {
                         .frame(width: textWidth, alignment: .leading)
 
                     if !isSearchMode {
-                        Toggle(isOn: $isGhostOn) {
-                            EmptyView()
-                        }
-                        .toggleStyle(.automatic)
-                        .labelsHidden()
-                        .frame(width: toggleWidth)
+                        HStack(spacing: spacing) {
+                            Toggle(isOn: $isGhostOn) {
+                                EmptyView()
+                            }
+                            .toggleStyle(.automatic)
+                            .labelsHidden()
+                            .frame(width: toggleWidth)
 
-                        Image(systemName: ghostClockIconName)
-                            .font(.system(size: iconSize, weight: .semibold))
-                            .foregroundStyle(isGhostOn ? .blue : .secondary)
-                            .frame(width: iconSlotWidth)
-                            .accessibilityHidden(true)
+                            Image(systemName: ghostClockIconName)
+                                .font(.system(size: iconSize, weight: .semibold))
+                                .foregroundStyle(isGhostOn ? .blue : .secondary)
+                                .frame(width: iconSlotWidth)
+                                .accessibilityHidden(true)
+                        }
+                        .frame(width: controlsWidth, alignment: .center)
                     }
                 }
                 .padding(.horizontal, sidePadding)
@@ -940,18 +964,7 @@ struct CaptureView: View {
             }
             .padding(.bottom, 24)
         }
-        .background(alignment: .bottom) {
-            Rectangle()
-                .fill(.ultraThinMaterial)
-                .opacity(keyboardToolbarBlurOpacity)
-                .ignoresSafeArea(edges: .bottom)
-        }
         .ignoresSafeArea(edges: .bottom)
-    }
-
-    private var keyboardToolbarBlurOpacity: Double {
-        let normalized = min(max(keyboardOverlapHeight / 320, 0), 1)
-        return Double(normalized) * 0.9
     }
 
     private func recurringSettingsSheet() -> some View {
@@ -982,6 +995,9 @@ struct CaptureView: View {
         .presentationDragIndicator(.visible)
         .sheet(isPresented: $showRepeatEditorSheet) {
             repeatEditorSheet()
+        }
+        .sheet(isPresented: $showAppleRemindersSheet) {
+            appleRemindersConnectSheet()
         }
         .onDisappear {
             if !showRepeatEditorSheet {
@@ -1131,7 +1147,7 @@ struct CaptureView: View {
             .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
             .listRowSeparator(.hidden)
         } header: {
-            Label("Due Dates", systemImage: "calendar")
+            Label("Due Dates", systemImage: "bell")
         } footer: {
             Text("Countdown will display and any hidden or repeated actions will be captured.")
                 .font(.footnote)
@@ -1144,37 +1160,110 @@ struct CaptureView: View {
     private func dataSourcesSection() -> some View {
         Section {
             VStack(spacing: 8) {
-                dataSourceRow(title: "Apple Reminders", icon: "list.bullet")
-                dataSourceRow(title: "Microsoft To Do", icon: "checkmark")
-                dataSourceRow(title: "Google Tasks", icon: "checkmark.circle")
+                dataSourceRow(title: "Apple Reminders", icon: "list.bullet", enabled: true) {
+                    showAppleRemindersSheet = true
+                }
+                dataSourceRow(title: "Microsoft To Do", icon: "checkmark", enabled: false, action: nil)
+                dataSourceRow(title: "Google Tasks", icon: "checkmark.circle", enabled: false, action: nil)
             }
             .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
             .listRowSeparator(.hidden)
-            .allowsHitTesting(false)
         } header: {
             Label("Data Sources & Access", systemImage: "link")
         }
     }
 
-    private func dataSourceRow(title: String, icon: String) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: icon)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 24, height: 24)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 7)
-                        .stroke(Color.secondary.opacity(0.9), lineWidth: 1)
-                )
+    private func dataSourceRow(
+        title: String,
+        icon: String,
+        enabled: Bool,
+        action: (() -> Void)?
+    ) -> some View {
+        Button {
+            action?()
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(enabled ? .primary : .secondary)
+                    .frame(width: 24, height: 24)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7)
+                            .stroke((enabled ? Color.primary : Color.secondary).opacity(0.9), lineWidth: 1)
+                    )
 
-            Text(title)
-                .foregroundStyle(.secondary)
-            Spacer()
+                Text(title)
+                    .foregroundStyle(enabled ? .primary : .secondary)
+                Spacer()
+                if enabled {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(8)
+            .padding(.vertical, 2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
         }
-        .padding(8)
-        .padding(.vertical, 2)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+    }
+
+    private func appleRemindersConnectSheet() -> some View {
+        NavigationStack {
+            List {
+                Section {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(appleRemindersConnected ? "Apple Reminders is connected." : "Connect Apple Reminders to sync active reminders into Capture.")
+                            .font(.body)
+                        if appleRemindersLastSyncUnix > 0 {
+                            Text("Last sync: \(formatDate(Date(timeIntervalSince1970: appleRemindersLastSyncUnix)))")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        if !appleRemindersStatusMessage.isEmpty {
+                            Text(appleRemindersStatusMessage)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                Section {
+                    Button {
+                        syncAppleRemindersIntoCapture()
+                    } label: {
+                        HStack {
+                            if isSyncingAppleReminders {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                            Text(appleRemindersConnected ? "Sync Now" : "Connect & Sync")
+                                .fontWeight(.semibold)
+                        }
+                    }
+                    .disabled(isSyncingAppleReminders)
+
+                    Button("Disconnect", role: .destructive) {
+                        disconnectAppleReminders()
+                    }
+                    .disabled(isSyncingAppleReminders || !appleRemindersConnected)
+                }
+            }
+            .navigationTitle("Apple Reminders")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        showAppleRemindersSheet = false
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
     }
 
     private func repeatEditorSheet() -> some View {
@@ -1653,13 +1742,24 @@ struct CaptureView: View {
         let dayDelta = cal.dateComponents([.day], from: today, to: due).day ?? 0
         let attention = min(max(item.dueDateAttentionDays ?? dueDateAttentionDays, 7), 30)
         guard dayDelta <= attention else { return nil }
-        let visibleDays = max(0, dayDelta)
-        let dayWord = visibleDays == 1 ? "day" : "days"
-        return "Due in \(visibleDays) \(dayWord) on \(formatDueDate(due))"
+        if dayDelta < 0 {
+            let overdueDays = abs(dayDelta)
+            let dayWord = overdueDays == 1 ? "day" : "days"
+            return "Due \(overdueDays) \(dayWord) ago on \(formatDueDate(due))"
+        } else {
+            let dayWord = dayDelta == 1 ? "day" : "days"
+            return "Due in \(dayDelta) \(dayWord) on \(formatDueDate(due))"
+        }
     }
 
     private func hasVisibleDueStatus(for item: RollingCaptureItem) -> Bool {
         dueDateStatusText(for: item) != nil
+    }
+
+    private func dueDateStatusColor(for item: RollingCaptureItem) -> Color {
+        guard let due = dueDate(for: item) else { return .secondary }
+        let dayDelta = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: Date()), to: due).day ?? 0
+        return dayDelta < 0 ? .red : .secondary
     }
 
     private func repeatDescription(for rule: RecurringCaptureRule) -> String {
@@ -1993,6 +2093,7 @@ struct CaptureView: View {
     private func deleteItems(at offsets: IndexSet) {
         for offset in offsets {
             let item = displayItems[offset]
+            applyAppleReminderMutationIfNeeded(for: item, action: .delete)
             RecentlyDeletedStore.trash(item, in: modelContext)
         }
         try? modelContext.save()
@@ -2048,8 +2149,177 @@ struct CaptureView: View {
         editingItemOriginalHasDueDate = hasDueDate
         editingItemAttentionDays = resolvedAttention
         editingItemOriginalAttentionDays = resolvedAttention
+        editingItemSourceType = item.sourceType
         showFullTextEditorSheet = true
     }
+
+    private func sourceDisplayName(for sourceType: String?) -> String? {
+        guard let sourceType else { return nil }
+        switch sourceType {
+        case "apple_reminder":
+            return "Apple Reminders"
+        case "microsoft_todo":
+            return "Microsoft To Do"
+        case "google_tasks":
+            return "Google Tasks"
+        default:
+            return nil
+        }
+    }
+
+    private func syncAppleRemindersIntoCapture() {
+        #if canImport(EventKit)
+        let store = EKEventStore()
+        isSyncingAppleReminders = true
+        appleRemindersStatusMessage = ""
+
+        let handleGranted: (Bool) -> Void = { granted in
+            DispatchQueue.main.async {
+                guard granted else {
+                    self.isSyncingAppleReminders = false
+                    self.appleRemindersConnected = false
+                    self.appleRemindersStatusMessage = "Access not granted."
+                    return
+                }
+                self.appleRemindersConnected = true
+                let predicate = store.predicateForIncompleteReminders(withDueDateStarting: nil, ending: nil, calendars: nil)
+                store.fetchReminders(matching: predicate) { reminders in
+                    DispatchQueue.main.async {
+                        self.upsertAppleReminders(reminders ?? [])
+                    }
+                }
+            }
+        }
+
+        if #available(iOS 17.0, *) {
+            store.requestFullAccessToReminders { granted, _ in
+                handleGranted(granted)
+            }
+        } else {
+            store.requestAccess(to: .reminder) { granted, _ in
+                handleGranted(granted)
+            }
+        }
+        #else
+        appleRemindersStatusMessage = "Apple Reminders is unavailable on this platform."
+        #endif
+    }
+
+    private func disconnectAppleReminders() {
+        let sourcedItems = allItems.filter { $0.sourceType == "apple_reminder" }
+        for item in sourcedItems {
+            modelContext.delete(item)
+        }
+        try? modelContext.save()
+        appleRemindersConnected = false
+        appleRemindersInitialImportDone = false
+        appleRemindersLastSyncUnix = 0
+        appleRemindersStatusMessage = sourcedItems.isEmpty
+            ? "Disconnected."
+            : "Disconnected and removed \(sourcedItems.count) synced items."
+    }
+
+    private func applyAppleReminderMutationIfNeeded(for item: RollingCaptureItem, action: AppleReminderMutationAction) {
+        guard item.sourceType == "apple_reminder",
+              let externalID = item.sourceExternalID,
+              !externalID.isEmpty else { return }
+        #if canImport(EventKit)
+        let store = EKEventStore()
+        let runMutation: (Bool) -> Void = { granted in
+            guard granted else { return }
+            guard let reminder = store.calendarItem(withIdentifier: externalID) as? EKReminder else { return }
+            do {
+                switch action {
+                case .complete:
+                    reminder.isCompleted = true
+                    reminder.completionDate = Date()
+                    try store.save(reminder, commit: true)
+                case .delete:
+                    try store.remove(reminder, commit: true)
+                }
+            } catch {
+                // Best-effort write-back to Apple Reminders.
+            }
+        }
+        if #available(iOS 17.0, *) {
+            store.requestFullAccessToReminders { granted, _ in
+                runMutation(granted)
+            }
+        } else {
+            store.requestAccess(to: .reminder) { granted, _ in
+                runMutation(granted)
+            }
+        }
+        #endif
+    }
+
+    #if canImport(EventKit)
+    private func upsertAppleReminders(_ reminders: [EKReminder]) {
+        let cal = Calendar.current
+        let activeIDs = Set(reminders.map(\.calendarItemIdentifier))
+        let isInitialImport = !appleRemindersInitialImportDone
+        let existingBySourceID = Dictionary(
+            uniqueKeysWithValues: allItems.compactMap { item -> (String, RollingCaptureItem)? in
+                guard item.sourceType == "apple_reminder", let sourceID = item.sourceExternalID else { return nil }
+                return (sourceID, item)
+            }
+        )
+
+        for reminder in reminders {
+            let sourceID = reminder.calendarItemIdentifier
+            let title = reminder.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !title.isEmpty else { continue }
+            let dueDate: Date? = {
+                guard let comps = reminder.dueDateComponents,
+                      let date = cal.date(from: comps) else { return nil }
+                return cal.startOfDay(for: date)
+            }()
+
+            if let existing = existingBySourceID[sourceID] {
+                existing.text = title
+                existing.dueDate = dueDate
+                existing.dueDateAttentionDays = min(max(existing.dueDateAttentionDays ?? dueDateAttentionDays, 7), 30)
+                existing.isGhost = false
+                existing.unhideDate = nil
+            } else {
+                let createdAtForInsert: Date = {
+                    // On first import, load existing no-due reminders at the bottom.
+                    if isInitialImport, dueDate == nil {
+                        return Date(timeIntervalSince1970: 1)
+                    }
+                    return .now
+                }()
+                modelContext.insert(
+                    RollingCaptureItem(
+                        text: title,
+                        isGhost: false,
+                        createdAt: createdAtForInsert,
+                        dueDate: dueDate,
+                        dueDateAttentionDays: min(max(dueDateAttentionDays, 7), 30),
+                        sourceType: "apple_reminder",
+                        sourceExternalID: sourceID,
+                        unhideDate: nil,
+                        unhiddenAt: nil
+                    )
+                )
+            }
+        }
+
+        let staleSyncedItems = allItems.filter {
+            $0.sourceType == "apple_reminder"
+            && (($0.sourceExternalID.map { !activeIDs.contains($0) }) ?? true)
+        }
+        for stale in staleSyncedItems {
+            modelContext.delete(stale)
+        }
+
+        try? modelContext.save()
+        appleRemindersInitialImportDone = true
+        appleRemindersLastSyncUnix = Date().timeIntervalSince1970
+        appleRemindersStatusMessage = "Synced \(reminders.count) active reminders."
+        isSyncingAppleReminders = false
+    }
+    #endif
 
     private func scheduleInlineEditSave() {
         inlineEditSaveTask?.cancel()
@@ -2085,7 +2355,12 @@ struct CaptureView: View {
         var toDelete: [RollingCaptureItem] = []
 
         for item in allItems {
-            let key = normalizedActionText(item.text)
+            let key: String = {
+                if let sourceType = item.sourceType, let sourceID = item.sourceExternalID, !sourceID.isEmpty {
+                    return "src|\(sourceType)|\(sourceID)"
+                }
+                return normalizedActionText(item.text)
+            }()
             guard !key.isEmpty else { continue }
 
             if let existing = keeperByKey[key] {
@@ -2118,6 +2393,7 @@ struct CaptureView: View {
     }
 
     private func quickCompleteItem(_ item: RollingCaptureItem) {
+        applyAppleReminderMutationIfNeeded(for: item, action: .complete)
         modelContext.insert(QuickCompletedCaptureItem(text: item.text, completedAt: .now))
         RecentlyDeletedStore.trash(item, in: modelContext)
         try? modelContext.save()

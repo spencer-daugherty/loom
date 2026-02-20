@@ -895,6 +895,10 @@ final class RollingCaptureItem {
   var dueDate: Date?
   /// Optional per-item attention window (7...30 days) for due countdown display.
   var dueDateAttentionDays: Int?
+  /// Optional source provider for synced items (e.g., "apple_reminder").
+  var sourceType: String?
+  /// Optional external source identifier (e.g., EKReminder identifier).
+  var sourceExternalID: String?
 
   /// When this ghost item should become visible.
   /// (Used only while `isGhost == true`.)
@@ -910,6 +914,8 @@ final class RollingCaptureItem {
     createdAt: Date = .now,
     dueDate: Date? = nil,
     dueDateAttentionDays: Int? = nil,
+    sourceType: String? = nil,
+    sourceExternalID: String? = nil,
     unhideDate: Date? = nil,
     unhiddenAt: Date? = nil
   ) {
@@ -919,6 +925,8 @@ final class RollingCaptureItem {
     self.createdAt = createdAt
     self.dueDate = dueDate
     self.dueDateAttentionDays = dueDateAttentionDays
+    self.sourceType = sourceType
+    self.sourceExternalID = sourceExternalID
     self.unhideDate = unhideDate
     self.unhiddenAt = unhiddenAt
   }
