@@ -539,7 +539,7 @@ struct CaptureView: View {
                         }
                         if hasVisibleDueStatus(for: item) && !item.isGhost {
                             RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color.secondary.opacity(0.85), lineWidth: 1.5)
+                                .stroke(dueDateStatusBorderColor(for: item), lineWidth: 1.5)
                         }
                         if highlightedDuplicateItemID == item.id {
                             RoundedRectangle(cornerRadius: 8)
@@ -1746,6 +1746,8 @@ struct CaptureView: View {
             let overdueDays = abs(dayDelta)
             let dayWord = overdueDays == 1 ? "day" : "days"
             return "Due \(overdueDays) \(dayWord) ago on \(formatDueDate(due))"
+        } else if dayDelta == 0 {
+            return "Due Today on \(formatDueDate(due))"
         } else {
             let dayWord = dayDelta == 1 ? "day" : "days"
             return "Due in \(dayDelta) \(dayWord) on \(formatDueDate(due))"
@@ -1759,7 +1761,13 @@ struct CaptureView: View {
     private func dueDateStatusColor(for item: RollingCaptureItem) -> Color {
         guard let due = dueDate(for: item) else { return .secondary }
         let dayDelta = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: Date()), to: due).day ?? 0
-        return dayDelta < 0 ? .red : .secondary
+        if dayDelta < 0 { return .red }
+        if dayDelta == 0 { return .blue }
+        return .secondary
+    }
+
+    private func dueDateStatusBorderColor(for item: RollingCaptureItem) -> Color {
+        dueDateStatusColor(for: item).opacity(0.85)
     }
 
     private func repeatDescription(for rule: RecurringCaptureRule) -> String {
