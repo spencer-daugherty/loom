@@ -83,6 +83,7 @@ struct CaptureView: View {
     @State private var duplicateMessage: String = "Duplicate: action is already entered"
     @State private var highlightedDuplicateItemID: UUID? = nil
     @State private var duplicateResetWorkItem: DispatchWorkItem? = nil
+    @State private var keyboardOverlapHeight: CGFloat = 0
     @State private var isSearchMode: Bool = false
     @State private var showFullTextEditorSheet: Bool = false
     @State private var editingItemID: UUID?
@@ -301,6 +302,17 @@ struct CaptureView: View {
         text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
+    private func updateKeyboardOverlap(from notification: Notification) {
+        guard
+            let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
+        else { return }
+        let screenHeight = UIScreen.main.bounds.height
+        let overlap = max(0, screenHeight - frame.minY)
+        withAnimation(.easeOut(duration: 0.18)) {
+            keyboardOverlapHeight = overlap
+        }
+    }
+
     private func shouldShowMoreButton(for text: String) -> Bool {
         text.contains("\n") || text.count > 42
     }
@@ -419,6 +431,14 @@ struct CaptureView: View {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                             focusedField = .newInput
                         }
+                    }
+                }
+                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
+                    updateKeyboardOverlap(from: notification)
+                }
+                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        keyboardOverlapHeight = 0
                     }
                 }
                 .safeAreaInset(edge: .bottom) {
@@ -920,7 +940,18 @@ struct CaptureView: View {
             }
             .padding(.bottom, 24)
         }
+        .background(alignment: .bottom) {
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .opacity(keyboardToolbarBlurOpacity)
+                .ignoresSafeArea(edges: .bottom)
+        }
         .ignoresSafeArea(edges: .bottom)
+    }
+
+    private var keyboardToolbarBlurOpacity: Double {
+        let normalized = min(max(keyboardOverlapHeight / 320, 0), 1)
+        return Double(normalized) * 0.9
     }
 
     private func recurringSettingsSheet() -> some View {
@@ -960,12 +991,14 @@ struct CaptureView: View {
     }
 
     private func recurringSection() -> some View {
-        Section("Recurring") {
+        Section {
             recurringAddRow()
 
             ForEach(recurringRules.filter(\.isActive)) { rule in
                 recurringRuleRow(rule)
             }
+        } header: {
+            Label("Recurring", systemImage: "repeat")
         }
     }
 
@@ -1077,14 +1110,19 @@ struct CaptureView: View {
             HStack {
                 Text("Default Due Date Attention")
                 Spacer()
-                Picker("Default Due Date Attention", selection: dueDateAttentionBinding) {
+                Menu {
                     ForEach(7...30, id: \.self) { value in
-                        Text("\(value) days").tag(value)
+                        Button("\(value) days") {
+                            dueDateAttentionBinding.wrappedValue = value
+                        }
                     }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("\(dueDateAttentionBinding.wrappedValue) days")
+                        Image(systemName: "chevron.up.chevron.down")
+                    }
+                    .foregroundStyle(.blue)
                 }
-                .pickerStyle(.wheel)
-                .frame(width: 110, height: 88)
-                .clipped()
             }
             .padding(8)
             .padding(.vertical, 2)
@@ -1093,7 +1131,7 @@ struct CaptureView: View {
             .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
             .listRowSeparator(.hidden)
         } header: {
-            Text("Due Dates")
+            Label("Due Dates", systemImage: "calendar")
         } footer: {
             Text("Countdown will display and any hidden or repeated actions will be captured.")
                 .font(.footnote)
@@ -1104,7 +1142,7 @@ struct CaptureView: View {
     }
 
     private func dataSourcesSection() -> some View {
-        Section("Data Sources & Access") {
+        Section {
             VStack(spacing: 8) {
                 dataSourceRow(title: "Apple Reminders", icon: "list.bullet")
                 dataSourceRow(title: "Microsoft To Do", icon: "checkmark")
@@ -1113,6 +1151,8 @@ struct CaptureView: View {
             .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
             .listRowSeparator(.hidden)
             .allowsHitTesting(false)
+        } header: {
+            Label("Data Sources & Access", systemImage: "link")
         }
     }
 
@@ -1124,7 +1164,7 @@ struct CaptureView: View {
                 .frame(width: 24, height: 24)
                 .overlay(
                     RoundedRectangle(cornerRadius: 7)
-                        .stroke(Color.white.opacity(0.95), lineWidth: 1)
+                        .stroke(Color.secondary.opacity(0.9), lineWidth: 1)
                 )
 
             Text(title)
