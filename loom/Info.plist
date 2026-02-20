@@ -4,6 +4,16 @@
 <dict>
 	<key>CFBundleDisplayName</key>
 	<string>Loom</string>
+	<key>GoogleOAuthClientID</key>
+	<string></string>
+	<key>GoogleOAuthRedirectURI</key>
+	<string></string>
+	<key>MicrosoftOAuthClientID</key>
+	<string></string>
+	<key>MicrosoftOAuthRedirectURI</key>
+	<string></string>
+	<key>MicrosoftOAuthTenantID</key>
+	<string>common</string>
 	<key>NSRemindersUsageDescription</key>
 	<string>Loom needs access to your reminders to sync active tasks into Capture.</string>
 	<key>NSRemindersFullAccessUsageDescription</key>

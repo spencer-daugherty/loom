@@ -3,6 +3,12 @@ import SwiftData
 #if canImport(UIKit)
 import UIKit
 #endif
+#if canImport(AuthenticationServices)
+import AuthenticationServices
+#endif
+#if canImport(CryptoKit)
+import CryptoKit
+#endif
 #if canImport(EventKit)
 import EventKit
 #endif
@@ -11,6 +17,89 @@ private struct PopoverHeightPreferenceKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()
+    }
+}
+
+private struct GoogleTaskListResponse: Decodable {
+    var items: [GoogleTaskList]?
+}
+
+private struct GoogleTaskList: Decodable {
+    var id: String?
+}
+
+private struct GoogleTaskResponse: Decodable {
+    var items: [GoogleTask]?
+}
+
+private struct GoogleTask: Decodable {
+    var id: String?
+    var title: String?
+    var due: String?
+    var status: String?
+    var deleted: Bool?
+    var hidden: Bool?
+}
+
+private struct GoogleTaskEnvelope {
+    var listID: String
+    var taskID: String
+    var title: String
+    var dueRFC3339: String?
+}
+
+private struct GoogleTokenResponse: Decodable {
+    var accessToken: String
+    var expiresIn: Int
+    var refreshToken: String?
+
+    enum CodingKeys: String, CodingKey {
+        case accessToken = "access_token"
+        case expiresIn = "expires_in"
+        case refreshToken = "refresh_token"
+    }
+}
+
+private struct MicrosoftTodoListResponse: Decodable {
+    var value: [MicrosoftTodoList]
+}
+
+private struct MicrosoftTodoList: Decodable {
+    var id: String
+}
+
+private struct MicrosoftTodoTaskResponse: Decodable {
+    var value: [MicrosoftTodoTask]
+}
+
+private struct MicrosoftTodoTask: Decodable {
+    var id: String
+    var title: String?
+    var status: String?
+    var dueDateTime: MicrosoftTodoDateTime?
+}
+
+private struct MicrosoftTodoDateTime: Decodable {
+    var dateTime: String?
+    var timeZone: String?
+}
+
+private struct MicrosoftTodoEnvelope {
+    var listID: String
+    var taskID: String
+    var title: String
+    var dueDateTimeString: String?
+}
+
+private struct MicrosoftTokenResponse: Decodable {
+    var accessToken: String
+    var expiresIn: Int
+    var refreshToken: String?
+
+    enum CodingKeys: String, CodingKey {
+        case accessToken = "access_token"
+        case expiresIn = "expires_in"
+        case refreshToken = "refresh_token"
     }
 }
 
@@ -103,14 +192,50 @@ struct CaptureView: View {
     @State private var editingItemSourceType: String? = nil
     @State private var showRecurringSettingsSheet: Bool = false
     @State private var showAppleRemindersSheet: Bool = false
+    @State private var showGoogleTasksSheet: Bool = false
+    @State private var showMicrosoftTodoSheet: Bool = false
     @State private var isSyncingAppleReminders: Bool = false
+    @State private var isSyncingGoogleTasks: Bool = false
+    @State private var isSyncingMicrosoftTodo: Bool = false
     @State private var appleRemindersStatusMessage: String = ""
+    @State private var googleTasksStatusMessage: String = ""
+    @State private var microsoftTodoStatusMessage: String = ""
+#if canImport(AuthenticationServices)
+    @State private var googleAuthSession: ASWebAuthenticationSession?
+    @State private var microsoftAuthSession: ASWebAuthenticationSession?
+#endif
+    @State private var googlePKCEVerifier: String = ""
+    @State private var microsoftPKCEVerifier: String = ""
     @AppStorage("capture_apple_reminders_connected")
     private var appleRemindersConnected: Bool = false
     @AppStorage("capture_apple_reminders_last_sync_unix")
     private var appleRemindersLastSyncUnix: Double = 0
     @AppStorage("capture_apple_reminders_initial_import_done")
     private var appleRemindersInitialImportDone: Bool = false
+    @AppStorage("capture_google_tasks_connected")
+    private var googleTasksConnected: Bool = false
+    @AppStorage("capture_google_tasks_last_sync_unix")
+    private var googleTasksLastSyncUnix: Double = 0
+    @AppStorage("capture_google_tasks_initial_import_done")
+    private var googleTasksInitialImportDone: Bool = false
+    @AppStorage("capture_google_tasks_access_token")
+    private var googleTasksAccessToken: String = ""
+    @AppStorage("capture_google_tasks_refresh_token")
+    private var googleTasksRefreshToken: String = ""
+    @AppStorage("capture_google_tasks_access_expiry_unix")
+    private var googleTasksAccessExpiryUnix: Double = 0
+    @AppStorage("capture_microsoft_todo_connected")
+    private var microsoftTodoConnected: Bool = false
+    @AppStorage("capture_microsoft_todo_last_sync_unix")
+    private var microsoftTodoLastSyncUnix: Double = 0
+    @AppStorage("capture_microsoft_todo_initial_import_done")
+    private var microsoftTodoInitialImportDone: Bool = false
+    @AppStorage("capture_microsoft_todo_access_token")
+    private var microsoftTodoAccessToken: String = ""
+    @AppStorage("capture_microsoft_todo_refresh_token")
+    private var microsoftTodoRefreshToken: String = ""
+    @AppStorage("capture_microsoft_todo_access_expiry_unix")
+    private var microsoftTodoAccessExpiryUnix: Double = 0
     @AppStorage("capture_default_due_date_attention_days")
     private var dueDateAttentionDays: Int = 7
     @State private var recurringAddIsAdding: Bool = false
@@ -233,7 +358,7 @@ struct CaptureView: View {
         }
     }
 
-    private enum AppleReminderMutationAction {
+    private enum ExternalMutationAction {
         case complete
         case delete
     }
@@ -403,6 +528,12 @@ struct CaptureView: View {
                         if appleRemindersConnected {
                             syncAppleRemindersIntoCapture()
                         }
+                        if googleTasksConnected {
+                            syncGoogleTasksIntoCapture()
+                        }
+                        if microsoftTodoConnected {
+                            syncMicrosoftTodoIntoCapture()
+                        }
 
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                             focusedField = .newInput
@@ -416,6 +547,12 @@ struct CaptureView: View {
                         runRecurringDispatchIfNeeded()
                         if appleRemindersConnected {
                             syncAppleRemindersIntoCapture()
+                        }
+                        if googleTasksConnected {
+                            syncGoogleTasksIntoCapture()
+                        }
+                        if microsoftTodoConnected {
+                            syncMicrosoftTodoIntoCapture()
                         }
                     }
                 }
@@ -459,7 +596,7 @@ struct CaptureView: View {
         List {
             ForEach(displayItems) { item in
                 HStack(alignment: .center, spacing: 8) {
-                    if item.sourceType == "apple_reminder" {
+                    if item.sourceType != nil {
                         Image(systemName: "link")
                             .font(.system(size: 16, weight: .semibold))
                             .foregroundStyle(.secondary)
@@ -996,6 +1133,12 @@ struct CaptureView: View {
         .sheet(isPresented: $showRepeatEditorSheet) {
             repeatEditorSheet()
         }
+        .sheet(isPresented: $showGoogleTasksSheet) {
+            googleTasksConnectSheet()
+        }
+        .sheet(isPresented: $showMicrosoftTodoSheet) {
+            microsoftTodoConnectSheet()
+        }
         .sheet(isPresented: $showAppleRemindersSheet) {
             appleRemindersConnectSheet()
         }
@@ -1163,8 +1306,12 @@ struct CaptureView: View {
                 dataSourceRow(title: "Apple Reminders", icon: "list.bullet", enabled: true) {
                     showAppleRemindersSheet = true
                 }
-                dataSourceRow(title: "Microsoft To Do", icon: "checkmark", enabled: false, action: nil)
-                dataSourceRow(title: "Google Tasks", icon: "checkmark.circle", enabled: false, action: nil)
+                dataSourceRow(title: "Microsoft To Do", icon: "checkmark", enabled: true) {
+                    showMicrosoftTodoSheet = true
+                }
+                dataSourceRow(title: "Google Tasks", icon: "checkmark.circle", enabled: true) {
+                    showGoogleTasksSheet = true
+                }
             }
             .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
             .listRowSeparator(.hidden)
@@ -1258,6 +1405,118 @@ struct CaptureView: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Done") {
                         showAppleRemindersSheet = false
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func googleTasksConnectSheet() -> some View {
+        NavigationStack {
+            List {
+                Section {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(googleTasksConnected ? "Google Tasks is connected." : "Connect Google Tasks to sync active tasks into Capture.")
+                            .font(.body)
+                        if googleTasksLastSyncUnix > 0 {
+                            Text("Last sync: \(formatDate(Date(timeIntervalSince1970: googleTasksLastSyncUnix)))")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        if !googleTasksStatusMessage.isEmpty {
+                            Text(googleTasksStatusMessage)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                Section {
+                    Button {
+                        syncGoogleTasksIntoCapture()
+                    } label: {
+                        HStack {
+                            if isSyncingGoogleTasks {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                            Text(googleTasksConnected ? "Sync Now" : "Connect & Sync")
+                                .fontWeight(.semibold)
+                        }
+                    }
+                    .disabled(isSyncingGoogleTasks)
+
+                    Button("Disconnect", role: .destructive) {
+                        disconnectGoogleTasks()
+                    }
+                    .disabled(isSyncingGoogleTasks || !googleTasksConnected)
+                }
+            }
+            .navigationTitle("Google Tasks")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        showGoogleTasksSheet = false
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func microsoftTodoConnectSheet() -> some View {
+        NavigationStack {
+            List {
+                Section {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(microsoftTodoConnected ? "Microsoft To Do is connected." : "Connect Microsoft To Do to sync active tasks into Capture.")
+                            .font(.body)
+                        if microsoftTodoLastSyncUnix > 0 {
+                            Text("Last sync: \(formatDate(Date(timeIntervalSince1970: microsoftTodoLastSyncUnix)))")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        if !microsoftTodoStatusMessage.isEmpty {
+                            Text(microsoftTodoStatusMessage)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                Section {
+                    Button {
+                        syncMicrosoftTodoIntoCapture()
+                    } label: {
+                        HStack {
+                            if isSyncingMicrosoftTodo {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                            Text(microsoftTodoConnected ? "Sync Now" : "Connect & Sync")
+                                .fontWeight(.semibold)
+                        }
+                    }
+                    .disabled(isSyncingMicrosoftTodo)
+
+                    Button("Disconnect", role: .destructive) {
+                        disconnectMicrosoftTodo()
+                    }
+                    .disabled(isSyncingMicrosoftTodo || !microsoftTodoConnected)
+                }
+            }
+            .navigationTitle("Microsoft To Do")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        showMicrosoftTodoSheet = false
                     }
                 }
             }
@@ -2101,7 +2360,7 @@ struct CaptureView: View {
     private func deleteItems(at offsets: IndexSet) {
         for offset in offsets {
             let item = displayItems[offset]
-            applyAppleReminderMutationIfNeeded(for: item, action: .delete)
+            applyExternalSourceMutationIfNeeded(for: item, action: .delete)
             RecentlyDeletedStore.trash(item, in: modelContext)
         }
         try? modelContext.save()
@@ -2227,10 +2486,284 @@ struct CaptureView: View {
             : "Disconnected and removed \(sourcedItems.count) synced items."
     }
 
-    private func applyAppleReminderMutationIfNeeded(for item: RollingCaptureItem, action: AppleReminderMutationAction) {
-        guard item.sourceType == "apple_reminder",
-              let externalID = item.sourceExternalID,
-              !externalID.isEmpty else { return }
+    private func syncGoogleTasksIntoCapture() {
+        guard let config = googleOAuthConfig() else {
+            googleTasksStatusMessage = "Missing Google OAuth config in Info.plist."
+            return
+        }
+        isSyncingGoogleTasks = true
+        googleTasksStatusMessage = ""
+
+        googleValidAccessToken { token in
+            guard let token else {
+                self.startGoogleOAuthFlow(config: config)
+                return
+            }
+            Task { @MainActor in
+                await self.fetchAndUpsertGoogleTasks(accessToken: token)
+            }
+        }
+    }
+
+    private func disconnectGoogleTasks() {
+        let sourcedItems = allItems.filter { $0.sourceType == "google_tasks" }
+        for item in sourcedItems {
+            modelContext.delete(item)
+        }
+        try? modelContext.save()
+        googleTasksConnected = false
+        googleTasksInitialImportDone = false
+        googleTasksLastSyncUnix = 0
+        googleTasksAccessToken = ""
+        googleTasksRefreshToken = ""
+        googleTasksAccessExpiryUnix = 0
+        googleTasksStatusMessage = sourcedItems.isEmpty
+            ? "Disconnected."
+            : "Disconnected and removed \(sourcedItems.count) synced items."
+    }
+
+    private func syncMicrosoftTodoIntoCapture() {
+        let config = microsoftOAuthConfig()
+        guard !config.clientID.isEmpty, !config.redirectURI.isEmpty else {
+            microsoftTodoStatusMessage = "Missing Microsoft OAuth config in Info.plist."
+            return
+        }
+        isSyncingMicrosoftTodo = true
+        microsoftTodoStatusMessage = ""
+
+        microsoftValidAccessToken { token in
+            guard let token else {
+                self.startMicrosoftOAuthFlow(config: config)
+                return
+            }
+            Task { @MainActor in
+                await self.fetchAndUpsertMicrosoftTodoTasks(accessToken: token)
+            }
+        }
+    }
+
+    private func disconnectMicrosoftTodo() {
+        let sourcedItems = allItems.filter { $0.sourceType == "microsoft_todo" }
+        for item in sourcedItems {
+            modelContext.delete(item)
+        }
+        try? modelContext.save()
+        microsoftTodoConnected = false
+        microsoftTodoInitialImportDone = false
+        microsoftTodoLastSyncUnix = 0
+        microsoftTodoAccessToken = ""
+        microsoftTodoRefreshToken = ""
+        microsoftTodoAccessExpiryUnix = 0
+        microsoftTodoStatusMessage = sourcedItems.isEmpty
+            ? "Disconnected."
+            : "Disconnected and removed \(sourcedItems.count) synced items."
+    }
+
+    private func microsoftOAuthConfig() -> (clientID: String, redirectURI: String, tenantID: String) {
+        let rawClientID = (Bundle.main.object(forInfoDictionaryKey: "MicrosoftOAuthClientID") as? String) ?? ""
+        let rawRedirectURI = (Bundle.main.object(forInfoDictionaryKey: "MicrosoftOAuthRedirectURI") as? String) ?? ""
+        let rawTenantID = (Bundle.main.object(forInfoDictionaryKey: "MicrosoftOAuthTenantID") as? String) ?? "common"
+        let clientID = rawClientID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let redirectURI = rawRedirectURI.trimmingCharacters(in: .whitespacesAndNewlines)
+        let tenantID = rawTenantID.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (
+            clientID: clientID,
+            redirectURI: redirectURI,
+            tenantID: tenantID.isEmpty ? "common" : tenantID
+        )
+    }
+
+    private func microsoftValidAccessToken(completion: @escaping (String?) -> Void) {
+        let config = microsoftOAuthConfig()
+        let now = Date().timeIntervalSince1970
+        if !microsoftTodoAccessToken.isEmpty, microsoftTodoAccessExpiryUnix > now + 30 {
+            completion(microsoftTodoAccessToken)
+            return
+        }
+        guard !config.clientID.isEmpty, !config.redirectURI.isEmpty, !microsoftTodoRefreshToken.isEmpty else {
+            completion(nil)
+            return
+        }
+        Task {
+            let refreshed = await refreshMicrosoftAccessToken(config: config)
+            await MainActor.run {
+                completion(refreshed)
+            }
+        }
+    }
+
+    private func startMicrosoftOAuthFlow(config: (clientID: String, redirectURI: String, tenantID: String)) {
+        #if canImport(AuthenticationServices)
+        guard !config.clientID.isEmpty, !config.redirectURI.isEmpty else {
+            isSyncingMicrosoftTodo = false
+            microsoftTodoStatusMessage = "Missing Microsoft OAuth config in Info.plist."
+            return
+        }
+        guard let callbackScheme = URL(string: config.redirectURI)?.scheme else {
+            isSyncingMicrosoftTodo = false
+            microsoftTodoStatusMessage = "Invalid Microsoft redirect URI."
+            return
+        }
+        let verifier = randomPKCEString(length: 64)
+        microsoftPKCEVerifier = verifier
+        let challenge = pkceCodeChallenge(for: verifier)
+        var components = URLComponents(string: "https://login.microsoftonline.com/\(config.tenantID)/oauth2/v2.0/authorize")!
+        components.queryItems = [
+            URLQueryItem(name: "client_id", value: config.clientID),
+            URLQueryItem(name: "redirect_uri", value: config.redirectURI),
+            URLQueryItem(name: "response_type", value: "code"),
+            URLQueryItem(name: "scope", value: "offline_access openid profile Tasks.ReadWrite"),
+            URLQueryItem(name: "code_challenge", value: challenge),
+            URLQueryItem(name: "code_challenge_method", value: "S256")
+        ]
+        guard let authURL = components.url else {
+            isSyncingMicrosoftTodo = false
+            microsoftTodoStatusMessage = "Unable to start Microsoft sign-in."
+            return
+        }
+        let session = ASWebAuthenticationSession(url: authURL, callbackURLScheme: callbackScheme) { callbackURL, _ in
+            guard let callbackURL,
+                  let code = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false)?
+                    .queryItems?
+                    .first(where: { $0.name == "code" })?.value else {
+                DispatchQueue.main.async {
+                    self.isSyncingMicrosoftTodo = false
+                    self.microsoftTodoStatusMessage = "Microsoft sign-in canceled."
+                }
+                return
+            }
+            Task {
+                let token = await self.exchangeMicrosoftAuthCodeForToken(code: code, config: config, verifier: verifier)
+                await MainActor.run {
+                    guard let token else {
+                        self.isSyncingMicrosoftTodo = false
+                        self.microsoftTodoStatusMessage = "Failed to connect Microsoft To Do."
+                        return
+                    }
+                    self.microsoftTodoConnected = true
+                    self.microsoftTodoAccessToken = token.accessToken
+                    self.microsoftTodoRefreshToken = token.refreshToken ?? self.microsoftTodoRefreshToken
+                    self.microsoftTodoAccessExpiryUnix = Date().timeIntervalSince1970 + Double(max(60, token.expiresIn))
+                    self.syncMicrosoftTodoIntoCapture()
+                }
+            }
+        }
+        session.prefersEphemeralWebBrowserSession = false
+        microsoftAuthSession = session
+        session.start()
+        #else
+        isSyncingMicrosoftTodo = false
+        microsoftTodoStatusMessage = "Microsoft auth is unavailable on this platform."
+        #endif
+    }
+
+    private func googleOAuthConfig() -> (clientID: String, redirectURI: String)? {
+        guard
+            let clientID = Bundle.main.object(forInfoDictionaryKey: "GoogleOAuthClientID") as? String,
+            let redirectURI = Bundle.main.object(forInfoDictionaryKey: "GoogleOAuthRedirectURI") as? String
+        else { return nil }
+        let trimmedClient = clientID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedRedirect = redirectURI.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedClient.isEmpty, !trimmedRedirect.isEmpty else { return nil }
+        return (trimmedClient, trimmedRedirect)
+    }
+
+    private func googleValidAccessToken(completion: @escaping (String?) -> Void) {
+        let now = Date().timeIntervalSince1970
+        if !googleTasksAccessToken.isEmpty, googleTasksAccessExpiryUnix > now + 30 {
+            completion(googleTasksAccessToken)
+            return
+        }
+        guard let config = googleOAuthConfig(), !googleTasksRefreshToken.isEmpty else {
+            completion(nil)
+            return
+        }
+        Task {
+            let refreshed = await refreshGoogleAccessToken(config: config)
+            await MainActor.run {
+                completion(refreshed)
+            }
+        }
+    }
+
+    private func startGoogleOAuthFlow(config: (clientID: String, redirectURI: String)) {
+        #if canImport(AuthenticationServices)
+        guard let callbackScheme = URL(string: config.redirectURI)?.scheme else {
+            isSyncingGoogleTasks = false
+            googleTasksStatusMessage = "Invalid Google redirect URI."
+            return
+        }
+        let verifier = randomPKCEString(length: 64)
+        googlePKCEVerifier = verifier
+        let challenge = pkceCodeChallenge(for: verifier)
+        var components = URLComponents(string: "https://accounts.google.com/o/oauth2/v2/auth")!
+        components.queryItems = [
+            URLQueryItem(name: "client_id", value: config.clientID),
+            URLQueryItem(name: "redirect_uri", value: config.redirectURI),
+            URLQueryItem(name: "response_type", value: "code"),
+            URLQueryItem(name: "scope", value: "https://www.googleapis.com/auth/tasks"),
+            URLQueryItem(name: "access_type", value: "offline"),
+            URLQueryItem(name: "prompt", value: "consent"),
+            URLQueryItem(name: "code_challenge", value: challenge),
+            URLQueryItem(name: "code_challenge_method", value: "S256")
+        ]
+        guard let authURL = components.url else {
+            isSyncingGoogleTasks = false
+            googleTasksStatusMessage = "Unable to start Google sign-in."
+            return
+        }
+        let session = ASWebAuthenticationSession(url: authURL, callbackURLScheme: callbackScheme) { callbackURL, _ in
+            guard let callbackURL,
+                  let code = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false)?
+                    .queryItems?
+                    .first(where: { $0.name == "code" })?.value else {
+                DispatchQueue.main.async {
+                    self.isSyncingGoogleTasks = false
+                    self.googleTasksStatusMessage = "Google sign-in canceled."
+                }
+                return
+            }
+            Task {
+                let token = await self.exchangeGoogleAuthCodeForToken(code: code, config: config, verifier: verifier)
+                await MainActor.run {
+                    guard let token else {
+                        self.isSyncingGoogleTasks = false
+                        self.googleTasksStatusMessage = "Failed to connect Google Tasks."
+                        return
+                    }
+                    self.googleTasksConnected = true
+                    self.googleTasksAccessToken = token.accessToken
+                    self.googleTasksRefreshToken = token.refreshToken ?? self.googleTasksRefreshToken
+                    self.googleTasksAccessExpiryUnix = Date().timeIntervalSince1970 + Double(max(60, token.expiresIn))
+                    self.syncGoogleTasksIntoCapture()
+                }
+            }
+        }
+        session.prefersEphemeralWebBrowserSession = false
+        googleAuthSession = session
+        session.start()
+        #else
+        isSyncingGoogleTasks = false
+        googleTasksStatusMessage = "Google auth is unavailable on this platform."
+        #endif
+    }
+
+    private func applyExternalSourceMutationIfNeeded(for item: RollingCaptureItem, action: ExternalMutationAction) {
+        guard let sourceType = item.sourceType else { return }
+        switch sourceType {
+        case "apple_reminder":
+            applyAppleReminderMutationIfNeeded(for: item, action: action)
+        case "microsoft_todo":
+            applyMicrosoftTodoMutationIfNeeded(for: item, action: action)
+        case "google_tasks":
+            applyGoogleTaskMutationIfNeeded(for: item, action: action)
+        default:
+            break
+        }
+    }
+
+    private func applyAppleReminderMutationIfNeeded(for item: RollingCaptureItem, action: ExternalMutationAction) {
+        guard let externalID = item.sourceExternalID, !externalID.isEmpty else { return }
         #if canImport(EventKit)
         let store = EKEventStore()
         let runMutation: (Bool) -> Void = { granted in
@@ -2259,6 +2792,491 @@ struct CaptureView: View {
             }
         }
         #endif
+    }
+
+    private func applyGoogleTaskMutationIfNeeded(for item: RollingCaptureItem, action: ExternalMutationAction) {
+        guard let externalID = item.sourceExternalID else { return }
+        let parts = externalID.split(separator: "|", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { return }
+        let listID = parts[0]
+        let taskID = parts[1]
+        googleValidAccessToken { token in
+            guard let token else { return }
+            Task {
+                await performGoogleTaskMutation(
+                    accessToken: token,
+                    listID: listID,
+                    taskID: taskID,
+                    action: action
+                )
+            }
+        }
+    }
+
+    private func performGoogleTaskMutation(
+        accessToken: String,
+        listID: String,
+        taskID: String,
+        action: ExternalMutationAction
+    ) async {
+        guard
+            let listEncoded = listID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+            let taskEncoded = taskID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)
+        else { return }
+        switch action {
+        case .complete:
+            guard let url = URL(string: "https://tasks.googleapis.com/tasks/v1/lists/\(listEncoded)/tasks/\(taskEncoded)") else { return }
+            var request = URLRequest(url: url)
+            request.httpMethod = "PATCH"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+            let body: [String: String] = [
+                "status": "completed",
+                "completed": ISO8601DateFormatter().string(from: Date())
+            ]
+            request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+            _ = try? await URLSession.shared.data(for: request)
+        case .delete:
+            guard let url = URL(string: "https://tasks.googleapis.com/tasks/v1/lists/\(listEncoded)/tasks/\(taskEncoded)") else { return }
+            var request = URLRequest(url: url)
+            request.httpMethod = "DELETE"
+            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+            _ = try? await URLSession.shared.data(for: request)
+        }
+    }
+
+    private func applyMicrosoftTodoMutationIfNeeded(for item: RollingCaptureItem, action: ExternalMutationAction) {
+        guard let externalID = item.sourceExternalID else { return }
+        let parts = externalID.split(separator: "|", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { return }
+        let listID = parts[0]
+        let taskID = parts[1]
+        microsoftValidAccessToken { token in
+            guard let token else { return }
+            Task {
+                await performMicrosoftTodoMutation(
+                    accessToken: token,
+                    listID: listID,
+                    taskID: taskID,
+                    action: action
+                )
+            }
+        }
+    }
+
+    private func performMicrosoftTodoMutation(
+        accessToken: String,
+        listID: String,
+        taskID: String,
+        action: ExternalMutationAction
+    ) async {
+        guard
+            let listEncoded = listID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+            let taskEncoded = taskID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+            let url = URL(string: "https://graph.microsoft.com/v1.0/me/todo/lists/\(listEncoded)/tasks/\(taskEncoded)")
+        else { return }
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        switch action {
+        case .complete:
+            request.httpMethod = "PATCH"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            let body: [String: String] = ["status": "completed"]
+            request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+            _ = try? await URLSession.shared.data(for: request)
+        case .delete:
+            request.httpMethod = "DELETE"
+            _ = try? await URLSession.shared.data(for: request)
+        }
+    }
+
+    private func fetchAndUpsertMicrosoftTodoTasks(accessToken: String) async {
+        guard let listsURL = URL(string: "https://graph.microsoft.com/v1.0/me/todo/lists?$top=100") else {
+            await MainActor.run {
+                isSyncingMicrosoftTodo = false
+                microsoftTodoStatusMessage = "Invalid Microsoft To Do request URL."
+            }
+            return
+        }
+        var listsRequest = URLRequest(url: listsURL)
+        listsRequest.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        do {
+            let (listsData, _) = try await URLSession.shared.data(for: listsRequest)
+            let listResponse = try JSONDecoder().decode(MicrosoftTodoListResponse.self, from: listsData)
+            var allTasks: [MicrosoftTodoEnvelope] = []
+
+            for list in listResponse.value {
+                guard
+                    let listID = list.id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+                    let tasksURL = URL(string: "https://graph.microsoft.com/v1.0/me/todo/lists/\(listID)/tasks?$top=200")
+                else { continue }
+                var tasksRequest = URLRequest(url: tasksURL)
+                tasksRequest.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+                let (tasksData, _) = try await URLSession.shared.data(for: tasksRequest)
+                let taskResponse = try JSONDecoder().decode(MicrosoftTodoTaskResponse.self, from: tasksData)
+                let tasks = taskResponse.value.filter { ($0.status ?? "notStarted") != "completed" }
+                for task in tasks {
+                    allTasks.append(
+                        MicrosoftTodoEnvelope(
+                            listID: list.id,
+                            taskID: task.id,
+                            title: task.title ?? "",
+                            dueDateTimeString: task.dueDateTime?.dateTime
+                        )
+                    )
+                }
+            }
+
+            await MainActor.run {
+                upsertMicrosoftTodoTasksIntoCapture(allTasks)
+            }
+        } catch {
+            await MainActor.run {
+                isSyncingMicrosoftTodo = false
+                microsoftTodoStatusMessage = "Microsoft To Do sync failed."
+            }
+        }
+    }
+
+    private func upsertMicrosoftTodoTasksIntoCapture(_ tasks: [MicrosoftTodoEnvelope]) {
+        let cal = Calendar.current
+        let activeIDs = Set(tasks.map { "\($0.listID)|\($0.taskID)" })
+        let isInitialImport = !microsoftTodoInitialImportDone
+        let existingBySourceID = Dictionary(
+            uniqueKeysWithValues: allItems.compactMap { item -> (String, RollingCaptureItem)? in
+                guard item.sourceType == "microsoft_todo", let sourceID = item.sourceExternalID else { return nil }
+                return (sourceID, item)
+            }
+        )
+
+        for task in tasks {
+            let sourceID = "\(task.listID)|\(task.taskID)"
+            let title = task.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty else { continue }
+            let dueDate: Date? = {
+                guard let dateString = task.dueDateTimeString,
+                      let date = microsoftDate(from: dateString) else { return nil }
+                return cal.startOfDay(for: date)
+            }()
+
+            if let existing = existingBySourceID[sourceID] {
+                existing.text = title
+                existing.dueDate = dueDate
+                existing.dueDateAttentionDays = min(max(existing.dueDateAttentionDays ?? dueDateAttentionDays, 7), 30)
+                existing.isGhost = false
+                existing.unhideDate = nil
+            } else {
+                let createdAtForInsert: Date = {
+                    if isInitialImport, dueDate == nil {
+                        return Date(timeIntervalSince1970: 1)
+                    }
+                    return .now
+                }()
+                modelContext.insert(
+                    RollingCaptureItem(
+                        text: title,
+                        isGhost: false,
+                        createdAt: createdAtForInsert,
+                        dueDate: dueDate,
+                        dueDateAttentionDays: min(max(dueDateAttentionDays, 7), 30),
+                        sourceType: "microsoft_todo",
+                        sourceExternalID: sourceID,
+                        unhideDate: nil,
+                        unhiddenAt: nil
+                    )
+                )
+            }
+        }
+
+        let staleSyncedItems = allItems.filter {
+            $0.sourceType == "microsoft_todo"
+            && (($0.sourceExternalID.map { !activeIDs.contains($0) }) ?? true)
+        }
+        for stale in staleSyncedItems {
+            modelContext.delete(stale)
+        }
+
+        try? modelContext.save()
+        microsoftTodoInitialImportDone = true
+        microsoftTodoLastSyncUnix = Date().timeIntervalSince1970
+        microsoftTodoConnected = true
+        microsoftTodoStatusMessage = "Synced \(tasks.count) active tasks."
+        isSyncingMicrosoftTodo = false
+    }
+
+    private func microsoftDate(from text: String) -> Date? {
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let parsed = iso.date(from: text) {
+            return parsed
+        }
+        iso.formatOptions = [.withInternetDateTime]
+        if let parsed = iso.date(from: text) {
+            return parsed
+        }
+        let fallback = DateFormatter()
+        fallback.locale = Locale(identifier: "en_US_POSIX")
+        fallback.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSSS"
+        return fallback.date(from: text)
+    }
+
+    private func fetchAndUpsertGoogleTasks(accessToken: String) async {
+        guard let listsURL = URL(string: "https://tasks.googleapis.com/tasks/v1/users/@me/lists?maxResults=100") else {
+            await MainActor.run {
+                isSyncingGoogleTasks = false
+                googleTasksStatusMessage = "Invalid Google Tasks request URL."
+            }
+            return
+        }
+        var listsRequest = URLRequest(url: listsURL)
+        listsRequest.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        do {
+            let (listsData, _) = try await URLSession.shared.data(for: listsRequest)
+            let listResponse = try JSONDecoder().decode(GoogleTaskListResponse.self, from: listsData)
+            var allTasks: [GoogleTaskEnvelope] = []
+            for list in listResponse.items ?? [] {
+                guard
+                    let listID = list.id?.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+                    let rawListID = list.id,
+                    let tasksURL = URL(string: "https://tasks.googleapis.com/tasks/v1/lists/\(listID)/tasks?showCompleted=false&showHidden=false&maxResults=100")
+                else { continue }
+                var tasksRequest = URLRequest(url: tasksURL)
+                tasksRequest.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+                let (tasksData, _) = try await URLSession.shared.data(for: tasksRequest)
+                let taskResponse = try JSONDecoder().decode(GoogleTaskResponse.self, from: tasksData)
+                let tasks = (taskResponse.items ?? []).filter {
+                    ($0.deleted ?? false) == false
+                    && ($0.hidden ?? false) == false
+                    && ($0.status ?? "needsAction") != "completed"
+                }
+                for task in tasks {
+                    guard let taskID = task.id else { continue }
+                    allTasks.append(
+                        GoogleTaskEnvelope(
+                            listID: rawListID,
+                            taskID: taskID,
+                            title: task.title ?? "",
+                            dueRFC3339: task.due
+                        )
+                    )
+                }
+            }
+            await MainActor.run {
+                upsertGoogleTasksIntoCapture(allTasks)
+            }
+        } catch {
+            await MainActor.run {
+                isSyncingGoogleTasks = false
+                googleTasksStatusMessage = "Google Tasks sync failed."
+            }
+        }
+    }
+
+    private func upsertGoogleTasksIntoCapture(_ tasks: [GoogleTaskEnvelope]) {
+        let cal = Calendar.current
+        let activeIDs = Set(tasks.map { "\($0.listID)|\($0.taskID)" })
+        let isInitialImport = !googleTasksInitialImportDone
+        let existingBySourceID = Dictionary(
+            uniqueKeysWithValues: allItems.compactMap { item -> (String, RollingCaptureItem)? in
+                guard item.sourceType == "google_tasks", let sourceID = item.sourceExternalID else { return nil }
+                return (sourceID, item)
+            }
+        )
+        let dateFormatter = ISO8601DateFormatter()
+
+        for task in tasks {
+            let sourceID = "\(task.listID)|\(task.taskID)"
+            let title = task.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty else { continue }
+            let dueDate: Date? = {
+                guard let dueRFC3339 = task.dueRFC3339, let date = dateFormatter.date(from: dueRFC3339) else { return nil }
+                return cal.startOfDay(for: date)
+            }()
+            if let existing = existingBySourceID[sourceID] {
+                existing.text = title
+                existing.dueDate = dueDate
+                existing.dueDateAttentionDays = min(max(existing.dueDateAttentionDays ?? dueDateAttentionDays, 7), 30)
+                existing.isGhost = false
+                existing.unhideDate = nil
+            } else {
+                let createdAtForInsert: Date = {
+                    if isInitialImport, dueDate == nil {
+                        return Date(timeIntervalSince1970: 1)
+                    }
+                    return .now
+                }()
+                modelContext.insert(
+                    RollingCaptureItem(
+                        text: title,
+                        isGhost: false,
+                        createdAt: createdAtForInsert,
+                        dueDate: dueDate,
+                        dueDateAttentionDays: min(max(dueDateAttentionDays, 7), 30),
+                        sourceType: "google_tasks",
+                        sourceExternalID: sourceID,
+                        unhideDate: nil,
+                        unhiddenAt: nil
+                    )
+                )
+            }
+        }
+
+        let staleSyncedItems = allItems.filter {
+            $0.sourceType == "google_tasks"
+            && (($0.sourceExternalID.map { !activeIDs.contains($0) }) ?? true)
+        }
+        for stale in staleSyncedItems {
+            modelContext.delete(stale)
+        }
+        try? modelContext.save()
+        googleTasksInitialImportDone = true
+        googleTasksLastSyncUnix = Date().timeIntervalSince1970
+        googleTasksConnected = true
+        googleTasksStatusMessage = "Synced \(tasks.count) active tasks."
+        isSyncingGoogleTasks = false
+    }
+
+    private func randomPKCEString(length: Int) -> String {
+        let chars = Array("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~")
+        return String((0..<length).map { _ in chars.randomElement()! })
+    }
+
+    private func pkceCodeChallenge(for verifier: String) -> String {
+        guard let data = verifier.data(using: .utf8) else { return verifier }
+        let digest = sha256(data)
+        return Data(digest)
+            .base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+
+    private func sha256(_ data: Data) -> [UInt8] {
+        #if canImport(CryptoKit)
+        return Array(SHA256.hash(data: data))
+        #else
+        return Array(data)
+        #endif
+    }
+
+    private func exchangeGoogleAuthCodeForToken(
+        code: String,
+        config: (clientID: String, redirectURI: String),
+        verifier: String
+    ) async -> GoogleTokenResponse? {
+        guard let url = URL(string: "https://oauth2.googleapis.com/token") else { return nil }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        let body = [
+            "code": code,
+            "client_id": config.clientID,
+            "redirect_uri": config.redirectURI,
+            "grant_type": "authorization_code",
+            "code_verifier": verifier
+        ]
+        request.httpBody = body
+            .map { "\($0.key)=\($0.value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")" }
+            .joined(separator: "&")
+            .data(using: .utf8)
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            return try? JSONDecoder().decode(GoogleTokenResponse.self, from: data)
+        } catch {
+            return nil
+        }
+    }
+
+    private func refreshGoogleAccessToken(config: (clientID: String, redirectURI: String)) async -> String? {
+        guard !googleTasksRefreshToken.isEmpty,
+              let url = URL(string: "https://oauth2.googleapis.com/token") else { return nil }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        let body = [
+            "client_id": config.clientID,
+            "grant_type": "refresh_token",
+            "refresh_token": googleTasksRefreshToken
+        ]
+        request.httpBody = body
+            .map { "\($0.key)=\($0.value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")" }
+            .joined(separator: "&")
+            .data(using: .utf8)
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            if let token = try? JSONDecoder().decode(GoogleTokenResponse.self, from: data) {
+                await MainActor.run {
+                    googleTasksAccessToken = token.accessToken
+                    googleTasksAccessExpiryUnix = Date().timeIntervalSince1970 + Double(max(60, token.expiresIn))
+                    if let refresh = token.refreshToken, !refresh.isEmpty {
+                        googleTasksRefreshToken = refresh
+                    }
+                }
+                return token.accessToken
+            }
+        } catch {}
+        return nil
+    }
+
+    private func exchangeMicrosoftAuthCodeForToken(
+        code: String,
+        config: (clientID: String, redirectURI: String, tenantID: String),
+        verifier: String
+    ) async -> MicrosoftTokenResponse? {
+        guard let url = URL(string: "https://login.microsoftonline.com/\(config.tenantID)/oauth2/v2.0/token") else { return nil }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        let body = [
+            "code": code,
+            "client_id": config.clientID,
+            "redirect_uri": config.redirectURI,
+            "grant_type": "authorization_code",
+            "code_verifier": verifier
+        ]
+        request.httpBody = body
+            .map { "\($0.key)=\($0.value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")" }
+            .joined(separator: "&")
+            .data(using: .utf8)
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            return try? JSONDecoder().decode(MicrosoftTokenResponse.self, from: data)
+        } catch {
+            return nil
+        }
+    }
+
+    private func refreshMicrosoftAccessToken(config: (clientID: String, redirectURI: String, tenantID: String)) async -> String? {
+        guard !microsoftTodoRefreshToken.isEmpty,
+              let url = URL(string: "https://login.microsoftonline.com/\(config.tenantID)/oauth2/v2.0/token") else { return nil }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        let body = [
+            "client_id": config.clientID,
+            "grant_type": "refresh_token",
+            "refresh_token": microsoftTodoRefreshToken,
+            "scope": "offline_access openid profile Tasks.ReadWrite"
+        ]
+        request.httpBody = body
+            .map { "\($0.key)=\($0.value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")" }
+            .joined(separator: "&")
+            .data(using: .utf8)
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            if let token = try? JSONDecoder().decode(MicrosoftTokenResponse.self, from: data) {
+                await MainActor.run {
+                    microsoftTodoAccessToken = token.accessToken
+                    microsoftTodoAccessExpiryUnix = Date().timeIntervalSince1970 + Double(max(60, token.expiresIn))
+                    if let refresh = token.refreshToken, !refresh.isEmpty {
+                        microsoftTodoRefreshToken = refresh
+                    }
+                }
+                return token.accessToken
+            }
+        } catch {}
+        return nil
     }
 
     #if canImport(EventKit)
@@ -2401,7 +3419,7 @@ struct CaptureView: View {
     }
 
     private func quickCompleteItem(_ item: RollingCaptureItem) {
-        applyAppleReminderMutationIfNeeded(for: item, action: .complete)
+        applyExternalSourceMutationIfNeeded(for: item, action: .complete)
         modelContext.insert(QuickCompletedCaptureItem(text: item.text, completedAt: .now))
         RecentlyDeletedStore.trash(item, in: modelContext)
         try? modelContext.save()
