@@ -2767,7 +2767,7 @@ struct FulfillmentStartView: View {
     }
 }
 
-private struct FulfillmentIntroRouteLinesView: View {
+struct FulfillmentIntroRouteLinesView: View {
     private let lineCount: Int = 10
     @State private var animationStartDate: Date = .now
 

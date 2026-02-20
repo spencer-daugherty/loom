@@ -21,6 +21,7 @@ struct ContentView: View {
     @AppStorage("enable_projects_feature") private var enableProjectsFeature = false
     @AppStorage("blank_homepage_mode") private var blankHomepageMode = false
     @AppStorage("setup_homepage_mode") private var setupHomepageMode = false
+    @AppStorage("has_completed_plan_flow_once") private var hasCompletedPlanFlowOnce = false
     @State private var isPresentingCaptureView = false
     @State private var pressedEmotion: String? = nil
     @State private var pressedOutcome: Outcomes? = nil
@@ -47,12 +48,10 @@ struct ContentView: View {
     @Query(sort: \ActivePlanState.id, order: .forward)
     private var activePlanStates: [ActivePlanState]
 
-    @State private var navPath: [PlayDestination] = []
     @State private var playSheetDestination: PlayDestination? = nil
     @State private var navigateToFulfillmentFromOnboarding = false
 
     private enum PlayDestination: String, Identifiable, Hashable {
-        case plan
         case action
         var id: String { rawValue }
     }
@@ -106,7 +105,11 @@ struct ContentView: View {
     }
 
     private var shouldShowAnyOnboardingBounce: Bool {
-        shouldShowDrivingOnboardingPulse || shouldShowFulfillmentOnboardingPulse
+        shouldShowDrivingOnboardingPulse || shouldShowFulfillmentOnboardingPulse || shouldShowPlanButtonOnboardingBounce
+    }
+
+    private var shouldShowPlanButtonOnboardingBounce: Bool {
+        !isDrivingForceEmptyState && !isFulfillmentEmptyState && !isActiveActionFlow
     }
 
     private var canOpenPlanOrActionFlow: Bool {
@@ -147,7 +150,7 @@ struct ContentView: View {
     }
     
     var body: some View {
-        NavigationStack(path: $navPath) {
+        NavigationStack {
             ZStack {
                 Color(.systemGroupedBackground)
                     .ignoresSafeArea()
@@ -292,21 +295,11 @@ struct ContentView: View {
             }
             .ignoresSafeArea(.keyboard)
         }
-        .navigationDestination(for: ContentView.PlayDestination.self) { destination in
-            switch destination {
-            case .plan:
-                PlanView()
-            case .action:
-                ActionView()
-            }
-        }
         .navigationDestination(isPresented: $navigateToFulfillmentFromOnboarding) {
             FulfillmentView()
         }
         .fullScreenCover(item: $playSheetDestination) { destination in
             switch destination {
-            case .plan:
-                PlanView()
             case .action:
                 ActionView()
             }
@@ -674,22 +667,66 @@ struct ContentView: View {
                 }
                 .buttonStyle(.plain)
 
-                Button(action: {
-                    guard canOpenPlanOrActionFlow else {
-                        triggerPlayBlockedFeedback()
-                        return
+                Group {
+                    if !canOpenPlanOrActionFlow {
+                        Button(action: {
+                            triggerPlayBlockedFeedback()
+                        }) {
+                            Image(systemName: "play.fill")
+                                .font(.title)
+                                .foregroundColor(Color(.systemBackground))
+                                .frame(width: 60, height: 60)
+                                .background(Color(.systemGray3))
+                                .opacity(0.62)
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                    } else if isActiveActionFlow {
+                        Button(action: {
+                            playSheetDestination = .action
+                        }) {
+                            Image(systemName: "forward.fill")
+                                .font(.title)
+                                .foregroundColor(Color(.systemBackground))
+                                .frame(width: 60, height: 60)
+                                .background(Color.accentColor)
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        NavigationLink {
+                            if hasCompletedPlanFlowOnce {
+                                PlanView()
+                            } else {
+                                PlanStartView()
+                            }
+                        } label: {
+                            Image(systemName: "play.fill")
+                                .font(.title)
+                                .foregroundColor(Color(.systemBackground))
+                                .frame(width: 60, height: 60)
+                                .background(Color.accentColor)
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(.plain)
                     }
-                    playSheetDestination = isActiveActionFlow ? .action : .plan
-                }) {
-                    Image(systemName: isActiveActionFlow ? "forward.fill" : "play.fill")
-                        .font(.title)
-                        .foregroundColor(Color(.systemBackground))
-                        .frame(width: 60, height: 60)
-                        .background(canOpenPlanOrActionFlow ? Color.accentColor : Color(.systemGray3))
-                        .opacity(canOpenPlanOrActionFlow ? 1.0 : 0.62)
-                        .clipShape(Circle())
                 }
-                .buttonStyle(.plain)
+                .scaleEffect(
+                    shouldShowPlanButtonOnboardingBounce
+                        ? (drivingCardBounceOn ? 1.012 : 1.0)
+                        : 1.0
+                )
+                .offset(
+                    y: shouldShowPlanButtonOnboardingBounce
+                        ? (drivingCardBounceOn ? -3 : 0)
+                        : 0
+                )
+                .animation(
+                    shouldShowPlanButtonOnboardingBounce
+                        ? .easeInOut(duration: 0.20)
+                        : .default,
+                    value: drivingCardBounceOn
+                )
             }
             .padding(.horizontal)
             .padding(.top, 6)
