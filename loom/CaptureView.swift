@@ -428,6 +428,9 @@ struct CaptureView: View {
         allItems.isEmpty
         && !isSearchMode
     }
+    private var captureIntroBoxBackground: Color {
+        colorScheme == .dark ? Color(.systemGroupedBackground) : Color.white
+    }
     private var ghostClockIconName: String {
         #if canImport(UIKit)
         let candidates = [
@@ -1131,7 +1134,7 @@ struct CaptureView: View {
                     .frame(maxWidth: .infinity, alignment: .center)
             }
             .padding(10)
-            .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+            .background(captureIntroBoxBackground, in: RoundedRectangle(cornerRadius: 12))
 
             Text("This is where you collect everything on your mind. Tasks, ideas, commitments, etc.")
                 .font(.body)
@@ -1140,7 +1143,7 @@ struct CaptureView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+                .background(captureIntroBoxBackground, in: RoundedRectangle(cornerRadius: 12))
 
             Text("Don’t organize or filter yet. Just get it out. Clarity comes later.")
                 .font(.body)
@@ -1149,7 +1152,7 @@ struct CaptureView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+                .background(captureIntroBoxBackground, in: RoundedRectangle(cornerRadius: 12))
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
