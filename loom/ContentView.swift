@@ -49,6 +49,7 @@ struct ContentView: View {
 
     @State private var navPath: [PlayDestination] = []
     @State private var playSheetDestination: PlayDestination? = nil
+    @State private var navigateToFulfillmentFromOnboarding = false
 
     private enum PlayDestination: String, Identifiable, Hashable {
         case plan
@@ -299,6 +300,9 @@ struct ContentView: View {
                 ActionView()
             }
         }
+        .navigationDestination(isPresented: $navigateToFulfillmentFromOnboarding) {
+            FulfillmentView()
+        }
         .fullScreenCover(item: $playSheetDestination) { destination in
             switch destination {
             case .plan:
@@ -321,6 +325,11 @@ struct ContentView: View {
             beginStartupPreparationIfNeeded()
             if shouldShowAnyOnboardingBounce {
                 bounceDrivingCardOnce()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("open_fulfillment_after_onboarding"))) { _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                navigateToFulfillmentFromOnboarding = true
             }
         }
         .onChange(of: shouldShowAnyOnboardingBounce) { _, shouldShow in

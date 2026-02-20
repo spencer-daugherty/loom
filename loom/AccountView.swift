@@ -436,6 +436,11 @@ struct ModelFilter: Identifiable, Hashable {
 
 // MARK: - Main View
 struct AccountView: View {
+    private enum DeleteScope {
+        case allData
+        case fulfillmentOnly
+    }
+
     @Environment(\.modelContext) private var context
     @Query private var fulfillments: [Fulfillment]
     @AppStorage("enable_projects_feature") private var enableProjectsFeature = false
@@ -443,6 +448,7 @@ struct AccountView: View {
     @AppStorage("setup_homepage_mode") private var setupHomepageMode = false
     @State private var showDeleteAllDataSheet = false
     @State private var deleteAllConfirmationCode = ""
+    @State private var pendingDeleteScope: DeleteScope = .allData
 
     private var isFulfillmentEmptyState: Bool {
         blankHomepageMode || fulfillments.isEmpty
@@ -504,6 +510,15 @@ struct AccountView: View {
                 Toggle("Blank Homepage", isOn: $blankHomepageMode)
                 Toggle("Setup Homepage", isOn: $setupHomepageMode)
                 Button {
+                    pendingDeleteScope = .fulfillmentOnly
+                    deleteAllConfirmationCode = ""
+                    showDeleteAllDataSheet = true
+                } label: {
+                    Text("Delete Fulfillment Data")
+                        .foregroundStyle(.red)
+                }
+                Button {
+                    pendingDeleteScope = .allData
                     deleteAllConfirmationCode = ""
                     showDeleteAllDataSheet = true
                 } label: {
@@ -526,13 +541,21 @@ struct AccountView: View {
         .sheet(isPresented: $showDeleteAllDataSheet) {
             NavigationStack {
                 VStack(alignment: .leading, spacing: 14) {
-                    Text("WARNING: Delete All Data")
+                    Text(
+                        pendingDeleteScope == .allData
+                            ? "WARNING: Delete All Data"
+                            : "WARNING: Delete Fulfillment Data"
+                    )
                         .font(.headline.weight(.bold))
                         .foregroundStyle(.red)
                         .frame(maxWidth: .infinity, alignment: .center)
                         .multilineTextAlignment(.center)
 
-                    Text("This will permanently delete all your data and it won't be recoverable. If you would like to continue please enter \"1234\" below and click \"Permanently Delete All Data\".")
+                    Text(
+                        pendingDeleteScope == .allData
+                            ? "This will permanently delete all your data and it won't be recoverable. If you would like to continue please enter \"1234\" below and click \"Permanently Delete All Data\"."
+                            : "This will permanently delete all fulfillment data and it won't be recoverable. If you would like to continue please enter \"1234\" below and click \"Permanently Delete Fulfillment Data\"."
+                    )
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -544,8 +567,17 @@ struct AccountView: View {
                         .keyboardType(.numberPad)
 
                     VStack(spacing: 10) {
-                        Button("Permanently Delete All Data", role: .destructive) {
-                            permanentlyDeleteAllData()
+                        Button(
+                            pendingDeleteScope == .allData
+                                ? "Permanently Delete All Data"
+                                : "Permanently Delete Fulfillment Data",
+                            role: .destructive
+                        ) {
+                            if pendingDeleteScope == .allData {
+                                permanentlyDeleteAllData()
+                            } else {
+                                permanentlyDeleteFulfillmentData()
+                            }
                             showDeleteAllDataSheet = false
                         }
                         .buttonStyle(.borderedProminent)
@@ -634,6 +666,23 @@ struct AccountView: View {
         deleteAllRows(PlannedChunkActionAttachment.self)
         deleteAllRows(PlannedChunkActionLeverageItem.self)
         deleteAllRows(PlannedChunkActionSensitivityPlace.self)
+        try? context.save()
+    }
+
+    private func permanentlyDeleteFulfillmentData() {
+        deleteAllRows(PassionFulfillmentJoin.self)
+        deleteAllRows(PassionFulfillmentJoinArchive.self)
+        deleteAllRows(Fulfillment.self)
+        deleteAllRows(FulfillmentArchive.self)
+        deleteAllRows(FulfillmentRoles.self)
+        deleteAllRows(FulfillmentRolesArchive.self)
+        deleteAllRows(FulfillmentFocus.self)
+        deleteAllRows(FulfillmentFocusArchive.self)
+        deleteAllRows(FulfillmentResources.self)
+        deleteAllRows(FulfillmentResourcesArchive.self)
+        deleteAllRows(ReplacedFulfillmentCategoryArchive.self)
+        FulfillmentCategoryTheme.clearFulfillmentPreferences()
+        UserDefaults.standard.removeObject(forKey: "fulfillment_start_onboarding_draft_v1")
         try? context.save()
     }
 

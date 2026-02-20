@@ -108,7 +108,6 @@ struct FulfillmentStartView: View {
     @Query(sort: \Outcomes.updatedAt, order: .reverse) private var allOutcomes: [Outcomes]
     @Query(sort: \PlanLabel.category, order: .forward) private var planLabels: [PlanLabel]
 
-    @State private var navigateToFulfillment = false
 
     @State private var step: Step = .intro
     @State private var visionIndex: Int = 0
@@ -510,9 +509,6 @@ struct FulfillmentStartView: View {
         .onChange(of: purposeDrafts) { _, _ in
             persistDraftIfNeeded()
         }
-        .navigationDestination(isPresented: $navigateToFulfillment) {
-            FulfillmentView()
-        }
         .overlay(alignment: .bottom) {
             let persistentColorConflict = step == .createCategories && hasCreateCategoriesColorConflict
             if persistentColorConflict || showValidationHint {
@@ -631,7 +627,7 @@ struct FulfillmentStartView: View {
                 progressSegment(for: index)
             }
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .center)
         .animation(.easeInOut(duration: 0.22), value: progressCurrentStep)
         .animation(.easeInOut(duration: 0.22), value: nestedProgressFraction ?? 0)
         .animation(.easeInOut(duration: 0.22), value: nestedProgressFraction != nil)
@@ -660,7 +656,7 @@ struct FulfillmentStartView: View {
                 .transition(.opacity)
             }
         }
-        .frame(maxWidth: .infinity)
+        .frame(width: 26)
         .frame(height: 4)
     }
 
@@ -1749,12 +1745,16 @@ struct FulfillmentStartView: View {
         case .littleWins:
             if deepIndex > 0 {
                 deepIndex -= 1
-                step = .resources
             } else {
                 step = .priorities
             }
         case .resources:
-            step = .littleWins
+            if deepIndex > 0 {
+                deepIndex -= 1
+            } else {
+                step = .littleWins
+                deepIndex = max(deepCategoryIDs.count - 1, 0)
+            }
         case .passions:
             if passionIndex > 0 {
                 passionIndex -= 1
@@ -1806,14 +1806,18 @@ struct FulfillmentStartView: View {
             if let record = currentDeepRecord, addingFocus {
                 commitFocus(record)
             }
-            step = .resources
+            if deepIndex < deepCategoryIDs.count - 1 {
+                deepIndex += 1
+            } else {
+                deepIndex = 0
+                step = .resources
+            }
         case .resources:
             if let record = currentDeepRecord, addingResource {
                 commitResource(record)
             }
             if deepIndex < deepCategoryIDs.count - 1 {
                 deepIndex += 1
-                step = .littleWins
             } else {
                 passionIndex = 0
                 step = .passions
@@ -2324,8 +2328,10 @@ struct FulfillmentStartView: View {
         try? modelContext.save()
         didFinalizeOnboarding = true
         clearDraft()
-
-        navigateToFulfillment = true
+        dismiss()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            NotificationCenter.default.post(name: Notification.Name("open_fulfillment_after_onboarding"), object: nil)
+        }
     }
 
     private func commitStagedFulfillmentRowsToContext() {

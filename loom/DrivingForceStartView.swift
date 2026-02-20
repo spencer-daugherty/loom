@@ -390,11 +390,11 @@ struct DrivingForceStartView: View {
             ForEach(1...progressTotalSteps, id: \.self) { index in
                 Capsule()
                     .fill(index <= progressCurrentStep ? Color.accentColor : Color(.systemGray4))
-                    .frame(maxWidth: .infinity)
+                    .frame(width: 26)
                     .frame(height: 4)
             }
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .center)
     }
 
     private var introStep: some View {
@@ -448,6 +448,8 @@ struct DrivingForceStartView: View {
                             .padding(.top, 4)
                         Text("\"I live a life of purpose, growth, and freedom. I build meaningful work that creates value for others while giving me time, financial independence, and the ability to choose how I live. I am healthy, energized, and surrounded by strong relationships, and I continue to learn, lead, and make a positive impact.\"")
                             .italic()
+                            .lineLimit(nil)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -499,6 +501,8 @@ struct DrivingForceStartView: View {
                             .padding(.top, 4)
                         Text("\"Because I don’t want to waste my life reacting to circumstances or other people’s expectations. I want to use my full potential, create something meaningful, support the people I love, and live with confidence, fulfillment, and peace.\"")
                             .italic()
+                            .lineLimit(nil)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .font(.subheadline)
                     .foregroundStyle(.secondary)

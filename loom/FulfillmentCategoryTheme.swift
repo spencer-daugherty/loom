@@ -167,4 +167,12 @@ struct FulfillmentCategoryTheme {
         guard !key.isEmpty else { return nil }
         return categoryAliases()[key]
     }
+
+    static func clearFulfillmentPreferences() {
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: userDefaultsKey)
+        defaults.removeObject(forKey: completedOutcomeColorKeyByArchiveKey)
+        defaults.removeObject(forKey: completedActionBlockChunkColorKeyByArchiveChunkKey)
+        defaults.removeObject(forKey: categoryAliasesKey)
+    }
 }

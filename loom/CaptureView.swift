@@ -471,11 +471,6 @@ struct CaptureView: View {
             ZStack {
                 (colorScheme == .dark ? Color(.systemGroupedBackground) : Color.white).ignoresSafeArea()
                 VStack(spacing: 12) {
-                    if shouldShowCaptureIntro {
-                        captureIntroView
-                            .padding(.horizontal)
-                            .transition(.opacity)
-                    }
                     ScrollViewReader { proxy in
                         captureList(proxy: proxy)
                     }
@@ -603,6 +598,13 @@ struct CaptureView: View {
 
     private func captureList(proxy: ScrollViewProxy) -> some View {
         List {
+            if shouldShowCaptureIntro {
+                captureIntroView
+                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 2, trailing: 16))
+                    .listRowSeparator(.hidden)
+                    .transition(.opacity)
+            }
+
             ForEach(displayItems) { item in
                 HStack(alignment: .center, spacing: 8) {
                     if item.sourceType != nil {
@@ -1124,7 +1126,7 @@ struct CaptureView: View {
                     .frame(height: 184)
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
-                Text("Collect Everything")
+                Text("Capture Everything")
                     .font(.largeTitle.weight(.bold))
                     .frame(maxWidth: .infinity, alignment: .center)
             }
