@@ -255,11 +255,9 @@ struct CompletedActionBlocksDetailView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Motivation").font(.title2).fontWeight(.bold)
-                        Text("Power Question").font(.headline)
+                        Text("What am I happy for or grateful about in life right now?").font(.headline)
                         Text(weekMindset?.morningPowerQuestion ?? "—").foregroundStyle(.secondary)
-                        Text("What am I grateful for?").font(.headline)
-                        Text(weekMindset?.gratitude ?? "—").foregroundStyle(.secondary)
-                        Text("Incantation").font(.headline)
+                        Text("What’s a simple phrase that inspires you?").font(.headline)
                         Text(weekMindset?.incantation ?? "—").foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)

@@ -1250,7 +1250,11 @@ struct ManageRawDataView: View {
                 content: $0.morningPowerQuestion,
                 date: $0.createdAt,
                 emotion: nil,
-                additionalFields: ["Gratitude": $0.gratitude, "Incantation": $0.incantation, "Week Start": $0.weekStart.formatted()]
+                additionalFields: [
+                    "Happy For / Grateful": $0.gratitude,
+                    "Inspiring Phrase": $0.incantation,
+                    "Week Start": $0.weekStart.formatted()
+                ]
             )
         }
         allItems += activePlanStates.map {

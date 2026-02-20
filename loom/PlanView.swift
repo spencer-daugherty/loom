@@ -284,7 +284,6 @@ private struct PlanIntroRouteLinesView: View {
 /// UI-only: Three one-line text fields with a bottom-pinned "Next" + "Close" button.
 struct PlanView: View {
     @State private var morningPowerQuestion: String = ""
-    @State private var gratefulFor: String = ""
     @State private var incantation: String = ""
     
     @Environment(\.modelContext) private var modelContext
@@ -301,7 +300,7 @@ struct PlanView: View {
     @State private var shouldHighlightStep1Validation: Bool = false
     @State private var step1ValidationResetWorkItem: DispatchWorkItem?
     @FocusState private var focusedField: Field?
-    private enum Field: Hashable { case morning, grateful, incantation }
+    private enum Field: Hashable { case morning, incantation }
     private let stepOneFreshStartCleanupKeyPrefix = "plan_step1_fresh_start_cleanup_done"
 
     private var currentWeekStart: Date {
@@ -331,16 +330,11 @@ struct PlanView: View {
 
     private var isNextDisabled: Bool {
         morningPowerQuestion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-        gratefulFor.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
         incantation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var isMorningMissing: Bool {
         morningPowerQuestion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    private var isGratefulMissing: Bool {
-        gratefulFor.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var isIncantationMissing: Bool {
@@ -370,19 +364,15 @@ struct PlanView: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("Power Question")
+                Text("What am I happy for or grateful about in life right now?")
                     .font(.headline)
-                Text("What am I happy about in life right now?")
-                    .font(.subheadline)
-                    .italic()
-                    .foregroundColor(.secondary)
                 TextField("My dreams, aspirations, and goals", text: $morningPowerQuestion)
                     .font(weeklyPlanningFieldFont)
                     .textFieldStyle(.roundedBorder)
                     .frame(height: weeklyPlanningFieldHeight)
                     .submitLabel(.next)
                     .focused($focusedField, equals: .morning)
-                    .onSubmit { focusedField = .grateful }
+                    .onSubmit { focusedField = .incantation }
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)
                             .stroke(
@@ -394,31 +384,8 @@ struct PlanView: View {
             .padding(.top, 16)
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("What am I grateful for?")
+                Text("What’s a simple phrase that inspires you?")
                     .font(.headline)
-                TextField("Health", text: $gratefulFor)
-                    .font(weeklyPlanningFieldFont)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(height: weeklyPlanningFieldHeight)
-                    .submitLabel(.next)
-                    .focused($focusedField, equals: .grateful)
-                    .onSubmit { focusedField = .incantation }
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(
-                                shouldHighlightStep1Validation && isGratefulMissing ? Color.red.opacity(0.75) : Color.clear,
-                                lineWidth: shouldHighlightStep1Validation && isGratefulMissing ? 1.5 : 0
-                            )
-                    )
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Incantation")
-                    .font(.headline)
-                Text("What’s a simple phrase to set your mindset?")
-                    .font(.subheadline)
-                    .italic()
-                    .foregroundColor(.secondary)
                 TextField("Where I focus improves", text: $incantation)
                     .font(weeklyPlanningFieldFont)
                     .textFieldStyle(.roundedBorder)
@@ -499,16 +466,13 @@ struct PlanView: View {
                 }
                 if shouldHydrateStepOneFromExisting, let existing = existingEntryForWeek {
                     morningPowerQuestion = existing.morningPowerQuestion
-                    gratefulFor = existing.gratitude
                     incantation = existing.incantation
                 } else {
                     morningPowerQuestion = ""
-                    gratefulFor = ""
                     incantation = ""
                 }
             } else if let existing = existingEntryForWeek {
                 morningPowerQuestion = existing.morningPowerQuestion
-                gratefulFor = existing.gratitude
                 incantation = existing.incantation
             }
 
@@ -517,12 +481,6 @@ struct PlanView: View {
             }
         }
         .onChange(of: morningPowerQuestion) { _, _ in
-            if !isNextDisabled {
-                shouldHighlightStep1Validation = false
-                showStep1ValidationHint = false
-            }
-        }
-        .onChange(of: gratefulFor) { _, _ in
             if !isNextDisabled {
                 shouldHighlightStep1Validation = false
                 showStep1ValidationHint = false
@@ -540,7 +498,7 @@ struct PlanView: View {
 
     private func saveStepOneAndAdvance() {
         let trimmedMorning = morningPowerQuestion.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedGratitude = gratefulFor.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedGratitude = existingEntryForWeek?.gratitude.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let trimmedIncantation = incantation.trimmingCharacters(in: .whitespacesAndNewlines)
 
         if hasCompletedReflectionForWeek {

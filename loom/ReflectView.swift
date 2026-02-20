@@ -803,16 +803,11 @@ struct ReflectView: View {
 
                     if let row = weekMindsetRow {
                         Divider().padding(.vertical, 4)
-                        Text("Power Question")
+                        Text("What am I happy for or grateful about in life right now?")
                             .font(.headline)
                         Text(row.morningPowerQuestion)
                             .foregroundStyle(.secondary)
-                        Text("What am I grateful for?")
-                            .font(.headline)
-                            .padding(.top, 6)
-                        Text(row.gratitude)
-                            .foregroundStyle(.secondary)
-                        Text("Incantation")
+                        Text("What’s a simple phrase that inspires you?")
                             .font(.headline)
                             .padding(.top, 6)
                         Text(row.incantation)

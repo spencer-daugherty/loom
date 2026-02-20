@@ -738,6 +738,20 @@ enum WeeklyMindsetEntry {
     var gratitude: String
     var incantation: String
 
+    // Backward-compatible aliases for updated weekly planning wording.
+    var happyOrGratefulNow: String {
+      get { morningPowerQuestion }
+      set { morningPowerQuestion = newValue }
+    }
+    var gratitudeNotes: String {
+      get { gratitude }
+      set { gratitude = newValue }
+    }
+    var inspiringPhrase: String {
+      get { incantation }
+      set { incantation = newValue }
+    }
+
     init(
       id: UUID = .init(),
       createdAt: Date = .now,

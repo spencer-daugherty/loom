@@ -2561,18 +2561,13 @@ private struct ActionInstructionsPopup: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     motivationRow(
-                        title: "Power Question",
-                        subtitle: "What am I happy about in life right now?",
+                        title: "What am I happy for or grateful about in life right now?",
+                        subtitle: nil,
                         value: currentEntry?.morningPowerQuestion ?? ""
                     )
                     motivationRow(
-                        title: "What am I grateful for?",
+                        title: "What’s a simple phrase that inspires you?",
                         subtitle: nil,
-                        value: currentEntry?.gratitude ?? ""
-                    )
-                    motivationRow(
-                        title: "Incantation",
-                        subtitle: "What’s a simple phrase to set your mindset?",
                         value: currentEntry?.incantation ?? ""
                     )
                 }
