@@ -1106,22 +1106,35 @@ struct CaptureView: View {
     private func dataSourcesSection() -> some View {
         Section("Data Sources & Access") {
             VStack(spacing: 8) {
-                ForEach(["Apple Reminders", "Microsoft To Do", "Google Tasks"], id: \.self) { source in
-                    HStack {
-                        Text(source)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                    }
-                    .padding(8)
-                    .padding(.vertical, 2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
-                }
+                dataSourceRow(title: "Apple Reminders", icon: "list.bullet")
+                dataSourceRow(title: "Microsoft To Do", icon: "checkmark")
+                dataSourceRow(title: "Google Tasks", icon: "checkmark.circle")
             }
             .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
             .listRowSeparator(.hidden)
             .allowsHitTesting(false)
         }
+    }
+
+    private func dataSourceRow(title: String, icon: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 24, height: 24)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7)
+                        .stroke(Color.white.opacity(0.95), lineWidth: 1)
+                )
+
+            Text(title)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(8)
+        .padding(.vertical, 2)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private func repeatEditorSheet() -> some View {
