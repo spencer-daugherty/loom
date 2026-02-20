@@ -1131,7 +1131,7 @@ struct CaptureView: View {
             .padding(10)
             .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
 
-            Text("This is where you collect everything on your mind. Tasks, ideas, commitments, and distractions.")
+            Text("This is where you collect everything on your mind. Tasks, ideas, commitments, etc.")
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .lineLimit(nil)
@@ -1140,16 +1140,7 @@ struct CaptureView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
 
-            Text("Don’t organize or filter yet. Just get it out. Clarity comes later. This step creates mental space.")
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .lineLimit(nil)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
-
-            Text("Your goal is to move from reacting to designing your life. This system helps you focus on what truly matters, not endless to-do lists.")
+            Text("Don’t organize or filter yet. Just get it out. Clarity comes later.")
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .lineLimit(nil)
