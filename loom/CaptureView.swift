@@ -424,6 +424,10 @@ struct CaptureView: View {
     }
 
     private var earliestUnhideDate: Date { Calendar.current.date(byAdding: .day, value: 7, to: Date())! }
+    private var shouldShowCaptureIntro: Bool {
+        allItems.isEmpty
+        && !isSearchMode
+    }
     private var ghostClockIconName: String {
         #if canImport(UIKit)
         let candidates = [
@@ -467,6 +471,11 @@ struct CaptureView: View {
             ZStack {
                 (colorScheme == .dark ? Color(.systemGroupedBackground) : Color.white).ignoresSafeArea()
                 VStack(spacing: 12) {
+                    if shouldShowCaptureIntro {
+                        captureIntroView
+                            .padding(.horizontal)
+                            .transition(.opacity)
+                    }
                     ScrollViewReader { proxy in
                         captureList(proxy: proxy)
                     }
@@ -1101,7 +1110,55 @@ struct CaptureView: View {
             }
             .padding(.bottom, 24)
         }
+        .animation(.easeInOut(duration: 0.22), value: shouldShowCaptureIntro)
         .ignoresSafeArea(edges: .bottom)
+    }
+
+    private var captureIntroView: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 8) {
+                Image("CaptureGraphic")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 184)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                Text("Collect Everything")
+                    .font(.largeTitle.weight(.bold))
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
+            .padding(10)
+            .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+
+            Text("This is where you collect everything on your mind. Tasks, ideas, commitments, and distractions.")
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+
+            Text("Don’t organize or filter yet. Just get it out. Clarity comes later. This step creates mental space.")
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+
+            Text("Your goal is to move from reacting to designing your life. This system helps you focus on what truly matters, not endless to-do lists.")
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     private func recurringSettingsSheet() -> some View {
