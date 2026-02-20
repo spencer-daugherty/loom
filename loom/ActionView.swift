@@ -309,30 +309,9 @@ struct ActionView: View {
             return s == .noAction || s == .leveraged || s == .inProgress
         }
     }
-    private var showActiveOnlyFilterButton: Bool {
-        if activeOnly { return true }
-        let base = filteredActionsForVisibility(excluding: [.activeOnly])
-        guard !base.isEmpty else { return false }
-        let keepCount = base.filter {
-            let s = status(for: $0.id)
-            return s == .noAction || s == .leveraged || s == .inProgress
-        }.count
-        return keepCount > 0 && keepCount < base.count
-    }
-    private var showLeveragedOnlyFilterButton: Bool {
-        if leveragedOnly { return true }
-        let base = filteredActionsForVisibility(excluding: [.leveragedOnly])
-        guard !base.isEmpty else { return false }
-        let keepCount = base.filter { status(for: $0.id) == .leveraged }.count
-        return keepCount > 0 && keepCount < base.count
-    }
-    private var showInProgressOnlyFilterButton: Bool {
-        if inProgressOnly { return true }
-        let base = filteredActionsForVisibility(excluding: [.inProgressOnly])
-        guard !base.isEmpty else { return false }
-        let keepCount = base.filter { status(for: $0.id) == .inProgress }.count
-        return keepCount > 0 && keepCount < base.count
-    }
+    private var showActiveOnlyFilterButton: Bool { !weekActions.isEmpty || activeOnly }
+    private var showLeveragedOnlyFilterButton: Bool { !weekActions.isEmpty || leveragedOnly }
+    private var showInProgressOnlyFilterButton: Bool { !weekActions.isEmpty || inProgressOnly }
 
     private enum FilterFacet: Hashable {
         case place, person, tool, timeOfDay, musts, duration, attachments
@@ -455,12 +434,7 @@ struct ActionView: View {
     private var hasTimeOfDayFilterButton: Bool {
         !selectedTimeOfDay.isEmpty || canExpandTimeOfDaySelection
     }
-    private var hasMustsFilterButton: Bool {
-        if onlyMusts { return true }
-        return filteredActionsForVisibility(excluding: [.musts]).contains {
-            isMust(for: $0.id, defineByAction: defineStateByActionID)
-        }
-    }
+    private var hasMustsFilterButton: Bool { !weekActions.isEmpty || onlyMusts }
     private var canExpandDurationSelection: Bool {
         contextualDurations.contains { !selectedDurations.contains($0) }
     }
@@ -876,15 +850,6 @@ struct ActionView: View {
                 pendingFocusActionID = nil
             }
         }
-        .onChange(of: showActiveOnlyFilterButton) { _, visible in
-            if !visible { activeOnly = false }
-        }
-        .onChange(of: showLeveragedOnlyFilterButton) { _, visible in
-            if !visible { leveragedOnly = false }
-        }
-        .onChange(of: showInProgressOnlyFilterButton) { _, visible in
-            if !visible { inProgressOnly = false }
-        }
         .onPreferenceChange(ActionScrollOffsetPreferenceKey.self) { y in
             handleScrollOffsetChange(y)
         }
@@ -1018,9 +983,9 @@ struct ActionView: View {
     }
 
     private var orderedVisibleFilterChips: [FilterChipKind] {
-        let visible = defaultFilterChipOrder.filter { isFilterChipVisible($0) }
-        let selected = visible.filter { isFilterChipSelected($0) }
-        let nonSelected = visible.filter { !isFilterChipSelected($0) }
+        // Keep chip layout stable to avoid heavy visibility recomputation while toggling quickly.
+        let selected = defaultFilterChipOrder.filter { isFilterChipSelected($0) }
+        let nonSelected = defaultFilterChipOrder.filter { !isFilterChipSelected($0) }
         return selected + nonSelected
     }
 
