@@ -1646,7 +1646,8 @@ struct ActionView: View {
         }
         // Display-only ordering rule:
         // - "In progress" actions are pinned to the top inside each chunk.
-        // - "Done" actions are pinned to the bottom inside each chunk.
+        // - Closed actions are pinned to the bottom inside each chunk.
+        //   (Done, Carried to capture, Didn't need to be done)
         // - Base order remains `sortOrder`, so when status changes away from these
         //   pinned statuses the action naturally returns to its previous list position.
         for chunkId in result.keys {
@@ -1658,7 +1659,7 @@ struct ActionView: View {
                 switch lhsStatus {
                 case .inProgress:
                     lhsRank = 0
-                case .done:
+                case .done, .carriedToCapture, .notNeeded:
                     lhsRank = 2
                 default:
                     lhsRank = 1
@@ -1668,7 +1669,7 @@ struct ActionView: View {
                 switch rhsStatus {
                 case .inProgress:
                     rhsRank = 0
-                case .done:
+                case .done, .carriedToCapture, .notNeeded:
                     rhsRank = 2
                 default:
                     rhsRank = 1
