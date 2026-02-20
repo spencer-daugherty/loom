@@ -122,6 +122,10 @@ struct FulfillmentStartView: View {
     @State private var visionDrafts: [UUID: String] = [:]
     @State private var purposeDrafts: [UUID: String] = [:]
     @State private var fulfillmentSnapshot: [Fulfillment] = []
+    @State private var draftRoles: [DraftRoleRow] = []
+    @State private var draftFoci: [DraftFocusRow] = []
+    @State private var draftResources: [DraftResourceRow] = []
+    @State private var draftPassionJoins: [DraftPassionJoinRow] = []
     @State private var roleEntry: String = ""
     @State private var focusEntry: String = ""
     @State private var resourceEntry: String = ""
@@ -150,6 +154,8 @@ struct FulfillmentStartView: View {
     @State private var hintWorkItem: DispatchWorkItem?
     @State private var previousAutosaveEnabled: Bool = true
     @State private var didFinalizeOnboarding = false
+    @State private var didInitializeViewState = false
+    @State private var ignoreBackUntil: Date = .distantPast
     @State private var usesDraftPersistence = false
     @State private var highlightInvalid = false
     @State private var invalidCategoryIDs = Set<UUID>()
@@ -277,7 +283,7 @@ struct FulfillmentStartView: View {
 
     private var isScrollableStep: Bool {
         switch step {
-        case .createCategories, .roles, .littleWins, .resources, .passions, .summary:
+        case .intro, .createCategories, .roles, .littleWins, .resources, .passions, .summary:
             return true
         default:
             return false
@@ -417,37 +423,48 @@ struct FulfillmentStartView: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            VStack(spacing: 6) {
-                if step == .createCategories, shouldShowRefreshButton {
-                    Button("refresh") {
-                        restoreDeletedDefaultCategories()
+            if step != .intro {
+                VStack(spacing: 6) {
+                    if step == .createCategories, shouldShowRefreshButton {
+                        Button("refresh") {
+                            restoreDeletedDefaultCategories()
+                        }
+                        .font(.subheadline)
+                        .foregroundStyle(.gray)
+                        .buttonStyle(.plain)
+                        .frame(maxWidth: .infinity, alignment: .center)
                     }
-                    .font(.subheadline)
-                    .foregroundStyle(.gray)
-                    .buttonStyle(.plain)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                }
 
-                footer
+                    footer
+                }
+                .padding(.horizontal)
+                .padding(.top, 8)
+                .padding(.bottom, 10)
+                .background(Color(.systemGroupedBackground))
             }
-            .padding(.horizontal)
-            .padding(.top, 8)
-            .padding(.bottom, 10)
-            .background(Color(.systemGroupedBackground))
+        }
+        .overlay(alignment: .bottom) {
+            if step == .intro {
+                footer
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+                    .padding(.bottom, 10)
+                    .background(Color(.systemGroupedBackground))
+                    .zIndex(20)
+            }
         }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(step != .intro)
         .onAppear {
+            guard !didInitializeViewState else { return }
+            didInitializeViewState = true
             previousAutosaveEnabled = modelContext.autosaveEnabled
-            usesDraftPersistence = fulfillments.isEmpty
-            modelContext.autosaveEnabled = usesDraftPersistence ? false : previousAutosaveEnabled
-            if usesDraftPersistence, restoreDraftIfAvailable() {
-                refreshFulfillmentSnapshot()
-            } else {
-                if !usesDraftPersistence {
-                    clearDraft()
-                }
+            // Always stage onboarding edits in draft storage/context only.
+            // Nothing should be committed to shared app data until Summary -> Continue.
+            usesDraftPersistence = true
+            modelContext.autosaveEnabled = false
+            if !restoreDraftIfAvailable() {
                 loadFromPersistentData()
             }
         }
@@ -689,6 +706,7 @@ struct FulfillmentStartView: View {
         HStack(spacing: 10) {
             if step == .intro {
                 Button {
+                    ignoreBackUntil = Date().addingTimeInterval(0.45)
                     step = .createCategories
                 } label: {
                     Text("Start")
@@ -768,6 +786,7 @@ struct FulfillmentStartView: View {
                 .frame(maxWidth: .infinity)
             }
         }
+        .contentShape(Rectangle())
     }
 
     private var introStep: some View {
@@ -1698,6 +1717,9 @@ struct FulfillmentStartView: View {
     // MARK: - Navigation
 
     private func goBack() {
+        if Date() < ignoreBackUntil {
+            return
+        }
         switch step {
         case .createCategories:
             step = .intro
@@ -1878,10 +1900,52 @@ struct FulfillmentStartView: View {
             }
         }
         categoryColorKeys = map
-        FulfillmentCategoryTheme.persistColorKeys(map)
 
         visionDrafts = Dictionary(uniqueKeysWithValues: orderedFulfillments.map { ($0.category_id, $0.category_vision) })
         purposeDrafts = Dictionary(uniqueKeysWithValues: orderedFulfillments.map { ($0.category_id, $0.category_purpose) })
+        let categoryIDs = Set(orderedFulfillments.map(\.category_id))
+        draftRoles = roles
+            .filter { categoryIDs.contains($0.category_id) }
+            .map {
+                DraftRoleRow(
+                    id: $0.id,
+                    categoryID: $0.category_id,
+                    updatedAt: $0.updatedAt,
+                    role: $0.role,
+                    rank: $0.rank
+                )
+            }
+        draftFoci = foci
+            .filter { categoryIDs.contains($0.category_id) }
+            .map {
+                DraftFocusRow(
+                    id: $0.id,
+                    categoryID: $0.category_id,
+                    updatedAt: $0.updatedAt,
+                    activity: $0.activity,
+                    rank: $0.rank
+                )
+            }
+        draftResources = resources
+            .filter { categoryIDs.contains($0.category_id) }
+            .map {
+                DraftResourceRow(
+                    id: $0.id,
+                    categoryID: $0.category_id,
+                    updatedAt: $0.updatedAt,
+                    resource: $0.resource,
+                    rank: $0.rank
+                )
+            }
+        draftPassionJoins = passionJoins
+            .filter { categoryIDs.contains($0.category_id) }
+            .map {
+                DraftPassionJoinRow(
+                    id: $0.id,
+                    passionID: $0.passion_id,
+                    categoryID: $0.category_id
+                )
+            }
 
         priorityCategoryIDs = priorityCategoryIDs.filter { id in
             orderedFulfillments.contains(where: { $0.category_id == id })
@@ -1948,11 +2012,10 @@ struct FulfillmentStartView: View {
         }
         let cycleKeys = onboardingColorCycleKeys
         if !cycleKeys.isEmpty {
-            var map = FulfillmentCategoryTheme.persistedColorKeys()
+            var map = categoryColorKeys
             for (idx, category) in fulfillmentStartSelectableDefaultCategories.enumerated() {
                 map[category] = cycleKeys[idx % cycleKeys.count]
             }
-            FulfillmentCategoryTheme.persistColorKeys(map)
             categoryColorKeys = map
         }
         for category in missing {
@@ -2075,26 +2138,31 @@ struct FulfillmentStartView: View {
     }
 
     private func syncSelectedCategoriesIntoFulfillment() {
-        refreshFulfillmentSnapshot()
         let sourceRows = fulfillmentSnapshot.isEmpty ? fulfillments : fulfillmentSnapshot
-        for category in selectedCategoryNames {
-            let exists = sourceRows.contains {
-                categoryKey($0.category) == categoryKey(category)
+        let sourceByKey = Dictionary(uniqueKeysWithValues: sourceRows.map { (categoryKey($0.category), $0) })
+        let stagedRows: [Fulfillment] = selectedCategoryNames.map { category in
+            let key = categoryKey(category)
+            if let existing = sourceByKey[key] {
+                return existing
             }
-            guard !exists else { continue }
-            modelContext.insert(
-                Fulfillment(
-                    category_id: UUID(),
-                    updatedAt: Date(),
-                    category: category,
-                    category_identitiy: "",
-                    category_vision: "",
-                    category_purpose: ""
-                )
+            return Fulfillment(
+                category_id: UUID(),
+                updatedAt: Date(),
+                category: category,
+                category_identitiy: "",
+                category_vision: "",
+                category_purpose: ""
             )
         }
-        refreshFulfillmentSnapshot()
-        loadFromPersistentData()
+        fulfillmentSnapshot = stagedRows
+
+        visionDrafts = Dictionary(uniqueKeysWithValues: stagedRows.map { ($0.category_id, $0.category_vision) })
+        purposeDrafts = Dictionary(uniqueKeysWithValues: stagedRows.map { ($0.category_id, $0.category_purpose) })
+        visionIndex = min(visionIndex, max(orderedFulfillments.count - 1, 0))
+        purposeIndex = min(purposeIndex, max(orderedFulfillments.count - 1, 0))
+        roleIndex = min(roleIndex, max(roleCategoryIDs.count - 1, 0))
+        deepIndex = min(deepIndex, max(deepCategoryIDs.count - 1, 0))
+        passionIndex = min(passionIndex, max(roleCategoryIDs.count - 1, 0))
         persistDraftIfNeeded()
     }
 
@@ -2113,10 +2181,10 @@ struct FulfillmentStartView: View {
     private func persistDraft() {
         let rows = orderedFulfillments
         let rowIDs = Set(rows.map(\.category_id))
-        let rolesRows = roles.filter { rowIDs.contains($0.category_id) }
-        let fociRows = foci.filter { rowIDs.contains($0.category_id) }
-        let resourcesRows = resources.filter { rowIDs.contains($0.category_id) }
-        let joinRows = passionJoins.filter { rowIDs.contains($0.category_id) }
+        let rolesRows = draftRoles.filter { rowIDs.contains($0.categoryID) }
+        let fociRows = draftFoci.filter { rowIDs.contains($0.categoryID) }
+        let resourcesRows = draftResources.filter { rowIDs.contains($0.categoryID) }
+        let joinRows = draftPassionJoins.filter { rowIDs.contains($0.categoryID) }
 
         let draft = DraftState(
             stepRawValue: step.rawValue,
@@ -2141,40 +2209,10 @@ struct FulfillmentStartView: View {
                     purpose: $0.category_purpose
                 )
             },
-            roles: rolesRows.map {
-                DraftRoleRow(
-                    id: $0.id,
-                    categoryID: $0.category_id,
-                    updatedAt: $0.updatedAt,
-                    role: $0.role,
-                    rank: $0.rank
-                )
-            },
-            foci: fociRows.map {
-                DraftFocusRow(
-                    id: $0.id,
-                    categoryID: $0.category_id,
-                    updatedAt: $0.updatedAt,
-                    activity: $0.activity,
-                    rank: $0.rank
-                )
-            },
-            resources: resourcesRows.map {
-                DraftResourceRow(
-                    id: $0.id,
-                    categoryID: $0.category_id,
-                    updatedAt: $0.updatedAt,
-                    resource: $0.resource,
-                    rank: $0.rank
-                )
-            },
-            passionJoins: joinRows.map {
-                DraftPassionJoinRow(
-                    id: $0.id,
-                    passionID: $0.passion_id,
-                    categoryID: $0.category_id
-                )
-            }
+            roles: rolesRows,
+            foci: fociRows,
+            resources: resourcesRows,
+            passionJoins: joinRows
         )
 
         guard let data = try? JSONEncoder().encode(draft) else { return }
@@ -2186,25 +2224,38 @@ struct FulfillmentStartView: View {
               let draft = try? JSONDecoder().decode(DraftState.self, from: data) else {
             return false
         }
-
-        hydrateDraftIntoContext(draft)
+        fulfillmentSnapshot = draft.fulfillments.map {
+            Fulfillment(
+                category_id: $0.categoryID,
+                updatedAt: $0.updatedAt,
+                category: $0.category,
+                category_identitiy: $0.identity,
+                category_vision: $0.vision,
+                category_purpose: $0.purpose
+            )
+        }
 
         selectedCategoryNames = draft.selectedCategoryNames
         customCategoryNames = draft.customCategoryNames
         deletedDefaultCategoryNames = Set(draft.deletedDefaultCategoryNames)
-        // Keep latest persisted category colors from AccountView and only fill gaps from draft.
-        var mergedColors = FulfillmentCategoryTheme.persistedColorKeys()
-        for (category, key) in draft.categoryColorKeys where mergedColors[category] == nil {
+        // Preserve in-progress onboarding colors first, then fill any missing keys
+        // from globally persisted preferences.
+        var mergedColors = draft.categoryColorKeys
+        for (category, key) in FulfillmentCategoryTheme.persistedColorKeys() where mergedColors[category] == nil {
             mergedColors[category] = key
         }
         categoryColorKeys = mergedColors
         priorityCategoryIDs = draft.priorityCategoryIDs
-        // Always reopen onboarding at the beginning screen.
-        visionIndex = 0
-        purposeIndex = 0
-        deepIndex = 0
-        passionIndex = 0
-        step = .intro
+        draftRoles = draft.roles
+        draftFoci = draft.foci
+        draftResources = draft.resources
+        draftPassionJoins = draft.passionJoins
+        let restoredStep = Step(rawValue: draft.stepRawValue) ?? .intro
+        visionIndex = max(0, draft.visionIndex)
+        purposeIndex = max(0, draft.purposeIndex)
+        deepIndex = max(0, draft.deepIndex)
+        passionIndex = max(0, draft.passionIndex ?? 0)
+        step = restoredStep
         visionDrafts = Dictionary(uniqueKeysWithValues: draft.visionDrafts.compactMap { key, value in
             guard let id = UUID(uuidString: key) else { return nil }
             return (id, value)
@@ -2216,86 +2267,6 @@ struct FulfillmentStartView: View {
         return true
     }
 
-    private func hydrateDraftIntoContext(_ draft: DraftState) {
-        modelContext.rollback()
-
-        let existingFulfillments = (try? modelContext.fetch(FetchDescriptor<Fulfillment>())) ?? []
-        for row in existingFulfillments {
-            modelContext.delete(row)
-        }
-        let existingRoles = (try? modelContext.fetch(FetchDescriptor<FulfillmentRoles>())) ?? []
-        for row in existingRoles {
-            modelContext.delete(row)
-        }
-        let existingFoci = (try? modelContext.fetch(FetchDescriptor<FulfillmentFocus>())) ?? []
-        for row in existingFoci {
-            modelContext.delete(row)
-        }
-        let existingResources = (try? modelContext.fetch(FetchDescriptor<FulfillmentResources>())) ?? []
-        for row in existingResources {
-            modelContext.delete(row)
-        }
-        let existingJoins = (try? modelContext.fetch(FetchDescriptor<PassionFulfillmentJoin>())) ?? []
-        for row in existingJoins {
-            modelContext.delete(row)
-        }
-
-        for row in draft.fulfillments {
-            modelContext.insert(
-                Fulfillment(
-                    category_id: row.categoryID,
-                    updatedAt: row.updatedAt,
-                    category: row.category,
-                    category_identitiy: row.identity,
-                    category_vision: row.vision,
-                    category_purpose: row.purpose
-                )
-            )
-        }
-        for row in draft.roles {
-            modelContext.insert(
-                FulfillmentRoles(
-                    id: row.id,
-                    category_id: row.categoryID,
-                    updatedAt: row.updatedAt,
-                    role: row.role,
-                    rank: row.rank
-                )
-            )
-        }
-        for row in draft.foci {
-            modelContext.insert(
-                FulfillmentFocus(
-                    id: row.id,
-                    category_id: row.categoryID,
-                    updatedAt: row.updatedAt,
-                    activity: row.activity,
-                    rank: row.rank
-                )
-            )
-        }
-        for row in draft.resources {
-            modelContext.insert(
-                FulfillmentResources(
-                    id: row.id,
-                    category_id: row.categoryID,
-                    updatedAt: row.updatedAt,
-                    resource: row.resource,
-                    rank: row.rank
-                )
-            )
-        }
-        for row in draft.passionJoins {
-            modelContext.insert(
-                PassionFulfillmentJoin(
-                    id: row.id,
-                    passion_id: row.passionID,
-                    category_id: row.categoryID
-                )
-            )
-        }
-    }
-
     private func clearDraft() {
         UserDefaults.standard.removeObject(forKey: Self.draftStorageKey)
     }
@@ -2303,7 +2274,7 @@ struct FulfillmentStartView: View {
     private func assignDefaultColorIfNeeded(for category: String) {
         let trimmed = category.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        var map = FulfillmentCategoryTheme.persistedColorKeys()
+        var map = categoryColorKeys
         guard map[trimmed] == nil else {
             categoryColorKeys = map
             return
@@ -2314,18 +2285,16 @@ struct FulfillmentStartView: View {
         let idx = ordered.firstIndex(where: { $0.caseInsensitiveCompare(trimmed) == .orderedSame }) ?? ordered.count
         let nextColor = cycleKeys[idx % cycleKeys.count]
         map[trimmed] = nextColor
-        FulfillmentCategoryTheme.persistColorKeys(map)
         categoryColorKeys = map
     }
 
     private func applyColorSelection(for category: String, colorKey: String) {
-        var map = FulfillmentCategoryTheme.persistedColorKeys()
+        var map = categoryColorKeys
         let resolvedBefore = map[category] ?? FulfillmentCategoryTheme.defaultColorKeys()[category] ?? "blue"
         if let other = map.first(where: { $0.key != category && $0.value == colorKey })?.key {
             map[other] = resolvedBefore
         }
         map[category] = colorKey
-        FulfillmentCategoryTheme.persistColorKeys(map)
         categoryColorKeys = map
         persistDraftIfNeeded()
     }
@@ -2350,17 +2319,132 @@ struct FulfillmentStartView: View {
             return
         }
 
-        for record in orderedFulfillments {
-            let vision = (visionDrafts[record.category_id] ?? record.category_vision).trimmingCharacters(in: .whitespacesAndNewlines)
-            let purpose = (purposeDrafts[record.category_id] ?? record.category_purpose).trimmingCharacters(in: .whitespacesAndNewlines)
-            updateVision(record: record, newText: vision)
-            updatePurpose(record: record, newText: purpose)
-        }
+        commitStagedFulfillmentRowsToContext()
+        FulfillmentCategoryTheme.persistColorKeys(categoryColorKeys)
         try? modelContext.save()
         didFinalizeOnboarding = true
         clearDraft()
 
         navigateToFulfillment = true
+    }
+
+    private func commitStagedFulfillmentRowsToContext() {
+        let stagedRows = orderedFulfillments
+        let selectedKeys = Set(selectedCategoryNames.map { categoryKey($0) })
+        let liveRows = (try? modelContext.fetch(FetchDescriptor<Fulfillment>())) ?? []
+        let liveRoles = (try? modelContext.fetch(FetchDescriptor<FulfillmentRoles>())) ?? []
+        let liveFoci = (try? modelContext.fetch(FetchDescriptor<FulfillmentFocus>())) ?? []
+        let liveResources = (try? modelContext.fetch(FetchDescriptor<FulfillmentResources>())) ?? []
+        let liveJoins = (try? modelContext.fetch(FetchDescriptor<PassionFulfillmentJoin>())) ?? []
+
+        // Remove categories not included in this onboarding result.
+        let rowsToDelete = liveRows.filter { !selectedKeys.contains(categoryKey($0.category)) }
+        if !rowsToDelete.isEmpty {
+            let idsToDelete = Set(rowsToDelete.map(\.category_id))
+            for role in liveRoles where idsToDelete.contains(role.category_id) {
+                modelContext.delete(role)
+            }
+            for focus in liveFoci where idsToDelete.contains(focus.category_id) {
+                modelContext.delete(focus)
+            }
+            for resource in liveResources where idsToDelete.contains(resource.category_id) {
+                modelContext.delete(resource)
+            }
+            for join in liveJoins where idsToDelete.contains(join.category_id) {
+                modelContext.delete(join)
+            }
+            for row in rowsToDelete {
+                modelContext.delete(row)
+            }
+        }
+
+        var resolvedCategoryIDByDraftID: [UUID: UUID] = [:]
+        for staged in stagedRows {
+            if let existing = liveRows.first(where: {
+                $0.category_id == staged.category_id
+                || categoryKey($0.category) == categoryKey(staged.category)
+            }) {
+                existing.category = staged.category
+                existing.category_identitiy = staged.category_identitiy
+                existing.category_vision = staged.category_vision
+                existing.category_purpose = staged.category_purpose
+                existing.updatedAt = Date()
+                resolvedCategoryIDByDraftID[staged.category_id] = existing.category_id
+            } else {
+                resolvedCategoryIDByDraftID[staged.category_id] = staged.category_id
+                modelContext.insert(
+                    Fulfillment(
+                        category_id: staged.category_id,
+                        updatedAt: staged.updatedAt,
+                        category: staged.category,
+                        category_identitiy: staged.category_identitiy,
+                        category_vision: staged.category_vision,
+                        category_purpose: staged.category_purpose
+                    )
+                )
+            }
+        }
+
+        let keptIDs = Set(resolvedCategoryIDByDraftID.values)
+        for role in liveRoles where keptIDs.contains(role.category_id) {
+            modelContext.delete(role)
+        }
+        for focus in liveFoci where keptIDs.contains(focus.category_id) {
+            modelContext.delete(focus)
+        }
+        for resource in liveResources where keptIDs.contains(resource.category_id) {
+            modelContext.delete(resource)
+        }
+        for join in liveJoins where keptIDs.contains(join.category_id) {
+            modelContext.delete(join)
+        }
+
+        for row in draftRoles {
+            let categoryID = resolvedCategoryIDByDraftID[row.categoryID] ?? row.categoryID
+            modelContext.insert(
+                FulfillmentRoles(
+                    id: row.id,
+                    category_id: categoryID,
+                    updatedAt: row.updatedAt,
+                    role: row.role,
+                    rank: row.rank
+                )
+            )
+        }
+        for row in draftFoci {
+            let categoryID = resolvedCategoryIDByDraftID[row.categoryID] ?? row.categoryID
+            modelContext.insert(
+                FulfillmentFocus(
+                    id: row.id,
+                    category_id: categoryID,
+                    updatedAt: row.updatedAt,
+                    activity: row.activity,
+                    rank: row.rank
+                )
+            )
+        }
+        for row in draftResources {
+            let categoryID = resolvedCategoryIDByDraftID[row.categoryID] ?? row.categoryID
+            modelContext.insert(
+                FulfillmentResources(
+                    id: row.id,
+                    category_id: categoryID,
+                    updatedAt: row.updatedAt,
+                    resource: row.resource,
+                    rank: row.rank
+                )
+            )
+        }
+        for row in draftPassionJoins {
+            let categoryID = resolvedCategoryIDByDraftID[row.categoryID] ?? row.categoryID
+            modelContext.insert(
+                PassionFulfillmentJoin(
+                    id: row.id,
+                    passion_id: row.passionID,
+                    category_id: categoryID
+                )
+            )
+        }
     }
 
     // MARK: - Validation feedback
@@ -2434,16 +2518,6 @@ struct FulfillmentStartView: View {
 
     private func updateVision(record: Fulfillment, newText: String) {
         guard record.category_vision != newText else { return }
-        let archive = FulfillmentArchive(
-            category_id: record.category_id,
-            updatedAt: record.updatedAt,
-            category: record.category,
-            category_identitiy: record.category_identitiy,
-            category_vision: record.category_vision,
-            category_purpose: record.category_purpose,
-            archivedAt: Date()
-        )
-        modelContext.insert(archive)
         record.category_vision = newText
         record.updatedAt = Date()
         persistDraftIfNeeded()
@@ -2451,23 +2525,13 @@ struct FulfillmentStartView: View {
 
     private func updatePurpose(record: Fulfillment, newText: String) {
         guard record.category_purpose != newText else { return }
-        let archive = FulfillmentArchive(
-            category_id: record.category_id,
-            updatedAt: record.updatedAt,
-            category: record.category,
-            category_identitiy: record.category_identitiy,
-            category_vision: record.category_vision,
-            category_purpose: record.category_purpose,
-            archivedAt: Date()
-        )
-        modelContext.insert(archive)
         record.category_purpose = newText
         record.updatedAt = Date()
         persistDraftIfNeeded()
     }
 
-    private func getRoles(for f: Fulfillment) -> [FulfillmentRoles] {
-        roles.filter { $0.category_id == f.category_id }
+    private func getRoles(for f: Fulfillment) -> [DraftRoleRow] {
+        draftRoles.filter { $0.categoryID == f.category_id }
             .sorted { $0.rank < $1.rank }
     }
 
@@ -2484,19 +2548,16 @@ struct FulfillmentStartView: View {
             return
         }
         let nextRank = (getRoles(for: record).map(\.rank).max() ?? 0) + 1
-        let r = FulfillmentRoles(category_id: record.category_id, role: trimmed, rank: nextRank)
-        modelContext.insert(r)
-        if nextRank == 1 {
-            let archive = FulfillmentArchive(
-                category_id: record.category_id,
-                updatedAt: record.updatedAt,
-                category: record.category,
-                category_identitiy: record.category_identitiy,
-                category_vision: record.category_vision,
-                category_purpose: record.category_purpose,
-                archivedAt: Date()
+        draftRoles.append(
+            DraftRoleRow(
+                id: UUID(),
+                categoryID: record.category_id,
+                updatedAt: Date(),
+                role: trimmed,
+                rank: nextRank
             )
-            modelContext.insert(archive)
+        )
+        if nextRank == 1 {
             record.category_identitiy = text
             record.updatedAt = Date()
         }
@@ -2506,7 +2567,7 @@ struct FulfillmentStartView: View {
     private func roleExists(_ text: String) -> Bool {
         let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalized.isEmpty else { return false }
-        return roles.contains { role in
+        return draftRoles.contains { role in
             role.role.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == normalized
         }
     }
@@ -2516,21 +2577,13 @@ struct FulfillmentStartView: View {
         for idx in offsets {
             guard list.indices.contains(idx) else { continue }
             let r = list[idx]
-            let archive = FulfillmentRolesArchive(
-                category_id: r.category_id,
-                updatedAt: r.updatedAt,
-                role: r.role,
-                rank: r.rank,
-                archivedAt: Date()
-            )
-            modelContext.insert(archive)
-            RecentlyDeletedStore.trash(r, in: modelContext)
+            draftRoles.removeAll { $0.id == r.id }
         }
         persistDraftIfNeeded()
     }
 
-    private func getFoci(for f: Fulfillment) -> [FulfillmentFocus] {
-        foci.filter { $0.category_id == f.category_id }
+    private func getFoci(for f: Fulfillment) -> [DraftFocusRow] {
+        draftFoci.filter { $0.categoryID == f.category_id }
             .sorted { $0.rank < $1.rank }
     }
 
@@ -2546,15 +2599,22 @@ struct FulfillmentStartView: View {
             return
         }
         let nextRank = (getFoci(for: record).map(\.rank).max() ?? 0) + 1
-        let f = FulfillmentFocus(category_id: record.category_id, activity: trimmed, rank: nextRank)
-        modelContext.insert(f)
+        draftFoci.append(
+            DraftFocusRow(
+                id: UUID(),
+                categoryID: record.category_id,
+                updatedAt: Date(),
+                activity: trimmed,
+                rank: nextRank
+            )
+        )
         persistDraftIfNeeded()
     }
 
     private func focusExists(_ text: String) -> Bool {
         let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalized.isEmpty else { return false }
-        return foci.contains { row in
+        return draftFoci.contains { row in
             row.activity.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == normalized
         }
     }
@@ -2564,21 +2624,13 @@ struct FulfillmentStartView: View {
         for idx in offsets {
             guard list.indices.contains(idx) else { continue }
             let f = list[idx]
-            let archive = FulfillmentFocusArchive(
-                category_id: f.category_id,
-                updatedAt: f.updatedAt,
-                activity: f.activity,
-                rank: f.rank,
-                archivedAt: Date()
-            )
-            modelContext.insert(archive)
-            RecentlyDeletedStore.trash(f, in: modelContext)
+            draftFoci.removeAll { $0.id == f.id }
         }
         persistDraftIfNeeded()
     }
 
-    private func getResources(for f: Fulfillment) -> [FulfillmentResources] {
-        resources.filter { $0.category_id == f.category_id }
+    private func getResources(for f: Fulfillment) -> [DraftResourceRow] {
+        draftResources.filter { $0.categoryID == f.category_id }
             .sorted { $0.rank < $1.rank }
     }
 
@@ -2594,15 +2646,22 @@ struct FulfillmentStartView: View {
             return
         }
         let nextRank = (getResources(for: record).map(\.rank).max() ?? 0) + 1
-        let r = FulfillmentResources(category_id: record.category_id, resource: trimmed, rank: nextRank)
-        modelContext.insert(r)
+        draftResources.append(
+            DraftResourceRow(
+                id: UUID(),
+                categoryID: record.category_id,
+                updatedAt: Date(),
+                resource: trimmed,
+                rank: nextRank
+            )
+        )
         persistDraftIfNeeded()
     }
 
     private func resourceExists(_ text: String) -> Bool {
         let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalized.isEmpty else { return false }
-        return resources.contains { row in
+        return draftResources.contains { row in
             row.resource.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == normalized
         }
     }
@@ -2612,24 +2671,16 @@ struct FulfillmentStartView: View {
         for idx in offsets {
             guard list.indices.contains(idx) else { continue }
             let r = list[idx]
-            let archive = FulfillmentResourcesArchive(
-                category_id: r.category_id,
-                updatedAt: r.updatedAt,
-                resource: r.resource,
-                rank: r.rank,
-                archivedAt: Date()
-            )
-            modelContext.insert(archive)
-            RecentlyDeletedStore.trash(r, in: modelContext)
+            draftResources.removeAll { $0.id == r.id }
         }
         persistDraftIfNeeded()
     }
 
     private func selectedPassionIDs(for categoryID: UUID) -> Set<UUID> {
         Set(
-            passionJoins
-                .filter { $0.category_id == categoryID }
-                .map(\.passion_id)
+            draftPassionJoins
+                .filter { $0.categoryID == categoryID }
+                .map(\.passionID)
         )
     }
 
@@ -2647,18 +2698,20 @@ struct FulfillmentStartView: View {
     }
 
     private func togglePassion(_ passion: Passion, for categoryID: UUID) {
-        let existing = passionJoins.first {
-            $0.passion_id == passion.passion_id && $0.category_id == categoryID
+        let existing = draftPassionJoins.first {
+            $0.passionID == passion.passion_id && $0.categoryID == categoryID
         }
 
-        if let join = existing {
-            RecentlyDeletedStore.trash(join, in: modelContext)
+        if let existing {
+            draftPassionJoins.removeAll { $0.id == existing.id }
         } else {
-            let join = PassionFulfillmentJoin(
-                passion_id: passion.passion_id,
-                category_id: categoryID
+            draftPassionJoins.append(
+                DraftPassionJoinRow(
+                    id: UUID(),
+                    passionID: passion.passion_id,
+                    categoryID: categoryID
+                )
             )
-            modelContext.insert(join)
         }
         persistDraftIfNeeded()
     }
