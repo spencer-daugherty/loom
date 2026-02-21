@@ -4307,7 +4307,6 @@ struct PlanStepFiveView: View {
                                 onTapGear: { onOpenSensitivity(action.id) },
                                 onTapPaperclip: { onOpenAttachments(action.id) }
                             )
-                            .opacity(draggedActionID == action.id ? 0.0 : 1.0)
                             .onDrag {
                                 draggedActionID = action.id
                                 return NSItemProvider(object: action.id.uuidString as NSString)
