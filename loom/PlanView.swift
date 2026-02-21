@@ -1052,10 +1052,12 @@ struct PlanStepThreeView: View {
     @State private var showStep3ValidationHint: Bool = false
     @State private var shouldHighlightStep3Validation: Bool = false
     @State private var step3ValidationResetWorkItem: DispatchWorkItem?
+    @State private var isDraggingOverGroupArea: Bool = false
 
     private let hiddenUntilLaterIconName = "clock.arrow.trianglehead.clockwise.rotate.90.path.dotted"
     private let maxChunks = 8
     private let fulfillmentAreasSectionTitle = "Fulfillment Areas"
+    private let expandedGroupAreaRatio: CGFloat = 0.75
 
     private var secondaryButtonTextColor: Color {
         colorScheme == .dark ? Color(.secondaryLabel) : .black
@@ -1199,6 +1201,12 @@ struct PlanStepThreeView: View {
         return nil
     }
 
+    private func setGroupAreaDropTarget(_ isTargeted: Bool) {
+        withAnimation(.easeInOut(duration: 0.18)) {
+            isDraggingOverGroupArea = isTargeted
+        }
+    }
+
     var body: some View {
         VStack(spacing: 12) {
             VStack(spacing: 1) {
@@ -1283,61 +1291,85 @@ struct PlanStepThreeView: View {
                 Spacer(minLength: 0)
             }
 
-            List {
-                ForEach(poolItems) { item in
-                    rowView(
-                        text: item.text,
-                        showGhostOutline: item.isGhost,
-                        hiddenStatusText: hiddenStatusText(for: item),
-                        isDraggable: true,
-                        dragPayload: DragPayload(itemID: item.id)
-                    )
-                    .contentShape(Rectangle())
+            GeometryReader { geometry in
+                let availableHeight = max(geometry.size.height, 1)
+                let collapsedGroupHeight = availableHeight * 0.5
+                let expandedGroupHeight = availableHeight * expandedGroupAreaRatio
+                let groupHeight = isDraggingOverGroupArea ? expandedGroupHeight : collapsedGroupHeight
+                let boundedGroupHeight = min(max(groupHeight, 220), availableHeight - 120)
+                let poolHeight = max(120, availableHeight - boundedGroupHeight - 10)
+
+                VStack(spacing: 10) {
+                    List {
+                        ForEach(poolItems) { item in
+                            rowView(
+                                text: item.text,
+                                showGhostOutline: item.isGhost,
+                                hiddenStatusText: hiddenStatusText(for: item),
+                                isDraggable: true,
+                                dragPayload: DragPayload(itemID: item.id)
+                            )
+                            .contentShape(Rectangle())
+                            .dropDestination(for: DragPayload.self) { payloads, _ in
+                                guard let payload = payloads.first else { return false }
+                                moveItemToPool(payload.itemID)
+                                isDraggingOverGroupArea = false
+
+                                enforceShowHiddenIfNeeded()
+                                persistStep3Plan()
+                                return true
+                            }
+                            .padding(.vertical, 4)
+                            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                        }
+                        .listRowSeparator(.hidden)
+                    }
+                    .frame(height: poolHeight)
+                    .listRowSpacing(4)
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
                     .dropDestination(for: DragPayload.self) { payloads, _ in
                         guard let payload = payloads.first else { return false }
                         moveItemToPool(payload.itemID)
+                        isDraggingOverGroupArea = false
 
                         enforceShowHiddenIfNeeded()
                         persistStep3Plan()
                         return true
                     }
-                    .padding(.vertical, 4)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-                }
-                .listRowSeparator(.hidden)
-            }
-            .listRowSpacing(4)
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
-            .dropDestination(for: DragPayload.self) { payloads, _ in
-                guard let payload = payloads.first else { return false }
-                moveItemToPool(payload.itemID)
+                    .onChange(of: showHidden) { _, _ in
+                        enforceShowHiddenIfNeeded()
+                        syncPoolWithVisibility()
+                        persistStep3Plan()
+                    }
 
-                enforceShowHiddenIfNeeded()
-                persistStep3Plan()
-                return true
-            }
-            .onChange(of: showHidden) { _, _ in
-                enforceShowHiddenIfNeeded()
-                syncPoolWithVisibility()
-                persistStep3Plan()
-            }
+                    List {
+                        ForEach(Array(chunks.enumerated()), id: \.element.id) { index, _ in
+                            chunkContainerView(chunkIndex: index)
+                                .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+                                .listRowSeparator(.hidden)
+                        }
 
-            List {
-                ForEach(Array(chunks.enumerated()), id: \.element.id) { index, _ in
-                    chunkContainerView(chunkIndex: index)
-                        .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
-                        .listRowSeparator(.hidden)
+                        if chunks.count < maxChunks {
+                            addChunkRow
+                                .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+                                .listRowSeparator(.hidden)
+                        }
+                    }
+                    .frame(height: boundedGroupHeight)
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                    .dropDestination(
+                        for: DragPayload.self,
+                        action: { _, _ in false },
+                        isTargeted: { isTargeted in
+                            setGroupAreaDropTarget(isTargeted)
+                        }
+                    )
                 }
-
-                if chunks.count < maxChunks {
-                    addChunkRow
-                        .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
-                        .listRowSeparator(.hidden)
-                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
+            .frame(maxHeight: .infinity)
 
             if isRefreshVisible {
                 Button { refreshStep3() } label: {
@@ -1457,6 +1489,7 @@ struct PlanStepThreeView: View {
         }
         .onDisappear {
             guard hasInitializedStep3State else { return }
+            isDraggingOverGroupArea = false
             persistStep3Plan(force: true)
         }
     }
@@ -1625,14 +1658,21 @@ struct PlanStepThreeView: View {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(cardOverlayColor, lineWidth: cardOverlayWidth)
         )
-        .dropDestination(for: DragPayload.self) { payloads, _ in
-            guard let payload = payloads.first else { return false }
-            moveItem(payload.itemID, toChunkAt: chunkIndex)
+        .dropDestination(
+            for: DragPayload.self,
+            action: { payloads, _ in
+                guard let payload = payloads.first else { return false }
+                moveItem(payload.itemID, toChunkAt: chunkIndex)
+                isDraggingOverGroupArea = false
 
-            enforceShowHiddenIfNeeded()
-            persistStep3Plan()
-            return true
-        }
+                enforceShowHiddenIfNeeded()
+                persistStep3Plan()
+                return true
+            },
+            isTargeted: { isTargeted in
+                setGroupAreaDropTarget(isTargeted)
+            }
+        )
     }
 
     @ViewBuilder
