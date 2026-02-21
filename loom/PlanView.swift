@@ -2255,9 +2255,9 @@ struct PlanStepThreeLabelView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     if isChunkInfoExpanded {
                         (
-                            Text("Chunk: ")
+                            Text("Label: ")
                                 .fontWeight(.bold)
-                            + Text("Assign each chunk to the Fulfillment Area it best supports so your plan stays focused and aligned.")
+                            + Text("Assign each group of actions with the category it's most related to.")
                         )
                         .foregroundStyle(.secondary)
                         .font(.subheadline)
@@ -2268,9 +2268,9 @@ struct PlanStepThreeLabelView: View {
                     } else {
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
                             (
-                                Text("Chunk: ")
+                                Text("Label: ")
                                     .fontWeight(.bold)
-                                + Text("Assign each chunk to the Fulfillment Area it best supports so your plan stays focused and aligned.")
+                                + Text("Assign each group of actions with the category it's most related to.")
                             )
                             .foregroundStyle(.secondary)
                             .font(.subheadline)
@@ -2342,11 +2342,7 @@ struct PlanStepThreeLabelView: View {
                     Text("Complete your labels")
                         .font(.footnote)
                         .fontWeight(.bold)
-                    Text("• 2 or more chunks")
-                        .font(.footnote)
-                    Text("• 3 or more actions per chunk")
-                        .font(.footnote)
-                    Text("• Select one Fulfillment Area per chunk")
+                    Text("• Select one Fulfillment area per group")
                         .font(.footnote)
                 }
                 .multilineTextAlignment(.center)
@@ -2437,8 +2433,8 @@ struct PlanStepThreeLabelView: View {
         .overlay(
             RoundedRectangle(cornerRadius: 12)
                 .stroke(
-                    hasMissingLabel ? Color.red.opacity(0.7) : (colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.18)),
-                    lineWidth: hasMissingLabel ? 1.6 : 1
+                    colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.18),
+                    lineWidth: 1
                 )
         )
     }
@@ -3062,8 +3058,8 @@ struct PlanStepFourView: View {
 
                 Text(chunk.label)
                     .font(.subheadline)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(forcedDarkTextColor)
+                    .fontWeight(.bold)
+                    .foregroundStyle(FulfillmentCategoryTheme.color(for: chunk.category))
                     .frame(maxWidth: .infinity, alignment: .trailing)
                     .lineLimit(1)
             }
@@ -4249,9 +4245,28 @@ struct PlanStepFiveView: View {
                                 onTapGear: { onOpenSensitivity(action.id) },
                                 onTapPaperclip: { onOpenAttachments(action.id) }
                             )
+                            .opacity(draggedActionID == action.id ? 0.0 : 1.0)
                             .onDrag {
                                 draggedActionID = action.id
                                 return NSItemProvider(object: action.id.uuidString as NSString)
+                            } preview: {
+                                HStack(alignment: .center, spacing: 10) {
+                                    Text(action.text)
+                                        .font(.subheadline)
+                                        .foregroundStyle(colorScheme == .dark ? Color.white.opacity(0.85) : .black)
+                                        .lineLimit(2)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    Image(systemName: "chevron.up.chevron.down")
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(10)
+                                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .stroke(Color.black.opacity(0.12), lineWidth: 1)
+                                )
+                                .frame(maxWidth: 320)
                             }
                             .onDrop(of: [.text], delegate: AnimatedActionDropDelegate(
                                 targetID: action.id,
