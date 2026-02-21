@@ -5,6 +5,11 @@ import UniformTypeIdentifiers
 import UIKit
 #endif
 
+private struct PlannedActionDueSnapshot: Codable {
+    let dueDate: Date
+    let attentionDays: Int
+}
+
 struct ActionView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
@@ -37,8 +42,14 @@ struct ActionView: View {
     @Query private var attachments: [PlannedChunkActionAttachment]
     @Query(sort: \RollingCaptureItem.createdAt, order: .reverse)
     private var captureItems: [RollingCaptureItem]
+    @Query(sort: \RecurringCaptureRule.createdAt, order: .reverse)
+    private var recurringRules: [RecurringCaptureRule]
+    @Query(sort: \RecurringCaptureDispatch.sentAt, order: .reverse)
+    private var recurringDispatches: [RecurringCaptureDispatch]
     @Query(sort: \ActivePlanState.id, order: .forward)
     private var activePlanStates: [ActivePlanState]
+    @AppStorage("capture_default_due_date_attention_days")
+    private var dueDateAttentionDays: Int = 7
 
     @State private var isShowingInstructions: Bool = false
     @State private var openFilter: FilterMenu? = nil
@@ -78,6 +89,7 @@ struct ActionView: View {
     @State private var showReflectionFlow: Bool = false
     @State private var dismissActionViewAfterReflect: Bool = false
     @State private var deferredPersistor = ActionDeferredPersistor()
+    @State private var carriedProfileAppliedActionIDs: Set<UUID> = []
     private let weekStart: Date
 
     init() {
@@ -129,6 +141,13 @@ struct ActionView: View {
 
     private var currentWeekStart: Date {
         weekStart
+    }
+
+    struct DueDateEditorState {
+        var hasDueDate: Bool
+        var dueDate: Date
+        var attentionDays: Int
+        var minimumDate: Date
     }
 
     private var weekChunks: [PlannedChunk] {
@@ -732,6 +751,7 @@ struct ActionView: View {
             .presentationDragIndicator(.visible)
         }
         .sheet(item: $sensitivityActionID) { wrapper in
+            let dueEditor = dueDateEditorState(forActionId: wrapper.id)
             SensitivitySheet(
                 defineState: Binding(
                     get: { defineStateByActionID[wrapper.id] ?? makeBlankDefineState(actionId: wrapper.id) },
@@ -768,6 +788,10 @@ struct ActionView: View {
                 onTogglePlaceSelected: { placeId in
                     togglePlaceSelection(actionId: wrapper.id, placeId: placeId)
                     scheduleAutosave()
+                },
+                dueDateEditor: dueEditor,
+                onSaveDueDateEditor: { updated in
+                    updateDueDateEditor(forActionId: wrapper.id, with: updated)
                 }
             )
             .presentationDetents([.medium, .large])
@@ -835,6 +859,7 @@ struct ActionView: View {
         }
         .onAppear {
             ensureStateRowsExistForWeek()
+            applyCarriedProfilesToWeekActionsIfNeeded()
             cleanupAllBlankActions()
             deactivatePlanIfNoActionBlocks()
         }
@@ -843,6 +868,8 @@ struct ActionView: View {
         }
         .onChange(of: weekActions.map(\.id)) { _, ids in
             ensureStateRowsExistForWeek()
+            carriedProfileAppliedActionIDs = carriedProfileAppliedActionIDs.intersection(Set(ids))
+            applyCarriedProfilesToWeekActionsIfNeeded()
             cleanupAllBlankActions()
             deactivatePlanIfNoActionBlocks()
             if let pending = pendingFocusActionID, ids.contains(pending) {
@@ -1448,6 +1475,8 @@ struct ActionView: View {
         ActionSwipeRow(
             actionId: action.id,
             text: action.text,
+            dueStatusText: dueDateStatusTextForAction(action.id),
+            dueStatusColor: dueDateStatusColorForAction(action.id),
             status: status,
             accent: accent,
             colorScheme: colorScheme,
@@ -1512,6 +1541,172 @@ struct ActionView: View {
         captureItems.filter {
             !$0.isGhost && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
+    }
+
+    private var recurringRuleByID: [UUID: RecurringCaptureRule] {
+        Dictionary(uniqueKeysWithValues: recurringRules.map { ($0.id, $0) })
+    }
+
+    private var recurringDispatchByItemID: [UUID: RecurringCaptureDispatch] {
+        var result: [UUID: RecurringCaptureDispatch] = [:]
+        for dispatch in recurringDispatches where result[dispatch.captureItemID] == nil {
+            result[dispatch.captureItemID] = dispatch
+        }
+        return result
+    }
+
+    private func normalizedActionText(_ text: String) -> String {
+        text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+    }
+
+    private func formatDueDate(_ date: Date) -> String {
+        let cal = Calendar.current
+        let currentYear = cal.component(.year, from: Date())
+        let year = cal.component(.year, from: date)
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        if year == currentYear {
+            formatter.setLocalizedDateFormatFromTemplate("E MMM d")
+        } else {
+            formatter.setLocalizedDateFormatFromTemplate("E MMM d, yyyy")
+        }
+        return formatter.string(from: date)
+    }
+
+    private func dueDate(for captureItem: RollingCaptureItem) -> Date? {
+        if let explicit = captureItem.dueDate {
+            return Calendar.current.startOfDay(for: explicit)
+        }
+        guard let dispatch = recurringDispatchByItemID[captureItem.id],
+              let rule = recurringRuleByID[dispatch.ruleID] else {
+            return nil
+        }
+        let leadDays = max(7, rule.captureDaysBeforeDueDate)
+        let due = Calendar.current.date(byAdding: .day, value: leadDays, to: dispatch.sentAt) ?? dispatch.sentAt
+        return Calendar.current.startOfDay(for: due)
+    }
+
+    private func dueDateStatusText(for captureItem: RollingCaptureItem) -> String? {
+        guard let due = dueDate(for: captureItem) else { return nil }
+        let attention = min(max(captureItem.dueDateAttentionDays ?? dueDateAttentionDays, 7), 30)
+        return dueDateStatusText(for: due, attentionDays: attention)
+    }
+
+    private func dueDateStatusColor(for captureItem: RollingCaptureItem) -> Color {
+        guard let due = dueDate(for: captureItem) else { return .secondary }
+        let dayDelta = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: Date()), to: due).day ?? 0
+        if dayDelta < 0 { return .red }
+        if dayDelta == 0 { return .blue }
+        return .secondary
+    }
+
+    private var dueSnapshotsByActionText: [String: PlannedActionDueSnapshot] {
+        loadActionDueSnapshots(for: currentWeekStart)
+    }
+
+    private func loadActionDueSnapshots(for weekStart: Date) -> [String: PlannedActionDueSnapshot] {
+        let key = actionDueSnapshotStorageKey(for: weekStart)
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let decoded = try? JSONDecoder().decode([String: PlannedActionDueSnapshot].self, from: data) else {
+            return [:]
+        }
+        return decoded
+    }
+
+    private func actionDueSnapshotStorageKey(for weekStart: Date) -> String {
+        "planned_action_due_snapshots_\(dayKey(for: weekStart))"
+    }
+
+    private func dayKey(for date: Date) -> String {
+        let comps = Calendar.current.dateComponents([.year, .month, .day], from: date)
+        let y = comps.year ?? 0
+        let m = comps.month ?? 0
+        let d = comps.day ?? 0
+        return String(format: "%04d-%02d-%02d", y, m, d)
+    }
+
+    private func dueDateStatusText(for dueDate: Date, attentionDays: Int) -> String? {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let due = cal.startOfDay(for: dueDate)
+        let dayDelta = cal.dateComponents([.day], from: today, to: due).day ?? 0
+        guard dayDelta <= attentionDays else { return nil }
+        if dayDelta < 0 {
+            let overdueDays = abs(dayDelta)
+            let dayWord = overdueDays == 1 ? "day" : "days"
+            return "Due \(overdueDays) \(dayWord) ago on \(formatDueDate(due))"
+        } else if dayDelta == 0 {
+            return "Due Today on \(formatDueDate(due))"
+        } else {
+            let dayWord = dayDelta == 1 ? "day" : "days"
+            return "Due in \(dayDelta) \(dayWord) on \(formatDueDate(due))"
+        }
+    }
+
+    private func dueDateStatusColor(for dueDate: Date) -> Color {
+        let dayDelta = Calendar.current.dateComponents(
+            [.day],
+            from: Calendar.current.startOfDay(for: Date()),
+            to: Calendar.current.startOfDay(for: dueDate)
+        ).day ?? 0
+        if dayDelta < 0 { return .red }
+        if dayDelta == 0 { return .blue }
+        return .secondary
+    }
+
+    private func captureItemForPlannedActionID(_ actionId: UUID) -> RollingCaptureItem? {
+        guard let action = weekActions.first(where: { $0.id == actionId }) else { return nil }
+        let actionText = normalizedActionText(action.text)
+        return captureItems.first { normalizedActionText($0.text) == actionText }
+    }
+
+    private func dueDateStatusTextForAction(_ actionId: UUID) -> String? {
+        if let item = captureItemForPlannedActionID(actionId) {
+            return dueDateStatusText(for: item)
+        }
+        guard let action = weekActions.first(where: { $0.id == actionId }) else { return nil }
+        let key = normalizedActionText(action.text)
+        guard let snapshot = dueSnapshotsByActionText[key] else { return nil }
+        return dueDateStatusText(for: snapshot.dueDate, attentionDays: snapshot.attentionDays)
+    }
+
+    private func dueDateStatusColorForAction(_ actionId: UUID) -> Color {
+        if let item = captureItemForPlannedActionID(actionId) {
+            return dueDateStatusColor(for: item)
+        }
+        guard let action = weekActions.first(where: { $0.id == actionId }) else { return .secondary }
+        let key = normalizedActionText(action.text)
+        guard let snapshot = dueSnapshotsByActionText[key] else { return .secondary }
+        return dueDateStatusColor(for: snapshot.dueDate)
+    }
+
+    private func dueDateEditorState(forActionId actionId: UUID) -> DueDateEditorState? {
+        guard let item = captureItemForPlannedActionID(actionId) else { return nil }
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let resolvedDue = cal.startOfDay(
+            for: item.dueDate
+                ?? dueDate(for: item)
+                ?? cal.date(byAdding: .day, value: 7, to: today)
+                ?? today
+        )
+        let attention = min(max(item.dueDateAttentionDays ?? dueDateAttentionDays, 7), 30)
+        return DueDateEditorState(
+            hasDueDate: item.dueDate != nil,
+            dueDate: resolvedDue,
+            attentionDays: attention,
+            minimumDate: today
+        )
+    }
+
+    private func updateDueDateEditor(forActionId actionId: UUID, with updated: DueDateEditorState) {
+        guard let item = captureItemForPlannedActionID(actionId) else { return }
+        let normalizedDue = Calendar.current.startOfDay(for: updated.dueDate)
+        item.dueDate = updated.hasDueDate ? normalizedDue : nil
+        item.dueDateAttentionDays = min(max(updated.attentionDays, 7), 30)
+        scheduleAutosave()
     }
 
     private func insertAction(
@@ -2016,6 +2211,103 @@ struct ActionView: View {
             }
         }
         if insertedAny {
+            persistNow()
+        }
+    }
+
+    private func applyCarriedProfilesToWeekActionsIfNeeded() {
+        var didMutate = false
+
+        for action in weekActions {
+            guard !carriedProfileAppliedActionIDs.contains(action.id) else { continue }
+            guard let profile = ActionCarryProfileStore.load(for: action.text) else { continue }
+
+            upsertDefineState(forActionId: action.id) { st in
+                st.isMust = profile.isMust
+                st.timeEstimateMinutes = profile.timeEstimateMinutes
+                st.sensitiveMorning = profile.sensitiveMorning
+                st.sensitiveAfternoon = profile.sensitiveAfternoon
+                st.sensitiveEvening = profile.sensitiveEvening
+                st.updatedAt = .now
+            }
+
+            if let kindRaw = profile.leverageKindRaw,
+               let kind = ActionLeverageKind(rawValue: kindRaw),
+               let value = profile.leverageValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !value.isEmpty {
+                let key = "\(kind.rawValue.lowercased())|\(value.lowercased())"
+                let resource: LeverageResource
+                if let existing = leverageCatalog.first(where: { $0.kindValueKey == key }) {
+                    resource = existing
+                } else {
+                    let created = LeverageResource(kindRaw: kind.rawValue, value: value)
+                    modelContext.insert(created)
+                    resource = created
+                }
+                upsertLeverageSelection(forActionId: action.id) { sel in
+                    sel.resourceId = resource.id
+                    sel.updatedAt = .now
+                }
+            } else {
+                upsertLeverageSelection(forActionId: action.id) { sel in
+                    sel.resourceId = nil
+                    sel.updatedAt = .now
+                }
+            }
+
+            let trimmedPlaces = profile.placeNames
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            let targetPlaceIDs: Set<UUID> = Set(trimmedPlaces.map { placeName in
+                let normalized = placeName.lowercased()
+                if let existing = placesCatalog.first(where: { $0.normalizedKey == normalized }) {
+                    return existing.id
+                }
+                let created = SensitivityPlaceCatalogItem(place: placeName)
+                modelContext.insert(created)
+                return created.id
+            })
+
+            let existingLinks = placeLinks.filter { $0.plannedChunkActionId == action.id }
+            let existingIDs = Set(existingLinks.map(\.placeId))
+            for link in existingLinks where !targetPlaceIDs.contains(link.placeId) {
+                RecentlyDeletedStore.trash(link, in: modelContext)
+            }
+            for placeID in targetPlaceIDs where !existingIDs.contains(placeID) {
+                modelContext.insert(PlannedChunkActionSensitivityPlaceLink(
+                    weekStart: currentWeekStart,
+                    plannedChunkActionId: action.id,
+                    placeId: placeID,
+                    createdAt: .now
+                ))
+            }
+
+            upsertNote(forActionId: action.id) { n in
+                n.noteText = profile.noteText
+                n.updatedAt = .now
+            }
+
+            let existingAttachments = attachments.filter { $0.plannedChunkActionId == action.id }
+            for attachment in existingAttachments {
+                RecentlyDeletedStore.trash(attachment, in: modelContext)
+            }
+            for attachment in profile.attachments {
+                modelContext.insert(PlannedChunkActionAttachment(
+                    weekStart: currentWeekStart,
+                    plannedChunkActionId: action.id,
+                    kindRaw: attachment.kindRaw,
+                    urlString: attachment.urlString,
+                    fileName: attachment.fileName,
+                    fileBookmarkData: attachment.fileBookmarkData,
+                    createdAt: .now
+                ))
+            }
+
+            carriedProfileAppliedActionIDs.insert(action.id)
+            didMutate = true
+        }
+
+        if didMutate {
             persistNow()
         }
     }
@@ -2782,11 +3074,17 @@ private struct SensitivitySheet: View {
     let onAddPlaceToCatalog: (String) -> Void
     let onDeleteCatalogPlaces: (Set<UUID>) -> Void
     let onTogglePlaceSelected: (UUID) -> Void
+    let dueDateEditor: ActionView.DueDateEditorState?
+    let onSaveDueDateEditor: (ActionView.DueDateEditorState) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var newPlace: String = ""
     @State private var isNewPlaceMode: Bool = false
     @FocusState private var isNewPlaceFocused: Bool
+    @State private var localHasDueDate: Bool = false
+    @State private var localDueDate: Date = .now
+    @State private var localAttentionDays: Int = 7
+    @State private var localMinimumDate: Date = Calendar.current.startOfDay(for: Date())
 
     var body: some View {
         NavigationStack {
@@ -2863,6 +3161,63 @@ private struct SensitivitySheet: View {
                         }
                     }
                 }
+
+                if dueDateEditor != nil {
+                    Section("Due Date") {
+                        HStack {
+                            Text("Due Date")
+                            Spacer()
+                            Menu {
+                                Button("No") { localHasDueDate = false }
+                                Button("Yes") { localHasDueDate = true }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Text(localHasDueDate ? "Yes" : "No")
+                                    Image(systemName: "chevron.up.chevron.down")
+                                }
+                                .foregroundStyle(.blue)
+                            }
+                        }
+
+                        if localHasDueDate {
+                            HStack {
+                                Text("Set Due Date")
+                                Spacer()
+                                DatePicker(
+                                    "",
+                                    selection: $localDueDate,
+                                    in: localMinimumDate...,
+                                    displayedComponents: .date
+                                )
+                                .labelsHidden()
+                                .datePickerStyle(.compact)
+                            }
+
+                            HStack {
+                                Text("Attention")
+                                Spacer()
+                                Menu {
+                                    ForEach(7...30, id: \.self) { value in
+                                        Button("\(value) days") {
+                                            localAttentionDays = value
+                                        }
+                                    }
+                                } label: {
+                                    HStack(spacing: 4) {
+                                        Text("\(min(max(localAttentionDays, 7), 30)) days")
+                                        Image(systemName: "chevron.up.chevron.down")
+                                    }
+                                    .foregroundStyle(.blue)
+                                }
+                            }
+
+                            Text("Attention triggers countdown to display.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                }
             }
             .navigationTitle("Sensitivities")
             .navigationBarTitleDisplayMode(.inline)
@@ -2870,8 +3225,26 @@ private struct SensitivitySheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
                         commitInlinePlace()
+                        if dueDateEditor != nil {
+                            onSaveDueDateEditor(
+                                ActionView.DueDateEditorState(
+                                    hasDueDate: localHasDueDate,
+                                    dueDate: localDueDate,
+                                    attentionDays: min(max(localAttentionDays, 7), 30),
+                                    minimumDate: localMinimumDate
+                                )
+                            )
+                        }
                         dismiss()
                     }
+                }
+            }
+            .onAppear {
+                if let dueDateEditor {
+                    localHasDueDate = dueDateEditor.hasDueDate
+                    localDueDate = dueDateEditor.dueDate
+                    localAttentionDays = dueDateEditor.attentionDays
+                    localMinimumDate = dueDateEditor.minimumDate
                 }
             }
         }
@@ -3237,6 +3610,8 @@ private struct InlineActionEditor: View {
 private struct ActionSwipeRow: View {
     let actionId: UUID
     let text: String
+    let dueStatusText: String?
+    let dueStatusColor: Color
     let status: ActionExecutionStatus
     let accent: Color
     let colorScheme: ColorScheme
@@ -3262,6 +3637,8 @@ private struct ActionSwipeRow: View {
     init(
         actionId: UUID,
         text: String,
+        dueStatusText: String?,
+        dueStatusColor: Color,
         status: ActionExecutionStatus,
         accent: Color,
         colorScheme: ColorScheme,
@@ -3283,6 +3660,8 @@ private struct ActionSwipeRow: View {
     ) {
         self.actionId = actionId
         self.text = text
+        self.dueStatusText = dueStatusText
+        self.dueStatusColor = dueStatusColor
         self.status = status
         self.accent = accent
         self.colorScheme = colorScheme
@@ -3368,6 +3747,11 @@ private struct ActionSwipeRow: View {
             .buttonStyle(.plain)
 
             VStack(alignment: .leading, spacing: 8) {
+                if let dueStatusText {
+                    Text(dueStatusText)
+                        .font(.caption)
+                        .foregroundStyle(dueStatusColor)
+                }
                 InlineActionEditor(
                     actionId: actionId,
                     sourceText: text,

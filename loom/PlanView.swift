@@ -2,6 +2,11 @@ import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
 
+private struct PlannedActionDueSnapshot: Codable {
+    let dueDate: Date
+    let attentionDays: Int
+}
+
 private struct PlanStepProgressBar: View {
     let current: Int
     let total: Int
@@ -20,6 +25,7 @@ private struct PlanStepProgressBar: View {
 }
 
 struct PlanStartView: View {
+    @Environment(\.dismiss) private var dismiss
     @State private var navigateToPlan = false
 
     var body: some View {
@@ -102,6 +108,9 @@ struct PlanStartView: View {
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(isPresented: $navigateToPlan) {
             PlanView()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("plan_flow_completed"))) { _ in
+            dismiss()
         }
     }
 }
@@ -656,6 +665,10 @@ struct PlanStepTwoView: View {
 
     @Query(sort: \RollingCaptureItem.createdAt, order: .reverse)
     private var allItems: [RollingCaptureItem]
+    @Query(sort: \RecurringCaptureRule.createdAt, order: .reverse)
+    private var recurringRules: [RecurringCaptureRule]
+    @Query(sort: \RecurringCaptureDispatch.sentAt, order: .reverse)
+    private var recurringDispatches: [RecurringCaptureDispatch]
 
     @State private var input: String = ""
     @State private var showHidden: Bool = false
@@ -669,6 +682,8 @@ struct PlanStepTwoView: View {
     @State private var step2ValidationMessage: String = "Please enter value on keyboard"
     @State private var highlightedDuplicateItemID: UUID? = nil
     @State private var step2ValidationResetWorkItem: DispatchWorkItem?
+    @AppStorage("capture_default_due_date_attention_days")
+    private var dueDateAttentionDays: Int = 7
 
     private let hiddenUntilLaterIconName = "clock.arrow.trianglehead.clockwise.rotate.90.path.dotted"
 
@@ -681,27 +696,22 @@ struct PlanStepTwoView: View {
     }
 
     private var displayItems: [RollingCaptureItem] {
-        if !showHidden {
-            return allItems
-                .filter { !$0.isGhost }
-                .sorted { $0.createdAt > $1.createdAt }
-        }
-
-        return allItems.sorted { lhs, rhs in
-            let lhsIsBaseline = baselineItemIDs.contains(lhs.id)
-            let rhsIsBaseline = baselineItemIDs.contains(rhs.id)
-
-            func rank(_ item: RollingCaptureItem, isBaseline: Bool) -> Int {
-                if !isBaseline, !item.isGhost { return 0 }
-                if item.isGhost { return 1 }
-                return 2
+        let base = showHidden ? allItems : allItems.filter { !$0.isGhost }
+        return base.sorted {
+            if $0.isGhost != $1.isGhost { return $0.isGhost && !$1.isGhost }
+            let lhsDueVisible = hasVisibleDueStatus(for: $0)
+            let rhsDueVisible = hasVisibleDueStatus(for: $1)
+            if lhsDueVisible != rhsDueVisible {
+                return lhsDueVisible && !rhsDueVisible
             }
-
-            let rL = rank(lhs, isBaseline: lhsIsBaseline)
-            let rR = rank(rhs, isBaseline: rhsIsBaseline)
-
-            if rL != rR { return rL < rR }
-            return lhs.createdAt > rhs.createdAt
+            if lhsDueVisible, rhsDueVisible {
+                let lhsDueDate = dueDate(for: $0) ?? .distantFuture
+                let rhsDueDate = dueDate(for: $1) ?? .distantFuture
+                if lhsDueDate != rhsDueDate {
+                    return lhsDueDate < rhsDueDate
+                }
+            }
+            return $0.createdAt > $1.createdAt
         }
     }
 
@@ -778,7 +788,7 @@ struct PlanStepTwoView: View {
 
             List {
                 ForEach(displayItems) { item in
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    HStack(alignment: .center, spacing: 8) {
                         if baselineItemIDs.contains(item.id) {
                             Image(systemName: (item.sourceType?.isEmpty == false) ? "link" : "plus.viewfinder")
                                 .foregroundStyle(.secondary)
@@ -787,20 +797,35 @@ struct PlanStepTwoView: View {
                                 .foregroundStyle(.blue)
                         }
 
-                        Text(item.text)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        VStack(alignment: .leading, spacing: 2) {
+                            if let dueStatus = dueDateStatusText(for: item) {
+                                Text(dueStatus)
+                                    .font(.caption)
+                                    .foregroundStyle(dueDateStatusColor(for: item))
+                            }
+                            Text(item.text)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .padding(8)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
                     .overlay {
-                        if item.isGhost {
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(style: StrokeStyle(lineWidth: 2, dash: [6]))
-                                .foregroundStyle(.blue)
-                        } else if highlightedDuplicateItemID == item.id {
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color.red.opacity(0.85), lineWidth: 1.5)
+                        ZStack {
+                            if item.isGhost {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(style: StrokeStyle(lineWidth: 2, dash: [6]))
+                                    .foregroundStyle(.blue)
+                            }
+                            if hasVisibleDueStatus(for: item) && !item.isGhost {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(dueDateStatusBorderColor(for: item), lineWidth: 1.5)
+                            }
+                            if highlightedDuplicateItemID == item.id {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.red.opacity(0.85), lineWidth: 1.5)
+                            }
                         }
                     }
                     .padding(.vertical, 4)
@@ -956,6 +981,7 @@ struct PlanStepTwoView: View {
     private func deleteItems(at offsets: IndexSet) {
         for offset in offsets {
             let item = displayItems[offset]
+            ActionCarryProfileStore.remove(for: item.text)
             RecentlyDeletedStore.trash(item, in: modelContext)
         }
         try? modelContext.save()
@@ -965,6 +991,83 @@ struct PlanStepTwoView: View {
         modelContext.insert(QuickCompletedCaptureItem(text: item.text, completedAt: .now))
         RecentlyDeletedStore.trash(item, in: modelContext)
         try? modelContext.save()
+    }
+
+    private var recurringRuleByID: [UUID: RecurringCaptureRule] {
+        Dictionary(uniqueKeysWithValues: recurringRules.map { ($0.id, $0) })
+    }
+
+    private var recurringDispatchByItemID: [UUID: RecurringCaptureDispatch] {
+        var result: [UUID: RecurringCaptureDispatch] = [:]
+        for dispatch in recurringDispatches {
+            if result[dispatch.captureItemID] == nil {
+                result[dispatch.captureItemID] = dispatch
+            }
+        }
+        return result
+    }
+
+    private func formatDueDate(_ date: Date) -> String {
+        let cal = Calendar.current
+        let currentYear = cal.component(.year, from: Date())
+        let year = cal.component(.year, from: date)
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        if year == currentYear {
+            formatter.setLocalizedDateFormatFromTemplate("E MMM d")
+        } else {
+            formatter.setLocalizedDateFormatFromTemplate("E MMM d, yyyy")
+        }
+        return formatter.string(from: date)
+    }
+
+    private func dueDate(for item: RollingCaptureItem) -> Date? {
+        if item.isGhost { return nil }
+        if let explicit = item.dueDate {
+            return Calendar.current.startOfDay(for: explicit)
+        }
+        guard let dispatch = recurringDispatchByItemID[item.id],
+              let rule = recurringRuleByID[dispatch.ruleID] else {
+            return nil
+        }
+        let leadDays = max(7, rule.captureDaysBeforeDueDate)
+        let due = Calendar.current.date(byAdding: .day, value: leadDays, to: dispatch.sentAt) ?? dispatch.sentAt
+        return Calendar.current.startOfDay(for: due)
+    }
+
+    private func dueDateStatusText(for item: RollingCaptureItem) -> String? {
+        guard let due = dueDate(for: item) else { return nil }
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let dayDelta = cal.dateComponents([.day], from: today, to: due).day ?? 0
+        let attention = min(max(item.dueDateAttentionDays ?? dueDateAttentionDays, 7), 30)
+        guard dayDelta <= attention else { return nil }
+        if dayDelta < 0 {
+            let overdueDays = abs(dayDelta)
+            let dayWord = overdueDays == 1 ? "day" : "days"
+            return "Due \(overdueDays) \(dayWord) ago on \(formatDueDate(due))"
+        } else if dayDelta == 0 {
+            return "Due Today on \(formatDueDate(due))"
+        } else {
+            let dayWord = dayDelta == 1 ? "day" : "days"
+            return "Due in \(dayDelta) \(dayWord) on \(formatDueDate(due))"
+        }
+    }
+
+    private func hasVisibleDueStatus(for item: RollingCaptureItem) -> Bool {
+        dueDateStatusText(for: item) != nil
+    }
+
+    private func dueDateStatusColor(for item: RollingCaptureItem) -> Color {
+        guard let due = dueDate(for: item) else { return .secondary }
+        let dayDelta = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: Date()), to: due).day ?? 0
+        if dayDelta < 0 { return .red }
+        if dayDelta == 0 { return .blue }
+        return .secondary
+    }
+
+    private func dueDateStatusBorderColor(for item: RollingCaptureItem) -> Color {
+        dueDateStatusColor(for: item).opacity(0.85)
     }
 
     private func triggerStep2InputValidationFeedback() {
@@ -1036,6 +1139,10 @@ struct PlanStepThreeView: View {
 
     @Query(sort: \PlannedChunkAction.createdAt, order: .reverse)
     private var plannedActions: [PlannedChunkAction]
+    @Query(sort: \RecurringCaptureRule.createdAt, order: .reverse)
+    private var recurringRules: [RecurringCaptureRule]
+    @Query(sort: \RecurringCaptureDispatch.sentAt, order: .reverse)
+    private var recurringDispatches: [RecurringCaptureDispatch]
 
     @State private var showHidden: Bool = false
     @State private var isCategorizeExpanded: Bool = false
@@ -1053,6 +1160,10 @@ struct PlanStepThreeView: View {
     @State private var shouldHighlightStep3Validation: Bool = false
     @State private var step3ValidationResetWorkItem: DispatchWorkItem?
     @State private var isDraggingOverGroupArea: Bool = false
+    @State private var measuredStep3ChunkHeights: [UUID: CGFloat] = [:]
+    @State private var measuredStep3AddGroupRowHeight: CGFloat = 0
+    @AppStorage("capture_default_due_date_attention_days")
+    private var dueDateAttentionDays: Int = 7
 
     private let hiddenUntilLaterIconName = "clock.arrow.trianglehead.clockwise.rotate.90.path.dotted"
     private let maxChunks = 8
@@ -1201,6 +1312,83 @@ struct PlanStepThreeView: View {
         return nil
     }
 
+    private var recurringRuleByID: [UUID: RecurringCaptureRule] {
+        Dictionary(uniqueKeysWithValues: recurringRules.map { ($0.id, $0) })
+    }
+
+    private var recurringDispatchByItemID: [UUID: RecurringCaptureDispatch] {
+        var result: [UUID: RecurringCaptureDispatch] = [:]
+        for dispatch in recurringDispatches {
+            if result[dispatch.captureItemID] == nil {
+                result[dispatch.captureItemID] = dispatch
+            }
+        }
+        return result
+    }
+
+    private func formatDueDate(_ date: Date) -> String {
+        let cal = Calendar.current
+        let currentYear = cal.component(.year, from: Date())
+        let year = cal.component(.year, from: date)
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        if year == currentYear {
+            formatter.setLocalizedDateFormatFromTemplate("E MMM d")
+        } else {
+            formatter.setLocalizedDateFormatFromTemplate("E MMM d, yyyy")
+        }
+        return formatter.string(from: date)
+    }
+
+    private func dueDate(for item: RollingCaptureItem) -> Date? {
+        if item.isGhost { return nil }
+        if let explicit = item.dueDate {
+            return Calendar.current.startOfDay(for: explicit)
+        }
+        guard let dispatch = recurringDispatchByItemID[item.id],
+              let rule = recurringRuleByID[dispatch.ruleID] else {
+            return nil
+        }
+        let leadDays = max(7, rule.captureDaysBeforeDueDate)
+        let due = Calendar.current.date(byAdding: .day, value: leadDays, to: dispatch.sentAt) ?? dispatch.sentAt
+        return Calendar.current.startOfDay(for: due)
+    }
+
+    private func dueDateStatusText(for item: RollingCaptureItem) -> String? {
+        guard let due = dueDate(for: item) else { return nil }
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let dayDelta = cal.dateComponents([.day], from: today, to: due).day ?? 0
+        let attention = min(max(item.dueDateAttentionDays ?? dueDateAttentionDays, 7), 30)
+        guard dayDelta <= attention else { return nil }
+        if dayDelta < 0 {
+            let overdueDays = abs(dayDelta)
+            let dayWord = overdueDays == 1 ? "day" : "days"
+            return "Due \(overdueDays) \(dayWord) ago on \(formatDueDate(due))"
+        } else if dayDelta == 0 {
+            return "Due Today on \(formatDueDate(due))"
+        } else {
+            let dayWord = dayDelta == 1 ? "day" : "days"
+            return "Due in \(dayDelta) \(dayWord) on \(formatDueDate(due))"
+        }
+    }
+
+    private func hasVisibleDueStatus(for item: RollingCaptureItem) -> Bool {
+        dueDateStatusText(for: item) != nil
+    }
+
+    private func dueDateStatusColor(for item: RollingCaptureItem) -> Color {
+        guard let due = dueDate(for: item) else { return .secondary }
+        let dayDelta = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: Date()), to: due).day ?? 0
+        if dayDelta < 0 { return .red }
+        if dayDelta == 0 { return .blue }
+        return .secondary
+    }
+
+    private func dueDateStatusBorderColor(for item: RollingCaptureItem) -> Color {
+        dueDateStatusColor(for: item).opacity(0.85)
+    }
+
     private func setGroupAreaDropTarget(_ isTargeted: Bool) {
         withAnimation(.easeInOut(duration: 0.18)) {
             isDraggingOverGroupArea = isTargeted
@@ -1295,8 +1483,20 @@ struct PlanStepThreeView: View {
                 let availableHeight = max(geometry.size.height, 1)
                 let collapsedGroupHeight = availableHeight * 0.5
                 let expandedGroupHeight = availableHeight * expandedGroupAreaRatio
-                let groupHeight = isDraggingOverGroupArea ? expandedGroupHeight : collapsedGroupHeight
-                let boundedGroupHeight = min(max(groupHeight, 220), availableHeight - 60)
+                let collapsedBoundedGroupHeight = min(max(collapsedGroupHeight, 220), availableHeight - 60)
+                let expandedBoundedGroupHeight = min(max(expandedGroupHeight, 220), availableHeight - 60)
+
+                let measuredChunkRowsHeight = chunks.reduce(CGFloat(0)) { partial, chunk in
+                    // Include row vertical insets (8 top + 8 bottom) used by each chunk row.
+                    partial + (measuredStep3ChunkHeights[chunk.id] ?? 72) + 16
+                }
+                let measuredAddGroupRowHeight = chunks.count < maxChunks
+                    ? (measuredStep3AddGroupRowHeight > 0 ? measuredStep3AddGroupRowHeight + 16 : 72)
+                    : 0
+                let estimatedBottomContentHeight = measuredChunkRowsHeight + measuredAddGroupRowHeight + 8
+
+                let shouldExpandGroupArea = isDraggingOverGroupArea && estimatedBottomContentHeight > collapsedBoundedGroupHeight
+                let boundedGroupHeight = shouldExpandGroupArea ? expandedBoundedGroupHeight : collapsedBoundedGroupHeight
                 let poolHeight = max(60, availableHeight - boundedGroupHeight - 10)
 
                 VStack(spacing: 10) {
@@ -1306,6 +1506,9 @@ struct PlanStepThreeView: View {
                                 text: item.text,
                                 showGhostOutline: item.isGhost,
                                 hiddenStatusText: hiddenStatusText(for: item),
+                                dueStatusText: dueDateStatusText(for: item),
+                                dueStatusColor: dueDateStatusColor(for: item),
+                                showDueBorder: hasVisibleDueStatus(for: item),
                                 isDraggable: true,
                                 dragPayload: DragPayload(itemID: item.id)
                             )
@@ -1346,12 +1549,28 @@ struct PlanStepThreeView: View {
                     List {
                         ForEach(Array(chunks.enumerated()), id: \.element.id) { index, _ in
                             chunkContainerView(chunkIndex: index)
+                                .background(
+                                    GeometryReader { proxy in
+                                        Color.clear.preference(
+                                            key: Step3ChunkRowHeightPreferenceKey.self,
+                                            value: [chunks[index].id: proxy.size.height]
+                                        )
+                                    }
+                                )
                                 .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
                                 .listRowSeparator(.hidden)
                         }
 
                         if chunks.count < maxChunks {
                             addChunkRow
+                                .background(
+                                    GeometryReader { proxy in
+                                        Color.clear.preference(
+                                            key: Step3AddGroupRowHeightPreferenceKey.self,
+                                            value: proxy.size.height
+                                        )
+                                    }
+                                )
                                 .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
                                 .listRowSeparator(.hidden)
                         }
@@ -1366,6 +1585,14 @@ struct PlanStepThreeView: View {
                             setGroupAreaDropTarget(isTargeted)
                         }
                     )
+                }
+                .onPreferenceChange(Step3ChunkRowHeightPreferenceKey.self) { heights in
+                    measuredStep3ChunkHeights.merge(heights) { _, new in new }
+                }
+                .onPreferenceChange(Step3AddGroupRowHeightPreferenceKey.self) { height in
+                    if height > 0 {
+                        measuredStep3AddGroupRowHeight = height
+                    }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
@@ -1526,6 +1753,18 @@ struct PlanStepThreeView: View {
         let base = showHidden ? allItems : allItems.filter { !$0.isGhost }
         return base.sorted {
             if $0.isGhost != $1.isGhost { return $0.isGhost && !$1.isGhost }
+            let lhsDueVisible = hasVisibleDueStatus(for: $0)
+            let rhsDueVisible = hasVisibleDueStatus(for: $1)
+            if lhsDueVisible != rhsDueVisible {
+                return lhsDueVisible && !rhsDueVisible
+            }
+            if lhsDueVisible, rhsDueVisible {
+                let lhsDueDate = dueDate(for: $0) ?? .distantFuture
+                let rhsDueDate = dueDate(for: $1) ?? .distantFuture
+                if lhsDueDate != rhsDueDate {
+                    return lhsDueDate < rhsDueDate
+                }
+            }
             return $0.createdAt > $1.createdAt
         }
     }
@@ -1550,14 +1789,28 @@ struct PlanStepThreeView: View {
         text: String,
         showGhostOutline: Bool,
         hiddenStatusText: String?,
+        dueStatusText: String? = nil,
+        dueStatusColor: Color = .secondary,
+        showDueBorder: Bool = false,
         isDraggable: Bool,
         dragPayload: DragPayload?,
+        showsTrailingControl: Bool = true,
+        useBoxChrome: Bool = true,
         showsReturnToPool: Bool = false,
         onReturnToPool: (() -> Void)? = nil
     ) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(text)
-                .frame(maxWidth: .infinity, alignment: .leading)
+        HStack(alignment: .center, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                if let dueStatusText {
+                    Text(dueStatusText)
+                        .font(.caption)
+                        .foregroundStyle(dueStatusColor)
+                }
+
+                Text(text)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             if let hiddenStatusText {
                 Text(hiddenStatusText)
@@ -1565,51 +1818,62 @@ struct PlanStepThreeView: View {
                     .foregroundStyle(.secondary)
             }
 
-            if showsReturnToPool, let onReturnToPool {
-                Button {
-                    onReturnToPool()
-                } label: {
-                    Image(systemName: "arrow.uturn.backward")
-                        .foregroundStyle(.blue)
-                        .accessibilityLabel("Return to capture list")
+            if showsTrailingControl {
+                if showsReturnToPool, let onReturnToPool {
+                    Button {
+                        onReturnToPool()
+                    } label: {
+                        Image(systemName: "arrow.uturn.backward")
+                            .foregroundStyle(.blue)
+                            .accessibilityLabel("Return to capture list")
+                            .contentShape(Rectangle())
+                            .padding(.leading, 4)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel("Drag")
                         .contentShape(Rectangle())
                         .padding(.leading, 4)
-                }
-                .buttonStyle(.plain)
-            } else {
-                Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel("Drag")
-                    .contentShape(Rectangle())
-                    .padding(.leading, 4)
-                    .if(isDraggable && dragPayload != nil, transform: { view in
-                        view.draggable(dragPayload!) {
-                            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                Text(text)
-                                    .lineLimit(1)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
+                        .if(isDraggable && dragPayload != nil, transform: { view in
+                            view.draggable(dragPayload!) {
+                                HStack(alignment: .center, spacing: 8) {
+                                    Text(text)
+                                        .lineLimit(1)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
 
-                                Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
-                                    .foregroundStyle(.secondary)
+                                    Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(8)
+                                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+                                .frame(maxWidth: 320)
                             }
-                            .padding(8)
-                            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
-                            .frame(maxWidth: 320)
-                        }
-                    })
+                        })
+                }
             }
         }
-        .padding(8)
+        .padding(useBoxChrome ? 8 : 0)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
-        .overlay {
-            if showGhostOutline {
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(style: StrokeStyle(lineWidth: 2, dash: [6]))
-                    .foregroundStyle(.blue)
-            }
-        }
-        .padding(.vertical, 2)
+        .if(useBoxChrome, transform: { view in
+            view
+                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+                .overlay {
+                    ZStack {
+                        if showGhostOutline {
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(style: StrokeStyle(lineWidth: 2, dash: [6]))
+                                .foregroundStyle(.blue)
+                        }
+                        if showDueBorder && !showGhostOutline {
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(dueStatusColor.opacity(0.85), lineWidth: 1.5)
+                        }
+                    }
+                }
+        })
+        .padding(.vertical, useBoxChrome ? 2 : 4)
     }
 
     @ViewBuilder
@@ -1753,16 +2017,17 @@ struct PlanStepThreeView: View {
                     ForEach(chunkItems(for: chunkIndex)) { item in
                         rowView(
                             text: item.text,
-                            showGhostOutline: item.isGhost,
-                            hiddenStatusText: hiddenStatusText(for: item),
+                            showGhostOutline: false,
+                            hiddenStatusText: nil,
+                            dueStatusText: nil,
+                            dueStatusColor: .secondary,
+                            showDueBorder: false,
                             isDraggable: false,
                             dragPayload: nil,
-                            showsReturnToPool: true,
-                            onReturnToPool: {
-                                moveItemToPool(item.id)
-                                enforceShowHiddenIfNeeded()
-                                persistStep3Plan()
-                            }
+                            showsTrailingControl: false,
+                            useBoxChrome: false,
+                            showsReturnToPool: false,
+                            onReturnToPool: nil
                         )
                 }
             }
@@ -1895,6 +2160,13 @@ struct PlanStepThreeView: View {
             }
         }
 
+        var visibleItemsByNormalizedText: [String: [RollingCaptureItem]] = [:]
+        for item in visibleItems {
+            let key = normalizedPlanActionText(item.text)
+            visibleItemsByNormalizedText[key, default: []].append(item)
+        }
+        var usedVisibleItemCountByText: [String: Int] = [:]
+
         for pc in persistedChunks {
             guard pc.chunkIndex >= 0, pc.chunkIndex < chunks.count else { continue }
 
@@ -1909,12 +2181,17 @@ struct PlanStepThreeView: View {
                 chunks[pc.chunkIndex].selectionCategory = pc.category
             }
 
-            let ordered = persistedActions
+            let orderedActions = persistedActions
                 .filter { $0.plannedChunkId == pc.id }
                 .sorted { $0.sortOrder < $1.sortOrder }
-                .compactMap { action in
-                    visibleItems.first(where: { $0.text == action.text })?.id
-                }
+            let ordered = orderedActions.compactMap { action -> UUID? in
+                let key = normalizedPlanActionText(action.text)
+                guard let matches = visibleItemsByNormalizedText[key], !matches.isEmpty else { return nil }
+                let used = usedVisibleItemCountByText[key, default: 0]
+                guard used < matches.count else { return nil }
+                usedVisibleItemCountByText[key] = used + 1
+                return matches[used].id
+            }
 
             chunks[pc.chunkIndex].itemIDs = ordered
         }
@@ -2026,7 +2303,15 @@ struct PlanStepThreeView: View {
             RecentlyDeletedStore.trash(sel, in: modelContext)
         }
 
-        var desiredActionsByText: [String: (chunkIndex: Int, plannedChunkId: UUID, sortOrder: Int)] = [:]
+        struct DesiredPlanActionEntry {
+            let key: String
+            let text: String
+            let chunkIndex: Int
+            let plannedChunkId: UUID
+            let sortOrder: Int
+        }
+        var desiredActionEntries: [DesiredPlanActionEntry] = []
+        var desiredOccurrenceByText: [String: Int] = [:]
         for (chunkIndex, chunkState) in chunks.enumerated() where !chunkState.itemIDs.isEmpty {
             guard let plannedChunk = weekChunksByIndex[chunkIndex] else { continue }
 
@@ -2041,32 +2326,57 @@ struct PlanStepThreeView: View {
 
             for (order, itemID) in chunkState.itemIDs.enumerated() {
                 guard let item = captureByID[itemID] else { continue }
-                desiredActionsByText[item.text] = (chunkIndex, plannedChunk.id, order)
+                let text = item.text
+                let normalized = normalizedPlanActionText(text)
+                let occurrence = desiredOccurrenceByText[normalized, default: 0]
+                desiredOccurrenceByText[normalized] = occurrence + 1
+                let key = "\(normalized)|\(occurrence)"
+                desiredActionEntries.append(
+                    DesiredPlanActionEntry(
+                        key: key,
+                        text: text,
+                        chunkIndex: chunkIndex,
+                        plannedChunkId: plannedChunk.id,
+                        sortOrder: order
+                    )
+                )
             }
         }
 
-        var existingActionsByText: [String: PlannedChunkAction] = [:]
-        for action in existingWeekActions {
-            if existingActionsByText[action.text] == nil {
-                existingActionsByText[action.text] = action
+        var existingActionsByKey: [String: PlannedChunkAction] = [:]
+        var existingOccurrenceByText: [String: Int] = [:]
+        for action in existingWeekActions
+            .sorted(by: {
+                if $0.chunkIndex != $1.chunkIndex { return $0.chunkIndex < $1.chunkIndex }
+                if $0.sortOrder != $1.sortOrder { return $0.sortOrder < $1.sortOrder }
+                if $0.createdAt != $1.createdAt { return $0.createdAt < $1.createdAt }
+                return $0.id.uuidString < $1.id.uuidString
+            }) {
+            let normalized = normalizedPlanActionText(action.text)
+            let occurrence = existingOccurrenceByText[normalized, default: 0]
+            existingOccurrenceByText[normalized] = occurrence + 1
+            let key = "\(normalized)|\(occurrence)"
+            if existingActionsByKey[key] == nil {
+                existingActionsByKey[key] = action
             } else {
-                // Deduplicate stale rows for the same action text.
                 RecentlyDeletedStore.trash(action, in: modelContext)
             }
         }
 
-        for (text, desired) in desiredActionsByText {
-            if let action = existingActionsByText[text] {
+        let desiredKeys = Set(desiredActionEntries.map(\.key))
+        for desired in desiredActionEntries {
+            if let action = existingActionsByKey[desired.key] {
                 action.weekStart = weekStart
                 action.chunkIndex = desired.chunkIndex
                 action.plannedChunkId = desired.plannedChunkId
                 action.sortOrder = desired.sortOrder
+                if action.text != desired.text { action.text = desired.text }
             } else {
                 let planned = PlannedChunkAction(
                     weekStart: weekStart,
                     chunkIndex: desired.chunkIndex,
                     plannedChunkId: desired.plannedChunkId,
-                    text: text,
+                    text: desired.text,
                     sortOrder: desired.sortOrder,
                     createdAt: .now
                 )
@@ -2074,7 +2384,7 @@ struct PlanStepThreeView: View {
             }
         }
 
-        for action in existingWeekActions where desiredActionsByText[action.text] == nil {
+        for (key, action) in existingActionsByKey where !desiredKeys.contains(key) {
             RecentlyDeletedStore.trash(action, in: modelContext)
         }
 
@@ -2088,6 +2398,12 @@ struct PlanStepThreeView: View {
         let m = comps.month ?? 0
         let d = comps.day ?? 0
         return String(format: "%04d-%02d-%02d", y, m, d)
+    }
+
+    private func normalizedPlanActionText(_ text: String) -> String {
+        text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
     }
 
     private func moveItem(_ itemID: UUID, toChunkAt chunkIndex: Int) {
@@ -2637,6 +2953,10 @@ struct PlanStepFourView: View {
 
     @Query(sort: \RollingCaptureItem.createdAt, order: .reverse)
     private var allCaptureItems: [RollingCaptureItem]
+    @Query(sort: \RecurringCaptureRule.createdAt, order: .reverse)
+    private var recurringRules: [RecurringCaptureRule]
+    @Query(sort: \RecurringCaptureDispatch.sentAt, order: .reverse)
+    private var recurringDispatches: [RecurringCaptureDispatch]
 
     @Query(sort: \Outcomes.rank, order: .forward)
     private var outcomes: [Outcomes]
@@ -3529,6 +3849,10 @@ struct PlanStepFiveView: View {
 
     @Query(sort: \RollingCaptureItem.createdAt, order: .reverse)
     private var allCaptureItems: [RollingCaptureItem]
+    @Query(sort: \RecurringCaptureRule.createdAt, order: .reverse)
+    private var recurringRules: [RecurringCaptureRule]
+    @Query(sort: \RecurringCaptureDispatch.sentAt, order: .reverse)
+    private var recurringDispatches: [RecurringCaptureDispatch]
 
     @Query(sort: \PlannedChunkStepFourState.updatedAt, order: .reverse)
     private var stepFourStates: [PlannedChunkStepFourState]
@@ -3576,6 +3900,7 @@ struct PlanStepFiveView: View {
     // Local animated list snapshot per chunk
     @State private var localActionsByChunkId: [UUID: [PlannedChunkAction]] = [:]
     @State private var draggedActionID: UUID? = nil
+    @State private var carriedProfileAppliedActionIDs: Set<UUID> = []
 
     // Debounced autosave
     @State private var step5AutosaveTask: Task<Void, Never>? = nil
@@ -3587,6 +3912,8 @@ struct PlanStepFiveView: View {
 
     // Confirmation dialog for Start
     @State private var isShowingStartConfirmation: Bool = false
+    @AppStorage("capture_default_due_date_attention_days")
+    private var dueDateAttentionDays: Int = 7
 
     // Robust "did anything change?" trigger for routine saving
     @State private var step5ChangeTick: Int = 0
@@ -3624,6 +3951,10 @@ struct PlanStepFiveView: View {
         return actions.allSatisfy { action in
             (defineState(forActionId: action.id)?.timeEstimateMinutes) != nil
         }
+    }
+
+    private func normalizedActionText(_ text: String) -> String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
     var body: some View {
@@ -3838,6 +4169,7 @@ struct PlanStepFiveView: View {
             .presentationDragIndicator(.visible)
         }
         .sheet(item: $sensitivitySheetActionID) { wrapper in
+            let dueEditor = dueDateEditorState(forActionId: wrapper.id)
             SensitivitySheet(
                 defineState: Binding(
                     get: { defineState(forActionId: wrapper.id) ?? makeBlankDefineState(actionId: wrapper.id) },
@@ -3876,6 +4208,10 @@ struct PlanStepFiveView: View {
                 onTogglePlaceSelected: { placeId in
                     togglePlaceSelection(actionId: wrapper.id, placeId: placeId)
                     markStep5DirtyAndAutosave()
+                },
+                dueDateEditor: dueEditor,
+                onSaveDueDateEditor: { updated in
+                    updateDueDateEditor(forActionId: wrapper.id, with: updated)
                 }
             )
             .presentationDetents([.medium, .large])
@@ -3934,22 +4270,27 @@ struct PlanStepFiveView: View {
             .presentationDragIndicator(.visible)
         }
         .onAppear {
+            applyInitialDueSortIfNeeded()
             hydrateLocalActions()
             ensureDefineStatesExistForWeek()
             ensureLeverageSelectionRowsExistForWeek()
             ensureNoteRowsExistForWeek()
+            applyCarriedProfilesToWeekActionsIfNeeded()
         }
         .onChange(of: plannedChunksForWeek.map(\.id)) { _, _ in
             hydrateLocalActions()
             ensureDefineStatesExistForWeek()
             ensureLeverageSelectionRowsExistForWeek()
             ensureNoteRowsExistForWeek()
+            applyCarriedProfilesToWeekActionsIfNeeded()
         }
         .onChange(of: allPlannedActions.map(\.id)) { _, _ in
             hydrateLocalActions()
             ensureDefineStatesExistForWeek()
             ensureLeverageSelectionRowsExistForWeek()
             ensureNoteRowsExistForWeek()
+            carriedProfileAppliedActionIDs = carriedProfileAppliedActionIDs.intersection(Set(allPlannedActions.map(\.id)))
+            applyCarriedProfilesToWeekActionsIfNeeded()
         }
         // Central "routine save" trigger: any meaningful change bumps tick -> debounced save runs.
         .onChange(of: step5ChangeTick) { _, _ in
@@ -4024,6 +4365,15 @@ struct PlanStepFiveView: View {
             draggedActionID: $draggedActionID,
             defineStateForAction: { actionId in
                 defineState(forActionId: actionId)
+            },
+            dueStatusTextForAction: { actionId in
+                dueDateStatusTextForAction(actionId)
+            },
+            dueStatusColorForAction: { actionId in
+                dueDateStatusColorForAction(actionId)
+            },
+            hasVisibleDueStatusForAction: { actionId in
+                hasVisibleDueStatusForAction(actionId)
             },
             hasLeverage: { actionId in
                 currentLeverageSelectionResourceId(forActionId: actionId) != nil
@@ -4112,6 +4462,9 @@ struct PlanStepFiveView: View {
         @Binding var draggedActionID: UUID?
 
         let defineStateForAction: (UUID) -> PlannedChunkActionDefineState?
+        let dueStatusTextForAction: (UUID) -> String?
+        let dueStatusColorForAction: (UUID) -> Color
+        let hasVisibleDueStatusForAction: (UUID) -> Bool
         let hasLeverage: (UUID) -> Bool
         let leverageIconName: (UUID) -> String
         let hasSensitivity: (UUID) -> Bool
@@ -4290,6 +4643,9 @@ struct PlanStepFiveView: View {
 
                             DefineActionRow(
                                 text: action.text,
+                                dueStatusText: dueStatusTextForAction(action.id),
+                                dueStatusColor: dueStatusColorForAction(action.id),
+                                showDueBorder: hasVisibleDueStatusForAction(action.id),
                                 accent: accent,
                                 colorScheme: colorScheme,
                                 isMust: isMust,
@@ -4352,6 +4708,9 @@ struct PlanStepFiveView: View {
 
         private struct DefineActionRow: View {
             let text: String
+            let dueStatusText: String?
+            let dueStatusColor: Color
+            let showDueBorder: Bool
             let accent: Color
             let colorScheme: ColorScheme
 
@@ -4382,6 +4741,11 @@ struct PlanStepFiveView: View {
             var body: some View {
                 HStack(alignment: .center, spacing: 10) {
                     VStack(alignment: .leading, spacing: 10) {
+                        if let dueStatusText {
+                            Text(dueStatusText)
+                                .font(.caption)
+                                .foregroundStyle(dueStatusColor)
+                        }
                         Text(text)
                             .font(.subheadline)
                             .foregroundStyle(actionTextColor)
@@ -4558,6 +4922,114 @@ struct PlanStepFiveView: View {
 
     // MARK: - Step 5 persistence helpers
 
+    private var recurringRuleByID: [UUID: RecurringCaptureRule] {
+        Dictionary(uniqueKeysWithValues: recurringRules.map { ($0.id, $0) })
+    }
+
+    private var recurringDispatchByItemID: [UUID: RecurringCaptureDispatch] {
+        var result: [UUID: RecurringCaptureDispatch] = [:]
+        for dispatch in recurringDispatches {
+            if result[dispatch.captureItemID] == nil {
+                result[dispatch.captureItemID] = dispatch
+            }
+        }
+        return result
+    }
+
+    private func formatDueDate(_ date: Date) -> String {
+        let cal = Calendar.current
+        let currentYear = cal.component(.year, from: Date())
+        let year = cal.component(.year, from: date)
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        if year == currentYear {
+            formatter.setLocalizedDateFormatFromTemplate("E MMM d")
+        } else {
+            formatter.setLocalizedDateFormatFromTemplate("E MMM d, yyyy")
+        }
+        return formatter.string(from: date)
+    }
+
+    private func dueDate(for captureItem: RollingCaptureItem) -> Date? {
+        if let explicit = captureItem.dueDate {
+            return Calendar.current.startOfDay(for: explicit)
+        }
+        guard let dispatch = recurringDispatchByItemID[captureItem.id],
+              let rule = recurringRuleByID[dispatch.ruleID] else {
+            return nil
+        }
+        let leadDays = max(7, rule.captureDaysBeforeDueDate)
+        let due = Calendar.current.date(byAdding: .day, value: leadDays, to: dispatch.sentAt) ?? dispatch.sentAt
+        return Calendar.current.startOfDay(for: due)
+    }
+
+    private func dueDateStatusText(for captureItem: RollingCaptureItem) -> String? {
+        guard let due = dueDate(for: captureItem) else { return nil }
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let dayDelta = cal.dateComponents([.day], from: today, to: due).day ?? 0
+        let attention = min(max(captureItem.dueDateAttentionDays ?? dueDateAttentionDays, 7), 30)
+        guard dayDelta <= attention else { return nil }
+        if dayDelta < 0 {
+            let overdueDays = abs(dayDelta)
+            let dayWord = overdueDays == 1 ? "day" : "days"
+            return "Due \(overdueDays) \(dayWord) ago on \(formatDueDate(due))"
+        } else if dayDelta == 0 {
+            return "Due Today on \(formatDueDate(due))"
+        } else {
+            let dayWord = dayDelta == 1 ? "day" : "days"
+            return "Due in \(dayDelta) \(dayWord) on \(formatDueDate(due))"
+        }
+    }
+
+    private func dueDateStatusColor(for captureItem: RollingCaptureItem) -> Color {
+        guard let due = dueDate(for: captureItem) else { return .secondary }
+        let dayDelta = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: Date()), to: due).day ?? 0
+        if dayDelta < 0 { return .red }
+        if dayDelta == 0 { return .blue }
+        return .secondary
+    }
+
+    private func captureItemForPlannedActionID(_ actionId: UUID) -> RollingCaptureItem? {
+        guard let action = allPlannedActions.first(where: { $0.id == actionId }) else { return nil }
+        let actionText = normalizedActionText(action.text)
+        return allCaptureItems.first { normalizedActionText($0.text) == actionText }
+    }
+
+    private func dueDateStatusTextForAction(_ actionId: UUID) -> String? {
+        guard let item = captureItemForPlannedActionID(actionId) else { return nil }
+        return dueDateStatusText(for: item)
+    }
+
+    private func dueDateStatusColorForAction(_ actionId: UUID) -> Color {
+        guard let item = captureItemForPlannedActionID(actionId) else { return .secondary }
+        return dueDateStatusColor(for: item)
+    }
+
+    private func hasVisibleDueStatusForAction(_ actionId: UUID) -> Bool {
+        dueDateStatusTextForAction(actionId) != nil
+    }
+
+    private var step5InitialDueSortKey: String {
+        "plan_step5_initial_due_sort_applied_\(step5DayKey(from: currentWeekStart))"
+    }
+
+    private func step5DayKey(from date: Date) -> String {
+        let cal = Calendar.current
+        let comps = cal.dateComponents([.year, .month, .day], from: date)
+        let y = comps.year ?? 0
+        let m = comps.month ?? 0
+        let d = comps.day ?? 0
+        return String(format: "%04d-%02d-%02d", y, m, d)
+    }
+
+    struct DueDateEditorState {
+        var hasDueDate: Bool
+        var dueDate: Date
+        var attentionDays: Int
+        var minimumDate: Date
+    }
+
     private func plannedActionsForWeek() -> [PlannedChunkAction] {
         allPlannedActions
             .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) }
@@ -4730,6 +5202,109 @@ struct PlanStepFiveView: View {
         markStep5DirtyAndAutosave()
     }
 
+    private func applyCarriedProfilesToWeekActionsIfNeeded() {
+        var didMutate = false
+
+        for action in plannedActionsForWeek() {
+            guard !carriedProfileAppliedActionIDs.contains(action.id) else { continue }
+            guard let profile = ActionCarryProfileStore.load(for: action.text) else { continue }
+
+            upsertDefineState(forActionId: action.id) { st in
+                st.isMust = profile.isMust
+                st.timeEstimateMinutes = profile.timeEstimateMinutes
+                st.sensitiveMorning = profile.sensitiveMorning
+                st.sensitiveAfternoon = profile.sensitiveAfternoon
+                st.sensitiveEvening = profile.sensitiveEvening
+                st.updatedAt = .now
+            }
+
+            if let kindRaw = profile.leverageKindRaw,
+               let kind = ActionLeverageKind(rawValue: kindRaw),
+               let value = profile.leverageValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !value.isEmpty {
+                let key = "\(kind.rawValue.lowercased())|\(value.lowercased())"
+                let resource: LeverageResource
+                if let existing = leverageCatalog.first(where: { $0.kindValueKey == key }) {
+                    resource = existing
+                } else {
+                    let created = LeverageResource(kindRaw: kind.rawValue, value: value)
+                    modelContext.insert(created)
+                    resource = created
+                }
+                upsertLeverageSelection(forActionId: action.id) { sel in
+                    sel.resourceId = resource.id
+                    sel.updatedAt = .now
+                }
+            } else {
+                upsertLeverageSelection(forActionId: action.id) { sel in
+                    sel.resourceId = nil
+                    sel.updatedAt = .now
+                }
+            }
+
+            let trimmedPlaces = profile.placeNames
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            let targetPlaceIDs: Set<UUID> = Set(trimmedPlaces.map { placeName in
+                let normalized = placeName.lowercased()
+                if let existing = placesCatalog.first(where: { $0.normalizedKey == normalized }) {
+                    return existing.id
+                }
+                let created = SensitivityPlaceCatalogItem(place: placeName)
+                modelContext.insert(created)
+                return created.id
+            })
+
+            let existingLinks = placeLinks.filter {
+                Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) &&
+                $0.plannedChunkActionId == action.id
+            }
+            let existingIDs = Set(existingLinks.map(\.placeId))
+            for link in existingLinks where !targetPlaceIDs.contains(link.placeId) {
+                RecentlyDeletedStore.trash(link, in: modelContext)
+            }
+            for placeID in targetPlaceIDs where !existingIDs.contains(placeID) {
+                modelContext.insert(PlannedChunkActionSensitivityPlaceLink(
+                    weekStart: currentWeekStart,
+                    plannedChunkActionId: action.id,
+                    placeId: placeID,
+                    createdAt: .now
+                ))
+            }
+
+            upsertNote(forActionId: action.id) { n in
+                n.noteText = profile.noteText
+                n.updatedAt = .now
+            }
+
+            let existingAttachments = attachments.filter {
+                Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) &&
+                $0.plannedChunkActionId == action.id
+            }
+            for attachment in existingAttachments {
+                RecentlyDeletedStore.trash(attachment, in: modelContext)
+            }
+            for attachment in profile.attachments {
+                modelContext.insert(PlannedChunkActionAttachment(
+                    weekStart: currentWeekStart,
+                    plannedChunkActionId: action.id,
+                    kindRaw: attachment.kindRaw,
+                    urlString: attachment.urlString,
+                    fileName: attachment.fileName,
+                    fileBookmarkData: attachment.fileBookmarkData,
+                    createdAt: .now
+                ))
+            }
+
+            carriedProfileAppliedActionIDs.insert(action.id)
+            didMutate = true
+        }
+
+        if didMutate {
+            markStep5DirtyAndAutosave()
+        }
+    }
+
     private func attachmentsForAction(_ actionId: UUID) -> [PlannedChunkActionAttachment] {
         attachments
             .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) && $0.plannedChunkActionId == actionId }
@@ -4756,6 +5331,77 @@ struct PlanStepFiveView: View {
                 .sorted { $0.sortOrder < $1.sortOrder }
             localActionsByChunkId[chunk.id] = actions
         }
+    }
+
+    private func applyInitialDueSortIfNeeded() {
+        guard UserDefaults.standard.bool(forKey: step5InitialDueSortKey) == false else { return }
+
+        var didMutate = false
+        for chunk in plannedChunksForWeek {
+            let chunkActions = allPlannedActions
+                .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) && $0.plannedChunkId == chunk.id }
+                .sorted { $0.sortOrder < $1.sortOrder }
+            guard !chunkActions.isEmpty else { continue }
+
+            let sorted = chunkActions.sorted { lhs, rhs in
+                let lhsDue = dueDateForAction(lhs.id)
+                let rhsDue = dueDateForAction(rhs.id)
+                if (lhsDue != nil) != (rhsDue != nil) {
+                    return lhsDue != nil
+                }
+                if let lhsDue, let rhsDue, lhsDue != rhsDue {
+                    return lhsDue < rhsDue
+                }
+                if lhs.sortOrder != rhs.sortOrder {
+                    return lhs.sortOrder < rhs.sortOrder
+                }
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
+
+            for (index, action) in sorted.enumerated() where action.sortOrder != index {
+                action.sortOrder = index
+                didMutate = true
+            }
+        }
+
+        if didMutate {
+            try? modelContext.save()
+        }
+        UserDefaults.standard.set(true, forKey: step5InitialDueSortKey)
+    }
+
+    private func dueDateForAction(_ actionId: UUID) -> Date? {
+        guard let item = captureItemForPlannedActionID(actionId) else { return nil }
+        return dueDate(for: item)
+    }
+
+    private func dueDateEditorState(forActionId actionId: UUID) -> DueDateEditorState? {
+        guard let item = captureItemForPlannedActionID(actionId) else { return nil }
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let resolvedDue = cal.startOfDay(
+            for: item.dueDate
+                ?? dueDate(for: item)
+                ?? cal.date(byAdding: .day, value: 7, to: today)
+                ?? today
+        )
+        let attention = min(max(item.dueDateAttentionDays ?? dueDateAttentionDays, 7), 30)
+        return DueDateEditorState(
+            hasDueDate: item.dueDate != nil,
+            dueDate: resolvedDue,
+            attentionDays: attention,
+            minimumDate: today
+        )
+    }
+
+    private func updateDueDateEditor(forActionId actionId: UUID, with updated: DueDateEditorState) {
+        guard let item = captureItemForPlannedActionID(actionId) else { return }
+        let normalizedDue = Calendar.current.startOfDay(for: updated.dueDate)
+        item.dueDate = updated.hasDueDate ? normalizedDue : nil
+        item.dueDateAttentionDays = min(max(updated.attentionDays, 7), 30)
+        markStep5DirtyAndAutosave()
+        // Persist immediately so due-date edits survive exiting Step 6 before "Start".
+        try? modelContext.save()
     }
 
     private func markStep5DirtyAndAutosave() {
@@ -4816,14 +5462,30 @@ struct PlanStepFiveView: View {
         persistStep5ForWeekNow()
 
         let actionTextSet = Set(plannedActionsForWeek().map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() })
+        var dueSnapshotsByText: [String: PlannedActionDueSnapshot] = [:]
         if !actionTextSet.isEmpty {
             for item in allCaptureItems {
                 let key = item.text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                 if actionTextSet.contains(key) {
-                    RecentlyDeletedStore.trash(item, in: modelContext)
+                    if let due = dueDate(for: item) {
+                        let attention = min(max(item.dueDateAttentionDays ?? dueDateAttentionDays, 7), 30)
+                        dueSnapshotsByText[key] = PlannedActionDueSnapshot(
+                            dueDate: due,
+                            attentionDays: attention
+                        )
+                    }
+                    // Keep integrated items in the DB but hide them while Action Blocks are active,
+                    // so "carried to capture" can restore the same source-linked record.
+                    if let sourceType = item.sourceType, !sourceType.isEmpty {
+                        item.isGhost = true
+                        item.unhideDate = nil
+                    } else {
+                        RecentlyDeletedStore.trash(item, in: modelContext)
+                    }
                 }
             }
         }
+        persistActionDueSnapshots(dueSnapshotsByText, weekStart: currentWeekStart)
 
         let state = ActivePlanState.fetchOrCreate(in: modelContext)
         state.isActive = true
@@ -4831,8 +5493,31 @@ struct PlanStepFiveView: View {
         state.weekStart = currentWeekStart
         hasCompletedPlanFlowOnce = true
         try? modelContext.save()
+        NotificationCenter.default.post(name: Notification.Name("plan_flow_completed"), object: nil)
 
         dismiss()
+    }
+
+    private func persistActionDueSnapshots(_ snapshots: [String: PlannedActionDueSnapshot], weekStart: Date) {
+        let key = actionDueSnapshotStorageKey(for: weekStart)
+        if snapshots.isEmpty {
+            UserDefaults.standard.removeObject(forKey: key)
+            return
+        }
+        guard let data = try? JSONEncoder().encode(snapshots) else { return }
+        UserDefaults.standard.set(data, forKey: key)
+    }
+
+    private func actionDueSnapshotStorageKey(for weekStart: Date) -> String {
+        "planned_action_due_snapshots_\(dayKey(for: weekStart))"
+    }
+
+    private func dayKey(for date: Date) -> String {
+        let comps = Calendar.current.dateComponents([.year, .month, .day], from: date)
+        let y = comps.year ?? 0
+        let m = comps.month ?? 0
+        let d = comps.day ?? 0
+        return String(format: "%04d-%02d-%02d", y, m, d)
     }
 }
 
@@ -5027,11 +5712,17 @@ private struct SensitivitySheet: View {
     let onAddPlaceToCatalog: (String) -> Void
     let onDeleteCatalogPlaces: (Set<UUID>) -> Void
     let onTogglePlaceSelected: (UUID) -> Void
+    let dueDateEditor: PlanStepFiveView.DueDateEditorState?
+    let onSaveDueDateEditor: (PlanStepFiveView.DueDateEditorState) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var newPlace: String = ""
     @State private var isNewPlaceMode: Bool = false
     @FocusState private var isNewPlaceFocused: Bool
+    @State private var localHasDueDate: Bool = false
+    @State private var localDueDate: Date = .now
+    @State private var localAttentionDays: Int = 7
+    @State private var localMinimumDate: Date = Calendar.current.startOfDay(for: Date())
 
     var body: some View {
         NavigationStack {
@@ -5108,6 +5799,63 @@ private struct SensitivitySheet: View {
                         }
                     }
                 }
+
+                if dueDateEditor != nil {
+                    Section("Due Date") {
+                        HStack {
+                            Text("Due Date")
+                            Spacer()
+                            Menu {
+                                Button("No") { localHasDueDate = false }
+                                Button("Yes") { localHasDueDate = true }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Text(localHasDueDate ? "Yes" : "No")
+                                    Image(systemName: "chevron.up.chevron.down")
+                                }
+                                .foregroundStyle(.blue)
+                            }
+                        }
+
+                        if localHasDueDate {
+                            HStack {
+                                Text("Set Due Date")
+                                Spacer()
+                                DatePicker(
+                                    "",
+                                    selection: $localDueDate,
+                                    in: localMinimumDate...,
+                                    displayedComponents: .date
+                                )
+                                .labelsHidden()
+                                .datePickerStyle(.compact)
+                            }
+
+                            HStack {
+                                Text("Attention")
+                                Spacer()
+                                Menu {
+                                    ForEach(7...30, id: \.self) { value in
+                                        Button("\(value) days") {
+                                            localAttentionDays = value
+                                        }
+                                    }
+                                } label: {
+                                    HStack(spacing: 4) {
+                                        Text("\(min(max(localAttentionDays, 7), 30)) days")
+                                        Image(systemName: "chevron.up.chevron.down")
+                                    }
+                                    .foregroundStyle(.blue)
+                                }
+                            }
+
+                            Text("Attention triggers countdown to display.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                }
             }
             .navigationTitle("Sensitivities")
             .navigationBarTitleDisplayMode(.inline)
@@ -5115,8 +5863,26 @@ private struct SensitivitySheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
                         commitInlinePlace()
+                        if dueDateEditor != nil {
+                            onSaveDueDateEditor(
+                                PlanStepFiveView.DueDateEditorState(
+                                    hasDueDate: localHasDueDate,
+                                    dueDate: localDueDate,
+                                    attentionDays: min(max(localAttentionDays, 7), 30),
+                                    minimumDate: localMinimumDate
+                                )
+                            )
+                        }
                         dismiss()
                     }
+                }
+            }
+            .onAppear {
+                if let dueDateEditor {
+                    localHasDueDate = dueDateEditor.hasDueDate
+                    localDueDate = dueDateEditor.dueDate
+                    localAttentionDays = dueDateEditor.attentionDays
+                    localMinimumDate = dueDateEditor.minimumDate
                 }
             }
         }
@@ -5690,6 +6456,21 @@ private struct ChunkContainerState: Identifiable, Hashable {
     init(id: UUID = .init(), isLocked: Bool) {
         self.id = id
         self.isLocked = isLocked
+    }
+}
+
+private struct Step3ChunkRowHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: [UUID: CGFloat] = [:]
+    static func reduce(value: inout [UUID: CGFloat], nextValue: () -> [UUID: CGFloat]) {
+        value.merge(nextValue()) { _, new in new }
+    }
+}
+
+private struct Step3AddGroupRowHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        let next = nextValue()
+        if next > 0 { value = next }
     }
 }
 

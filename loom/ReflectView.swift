@@ -2,6 +2,9 @@ import SwiftUI
 import SwiftData
 import Charts
 import UIKit
+#if canImport(EventKit)
+import EventKit
+#endif
 
 private struct ReflectDarkModeInvertImage: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
@@ -44,6 +47,8 @@ struct ReflectView: View {
     @Query private var allAdHocMarkers: [PlannedChunkActionAdHocMarker]
     @Query(sort: \RollingCaptureItem.createdAt, order: .reverse) private var captureItems: [RollingCaptureItem]
     @Query(sort: \ActivePlanState.id, order: .forward) private var activePlanStates: [ActivePlanState]
+    @AppStorage("capture_google_tasks_access_token") private var googleTasksAccessToken: String = ""
+    @AppStorage("capture_microsoft_todo_access_token") private var microsoftTodoAccessToken: String = ""
 
     @State private var step: Int = 1
     @State private var showInstructions: Bool = false
@@ -1144,6 +1149,8 @@ struct ReflectView: View {
             }
         }
 
+        persistCarriedActionProfiles()
+        applyIntegratedCaptureFinalStatuses()
         recaptureCarriedActions()
         clearWeekPlanningStateAfterArchive()
 
@@ -1297,6 +1304,226 @@ struct ReflectView: View {
                 )
             )
             seen.insert(key)
+        }
+    }
+
+    private func persistCarriedActionProfiles() {
+        for action in weekActions {
+            let actionText = action.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !actionText.isEmpty else { continue }
+            let finalStatus = status(for: action.id)
+
+            switch finalStatus {
+            case .carriedToCapture:
+                ActionCarryProfileStore.save(
+                    for: actionText,
+                    profile: carriedProfile(for: action.id)
+                )
+            case .notNeeded:
+                ActionCarryProfileStore.remove(for: actionText)
+            default:
+                continue
+            }
+        }
+    }
+
+    private func carriedProfile(for actionId: UUID) -> CarriedActionProfile {
+        let define = defineByActionID[actionId]
+        let leverage = leverageByActionID[actionId]
+        let resource = leverage.flatMap { $0.resourceId.flatMap { resourceByID[$0] } }
+        let placeNames = (placeIDsByActionID[actionId] ?? [])
+            .compactMap { placeByID[$0]?.place.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let noteText = noteByActionID[actionId]?.noteText ?? ""
+        let attachments = (attachmentsByActionID[actionId] ?? []).map { attachment in
+            CarriedActionAttachmentSnapshot(
+                kindRaw: attachment.kindRaw,
+                urlString: attachment.urlString,
+                fileName: attachment.fileName,
+                fileBookmarkData: attachment.fileBookmarkData
+            )
+        }
+
+        return CarriedActionProfile(
+            isMust: define?.isMust ?? false,
+            timeEstimateMinutes: define?.timeEstimateMinutes,
+            sensitiveMorning: define?.sensitiveMorning ?? true,
+            sensitiveAfternoon: define?.sensitiveAfternoon ?? true,
+            sensitiveEvening: define?.sensitiveEvening ?? true,
+            leverageKindRaw: resource?.kind.rawValue,
+            leverageValue: resource?.value,
+            placeNames: placeNames,
+            noteText: noteText,
+            attachments: attachments,
+            updatedAtUnix: Date().timeIntervalSince1970
+        )
+    }
+
+    private enum ExternalMutationAction {
+        case complete
+        case delete
+    }
+
+    private func applyIntegratedCaptureFinalStatuses() {
+        var actionByNormalizedText: [String: PlannedChunkAction] = [:]
+        for action in weekActions {
+            let key = normalized(action.text)
+            if actionByNormalizedText[key] == nil {
+                actionByNormalizedText[key] = action
+            }
+        }
+
+        for item in captureItems {
+            guard let sourceType = item.sourceType, !sourceType.isEmpty else { continue }
+            let key = normalized(item.text)
+            guard let action = actionByNormalizedText[key] else { continue }
+            let finalStatus = status(for: action.id)
+
+            switch finalStatus {
+            case .done:
+                applyExternalSourceMutationIfNeeded(for: item, action: .complete)
+                RecentlyDeletedStore.trash(item, in: modelContext)
+            case .notNeeded:
+                applyExternalSourceMutationIfNeeded(for: item, action: .delete)
+                RecentlyDeletedStore.trash(item, in: modelContext)
+            case .carriedToCapture:
+                item.isGhost = false
+                item.unhideDate = nil
+                item.unhiddenAt = .now
+            default:
+                break
+            }
+        }
+    }
+
+    private func applyExternalSourceMutationIfNeeded(for item: RollingCaptureItem, action: ExternalMutationAction) {
+        guard let sourceType = item.sourceType else { return }
+        switch sourceType {
+        case "apple_reminder":
+            applyAppleReminderMutationIfNeeded(for: item, action: action)
+        case "google_tasks":
+            applyGoogleTaskMutationIfNeeded(for: item, action: action)
+        case "microsoft_todo":
+            applyMicrosoftTodoMutationIfNeeded(for: item, action: action)
+        default:
+            break
+        }
+    }
+
+    private func applyAppleReminderMutationIfNeeded(for item: RollingCaptureItem, action: ExternalMutationAction) {
+        guard let externalID = item.sourceExternalID, !externalID.isEmpty else { return }
+        #if canImport(EventKit)
+        let store = EKEventStore()
+        let runMutation: (Bool) -> Void = { granted in
+            guard granted else { return }
+            guard let reminder = store.calendarItem(withIdentifier: externalID) as? EKReminder else { return }
+            do {
+                switch action {
+                case .complete:
+                    reminder.isCompleted = true
+                    reminder.completionDate = Date()
+                    try store.save(reminder, commit: true)
+                case .delete:
+                    try store.remove(reminder, commit: true)
+                }
+            } catch {
+                // Best-effort write-back.
+            }
+        }
+        if #available(iOS 17.0, *) {
+            store.requestFullAccessToReminders { granted, _ in
+                runMutation(granted)
+            }
+        } else {
+            store.requestAccess(to: .reminder) { granted, _ in
+                runMutation(granted)
+            }
+        }
+        #endif
+    }
+
+    private func applyGoogleTaskMutationIfNeeded(for item: RollingCaptureItem, action: ExternalMutationAction) {
+        guard !googleTasksAccessToken.isEmpty else { return }
+        guard let externalID = item.sourceExternalID else { return }
+        let parts = externalID.split(separator: "|", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { return }
+        let listID = parts[0]
+        let taskID = parts[1]
+        Task { await performGoogleTaskMutation(accessToken: googleTasksAccessToken, listID: listID, taskID: taskID, action: action) }
+    }
+
+    private func performGoogleTaskMutation(
+        accessToken: String,
+        listID: String,
+        taskID: String,
+        action: ExternalMutationAction
+    ) async {
+        guard
+            let listEncoded = listID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+            let taskEncoded = taskID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+            let url = URL(string: "https://tasks.googleapis.com/tasks/v1/lists/\(listEncoded)/tasks/\(taskEncoded)")
+        else { return }
+
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        switch action {
+        case .complete:
+            request.httpMethod = "PATCH"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            let body: [String: String] = [
+                "status": "completed",
+                "completed": ISO8601DateFormatter().string(from: Date())
+            ]
+            request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+            _ = try? await URLSession.shared.data(for: request)
+        case .delete:
+            request.httpMethod = "DELETE"
+            _ = try? await URLSession.shared.data(for: request)
+        }
+    }
+
+    private func applyMicrosoftTodoMutationIfNeeded(for item: RollingCaptureItem, action: ExternalMutationAction) {
+        guard !microsoftTodoAccessToken.isEmpty else { return }
+        guard let externalID = item.sourceExternalID else { return }
+        let parts = externalID.split(separator: "|", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { return }
+        let listID = parts[0]
+        let taskID = parts[1]
+        Task {
+            await performMicrosoftTodoMutation(
+                accessToken: microsoftTodoAccessToken,
+                listID: listID,
+                taskID: taskID,
+                action: action
+            )
+        }
+    }
+
+    private func performMicrosoftTodoMutation(
+        accessToken: String,
+        listID: String,
+        taskID: String,
+        action: ExternalMutationAction
+    ) async {
+        guard
+            let listEncoded = listID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+            let taskEncoded = taskID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+            let url = URL(string: "https://graph.microsoft.com/v1.0/me/todo/lists/\(listEncoded)/tasks/\(taskEncoded)")
+        else { return }
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        switch action {
+        case .complete:
+            request.httpMethod = "PATCH"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            let body: [String: String] = ["status": "completed"]
+            request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+            _ = try? await URLSession.shared.data(for: request)
+        case .delete:
+            request.httpMethod = "DELETE"
+            _ = try? await URLSession.shared.data(for: request)
         }
     }
 

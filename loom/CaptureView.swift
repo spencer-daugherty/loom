@@ -238,6 +238,8 @@ struct CaptureView: View {
     private var microsoftTodoAccessExpiryUnix: Double = 0
     @AppStorage("capture_default_due_date_attention_days")
     private var dueDateAttentionDays: Int = 7
+    @AppStorage("capture_source_due_date_overrides_json")
+    private var sourceDueDateOverridesJSON: String = "{}"
     @State private var recurringAddIsAdding: Bool = false
     @State private var recurringAddText: String = ""
     @State private var shouldFocusRecurringAddField: Bool = false
@@ -361,6 +363,11 @@ struct CaptureView: View {
     private enum ExternalMutationAction {
         case complete
         case delete
+    }
+
+    private struct SourceDueDateOverrideRecord: Codable {
+        var hasDueDate: Bool
+        var dueDateUnix: Double
     }
 
     private let recurringDispatchTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
@@ -669,12 +676,6 @@ struct CaptureView: View {
                                 .foregroundStyle(.secondary)
                         }
                         .buttonStyle(.plain)
-
-                        if let d = item.unhiddenAt {
-                            Text("Unhidden " + formatShortDate(d))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
                     }
                 }
                 .padding(8)
@@ -786,6 +787,10 @@ struct CaptureView: View {
                 || (editingItemHasDueDate && Calendar.current.startOfDay(for: editingItemDueDate) != Calendar.current.startOfDay(for: editingItemOriginalDueDate))
                 || (editingItemHasDueDate && editingItemAttentionDays != editingItemOriginalAttentionDays)
                 || (editingItemIsGhost && Calendar.current.startOfDay(for: editingItemHiddenUntil) != Calendar.current.startOfDay(for: editingItemOriginalHiddenUntil))
+            let dueDateSettingsChanged =
+                editingItemHasDueDate != editingItemOriginalHasDueDate
+                || (editingItemHasDueDate && Calendar.current.startOfDay(for: editingItemDueDate) != Calendar.current.startOfDay(for: editingItemOriginalDueDate))
+                || (editingItemHasDueDate && editingItemAttentionDays != editingItemOriginalAttentionDays)
             NavigationStack {
                 List {
                     TextEditor(text: $editingItemText)
@@ -907,8 +912,15 @@ struct CaptureView: View {
                                     return
                                 }
                                 renameItemInline(item, to: editingItemText)
-                                item.dueDate = editingItemHasDueDate ? Calendar.current.startOfDay(for: editingItemDueDate) : nil
+                                let updatedDueDate = editingItemHasDueDate ? Calendar.current.startOfDay(for: editingItemDueDate) : nil
+                                item.dueDate = updatedDueDate
                                 item.dueDateAttentionDays = min(max(editingItemAttentionDays, 7), 30)
+                                if dueDateSettingsChanged {
+                                    if item.sourceType != "apple_reminder" {
+                                        persistSourceDueDateOverrideIfNeeded(for: item, dueDate: updatedDueDate)
+                                    }
+                                    applyAppleReminderDueDateUpdateIfNeeded(for: item, dueDate: updatedDueDate)
+                                }
                                 if editingItemIsGhost {
                                     item.unhideDate = Calendar.current.startOfDay(for: editingItemHiddenUntil)
                                 }
@@ -2413,6 +2425,7 @@ struct CaptureView: View {
     private func deleteItems(at offsets: IndexSet) {
         for offset in offsets {
             let item = displayItems[offset]
+            ActionCarryProfileStore.remove(for: item.text)
             applyExternalSourceMutationIfNeeded(for: item, action: .delete)
             RecentlyDeletedStore.trash(item, in: modelContext)
         }
@@ -2485,6 +2498,58 @@ struct CaptureView: View {
         default:
             return nil
         }
+    }
+
+    private func sourceOverrideKey(sourceType: String, sourceID: String) -> String {
+        "\(sourceType)|\(sourceID)"
+    }
+
+    private func decodedSourceDueDateOverrides() -> [String: SourceDueDateOverrideRecord] {
+        guard let data = sourceDueDateOverridesJSON.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode([String: SourceDueDateOverrideRecord].self, from: data) else {
+            return [:]
+        }
+        return decoded
+    }
+
+    private func saveSourceDueDateOverrides(_ map: [String: SourceDueDateOverrideRecord]) {
+        guard let data = try? JSONEncoder().encode(map),
+              let json = String(data: data, encoding: .utf8) else {
+            return
+        }
+        sourceDueDateOverridesJSON = json
+    }
+
+    private func sourceDueDateOverrideIfAny(sourceType: String, sourceID: String) -> (hasOverride: Bool, dueDate: Date?) {
+        let map = decodedSourceDueDateOverrides()
+        let key = sourceOverrideKey(sourceType: sourceType, sourceID: sourceID)
+        guard let record = map[key] else { return (false, nil) }
+        if !record.hasDueDate {
+            return (true, nil)
+        }
+        let date = Calendar.current.startOfDay(for: Date(timeIntervalSince1970: record.dueDateUnix))
+        return (true, date)
+    }
+
+    private func persistSourceDueDateOverrideIfNeeded(for item: RollingCaptureItem, dueDate: Date?) {
+        guard let sourceType = item.sourceType,
+              let sourceID = item.sourceExternalID,
+              !sourceID.isEmpty else { return }
+        var map = decodedSourceDueDateOverrides()
+        let key = sourceOverrideKey(sourceType: sourceType, sourceID: sourceID)
+        let normalizedDate = dueDate.map { Calendar.current.startOfDay(for: $0) }
+        map[key] = SourceDueDateOverrideRecord(
+            hasDueDate: normalizedDate != nil,
+            dueDateUnix: normalizedDate?.timeIntervalSince1970 ?? 0
+        )
+        saveSourceDueDateOverrides(map)
+    }
+
+    private func clearSourceDueDateOverride(sourceType: String, sourceID: String) {
+        var map = decodedSourceDueDateOverrides()
+        let key = sourceOverrideKey(sourceType: sourceType, sourceID: sourceID)
+        guard map.removeValue(forKey: key) != nil else { return }
+        saveSourceDueDateOverrides(map)
     }
 
     private func syncAppleRemindersIntoCapture() {
@@ -2847,6 +2912,39 @@ struct CaptureView: View {
         #endif
     }
 
+    private func applyAppleReminderDueDateUpdateIfNeeded(for item: RollingCaptureItem, dueDate: Date?) {
+        guard item.sourceType == "apple_reminder" else { return }
+        guard let externalID = item.sourceExternalID, !externalID.isEmpty else { return }
+        #if canImport(EventKit)
+        let store = EKEventStore()
+        let runUpdate: (Bool) -> Void = { granted in
+            guard granted else { return }
+            guard let reminder = store.calendarItem(withIdentifier: externalID) as? EKReminder else { return }
+            do {
+                if let dueDate {
+                    var comps = Calendar.current.dateComponents([.year, .month, .day], from: dueDate)
+                    comps.calendar = Calendar.current
+                    reminder.dueDateComponents = comps
+                } else {
+                    reminder.dueDateComponents = nil
+                }
+                try store.save(reminder, commit: true)
+            } catch {
+                // Best-effort write-back to Apple Reminders.
+            }
+        }
+        if #available(iOS 17.0, *) {
+            store.requestFullAccessToReminders { granted, _ in
+                runUpdate(granted)
+            }
+        } else {
+            store.requestAccess(to: .reminder) { granted, _ in
+                runUpdate(granted)
+            }
+        }
+        #endif
+    }
+
     private func applyGoogleTaskMutationIfNeeded(for item: RollingCaptureItem, action: ExternalMutationAction) {
         guard let externalID = item.sourceExternalID else { return }
         let parts = externalID.split(separator: "|", maxSplits: 1).map(String.init)
@@ -3007,11 +3105,13 @@ struct CaptureView: View {
             let sourceID = "\(task.listID)|\(task.taskID)"
             let title = task.title.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !title.isEmpty else { continue }
-            let dueDate: Date? = {
+            let sourceDueDate: Date? = {
                 guard let dateString = task.dueDateTimeString,
                       let date = microsoftDate(from: dateString) else { return nil }
                 return cal.startOfDay(for: date)
             }()
+            let override = sourceDueDateOverrideIfAny(sourceType: "microsoft_todo", sourceID: sourceID)
+            let dueDate = override.hasOverride ? override.dueDate : sourceDueDate
 
             if let existing = existingBySourceID[sourceID] {
                 existing.text = title
@@ -3142,10 +3242,12 @@ struct CaptureView: View {
             let sourceID = "\(task.listID)|\(task.taskID)"
             let title = task.title.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !title.isEmpty else { continue }
-            let dueDate: Date? = {
+            let sourceDueDate: Date? = {
                 guard let dueRFC3339 = task.dueRFC3339, let date = dateFormatter.date(from: dueRFC3339) else { return nil }
                 return cal.startOfDay(for: date)
             }()
+            let override = sourceDueDateOverrideIfAny(sourceType: "google_tasks", sourceID: sourceID)
+            let dueDate = override.hasOverride ? override.dueDate : sourceDueDate
             if let existing = existingBySourceID[sourceID] {
                 existing.text = title
                 existing.dueDate = dueDate
@@ -3348,11 +3450,13 @@ struct CaptureView: View {
             let sourceID = reminder.calendarItemIdentifier
             let title = reminder.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             guard !title.isEmpty else { continue }
-            let dueDate: Date? = {
+            let sourceDueDate: Date? = {
                 guard let comps = reminder.dueDateComponents,
                       let date = cal.date(from: comps) else { return nil }
                 return cal.startOfDay(for: date)
             }()
+            let dueDate = sourceDueDate
+            clearSourceDueDateOverride(sourceType: "apple_reminder", sourceID: sourceID)
 
             if let existing = existingBySourceID[sourceID] {
                 existing.text = title
