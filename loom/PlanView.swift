@@ -1111,16 +1111,14 @@ struct PlanStepThreeView: View {
         }
     }
 
-    private var qualifyingChunkIndices: [Int] {
-        chunks.indices.filter { chunks[$0].itemIDs.count >= 3 }
-    }
-
     private var isStep3NextEnabled: Bool {
-        qualifyingChunkIndices.count >= 2
+        let nonEmptyGroups = chunks.filter { !$0.itemIDs.isEmpty }
+        guard nonEmptyGroups.count >= 2 else { return false }
+        return nonEmptyGroups.allSatisfy { $0.itemIDs.count >= 3 }
     }
 
     private var step3RelevantChunkIndices: [Int] {
-        chunks.indices.filter { $0 < 2 || !chunks[$0].itemIDs.isEmpty }
+        chunks.indices.filter { !chunks[$0].itemIDs.isEmpty }
     }
 
     private var step3ChunksMissingMinimumActions: Set<Int> {
@@ -1371,6 +1369,7 @@ struct PlanStepThreeView: View {
                     if isStep3NextEnabled {
                         shouldHighlightStep3Validation = false
                         showStep3ValidationHint = false
+                        compactGroupsBeforeLabelStep()
                         if let onNext { onNext() }
                     } else {
                         triggerStep3ValidationFeedback()
@@ -2131,6 +2130,24 @@ struct PlanStepThreeView: View {
         step3ValidationResetWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.8, execute: workItem)
     }
+
+    private func compactGroupsBeforeLabelStep() {
+        let nonEmpty = chunks.filter { !$0.itemIDs.isEmpty }
+        guard nonEmpty.count != chunks.count else {
+            persistStep3Plan(force: true)
+            return
+        }
+
+        chunks = nonEmpty.enumerated().map { index, chunk in
+            var updated = chunk
+            updated.isLocked = index < 2
+            return updated
+        }
+
+        enforceShowHiddenIfNeeded()
+        syncPoolWithVisibility()
+        persistStep3Plan(force: true)
+    }
 }
 
 // MARK: - Step 4 (Label)
@@ -2231,21 +2248,15 @@ struct PlanStepThreeLabelView: View {
         return map
     }
 
-    private var qualifyingChunkIndices: [Int] {
-        plannedChunksForWeek.compactMap { chunk in
-            actionsForChunk(chunk).count >= 3 ? chunk.chunkIndex : nil
-        }
-    }
-
     private var isNextEnabled: Bool {
-        guard qualifyingChunkIndices.count >= 2 else { return false }
+        guard !plannedChunksForWeek.isEmpty else { return false }
         let selected = selectedLabelIDsByChunkIndex
-        return qualifyingChunkIndices.allSatisfy { selected[$0] != nil }
+        return plannedChunksForWeek.allSatisfy { selected[$0.chunkIndex] != nil }
     }
 
     private var missingLabelChunkIndices: Set<Int> {
         let selected = selectedLabelIDsByChunkIndex
-        return Set(qualifyingChunkIndices.filter { selected[$0] == nil })
+        return Set(plannedChunksForWeek.map(\.chunkIndex).filter { selected[$0] == nil })
     }
 
     var body: some View {
@@ -2381,10 +2392,15 @@ struct PlanStepThreeLabelView: View {
 
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center, spacing: 6) {
+                let selectedName = selectedLabelName(forChunkIndex: chunkIndex)
+                let actionsRelatedToColor: Color = {
+                    if selectedName != nil { return Color(.systemGray) } // fixed light-mode-style grey after selection
+                    return colorScheme == .dark ? .white : .black
+                }()
                 Text("Actions Related To:")
                     .font(.caption)
                     .fontWeight(.bold)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(actionsRelatedToColor)
 
                 Spacer(minLength: 8)
 
@@ -2398,7 +2414,6 @@ struct PlanStepThreeLabelView: View {
                         }
                     }
                 } label: {
-                    let selectedName = selectedLabelName(forChunkIndex: chunkIndex)
                     let selectedColor = selectedName.map { FulfillmentCategoryTheme.color(for: $0) } ?? .blue
                     HStack(spacing: 4) {
                         Text(selectedName ?? "Select…")
@@ -2458,12 +2473,7 @@ struct PlanStepThreeLabelView: View {
     }
 
     private func availableLabels(forChunkIndex chunkIndex: Int) -> [Step3SelectableLabel] {
-        let selected = selectedLabelIDsByChunkIndex
-        let selectedElsewhere = Set(selected.filter { $0.key != chunkIndex }.map(\.value))
-        return selectableLabels.filter { label in
-            if selected[chunkIndex] == label.id { return true }
-            return !selectedElsewhere.contains(label.id)
-        }
+        selectableLabels
     }
 
     private func selectedLabelName(forChunkIndex chunkIndex: Int) -> String? {
@@ -4290,6 +4300,12 @@ struct PlanStepFiveView: View {
                             ))
                         }
                     }
+                    .onDrop(of: [.text], delegate: ResetDragStateDropDelegate(
+                        draggedID: $draggedActionID,
+                        onCommit: {
+                            onCommitReorder(localActions)
+                        }
+                    ))
                     .animation(.interactiveSpring(response: 0.28, dampingFraction: 0.88, blendDuration: 0.12), value: localActions)
                 }
             }
@@ -4483,6 +4499,21 @@ struct PlanStepFiveView: View {
             }
 
             func dropExited(info: DropInfo) { }
+        }
+
+        private struct ResetDragStateDropDelegate: DropDelegate {
+            @Binding var draggedID: UUID?
+            let onCommit: () -> Void
+
+            func performDrop(info: DropInfo) -> Bool {
+                draggedID = nil
+                onCommit()
+                return true
+            }
+
+            func dropExited(info: DropInfo) {
+                draggedID = nil
+            }
         }
     }
 
