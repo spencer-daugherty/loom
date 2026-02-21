@@ -44,7 +44,7 @@ final class PlanLabel {
     }
 }
 
-/// Persists the user's Step 3 chunk "category/label" selection.
+/// Persists the user's Step 3 group "category/label" selection.
 /// This is NEW persistence that Step 3 previously did not have.
 ///
 /// We associate it to the current plan week via `weekStart`, which matches your existing
@@ -56,7 +56,7 @@ final class PlanChunkSelection {
     /// Which plan week this selection belongs to.
     var weekStart: Date
 
-    /// Which chunk (0-based) this selection applies to.
+    /// Which group (0-based) this selection applies to.
     var chunkIndex: Int
 
     /// Selected seeded label info (IDs + strings captured at selection time).

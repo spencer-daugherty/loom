@@ -2003,7 +2003,7 @@ struct FulfillmentStartView: View {
 
     private func attemptRemoveCategoryFromStepList(_ category: String) {
         if hasOngoingUsage(in: category) {
-            triggerHint("This category has an ongoing action block, chunk, or outcome.")
+            triggerHint("This category has an ongoing action block, group, or outcome.")
             return
         }
         removeCategoryFromStepList(category)
@@ -2072,7 +2072,7 @@ struct FulfillmentStartView: View {
             assignDefaultColorIfNeeded(for: category)
         } else {
             if hasOngoingUsage(in: category) {
-                triggerHint("This category has an ongoing action block, chunk, or outcome.")
+                triggerHint("This category has an ongoing action block, group, or outcome.")
                 return
             }
             selectedCategoryNames.removeAll { $0.caseInsensitiveCompare(category) == .orderedSame }

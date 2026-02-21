@@ -1206,7 +1206,7 @@ struct PlanStepThreeView: View {
             VStack(spacing: 1) {
                 PlanStepProgressBar(current: 3, total: 6)
                     .frame(maxWidth: .infinity, alignment: .center)
-                Text("Chunk")
+                Text("Group")
                     .font(.largeTitle)
                     .fontWeight(.bold)
                     .frame(maxWidth: .infinity, alignment: .center)
@@ -1388,12 +1388,12 @@ struct PlanStepThreeView: View {
         .overlay(alignment: .bottom) {
             if showStep3ValidationHint {
                 VStack(alignment: .center, spacing: 6) {
-                    Text("Complete your chunks")
+                    Text("Complete your groups")
                         .font(.footnote)
                         .fontWeight(.bold)
-                    Text("• 2 or more chunks")
+                    Text("• 2 or more groups")
                         .font(.footnote)
-                    Text("• 3 or more actions per chunk")
+                    Text("• 3 or more actions per group")
                         .font(.footnote)
                 }
                 .multilineTextAlignment(.center)
@@ -1470,7 +1470,7 @@ struct PlanStepThreeView: View {
             HStack(spacing: 8) {
                 Image(systemName: "plus")
                     .font(.system(size: 16, weight: .bold))
-                Text("Add Chunk")
+                Text("Add Group")
                     .font(.headline)
             }
             .frame(maxWidth: .infinity, minHeight: 48)
@@ -1588,7 +1588,7 @@ struct PlanStepThreeView: View {
                             .font(.system(size: 18, weight: .semibold))
                             .foregroundStyle(.secondary)
                             .opacity(canDeleteThisChunk ? 1.0 : 0.35)
-                            .accessibilityLabel("Delete chunk")
+                            .accessibilityLabel("Delete group")
                     }
                     .buttonStyle(.plain)
                     .disabled(!canDeleteThisChunk)
@@ -1677,7 +1677,7 @@ struct PlanStepThreeView: View {
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(.secondary)
                         .opacity(canDeleteThisChunk ? 1.0 : 0.35)
-                        .accessibilityLabel("Delete chunk")
+                        .accessibilityLabel("Delete group")
                 }
                 .buttonStyle(.plain)
                 .disabled(!canDeleteThisChunk)
@@ -2290,7 +2290,7 @@ struct PlanStepThreeLabelView: View {
             ScrollView {
                 VStack(spacing: 12) {
                     if plannedChunksForWeek.isEmpty {
-                        Text("No chunks yet.")
+                        Text("No groups yet.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .center)
@@ -2408,7 +2408,7 @@ struct PlanStepThreeLabelView: View {
             }
 
             if actions.isEmpty {
-                Text("No actions in this chunk.")
+                Text("No actions in this group.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .padding(.vertical, 12)
@@ -2713,7 +2713,7 @@ struct PlanStepFourView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     if plannedChunksForWeek.isEmpty {
-                        Text("No chunks yet.")
+                        Text("No groups yet.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .center)
@@ -3580,7 +3580,7 @@ struct PlanStepFiveView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     if plannedChunksForWeek.isEmpty {
-                        Text("No chunks yet.")
+                        Text("No groups yet.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .center)

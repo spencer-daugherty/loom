@@ -772,7 +772,7 @@ enum WeeklyMindsetEntry {
 
 // MARK: - Step 4 storage
 
-/// Stores the user's Step 4 inputs per week + planned chunk.
+/// Stores the user's Step 4 inputs per week + planned group.
 @Model
 final class PlannedChunkStepFourState {
     @Attribute(.unique) var id: UUID
@@ -783,7 +783,7 @@ final class PlannedChunkStepFourState {
     var resultText: String
     var roleNoteText: String
 
-    /// Connected role for the chunk (FulfillmentRoles.id)
+    /// Connected role for the group (FulfillmentRoles.id)
     var connectedRoleId: UUID?
 
     var updatedAt: Date
@@ -822,7 +822,7 @@ final class PlannedChunkStepFourState {
     }
 }
 
-/// Stores up to 3 connected outcomes per chunk for Step 4.
+/// Stores up to 3 connected outcomes per group for Step 4.
 @Model
 final class PlannedChunkOutcomeLink {
     @Attribute(.unique) var id: UUID
@@ -1282,15 +1282,15 @@ final class ActionBlocksReflectionOutcomeContribution {
 }
 
 // MARK: - NEW: Planned chunks (Step 3 -> Step 4 persistence)
-/// A persisted chunk created in Plan Step 3 for a given plan week.
+/// A persisted group created in Plan Step 3 for a given plan week.
 @Model
 final class PlannedChunk {
     @Attribute(.unique) var id: UUID
 
-    /// Which plan week this chunk belongs to (week start).
+    /// Which plan week this group belongs to (week start).
     var weekStart: Date
 
-    /// Chunk index as displayed in Step 3 (0-based).
+    /// Group index as displayed in Step 3 (0-based).
     var chunkIndex: Int
 
     /// Selected label/category (copied at time of planning).
@@ -1301,7 +1301,7 @@ final class PlannedChunk {
 
     var updatedAt: Date
 
-    /// Unique key to ensure only 1 chunk per (weekStart, chunkIndex) if you recreate the plan.
+    /// Unique key to ensure only 1 group per (weekStart, chunkIndex) if you recreate the plan.
     @Attribute(.unique) var weekChunkKey: String
 
     init(
@@ -1337,7 +1337,7 @@ final class PlannedChunk {
     }
 }
 
-/// A persisted action assigned into a chunk during planning (text-only; no ghost metadata).
+/// A persisted action assigned into a group during planning (text-only; no ghost metadata).
 @Model
 final class PlannedChunkAction {
     @Attribute(.unique) var id: UUID

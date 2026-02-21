@@ -1144,10 +1144,10 @@ struct ManageRawDataView: View {
         .init(id: "capture", name: "Rolling Capture Item"),
         .init(id: "quickCapture", name: "Quick Completed Capture"),
         .init(id: "planLabel", name: "Plan Label"),
-        .init(id: "planSelect", name: "Plan Chunk Selection"),
-        .init(id: "chunk", name: "Planned Chunk"),
-        .init(id: "chunkAction", name: "Planned Chunk Action"),
-        .init(id: "step4", name: "Step 4 Chunk State"),
+        .init(id: "planSelect", name: "Plan Group Selection"),
+        .init(id: "chunk", name: "Planned Group"),
+        .init(id: "chunkAction", name: "Planned Group Action"),
+        .init(id: "step4", name: "Step 4 Group State"),
         .init(id: "chunkOutcome", name: "Step 4 Outcome Link"),
         .init(id: "define", name: "Define State"),
         .init(id: "exec", name: "Execution State"),
@@ -1277,19 +1277,19 @@ struct ManageRawDataView: View {
             DataItem(id: "planLabel-\($0.labelId.uuidString)", source: "Plan Label", content: $0.label, date: .now, emotion: nil, additionalFields: ["Category": $0.category, "Source": $0.source])
         }
         allItems += planSelections.map {
-            DataItem(id: "planSelect-\($0.id.uuidString)", source: "Plan Chunk Selection", content: $0.label ?? "(none)", date: $0.updatedAt, emotion: nil, additionalFields: ["Chunk": "\($0.chunkIndex)", "Category": $0.category ?? ""])
+            DataItem(id: "planSelect-\($0.id.uuidString)", source: "Plan Group Selection", content: $0.label ?? "(none)", date: $0.updatedAt, emotion: nil, additionalFields: ["Group": "\($0.chunkIndex)", "Category": $0.category ?? ""])
         }
         allItems += plannedChunks.map {
-            DataItem(id: "chunk-\($0.id.uuidString)", source: "Planned Chunk", content: $0.label, date: $0.updatedAt, emotion: nil, additionalFields: ["Category": $0.category, "Index": "\($0.chunkIndex)"])
+            DataItem(id: "chunk-\($0.id.uuidString)", source: "Planned Group", content: $0.label, date: $0.updatedAt, emotion: nil, additionalFields: ["Category": $0.category, "Index": "\($0.chunkIndex)"])
         }
         allItems += plannedActions.map {
-            DataItem(id: "chunkAction-\($0.id.uuidString)", source: "Planned Chunk Action", content: $0.text, date: $0.createdAt, emotion: nil, additionalFields: ["Chunk Index": "\($0.chunkIndex)", "Sort": "\($0.sortOrder)"])
+            DataItem(id: "chunkAction-\($0.id.uuidString)", source: "Planned Group Action", content: $0.text, date: $0.createdAt, emotion: nil, additionalFields: ["Group Index": "\($0.chunkIndex)", "Sort": "\($0.sortOrder)"])
         }
         allItems += stepFourStates.map {
-            DataItem(id: "step4-\($0.id.uuidString)", source: "Step 4 Chunk State", content: $0.resultText, date: $0.updatedAt, emotion: nil, additionalFields: ["Role Note": $0.roleNoteText])
+            DataItem(id: "step4-\($0.id.uuidString)", source: "Step 4 Group State", content: $0.resultText, date: $0.updatedAt, emotion: nil, additionalFields: ["Role Note": $0.roleNoteText])
         }
         allItems += chunkOutcomeLinks.map {
-            DataItem(id: "chunkOutcome-\($0.id.uuidString)", source: "Step 4 Outcome Link", content: $0.outcomeId.uuidString, date: $0.createdAt, emotion: nil, additionalFields: ["Chunk ID": $0.plannedChunkId.uuidString])
+            DataItem(id: "chunkOutcome-\($0.id.uuidString)", source: "Step 4 Outcome Link", content: $0.outcomeId.uuidString, date: $0.createdAt, emotion: nil, additionalFields: ["Group ID": $0.plannedChunkId.uuidString])
         }
         allItems += defineStates.map {
             DataItem(id: "define-\($0.id.uuidString)", source: "Define State", content: $0.isMust ? "Must" : "Optional", date: $0.updatedAt, emotion: nil, additionalFields: ["Time (min)": "\($0.timeEstimateMinutes ?? 0)", "Action ID": $0.plannedChunkActionId.uuidString])
@@ -1328,7 +1328,7 @@ struct ManageRawDataView: View {
             DataItem(id: "reflect-\($0.id.uuidString)", source: "Reflection Archive", content: $0.achievementsText, date: $0.savedAt, emotion: nil, additionalFields: ["Magic Moments": $0.magicMomentsText, "Power Question": $0.powerQuestionText])
         }
         allItems += reflectionActions.map {
-            DataItem(id: "reflectAction-\($0.id.uuidString)", source: "Reflection Archive Action", content: $0.actionText, date: $0.weekStart, emotion: nil, additionalFields: ["Status": $0.statusRaw, "Chunk": $0.chunkLabel])
+            DataItem(id: "reflectAction-\($0.id.uuidString)", source: "Reflection Archive Action", content: $0.actionText, date: $0.weekStart, emotion: nil, additionalFields: ["Status": $0.statusRaw, "Group": $0.chunkLabel])
         }
         allItems += reflectionOutcomes.map {
             DataItem(id: "reflectOutcome-\($0.id.uuidString)", source: "Reflection Archive Outcome", content: $0.outcomeText, date: $0.weekStart, emotion: nil, additionalFields: ["Category": $0.category])
@@ -1593,7 +1593,7 @@ struct ManageFulfillmentCategoriesView: View {
         .alert("Can't change area", isPresented: $showCannotDeleteCategoryPopup) {
             Button("Return", role: .cancel) {}
         } message: {
-            Text("This area has an ongoing action block, chunk, or outcome.")
+            Text("This area has an ongoing action block, group, or outcome.")
         }
         .alert("Archived", isPresented: $showArchiveCompletePopup) {
             Button("OK", role: .cancel) {}
@@ -1973,7 +1973,7 @@ private struct FulfillmentCategoryLabelsView: View {
         .alert("Can't change category", isPresented: $showCannotChangeCategoryPopup) {
             Button("Return", role: .cancel) {}
         } message: {
-            Text("This category has an ongoing action block, chunk, or outcome.")
+            Text("This category has an ongoing action block, group, or outcome.")
         }
         .safeAreaInset(edge: .bottom) {
             if showNewCategoryLabelsInlineHint {
