@@ -1519,7 +1519,9 @@ struct PlanStepThreeView: View {
         showGhostOutline: Bool,
         hiddenStatusText: String?,
         isDraggable: Bool,
-        dragPayload: DragPayload?
+        dragPayload: DragPayload?,
+        showsReturnToPool: Bool = false,
+        onReturnToPool: (() -> Void)? = nil
     ) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(text)
@@ -1531,26 +1533,39 @@ struct PlanStepThreeView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
-                .foregroundStyle(.secondary)
-                .accessibilityLabel("Drag")
-                .contentShape(Rectangle())
-                .padding(.leading, 4)
-                .if(isDraggable && dragPayload != nil, transform: { view in
-                    view.draggable(dragPayload!) {
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text(text)
-                                .lineLimit(1)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+            if showsReturnToPool, let onReturnToPool {
+                Button {
+                    onReturnToPool()
+                } label: {
+                    Image(systemName: "arrow.uturn.backward")
+                        .foregroundStyle(.blue)
+                        .accessibilityLabel("Return to capture list")
+                        .contentShape(Rectangle())
+                        .padding(.leading, 4)
+                }
+                .buttonStyle(.plain)
+            } else {
+                Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Drag")
+                    .contentShape(Rectangle())
+                    .padding(.leading, 4)
+                    .if(isDraggable && dragPayload != nil, transform: { view in
+                        view.draggable(dragPayload!) {
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Text(text)
+                                    .lineLimit(1)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
 
-                            Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
-                                .foregroundStyle(.secondary)
+                                Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(8)
+                            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+                            .frame(maxWidth: 320)
                         }
-                        .padding(8)
-                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
-                        .frame(maxWidth: 320)
-                    }
-                })
+                    })
+            }
         }
         .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1701,18 +1716,15 @@ struct PlanStepThreeView: View {
                             text: item.text,
                             showGhostOutline: item.isGhost,
                             hiddenStatusText: hiddenStatusText(for: item),
-                            isDraggable: true,
-                            dragPayload: DragPayload(itemID: item.id)
+                            isDraggable: false,
+                            dragPayload: nil,
+                            showsReturnToPool: true,
+                            onReturnToPool: {
+                                moveItemToPool(item.id)
+                                enforceShowHiddenIfNeeded()
+                                persistStep3Plan()
+                            }
                         )
-                    .contentShape(Rectangle())
-                    .dropDestination(for: DragPayload.self) { payloads, _ in
-                        guard let payload = payloads.first else { return false }
-                        moveItem(payload.itemID, toChunkAt: chunkIndex)
-
-                        enforceShowHiddenIfNeeded()
-                        persistStep3Plan()
-                        return true
-                    }
                 }
             }
         }
