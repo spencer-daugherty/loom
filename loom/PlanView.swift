@@ -1057,7 +1057,7 @@ struct PlanStepThreeView: View {
     private let hiddenUntilLaterIconName = "clock.arrow.trianglehead.clockwise.rotate.90.path.dotted"
     private let maxChunks = 8
     private let fulfillmentAreasSectionTitle = "Fulfillment Areas"
-    private let expandedGroupAreaRatio: CGFloat = 0.75
+    private let expandedGroupAreaRatio: CGFloat = 0.90
 
     private var secondaryButtonTextColor: Color {
         colorScheme == .dark ? Color(.secondaryLabel) : .black
@@ -1296,8 +1296,8 @@ struct PlanStepThreeView: View {
                 let collapsedGroupHeight = availableHeight * 0.5
                 let expandedGroupHeight = availableHeight * expandedGroupAreaRatio
                 let groupHeight = isDraggingOverGroupArea ? expandedGroupHeight : collapsedGroupHeight
-                let boundedGroupHeight = min(max(groupHeight, 220), availableHeight - 120)
-                let poolHeight = max(120, availableHeight - boundedGroupHeight - 10)
+                let boundedGroupHeight = min(max(groupHeight, 220), availableHeight - 60)
+                let poolHeight = max(60, availableHeight - boundedGroupHeight - 10)
 
                 VStack(spacing: 10) {
                     List {
