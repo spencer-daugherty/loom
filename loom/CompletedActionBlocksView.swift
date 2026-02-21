@@ -787,7 +787,7 @@ private extension ActionExecutionStatus {
         case .leveraged:
             return "circle"
         case .inProgress:
-            return "checkmark"
+            return "progress.indicator"
         case .done:
             return "xmark"
         case .carriedToCapture:
