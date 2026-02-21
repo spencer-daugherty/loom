@@ -355,7 +355,7 @@ struct PlanView: View {
             } else {
                 VStack(alignment: .leading, spacing: 24) {
             VStack(spacing: 1) {
-                PlanStepProgressBar(current: 1, total: 5)
+                PlanStepProgressBar(current: 1, total: 6)
                     .frame(maxWidth: .infinity, alignment: .center)
                 Text("Weekly Planning")
                     .font(.largeTitle)
@@ -613,7 +613,7 @@ struct PlanView: View {
     }
 }
 
-// MARK: - Single modal host for steps 2–5 (prevents stacked fullScreenCover text input bugs)
+// MARK: - Single modal host for steps 2–6 (prevents stacked fullScreenCover text input bugs)
 
 private struct PlanFlowHostView: View {
     @Environment(\.dismiss) private var dismiss
@@ -628,9 +628,11 @@ private struct PlanFlowHostView: View {
             case 3:
                 PlanStepThreeView(onBack: { step = 2 }, onNext: { step = 4 })
             case 4:
-                PlanStepFourView(onBack: { step = 3 }, onNext: { step = 5 })
+                PlanStepThreeLabelView(onBack: { step = 3 }, onNext: { step = 5 })
+            case 5:
+                PlanStepFourView(onBack: { step = 4 }, onNext: { step = 6 })
             default:
-                PlanStepFiveView(onBack: { step = 4 })
+                PlanStepFiveView(onBack: { step = 5 })
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -710,7 +712,7 @@ struct PlanStepTwoView: View {
     var body: some View {
         VStack(spacing: 12) {
             VStack(spacing: 1) {
-                PlanStepProgressBar(current: 2, total: 5)
+                PlanStepProgressBar(current: 2, total: 6)
                     .frame(maxWidth: .infinity, alignment: .center)
                 Text("Capture")
                     .font(.largeTitle)
@@ -778,7 +780,7 @@ struct PlanStepTwoView: View {
                 ForEach(displayItems) { item in
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         if baselineItemIDs.contains(item.id) {
-                            Image(systemName: "plus.viewfinder")
+                            Image(systemName: (item.sourceType?.isEmpty == false) ? "link" : "plus.viewfinder")
                                 .foregroundStyle(.secondary)
                         } else if showHidden, item.isGhost {
                             Image(systemName: hiddenUntilLaterIconName)
@@ -804,6 +806,14 @@ struct PlanStepTwoView: View {
                     .padding(.vertical, 4)
                     .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                     .listRowSeparator(.hidden)
+                    .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                        Button {
+                            quickCompleteItem(item)
+                        } label: {
+                            Text("Quick Complete")
+                        }
+                        .tint(.green)
+                    }
                 }
                 .onDelete(perform: deleteItems)
             }
@@ -951,6 +961,12 @@ struct PlanStepTwoView: View {
         try? modelContext.save()
     }
 
+    private func quickCompleteItem(_ item: RollingCaptureItem) {
+        modelContext.insert(QuickCompletedCaptureItem(text: item.text, completedAt: .now))
+        RecentlyDeletedStore.trash(item, in: modelContext)
+        try? modelContext.save()
+    }
+
     private func triggerStep2InputValidationFeedback() {
         step2ValidationResetWorkItem?.cancel()
         step2ValidationMessage = "Please enter value on keyboard"
@@ -1009,8 +1025,8 @@ struct PlanStepThreeView: View {
     @Query(sort: \RollingCaptureItem.createdAt, order: .reverse)
     private var allItems: [RollingCaptureItem]
 
-    @Query(sort: \PlanLabel.category, order: .forward)
-    private var allPlanLabels: [PlanLabel]
+    @Query(sort: \Fulfillment.updatedAt, order: .reverse)
+    private var fulfillments: [Fulfillment]
 
     @Query(sort: \PlanChunkSelection.updatedAt, order: .reverse)
     private var allChunkSelections: [PlanChunkSelection]
@@ -1039,6 +1055,7 @@ struct PlanStepThreeView: View {
 
     private let hiddenUntilLaterIconName = "clock.arrow.trianglehead.clockwise.rotate.90.path.dotted"
     private let maxChunks = 8
+    private let fulfillmentAreasSectionTitle = "Fulfillment Areas"
 
     private var secondaryButtonTextColor: Color {
         colorScheme == .dark ? Color(.secondaryLabel) : .black
@@ -1048,29 +1065,48 @@ struct PlanStepThreeView: View {
         WeeklyMindsetEntry.weekStart(for: Date())
     }
 
-    private var defaultLabels: [PlanLabel] {
-        allPlanLabels
-            .filter { $0.source == "default" }
-            .sorted {
-                if $0.category != $1.category { return $0.category < $1.category }
-                return $0.label < $1.label
+    private struct Step3SelectableLabel: Hashable {
+        let id: UUID
+        let label: String
+        let categoryId: UUID
+        let category: String
+        let sectionTitle: String
+    }
+
+    private var selectableLabels: [Step3SelectableLabel] {
+        var seenFulfillmentAreaIDs: Set<UUID> = []
+        return fulfillments
+            .compactMap { area -> Step3SelectableLabel? in
+                let trimmed = area.category.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { return nil }
+                guard seenFulfillmentAreaIDs.insert(area.category_id).inserted else { return nil }
+
+                return Step3SelectableLabel(
+                    id: area.category_id,
+                    label: trimmed,
+                    categoryId: area.category_id,
+                    category: trimmed,
+                    sectionTitle: fulfillmentAreasSectionTitle
+                )
             }
+            .sorted { $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending }
     }
 
     private var selectedLabelIDs: Set<UUID> {
         Set(chunks.compactMap(\.selectionLabelId))
     }
 
-    private func labelsByCategory(for chunkIndex: Int) -> [(category: String, labels: [PlanLabel])] {
+    private func labelsByCategory(for chunkIndex: Int) -> [(category: String, labels: [Step3SelectableLabel])] {
         let currentSelection = chunks.indices.contains(chunkIndex) ? chunks[chunkIndex].selectionLabelId : nil
 
-        let available = defaultLabels.filter { label in
-            if let currentSelection, label.labelId == currentSelection { return true }
-            return !selectedLabelIDs.contains(label.labelId)
+        let available = selectableLabels.filter { label in
+            if let currentSelection, label.id == currentSelection { return true }
+            return !selectedLabelIDs.contains(label.id)
         }
 
-        let grouped = Dictionary(grouping: available, by: \.category)
-        return grouped.keys.sorted().map { key in
+        let grouped = Dictionary(grouping: available, by: \.sectionTitle)
+        let orderedSectionTitles = grouped.keys.sorted()
+        return orderedSectionTitles.map { key in
             (category: key, labels: grouped[key]!.sorted { $0.label < $1.label })
         }
     }
@@ -1080,9 +1116,7 @@ struct PlanStepThreeView: View {
     }
 
     private var isStep3NextEnabled: Bool {
-        let qualifying = qualifyingChunkIndices
-        guard qualifying.count >= 2 else { return false }
-        return qualifying.allSatisfy { chunks[$0].selectionLabelId != nil }
+        qualifyingChunkIndices.count >= 2
     }
 
     private var step3RelevantChunkIndices: [Int] {
@@ -1091,16 +1125,6 @@ struct PlanStepThreeView: View {
 
     private var step3ChunksMissingMinimumActions: Set<Int> {
         Set(step3RelevantChunkIndices.filter { chunks[$0].itemIDs.count < 3 })
-    }
-
-    private var step3ChunksMissingLabel: Set<Int> {
-        Set(step3RelevantChunkIndices.filter { chunks[$0].selectionLabelId == nil })
-    }
-
-    private var step3ChunksNeedingLabelOutline: Set<Int> {
-        Set(step3RelevantChunkIndices.filter {
-            chunks[$0].itemIDs.count >= 3 && chunks[$0].selectionLabelId == nil
-        })
     }
 
     private var isRefreshVisible: Bool {
@@ -1180,7 +1204,7 @@ struct PlanStepThreeView: View {
     var body: some View {
         VStack(spacing: 12) {
             VStack(spacing: 1) {
-                PlanStepProgressBar(current: 3, total: 5)
+                PlanStepProgressBar(current: 3, total: 6)
                     .frame(maxWidth: .infinity, alignment: .center)
                 Text("Chunk")
                     .font(.largeTitle)
@@ -1371,8 +1395,6 @@ struct PlanStepThreeView: View {
                         .font(.footnote)
                     Text("• 3 or more actions per chunk")
                         .font(.footnote)
-                    Text("• Select label")
-                        .font(.footnote)
                 }
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: true, vertical: false)
@@ -1389,7 +1411,6 @@ struct PlanStepThreeView: View {
         .safeAreaPadding(.bottom)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear {
-            PlanLabelSeeder.seedDefaultsIfNeeded(in: modelContext)
             hasInitializedStep3State = false
 
             if chunks.isEmpty {
@@ -1550,24 +1571,30 @@ struct PlanStepThreeView: View {
         let showDeleteX = chunkIndex >= 2
         let canDeleteThisChunk = canDeleteChunk(at: chunkIndex)
         let hasTooFewActions = shouldHighlightStep3Validation && step3ChunksMissingMinimumActions.contains(chunkIndex)
-        let missingLabel = shouldHighlightStep3Validation && step3ChunksMissingLabel.contains(chunkIndex)
-        let shouldShowMissingLabelOutline = shouldHighlightStep3Validation && step3ChunksNeedingLabelOutline.contains(chunkIndex)
         let fill = chunkLightFillColor(categoryName: chunk.selectionCategory)
-        let headerTextColor: Color = (colorScheme == .dark && chunk.selectionLabelId != nil) ? .black : .secondary
-        let pickerTextColor: Color = missingLabel ? .red : .primary
         let cardOverlayColor: Color = hasTooFewActions ? Color.red.opacity(0.7) : (colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.18))
         let cardBackgroundOverlay: Color = hasTooFewActions ? Color.red.opacity(colorScheme == .dark ? 0.15 : 0.08) : .clear
         let cardOverlayWidth: CGFloat = hasTooFewActions ? 1.6 : 1
 
         VStack(spacing: 10) {
-            chunkHeaderView(
-                chunkIndex: chunkIndex,
-                headerTextColor: headerTextColor,
-                pickerTextColor: pickerTextColor,
-                shouldShowMissingLabelOutline: shouldShowMissingLabelOutline,
-                showDeleteX: showDeleteX,
-                canDeleteThisChunk: canDeleteThisChunk
-            )
+            if showDeleteX {
+                HStack {
+                    Spacer(minLength: 0)
+                    Button {
+                        deleteChunkContainerIfAllowed(at: chunkIndex)
+                        persistStep3Plan()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .opacity(canDeleteThisChunk ? 1.0 : 0.35)
+                            .accessibilityLabel("Delete chunk")
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canDeleteThisChunk)
+                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
+            }
             chunkItemsView(chunkIndex: chunkIndex, chunk: chunk)
         }
         .padding(12)
@@ -1623,9 +1650,9 @@ struct PlanStepThreeView: View {
 
                 ForEach(labelsByCategory(for: chunkIndex), id: \.category) { section in
                     Section(section.category) {
-                        ForEach(section.labels, id: \.labelId) { label in
+                        ForEach(section.labels, id: \.id) { label in
                             Text(label.label)
-                                .tag(Optional(label.labelId))
+                                .tag(Optional(label.id))
                         }
                     }
                 }
@@ -1707,7 +1734,7 @@ struct PlanStepThreeView: View {
             return
         }
 
-        guard let selected = defaultLabels.first(where: { $0.labelId == newLabelId }) else {
+        guard let selected = selectableLabels.first(where: { $0.id == newLabelId }) else {
             chunks[chunkIndex].selectionLabel = nil
             chunks[chunkIndex].selectionCategoryId = nil
             chunks[chunkIndex].selectionCategory = nil
@@ -1747,7 +1774,7 @@ struct PlanStepThreeView: View {
 
         isHydratingFromStorage = true
         defer { isHydratingFromStorage = false }
-        let validLabelIDs = Set(defaultLabels.map(\.labelId))
+        let validLabelIDs = Set(selectableLabels.map(\.id))
 
         let persistedChunks = plannedChunks
             .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) }
@@ -2094,8 +2121,441 @@ struct PlanStepThreeView: View {
     }
 }
 
-// MARK: - Step 4
-// (unchanged from your current file)
+// MARK: - Step 4 (Label)
+
+struct PlanStepThreeLabelView: View {
+    let onBack: (() -> Void)?
+    let onNext: (() -> Void)?
+
+    init(onBack: (() -> Void)? = nil, onNext: (() -> Void)? = nil) {
+        self.onBack = onBack
+        self.onNext = onNext
+    }
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.colorScheme) private var colorScheme
+
+    @Query(sort: \PlannedChunk.updatedAt, order: .reverse)
+    private var allPlannedChunks: [PlannedChunk]
+
+    @Query(sort: \PlannedChunkAction.sortOrder, order: .forward)
+    private var allPlannedActions: [PlannedChunkAction]
+
+    @Query(sort: \PlanChunkSelection.updatedAt, order: .reverse)
+    private var allChunkSelections: [PlanChunkSelection]
+
+    @Query(sort: \Fulfillment.updatedAt, order: .reverse)
+    private var fulfillments: [Fulfillment]
+
+    @State private var isChunkInfoExpanded: Bool = false
+    @State private var showValidationHint: Bool = false
+    @State private var shouldHighlightMissingLabels: Bool = false
+    @State private var validationResetWorkItem: DispatchWorkItem?
+
+    private struct Step3SelectableLabel: Hashable {
+        let id: UUID
+        let label: String
+        let categoryId: UUID
+        let category: String
+    }
+
+    private var secondaryButtonTextColor: Color {
+        colorScheme == .dark ? Color(.secondaryLabel) : .black
+    }
+
+    private var currentWeekStart: Date {
+        WeeklyMindsetEntry.weekStart(for: Date())
+    }
+
+    private var plannedChunksForWeek: [PlannedChunk] {
+        allPlannedChunks
+            .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) }
+            .sorted { $0.chunkIndex < $1.chunkIndex }
+    }
+
+    private var plannedActionsForWeek: [PlannedChunkAction] {
+        allPlannedActions
+            .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) }
+    }
+
+    private var selectionsByChunkIndex: [Int: PlanChunkSelection] {
+        var map: [Int: PlanChunkSelection] = [:]
+        let rows = allChunkSelections
+            .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) }
+            .sorted { $0.updatedAt > $1.updatedAt }
+        for row in rows where map[row.chunkIndex] == nil {
+            map[row.chunkIndex] = row
+        }
+        return map
+    }
+
+    private var selectableLabels: [Step3SelectableLabel] {
+        var seenFulfillmentAreaIDs: Set<UUID> = []
+        return fulfillments
+            .compactMap { area -> Step3SelectableLabel? in
+                let trimmed = area.category.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { return nil }
+                guard seenFulfillmentAreaIDs.insert(area.category_id).inserted else { return nil }
+                return Step3SelectableLabel(
+                    id: area.category_id,
+                    label: trimmed,
+                    categoryId: area.category_id,
+                    category: trimmed
+                )
+            }
+            .sorted { $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending }
+    }
+
+    private var selectedLabelIDsByChunkIndex: [Int: UUID] {
+        var map: [Int: UUID] = [:]
+        for chunk in plannedChunksForWeek {
+            if let sel = selectionsByChunkIndex[chunk.chunkIndex]?.labelId {
+                map[chunk.chunkIndex] = sel
+            } else if selectableLabels.contains(where: { $0.id == chunk.labelId }) {
+                map[chunk.chunkIndex] = chunk.labelId
+            }
+        }
+        return map
+    }
+
+    private var qualifyingChunkIndices: [Int] {
+        plannedChunksForWeek.compactMap { chunk in
+            actionsForChunk(chunk).count >= 3 ? chunk.chunkIndex : nil
+        }
+    }
+
+    private var isNextEnabled: Bool {
+        guard qualifyingChunkIndices.count >= 2 else { return false }
+        let selected = selectedLabelIDsByChunkIndex
+        return qualifyingChunkIndices.allSatisfy { selected[$0] != nil }
+    }
+
+    private var missingLabelChunkIndices: Set<Int> {
+        let selected = selectedLabelIDsByChunkIndex
+        return Set(qualifyingChunkIndices.filter { selected[$0] == nil })
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            VStack(spacing: 1) {
+                PlanStepProgressBar(current: 4, total: 6)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                Text("Label")
+                    .font(.largeTitle)
+                    .fontWeight(.bold)
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
+
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "info.circle")
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 1)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    if isChunkInfoExpanded {
+                        (
+                            Text("Chunk: ")
+                                .fontWeight(.bold)
+                            + Text("Assign each chunk to the Fulfillment Area it best supports so your plan stays focused and aligned.")
+                        )
+                        .foregroundStyle(.secondary)
+                        .font(.subheadline)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                        Button("Show less") { isChunkInfoExpanded = false }
+                            .font(.subheadline)
+                    } else {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            (
+                                Text("Chunk: ")
+                                    .fontWeight(.bold)
+                                + Text("Assign each chunk to the Fulfillment Area it best supports so your plan stays focused and aligned.")
+                            )
+                            .foregroundStyle(.secondary)
+                            .font(.subheadline)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+
+                            Button("Show more") { isChunkInfoExpanded = true }
+                                .font(.subheadline)
+                                .layoutPriority(1)
+                        }
+                    }
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            ScrollView {
+                VStack(spacing: 12) {
+                    if plannedChunksForWeek.isEmpty {
+                        Text("No chunks yet.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.top, 24)
+                    } else {
+                        ForEach(plannedChunksForWeek) { chunk in
+                            labelChunkCard(chunk)
+                        }
+                    }
+                }
+                .padding(.bottom, 12)
+            }
+
+            HStack(spacing: 12) {
+                Button {
+                    if let onBack { onBack() } else { dismiss() }
+                } label: {
+                    Text("Back")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .foregroundStyle(secondaryButtonTextColor)
+                }
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color(.systemGray5))
+                )
+
+                Button {
+                    if isNextEnabled {
+                        shouldHighlightMissingLabels = false
+                        showValidationHint = false
+                        if let onNext { onNext() }
+                    } else {
+                        triggerValidationFeedback()
+                    }
+                } label: {
+                    Text("Next")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(isNextEnabled ? .accentColor : Color(.systemGray3))
+            }
+            .padding(.bottom, 2)
+        }
+        .padding(.horizontal)
+        .overlay(alignment: .bottom) {
+            if showValidationHint {
+                VStack(alignment: .center, spacing: 6) {
+                    Text("Complete your labels")
+                        .font(.footnote)
+                        .fontWeight(.bold)
+                    Text("• 2 or more chunks")
+                        .font(.footnote)
+                    Text("• 3 or more actions per chunk")
+                        .font(.footnote)
+                    Text("• Select one Fulfillment Area per chunk")
+                        .font(.footnote)
+                }
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: true, vertical: false)
+                .padding(10)
+                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Color.black.opacity(0.12), lineWidth: 1)
+                )
+                .padding(.bottom, 56)
+                .transition(.opacity)
+            }
+        }
+        .safeAreaPadding(.bottom)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    @ViewBuilder
+    private func labelChunkCard(_ chunk: PlannedChunk) -> some View {
+        let chunkIndex = chunk.chunkIndex
+        let actions = actionsForChunk(chunk)
+        let hasMissingLabel = shouldHighlightMissingLabels && missingLabelChunkIndices.contains(chunkIndex)
+
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 6) {
+                Text("Actions Related To:")
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .foregroundStyle(.secondary)
+
+                Spacer(minLength: 8)
+
+                Menu {
+                    Button("Select…") {
+                        applySelection(nil, to: chunk)
+                    }
+                    ForEach(availableLabels(forChunkIndex: chunkIndex), id: \.id) { label in
+                        Button(label.label) {
+                            applySelection(label.id, to: chunk)
+                        }
+                    }
+                } label: {
+                    let selectedName = selectedLabelName(forChunkIndex: chunkIndex)
+                    let selectedColor = selectedName.map { FulfillmentCategoryTheme.color(for: $0) } ?? .blue
+                    HStack(spacing: 4) {
+                        Text(selectedName ?? "Select…")
+                            .fontWeight(selectedName == nil ? .regular : .semibold)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.caption2.weight(.semibold))
+                    }
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .foregroundStyle(selectedColor)
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(hasMissingLabel ? Color.red.opacity(0.75) : Color.clear, lineWidth: hasMissingLabel ? 1.5 : 0)
+                )
+            }
+
+            if actions.isEmpty {
+                Text("No actions in this chunk.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 12)
+                    .frame(maxWidth: .infinity)
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(actions) { action in
+                        Text(action.text)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(8)
+                            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(chunk.category.isEmpty ? Color(.secondarySystemBackground) : FulfillmentCategoryColors.lightColor(for: chunk.category))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(
+                    hasMissingLabel ? Color.red.opacity(0.7) : (colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.18)),
+                    lineWidth: hasMissingLabel ? 1.6 : 1
+                )
+        )
+    }
+
+    private func actionsForChunk(_ chunk: PlannedChunk) -> [PlannedChunkAction] {
+        plannedActionsForWeek
+            .filter { $0.plannedChunkId == chunk.id }
+            .sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    private func availableLabels(forChunkIndex chunkIndex: Int) -> [Step3SelectableLabel] {
+        let selected = selectedLabelIDsByChunkIndex
+        let selectedElsewhere = Set(selected.filter { $0.key != chunkIndex }.map(\.value))
+        return selectableLabels.filter { label in
+            if selected[chunkIndex] == label.id { return true }
+            return !selectedElsewhere.contains(label.id)
+        }
+    }
+
+    private func selectedLabelName(forChunkIndex chunkIndex: Int) -> String? {
+        guard let selectedID = selectedLabelIDsByChunkIndex[chunkIndex] else { return nil }
+        return selectableLabels.first(where: { $0.id == selectedID })?.label
+    }
+
+    private func applySelection(_ labelID: UUID?, to chunk: PlannedChunk) {
+        let weekStart = currentWeekStart
+        let dayKey = dayKey(from: weekStart)
+        let chunkIndex = chunk.chunkIndex
+
+        let existingSelection = allChunkSelections.first {
+            Calendar.current.isDate($0.weekStart, inSameDayAs: weekStart) && $0.chunkIndex == chunkIndex
+        }
+
+        if let selection = existingSelection {
+            selection.weekStart = weekStart
+            selection.chunkIndex = chunkIndex
+            selection.updatedAt = .now
+            let nextWeekChunkKey = "\(dayKey)|\(chunkIndex)"
+            if selection.weekChunkKey != nextWeekChunkKey { selection.weekChunkKey = nextWeekChunkKey }
+
+            if let labelID, let selected = selectableLabels.first(where: { $0.id == labelID }) {
+                selection.labelId = selected.id
+                selection.label = selected.label
+                selection.categoryId = selected.categoryId
+                selection.category = selected.category
+                chunk.labelId = selected.id
+                chunk.label = selected.label
+                chunk.categoryId = selected.categoryId
+                chunk.category = selected.category
+            } else {
+                selection.labelId = nil
+                selection.label = nil
+                selection.categoryId = nil
+                selection.category = nil
+                chunk.labelId = UUID()
+                chunk.label = ""
+                chunk.categoryId = UUID()
+                chunk.category = ""
+            }
+            chunk.updatedAt = .now
+        } else {
+            if let labelID, let selected = selectableLabels.first(where: { $0.id == labelID }) {
+                let selection = PlanChunkSelection(
+                    weekStart: weekStart,
+                    chunkIndex: chunkIndex,
+                    labelId: selected.id,
+                    label: selected.label,
+                    categoryId: selected.categoryId,
+                    category: selected.category,
+                    updatedAt: .now
+                )
+                modelContext.insert(selection)
+
+                chunk.labelId = selected.id
+                chunk.label = selected.label
+                chunk.categoryId = selected.categoryId
+                chunk.category = selected.category
+            } else {
+                chunk.labelId = UUID()
+                chunk.label = ""
+                chunk.categoryId = UUID()
+                chunk.category = ""
+            }
+            chunk.updatedAt = .now
+        }
+
+        try? modelContext.save()
+    }
+
+    private func dayKey(from date: Date) -> String {
+        let cal = Calendar.current
+        let comps = cal.dateComponents([.year, .month, .day], from: date)
+        let y = comps.year ?? 0
+        let m = comps.month ?? 0
+        let d = comps.day ?? 0
+        return String(format: "%04d-%02d-%02d", y, m, d)
+    }
+
+    private func triggerValidationFeedback() {
+        validationResetWorkItem?.cancel()
+        shouldHighlightMissingLabels = true
+        withAnimation(.easeInOut(duration: 0.15)) {
+            showValidationHint = true
+        }
+
+        let workItem = DispatchWorkItem {
+            shouldHighlightMissingLabels = false
+            withAnimation(.easeInOut(duration: 0.15)) {
+                showValidationHint = false
+            }
+        }
+        validationResetWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8, execute: workItem)
+    }
+}
+
+// MARK: - Step 5 (Plan)
 struct PlanStepFourView: View {
     let onBack: (() -> Void)?
     let onNext: (() -> Void)?
@@ -2244,7 +2704,7 @@ struct PlanStepFourView: View {
     var body: some View {
         VStack(spacing: 12) {
             VStack(spacing: 1) {
-                PlanStepProgressBar(current: 4, total: 5)
+                PlanStepProgressBar(current: 5, total: 6)
                     .frame(maxWidth: .infinity, alignment: .center)
                 Text("Plan")
                     .font(.largeTitle)
@@ -2987,7 +3447,7 @@ struct PlanStepFourView: View {
     }
 }
 
-// MARK: - Step 5 (Define)
+// MARK: - Step 6 (Define)
 
 struct PlanStepFiveView: View {
     let onBack: (() -> Void)?
@@ -3111,7 +3571,7 @@ struct PlanStepFiveView: View {
     var body: some View {
         VStack(spacing: 12) {
             VStack(spacing: 1) {
-                PlanStepProgressBar(current: 5, total: 5)
+                PlanStepProgressBar(current: 6, total: 6)
                     .frame(maxWidth: .infinity, alignment: .center)
                 Text("Define")
                     .font(.largeTitle)

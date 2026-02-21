@@ -157,53 +157,55 @@ struct ObjectivesView: View {
                     }
                     .padding(.horizontal)
 
-                    VStack(alignment: .leading, spacing: 4) {
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                showCompletedOutcomesPlaceholder.toggle()
+                    if !(outcomes.isEmpty && sortedCompletedOutcomes.isEmpty) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    showCompletedOutcomesPlaceholder.toggle()
+                                }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: showCompletedOutcomesPlaceholder ? "chevron.up" : "chevron.down")
+                                        .font(.caption2.weight(.semibold))
+                                    Text("Outcomes Completed")
+                                        .font(.caption2.weight(.semibold))
+                                }
+                                .foregroundStyle(colorScheme == .dark ? Color.white.opacity(0.68) : .black)
+                                .padding(.vertical, 5)
+                                .padding(.horizontal, 8)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .fill(Color(.systemGray4))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(Color.black.opacity(0.15), lineWidth: 1)
+                                )
                             }
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: showCompletedOutcomesPlaceholder ? "chevron.up" : "chevron.down")
-                                    .font(.caption2.weight(.semibold))
-                                Text("Outcomes Completed")
-                                    .font(.caption2.weight(.semibold))
-                            }
-                            .foregroundStyle(colorScheme == .dark ? Color.white.opacity(0.68) : .black)
-                            .padding(.vertical, 5)
-                            .padding(.horizontal, 8)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(Color(.systemGray4))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(Color.black.opacity(0.15), lineWidth: 1)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                            .buttonStyle(.plain)
+                            .frame(maxWidth: .infinity, alignment: .leading)
 
-                        if showCompletedOutcomesPlaceholder {
-                            if sortedCompletedOutcomes.isEmpty {
-                                Text("No completed outcomes yet.")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.leading, 2)
-                            } else {
-                                ForEach(sortedCompletedOutcomes) { archive in
-                                    Button {
-                                        navigationAction = .completedOutcome(archive)
-                                    } label: {
-                                        CompletedOutcomeRow(archive: archive)
+                            if showCompletedOutcomesPlaceholder {
+                                if sortedCompletedOutcomes.isEmpty {
+                                    Text("No completed outcomes yet.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(.leading, 2)
+                                } else {
+                                    ForEach(sortedCompletedOutcomes) { archive in
+                                        Button {
+                                            navigationAction = .completedOutcome(archive)
+                                        } label: {
+                                            CompletedOutcomeRow(archive: archive)
+                                        }
+                                        .buttonStyle(.plain)
                                     }
-                                    .buttonStyle(.plain)
                                 }
                             }
                         }
+                        .padding(.horizontal)
                     }
-                    .padding(.horizontal)
 
                     if enableProjectsFeature {
                         // Projects Header

@@ -1514,7 +1514,6 @@ struct ManageFulfillmentCategoriesView: View {
     @Query(sort: \PlannedChunk.updatedAt, order: .reverse) private var allPlannedChunks: [PlannedChunk]
     @Query(sort: \PlannedChunkAction.createdAt, order: .reverse) private var allPlannedActions: [PlannedChunkAction]
     @Query(sort: \Outcomes.updatedAt, order: .reverse) private var allOutcomes: [Outcomes]
-    @Query(sort: \PlanLabel.category, order: .forward) private var labels: [PlanLabel]
     @State private var categoryColorKeys: [String: String] = [:]
     @State private var selectedCategoryForColor: String = ""
     @State private var showColorPicker: Bool = false
@@ -1522,18 +1521,23 @@ struct ManageFulfillmentCategoriesView: View {
     @State private var categoriesMarkedForDelete: Set<String> = []
     @State private var isAddingCategory: Bool = false
     @State private var newCategoryText: String = ""
-    @State private var showNewCategoryDestination: Bool = false
-    @State private var newCategoryToOpen: String = ""
     @State private var showMinimumCategoryAlert: Bool = false
     @State private var showCannotDeleteCategoryPopup: Bool = false
     @State private var showArchiveCompletePopup: Bool = false
     @FocusState private var isAddCategoryFocused: Bool
 
     private var categories: [String] {
-        let fromFulfillment = fulfillments.map(\.category)
-        let fromLabels = labels.map(\.category)
-        return Array(Set(fromFulfillment + fromLabels))
-            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        var seen = Set<String>()
+        return fulfillments
+            .map(\.category)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .filter { name in
+                let key = name.lowercased()
+                if seen.contains(key) { return false }
+                seen.insert(key)
+                return true
+            }
             .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
@@ -1610,17 +1614,6 @@ struct ManageFulfillmentCategoriesView: View {
             )
             .presentationDetents([.medium])
             .presentationDragIndicator(.visible)
-        }
-        .navigationDestination(isPresented: $showNewCategoryDestination) {
-            FulfillmentCategoryLabelsView(category: newCategoryToOpen, startAsNewCategorySetup: true)
-                .onDisappear {
-                    newCategoryToOpen = ""
-                }
-        }
-        .onChange(of: showNewCategoryDestination) { _, isPresented in
-            if !isPresented {
-                newCategoryToOpen = ""
-            }
         }
     }
 
@@ -1729,11 +1722,27 @@ struct ManageFulfillmentCategoriesView: View {
             return
         }
 
-        // Draft only: do not persist anything until labels setup Save is tapped.
+        context.insert(
+            Fulfillment(
+                category: trimmed,
+                category_identitiy: "",
+                category_vision: "",
+                category_purpose: ""
+            )
+        )
+        var map = categoryColorKeys
+        if map[trimmed] == nil {
+            let defaults = FulfillmentCategoryTheme.defaultColorKeys()
+            let used = Set(categories.compactMap { map[$0] ?? defaults[$0] })
+            let nextColor = FulfillmentCategoryTheme.palette.map(\.key).first(where: { !used.contains($0) }) ?? "blue"
+            map[trimmed] = nextColor
+        }
+        categoryColorKeys = map
+        persistFulfillmentCategoryColorKeys(map)
+        try? context.save()
+
         isAddingCategory = false
         newCategoryText = ""
-        newCategoryToOpen = trimmed
-        showNewCategoryDestination = true
     }
 
     private func deleteMarkedCategories() {
@@ -1756,9 +1765,6 @@ struct ManageFulfillmentCategoriesView: View {
         for item in fulfillments where categoriesMarkedForDelete.contains(item.category) {
             archiveCategoryIfNeeded(record: item)
             context.delete(item)
-        }
-        for label in labels where categoriesMarkedForDelete.contains(label.category) {
-            context.delete(label)
         }
         for role in allRoles where idsToDelete.contains(role.category_id) {
             context.delete(role)
@@ -1945,35 +1951,11 @@ private struct FulfillmentCategoryLabelsView: View {
     var body: some View {
         List {
             categorySection
-            labelsSection
         }
         .listStyle(.insetGrouped)
         .navigationTitle(displayedCategoryTitle)
         .navigationBarTitleDisplayMode(.inline)
-        .navigationBarBackButtonHidden(isConfiguringNewCategoryLabels)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
-                if isConfiguringNewCategoryLabels {
-                    Button("Cancel") {
-                        cancelNewCategorySetup()
-                    }
-                    .foregroundStyle(.red)
-                }
-            }
-            ToolbarItem(placement: .navigationBarTrailing) {
-                if isConfiguringNewCategoryLabels {
-                    Button("Save") {
-                        if canFinalizeNewCategorySetup {
-                            finalizeNewCategorySetup()
-                        } else {
-                            triggerNewCategoryLabelsValidationFeedback()
-                        }
-                    }
-                    .disabled(!canFinalizeNewCategorySetup)
-                    .foregroundStyle(canFinalizeNewCategorySetup ? .blue : .secondary)
-                }
-            }
-        }
+        .navigationBarBackButtonHidden(false)
         .alert("Unable to rename category", isPresented: $showCategoryRenameAlert) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -2007,13 +1989,7 @@ private struct FulfillmentCategoryLabelsView: View {
                     .padding(.bottom, 8)
             }
         }
-        .onAppear {
-            if startAsNewCategorySetup {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    focusedField = .required(0)
-                }
-            }
-        }
+        .onAppear { }
         .onChange(of: focusedField) { _, newValue in
             if case .required(let idx) = focusedField,
                newValue != .required(idx),
