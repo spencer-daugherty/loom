@@ -2014,21 +2014,24 @@ struct PlanStepThreeView: View {
                     .padding(.vertical, 14)
                     .frame(maxWidth: .infinity)
             } else {
-                    ForEach(chunkItems(for: chunkIndex)) { item in
-                        rowView(
-                            text: item.text,
-                            showGhostOutline: false,
-                            hiddenStatusText: nil,
-                            dueStatusText: nil,
-                            dueStatusColor: .secondary,
-                            showDueBorder: false,
-                            isDraggable: false,
-                            dragPayload: nil,
-                            showsTrailingControl: false,
-                            useBoxChrome: false,
-                            showsReturnToPool: false,
-                            onReturnToPool: nil
-                        )
+                ForEach(chunkItems(for: chunkIndex)) { item in
+                    rowView(
+                        text: item.text,
+                        showGhostOutline: false,
+                        hiddenStatusText: nil,
+                        dueStatusText: nil,
+                        dueStatusColor: .secondary,
+                        showDueBorder: false,
+                        isDraggable: false,
+                        dragPayload: nil,
+                        showsTrailingControl: true,
+                        useBoxChrome: false,
+                        showsReturnToPool: true,
+                        onReturnToPool: {
+                            moveItemToPool(item.id)
+                            persistStep3Plan()
+                        }
+                    )
                 }
             }
         }
