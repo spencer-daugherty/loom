@@ -157,7 +157,7 @@ struct ObjectivesView: View {
                     }
                     .padding(.horizontal)
 
-                    if !(outcomes.isEmpty && sortedCompletedOutcomes.isEmpty) {
+                    if !sortedCompletedOutcomes.isEmpty {
                         VStack(alignment: .leading, spacing: 4) {
                             Button {
                                 withAnimation(.easeInOut(duration: 0.2)) {
@@ -186,21 +186,13 @@ struct ObjectivesView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
 
                             if showCompletedOutcomesPlaceholder {
-                                if sortedCompletedOutcomes.isEmpty {
-                                    Text("No completed outcomes yet.")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .padding(.leading, 2)
-                                } else {
-                                    ForEach(sortedCompletedOutcomes) { archive in
-                                        Button {
-                                            navigationAction = .completedOutcome(archive)
-                                        } label: {
-                                            CompletedOutcomeRow(archive: archive)
-                                        }
-                                        .buttonStyle(.plain)
+                                ForEach(sortedCompletedOutcomes) { archive in
+                                    Button {
+                                        navigationAction = .completedOutcome(archive)
+                                    } label: {
+                                        CompletedOutcomeRow(archive: archive)
                                     }
+                                    .buttonStyle(.plain)
                                 }
                             }
                         }

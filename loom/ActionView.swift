@@ -52,6 +52,10 @@ struct ActionView: View {
     private var dueDateAttentionDays: Int = 7
     @AppStorage("action_collapsed_metrics_use_percentage")
     private var collapsedMetricsUsePercentage: Bool = false
+    @AppStorage("dev_manual_warning_cards_enabled")
+    private var devManualWarningCardsEnabled: Bool = false
+    @AppStorage("dev_action_blocks_warning_old_blocks")
+    private var devActionBlocksWarningOldBlocks: Bool = false
 
     @State private var isShowingInstructions: Bool = false
     @State private var openFilter: FilterMenu? = nil
@@ -92,6 +96,9 @@ struct ActionView: View {
     @State private var areAllActionBlocksCollapsed: Bool = false
     @State private var localChunkOrderIDs: [UUID] = []
     @State private var draggedChunkID: UUID? = nil
+    @State private var draggedActionID: UUID? = nil
+    @State private var draggedActionChunkID: UUID? = nil
+    @State private var localActionOrderIDs: [UUID] = []
     @State private var highlightedStatusActionIDs: Set<UUID> = []
     @State private var showCompleteHint: Bool = false
     @State private var showReflectionFlow: Bool = false
@@ -164,14 +171,28 @@ struct ActionView: View {
 
     private var orderedWeekChunksForDisplay: [PlannedChunk] {
         let sortedByIndex = weekChunks.sorted { $0.chunkIndex < $1.chunkIndex }
-        guard !localChunkOrderIDs.isEmpty else { return sortedByIndex }
-        let byID = Dictionary(uniqueKeysWithValues: sortedByIndex.map { ($0.id, $0) })
-        let ordered = localChunkOrderIDs.compactMap { byID[$0] }
-        if ordered.count == sortedByIndex.count { return ordered }
-        let missing = sortedByIndex.filter { chunk in
-            !localChunkOrderIDs.contains(chunk.id)
+        let baseOrder: [PlannedChunk] = {
+            guard !localChunkOrderIDs.isEmpty else { return sortedByIndex }
+            let byID = Dictionary(uniqueKeysWithValues: sortedByIndex.map { ($0.id, $0) })
+            let ordered = localChunkOrderIDs.compactMap { byID[$0] }
+            if ordered.count == sortedByIndex.count { return ordered }
+            let missing = sortedByIndex.filter { chunk in
+                !localChunkOrderIDs.contains(chunk.id)
+            }
+            return ordered + missing
+        }()
+
+        let activeBlocks = baseOrder.filter { chunkHasAnyActiveActions($0.id) }
+        let completedBlocks = baseOrder.filter { !chunkHasAnyActiveActions($0.id) }
+        return activeBlocks + completedBlocks
+    }
+
+    private func chunkHasAnyActiveActions(_ chunkID: UUID) -> Bool {
+        weekActions.contains { action in
+            guard action.plannedChunkId == chunkID else { return false }
+            let status = executionStateByActionID[action.id]?.status ?? .noAction
+            return isActiveStatus(status)
         }
-        return ordered + missing
     }
 
     private var weekActions: [PlannedChunkAction] {
@@ -418,9 +439,17 @@ struct ActionView: View {
         var options = Set<TimeOfDayChoice>()
         for action in base {
             let st = defineStateByActionID[action.id]
-            if st?.sensitiveMorning ?? true { options.insert(.morning) }
-            if st?.sensitiveAfternoon ?? true { options.insert(.afternoon) }
-            if st?.sensitiveEvening ?? true { options.insert(.evening) }
+            let hasMorning = st?.sensitiveMorning ?? true
+            let hasAfternoon = st?.sensitiveAfternoon ?? true
+            let hasEvening = st?.sensitiveEvening ?? true
+            let isAnytime = hasMorning && hasAfternoon && hasEvening
+            if isAnytime {
+                options.insert(.any)
+            } else {
+                if hasMorning { options.insert(.morning) }
+                if hasAfternoon { options.insert(.afternoon) }
+                if hasEvening { options.insert(.evening) }
+            }
         }
         options.formUnion(selectedTimeOfDay)
         return TimeOfDayChoice.allCases.filter { options.contains($0) }
@@ -1013,7 +1042,7 @@ struct ActionView: View {
 
             if !isHeaderCollapsed {
                 instructionsRow
-                if let age = blocksAgeDays, age >= 8 {
+                if shouldShowActionBlocksOldCautionCard {
                     cautionRow
                 }
                 if !areAllActionBlocksCollapsed {
@@ -1025,6 +1054,12 @@ struct ActionView: View {
             }
         }
         .padding(.bottom, 6)
+    }
+
+    private var shouldShowActionBlocksOldCautionCard: Bool {
+        let autoShow = (blocksAgeDays ?? 0) >= 8
+        let manualShow = devManualWarningCardsEnabled && devActionBlocksWarningOldBlocks
+        return manualShow || autoShow
     }
 
     private var instructionsRow: some View {
@@ -1049,7 +1084,9 @@ struct ActionView: View {
         .buttonStyle(.plain)
     }
 
+    @ViewBuilder
     private var cautionRow: some View {
+        let cautionAgeDays = blocksAgeDays ?? (devManualWarningCardsEnabled && devActionBlocksWarningOldBlocks ? 8 : 0)
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.secondary)
@@ -1059,7 +1096,7 @@ struct ActionView: View {
             VStack(alignment: .leading, spacing: 4) {
                 (
                     Text("Caution: ").fontWeight(.bold)
-                    + Text("Action Blocks created \(blocksAgeDays ?? 0) days ago. Mark uncompleted actions ")
+                    + Text("Action Blocks created \(cautionAgeDays) days ago. Mark uncompleted actions ")
                     + Text(Image(systemName: "arrow.right"))
                     + Text(" to a new capture list and start a new plan to keep it fresh.")
                 )
@@ -1072,7 +1109,8 @@ struct ActionView: View {
                     }
                     .buttonStyle(.plain)
                     .font(.subheadline)
-                    .fontWeight(.semibold)
+                    .fontWeight(.regular)
+                    .foregroundStyle(.blue)
                 }
             }
 
@@ -1114,10 +1152,7 @@ struct ActionView: View {
         let visible = defaultFilterChipOrder.filter { isFilterChipVisible($0) || isFilterChipSelected($0) }
         let selected = visible.filter { isFilterChipSelected($0) }
         let nonSelected = visible.filter { !isFilterChipSelected($0) }
-        let ordered = selected + nonSelected
-        let tail = ordered.filter { $0 == .activeOnly }
-        let head = ordered.filter { $0 != .activeOnly }
-        return head + tail
+        return selected + nonSelected
     }
 
     private var defaultFilterChipOrder: [FilterChipKind] {
@@ -1371,9 +1406,25 @@ struct ActionView: View {
         let outcomesForChunk = selectedOutcomeIDs.compactMap { outcomesByID[$0] }
         let isCollapsed = areAllActionBlocksCollapsed
         let canShowFooterControls = !isAnyFilterApplied
+        let showNoApplicableActionsPlaceholder = filtered.isEmpty && isAnyFilterApplied
+        let showCompletedInactiveHeader = !isAnyFilterApplied && filtered.isEmpty && !allForChunk.isEmpty
+        let canReorderDisplayedActions = !isAnyFilterApplied && filtered.count > 1
+        let canonicalFilteredIDs = filtered.map(\.id)
+        let displayedFiltered: [PlannedChunkAction] = {
+            guard canReorderDisplayedActions, draggedActionChunkID == chunk.id, !localActionOrderIDs.isEmpty else {
+                return filtered
+            }
+            let canonicalSet = Set(canonicalFilteredIDs)
+            let normalizedIDs =
+                localActionOrderIDs.filter { canonicalSet.contains($0) } +
+                canonicalFilteredIDs.filter { !localActionOrderIDs.contains($0) }
+            let byID = Dictionary(uniqueKeysWithValues: filtered.map { ($0.id, $0) })
+            let ordered = normalizedIDs.compactMap { byID[$0] }
+            return ordered.count == filtered.count ? ordered : filtered
+        }()
 
         return VStack(alignment: .leading, spacing: 10) {
-            if filtered.isEmpty {
+            if showNoApplicableActionsPlaceholder {
                 Text("Block has no applicable actions")
                     .font(.subheadline)
                     .italic()
@@ -1413,6 +1464,20 @@ struct ActionView: View {
                             .foregroundStyle(.gray)
                     }
                 } else {
+                    if showCompletedInactiveHeader {
+                        HStack(spacing: 6) {
+                            Image(systemName: "star")
+                                .font(.caption)
+                            Text("Block Completed")
+                                .font(.system(size: 16))
+                                .italic()
+                            Image(systemName: "star")
+                                .font(.caption)
+                        }
+                        .foregroundStyle(Color.black.opacity(0.58))
+                        .frame(maxWidth: .infinity, alignment: .center)
+                    }
+
                     resultSection(resultText: step4?.resultText ?? "")
 
                     if !outcomesForChunk.isEmpty {
@@ -1440,8 +1505,33 @@ struct ActionView: View {
                                 .foregroundStyle(Color.black.opacity(0.58))
                         }
 
+                        if showCompletedInactiveHeader {
+                            HStack(alignment: .center, spacing: 8) {
+                                Text("All Actions are Inactive")
+                                    .font(.footnote)
+                                    .foregroundStyle(colorScheme == .dark ? Color.white : Color.black.opacity(0.72))
+                                Spacer(minLength: 8)
+                                Button("Show Inactive") {
+                                    inactiveOnly = true
+                                }
+                                .buttonStyle(.plain)
+                                .font(.footnote)
+                                .foregroundStyle(.blue)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .fill(Color(.secondarySystemBackground))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(Color.black.opacity(0.12), lineWidth: 1)
+                            )
+                        }
+
                         LazyVStack(spacing: 8) {
-                            ForEach(filtered) { action in
+                            ForEach(displayedFiltered) { action in
                                 let defineState = defineByAction[action.id]
                                 let status = executionByAction[action.id]?.status ?? .noAction
                                 let selectedResource = resourcesByAction[action.id].flatMap { resourceByID[$0] }
@@ -1451,26 +1541,79 @@ struct ActionView: View {
                                     return selectedResource.kind == .tool ? "wrench.and.screwdriver.fill" : "person.fill"
                                 }()
                                 let placeIDs = placesByAction[action.id] ?? []
-                                let hasSensitivity = hasAnySensitivity(defineState: defineState, placeIDs: placeIDs)
+                                let hasSensitivity = hasAnySensitivity(
+                                    actionId: action.id,
+                                    defineState: defineState,
+                                    placeIDs: placeIDs
+                                )
                                 let hasAttachments = hasAnyAttachments(
                                     note: notesByAction[action.id],
                                     attachments: attachmentsByAction[action.id] ?? []
                                 )
 
-                                actionRow(
-                                    action: action,
-                                    accent: accent,
-                                    defineState: defineState,
-                                    status: status,
-                                    hasLeverage: hasLeverage,
-                                    leverageIconName: leverageIconName,
-                                    hasSensitivity: hasSensitivity,
-                                    hasAttachments: hasAttachments,
-                                    highlightStatusBox: highlightedStatusActionIDs.contains(action.id)
-                                )
-                                .id(action.id)
+                                if canReorderDisplayedActions {
+                                    actionRow(
+                                        action: action,
+                                        accent: accent,
+                                        defineState: defineState,
+                                        status: status,
+                                        hasLeverage: hasLeverage,
+                                        leverageIconName: leverageIconName,
+                                        hasSensitivity: hasSensitivity,
+                                        hasAttachments: hasAttachments,
+                                        highlightStatusBox: highlightedStatusActionIDs.contains(action.id),
+                                        showsReorderHandle: true
+                                    )
+                                    .id(action.id)
+                                    .onDrag {
+                                        let startingOrder = displayedFiltered.map(\.id)
+                                        draggedActionChunkID = chunk.id
+                                        localActionOrderIDs = startingOrder
+                                        draggedActionID = action.id
+                                        return NSItemProvider(object: action.id.uuidString as NSString)
+                                    }
+                                    .onDrop(
+                                        of: [.text],
+                                        delegate: AnimatedActionRowDropDelegate(
+                                            targetID: action.id,
+                                            draggedID: $draggedActionID,
+                                            draggedChunkID: $draggedActionChunkID,
+                                            localActionOrderIDs: $localActionOrderIDs,
+                                            enabled: true,
+                                            onCommit: { reorderedIDs in
+                                                commitActionOrder(in: chunk.id, visibleOrderedIDs: reorderedIDs)
+                                            }
+                                        )
+                                    )
+                                } else {
+                                    actionRow(
+                                        action: action,
+                                        accent: accent,
+                                        defineState: defineState,
+                                        status: status,
+                                        hasLeverage: hasLeverage,
+                                        leverageIconName: leverageIconName,
+                                        hasSensitivity: hasSensitivity,
+                                        hasAttachments: hasAttachments,
+                                        highlightStatusBox: highlightedStatusActionIDs.contains(action.id),
+                                        showsReorderHandle: false
+                                    )
+                                    .id(action.id)
+                                }
                             }
                         }
+                        .onDrop(
+                            of: [.text],
+                            delegate: ResetActionRowDragStateDropDelegate(
+                                ownerChunkID: chunk.id,
+                                draggedID: $draggedActionID,
+                                draggedChunkID: $draggedActionChunkID,
+                                localActionOrderIDs: $localActionOrderIDs,
+                                onCommit: { reorderedIDs in
+                                    commitActionOrder(in: chunk.id, visibleOrderedIDs: reorderedIDs)
+                                }
+                            )
+                        )
 
                         let isFilterApplied = isAnyFilterApplied
                         let useFilterTotalsLabel = isFilterApplied && !isOnlyInactiveOnlyFilterApplied
@@ -1494,29 +1637,31 @@ struct ActionView: View {
 
                             Spacer(minLength: 8)
 
-                            VStack(alignment: .trailing, spacing: 4) {
-                                (
-                                    Text(useFilterTotalsLabel ? "Filter Total Time: " : "Total Time: ")
-                                        .font(.footnote)
-                                    + Text(formatMinutes(totalMinutes))
-                                        .font(.footnote)
-                                        .fontWeight(.bold)
-                                )
-                                .italic(useFilterTotalsLabel)
-                                .foregroundStyle(Color.black.opacity(0.58))
+                            if !activeActions.isEmpty {
+                                VStack(alignment: .trailing, spacing: 4) {
+                                    (
+                                        Text(useFilterTotalsLabel ? "Filter Total Time: " : "Total Time: ")
+                                            .font(.footnote)
+                                        + Text(formatMinutes(totalMinutes))
+                                            .font(.footnote)
+                                            .fontWeight(.bold)
+                                    )
+                                    .italic(useFilterTotalsLabel)
+                                    .foregroundStyle(Color.black.opacity(0.58))
 
-                                (
-                                    Text(useFilterTotalsLabel ? "Filter Total Must Time: " : "Total Must Time: ")
-                                        .font(.footnote)
-                                    + Text(formatMinutes(totalMustMinutes))
-                                        .font(.footnote)
-                                        .fontWeight(.bold)
-                                )
-                                .italic(useFilterTotalsLabel)
-                                .foregroundStyle(Color.black.opacity(0.58))
+                                    (
+                                        Text(useFilterTotalsLabel ? "Filter Total Must Time: " : "Total Must Time: ")
+                                            .font(.footnote)
+                                        + Text(formatMinutes(totalMustMinutes))
+                                            .font(.footnote)
+                                            .fontWeight(.bold)
+                                    )
+                                    .italic(useFilterTotalsLabel)
+                                    .foregroundStyle(Color.black.opacity(0.58))
+                                }
+                                .frame(maxWidth: .infinity, alignment: .trailing)
+                                .multilineTextAlignment(.trailing)
                             }
-                            .frame(maxWidth: .infinity, alignment: .trailing)
-                            .multilineTextAlignment(.trailing)
                         }
                     }
                 }
@@ -1636,7 +1781,8 @@ struct ActionView: View {
         leverageIconName: String,
         hasSensitivity: Bool,
         hasAttachments: Bool,
-        highlightStatusBox: Bool
+        highlightStatusBox: Bool,
+        showsReorderHandle: Bool
     ) -> some View {
         ActionSwipeRow(
             actionId: action.id,
@@ -1653,6 +1799,7 @@ struct ActionView: View {
             hasSensitivity: hasSensitivity,
             hasAttachments: hasAttachments,
             highlightStatusBox: highlightStatusBox,
+            showsReorderHandle: showsReorderHandle,
             focusedActionID: $focusedActionID,
             onCommitText: { newValue in
                 handleActionTextCommit(action: action, newValue: newValue)
@@ -1736,7 +1883,7 @@ struct ActionView: View {
             Text("Tap to Expand")
                 .font(.caption2)
         }
-        .foregroundStyle(Color.gray)
+        .foregroundStyle(Color(red: 0.42, green: 0.42, blue: 0.45))
         .padding(.top, 2)
     }
 
@@ -1747,17 +1894,15 @@ struct ActionView: View {
     ) -> some View {
         let statuses = actions.map { executionByAction[$0.id]?.status ?? .noAction }
         let totalActionsCount = actions.count
-        let completedActionsCount = statuses.filter { isCompletedForCollapsedMetrics($0) }.count
-        let remainingActionsCount = max(0, totalActionsCount - completedActionsCount)
+        let inactiveActionsCount = statuses.filter { isCompletedForCollapsedMetrics($0) }.count
         let totalEstimatedMinutes = actions.reduce(0) { partial, action in
             partial + max(0, defineByAction[action.id]?.timeEstimateMinutes ?? 0)
         }
-        let completedEstimatedMinutes = actions.reduce(0) { partial, action in
+        let inactiveEstimatedMinutes = actions.reduce(0) { partial, action in
             let status = executionByAction[action.id]?.status ?? .noAction
             guard isCompletedForCollapsedMetrics(status) else { return partial }
             return partial + max(0, defineByAction[action.id]?.timeEstimateMinutes ?? 0)
         }
-        let remainingEstimatedMinutes = max(0, totalEstimatedMinutes - completedEstimatedMinutes)
 
         return HStack(alignment: .center, spacing: 8) {
             tapToExpandLabel()
@@ -1766,17 +1911,17 @@ struct ActionView: View {
             HStack(alignment: .center, spacing: 8) {
                 compactMetricChip(
                     label: "actions",
-                    completed: completedActionsCount,
-                    remaining: remainingActionsCount,
+                    completed: inactiveActionsCount,
+                    remaining: totalActionsCount,
+                    total: totalActionsCount,
                     usePercentage: collapsedMetricsUsePercentage
                 )
 
                 compactMetricChip(
                     label: "time",
-                    completed: completedEstimatedMinutes,
-                    remaining: remainingEstimatedMinutes,
+                    completed: inactiveEstimatedMinutes,
+                    remaining: totalEstimatedMinutes,
                     total: totalEstimatedMinutes,
-                    fractionUsesRemainingOverTotal: true,
                     fractionSuffix: "m",
                     usePercentage: collapsedMetricsUsePercentage
                 )
@@ -1836,6 +1981,35 @@ struct ActionView: View {
         }
 
         if changed {
+            scheduleAutosave()
+        }
+    }
+
+    private func commitActionOrder(in chunkID: UUID, visibleOrderedIDs: [UUID]) {
+        guard !visibleOrderedIDs.isEmpty else { return }
+        let visibleSet = Set(visibleOrderedIDs)
+        let allInChunk = weekActions
+            .filter { $0.plannedChunkId == chunkID }
+            .sorted {
+                if $0.sortOrder != $1.sortOrder { return $0.sortOrder < $1.sortOrder }
+                return $0.id.uuidString < $1.id.uuidString
+            }
+
+        guard !allInChunk.isEmpty else { return }
+
+        let hidden = allInChunk.filter { !visibleSet.contains($0.id) }
+        let byID = Dictionary(uniqueKeysWithValues: allInChunk.map { ($0.id, $0) })
+        let visibleOrdered = visibleOrderedIDs.compactMap { byID[$0] }
+        let final = visibleOrdered + hidden
+
+        var didChange = false
+        for (index, action) in final.enumerated() {
+            if action.sortOrder != index {
+                action.sortOrder = index
+                didChange = true
+            }
+        }
+        if didChange {
             scheduleAutosave()
         }
     }
@@ -2317,11 +2491,13 @@ struct ActionView: View {
             let hasMorning = define?.sensitiveMorning ?? true
             let hasAfternoon = define?.sensitiveAfternoon ?? true
             let hasEvening = define?.sensitiveEvening ?? true
+            let isAnytime = hasMorning && hasAfternoon && hasEvening
 
             var matchesAny = false
-            if selectedTimeOfDay.contains(.morning) && hasMorning { matchesAny = true }
-            if selectedTimeOfDay.contains(.afternoon) && hasAfternoon { matchesAny = true }
-            if selectedTimeOfDay.contains(.evening) && hasEvening { matchesAny = true }
+            if selectedTimeOfDay.contains(.any) && isAnytime { matchesAny = true }
+            if selectedTimeOfDay.contains(.morning) && !isAnytime && hasMorning { matchesAny = true }
+            if selectedTimeOfDay.contains(.afternoon) && !isAnytime && hasAfternoon { matchesAny = true }
+            if selectedTimeOfDay.contains(.evening) && !isAnytime && hasEvening { matchesAny = true }
             if !matchesAny { return false }
         }
 
@@ -2513,10 +2689,15 @@ struct ActionView: View {
         minutes == nil ? Color(.systemGray) : accent
     }
 
-    private func hasAnySensitivity(defineState st: PlannedChunkActionDefineState?, placeIDs: Set<UUID>) -> Bool {
+    private func hasAnySensitivity(
+        actionId: UUID,
+        defineState st: PlannedChunkActionDefineState?,
+        placeIDs: Set<UUID>
+    ) -> Bool {
         let hasTimePrefs = !(st?.sensitiveMorning ?? true) || !(st?.sensitiveAfternoon ?? true) || !(st?.sensitiveEvening ?? true)
         let hasPlaces = !placeIDs.isEmpty
-        return hasTimePrefs || hasPlaces
+        let hasDueDate = dueDateEditorState(forActionId: actionId)?.hasDueDate ?? false
+        return hasTimePrefs || hasPlaces || hasDueDate
     }
 
     private func hasAnyAttachments(note: PlannedChunkActionNote?, attachments: [PlannedChunkActionAttachment]) -> Bool {
@@ -3137,12 +3318,14 @@ private struct ActionScrollOffsetPreferenceKey: PreferenceKey {
 }
 
 private enum TimeOfDayChoice: String, CaseIterable, Hashable {
+    case any
     case morning
     case afternoon
     case evening
 
     var title: String {
         switch self {
+        case .any: return "Any"
         case .morning: return "Morning"
         case .afternoon: return "Afternoon"
         case .evening: return "Evening"
@@ -3530,15 +3713,35 @@ private struct SensitivitySheet: View {
     @State private var localMinimumDate: Date = Calendar.current.startOfDay(for: Date())
     @State private var showLeverageDueDateError: Bool = false
     private let dueDateScrollAnchorID: String = "sensitivity_due_date_anchor"
+    private var isAnytimeOfDay: Bool {
+        defineState.sensitiveMorning && defineState.sensitiveAfternoon && defineState.sensitiveEvening
+    }
 
     var body: some View {
         NavigationStack {
             ScrollViewReader { proxy in
                 List {
                 Section("Time of Day") {
-                    Toggle("Morning", isOn: bindingForTimeOfDay(\.sensitiveMorning))
-                    Toggle("Afternoon", isOn: bindingForTimeOfDay(\.sensitiveAfternoon))
-                    Toggle("Evening", isOn: bindingForTimeOfDay(\.sensitiveEvening))
+                    HStack {
+                        Text("Can be completed anytime")
+                        Spacer()
+                        Menu {
+                            Button("Yes") { setAnytimeOfDay(true) }
+                            Button("No") { setAnytimeOfDay(false) }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(isAnytimeOfDay ? "Yes" : "No")
+                                Image(systemName: "chevron.up.chevron.down")
+                            }
+                            .foregroundStyle(.blue)
+                        }
+                    }
+
+                    if !isAnytimeOfDay {
+                        Toggle("Morning", isOn: bindingForTimeOfDay(\.sensitiveMorning))
+                        Toggle("Afternoon", isOn: bindingForTimeOfDay(\.sensitiveAfternoon))
+                        Toggle("Evening", isOn: bindingForTimeOfDay(\.sensitiveEvening))
+                    }
                 }
 
                 Section("Places") {
@@ -3711,6 +3914,9 @@ private struct SensitivitySheet: View {
                         showLeverageDueDateError = false
                     }
                 }
+                .onDisappear {
+                    normalizeTimeOfDayIfNoneSelected()
+                }
                 .overlay(alignment: .bottom) {
                     if showLeverageDueDateError && !localHasDueDate {
                         VStack(alignment: .leading, spacing: 6) {
@@ -3761,11 +3967,37 @@ private struct SensitivitySheet: View {
                 if keyPath == \.sensitiveEvening { proposed.evening = newValue }
 
                 let onCount = [proposed.morning, proposed.afternoon, proposed.evening].filter { $0 }.count
-                guard onCount >= 1 else { return }
+                guard onCount <= 2 else { return }
 
                 defineState[keyPath: keyPath] = newValue
             }
         )
+    }
+
+    private func setAnytimeOfDay(_ enabled: Bool) {
+        if enabled {
+            defineState.sensitiveMorning = true
+            defineState.sensitiveAfternoon = true
+            defineState.sensitiveEvening = true
+            return
+        }
+
+        if isAnytimeOfDay {
+            defineState.sensitiveMorning = false
+            defineState.sensitiveAfternoon = false
+            defineState.sensitiveEvening = false
+        }
+    }
+
+    private func normalizeTimeOfDayIfNoneSelected() {
+        let onCount = [
+            defineState.sensitiveMorning,
+            defineState.sensitiveAfternoon,
+            defineState.sensitiveEvening
+        ].filter { $0 }.count
+        if onCount == 0 {
+            setAnytimeOfDay(true)
+        }
     }
 }
 
@@ -4108,6 +4340,7 @@ private struct ActionSwipeRow: View {
     let hasSensitivity: Bool
     let hasAttachments: Bool
     let highlightStatusBox: Bool
+    let showsReorderHandle: Bool
     @Binding var focusedActionID: UUID?
     let onCommitText: (String) -> Void
     let onOpenStatus: () -> Void
@@ -4135,6 +4368,7 @@ private struct ActionSwipeRow: View {
         hasSensitivity: Bool,
         hasAttachments: Bool,
         highlightStatusBox: Bool,
+        showsReorderHandle: Bool,
         focusedActionID: Binding<UUID?>,
         onCommitText: @escaping (String) -> Void,
         onOpenStatus: @escaping () -> Void,
@@ -4158,6 +4392,7 @@ private struct ActionSwipeRow: View {
         self.hasSensitivity = hasSensitivity
         self.hasAttachments = hasAttachments
         self.highlightStatusBox = highlightStatusBox
+        self.showsReorderHandle = showsReorderHandle
         self._focusedActionID = focusedActionID
         self.onCommitText = onCommitText
         self.onOpenStatus = onOpenStatus
@@ -4304,6 +4539,13 @@ private struct ActionSwipeRow: View {
                 .font(.system(size: 19, weight: .semibold))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+
+            if showsReorderHandle {
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color(.systemGray))
+                    .frame(width: 22, alignment: .center)
+            }
         }
         .padding(10)
         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
@@ -4478,6 +4720,69 @@ private struct ResetChunkDragStateDropDelegate: DropDelegate {
 
     func dropExited(info: DropInfo) {
         draggedChunkID = nil
+    }
+}
+
+private struct AnimatedActionRowDropDelegate: DropDelegate {
+    let targetID: UUID
+    @Binding var draggedID: UUID?
+    @Binding var draggedChunkID: UUID?
+    @Binding var localActionOrderIDs: [UUID]
+    let enabled: Bool
+    let onCommit: ([UUID]) -> Void
+
+    func dropEntered(info: DropInfo) {
+        guard enabled else { return }
+        guard let draggedID, draggedID != targetID else { return }
+        guard
+            let fromIndex = localActionOrderIDs.firstIndex(of: draggedID),
+            let toIndex = localActionOrderIDs.firstIndex(of: targetID)
+        else { return }
+        guard fromIndex != toIndex else { return }
+        withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.88, blendDuration: 0.12)) {
+            let moved = localActionOrderIDs.remove(at: fromIndex)
+            localActionOrderIDs.insert(moved, at: toIndex)
+        }
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        if enabled, !localActionOrderIDs.isEmpty {
+            onCommit(localActionOrderIDs)
+        }
+        draggedID = nil
+        draggedChunkID = nil
+        localActionOrderIDs = []
+        return true
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        enabled ? DropProposal(operation: .move) : DropProposal(operation: .cancel)
+    }
+
+    func dropExited(info: DropInfo) { }
+}
+
+private struct ResetActionRowDragStateDropDelegate: DropDelegate {
+    let ownerChunkID: UUID
+    @Binding var draggedID: UUID?
+    @Binding var draggedChunkID: UUID?
+    @Binding var localActionOrderIDs: [UUID]
+    let onCommit: ([UUID]) -> Void
+
+    func performDrop(info: DropInfo) -> Bool {
+        if draggedChunkID == ownerChunkID, !localActionOrderIDs.isEmpty {
+            onCommit(localActionOrderIDs)
+        }
+        draggedID = nil
+        draggedChunkID = nil
+        localActionOrderIDs = []
+        return true
+    }
+
+    func dropExited(info: DropInfo) {
+        draggedID = nil
+        draggedChunkID = nil
+        localActionOrderIDs = []
     }
 }
 

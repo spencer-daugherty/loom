@@ -446,6 +446,10 @@ struct AccountView: View {
     @AppStorage("enable_projects_feature") private var enableProjectsFeature = false
     @AppStorage("blank_homepage_mode") private var blankHomepageMode = false
     @AppStorage("setup_homepage_mode") private var setupHomepageMode = false
+    @AppStorage("dev_manual_warning_cards_enabled") private var devManualWarningCardsEnabled = false
+    @AppStorage("dev_outcome_warning_target_passed") private var devOutcomeWarningTargetPassed = false
+    @AppStorage("dev_outcome_warning_goal_achieved") private var devOutcomeWarningGoalAchieved = false
+    @AppStorage("dev_action_blocks_warning_old_blocks") private var devActionBlocksWarningOldBlocks = false
     @State private var showDeleteAllDataSheet = false
     @State private var deleteAllConfirmationCode = ""
     @State private var pendingDeleteScope: DeleteScope = .allData
@@ -509,6 +513,25 @@ struct AccountView: View {
                 Toggle("Enable Projects", isOn: $enableProjectsFeature)
                 Toggle("Blank Homepage", isOn: $blankHomepageMode)
                 Toggle("Setup Homepage", isOn: $setupHomepageMode)
+                Toggle("Manual Warning Cards", isOn: $devManualWarningCardsEnabled)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Outcomes")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Toggle("Outcome date passed", isOn: $devOutcomeWarningTargetPassed)
+                    Toggle("Outcome achieved", isOn: $devOutcomeWarningGoalAchieved)
+                }
+                .disabled(!devManualWarningCardsEnabled)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Action Blocks")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Toggle("Action Blocks are old", isOn: $devActionBlocksWarningOldBlocks)
+                }
+                .disabled(!devManualWarningCardsEnabled)
+
                 Button {
                     pendingDeleteScope = .fulfillmentOnly
                     deleteAllConfirmationCode = ""
@@ -609,6 +632,16 @@ struct AccountView: View {
         .onChange(of: setupHomepageMode) { _, isOn in
             if isOn, blankHomepageMode {
                 blankHomepageMode = false
+            }
+        }
+        .onChange(of: devOutcomeWarningTargetPassed) { _, isOn in
+            if isOn {
+                devOutcomeWarningGoalAchieved = false
+            }
+        }
+        .onChange(of: devOutcomeWarningGoalAchieved) { _, isOn in
+            if isOn {
+                devOutcomeWarningTargetPassed = false
             }
         }
     }

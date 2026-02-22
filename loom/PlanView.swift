@@ -5726,14 +5726,34 @@ private struct SensitivitySheet: View {
     @State private var localDueDate: Date = .now
     @State private var localAttentionDays: Int = 7
     @State private var localMinimumDate: Date = Calendar.current.startOfDay(for: Date())
+    private var isAnytimeOfDay: Bool {
+        defineState.sensitiveMorning && defineState.sensitiveAfternoon && defineState.sensitiveEvening
+    }
 
     var body: some View {
         NavigationStack {
             List {
                 Section("Time of Day") {
-                    Toggle("Morning", isOn: bindingForTimeOfDay(\.sensitiveMorning))
-                    Toggle("Afternoon", isOn: bindingForTimeOfDay(\.sensitiveAfternoon))
-                    Toggle("Evening", isOn: bindingForTimeOfDay(\.sensitiveEvening))
+                    HStack {
+                        Text("Can be completed anytime")
+                        Spacer()
+                        Menu {
+                            Button("Yes") { setAnytimeOfDay(true) }
+                            Button("No") { setAnytimeOfDay(false) }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(isAnytimeOfDay ? "Yes" : "No")
+                                Image(systemName: "chevron.up.chevron.down")
+                            }
+                            .foregroundStyle(.blue)
+                        }
+                    }
+
+                    if !isAnytimeOfDay {
+                        Toggle("Morning", isOn: bindingForTimeOfDay(\.sensitiveMorning))
+                        Toggle("Afternoon", isOn: bindingForTimeOfDay(\.sensitiveAfternoon))
+                        Toggle("Evening", isOn: bindingForTimeOfDay(\.sensitiveEvening))
+                    }
                 }
 
                 Section("Places") {
@@ -5888,6 +5908,9 @@ private struct SensitivitySheet: View {
                     localMinimumDate = dueDateEditor.minimumDate
                 }
             }
+            .onDisappear {
+                normalizeTimeOfDayIfNoneSelected()
+            }
         }
     }
 
@@ -5916,11 +5939,37 @@ private struct SensitivitySheet: View {
                 if keyPath == \.sensitiveEvening { proposed.evening = newValue }
 
                 let onCount = [proposed.morning, proposed.afternoon, proposed.evening].filter { $0 }.count
-                guard onCount >= 1 else { return }
+                guard onCount <= 2 else { return }
 
                 defineState[keyPath: keyPath] = newValue
             }
         )
+    }
+
+    private func setAnytimeOfDay(_ enabled: Bool) {
+        if enabled {
+            defineState.sensitiveMorning = true
+            defineState.sensitiveAfternoon = true
+            defineState.sensitiveEvening = true
+            return
+        }
+
+        if isAnytimeOfDay {
+            defineState.sensitiveMorning = false
+            defineState.sensitiveAfternoon = false
+            defineState.sensitiveEvening = false
+        }
+    }
+
+    private func normalizeTimeOfDayIfNoneSelected() {
+        let onCount = [
+            defineState.sensitiveMorning,
+            defineState.sensitiveAfternoon,
+            defineState.sensitiveEvening
+        ].filter { $0 }.count
+        if onCount == 0 {
+            setAnytimeOfDay(true)
+        }
     }
 }
 
