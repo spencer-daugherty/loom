@@ -1289,18 +1289,33 @@ struct ReflectView: View {
     }
 
     private func recaptureCarriedActions() {
-        let existing = Set(captureItems.map { normalized($0.text) })
-        var seen = existing
+        var existingByKey: [String: RollingCaptureItem] = [:]
+        for item in captureItems {
+            let key = normalized(item.text)
+            if !key.isEmpty, existingByKey[key] == nil {
+                existingByKey[key] = item
+            }
+        }
+        var seen = Set(existingByKey.keys)
         for action in carriedActions {
             let text = action.text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { continue }
             let key = normalized(text)
+            let profile = ActionCarryProfileStore.load(for: text)
+            if let existing = existingByKey[key] {
+                existing.leverageKindRaw = profile?.leverageKindRaw
+                existing.leverageValue = profile?.leverageValue
+                seen.insert(key)
+                continue
+            }
             guard !seen.contains(key) else { continue }
             modelContext.insert(
                 RollingCaptureItem(
                     text: text,
                     isGhost: false,
-                    createdAt: .now
+                    createdAt: .now,
+                    leverageKindRaw: profile?.leverageKindRaw,
+                    leverageValue: profile?.leverageValue
                 )
             )
             seen.insert(key)

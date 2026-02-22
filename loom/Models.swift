@@ -913,6 +913,10 @@ final class RollingCaptureItem {
   var sourceType: String?
   /// Optional external source identifier (e.g., EKReminder identifier).
   var sourceExternalID: String?
+  /// Optional leverage metadata carried with this action.
+  /// kind is "person" or "tool"; value is display text.
+  var leverageKindRaw: String?
+  var leverageValue: String?
 
   /// When this ghost item should become visible.
   /// (Used only while `isGhost == true`.)
@@ -930,6 +934,8 @@ final class RollingCaptureItem {
     dueDateAttentionDays: Int? = nil,
     sourceType: String? = nil,
     sourceExternalID: String? = nil,
+    leverageKindRaw: String? = nil,
+    leverageValue: String? = nil,
     unhideDate: Date? = nil,
     unhiddenAt: Date? = nil
   ) {
@@ -941,6 +947,8 @@ final class RollingCaptureItem {
     self.dueDateAttentionDays = dueDateAttentionDays
     self.sourceType = sourceType
     self.sourceExternalID = sourceExternalID
+    self.leverageKindRaw = leverageKindRaw
+    self.leverageValue = leverageValue
     self.unhideDate = unhideDate
     self.unhiddenAt = unhiddenAt
   }

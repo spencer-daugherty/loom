@@ -159,6 +159,8 @@ struct CaptureView: View {
     private var recurringRules: [RecurringCaptureRule]
     @Query(sort: \RecurringCaptureDispatch.sentAt, order: .reverse)
     private var recurringDispatches: [RecurringCaptureDispatch]
+    @Query(sort: \LeverageResource.createdAt, order: .forward)
+    private var leverageCatalog: [LeverageResource]
 
     @State private var input: String = ""
     @State private var isGhostOn: Bool = false
@@ -190,6 +192,9 @@ struct CaptureView: View {
     @State private var editingItemAttentionDays: Int = 7
     @State private var editingItemOriginalAttentionDays: Int = 7
     @State private var editingItemSourceType: String? = nil
+    @State private var editingItemLeverageResourceID: UUID? = nil
+    @State private var editingItemOriginalLeverageResourceID: UUID? = nil
+    @State private var showEditLeverageDueDateError: Bool = false
     @State private var showRecurringSettingsSheet: Bool = false
     @State private var showAppleRemindersSheet: Bool = false
     @State private var showGoogleTasksSheet: Bool = false
@@ -786,6 +791,7 @@ struct CaptureView: View {
                 || editingItemHasDueDate != editingItemOriginalHasDueDate
                 || (editingItemHasDueDate && Calendar.current.startOfDay(for: editingItemDueDate) != Calendar.current.startOfDay(for: editingItemOriginalDueDate))
                 || (editingItemHasDueDate && editingItemAttentionDays != editingItemOriginalAttentionDays)
+                || editingItemLeverageResourceID != editingItemOriginalLeverageResourceID
                 || (editingItemIsGhost && Calendar.current.startOfDay(for: editingItemHiddenUntil) != Calendar.current.startOfDay(for: editingItemOriginalHiddenUntil))
             let dueDateSettingsChanged =
                 editingItemHasDueDate != editingItemOriginalHasDueDate
@@ -826,6 +832,24 @@ struct CaptureView: View {
                                 Image(systemName: "chevron.up.chevron.down")
                             }
                             .foregroundStyle(.blue)
+                        }
+                    }
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(showEditLeverageDueDateError && !editingItemHasDueDate ? Color.red : Color.clear, lineWidth: 2)
+                    }
+
+                    HStack {
+                        Text("Leverage")
+                            .foregroundStyle(editingItemHasDueDate ? .primary : .secondary)
+                        Spacer()
+                        leverageSelectorLabel
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        if !editingItemHasDueDate {
+                            triggerCaptureEditLeverageDueDateError()
+                            return
                         }
                     }
 
@@ -869,6 +893,18 @@ struct CaptureView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
+                    if showEditLeverageDueDateError && !editingItemHasDueDate {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("You must add a due date to leverage action to hold your resources accountable")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(.red)
+                            Text("If not completed in this action block, the Resource and due date will be saved to your Capture list and future Action Blocks.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
                     if let sourceLabel = sourceDisplayName(for: editingItemSourceType) {
                         HStack {
                             Text("Source")
@@ -892,7 +928,10 @@ struct CaptureView: View {
                             editingItemHasDueDate = false
                             editingItemOriginalHasDueDate = false
                             editingItemSourceType = nil
-                            }
+                            editingItemLeverageResourceID = nil
+                            editingItemOriginalLeverageResourceID = nil
+                            showEditLeverageDueDateError = false
+                        }
                         .foregroundColor(hasChanges ? .red : .primary)
                     }
                     if hasChanges {
@@ -909,6 +948,9 @@ struct CaptureView: View {
                                     editingItemHasDueDate = false
                                     editingItemOriginalHasDueDate = false
                                     editingItemSourceType = nil
+                                    editingItemLeverageResourceID = nil
+                                    editingItemOriginalLeverageResourceID = nil
+                                    showEditLeverageDueDateError = false
                                     return
                                 }
                                 renameItemInline(item, to: editingItemText)
@@ -924,6 +966,7 @@ struct CaptureView: View {
                                 if editingItemIsGhost {
                                     item.unhideDate = Calendar.current.startOfDay(for: editingItemHiddenUntil)
                                 }
+                                applyCaptureItemLeverageSelection(item: item)
                                 scheduleInlineEditSave()
                                 isFullTextEditorFocused = false
                                 showFullTextEditorSheet = false
@@ -934,9 +977,20 @@ struct CaptureView: View {
                                 editingItemHasDueDate = false
                                 editingItemOriginalHasDueDate = false
                                 editingItemSourceType = nil
+                                editingItemLeverageResourceID = nil
+                                editingItemOriginalLeverageResourceID = nil
+                                showEditLeverageDueDateError = false
                             }
                             .foregroundColor(.blue)
                         }
+                    }
+                }
+                .onChange(of: editingItemHasDueDate) { _, hasDueDate in
+                    if !hasDueDate {
+                        editingItemLeverageResourceID = nil
+                    }
+                    if hasDueDate {
+                        showEditLeverageDueDateError = false
                     }
                 }
             }
@@ -947,6 +1001,7 @@ struct CaptureView: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.07) {
                     isFullTextEditorFocused = true
                 }
+                showEditLeverageDueDateError = false
             }
         }
         .onChange(of: showCompletedList) { _, isShowing in
@@ -2448,6 +2503,10 @@ struct CaptureView: View {
         }
         if duplicateExists { return }
 
+        if let profile = ActionCarryProfileStore.load(for: item.text) {
+            ActionCarryProfileStore.remove(for: item.text)
+            ActionCarryProfileStore.save(for: trimmed, profile: profile)
+        }
         item.text = trimmed
         scheduleInlineEditSave()
     }
@@ -2483,7 +2542,143 @@ struct CaptureView: View {
         editingItemAttentionDays = resolvedAttention
         editingItemOriginalAttentionDays = resolvedAttention
         editingItemSourceType = item.sourceType
+        let leverageResourceID = resolvedLeverageResourceID(for: item)
+        editingItemLeverageResourceID = leverageResourceID
+        editingItemOriginalLeverageResourceID = leverageResourceID
+        showEditLeverageDueDateError = false
         showFullTextEditorSheet = true
+    }
+
+    @ViewBuilder
+    private var leverageSelectorLabel: some View {
+        if editingItemHasDueDate {
+            Menu {
+                Button("None") {
+                    editingItemLeverageResourceID = nil
+                    showEditLeverageDueDateError = false
+                }
+                if !availablePersonLeverageResources.isEmpty {
+                    Section("People") {
+                        ForEach(availablePersonLeverageResources, id: \.id) { resource in
+                            Button {
+                                editingItemLeverageResourceID = resource.id
+                                showEditLeverageDueDateError = false
+                            } label: {
+                                Text(resource.value)
+                            }
+                        }
+                    }
+                }
+                if !availableToolLeverageResources.isEmpty {
+                    Section("Tools") {
+                        ForEach(availableToolLeverageResources, id: \.id) { resource in
+                            Button {
+                                editingItemLeverageResourceID = resource.id
+                                showEditLeverageDueDateError = false
+                            } label: {
+                                Text(resource.value)
+                            }
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    if let resource = editingItemLeverageResourceID.flatMap({ leverageResourceByID[$0] }) {
+                        Image(systemName: resource.kind == .person ? "person" : "wrench.and.screwdriver")
+                        Text(resource.value)
+                            .lineLimit(1)
+                    } else {
+                        Text("None")
+                    }
+                    Image(systemName: "chevron.up.chevron.down")
+                }
+                .foregroundStyle(.blue)
+            }
+        } else {
+            HStack(spacing: 4) {
+                if let resource = editingItemLeverageResourceID.flatMap({ leverageResourceByID[$0] }) {
+                    Image(systemName: resource.kind == .person ? "person" : "wrench.and.screwdriver")
+                    Text(resource.value)
+                        .lineLimit(1)
+                } else {
+                    Text("Select")
+                }
+                Image(systemName: "chevron.up.chevron.down")
+            }
+            .foregroundStyle(.secondary)
+        }
+    }
+
+    private var leverageResourceByID: [UUID: LeverageResource] {
+        Dictionary(uniqueKeysWithValues: leverageCatalog.map { ($0.id, $0) })
+    }
+
+    private var availablePersonLeverageResources: [LeverageResource] {
+        leverageCatalog.filter { $0.kind == .person }
+    }
+
+    private var availableToolLeverageResources: [LeverageResource] {
+        leverageCatalog.filter { $0.kind == .tool }
+    }
+
+    private func resolvedLeverageResourceID(for item: RollingCaptureItem) -> UUID? {
+        if let id = ensureLeverageResourceID(
+            kindRaw: item.leverageKindRaw,
+            value: item.leverageValue
+        ) {
+            return id
+        }
+
+        if let profile = ActionCarryProfileStore.load(for: item.text),
+           let id = ensureLeverageResourceID(
+               kindRaw: profile.leverageKindRaw,
+               value: profile.leverageValue
+           ) {
+            return id
+        }
+        return nil
+    }
+
+    private func ensureLeverageResourceID(kindRaw: String?, value: String?) -> UUID? {
+        guard let kindRaw,
+              let kind = ActionLeverageKind(rawValue: kindRaw),
+              let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty else { return nil }
+        if let existing = leverageCatalog.first(where: {
+            $0.kind == kind && $0.value.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare(value) == .orderedSame
+        }) {
+            return existing.id
+        }
+        let created = LeverageResource(kindRaw: kind.rawValue, value: value)
+        modelContext.insert(created)
+        try? modelContext.save()
+        return created.id
+    }
+
+    private func triggerCaptureEditLeverageDueDateError() {
+        withAnimation(.easeInOut(duration: 0.15)) {
+            showEditLeverageDueDateError = true
+        }
+    }
+
+    private func applyCaptureItemLeverageSelection(item: RollingCaptureItem) {
+        if !editingItemHasDueDate {
+            editingItemLeverageResourceID = nil
+        }
+
+        let selectedResource = editingItemLeverageResourceID.flatMap { leverageResourceByID[$0] }
+        item.leverageKindRaw = selectedResource?.kind.rawValue
+        item.leverageValue = selectedResource?.value
+
+        syncCarriedActionProfileLeverage(forText: item.text, resource: selectedResource)
+    }
+
+    private func syncCarriedActionProfileLeverage(forText text: String, resource: LeverageResource?) {
+        guard var profile = ActionCarryProfileStore.load(for: text) else { return }
+        profile.leverageKindRaw = resource?.kind.rawValue
+        profile.leverageValue = resource?.value
+        profile.updatedAtUnix = Date().timeIntervalSince1970
+        ActionCarryProfileStore.save(for: text, profile: profile)
     }
 
     private func sourceDisplayName(for sourceType: String?) -> String? {
