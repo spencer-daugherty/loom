@@ -893,18 +893,6 @@ struct CaptureView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
-                    if showEditLeverageDueDateError && !editingItemHasDueDate {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("You must add a due date to leverage action to hold your resources accountable")
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(.red)
-                            Text("If not completed in this action block, the Resource and due date will be saved to your Capture list and future Action Blocks.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-
                     if let sourceLabel = sourceDisplayName(for: editingItemSourceType) {
                         HStack {
                             Text("Source")
@@ -991,6 +979,27 @@ struct CaptureView: View {
                     }
                     if hasDueDate {
                         showEditLeverageDueDateError = false
+                    }
+                }
+                .overlay(alignment: .bottom) {
+                    if showEditLeverageDueDateError && !editingItemHasDueDate {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("You must add a due date to leverage action to hold your resources accountable")
+                                .font(.footnote)
+                                .fontWeight(.bold)
+                            Text("If not completed in this action block, the Resource and due date will be saved to your Capture list and future Action Blocks.")
+                                .font(.footnote)
+                        }
+                        .multilineTextAlignment(.leading)
+                        .padding(10)
+                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(Color.black.opacity(0.12), lineWidth: 1)
+                        )
+                        .padding(.horizontal, 8)
+                        .padding(.bottom, 8)
+                        .transition(.opacity)
                     }
                 }
             }
