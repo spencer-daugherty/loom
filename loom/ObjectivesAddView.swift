@@ -67,7 +67,7 @@ struct ObjectivesAddView: View {
     @State private var startNow: Bool
     @State private var startDate: Date
     @State private var endDate: Date
-    @State private var selectedCategory: Category
+    @State private var selectedCategory: String
     @State private var isShowingDeleteAlert = false
     @State private var isShowingDeleteOutcomeAlert = false
     @State private var isShowingAddMeasureSheet = false
@@ -82,7 +82,10 @@ struct ObjectivesAddView: View {
     
     private let outcome: Outcomes?
     private let outcomeMeasure: OutcomesMeasure?
+    @Query(sort: \Fulfillment.category, order: .forward) private var fulfillments: [Fulfillment]
     @Query(sort: \OutcomesMeasureEntry.measuredAt, order: .forward) private var allMeasureEntries: [OutcomesMeasureEntry]
+
+    private static let categoryPlaceholder = "Select Fulfillment Area"
 
     private var hasChanges: Bool {
         if let outcome {
@@ -101,10 +104,10 @@ struct ObjectivesAddView: View {
                    startDate != outcome.start ||
                    endDate != outcome.end ||
                    startNow != (outcome.start == outcome.updatedAt) ||
-                   selectedCategory.rawValue != outcome.category ||
+                   selectedCategory != outcome.category ||
                    measureChanged
         }
-        return !goal.isEmpty || !reasons.isEmpty || selectedDuration != 30 || !startNow || startDate != .now || endDate != Calendar.current.date(byAdding: .day, value: 30, to: .now)! || selectedCategory != .placeholder || isMeasurable
+        return !goal.isEmpty || !reasons.isEmpty || selectedDuration != 30 || !startNow || startDate != .now || endDate != Calendar.current.date(byAdding: .day, value: 30, to: .now)! || selectedCategory != Self.categoryPlaceholder || isMeasurable
     }
 
     private var showDeleteButton: Bool {
@@ -112,7 +115,7 @@ struct ObjectivesAddView: View {
     }
 
     private var isSaveDisabled: Bool {
-        goal.isEmpty || selectedCategory == .placeholder || (isMeasurable && (measureGoal.isEmpty || parseFormattedDecimal(measureGoal) == nil))
+        goal.isEmpty || selectedCategory == Self.categoryPlaceholder || (isMeasurable && (measureGoal.isEmpty || parseFormattedDecimal(measureGoal) == nil))
     }
 
     private var effectiveStartDate: Date {
@@ -133,28 +136,12 @@ struct ObjectivesAddView: View {
         return false
     }
 
-    enum Category: String, CaseIterable, Identifiable {
-        case placeholder = "select fulfillment category"
-        case career = "Career & Business"
-        case leadership = "Leadership & Impact"
-        case wealth = "Wealth & Lifestyle"
-        case mind = "Mind & Meaning"
-        case love = "Love & Relationships"
-        case health = "Health & Vitality"
-
-        var id: String { rawValue }
-
-        var color: Color {
-            switch self {
-            case .placeholder: return .gray
-            case .career: return FulfillmentCategoryTheme.color(for: Self.career.rawValue)
-            case .leadership: return FulfillmentCategoryTheme.color(for: Self.leadership.rawValue)
-            case .wealth: return FulfillmentCategoryTheme.color(for: Self.wealth.rawValue)
-            case .mind: return FulfillmentCategoryTheme.color(for: Self.mind.rawValue)
-            case .love: return FulfillmentCategoryTheme.color(for: Self.love.rawValue)
-            case .health: return FulfillmentCategoryTheme.color(for: Self.health.rawValue)
-            }
-        }
+    private var fulfillmentAreaOptions: [String] {
+        let names = fulfillments
+            .map { $0.category.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let unique = Array(Set(names)).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+        return [Self.categoryPlaceholder] + unique
     }
     
     enum MeasureFormat: String, CaseIterable, Identifiable {
@@ -252,7 +239,7 @@ struct ObjectivesAddView: View {
             _startNow = State(initialValue: outcome.start == outcome.updatedAt)
             _startDate = State(initialValue: outcome.start)
             _endDate = State(initialValue: outcome.end)
-            _selectedCategory = State(initialValue: Category(rawValue: outcome.category) ?? .placeholder)
+            _selectedCategory = State(initialValue: outcome.category)
             if let outcomeMeasure {
                 _isMeasurable = State(initialValue: outcomeMeasure.measure_amt != 0)
                 _measureGoal = State(initialValue: String(outcomeMeasure.measure_amt))
@@ -275,7 +262,7 @@ struct ObjectivesAddView: View {
             _startNow = State(initialValue: true)
             _startDate = State(initialValue: .now)
             _endDate = State(initialValue: Calendar.current.startOfDay(for: Calendar.current.date(byAdding: .day, value: 30, to: .now)!))
-            _selectedCategory = State(initialValue: .placeholder)
+            _selectedCategory = State(initialValue: Self.categoryPlaceholder)
             _isMeasurable = State(initialValue: false)
             _measureGoal = State(initialValue: "")
             _measureCurrent = State(initialValue: "")
@@ -323,7 +310,11 @@ struct ObjectivesAddView: View {
                     measureDecimalPlaces: $measureDecimalPlaces,
                     isMeasureGoalFieldFocused: $isMeasureGoalFieldFocused
                 )
-                CategorySection(selectedCategory: $selectedCategory)
+                CategorySection(
+                    selectedCategory: $selectedCategory,
+                    categories: fulfillmentAreaOptions,
+                    placeholder: Self.categoryPlaceholder
+                )
                 if outcome != nil {
                     DeleteOutcomeSection(
                         isShowingDeleteOutcomeAlert: $isShowingDeleteOutcomeAlert,
@@ -413,6 +404,10 @@ struct ObjectivesAddView: View {
         .interactiveDismissDisabled(outcome != nil ? hasChanges : showDeleteButton)
         .onAppear {
             hydrateMeasureFromLatestEntry()
+            syncSelectedCategoryWithFulfillmentAreas()
+        }
+        .onChange(of: fulfillments.map(\.category)) { _, _ in
+            syncSelectedCategoryWithFulfillmentAreas()
         }
         .sheet(isPresented: $isShowingAddMeasureSheet) {
             if let outcomeID = outcome?.outcome_id {
@@ -445,7 +440,7 @@ struct ObjectivesAddView: View {
                existingOutcome.reasons != reasons ||
                existingOutcome.start != start ||
                existingOutcome.end != normalizedEndDate ||
-               existingOutcome.category != selectedCategory.rawValue {
+               existingOutcome.category != selectedCategory {
                 let archivedOutcome = OutcomesArchive(
                     outcome_id: existingOutcome.outcome_id,
                     category: existingOutcome.category,
@@ -461,7 +456,7 @@ struct ObjectivesAddView: View {
                 modelContext.insert(archivedOutcome)
             }
 
-            existingOutcome.category = selectedCategory.rawValue
+            existingOutcome.category = selectedCategory
             existingOutcome.updatedAt = .now
             existingOutcome.outcome = goal
             existingOutcome.reasons = reasons
@@ -535,7 +530,7 @@ struct ObjectivesAddView: View {
         } else {
             let newOutcome = Outcomes(
                 outcome_id: UUID(),
-                category: selectedCategory.rawValue,
+                category: selectedCategory,
                 updatedAt: .now,
                 outcome: goal,
                 reasons: reasons,
@@ -594,6 +589,18 @@ struct ObjectivesAddView: View {
         }
         if let places = latest.decimalPlaces {
             measureDecimalPlaces = min(3, max(0, places))
+        }
+    }
+
+    private func syncSelectedCategoryWithFulfillmentAreas() {
+        let options = Set(fulfillmentAreaOptions)
+        if selectedCategory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            selectedCategory = Self.categoryPlaceholder
+            return
+        }
+        if selectedCategory == Self.categoryPlaceholder { return }
+        if !options.contains(selectedCategory) {
+            selectedCategory = Self.categoryPlaceholder
         }
     }
 
@@ -896,20 +903,51 @@ struct DurationButton: View {
 }
 
 struct CategorySection: View {
-    @Binding var selectedCategory: ObjectivesAddView.Category
+    @Binding var selectedCategory: String
+    let categories: [String]
+    let placeholder: String
+
+    private var selectedDisplayColor: Color {
+        selectedCategory == placeholder ? .blue : FulfillmentCategoryTheme.color(for: selectedCategory)
+    }
+
+    @ViewBuilder
+    private var pickerLabel: some View {
+        HStack(spacing: 4) {
+            Text(selectedCategory)
+                .foregroundColor(selectedDisplayColor)
+                .fontWeight(selectedCategory == placeholder ? .regular : .bold)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.caption2)
+                .foregroundColor(selectedDisplayColor)
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+    }
 
     var body: some View {
-        Picker("Category", selection: $selectedCategory) {
-            ForEach(ObjectivesAddView.Category.allCases) { category in
-                Text(category.rawValue)
-                    .foregroundColor(category.color)
-                    .fontWeight(category == selectedCategory ? .bold : .regular)
-                    .tag(category)
+        Section("Fulfillment Area") {
+            HStack(spacing: 8) {
+                Text("Related to:")
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Picker(selection: $selectedCategory) {
+                    ForEach(categories, id: \.self) { category in
+                        Text(category)
+                            .foregroundColor(category == placeholder ? .blue : FulfillmentCategoryTheme.color(for: category))
+                            .fontWeight(category == selectedCategory ? .bold : .regular)
+                            .tag(category)
+                    }
+                } label: {
+                    pickerLabel
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .tint(selectedDisplayColor)
+                .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }
-        .pickerStyle(.wheel)
-        .frame(maxHeight: 100)
-        .listRowBackground(Color.clear)
     }
 }
 

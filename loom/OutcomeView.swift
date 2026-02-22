@@ -56,6 +56,9 @@ struct OutcomeView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
+    @AppStorage("dev_manual_warning_cards_enabled") private var devManualWarningCardsEnabled = false
+    @AppStorage("dev_outcome_warning_target_passed") private var devOutcomeWarningTargetPassed = false
+    @AppStorage("dev_outcome_warning_goal_achieved") private var devOutcomeWarningGoalAchieved = false
 
     let outcome: Outcomes
     let outcomeMeasure: OutcomesMeasure?
@@ -125,12 +128,7 @@ struct OutcomeView: View {
             .map(\.category)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-        var unique = Array(Set(titles)).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
-        let current = selectedCategoryName.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !current.isEmpty && !unique.contains(where: { $0.caseInsensitiveCompare(current) == .orderedSame }) {
-            unique.insert(current, at: 0)
-        }
-        return unique
+        return Array(Set(titles)).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
     init(outcome: Outcomes, outcomeMeasure: OutcomesMeasure?) {
@@ -288,17 +286,35 @@ struct OutcomeView: View {
     }
 
     private var showGoalAchievedEarlyBanner: Bool {
+        if let manualSelection = manualOutcomeWarningSelection {
+            return manualSelection == .goalAchieved
+        }
         guard isMeasurable, isGoalMetNow else { return false }
         return Calendar.current.startOfDay(for: .now) < Calendar.current.startOfDay(for: endDate)
     }
 
     private var showTargetPassedBanner: Bool {
+        if let manualSelection = manualOutcomeWarningSelection {
+            return manualSelection == .targetPassed
+        }
         let passed = Calendar.current.startOfDay(for: .now) > Calendar.current.startOfDay(for: endDate)
         guard passed else { return false }
         if isMeasurable {
             return !isGoalMetNow
         }
         return true
+    }
+
+    private enum ManualOutcomeWarningSelection {
+        case targetPassed
+        case goalAchieved
+    }
+
+    private var manualOutcomeWarningSelection: ManualOutcomeWarningSelection? {
+        guard devManualWarningCardsEnabled else { return nil }
+        if devOutcomeWarningTargetPassed { return .targetPassed }
+        if devOutcomeWarningGoalAchieved { return .goalAchieved }
+        return nil
     }
 
     private var targetPassedBannerMessage: String {
@@ -655,6 +671,10 @@ struct OutcomeView: View {
             }
             .onAppear {
                 hydrateMeasureFromLatestEntry()
+                syncSelectedCategoryToFulfillmentAreas()
+            }
+            .onChange(of: fulfillments.map(\.category)) { _, _ in
+                syncSelectedCategoryToFulfillmentAreas()
             }
             .onDisappear {
                 if hasChanges && !isSaveDisabled {
@@ -1334,6 +1354,18 @@ struct OutcomeView: View {
         filterConnectedBlocksOnly = hasContributingActionsOutsideConnectedBlocks ? false : true
     }
 
+    private func syncSelectedCategoryToFulfillmentAreas() {
+        guard !categoryOptions.isEmpty else { return }
+        let current = selectedCategoryName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !current.isEmpty else {
+            selectedCategoryName = categoryOptions[0]
+            return
+        }
+        if !categoryOptions.contains(where: { $0.caseInsensitiveCompare(current) == .orderedSame }) {
+            selectedCategoryName = categoryOptions[0]
+        }
+    }
+
     private func applySelectedCompletedActions() {
         let selected = completedActionCandidates.filter { selectedCompletedArchiveActionIDs.contains($0.id) }
         let candidatePairByID = Dictionary(
@@ -1462,18 +1494,52 @@ private struct OutcomeStartedOnSection: View {
 private struct OutcomeCategorySection: View {
     @Binding var selectedCategoryName: String
     let categories: [String]
+    private let placeholder = "Select Fulfillment Area"
+
+    private var selectedDisplayColor: Color {
+        selectedCategoryName.isEmpty ? .blue : FulfillmentCategoryTheme.color(for: selectedCategoryName)
+    }
+
+    private var selectedDisplayText: String {
+        selectedCategoryName.isEmpty ? placeholder : selectedCategoryName
+    }
+
+    @ViewBuilder
+    private var pickerLabel: some View {
+        HStack(spacing: 4) {
+            Text(selectedDisplayText)
+                .foregroundColor(selectedDisplayColor)
+                .fontWeight(selectedCategoryName.isEmpty ? .regular : .bold)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.caption2)
+                .foregroundColor(selectedDisplayColor)
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+    }
 
     var body: some View {
-        Picker("Category", selection: $selectedCategoryName) {
-            ForEach(categories, id: \.self) { category in
-                Text(category)
-                    .foregroundColor(FulfillmentCategoryTheme.color(for: category))
-                    .fontWeight(category.caseInsensitiveCompare(selectedCategoryName) == .orderedSame ? .bold : .regular)
-                    .tag(category)
+        Section("Fulfillment Area") {
+            HStack(spacing: 8) {
+                Text("Related to:")
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Picker(selection: $selectedCategoryName) {
+                    ForEach(categories, id: \.self) { category in
+                        Text(category)
+                            .foregroundColor(FulfillmentCategoryTheme.color(for: category))
+                            .fontWeight(category.caseInsensitiveCompare(selectedCategoryName) == .orderedSame ? .bold : .regular)
+                            .tag(category)
+                    }
+                } label: {
+                    pickerLabel
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .tint(selectedDisplayColor)
+                .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }
-        .pickerStyle(.wheel)
-        .frame(maxHeight: 100)
-        .listRowBackground(Color.clear)
     }
 }
