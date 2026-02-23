@@ -1,6 +1,9 @@
 import SwiftUI
 import Charts
 import SwiftData
+#if canImport(UIKit)
+import UIKit
+#endif
 
 private struct DarkModeInvertImage: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
@@ -43,12 +46,14 @@ struct ContentView: View {
     @State private var highlightFulfillmentRequirement: Bool = false
     @State private var playBlockedResetWorkItem: DispatchWorkItem? = nil
     @State private var drivingCardBounceOn = false
+    @State private var littleWinsLogoDotBounceOn = false
     @State private var homePageIndex: Int = 1
     @State private var measuredHeaderLogoWidth: CGFloat = 118
     @State private var littleWinsCardOrder: [UUID] = []
     @State private var littleWinsCompletedFocusIDs: Set<UUID> = []
     @State private var littleWinsCompletionStateHydrated = false
     @State private var littleWinsCalendarPreviewDate: Date? = nil
+    @State private var littleWinsShowHiddenPlaceholder = false
     @State private var littleWinsDeckDragX: CGFloat = 0
     @State private var littleWinsDeckIsDragging = false
     @State private var littleWinsSuppressRowTapUntil: Date = .distantPast
@@ -314,6 +319,9 @@ struct ContentView: View {
             if shouldShowAnyOnboardingBounce {
                 bounceDrivingCardOnce()
             }
+            if shouldShowLittleWinsLogoDot {
+                bounceLittleWinsLogoDotOnce()
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("open_fulfillment_after_onboarding"))) { _ in
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
@@ -327,9 +335,20 @@ struct ContentView: View {
                 drivingCardBounceOn = false
             }
         }
+        .onChange(of: shouldShowLittleWinsLogoDot) { _, shouldShow in
+            if shouldShow {
+                bounceLittleWinsLogoDotOnce()
+            } else {
+                littleWinsLogoDotBounceOn = false
+            }
+        }
         .onReceive(drivingBounceTimer) { _ in
             guard shouldShowAnyOnboardingBounce else { return }
             bounceDrivingCardOnce()
+        }
+        .onReceive(drivingBounceTimer) { _ in
+            guard shouldShowLittleWinsLogoDot else { return }
+            bounceLittleWinsLogoDotOnce()
         }
         .tint(Color.accentColor)
         .ignoresSafeArea(.keyboard)
@@ -574,6 +593,26 @@ struct ContentView: View {
 
     private var hasIncompleteLittleWinsCards: Bool {
         littleWinsCards.contains { !isLittleWinsCardCompleted($0) }
+    }
+
+    private var shouldShowLittleWinsLogoDot: Bool {
+        homePageIndex == HomeSwipePage.home.rawValue && hasIncompleteLittleWinsCards
+    }
+
+    private var littleWinsHiddenClockIconName: String {
+        #if canImport(UIKit)
+        let candidates = [
+            "clock.arrow.trianglehead.clockwise.rotate.90.path.dotted",
+            "clock.arrow.circlepath",
+            "clock"
+        ]
+        for name in candidates where UIImage(systemName: name) != nil {
+            return name
+        }
+        return "clock"
+        #else
+        return "clock"
+        #endif
     }
 
     private var todayStartDate: Date {
@@ -912,11 +951,15 @@ struct ContentView: View {
                     .frame(height: 40)
                     .modifier(DarkModeInvertImage())
                     .overlay(alignment: .leading) {
-                        if homePageIndex == HomeSwipePage.home.rawValue && hasIncompleteLittleWinsCards {
+                        if shouldShowLittleWinsLogoDot {
                             Circle()
                                 .fill(Color(.systemGray3))
                                 .frame(width: 8, height: 8)
-                                .offset(x: -14, y: 1)
+                                .offset(x: -14 + (littleWinsLogoDotBounceOn ? -3 : 0), y: 1)
+                                .animation(
+                                    .interactiveSpring(response: 0.24, dampingFraction: 0.72, blendDuration: 0.12),
+                                    value: littleWinsLogoDotBounceOn
+                                )
                         }
                     }
                     .background(
@@ -1042,6 +1085,16 @@ struct ContentView: View {
             let cards = littleWinsCards
             let activeCards = cards.filter { !isLittleWinsCardCompleted($0) }
             let completedCards = cards.filter { isLittleWinsCardCompleted($0) }
+            let allActiveCardsCompleted = !cards.isEmpty && activeCards.isEmpty
+            let todayHasCompletedCard = !completedCards.isEmpty
+            let streakShowsTodayComplete = allActiveCardsCompleted && todayHasCompletedCard
+            let completedCardStreakCount = littleWinsCompletedCardStreakCount()
+            let todayMiniStackTopOverflow = littleWinsMiniStackTopOverflow(forCardCount: completedCards.count)
+            let calendarBadgeRowHeight: CGFloat = 36
+            let calendarBadgeVisualLift = todayMiniStackTopOverflow + calendarBadgeRowHeight + 34
+            let calendarBadgeHitAreaTopPadding = calendarBadgeRowHeight + 8
+            let calendarRowHeight: CGFloat = 84 + todayMiniStackTopOverflow
+            let calendarBandReserve: CGFloat = 132 + todayMiniStackTopOverflow
             let isCalendarPreviewActive = littleWinsCalendarPreviewDate != nil
 
             Group {
@@ -1066,7 +1119,8 @@ struct ContentView: View {
                         cardWidth: cardWidth,
                         cardHeight: cardHeight,
                         horizontalPadding: horizontalPadding,
-                        availableHeight: proxy.size.height
+                        availableHeight: proxy.size.height,
+                        bottomCalendarBandReserve: calendarBandReserve
                     )
                 }
             }
@@ -1080,10 +1134,54 @@ struct ContentView: View {
                             HStack {
                                 littleWinsLastWeekCalendarRow(completedTodayCards: completedCards)
                             }
-                            .frame(height: 60)
+                            .frame(minHeight: calendarRowHeight, alignment: .top)
                             .padding(.horizontal)
                             .padding(.top, 6)
                             .padding(.bottom, 0)
+                            .animation(
+                                .interactiveSpring(response: 0.38, dampingFraction: 0.84, blendDuration: 0.14),
+                                value: littleWinsCompletedFocusIDs
+                            )
+                            .overlay(alignment: .top) {
+                                ZStack {
+                                    HStack(spacing: 6) {
+                                        Toggle("", isOn: $littleWinsShowHiddenPlaceholder)
+                                            .labelsHidden()
+                                            .toggleStyle(.switch)
+                                        Image(systemName: littleWinsHiddenClockIconName)
+                                            .font(.system(size: 21, weight: .semibold))
+                                            .foregroundStyle(littleWinsShowHiddenPlaceholder ? .blue : .secondary)
+                                            .frame(width: 31, height: 31, alignment: .center)
+                                            .accessibilityHidden(true)
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                                    HStack(spacing: 8) {
+                                        ForEach(0..<7, id: \.self) { idx in
+                                            Group {
+                                                if idx == 6 && completedCardStreakCount > 0 {
+                                                    HStack(spacing: 4) {
+                                                        Image(systemName: streakShowsTodayComplete ? "bolt.badge.checkmark.fill" : "bolt.fill")
+                                                            .font(.caption2.weight(.semibold))
+                                                        Text("\(completedCardStreakCount)d")
+                                                            .font(.caption2.weight(.semibold))
+                                                    }
+                                                    .foregroundStyle(.secondary)
+                                                    .frame(maxWidth: .infinity)
+                                                } else {
+                                                    Color.clear
+                                                }
+                                            }
+                                            .frame(maxWidth: .infinity)
+                                        }
+                                    }
+                                    .allowsHitTesting(false)
+                                }
+                                .frame(height: calendarBadgeRowHeight)
+                                .padding(.horizontal)
+                                .padding(.top, calendarBadgeHitAreaTopPadding)
+                                .offset(y: -calendarBadgeVisualLift)
+                            }
                         }
                         Color.clear.frame(height: 8)
                     }
@@ -1126,19 +1224,44 @@ struct ContentView: View {
         }
     }
 
+    private func littleWinsCompletedCardStreakCount() -> Int {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let startsAtToday = !littleWinsCompletedCards(on: today).isEmpty
+        var streak = 0
+
+        for dayOffset in (startsAtToday ? 0 : 1)...30 {
+            guard let date = calendar.date(byAdding: .day, value: -dayOffset, to: today) else { break }
+            if littleWinsCompletedCards(on: date).isEmpty {
+                break
+            }
+            streak += 1
+        }
+
+        return streak
+    }
+
+    private func littleWinsMiniStackTopOverflow(forCardCount cardCount: Int) -> CGFloat {
+        let miniCardWidth: CGFloat = 28
+        let miniCardHeight: CGFloat = miniCardWidth * 1.42
+        let miniStackLiftPerCard = min(6, max(4, miniCardHeight * 0.14))
+        let visibleStackCount = min(3, max(0, cardCount))
+        return CGFloat(max(0, visibleStackCount - 1)) * miniStackLiftPerCard
+    }
+
     private func littleWinsDeckView(
         cards: [LittleWinsCardData],
         cardWidth: CGFloat,
         cardHeight: CGFloat,
         horizontalPadding: CGFloat,
-        availableHeight: CGFloat
+        availableHeight: CGFloat,
+        bottomCalendarBandReserve: CGFloat
     ) -> some View {
         let visibleCards = Array(cards.prefix(4))
         let backStep = cardHeight * 0.05
         let stackRise = backStep * CGFloat(max(0, visibleCards.count - 1))
         let hintHeight: CGFloat = 18
         let hintSpacing: CGFloat = 6
-        let bottomCalendarBandReserve: CGFloat = 84 // matches bottom safe-area calendar band footprint
         let deckVisibleHeight = cardHeight + stackRise
         let contentHeight = deckVisibleHeight + hintSpacing + hintHeight
         let freeHeight = max(0, availableHeight - bottomCalendarBandReserve - contentHeight)
@@ -1176,6 +1299,7 @@ struct ContentView: View {
             .contentShape(Rectangle())
             .simultaneousGesture(littleWinsDeckDragGesture(cards: cards, cardWidth: cardWidth))
             .animation(.interactiveSpring(response: 0.34, dampingFraction: 0.80, blendDuration: 0.15), value: littleWinsCardOrder)
+            .animation(.interactiveSpring(response: 0.38, dampingFraction: 0.84, blendDuration: 0.14), value: littleWinsCompletedFocusIDs)
 
             Text("swipe right to rearrange")
                 .font(.caption2)
@@ -1211,7 +1335,7 @@ struct ContentView: View {
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(primary)
                     .multilineTextAlignment(.center)
-                Text("Come back tomorrow to continue!")
+                Text("Come back tomorrow to continue")
                     .font(.subheadline)
                     .foregroundStyle(secondary)
                     .multilineTextAlignment(.center)
@@ -2639,6 +2763,17 @@ struct ContentView: View {
             drivingCardBounceOn = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
                 drivingCardBounceOn = false
+            }
+        }
+    }
+
+    private func bounceLittleWinsLogoDotOnce() {
+        littleWinsLogoDotBounceOn = false
+        DispatchQueue.main.async {
+            guard shouldShowLittleWinsLogoDot else { return }
+            littleWinsLogoDotBounceOn = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+                littleWinsLogoDotBounceOn = false
             }
         }
     }

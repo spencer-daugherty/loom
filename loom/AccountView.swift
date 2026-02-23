@@ -436,9 +436,11 @@ struct ModelFilter: Identifiable, Hashable {
 
 // MARK: - Main View
 struct AccountView: View {
-    private enum DeleteScope {
+    private enum DeleteScope: String, Identifiable {
         case allData
+        case littleWinsOnly
         case fulfillmentOnly
+        var id: String { rawValue }
     }
 
     @Environment(\.modelContext) private var context
@@ -450,9 +452,41 @@ struct AccountView: View {
     @AppStorage("dev_outcome_warning_target_passed") private var devOutcomeWarningTargetPassed = false
     @AppStorage("dev_outcome_warning_goal_achieved") private var devOutcomeWarningGoalAchieved = false
     @AppStorage("dev_action_blocks_warning_old_blocks") private var devActionBlocksWarningOldBlocks = false
-    @State private var showDeleteAllDataSheet = false
+    @State private var presentedDeleteScope: DeleteScope? = nil
     @State private var deleteAllConfirmationCode = ""
-    @State private var pendingDeleteScope: DeleteScope = .allData
+
+    private func deleteWarningTitle(for scope: DeleteScope) -> String {
+        switch scope {
+        case .allData:
+            return "WARNING: Delete All Data"
+        case .littleWinsOnly:
+            return "WARNING: Delete Little Wins Data"
+        case .fulfillmentOnly:
+            return "WARNING: Delete Fulfillment Data"
+        }
+    }
+
+    private func deleteWarningBody(for scope: DeleteScope) -> String {
+        switch scope {
+        case .allData:
+            return "This will permanently delete all your data and it won't be recoverable. If you would like to continue please enter \"1234\" below and click \"Permanently Delete All Data\"."
+        case .littleWinsOnly:
+            return "This will permanently delete all Little Wins data and it won't be recoverable. If you would like to continue please enter \"1234\" below and click \"Permanently Delete Little Wins Data\"."
+        case .fulfillmentOnly:
+            return "This will permanently delete all fulfillment data and it won't be recoverable. If you would like to continue please enter \"1234\" below and click \"Permanently Delete Fulfillment Data\"."
+        }
+    }
+
+    private func deleteConfirmButtonTitle(for scope: DeleteScope) -> String {
+        switch scope {
+        case .allData:
+            return "Permanently Delete All Data"
+        case .littleWinsOnly:
+            return "Permanently Delete Little Wins Data"
+        case .fulfillmentOnly:
+            return "Permanently Delete Fulfillment Data"
+        }
+    }
 
     private var isFulfillmentEmptyState: Bool {
         blankHomepageMode || fulfillments.isEmpty
@@ -533,17 +567,22 @@ struct AccountView: View {
                 }
 
                 Button {
-                    pendingDeleteScope = .fulfillmentOnly
                     deleteAllConfirmationCode = ""
-                    showDeleteAllDataSheet = true
+                    presentedDeleteScope = .littleWinsOnly
+                } label: {
+                    Text("Delete Little Wins Data")
+                        .foregroundStyle(.red)
+                }
+                Button {
+                    deleteAllConfirmationCode = ""
+                    presentedDeleteScope = .fulfillmentOnly
                 } label: {
                     Text("Delete Fulfillment Data")
                         .foregroundStyle(.red)
                 }
                 Button {
-                    pendingDeleteScope = .allData
                     deleteAllConfirmationCode = ""
-                    showDeleteAllDataSheet = true
+                    presentedDeleteScope = .allData
                 } label: {
                     Text("Delete All Data")
                         .foregroundStyle(.red)
@@ -567,24 +606,17 @@ struct AccountView: View {
             devOutcomeWarningGoalAchieved = false
             devActionBlocksWarningOldBlocks = false
         }
-        .sheet(isPresented: $showDeleteAllDataSheet) {
+        .sheet(item: $presentedDeleteScope) { scope in
             NavigationStack {
-                VStack(alignment: .leading, spacing: 14) {
-                    Text(
-                        pendingDeleteScope == .allData
-                            ? "WARNING: Delete All Data"
-                            : "WARNING: Delete Fulfillment Data"
-                    )
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text(deleteWarningTitle(for: scope))
                         .font(.headline.weight(.bold))
                         .foregroundStyle(.red)
                         .frame(maxWidth: .infinity, alignment: .center)
                         .multilineTextAlignment(.center)
 
-                    Text(
-                        pendingDeleteScope == .allData
-                            ? "This will permanently delete all your data and it won't be recoverable. If you would like to continue please enter \"1234\" below and click \"Permanently Delete All Data\"."
-                            : "This will permanently delete all fulfillment data and it won't be recoverable. If you would like to continue please enter \"1234\" below and click \"Permanently Delete Fulfillment Data\"."
-                    )
+                    Text(deleteWarningBody(for: scope))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -596,18 +628,15 @@ struct AccountView: View {
                         .keyboardType(.numberPad)
 
                     VStack(spacing: 10) {
-                        Button(
-                            pendingDeleteScope == .allData
-                                ? "Permanently Delete All Data"
-                                : "Permanently Delete Fulfillment Data",
-                            role: .destructive
-                        ) {
-                            if pendingDeleteScope == .allData {
+                        Button(deleteConfirmButtonTitle(for: scope), role: .destructive) {
+                            if scope == .allData {
                                 permanentlyDeleteAllData()
+                            } else if scope == .littleWinsOnly {
+                                permanentlyDeleteLittleWinsData()
                             } else {
                                 permanentlyDeleteFulfillmentData()
                             }
-                            showDeleteAllDataSheet = false
+                            presentedDeleteScope = nil
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(.red)
@@ -616,7 +645,7 @@ struct AccountView: View {
                         .disabled(deleteAllConfirmationCode != "1234")
 
                         Button("Return") {
-                            showDeleteAllDataSheet = false
+                            presentedDeleteScope = nil
                         }
                         .buttonStyle(.bordered)
                         .tint(.gray)
@@ -626,8 +655,11 @@ struct AccountView: View {
                     .padding(.top, 4)
                 }
                 .padding(16)
+                .scrollDismissesKeyboard(.interactively)
             }
-            .presentationDetents([.height(320)])
+            }
+            .presentationDetents([.medium, .large])
+            .presentationContentInteraction(.scrolls)
             .presentationDragIndicator(.visible)
         }
         .onChange(of: blankHomepageMode) { _, isOn in
@@ -665,6 +697,7 @@ struct AccountView: View {
         deleteAllRows(FulfillmentRolesArchive.self)
         deleteAllRows(FulfillmentFocus.self)
         deleteAllRows(FulfillmentFocusArchive.self)
+        deleteAllRows(LittleWinsDailyCompletion.self)
         deleteAllRows(FulfillmentResources.self)
         deleteAllRows(FulfillmentResourcesArchive.self)
         deleteAllRows(ReplacedFulfillmentCategoryArchive.self)
@@ -720,8 +753,14 @@ struct AccountView: View {
         deleteAllRows(FulfillmentResources.self)
         deleteAllRows(FulfillmentResourcesArchive.self)
         deleteAllRows(ReplacedFulfillmentCategoryArchive.self)
+        deleteAllRows(LittleWinsDailyCompletion.self)
         FulfillmentCategoryTheme.clearFulfillmentPreferences()
         UserDefaults.standard.removeObject(forKey: "fulfillment_start_onboarding_draft_v1")
+        try? context.save()
+    }
+
+    private func permanentlyDeleteLittleWinsData() {
+        deleteAllRows(LittleWinsDailyCompletion.self)
         try? context.save()
     }
 
