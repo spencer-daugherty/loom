@@ -1530,9 +1530,9 @@ struct ContentView: View {
         let allTodayCards = littleWinsCardsIncludingHiddenToday
         let activeCards = cards.filter { !isLittleWinsCardCompleted($0) }
         let completedCards = allTodayCards.filter { isLittleWinsCardCompleted($0) }
-        let hasHiddenLittleWinsToReveal = allTodayCards.contains { card in
-            card.items.contains { !card.activeTodayItemIDs.contains($0.id) }
-        }
+        let visibleItemIDs = Set(cards.flatMap { $0.items.map(\.id) })
+        let allItemIDs = Set(allTodayCards.flatMap { $0.items.map(\.id) })
+        let hasHiddenLittleWinsToReveal = !allItemIDs.subtracting(visibleItemIDs).isEmpty
         let allActiveCardsCompleted = !cards.isEmpty && activeCards.isEmpty
         let todayHasCompletedCard = !completedCards.isEmpty
         let streakShowsTodayComplete = allActiveCardsCompleted && todayHasCompletedCard
