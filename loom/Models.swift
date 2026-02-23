@@ -293,17 +293,29 @@ final class LittleWinsDailyCompletion {
   var focusId: UUID
   var day: Date
   var completedAt: Date
+  var categoryIdSnapshot: UUID?
+  var categoryTitleSnapshot: String?
+  var focusTitleSnapshot: String?
+  var categoryFocusCountSnapshot: Int?
 
   init(
     id: UUID = .init(),
     focusId: UUID,
     day: Date,
-    completedAt: Date = .now
+    completedAt: Date = .now,
+    categoryIdSnapshot: UUID? = nil,
+    categoryTitleSnapshot: String? = nil,
+    focusTitleSnapshot: String? = nil,
+    categoryFocusCountSnapshot: Int? = nil
   ) {
     self.id = id
     self.focusId = focusId
     self.day = day
     self.completedAt = completedAt
+    self.categoryIdSnapshot = categoryIdSnapshot
+    self.categoryTitleSnapshot = categoryTitleSnapshot
+    self.focusTitleSnapshot = focusTitleSnapshot
+    self.categoryFocusCountSnapshot = categoryFocusCountSnapshot
   }
 }
 

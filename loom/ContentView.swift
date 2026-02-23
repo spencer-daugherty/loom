@@ -47,6 +47,8 @@ struct ContentView: View {
     @State private var measuredHeaderLogoWidth: CGFloat = 118
     @State private var littleWinsCardOrder: [UUID] = []
     @State private var littleWinsCompletedFocusIDs: Set<UUID> = []
+    @State private var littleWinsCompletionStateHydrated = false
+    @State private var littleWinsCalendarPreviewDate: Date? = nil
     @State private var littleWinsDeckDragX: CGFloat = 0
     @State private var littleWinsDeckIsDragging = false
     @State private var littleWinsSuppressRowTapUntil: Date = .distantPast
@@ -465,6 +467,10 @@ struct ContentView: View {
         fulfillments.first { $0.category == categoryTitle }
     }
 
+    private func recordForCategoryID(_ categoryID: UUID) -> Fulfillment? {
+        fulfillments.first { $0.category_id == categoryID }
+    }
+
     private func rolesForCategory(_ categoryTitle: String) -> [FulfillmentRoles] {
         guard let rec = recordForCategory(categoryTitle) else { return [] }
         return roles.filter { $0.category_id == rec.category_id }
@@ -483,6 +489,33 @@ struct ContentView: View {
         let cardColor: Color
         let titleColor: Color
         let items: [FulfillmentFocus]
+    }
+
+    private struct LittleWinsHistoricalCompletionItem: Identifiable {
+        let id: UUID
+        let focusId: UUID
+        let categoryId: UUID?
+        let categoryTitle: String
+        let focusTitle: String
+        let completedAt: Date
+        let categoryFocusCountSnapshot: Int?
+    }
+
+    private struct LittleWinsHistoricalDayCategory: Identifiable {
+        let id: String
+        let categoryId: UUID?
+        let categoryTitle: String
+        let items: [LittleWinsHistoricalCompletionItem]
+        let requiredFocusCount: Int?
+
+        var completedFocusCount: Int {
+            Set(items.map(\.focusId)).count
+        }
+
+        var isCompletedCard: Bool {
+            guard let requiredFocusCount, requiredFocusCount > 0 else { return false }
+            return completedFocusCount >= requiredFocusCount
+        }
     }
 
     private var littleWinsCards: [LittleWinsCardData] {
@@ -533,7 +566,10 @@ struct ContentView: View {
     }
 
     private func isLittleWinsCardCompleted(_ card: LittleWinsCardData) -> Bool {
-        !card.items.isEmpty && card.items.allSatisfy { littleWinsCompletedFocusIDs.contains($0.id) }
+        let completedFocusIDs = littleWinsCompletionStateHydrated
+            ? littleWinsCompletedFocusIDs
+            : littleWinsCompletedFocusIDsFromStoreToday
+        return !card.items.isEmpty && card.items.allSatisfy { completedFocusIDs.contains($0.id) }
     }
 
     private var hasIncompleteLittleWinsCards: Bool {
@@ -544,16 +580,121 @@ struct ContentView: View {
         Calendar.current.startOfDay(for: Date())
     }
 
-    private func syncLittleWinsCompletionStateFromStore() {
+    private func currentLittleWinsFocusCount(for categoryID: UUID) -> Int? {
+        let count = foci.filter {
+            $0.category_id == categoryID &&
+            !$0.activity.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }.count
+        return count > 0 ? count : nil
+    }
+
+    private func littleWinsCompletionRecords(on date: Date) -> [LittleWinsDailyCompletion] {
         let calendar = Calendar.current
-        let ids = Set(
+        return littleWinsDailyCompletions.filter { calendar.isDate($0.day, inSameDayAs: date) }
+    }
+
+    private func littleWinsHistoricalCompletionItems(on date: Date) -> [LittleWinsHistoricalCompletionItem] {
+        let records = littleWinsCompletionRecords(on: date)
+        guard !records.isEmpty else { return [] }
+
+        var latestByFocusID: [UUID: LittleWinsHistoricalCompletionItem] = [:]
+        let sorted = records.sorted { $0.completedAt < $1.completedAt }
+
+        for record in sorted {
+            let currentFocus = foci.first { $0.id == record.focusId }
+            let resolvedCategoryID = record.categoryIdSnapshot ?? currentFocus?.category_id
+            let snapshotCategoryTitle = record.categoryTitleSnapshot?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let snapshotFocusTitle = record.focusTitleSnapshot?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let currentCategoryTitle = resolvedCategoryID.flatMap { recordForCategoryID($0)?.category }
+            let currentFocusTitle = currentFocus?.activity.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            let categoryTitle = (snapshotCategoryTitle?.isEmpty == false ? snapshotCategoryTitle : nil)
+                ?? currentCategoryTitle
+                ?? "Archived Little Wins"
+            let focusTitle = (snapshotFocusTitle?.isEmpty == false ? snapshotFocusTitle : nil)
+                ?? (currentFocusTitle?.isEmpty == false ? currentFocusTitle : nil)
+                ?? "Completed Action"
+            let requiredCount = record.categoryFocusCountSnapshot
+                ?? resolvedCategoryID.flatMap { currentLittleWinsFocusCount(for: $0) }
+
+            latestByFocusID[record.focusId] = LittleWinsHistoricalCompletionItem(
+                id: record.id,
+                focusId: record.focusId,
+                categoryId: resolvedCategoryID,
+                categoryTitle: categoryTitle,
+                focusTitle: focusTitle,
+                completedAt: record.completedAt,
+                categoryFocusCountSnapshot: requiredCount
+            )
+        }
+
+        return latestByFocusID.values.sorted { lhs, rhs in
+            if lhs.completedAt == rhs.completedAt {
+                return lhs.focusTitle.localizedCaseInsensitiveCompare(rhs.focusTitle) == .orderedAscending
+            }
+            return lhs.completedAt < rhs.completedAt
+        }
+    }
+
+    private func littleWinsHistoricalCategories(on date: Date) -> [LittleWinsHistoricalDayCategory] {
+        let items = littleWinsHistoricalCompletionItems(on: date)
+        guard !items.isEmpty else { return [] }
+
+        let grouped = Dictionary(grouping: items) { item in
+            item.categoryId?.uuidString ?? "title:\(item.categoryTitle.lowercased())"
+        }
+
+        return grouped.compactMap { key, groupItems in
+            let sortedItems = groupItems.sorted { $0.completedAt < $1.completedAt }
+            let latestRequiredCount = sortedItems.compactMap(\.categoryFocusCountSnapshot).max()
+            let first = sortedItems.first
+            return LittleWinsHistoricalDayCategory(
+                id: key,
+                categoryId: first?.categoryId,
+                categoryTitle: first?.categoryTitle ?? "Archived Little Wins",
+                items: sortedItems,
+                requiredFocusCount: latestRequiredCount
+            )
+        }
+        .sorted { lhs, rhs in
+            let lhsDate = lhs.items.last?.completedAt ?? .distantPast
+            let rhsDate = rhs.items.last?.completedAt ?? .distantPast
+            if lhsDate == rhsDate {
+                return lhs.categoryTitle.localizedCaseInsensitiveCompare(rhs.categoryTitle) == .orderedAscending
+            }
+            return lhsDate > rhsDate
+        }
+    }
+
+    private func littleWinsHistoricalCompletedCardSnapshots(on date: Date) -> [LittleWinsCardData] {
+        littleWinsHistoricalCategories(on: date)
+            .filter(\.isCompletedCard)
+            .map { category in
+                LittleWinsCardData(
+                    id: category.categoryId ?? UUID(),
+                    categoryTitle: category.categoryTitle,
+                    cardColor: FulfillmentCategoryTheme.lightColor(for: category.categoryTitle),
+                    titleColor: FulfillmentCategoryTheme.color(for: category.categoryTitle),
+                    items: []
+                )
+            }
+    }
+
+    private var littleWinsCompletedFocusIDsFromStoreToday: Set<UUID> {
+        let calendar = Calendar.current
+        return Set(
             littleWinsDailyCompletions
                 .filter { calendar.isDate($0.day, inSameDayAs: todayStartDate) }
                 .map(\.focusId)
         )
+    }
+
+    private func syncLittleWinsCompletionStateFromStore() {
+        let ids = littleWinsCompletedFocusIDsFromStoreToday
         if ids != littleWinsCompletedFocusIDs {
             littleWinsCompletedFocusIDs = ids
         }
+        littleWinsCompletionStateHydrated = true
     }
 
     private func persistLittleWinToggle(focusId: UUID, isCompleted: Bool) {
@@ -567,11 +708,20 @@ struct ContentView: View {
         } else if littleWinsDailyCompletions.first(where: {
             $0.focusId == focusId && calendar.isDate($0.day, inSameDayAs: todayStartDate)
         }) == nil {
+            let focus = foci.first { $0.id == focusId }
+            let categoryID = focus?.category_id
+            let categoryTitle = categoryID.flatMap { recordForCategoryID($0)?.category }
+            let focusTitle = focus?.activity.trimmingCharacters(in: .whitespacesAndNewlines)
+            let categoryFocusCount = categoryID.flatMap { currentLittleWinsFocusCount(for: $0) }
             modelContext.insert(
                 LittleWinsDailyCompletion(
                     focusId: focusId,
                     day: todayStartDate,
-                    completedAt: .now
+                    completedAt: .now,
+                    categoryIdSnapshot: categoryID,
+                    categoryTitleSnapshot: categoryTitle,
+                    focusTitleSnapshot: focusTitle,
+                    categoryFocusCountSnapshot: categoryFocusCount
                 )
             )
         }
@@ -892,6 +1042,7 @@ struct ContentView: View {
             let cards = littleWinsCards
             let activeCards = cards.filter { !isLittleWinsCardCompleted($0) }
             let completedCards = cards.filter { isLittleWinsCardCompleted($0) }
+            let isCalendarPreviewActive = littleWinsCalendarPreviewDate != nil
 
             Group {
                 if cards.isEmpty {
@@ -919,6 +1070,8 @@ struct ContentView: View {
                     )
                 }
             }
+            .opacity(isCalendarPreviewActive ? 0 : 1)
+            .animation(.easeInOut(duration: 0.18), value: isCalendarPreviewActive)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .safeAreaInset(edge: .bottom, spacing: 10) {
                 if !cards.isEmpty {
@@ -937,6 +1090,20 @@ struct ContentView: View {
                     .background(Color(.systemGroupedBackground))
                 }
             }
+            .overlay {
+                if let previewDate = littleWinsCalendarPreviewDate {
+                    let previewCategories = littleWinsHistoricalCategories(on: previewDate)
+                    if !previewCategories.isEmpty {
+                        littleWinsCalendarFullScreenPreview(
+                            date: previewDate,
+                            categories: previewCategories,
+                            containerSize: proxy.size
+                        )
+                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                        .zIndex(60)
+                    }
+                }
+            }
         }
         .contentShape(Rectangle())
         .onAppear(perform: syncLittleWinsCompletionStateFromStore)
@@ -946,6 +1113,16 @@ struct ContentView: View {
         }
         .onChange(of: littleWinsSourceCardIDs) { _, _ in
             syncLittleWinsCardOrder()
+        }
+        .onChange(of: homePageIndex) { _, _ in
+            if littleWinsCalendarPreviewDate != nil {
+                withAnimation(.easeOut(duration: 0.12)) {
+                    littleWinsCalendarPreviewDate = nil
+                }
+            }
+        }
+        .onDisappear {
+            littleWinsCalendarPreviewDate = nil
         }
     }
 
@@ -1113,9 +1290,16 @@ struct ContentView: View {
         return HStack(spacing: 8) {
             ForEach(dates, id: \.self) { date in
                 let isToday = calendar.isDateInToday(date)
+                let isHeldPreviewDate = calendar.isDate(date, inSameDayAs: littleWinsCalendarPreviewDate ?? .distantPast)
                 let completedCardsForDate = isToday ? completedTodayCards : littleWinsCompletedCards(on: date)
+                let historicalPreviewCategories = littleWinsHistoricalCategories(on: date)
+                let hasHistoricalPreview = !historicalPreviewCategories.isEmpty
+                let canShowHoldPreview = !completedCardsForDate.isEmpty && hasHistoricalPreview
                 let miniCardWidth: CGFloat = 28
                 let miniCardHeight: CGFloat = miniCardWidth * 1.42
+                let visibleStackCount = min(3, completedCardsForDate.count)
+                let miniStackLiftPerCard = min(6, max(4, miniCardHeight * 0.14))
+                let miniStackTopOverflow = CGFloat(max(0, visibleStackCount - 1)) * miniStackLiftPerCard
                 VStack(spacing: 3) {
                     if !completedCardsForDate.isEmpty {
                         littleWinsCompletedTodayMiniCardStack(
@@ -1151,26 +1335,38 @@ struct ContentView: View {
                 .padding(.top, 6)
                 .padding(.bottom, 1)
                 .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(isToday ? Color.primary.opacity(0.08) : Color.clear)
+                    ZStack {
+                        if isHeldPreviewDate {
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(Color(.systemGray5))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .stroke(Color.gray.opacity(0.35), lineWidth: 1)
+                                )
+                                .padding(.top, -miniStackTopOverflow)
+                                .allowsHitTesting(false)
+                        }
+
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(isToday && !isHeldPreviewDate ? Color.primary.opacity(0.08) : Color.clear)
+                            .padding(.top, isToday ? -miniStackTopOverflow : 0)
+                    }
                 )
+                .onLongPressGesture(minimumDuration: 0.18, maximumDistance: 36, pressing: { isPressing in
+                    guard canShowHoldPreview else { return }
+                    withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82, blendDuration: 0.1)) {
+                        littleWinsCalendarPreviewDate = isPressing ? calendar.startOfDay(for: date) : nil
+                    }
+                }, perform: {})
             }
         }
         .padding(.top, 2)
     }
 
     private func littleWinsCompletedCards(on date: Date) -> [LittleWinsCardData] {
-        let calendar = Calendar.current
-        let completedFocusIDsForDay = Set(
-            littleWinsDailyCompletions
-                .filter { calendar.isDate($0.day, inSameDayAs: date) }
-                .map(\.focusId)
-        )
-
-        guard !completedFocusIDsForDay.isEmpty else { return [] }
-        return littleWinsCards.filter { card in
-            !card.items.isEmpty && card.items.allSatisfy { completedFocusIDsForDay.contains($0.id) }
-        }
+        let historicalCards = littleWinsHistoricalCompletedCardSnapshots(on: date)
+        guard !historicalCards.isEmpty else { return [] }
+        return historicalCards
     }
 
     private func littleWinsCompletedTodayMiniCardStack(
@@ -1180,6 +1376,7 @@ struct ContentView: View {
         usesMatchedGeometry: Bool = true
     ) -> some View {
         let visible = Array(cards.suffix(3))
+        let stackLiftPerCard = min(6, max(4, cardHeight * 0.14))
         return ZStack {
             ForEach(Array(visible.enumerated()), id: \.element.id) { index, card in
                 let depth = CGFloat(visible.count - 1 - index)
@@ -1191,7 +1388,7 @@ struct ContentView: View {
                         littleWinsCompletedMiniCard(card, width: cardWidth, height: cardHeight)
                     }
                 }
-                    .offset(y: -(depth * 3))
+                    .offset(y: -(depth * stackLiftPerCard))
                     .zIndex(Double(index))
             }
         }
@@ -1212,6 +1409,182 @@ struct ContentView: View {
                     .stroke(card.titleColor, style: StrokeStyle(lineWidth: 1.8))
                     .padding(4)
             }
+    }
+
+    private func littleWinsCalendarFullScreenPreview(
+        date: Date,
+        categories: [LittleWinsHistoricalDayCategory],
+        containerSize: CGSize
+    ) -> some View {
+        let horizontalPadding: CGFloat = 14
+        let verticalPadding: CGFloat = 12
+        let gridSpacing: CGFloat = 12
+        let availableWidth = max(0, containerSize.width - (horizontalPadding * 2))
+        let availableHeight = max(0, containerSize.height - (verticalPadding * 2) - 64)
+        let cardWidth = max(120, (availableWidth - gridSpacing) / 2)
+        let cardHeightCap = max(140, (availableHeight - gridSpacing) / 2)
+        let cardHeight = min(cardWidth * 1.42, cardHeightCap)
+        let completedCardCount = categories.filter(\.isCompletedCard).count
+
+        return ZStack {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(date.formatted(.dateTime.weekday(.wide)))
+                            .font(.headline.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Text(date.formatted(.dateTime.month(.abbreviated).day()))
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(.primary)
+                    }
+                    Spacer(minLength: 0)
+                    Text("\(completedCardCount) card\(completedCardCount == 1 ? "" : "s") completed")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 4)
+
+                ScrollView(.vertical, showsIndicators: false) {
+                    LazyVGrid(
+                        columns: [
+                            GridItem(.flexible(), spacing: gridSpacing, alignment: .top),
+                            GridItem(.flexible(), spacing: gridSpacing, alignment: .top)
+                        ],
+                        spacing: gridSpacing
+                    ) {
+                        ForEach(categories) { category in
+                            littleWinsHistoricalPreviewCardView(
+                                category: category,
+                                width: cardWidth,
+                                height: cardHeight
+                            )
+                            .transition(.scale(scale: 0.92).combined(with: .opacity))
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.bottom, 6)
+                }
+            }
+            .padding(.horizontal, horizontalPadding)
+            .padding(.top, verticalPadding)
+            .padding(.bottom, 6)
+        }
+        .allowsHitTesting(false)
+    }
+
+    private func littleWinsHistoricalPreviewCardView(
+        category: LittleWinsHistoricalDayCategory,
+        width: CGFloat,
+        height: CGFloat
+    ) -> some View {
+        let baseWidth: CGFloat = 300
+        let baseHeight: CGFloat = baseWidth * 1.42
+        let scale = min(width / baseWidth, height / baseHeight)
+        return littleWinsHistoricalPreviewCardBaseView(
+            category: category,
+            width: baseWidth,
+            height: baseHeight
+        )
+        .scaleEffect(scale, anchor: .top)
+        .frame(width: width, height: height, alignment: .top)
+    }
+
+    private func littleWinsHistoricalPreviewCardBaseView(
+        category: LittleWinsHistoricalDayCategory,
+        width: CGFloat,
+        height: CGFloat
+    ) -> some View {
+        let fixedPrimaryText = Color.black.opacity(0.82)
+        let cardColor = FulfillmentCategoryTheme.lightColor(for: category.categoryTitle)
+        let titleColor = FulfillmentCategoryTheme.color(for: category.categoryTitle)
+        let radarSideCount = max(3, min(7, fulfillmentMetrics.count))
+
+        return VStack(spacing: 0) {
+            Text(category.categoryTitle)
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(titleColor)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+            .padding(.horizontal, 18)
+            .padding(.top, 10)
+            .padding(.bottom, 18)
+
+            GeometryReader { middleGeo in
+                VStack {
+                    Spacer(minLength: 0)
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(category.items.prefix(7)) { item in
+                            littleWinsHistoricalPreviewItemRow(
+                                title: item.focusTitle,
+                                titleColor: titleColor,
+                                fixedPrimaryText: fixedPrimaryText,
+                                iconSize: 26,
+                                fontSize: 36
+                            )
+                        }
+                    }
+
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 38)
+                .padding(.vertical, 14)
+                .frame(maxWidth: .infinity, minHeight: middleGeo.size.height, alignment: .center)
+                .clipped()
+            }
+
+            Spacer(minLength: 0)
+
+            HStack {
+                Spacer()
+                Text("Little Wins")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(fixedPrimaryText)
+                Spacer()
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 10)
+            .padding(.bottom, 14)
+        }
+        .frame(width: width, height: height, alignment: .top)
+        .background {
+            littleWinsCardBackground(
+                cardColor: cardColor,
+                titleColor: titleColor,
+                patternText: category.categoryTitle,
+                width: width,
+                height: height,
+                radarSideCount: radarSideCount
+            )
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .shadow(color: Color.black.opacity(0.10), radius: 10, x: 0, y: 6)
+    }
+
+    private func littleWinsHistoricalPreviewItemRow(
+        title: String,
+        titleColor: Color,
+        fixedPrimaryText: Color,
+        iconSize: CGFloat,
+        fontSize: CGFloat
+    ) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: iconSize, weight: .semibold))
+                .foregroundStyle(titleColor)
+                .padding(.top, 1)
+                .frame(width: 30, alignment: .center)
+
+            Text(title)
+                .font(.system(size: fontSize, weight: .semibold))
+                .foregroundStyle(fixedPrimaryText)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .lineLimit(2)
+                .minimumScaleFactor(0.55)
+                .allowsTightening(true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func lastSevenDatesEndingToday() -> [Date] {
