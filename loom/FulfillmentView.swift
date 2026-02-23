@@ -1753,6 +1753,7 @@ private struct LittleWinsManagerSheetView: View {
     @State private var isDeleteMode = false
     @State private var selectedIDsForDelete: Set<UUID> = []
     @State private var editorTarget: EditorTarget?
+    @State private var showDeleteGuardHint = false
 
     private let weekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 
@@ -1858,6 +1859,15 @@ private struct LittleWinsManagerSheetView: View {
                 autoFocusTextField: target.autoFocus
             )
         }
+        .overlay(alignment: .bottom) {
+            if showDeleteGuardHint {
+                littleWinsDeleteGuardHintCard
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 10)
+            }
+        }
+        .animation(.easeInOut(duration: 0.18), value: showDeleteGuardHint)
     }
 
     private func beginEditing(_ focus: FulfillmentFocus) {
@@ -1901,6 +1911,11 @@ private struct LittleWinsManagerSheetView: View {
 
     private func deleteSelected() {
         let targets = littleWins.filter { selectedIDsForDelete.contains($0.id) }
+        guard !targets.isEmpty else { return }
+        if foci.count - targets.count < 1 {
+            showMinimumLittleWinsGuardHint()
+            return
+        }
         for focus in targets {
             modelContext.insert(
                 FulfillmentFocusArchive(
@@ -1917,6 +1932,37 @@ private struct LittleWinsManagerSheetView: View {
         try? modelContext.save()
         selectedIDsForDelete.removeAll()
         isDeleteMode = false
+    }
+
+    private var littleWinsDeleteGuardHintCard: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.white)
+            Text("Keep at least 1 Little Win across Fulfillment Areas.")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white)
+                .multilineTextAlignment(.leading)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.red.opacity(0.92))
+        )
+        .shadow(color: Color.black.opacity(0.18), radius: 8, x: 0, y: 4)
+        .allowsHitTesting(false)
+    }
+
+    private func showMinimumLittleWinsGuardHint() {
+        withAnimation(.easeInOut(duration: 0.18)) {
+            showDeleteGuardHint = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                showDeleteGuardHint = false
+            }
+        }
     }
 }
 
