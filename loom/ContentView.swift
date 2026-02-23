@@ -32,6 +32,7 @@ struct ContentView: View {
     @State private var pressedCategoryTitle: String? = nil
     @State private var fulfillmentRadarSelectedIndex: Int = 0
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
     @Namespace private var graphNamespace
     @Namespace private var pageIndicatorNamespace
     @Namespace private var littleWinsCompletionNamespace
@@ -56,6 +57,9 @@ struct ContentView: View {
     @State private var littleWinsShowHiddenPlaceholder = false
     @State private var isPresentingLittleWinsManagerSheet = false
     @State private var littleWinsScheduleStoreRevision = 0
+    @State private var littleWinsIntegrationStoreRevision = 0
+    @State private var littleWinsIntegrationDetailTarget: LittleWinsIntegrationDetailTarget? = nil
+    @State private var littleWinsAppleHealthRefreshInFlight = false
     @State private var littleWinsDeckDragX: CGFloat = 0
     @State private var littleWinsDeckIsDragging = false
     @State private var littleWinsSuppressRowTapUntil: Date = .distantPast
@@ -465,6 +469,50 @@ struct ContentView: View {
         lightenedColor(from: categoryBaseUIColor(for: category))
     }
 
+    private struct ObjectivesCardListRow: Identifiable {
+        enum Kind {
+            case outcome(Outcomes)
+            case upcomingOutcome(Outcomes, startsInDays: Int)
+        }
+
+        let id: String
+        let kind: Kind
+    }
+
+    private func objectivesCardPreviewRows(limit: Int = 4) -> [ObjectivesCardListRow] {
+        let currentDate = Date()
+        let activeOutcomes = outcomes.filter { $0.start <= currentDate }
+        let activeOutcomeRows = activeOutcomes.prefix(limit).map { outcome in
+            ObjectivesCardListRow(
+                id: "outcome-\(outcome.outcome_id.uuidString)",
+                kind: .outcome(outcome)
+            )
+        }
+        let remainingSlots = max(0, limit - activeOutcomeRows.count)
+        guard remainingSlots > 0 else { return Array(activeOutcomeRows) }
+
+        let calendar = Calendar.current
+        let startOfToday = calendar.startOfDay(for: currentDate)
+        let upcomingOutcomes = outcomes
+            .filter { calendar.startOfDay(for: $0.start) > startOfToday }
+            .sorted { lhs, rhs in
+                let lhsStart = calendar.startOfDay(for: lhs.start)
+                let rhsStart = calendar.startOfDay(for: rhs.start)
+                if lhsStart != rhsStart { return lhsStart < rhsStart }
+                return lhs.rank < rhs.rank
+            }
+            .prefix(remainingSlots)
+            .map { outcome in
+                let daysToStart = max(0, calendar.dateComponents([.day], from: currentDate, to: outcome.start).day ?? 0)
+                return ObjectivesCardListRow(
+                    id: "upcoming-outcome-\(outcome.outcome_id.uuidString)",
+                    kind: .upcomingOutcome(outcome, startsInDays: daysToStart)
+                )
+            }
+
+        return Array(activeOutcomeRows) + upcomingOutcomes
+    }
+
     private func emotionKey(for label: String) -> String {
         // Map display label used in UI to the stored emotion key
         switch label {
@@ -518,6 +566,11 @@ struct ContentView: View {
         let activeTodayItemIDs: Set<UUID>
     }
 
+    private struct LittleWinsIntegrationDetailTarget: Identifiable {
+        let focusID: UUID
+        var id: UUID { focusID }
+    }
+
     private struct LittleWinsHistoricalCompletionItem: Identifiable {
         let id: UUID
         let focusId: UUID
@@ -552,6 +605,16 @@ struct ContentView: View {
 
     private func littleWinsScheduleRule(for focus: FulfillmentFocus) -> LittleWinsScheduleRule {
         LittleWinsScheduleStore.rule(for: focus.id)
+    }
+
+    private func littleWinsIntegrationConfig(for focus: FulfillmentFocus) -> LittleWinsIntegrationConfig? {
+        _ = littleWinsIntegrationStoreRevision
+        return LittleWinsIntegrationStore.config(for: focus.id)
+    }
+
+    private func isLittleWinIntegrated(_ focus: FulfillmentFocus) -> Bool {
+        guard let config = littleWinsIntegrationConfig(for: focus) else { return false }
+        return config.isEnabled
     }
 
     private func isLittleWinFocusActive(_ focus: FulfillmentFocus, on date: Date) -> Bool {
@@ -822,6 +885,260 @@ struct ContentView: View {
             littleWinsCompletedFocusIDs = ids
         }
         littleWinsCompletionStateHydrated = true
+    }
+
+    private func syncIntegratedLittleWinsCompletionsFromProgress() {
+        _ = littleWinsIntegrationStoreRevision
+        let calendar = Calendar.current
+        var insertedAny = false
+
+        for focus in foci {
+            let title = focus.activity.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty else { continue }
+            guard let config = LittleWinsIntegrationStore.config(for: focus.id), config.isEnabled, config.isGoalAchieved else { continue }
+
+            let alreadyCompletedToday = littleWinsDailyCompletions.contains {
+                $0.focusId == focus.id && calendar.isDate($0.day, inSameDayAs: todayStartDate)
+            }
+            guard !alreadyCompletedToday else { continue }
+
+            let categoryID = focus.category_id
+            let categoryTitle = recordForCategoryID(categoryID)?.category
+            let categoryFocusCount = currentLittleWinsFocusCount(for: categoryID, on: todayStartDate)
+            modelContext.insert(
+                LittleWinsDailyCompletion(
+                    focusId: focus.id,
+                    day: todayStartDate,
+                    completedAt: .now,
+                    categoryIdSnapshot: categoryID,
+                    categoryTitleSnapshot: categoryTitle,
+                    focusTitleSnapshot: title,
+                    categoryFocusCountSnapshot: categoryFocusCount
+                )
+            )
+            insertedAny = true
+        }
+
+        if insertedAny {
+            try? modelContext.save()
+            syncLittleWinsCompletionStateFromStore()
+        }
+    }
+
+    private func insertIntegratedLittleWinCompletionIfNeeded(
+        focus: FulfillmentFocus,
+        on day: Date,
+        completionTimestamp: Date
+    ) -> Bool {
+        let calendar = Calendar.current
+        let dayStart = calendar.startOfDay(for: day)
+        guard isLittleWinFocusActive(focus, on: dayStart) else { return false }
+
+        let exists = littleWinsDailyCompletions.contains {
+            $0.focusId == focus.id && calendar.isDate($0.day, inSameDayAs: dayStart)
+        }
+        guard !exists else { return false }
+
+        let title = focus.activity.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return false }
+
+        let categoryID = focus.category_id
+        let categoryTitle = recordForCategoryID(categoryID)?.category
+        let categoryFocusCount = currentLittleWinsFocusCount(for: categoryID, on: dayStart)
+
+        modelContext.insert(
+            LittleWinsDailyCompletion(
+                focusId: focus.id,
+                day: dayStart,
+                completedAt: completionTimestamp,
+                categoryIdSnapshot: categoryID,
+                categoryTitleSnapshot: categoryTitle,
+                focusTitleSnapshot: title,
+                categoryFocusCountSnapshot: categoryFocusCount
+            )
+        )
+        return true
+    }
+
+    private func refreshAppleHealthIntegratedLittleWinsProgressIfNeeded() {
+        guard !littleWinsAppleHealthRefreshInFlight else { return }
+
+        let targets: [(focus: FulfillmentFocus, config: LittleWinsIntegrationConfig)] = foci.compactMap { focus in
+            let title = focus.activity.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty else { return nil }
+            guard let config = LittleWinsIntegrationStore.config(for: focus.id) else { return nil }
+            guard config.isEnabled, config.isConnected, config.source == .appleHealth else { return nil }
+            return (focus, config)
+        }
+
+        guard !targets.isEmpty else { return }
+        littleWinsAppleHealthRefreshInFlight = true
+        let calendar = Calendar.current
+        let lookbackDates: [Date] = (0..<7).compactMap { offset in
+            calendar.date(byAdding: .day, value: -offset, to: todayStartDate)
+        }
+        var insertedAny = false
+        var savedAnyConfig = false
+
+        func refreshNext(_ index: Int) {
+            if index >= targets.count {
+                if insertedAny {
+                    try? modelContext.save()
+                    syncLittleWinsCompletionStateFromStore()
+                }
+                littleWinsAppleHealthRefreshInFlight = false
+                if savedAnyConfig {
+                    littleWinsIntegrationStoreRevision &+= 1
+                }
+                syncIntegratedLittleWinsCompletionsFromProgress()
+                return
+            }
+
+            let target = targets[index]
+            var progressByDayStart: [Date: Double] = [:]
+
+            func refreshDay(_ dayIndex: Int) {
+                if dayIndex >= lookbackDates.count {
+                    if let todayProgress = progressByDayStart[todayStartDate] {
+                        var updated = target.config
+                        let normalizedProgress = max(0, todayProgress)
+                        if abs(updated.progressValue - normalizedProgress) > 0.0001 {
+                            updated.progressValue = normalizedProgress
+                            updated.updatedAtUnix = Date().timeIntervalSince1970
+                            LittleWinsIntegrationStore.setConfig(updated, for: target.focus.id)
+                            savedAnyConfig = true
+                        }
+                    }
+
+                    for day in lookbackDates {
+                        let dayStart = calendar.startOfDay(for: day)
+                        guard let progress = progressByDayStart[dayStart] else { continue }
+                        guard progress >= target.config.targetValue else { continue }
+                        let completionStamp = (dayIndexForDate(dayStart, in: lookbackDates) == 0)
+                            ? Date()
+                            : (calendar.date(bySettingHour: 23, minute: 59, second: 0, of: dayStart) ?? dayStart)
+                        if insertIntegratedLittleWinCompletionIfNeeded(
+                            focus: target.focus,
+                            on: dayStart,
+                            completionTimestamp: completionStamp
+                        ) {
+                            insertedAny = true
+                        }
+                    }
+
+                    refreshNext(index + 1)
+                    return
+                }
+
+                let day = lookbackDates[dayIndex]
+                LittleWinsHealthKitBridge.readProgress(for: target.config.metric, on: day) { result in
+                    DispatchQueue.main.async {
+                        if case .success(let progress) = result {
+                            progressByDayStart[calendar.startOfDay(for: day)] = max(0, progress)
+                        }
+                        refreshDay(dayIndex + 1)
+                    }
+                }
+            }
+
+            refreshDay(0)
+        }
+
+        refreshNext(0)
+    }
+
+    private func dayIndexForDate(_ date: Date, in dates: [Date]) -> Int? {
+        let calendar = Calendar.current
+        return dates.firstIndex { calendar.isDate($0, inSameDayAs: date) }
+    }
+
+    private func littleWinsIntegrationDetailRows(for focus: FulfillmentFocus) -> [(String, String)] {
+        guard let config = littleWinsIntegrationConfig(for: focus) else { return [] }
+        let numberFormatter: NumberFormatter = {
+            let formatter = NumberFormatter()
+            formatter.numberStyle = .decimal
+            formatter.groupingSeparator = Locale.current.groupingSeparator
+            formatter.usesGroupingSeparator = true
+            formatter.maximumFractionDigits = (config.metric == .sleepHours) ? 1 : 0
+            formatter.minimumFractionDigits = 0
+            return formatter
+        }()
+        let formattedProgress = numberFormatter.string(from: NSNumber(value: config.progressValue)) ?? "\(config.progressValue)"
+        let formattedTarget = numberFormatter.string(from: NSNumber(value: config.targetValue)) ?? "\(config.targetValue)"
+        let progressText: String
+        progressText = "\(formattedProgress) / \(formattedTarget) \(config.metric.unitLabel)"
+        let statusText = config.isGoalAchieved ? "Goal achieved" : "In progress"
+        let connectedText = config.isConnected ? "Connected" : "Not connected"
+        let lastSyncText: String? = {
+            guard config.updatedAtUnix > 0 else { return nil }
+            let formatter = DateFormatter()
+            formatter.dateStyle = .none
+            formatter.timeStyle = .short
+            return formatter.string(from: Date(timeIntervalSince1970: config.updatedAtUnix))
+        }()
+
+        var rows: [(String, String)] = [
+            ("Source", config.source.title),
+            ("Metric", config.metric.title),
+            ("Progress", progressText),
+            ("Status", statusText),
+            ("Connection", connectedText)
+        ]
+        if config.source == .screenTime,
+           let summary = config.screenTimeSelectionSummary,
+           !summary.isEmpty {
+            rows.append(("Selection", summary))
+        }
+        if let lastSyncText {
+            rows.append(("Last sync", lastSyncText))
+        }
+        return rows
+    }
+
+    @ViewBuilder
+    private func littleWinsIntegratedIndicator(
+        config: LittleWinsIntegrationConfig,
+        isCompleted: Bool,
+        isDashedHiddenIndicator: Bool,
+        titleColor: Color,
+        fixedSecondaryText: Color
+    ) -> some View {
+        let progress = CGFloat(config.progressFraction)
+        ZStack {
+            Circle()
+                .stroke((isDashedHiddenIndicator ? Color.blue : fixedSecondaryText), lineWidth: 2)
+                .frame(width: 22, height: 22)
+
+            if progress > 0 && !isCompleted {
+                Circle()
+                    .trim(from: 0, to: progress)
+                    .stroke(titleColor, style: StrokeStyle(lineWidth: 2.4, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .frame(width: 22, height: 22)
+            }
+
+            if isDashedHiddenIndicator && !isCompleted {
+                Circle()
+                    .stroke(style: StrokeStyle(lineWidth: 2, dash: [4]))
+                    .foregroundStyle(.blue)
+                    .frame(width: 22, height: 22)
+            }
+
+            if isCompleted {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 26, weight: .regular))
+                    .foregroundStyle(titleColor)
+            } else {
+                Image(systemName: "link")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(isDashedHiddenIndicator ? .blue : fixedSecondaryText)
+            }
+        }
+        .frame(width: 30, alignment: .center)
+    }
+
+    private func presentLittleWinsIntegrationDetails(for item: FulfillmentFocus) {
+        littleWinsIntegrationDetailTarget = .init(focusID: item.id)
     }
 
     private func persistLittleWinToggle(focusId: UUID, isCompleted: Bool) {
@@ -1167,73 +1484,116 @@ struct ContentView: View {
 
     private func littleWinsMiddlePage() -> some View {
         GeometryReader { proxy in
-            let horizontalPadding: CGFloat = 16
-            let cardWidth = max(0, proxy.size.width - (horizontalPadding * 2))
-            let cardHeight = min(max(cardWidth * 1.42, 360), max(380, proxy.size.height - 36))
-            let cards = littleWinsCards
-            let allTodayCards = littleWinsCardsIncludingHiddenToday
-            let activeCards = cards.filter { !isLittleWinsCardCompleted($0) }
-            let completedCards = allTodayCards.filter { isLittleWinsCardCompleted($0) }
-            let allActiveCardsCompleted = !cards.isEmpty && activeCards.isEmpty
-            let todayHasCompletedCard = !completedCards.isEmpty
-            let streakShowsTodayComplete = allActiveCardsCompleted && todayHasCompletedCard
-            let completedCardStreakCount = littleWinsCompletedCardStreakCount()
-            let todayMiniStackTopOverflow = littleWinsMiniStackTopOverflow(forCardCount: completedCards.count)
-            let calendarBadgeRowHeight: CGFloat = 36
-            let calendarBadgeVisualLift = todayMiniStackTopOverflow + calendarBadgeRowHeight + 34
-            let calendarBadgeHitAreaTopPadding = calendarBadgeRowHeight + 8
-            let calendarRowHeight: CGFloat = 84 + todayMiniStackTopOverflow
-            let calendarBandReserve: CGFloat = 132 + todayMiniStackTopOverflow
-            let isCalendarPreviewActive = littleWinsCalendarPreviewDate != nil
-
-            Group {
-                if cards.isEmpty {
-                    VStack {
-                        Spacer()
-                        Text("No Little Wins yet")
-                            .font(.title3.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        Text("Add Little Wins inside Fulfillment Areas to see them here.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                            .padding(.top, 4)
-                            .padding(.horizontal, 24)
-                        Spacer()
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    littleWinsDeckView(
-                        cards: activeCards,
-                        cardWidth: cardWidth,
-                        cardHeight: cardHeight,
-                        horizontalPadding: horizontalPadding,
-                        availableHeight: proxy.size.height,
-                        bottomCalendarBandReserve: calendarBandReserve
-                    )
+            littleWinsMiddlePageContent(proxy: proxy)
+        }
+        .contentShape(Rectangle())
+        .onAppear(perform: syncLittleWinsCompletionStateFromStore)
+        .onAppear(perform: syncIntegratedLittleWinsCompletionsFromProgress)
+        .onAppear(perform: refreshAppleHealthIntegratedLittleWinsProgressIfNeeded)
+        .onAppear(perform: syncLittleWinsCardOrder)
+        .onChange(of: littleWinsDailyCompletions.map(\.id)) { _, _ in
+            syncLittleWinsCompletionStateFromStore()
+            syncIntegratedLittleWinsCompletionsFromProgress()
+        }
+        .onChange(of: littleWinsSourceCardIDs) { _, _ in
+            syncLittleWinsCardOrder()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .littleWinsScheduleDidChange)) { _ in
+            littleWinsScheduleStoreRevision &+= 1
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .littleWinsIntegrationDidChange)) { _ in
+            littleWinsIntegrationStoreRevision &+= 1
+            syncIntegratedLittleWinsCompletionsFromProgress()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            refreshAppleHealthIntegratedLittleWinsProgressIfNeeded()
+        }
+        .onChange(of: homePageIndex) { _, _ in
+            if littleWinsCalendarPreviewDate != nil {
+                withAnimation(.easeOut(duration: 0.12)) {
+                    littleWinsCalendarPreviewDate = nil
                 }
             }
-            .opacity(isCalendarPreviewActive ? 0 : 1)
-            .animation(.easeInOut(duration: 0.18), value: isCalendarPreviewActive)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .safeAreaInset(edge: .bottom, spacing: 10) {
-                if !cards.isEmpty {
-                    VStack(spacing: 0) {
-                        VStack(spacing: 6) {
-                            HStack {
-                                littleWinsLastWeekCalendarRow(completedTodayCards: completedCards)
-                            }
-                            .frame(minHeight: calendarRowHeight, alignment: .top)
-                            .padding(.horizontal)
-                            .padding(.top, 6)
-                            .padding(.bottom, 0)
-                            .animation(
-                                .interactiveSpring(response: 0.38, dampingFraction: 0.84, blendDuration: 0.14),
-                                value: littleWinsCompletedFocusIDs
-                            )
-                            .overlay(alignment: .top) {
-                                ZStack {
-                                    HStack(spacing: 6) {
+        }
+        .sheet(item: $littleWinsIntegrationDetailTarget, content: littleWinsIntegrationDetailSheet)
+        .onDisappear {
+            littleWinsCalendarPreviewDate = nil
+        }
+    }
+
+    private func littleWinsMiddlePageContent(proxy: GeometryProxy) -> some View {
+        let horizontalPadding: CGFloat = 16
+        let cardWidth = max(0, proxy.size.width - (horizontalPadding * 2))
+        let cardHeight = min(max(cardWidth * 1.42, 360), max(380, proxy.size.height - 36))
+        let cards = littleWinsCards
+        let allTodayCards = littleWinsCardsIncludingHiddenToday
+        let activeCards = cards.filter { !isLittleWinsCardCompleted($0) }
+        let completedCards = allTodayCards.filter { isLittleWinsCardCompleted($0) }
+        let hasHiddenLittleWinsToReveal = allTodayCards.contains { card in
+            card.items.contains { !card.activeTodayItemIDs.contains($0.id) }
+        }
+        let allActiveCardsCompleted = !cards.isEmpty && activeCards.isEmpty
+        let todayHasCompletedCard = !completedCards.isEmpty
+        let streakShowsTodayComplete = allActiveCardsCompleted && todayHasCompletedCard
+        let completedCardStreakCount = littleWinsCompletedCardStreakCount()
+        let todayMiniStackTopOverflow = littleWinsMiniStackTopOverflow(forCardCount: completedCards.count)
+        let calendarBadgeRowHeight: CGFloat = 36
+        let calendarBadgeVisualLift = todayMiniStackTopOverflow + calendarBadgeRowHeight + 34
+        let calendarBadgeHitAreaTopPadding = calendarBadgeRowHeight + 8
+        let calendarRowHeight: CGFloat = 84 + todayMiniStackTopOverflow
+        let calendarBandReserve: CGFloat = 132 + todayMiniStackTopOverflow
+        let isCalendarPreviewActive = littleWinsCalendarPreviewDate != nil
+
+        return Group {
+            if cards.isEmpty {
+                VStack {
+                    Spacer()
+                    Text("No Little Wins yet")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text("Add Little Wins inside Fulfillment Areas to see them here.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.top, 4)
+                        .padding(.horizontal, 24)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                littleWinsDeckView(
+                    cards: activeCards,
+                    cardWidth: cardWidth,
+                    cardHeight: cardHeight,
+                    horizontalPadding: horizontalPadding,
+                    availableHeight: proxy.size.height,
+                    bottomCalendarBandReserve: calendarBandReserve
+                )
+            }
+        }
+        .opacity(isCalendarPreviewActive ? 0 : 1)
+        .animation(.easeInOut(duration: 0.18), value: isCalendarPreviewActive)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .safeAreaInset(edge: .bottom, spacing: 10) {
+            if !cards.isEmpty {
+                VStack(spacing: 0) {
+                    VStack(spacing: 6) {
+                        HStack {
+                            littleWinsLastWeekCalendarRow(completedTodayCards: completedCards)
+                        }
+                        .frame(minHeight: calendarRowHeight, alignment: .top)
+                        .padding(.horizontal)
+                        .padding(.top, 6)
+                        .padding(.bottom, 0)
+                        .animation(
+                            .interactiveSpring(response: 0.38, dampingFraction: 0.84, blendDuration: 0.14),
+                            value: littleWinsCompletedFocusIDs
+                        )
+                        .overlay(alignment: .top) {
+                            ZStack {
+                                HStack(spacing: 6) {
+                                    if hasHiddenLittleWinsToReveal {
                                         Toggle("", isOn: $littleWinsShowHiddenPlaceholder)
                                             .labelsHidden()
                                             .toggleStyle(.switch)
@@ -1243,85 +1603,113 @@ struct ContentView: View {
                                             .frame(width: 31, height: 31, alignment: .center)
                                             .accessibilityHidden(true)
                                     }
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                                    Button {
-                                        isPresentingLittleWinsManagerSheet = true
-                                    } label: {
-                                        Text("Manage Little Wins")
-                                            .font(.caption2.weight(.semibold))
-                                            .foregroundStyle(.blue)
-                                    }
-                                    .buttonStyle(.plain)
-
-                                    HStack(spacing: 8) {
-                                        ForEach(0..<7, id: \.self) { idx in
-                                            Group {
-                                                if idx == 6 && completedCardStreakCount > 0 {
-                                                    HStack(spacing: 4) {
-                                                        Image(systemName: streakShowsTodayComplete ? "bolt.badge.checkmark.fill" : "bolt.fill")
-                                                            .font(.caption2.weight(.semibold))
-                                                        Text("\(completedCardStreakCount)d")
-                                                            .font(.caption2.weight(.semibold))
-                                                    }
-                                                    .foregroundStyle(.secondary)
-                                                    .frame(maxWidth: .infinity)
-                                                } else {
-                                                    Color.clear
-                                                }
-                                            }
-                                            .frame(maxWidth: .infinity)
-                                        }
-                                    }
-                                    .allowsHitTesting(false)
                                 }
-                                .frame(height: calendarBadgeRowHeight)
-                                .padding(.horizontal)
-                                .padding(.top, calendarBadgeHitAreaTopPadding)
-                                .offset(y: -calendarBadgeVisualLift)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+
+                                Button {
+                                    isPresentingLittleWinsManagerSheet = true
+                                } label: {
+                                    Text("Manage Little Wins")
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(.blue)
+                                }
+                                .buttonStyle(.plain)
+
+                                HStack(spacing: 8) {
+                                    ForEach(0..<7, id: \.self) { idx in
+                                        Group {
+                                            if idx == 6 && completedCardStreakCount > 0 {
+                                                HStack(spacing: 4) {
+                                                    Image(systemName: streakShowsTodayComplete ? "bolt.badge.checkmark.fill" : "bolt.fill")
+                                                        .font(.caption2.weight(.semibold))
+                                                    Text("\(completedCardStreakCount)d")
+                                                        .font(.caption2.weight(.semibold))
+                                                }
+                                                .foregroundStyle(.secondary)
+                                                .frame(maxWidth: .infinity)
+                                            } else {
+                                                Color.clear
+                                            }
+                                        }
+                                        .frame(maxWidth: .infinity)
+                                    }
+                                }
+                                .allowsHitTesting(false)
+                            }
+                            .frame(height: calendarBadgeRowHeight)
+                            .padding(.horizontal)
+                            .padding(.top, calendarBadgeHitAreaTopPadding)
+                            .offset(y: -calendarBadgeVisualLift)
+                        }
+                    }
+                    Color.clear.frame(height: 8)
+                }
+                .background(Color(.systemGroupedBackground))
+            }
+        }
+        .overlay {
+            if let previewDate = littleWinsCalendarPreviewDate {
+                let previewCategories = littleWinsHistoricalCategories(on: previewDate)
+                if !previewCategories.isEmpty {
+                    littleWinsCalendarFullScreenPreview(
+                        date: previewDate,
+                        categories: previewCategories,
+                        containerSize: proxy.size
+                    )
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    .zIndex(60)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func littleWinsIntegrationDetailSheet(target: LittleWinsIntegrationDetailTarget) -> some View {
+        if let focus = foci.first(where: { $0.id == target.focusID }),
+           let config = littleWinsIntegrationConfig(for: focus) {
+            NavigationStack {
+                List {
+                    Section {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(focus.activity)
+                                .font(.headline)
+                                .foregroundStyle(.primary)
+                            if let category = recordForCategoryID(focus.category_id)?.category {
+                                Text(category)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(FulfillmentCategoryTheme.color(for: category))
                             }
                         }
-                        Color.clear.frame(height: 8)
+                        .padding(.vertical, 2)
                     }
-                    .background(Color(.systemGroupedBackground))
+
+                    Section("Integration") {
+                        ForEach(littleWinsIntegrationDetailRows(for: focus), id: \.0) { row in
+                            HStack {
+                                Text(row.0)
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Text(row.1)
+                                    .multilineTextAlignment(.trailing)
+                            }
+                        }
+                    }
+
+                    Section {
+                        Text("This Little Win is completed automatically from integrated progress and can’t be checked manually.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
-            }
-            .overlay {
-                if let previewDate = littleWinsCalendarPreviewDate {
-                    let previewCategories = littleWinsHistoricalCategories(on: previewDate)
-                    if !previewCategories.isEmpty {
-                        littleWinsCalendarFullScreenPreview(
-                            date: previewDate,
-                            categories: previewCategories,
-                            containerSize: proxy.size
-                        )
-                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
-                        .zIndex(60)
+                .listStyle(.insetGrouped)
+                .navigationTitle(config.source.title)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("Done") { littleWinsIntegrationDetailTarget = nil }
                     }
                 }
             }
-        }
-        .contentShape(Rectangle())
-        .onAppear(perform: syncLittleWinsCompletionStateFromStore)
-        .onAppear(perform: syncLittleWinsCardOrder)
-        .onChange(of: littleWinsDailyCompletions.map(\.id)) { _, _ in
-            syncLittleWinsCompletionStateFromStore()
-        }
-        .onChange(of: littleWinsSourceCardIDs) { _, _ in
-            syncLittleWinsCardOrder()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .littleWinsScheduleDidChange)) { _ in
-            littleWinsScheduleStoreRevision &+= 1
-        }
-        .onChange(of: homePageIndex) { _, _ in
-            if littleWinsCalendarPreviewDate != nil {
-                withAnimation(.easeOut(duration: 0.12)) {
-                    littleWinsCalendarPreviewDate = nil
-                }
-            }
-        }
-        .onDisappear {
-            littleWinsCalendarPreviewDate = nil
         }
     }
 
@@ -1958,11 +2346,22 @@ struct ContentView: View {
         fixedSecondaryText: Color
     ) -> some View {
         let isCompleted = littleWinsCompletedFocusIDs.contains(item.id)
+        let integrationConfig = littleWinsIntegrationConfig(for: item)
+        let isIntegrated = integrationConfig?.isEnabled == true
         let isInactiveHiddenToday = littleWinsShowHiddenPlaceholder && !isActiveToday
         let showDashedCircleOnly = isInactiveHiddenToday && !isInsideFullyHiddenCard
         return HStack(alignment: .top, spacing: 10) {
             Group {
-                if showDashedCircleOnly && !isCompleted {
+                if let integrationConfig, isIntegrated {
+                    littleWinsIntegratedIndicator(
+                        config: integrationConfig,
+                        isCompleted: isCompleted,
+                        isDashedHiddenIndicator: showDashedCircleOnly && !isCompleted,
+                        titleColor: titleColor,
+                        fixedSecondaryText: fixedSecondaryText
+                    )
+                    .padding(.top, 6)
+                } else if showDashedCircleOnly && !isCompleted {
                     Circle()
                         .stroke(style: StrokeStyle(lineWidth: 2, dash: [6]))
                         .foregroundStyle(.blue)
@@ -1991,6 +2390,10 @@ struct ContentView: View {
             guard isActiveToday || littleWinsShowHiddenPlaceholder || isInsideFullyHiddenCard || isCompleted else { return }
             guard !littleWinsDeckIsDragging else { return }
             guard Date() >= littleWinsSuppressRowTapUntil else { return }
+            if isIntegrated {
+                presentLittleWinsIntegrationDetails(for: item)
+                return
+            }
             withAnimation(.interactiveSpring(response: 0.38, dampingFraction: 0.82, blendDuration: 0.12)) {
                 if isCompleted {
                     littleWinsCompletedFocusIDs.remove(item.id)
@@ -2780,68 +3183,91 @@ struct ContentView: View {
 
                         // Left: four outcome texts with dividers
                         VStack(alignment: .leading, spacing: 8) {
-                            let currentDate = Date()
-                            let filteredOutcomes = outcomes.filter { $0.start <= currentDate }
+                            let previewRows = objectivesCardPreviewRows(limit: 4)
 
-                            ForEach(filteredOutcomes.prefix(4)) { outcome in
-                                let remainingDays = daysUntil(outcome.end)
-                                HStack(alignment: .center, spacing: 8) {
-
-                                    // Box with days until end date
-                                    ZStack {
-                                        RoundedRectangle(cornerRadius: 4)
-                                            .fill(categoryBackgroundColor(for: outcome.category))
-                                            .frame(width: 40, height: 20)
-
-                                        Text("\(remainingDays)d")
-                                            .font(.caption)
-                                            .foregroundColor(remainingDays < 0 ? .red : .primary)
-                                            .bold()
-                                    }
-
-                                    // Outcome text
-                                    Text(outcome.outcome)
-                                        .font(.body)
-                                        .foregroundColor(categoryTextColor(for: outcome.category))
-                                        .lineLimit(1)
-
-                                    // Progress Circle
-                                    if let measure = latestMeasure(for: outcome),
-                                       measure.measure_amt != 0 && measure.format != nil {
-                                        Spacer()
+                            ForEach(Array(previewRows.enumerated()), id: \.element.id) { idx, row in
+                                switch row.kind {
+                                case .outcome(let outcome):
+                                    let remainingDays = daysUntil(outcome.end)
+                                    HStack(alignment: .center, spacing: 8) {
                                         ZStack {
-                                            Circle()
-                                                .stroke(Color(UIColor.systemGray3), lineWidth: 1.5)
-                                                .frame(width: 16, height: 16)
+                                            RoundedRectangle(cornerRadius: 4)
+                                                .fill(categoryBackgroundColor(for: outcome.category))
+                                                .frame(width: 40, height: 20)
 
-                                            Circle()
-                                                .trim(from: 0, to: progressTrim(for: measure, outcomeID: outcome.outcome_id))
-                                                .stroke(Color.primary, lineWidth: 1.5)
-                                                .frame(width: 16, height: 16)
-                                                .rotationEffect(.degrees(-90))
+                                            Text("\(remainingDays)d")
+                                                .font(.caption)
+                                                .foregroundColor(remainingDays < 0 ? .red : .primary)
+                                                .bold()
                                         }
-                                    }
-                                }
-                                .contentShape(Rectangle())
-                                .pressHighlight(pressedOutcome?.outcome_id == outcome.outcome_id, cornerRadius: 8, inset: 3)
-                                .onLongPressGesture(
-                                    minimumDuration: 0.5,
-                                    maximumDistance: 50,
-                                    pressing: { isPressing in
-                                        if !isPressing {
-                                            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-                                                pressedOutcome = nil
+
+                                        Text(outcome.outcome)
+                                            .font(.body)
+                                            .foregroundColor(categoryTextColor(for: outcome.category))
+                                            .lineLimit(1)
+
+                                        if let measure = latestMeasure(for: outcome),
+                                           measure.measure_amt != 0 && measure.format != nil {
+                                            Spacer()
+                                            ZStack {
+                                                Circle()
+                                                    .stroke(Color(UIColor.systemGray3), lineWidth: 1.5)
+                                                    .frame(width: 16, height: 16)
+
+                                                Circle()
+                                                    .trim(from: 0, to: progressTrim(for: measure, outcomeID: outcome.outcome_id))
+                                                    .stroke(Color.primary, lineWidth: 1.5)
+                                                    .frame(width: 16, height: 16)
+                                                    .rotationEffect(.degrees(-90))
                                             }
                                         }
-                                    },
-                                    perform: {
-                                        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-                                            pressedOutcome = outcome
-                                        }
                                     }
-                                )
+                                    .contentShape(Rectangle())
+                                    .pressHighlight(pressedOutcome?.outcome_id == outcome.outcome_id, cornerRadius: 8, inset: 3)
+                                    .onLongPressGesture(
+                                        minimumDuration: 0.5,
+                                        maximumDistance: 50,
+                                        pressing: { isPressing in
+                                            if !isPressing {
+                                                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                                                    pressedOutcome = nil
+                                                }
+                                            }
+                                        },
+                                        perform: {
+                                            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                                                pressedOutcome = outcome
+                                            }
+                                        }
+                                    )
 
-                                if outcome != filteredOutcomes.prefix(4).last {
+                                case .upcomingOutcome(let outcome, let startsInDays):
+                                    HStack(alignment: .center, spacing: 8) {
+                                        HStack(spacing: 4) {
+                                            Image(systemName: "clock")
+                                                .font(.caption2)
+                                                .foregroundStyle(.gray)
+                                            Text("\(startsInDays)d")
+                                                .font(.caption.weight(.semibold))
+                                                .foregroundStyle(.gray)
+                                        }
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 3)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                                .fill(Color(.systemGray5))
+                                        )
+
+                                        Text(outcome.outcome)
+                                            .font(.body)
+                                            .foregroundColor(categoryTextColor(for: outcome.category))
+                                            .lineLimit(1)
+
+                                        Spacer(minLength: 0)
+                                    }
+                                }
+
+                                if idx < (previewRows.count - 1) {
                                     Divider()
                                 }
                             }
@@ -3709,6 +4135,7 @@ private struct ContentLittleWinsManagerSheetView: View {
                 )
             )
             LittleWinsScheduleStore.removeRule(for: focus.id)
+            LittleWinsIntegrationStore.removeConfig(for: focus.id)
             RecentlyDeletedStore.trash(focus, in: modelContext)
         }
         try? modelContext.save()

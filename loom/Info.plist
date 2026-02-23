@@ -18,6 +18,8 @@
 	<string>Loom needs access to your reminders to sync active tasks into Capture.</string>
 	<key>NSRemindersFullAccessUsageDescription</key>
 	<string>Loom needs full access to your reminders to sync active tasks into Capture.</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>Loom uses Apple Health data you choose to connect to automatically track Little Wins progress.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>

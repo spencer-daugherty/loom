@@ -1,6 +1,9 @@
 import SwiftUI
 import SwiftData
 import Charts
+#if canImport(FamilyControls)
+import FamilyControls
+#endif
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -1678,6 +1681,7 @@ struct FulfillmentView: View {
             )
             modelContext.insert(archive)
             LittleWinsScheduleStore.removeRule(for: f.id)
+            LittleWinsIntegrationStore.removeConfig(for: f.id)
             RecentlyDeletedStore.trash(f, in: modelContext)
         }
     }
@@ -1927,6 +1931,7 @@ private struct LittleWinsManagerSheetView: View {
                 )
             )
             LittleWinsScheduleStore.removeRule(for: focus.id)
+            LittleWinsIntegrationStore.removeConfig(for: focus.id)
             RecentlyDeletedStore.trash(focus, in: modelContext)
         }
         try? modelContext.save()
@@ -1967,6 +1972,11 @@ private struct LittleWinsManagerSheetView: View {
 }
 
 struct LittleWinEditorSheetView: View {
+    private struct IntegrationSetupTarget: Identifiable {
+        let source: LittleWinsIntegrationConfig.Source
+        var id: String { source.rawValue }
+    }
+
     let categoryID: UUID
     let categoryTitle: String
     let focusID: UUID?
@@ -1979,7 +1989,11 @@ struct LittleWinEditorSheetView: View {
     @State private var draftText = ""
     @State private var draftCanAnyDay = true
     @State private var draftWeekdayMask = LittleWinsScheduleRule.everyDayMask
+    @State private var draftIntegrate = false
+    @State private var draftIntegrationConfig: LittleWinsIntegrationConfig? = nil
+    @State private var integrationSetupTarget: IntegrationSetupTarget?
     @State private var didHydrate = false
+    @State private var isShowingIntegrationDetails = false
     @FocusState private var isTextFocused: Bool
 
     private let weekdayLetterLabels = ["S", "M", "T", "W", "T", "F", "S"]
@@ -2021,6 +2035,52 @@ struct LittleWinEditorSheetView: View {
                             }
                             .foregroundStyle(.blue)
                         }
+                    }
+
+                    HStack {
+                        Text("Integrate")
+                        Spacer()
+                        Menu {
+                            Button("No") { setIntegrate(false) }
+                            Button("Yes") { setIntegrate(true) }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(draftIntegrate ? "Yes" : "No")
+                                Image(systemName: "chevron.up.chevron.down")
+                            }
+                            .foregroundStyle(.blue)
+                        }
+                    }
+
+                    if draftIntegrate {
+                        VStack(spacing: 8) {
+                            littleWinIntegrationSourceRow(
+                                title: "Apple Health",
+                                icon: "heart",
+                                selected: draftIntegrationConfig?.source == .appleHealth,
+                                connected: (draftIntegrationConfig?.source == .appleHealth) && (draftIntegrationConfig?.isConnected == true),
+                                enabled: true
+                            ) {
+                                if draftIntegrationConfig?.source != .appleHealth {
+                                    draftIntegrationConfig = LittleWinsIntegrationConfig.default(for: .appleHealth)
+                                }
+                                integrationSetupTarget = .init(source: .appleHealth)
+                            }
+
+                            littleWinIntegrationSourceRow(
+                                title: "Screen Time",
+                                icon: "hourglass",
+                                selected: draftIntegrationConfig?.source == .screenTime,
+                                connected: (draftIntegrationConfig?.source == .screenTime) && (draftIntegrationConfig?.isConnected == true),
+                                enabled: true
+                            ) {
+                                if draftIntegrationConfig?.source != .screenTime {
+                                    draftIntegrationConfig = LittleWinsIntegrationConfig.default(for: .screenTime)
+                                }
+                                integrationSetupTarget = .init(source: .screenTime)
+                            }
+                        }
+                        .padding(.vertical, 2)
                     }
 
                     if !draftCanAnyDay {
@@ -2079,6 +2139,15 @@ struct LittleWinEditorSheetView: View {
                 isTextFocused = true
             }
         }
+        .sheet(item: $integrationSetupTarget) { target in
+            LittleWinIntegrationSetupSheet(
+                source: target.source,
+                config: Binding(
+                    get: { draftIntegrationConfig ?? .default(for: target.source) },
+                    set: { draftIntegrationConfig = $0 }
+                )
+            )
+        }
     }
 
     private func hydrateIfNeeded() {
@@ -2089,10 +2158,30 @@ struct LittleWinEditorSheetView: View {
             draftText = focus.activity
             draftCanAnyDay = rule.canCompleteAnyDay
             draftWeekdayMask = rule.activeWeekdayMask
+            if let integration = LittleWinsIntegrationStore.config(for: focus.id) {
+                draftIntegrate = integration.isEnabled
+                draftIntegrationConfig = integration
+            } else {
+                draftIntegrate = false
+                draftIntegrationConfig = nil
+            }
         } else {
             draftText = ""
             draftCanAnyDay = true
             draftWeekdayMask = LittleWinsScheduleRule.everyDayMask
+            draftIntegrate = false
+            draftIntegrationConfig = nil
+        }
+    }
+
+    private func setIntegrate(_ value: Bool) {
+        draftIntegrate = value
+        if value {
+            if draftIntegrationConfig == nil {
+                draftIntegrationConfig = .default(for: .appleHealth)
+            }
+        } else {
+            draftIntegrationConfig = nil
         }
     }
 
@@ -2129,6 +2218,9 @@ struct LittleWinEditorSheetView: View {
         }
 
         let rule = LittleWinsScheduleRule(canCompleteAnyDay: finalCanAnyDay, activeWeekdayMask: finalMask).normalized
+        let finalIntegrationConfig = (draftIntegrate ? draftIntegrationConfig : nil).flatMap { config in
+            config.isConnected ? config : nil
+        }
 
         if let focus = editingFocus {
             if focus.activity != trimmed {
@@ -2145,16 +2237,322 @@ struct LittleWinEditorSheetView: View {
                 focus.updatedAt = Date()
             }
             LittleWinsScheduleStore.setRule(rule, for: focus.id)
+            LittleWinsIntegrationStore.setConfig(finalIntegrationConfig, for: focus.id)
         } else {
             guard littleWins.count < 3 else { return }
             let nextRank = (littleWins.map(\.rank).max() ?? 0) + 1
             let focus = FulfillmentFocus(category_id: categoryID, activity: trimmed, rank: nextRank)
             modelContext.insert(focus)
             LittleWinsScheduleStore.setRule(rule, for: focus.id)
+            LittleWinsIntegrationStore.setConfig(finalIntegrationConfig, for: focus.id)
         }
 
         try? modelContext.save()
+        if finalIntegrationConfig == nil, draftIntegrate {
+            draftIntegrate = false
+            draftIntegrationConfig = nil
+        }
         dismiss()
+    }
+
+    private func littleWinIntegrationSourceRow(
+        title: String,
+        icon: String,
+        selected: Bool,
+        connected: Bool,
+        enabled: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(enabled ? .primary : .secondary)
+                    .frame(width: 24, height: 24)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7)
+                            .stroke((enabled ? Color.primary : Color.secondary).opacity(0.9), lineWidth: 1)
+                    )
+                Text(title)
+                    .foregroundStyle(enabled ? .primary : .secondary)
+                Spacer()
+                if selected && connected {
+                    Image(systemName: "checkmark")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.blue)
+                } else {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(8)
+            .padding(.vertical, 2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+    }
+}
+
+private struct LittleWinIntegrationSetupSheet: View {
+    let source: LittleWinsIntegrationConfig.Source
+    @Binding var config: LittleWinsIntegrationConfig
+    @Environment(\.dismiss) private var dismiss
+    @State private var isConnecting = false
+    @State private var isRefreshingHealthProgress = false
+    @State private var healthStatusMessage: String? = nil
+    @State private var isShowingScreenTimePicker = false
+#if canImport(FamilyControls)
+    @State private var screenTimeSelection = FamilyActivitySelection()
+#endif
+
+    private var metricOptions: [LittleWinsIntegrationConfig.Metric] {
+        LittleWinsIntegrationConfig.Metric.options(for: source)
+    }
+
+    private var usesAppleHealth: Bool {
+        source == .appleHealth
+    }
+
+    private var connectButtonTitle: String {
+        if config.isConnected {
+            return "Disconnect \(source.title)"
+        }
+        return "Connect \(source.title)"
+    }
+
+    private var lastSyncText: String? {
+        guard config.isConnected, config.updatedAtUnix > 0 else { return nil }
+        let date = Date(timeIntervalSince1970: config.updatedAtUnix)
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        formatter.dateStyle = .none
+        return "Last sync \(formatter.string(from: date))"
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("\(source.title) Integration")
+                            .font(.headline)
+                        Text("Connect and configure an automatic completion goal for this Little Win.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                Section("Connect") {
+                    Button(connectButtonTitle) {
+                        connectSource()
+                    }
+                    .foregroundStyle(config.isConnected ? Color.red : Color.accentColor)
+                    .disabled(isConnecting || isRefreshingHealthProgress)
+                    if usesAppleHealth, config.isConnected {
+                        HStack(spacing: 10) {
+                            Button(isRefreshingHealthProgress ? "Syncing..." : "Sync") {
+                                refreshAppleHealthProgress()
+                            }
+                            .disabled(isConnecting || isRefreshingHealthProgress)
+
+                            Spacer(minLength: 8)
+
+                            if let lastSyncText {
+                                Text(lastSyncText)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
+                            }
+                        }
+                    }
+                    if source == .screenTime, config.isConnected {
+                        Button("Select Apps & Categories") {
+                            openScreenTimePicker()
+                        }
+                        if let summary = config.screenTimeSelectionSummary, !summary.isEmpty {
+                            Text(summary)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    if let healthStatusMessage, !healthStatusMessage.isEmpty {
+                        Text(healthStatusMessage)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("Automation Goal") {
+                    HStack {
+                        Text("Metric")
+                        Spacer()
+                        Menu {
+                            ForEach(metricOptions, id: \.rawValue) { metric in
+                                Button(metric.title) {
+                                    config.metric = metric
+                                    config.targetValue = metric.defaultTarget
+                                    if usesAppleHealth, config.isConnected {
+                                        refreshAppleHealthProgress()
+                                    }
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(config.metric.title)
+                                Image(systemName: "chevron.up.chevron.down")
+                            }
+                            .foregroundStyle(.blue)
+                        }
+                    }
+
+                    HStack {
+                        Text("Target")
+                        Spacer()
+                        TextField("", value: $config.targetValue, format: .number.precision(.fractionLength(config.metric == .sleepHours ? 1 : 0)))
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 90)
+                        Text(config.metric.unitLabel)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if config.isConnected {
+                        HStack {
+                            Text("Current Progress")
+                            Spacer()
+                            TextField("", value: $config.progressValue, format: .number.precision(.fractionLength(config.metric == .sleepHours ? 1 : 0)))
+                                .keyboardType(.decimalPad)
+                                .multilineTextAlignment(.trailing)
+                                .frame(width: 90)
+                                .disabled(usesAppleHealth)
+                            Text(config.metric.unitLabel)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .navigationTitle(source.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        config.source = source
+                        config.isEnabled = true
+                        config.updatedAtUnix = Date().timeIntervalSince1970
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+#if canImport(FamilyControls)
+        .sheet(isPresented: $isShowingScreenTimePicker) {
+            NavigationStack {
+                FamilyActivityPicker(selection: $screenTimeSelection)
+                    .navigationTitle("Select Apps")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarLeading) {
+                            Button("Cancel") { isShowingScreenTimePicker = false }
+                        }
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button("Done") {
+                                config.screenTimeSelectionSummary = LittleWinsScreenTimeBridge.selectionSummary(for: screenTimeSelection)
+                                config.updatedAtUnix = Date().timeIntervalSince1970
+                                isShowingScreenTimePicker = false
+                            }
+                        }
+                    }
+            }
+            .presentationDetents([.large])
+        }
+#endif
+    }
+
+    private func connectSource() {
+        if config.isConnected {
+            config.isConnected = false
+            healthStatusMessage = nil
+            return
+        }
+        if source == .screenTime {
+            connectScreenTime()
+            return
+        }
+        connectAppleHealth()
+    }
+
+    private func connectScreenTime() {
+        isConnecting = true
+        healthStatusMessage = nil
+        LittleWinsScreenTimeBridge.requestAuthorization { result in
+            DispatchQueue.main.async {
+                isConnecting = false
+                switch result {
+                case .success:
+                    config.isConnected = true
+                    config.updatedAtUnix = Date().timeIntervalSince1970
+                    healthStatusMessage = nil
+                case .failure(let error):
+                    config.isConnected = false
+                    healthStatusMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func openScreenTimePicker() {
+#if canImport(FamilyControls)
+        isShowingScreenTimePicker = true
+#else
+        healthStatusMessage = "Screen Time app/category picker is not available on this device."
+#endif
+    }
+
+    private func connectAppleHealth() {
+        isConnecting = true
+        healthStatusMessage = nil
+        LittleWinsHealthKitBridge.requestAuthorizationForLittleWins { result in
+            DispatchQueue.main.async {
+                isConnecting = false
+                switch result {
+                case .success:
+                    config.isConnected = true
+                    config.updatedAtUnix = Date().timeIntervalSince1970
+                    healthStatusMessage = nil
+                    refreshAppleHealthProgress()
+                case .failure(let error):
+                    config.isConnected = false
+                    healthStatusMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func refreshAppleHealthProgress() {
+        guard usesAppleHealth else { return }
+        guard config.isConnected else { return }
+        isRefreshingHealthProgress = true
+        healthStatusMessage = nil
+        LittleWinsHealthKitBridge.readTodayProgress(for: config.metric) { result in
+            DispatchQueue.main.async {
+                isRefreshingHealthProgress = false
+                switch result {
+                case .success(let progress):
+                    config.progressValue = progress
+                    config.updatedAtUnix = Date().timeIntervalSince1970
+                    healthStatusMessage = nil
+                case .failure(let error):
+                    healthStatusMessage = error.localizedDescription
+                }
+            }
+        }
     }
 }
 

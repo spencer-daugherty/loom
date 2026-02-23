@@ -1,9 +1,16 @@
 import Foundation
 import SwiftData
+#if canImport(FamilyControls)
+import FamilyControls
+#endif
+#if canImport(HealthKit)
+import HealthKit
+#endif
 
 extension Notification.Name {
   static let littleWinsScheduleDidChange = Notification.Name("littleWinsScheduleDidChange")
   static let littleWinsOpenNewEditor = Notification.Name("littleWinsOpenNewEditor")
+  static let littleWinsIntegrationDidChange = Notification.Name("littleWinsIntegrationDidChange")
 }
 
 struct LittleWinsScheduleRule: Codable, Equatable {
@@ -85,6 +92,416 @@ enum LittleWinsScheduleStore {
     NotificationCenter.default.post(name: .littleWinsScheduleDidChange, object: nil)
   }
 }
+
+struct LittleWinsIntegrationConfig: Codable, Equatable {
+  enum Source: String, Codable, CaseIterable {
+    case appleHealth
+    case screenTime
+
+    var title: String {
+      switch self {
+      case .appleHealth: return "Apple Health"
+      case .screenTime: return "Screen Time"
+      }
+    }
+
+    var iconName: String {
+      switch self {
+      case .appleHealth: return "heart"
+      case .screenTime: return "hourglass"
+      }
+    }
+  }
+
+  enum Metric: String, Codable, CaseIterable {
+    case steps
+    case workoutMinutes
+    case sleepHours
+    case socialMediaMinutes
+    case totalScreenTimeMinutes
+
+    var title: String {
+      switch self {
+      case .steps: return "Steps"
+      case .workoutMinutes: return "Workout Minutes"
+      case .sleepHours: return "Sleep Hours"
+      case .socialMediaMinutes: return "Social Media"
+      case .totalScreenTimeMinutes: return "Total Screen Time"
+      }
+    }
+
+    var unitLabel: String {
+      switch self {
+      case .steps: return "steps"
+      case .workoutMinutes: return "min"
+      case .sleepHours: return "hours"
+      case .socialMediaMinutes: return "min"
+      case .totalScreenTimeMinutes: return "min"
+      }
+    }
+
+    var defaultTarget: Double {
+      switch self {
+      case .steps: return 10_000
+      case .workoutMinutes: return 60
+      case .sleepHours: return 7
+      case .socialMediaMinutes: return 30
+      case .totalScreenTimeMinutes: return 60
+      }
+    }
+
+    static func options(for source: Source) -> [Metric] {
+      switch source {
+      case .appleHealth: return [.steps, .workoutMinutes, .sleepHours]
+      case .screenTime: return [.socialMediaMinutes, .totalScreenTimeMinutes]
+      }
+    }
+  }
+
+  var isEnabled: Bool
+  var source: Source
+  var metric: Metric
+  var targetValue: Double
+  var progressValue: Double
+  var isConnected: Bool
+  var screenTimeSelectionSummary: String?
+  var updatedAtUnix: TimeInterval
+
+  static func `default`(for source: Source) -> LittleWinsIntegrationConfig {
+    let metric = Metric.options(for: source).first ?? .steps
+    return LittleWinsIntegrationConfig(
+      isEnabled: true,
+      source: source,
+      metric: metric,
+      targetValue: metric.defaultTarget,
+      progressValue: 0,
+      isConnected: false,
+      screenTimeSelectionSummary: nil,
+      updatedAtUnix: Date().timeIntervalSince1970
+    )
+  }
+
+  var normalized: LittleWinsIntegrationConfig {
+    var copy = self
+    if !Metric.options(for: source).contains(copy.metric) {
+      copy.metric = Metric.options(for: source).first ?? .steps
+    }
+    copy.targetValue = max(1, copy.targetValue)
+    copy.progressValue = max(0, copy.progressValue)
+    if copy.source != .screenTime {
+      copy.screenTimeSelectionSummary = nil
+    }
+    return copy
+  }
+
+  var progressFraction: Double {
+    guard targetValue > 0 else { return 0 }
+    return min(1, max(0, progressValue / targetValue))
+  }
+
+  var isGoalAchieved: Bool {
+    progressFraction >= 1
+  }
+}
+
+enum LittleWinsIntegrationStore {
+  private static let defaultsKey = "littleWinsIntegrationConfigs.v1"
+
+  static func config(for focusID: UUID) -> LittleWinsIntegrationConfig? {
+    allConfigs()[focusID]?.normalized
+  }
+
+  static func allConfigs() -> [UUID: LittleWinsIntegrationConfig] {
+    guard let data = UserDefaults.standard.data(forKey: defaultsKey) else { return [:] }
+    guard let raw = try? JSONDecoder().decode([String: LittleWinsIntegrationConfig].self, from: data) else {
+      return [:]
+    }
+    var result: [UUID: LittleWinsIntegrationConfig] = [:]
+    for (key, value) in raw {
+      guard let id = UUID(uuidString: key) else { continue }
+      result[id] = value.normalized
+    }
+    return result
+  }
+
+  static func setConfig(_ config: LittleWinsIntegrationConfig?, for focusID: UUID) {
+    var map = allConfigs()
+    if let config, config.isEnabled {
+      map[focusID] = config.normalized
+    } else {
+      map.removeValue(forKey: focusID)
+    }
+    save(map)
+  }
+
+  static func removeConfig(for focusID: UUID) {
+    var map = allConfigs()
+    guard map.removeValue(forKey: focusID) != nil else { return }
+    save(map)
+  }
+
+  private static func save(_ map: [UUID: LittleWinsIntegrationConfig]) {
+    let raw = Dictionary(uniqueKeysWithValues: map.map { ($0.key.uuidString, $0.value.normalized) })
+    if let data = try? JSONEncoder().encode(raw) {
+      UserDefaults.standard.set(data, forKey: defaultsKey)
+    } else {
+      UserDefaults.standard.removeObject(forKey: defaultsKey)
+    }
+    NotificationCenter.default.post(name: .littleWinsIntegrationDidChange, object: nil)
+  }
+}
+
+#if canImport(FamilyControls)
+enum LittleWinsScreenTimeBridge {
+  private enum BridgeError: LocalizedError {
+    case unavailable
+
+    var errorDescription: String? {
+      switch self {
+      case .unavailable:
+        return "Screen Time controls are not available on this device."
+      }
+    }
+  }
+
+  static func requestAuthorization(completion: @escaping (Result<Void, Error>) -> Void) {
+    Task {
+      do {
+        try await AuthorizationCenter.shared.requestAuthorization(for: .individual)
+        await MainActor.run {
+          completion(.success(()))
+        }
+      } catch {
+        await MainActor.run {
+          completion(.failure(error))
+        }
+      }
+    }
+  }
+
+  static func selectionSummary(for selection: FamilyActivitySelection) -> String {
+    let appCount = selection.applicationTokens.count
+    let categoryCount = selection.categoryTokens.count
+    let webCount = selection.webDomainTokens.count
+    var parts: [String] = []
+    if appCount > 0 { parts.append("\(appCount) app\(appCount == 1 ? "" : "s")") }
+    if categoryCount > 0 { parts.append("\(categoryCount) categor\(categoryCount == 1 ? "y" : "ies")") }
+    if webCount > 0 { parts.append("\(webCount) site\(webCount == 1 ? "" : "s")") }
+    return parts.isEmpty ? "No apps or categories selected" : parts.joined(separator: ", ")
+  }
+}
+#else
+enum LittleWinsScreenTimeBridge {
+  private enum BridgeError: LocalizedError {
+    case unavailable
+    var errorDescription: String? { "Screen Time controls are not available on this device." }
+  }
+
+  static func requestAuthorization(completion: @escaping (Result<Void, Error>) -> Void) {
+    completion(.failure(BridgeError.unavailable))
+  }
+}
+#endif
+
+#if canImport(HealthKit)
+enum LittleWinsHealthKitBridge {
+  private static let store = HKHealthStore()
+
+  private enum BridgeError: LocalizedError {
+    case unavailable
+    case unsupportedMetric
+    case typeUnavailable
+
+    var errorDescription: String? {
+      switch self {
+      case .unavailable:
+        return "Apple Health is not available on this device."
+      case .unsupportedMetric:
+        return "This metric is not supported by Apple Health."
+      case .typeUnavailable:
+        return "The Apple Health data type is unavailable."
+      }
+    }
+  }
+
+  static func requestAuthorizationForLittleWins(completion: @escaping (Result<Void, Error>) -> Void) {
+    guard HKHealthStore.isHealthDataAvailable() else {
+      completion(.failure(BridgeError.unavailable))
+      return
+    }
+    do {
+      let readTypes = try littleWinsReadTypes()
+      store.requestAuthorization(toShare: nil, read: readTypes) { success, error in
+        if let error {
+          completion(.failure(error))
+        } else if success {
+          completion(.success(()))
+        } else {
+          completion(.failure(BridgeError.unavailable))
+        }
+      }
+    } catch {
+      completion(.failure(error))
+    }
+  }
+
+  static func readTodayProgress(
+    for metric: LittleWinsIntegrationConfig.Metric,
+    completion: @escaping (Result<Double, Error>) -> Void
+  ) {
+    readProgress(for: metric, on: Date(), completion: completion)
+  }
+
+  static func readProgress(
+    for metric: LittleWinsIntegrationConfig.Metric,
+    on day: Date,
+    completion: @escaping (Result<Double, Error>) -> Void
+  ) {
+    switch metric {
+    case .steps:
+      readSteps(on: day, completion: completion)
+    case .workoutMinutes:
+      readWorkoutMinutes(on: day, completion: completion)
+    case .sleepHours:
+      readSleepHours(on: day, completion: completion)
+    case .socialMediaMinutes, .totalScreenTimeMinutes:
+      completion(.failure(BridgeError.unsupportedMetric))
+    }
+  }
+
+  private static func littleWinsReadTypes() throws -> Set<HKObjectType> {
+    var types = Set<HKObjectType>()
+    types.formUnion(try readTypesForMetric(.steps))
+    types.formUnion(try readTypesForMetric(.workoutMinutes))
+    types.formUnion(try readTypesForMetric(.sleepHours))
+    return types
+  }
+
+  private static func readTypesForMetric(_ metric: LittleWinsIntegrationConfig.Metric) throws -> Set<HKObjectType> {
+    switch metric {
+    case .steps:
+      guard let type = HKObjectType.quantityType(forIdentifier: .stepCount) else {
+        throw BridgeError.typeUnavailable
+      }
+      return [type]
+    case .workoutMinutes:
+      return [HKObjectType.workoutType()]
+    case .sleepHours:
+      guard let type = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) else {
+        throw BridgeError.typeUnavailable
+      }
+      return [type]
+    case .socialMediaMinutes, .totalScreenTimeMinutes:
+      throw BridgeError.unsupportedMetric
+    }
+  }
+
+  private static func dayBounds(for day: Date) -> (start: Date, end: Date) {
+    let calendar = Calendar.current
+    let start = calendar.startOfDay(for: day)
+    let nextStart = calendar.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86400)
+    let now = Date()
+    let end = min(nextStart, now)
+    return (start, end)
+  }
+
+  private static func readSteps(on day: Date, completion: @escaping (Result<Double, Error>) -> Void) {
+    guard let type = HKQuantityType.quantityType(forIdentifier: .stepCount) else {
+      completion(.failure(BridgeError.typeUnavailable))
+      return
+    }
+    let bounds = dayBounds(for: day)
+    let predicate = HKQuery.predicateForSamples(withStart: bounds.start, end: bounds.end, options: .strictStartDate)
+    let query = HKStatisticsQuery(quantityType: type, quantitySamplePredicate: predicate, options: .cumulativeSum) { _, result, error in
+      if let error {
+        completion(.failure(error))
+        return
+      }
+      let value = result?.sumQuantity()?.doubleValue(for: HKUnit.count()) ?? 0
+      completion(.success(value))
+    }
+    store.execute(query)
+  }
+
+  private static func readWorkoutMinutes(on day: Date, completion: @escaping (Result<Double, Error>) -> Void) {
+    let bounds = dayBounds(for: day)
+    let predicate = HKQuery.predicateForSamples(withStart: bounds.start, end: bounds.end, options: .strictStartDate)
+    let query = HKSampleQuery(
+      sampleType: HKObjectType.workoutType(),
+      predicate: predicate,
+      limit: HKObjectQueryNoLimit,
+      sortDescriptors: nil
+    ) { _, samples, error in
+      if let error {
+        completion(.failure(error))
+        return
+      }
+      let workouts = (samples as? [HKWorkout]) ?? []
+      let totalMinutes = workouts.reduce(0.0) { $0 + ($1.duration / 60.0) }
+      completion(.success(totalMinutes))
+    }
+    store.execute(query)
+  }
+
+  private static func readSleepHours(on day: Date, completion: @escaping (Result<Double, Error>) -> Void) {
+    guard let type = HKCategoryType.categoryType(forIdentifier: .sleepAnalysis) else {
+      completion(.failure(BridgeError.typeUnavailable))
+      return
+    }
+    let bounds = dayBounds(for: day)
+    let predicate = HKQuery.predicateForSamples(withStart: bounds.start, end: bounds.end, options: [])
+    let query = HKSampleQuery(
+      sampleType: type,
+      predicate: predicate,
+      limit: HKObjectQueryNoLimit,
+      sortDescriptors: nil
+    ) { _, samples, error in
+      if let error {
+        completion(.failure(error))
+        return
+      }
+      let categories = (samples as? [HKCategorySample]) ?? []
+      let totalSeconds = categories.reduce(0.0) { partial, sample in
+        if sample.value == HKCategoryValueSleepAnalysis.inBed.rawValue {
+          return partial
+        }
+        let overlapStart = max(sample.startDate, bounds.start)
+        let overlapEnd = min(sample.endDate, bounds.end)
+        let overlap = overlapEnd.timeIntervalSince(overlapStart)
+        return partial + max(0, overlap)
+      }
+      completion(.success(totalSeconds / 3600.0))
+    }
+    store.execute(query)
+  }
+}
+#else
+enum LittleWinsHealthKitBridge {
+  private enum BridgeError: LocalizedError {
+    case unavailable
+    var errorDescription: String? { "Apple Health is not available on this device." }
+  }
+
+  static func requestAuthorizationForLittleWins(completion: @escaping (Result<Void, Error>) -> Void) {
+    completion(.failure(BridgeError.unavailable))
+  }
+
+  static func readTodayProgress(
+    for metric: LittleWinsIntegrationConfig.Metric,
+    completion: @escaping (Result<Double, Error>) -> Void
+  ) {
+    completion(.failure(BridgeError.unavailable))
+  }
+
+  static func readProgress(
+    for metric: LittleWinsIntegrationConfig.Metric,
+    on day: Date,
+    completion: @escaping (Result<Double, Error>) -> Void
+  ) {
+    completion(.failure(BridgeError.unavailable))
+  }
+}
+#endif
 
 @Model
 final class DrivingForce {
