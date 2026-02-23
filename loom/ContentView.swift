@@ -1740,7 +1740,7 @@ struct ContentView: View {
         let miniCardWidth: CGFloat = 28
         let miniCardHeight: CGFloat = miniCardWidth * 1.42
         let miniStackLiftPerCard = min(6, max(4, miniCardHeight * 0.14))
-        let visibleStackCount = min(3, max(0, cardCount))
+        let visibleStackCount = min(7, max(0, cardCount))
         return CGFloat(max(0, visibleStackCount - 1)) * miniStackLiftPerCard
     }
 
@@ -1752,15 +1752,21 @@ struct ContentView: View {
         availableHeight: CGFloat,
         bottomCalendarBandReserve: CGFloat
     ) -> some View {
-        let visibleCards = Array(cards.prefix(4))
         let backStep = cardHeight * 0.05
-        let stackRise = backStep * CGFloat(max(0, visibleCards.count - 1))
         let hintHeight: CGFloat = 18
         let hintSpacing: CGFloat = 6
-        let deckVisibleHeight = cardHeight + stackRise
-        let contentHeight = deckVisibleHeight + hintSpacing + hintHeight
+        let contentHeight = cardHeight + hintSpacing + hintHeight
         let freeHeight = max(0, availableHeight - bottomCalendarBandReserve - contentHeight)
-        let dynamicTopPadding = max(12 + stackRise, freeHeight * 0.35 + stackRise)
+        let minimumTopHeaderSpacing: CGFloat = 8
+        let minimumBottomControlsSpacing: CGFloat = 12
+        // Stack rise should only be limited after both top and bottom gaps have been
+        // reduced to their minimums.
+        let maxAllowedStackRise = max(0, freeHeight - minimumTopHeaderSpacing - minimumBottomControlsSpacing)
+        let maxVisibleByTopSpacing = 1 + Int(floor(maxAllowedStackRise / max(backStep, 1)))
+        let visibleCardLimit = max(1, min(7, maxVisibleByTopSpacing))
+        let visibleCards = Array(cards.prefix(visibleCardLimit))
+        let visibleStackRise = backStep * CGFloat(max(0, visibleCards.count - 1))
+        let deckTopPadding = minimumTopHeaderSpacing + visibleStackRise
 
         return VStack(spacing: 6) {
             ZStack {
@@ -1803,8 +1809,8 @@ struct ContentView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .padding(.horizontal, horizontalPadding)
-        .padding(.top, dynamicTopPadding)
-        .padding(.bottom, 14)
+        .padding(.top, deckTopPadding)
+        .padding(.bottom, minimumBottomControlsSpacing)
     }
 
     private func littleWinsCompletedTodayPlaceholderCard(width: CGFloat, height: CGFloat) -> some View {
@@ -1915,8 +1921,8 @@ struct ContentView: View {
                 let hasHistoricalPreview = !historicalPreviewCategories.isEmpty
                 let canShowHoldPreview = !completedCardsForDate.isEmpty && hasHistoricalPreview
                 let miniCardWidth: CGFloat = 28
-                let miniCardHeight: CGFloat = miniCardWidth * 1.42
-                let visibleStackCount = min(3, completedCardsForDate.count)
+        let miniCardHeight: CGFloat = miniCardWidth * 1.42
+                let visibleStackCount = min(7, completedCardsForDate.count)
                 let miniStackLiftPerCard = min(6, max(4, miniCardHeight * 0.14))
                 let miniStackTopOverflow = CGFloat(max(0, visibleStackCount - 1)) * miniStackLiftPerCard
                 VStack(spacing: 3) {
@@ -1994,7 +2000,7 @@ struct ContentView: View {
         cardHeight: CGFloat,
         usesMatchedGeometry: Bool = true
     ) -> some View {
-        let visible = Array(cards.suffix(3))
+        let visible = Array(cards.suffix(7))
         let stackLiftPerCard = min(6, max(4, cardHeight * 0.14))
         return ZStack {
             ForEach(Array(visible.enumerated()), id: \.element.id) { index, card in
@@ -3265,6 +3271,24 @@ struct ContentView: View {
 
                                         Spacer(minLength: 0)
                                     }
+                                    .contentShape(Rectangle())
+                                    .pressHighlight(pressedOutcome?.outcome_id == outcome.outcome_id, cornerRadius: 8, inset: 3)
+                                    .onLongPressGesture(
+                                        minimumDuration: 0.5,
+                                        maximumDistance: 50,
+                                        pressing: { isPressing in
+                                            if !isPressing {
+                                                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                                                    pressedOutcome = nil
+                                                }
+                                            }
+                                        },
+                                        perform: {
+                                            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                                                pressedOutcome = outcome
+                                            }
+                                        }
+                                    )
                                 }
 
                                 if idx < (previewRows.count - 1) {
@@ -3597,6 +3621,18 @@ struct OutcomePopupOverlay: View {
         return components.day ?? 0
     }
 
+    private func daysUntilStart(_ date: Date) -> Int {
+        let calendar = Calendar.current
+        let components = calendar.dateComponents([.day], from: .now, to: date)
+        return max(0, components.day ?? 0)
+    }
+
+    private func daysBetween(_ start: Date, _ end: Date) -> Int {
+        let calendar = Calendar.current
+        let components = calendar.dateComponents([.day], from: start, to: end)
+        return max(0, components.day ?? 0)
+    }
+
     private func formattedDate(_ date: Date) -> String {
         let calendar = Calendar.current
         let isSameYear = calendar.isDate(date, equalTo: .now, toGranularity: .year)
@@ -3692,7 +3728,26 @@ struct OutcomePopupOverlay: View {
     }
 
     var body: some View {
+        let isUpcoming = Calendar.current.startOfDay(for: outcome.start) > Calendar.current.startOfDay(for: .now)
         VStack(alignment: .leading, spacing: 12) {
+            if isUpcoming {
+                let daysToStart = daysUntilStart(outcome.start)
+                HStack(spacing: 8) {
+                    Image(systemName: "clock")
+                        .foregroundColor(.gray)
+                        .font(.caption)
+                    Text("starts in \(daysToStart) day\(daysToStart == 1 ? "" : "s") on \(formattedDate(outcome.start))")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                }
+                .padding(.vertical, 4)
+                .padding(.horizontal, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color(.systemGray5))
+                )
+            }
+
             // Goal
             Text(outcome.outcome)
                 .font(.headline)
@@ -3712,15 +3767,16 @@ struct OutcomePopupOverlay: View {
 
             // Days + Progress
             HStack(spacing: 8) {
-                let remainingDays = daysUntil(outcome.end)
+                let dayValue = isUpcoming ? daysBetween(outcome.start, outcome.end) : daysUntil(outcome.end)
+                let shouldShowRed = !isUpcoming && dayValue < 0
                 VStack(spacing: 2) {
-                    Text("\(remainingDays)")
+                    Text("\(dayValue)")
                         .font(.title3)
                         .fontWeight(.bold)
-                        .foregroundColor(remainingDays < 0 ? .red : .black)
-                    Text("days left")
+                        .foregroundColor(shouldShowRed ? .red : .black)
+                    Text(isUpcoming ? "days long" : "days left")
                         .font(.caption2)
-                        .foregroundColor(remainingDays < 0 ? .red : .black)
+                        .foregroundColor(shouldShowRed ? .red : .black)
                 }
                 .padding(.vertical, 6)
                 .padding(.horizontal, 10)
