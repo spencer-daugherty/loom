@@ -35,6 +35,7 @@ struct loomApp: App {
                 FulfillmentRolesArchive.self,
                 FulfillmentFocus.self,
                 FulfillmentFocusArchive.self,
+                LittleWinsDailyCompletion.self,
                 FulfillmentResources.self,
                 FulfillmentResourcesArchive.self,
                 ReplacedFulfillmentCategoryArchive.self,

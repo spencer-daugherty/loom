@@ -403,6 +403,8 @@ struct ContentView: View {
     @Query private var roles: [FulfillmentRoles]
     @Query private var foci: [FulfillmentFocus]
     @Query private var resources: [FulfillmentResources]
+    @Query(sort: \LittleWinsDailyCompletion.completedAt, order: .reverse)
+    private var littleWinsDailyCompletions: [LittleWinsDailyCompletion]
     @Query(sort: \ActionBlocksReflectionArchive.completedAt, order: .reverse)
     private var reflectionArchives: [ActionBlocksReflectionArchive]
 
@@ -532,6 +534,48 @@ struct ContentView: View {
 
     private func isLittleWinsCardCompleted(_ card: LittleWinsCardData) -> Bool {
         !card.items.isEmpty && card.items.allSatisfy { littleWinsCompletedFocusIDs.contains($0.id) }
+    }
+
+    private var hasIncompleteLittleWinsCards: Bool {
+        littleWinsCards.contains { !isLittleWinsCardCompleted($0) }
+    }
+
+    private var todayStartDate: Date {
+        Calendar.current.startOfDay(for: Date())
+    }
+
+    private func syncLittleWinsCompletionStateFromStore() {
+        let calendar = Calendar.current
+        let ids = Set(
+            littleWinsDailyCompletions
+                .filter { calendar.isDate($0.day, inSameDayAs: todayStartDate) }
+                .map(\.focusId)
+        )
+        if ids != littleWinsCompletedFocusIDs {
+            littleWinsCompletedFocusIDs = ids
+        }
+    }
+
+    private func persistLittleWinToggle(focusId: UUID, isCompleted: Bool) {
+        let calendar = Calendar.current
+        if isCompleted {
+            if let existing = littleWinsDailyCompletions.first(where: {
+                $0.focusId == focusId && calendar.isDate($0.day, inSameDayAs: todayStartDate)
+            }) {
+                modelContext.delete(existing)
+            }
+        } else if littleWinsDailyCompletions.first(where: {
+            $0.focusId == focusId && calendar.isDate($0.day, inSameDayAs: todayStartDate)
+        }) == nil {
+            modelContext.insert(
+                LittleWinsDailyCompletion(
+                    focusId: focusId,
+                    day: todayStartDate,
+                    completedAt: .now
+                )
+            )
+        }
+        try? modelContext.save()
     }
 
     private func resourcesForCategory(_ categoryTitle: String) -> [FulfillmentResources] {
@@ -717,6 +761,14 @@ struct ContentView: View {
                     .scaledToFit()
                     .frame(height: 40)
                     .modifier(DarkModeInvertImage())
+                    .overlay(alignment: .leading) {
+                        if homePageIndex == HomeSwipePage.home.rawValue && hasIncompleteLittleWinsCards {
+                            Circle()
+                                .fill(Color(.systemGray3))
+                                .frame(width: 8, height: 8)
+                                .offset(x: -14, y: 1)
+                        }
+                    }
                     .background(
                         GeometryReader { proxy in
                             Color.clear
@@ -886,7 +938,11 @@ struct ContentView: View {
             }
         }
         .contentShape(Rectangle())
+        .onAppear(perform: syncLittleWinsCompletionStateFromStore)
         .onAppear(perform: syncLittleWinsCardOrder)
+        .onChange(of: littleWinsDailyCompletions.map(\.id)) { _, _ in
+            syncLittleWinsCompletionStateFromStore()
+        }
         .onChange(of: littleWinsSourceCardIDs) { _, _ in
             syncLittleWinsCardOrder()
         }
@@ -903,25 +959,29 @@ struct ContentView: View {
 
         return VStack(spacing: 6) {
             ZStack {
-                ForEach(Array(visibleCards.enumerated()), id: \.element.id) { index, card in
-                    let depth = CGFloat(index)
-                    let isTop = index == 0
-                    littleWinsCardView(
-                        card,
-                        width: cardWidth,
-                        height: cardHeight,
-                        isFrontmost: isTop
-                    )
-                    .offset(
-                        x: isTop ? littleWinsDeckDragX : 0,
-                        y: -(depth * backStep)
-                    )
-                    .rotationEffect(.degrees(isTop ? Double(littleWinsDeckDragX / 28) : 0))
-                    .scaleEffect(isTop ? 1.0 : max(0.94, 1.0 - (depth * 0.02)))
-                    .opacity(index > 2 ? 0.92 : 1.0)
-                    .zIndex(Double(visibleCards.count - index))
-                    .allowsHitTesting(isTop)
-                    .matchedGeometryEffect(id: "lw-card-\(card.id.uuidString)", in: littleWinsCompletionNamespace)
+                if visibleCards.isEmpty {
+                    littleWinsCompletedTodayPlaceholderCard(width: cardWidth, height: cardHeight)
+                } else {
+                    ForEach(Array(visibleCards.enumerated()), id: \.element.id) { index, card in
+                        let depth = CGFloat(index)
+                        let isTop = index == 0
+                        littleWinsCardView(
+                            card,
+                            width: cardWidth,
+                            height: cardHeight,
+                            isFrontmost: isTop
+                        )
+                        .offset(
+                            x: isTop ? littleWinsDeckDragX : 0,
+                            y: -(depth * backStep)
+                        )
+                        .rotationEffect(.degrees(isTop ? Double(littleWinsDeckDragX / 28) : 0))
+                        .scaleEffect(isTop ? 1.0 : max(0.94, 1.0 - (depth * 0.02)))
+                        .opacity(index > 2 ? 0.92 : 1.0)
+                        .zIndex(Double(visibleCards.count - index))
+                        .allowsHitTesting(isTop)
+                        .matchedGeometryEffect(id: "lw-card-\(card.id.uuidString)", in: littleWinsCompletionNamespace)
+                    }
                 }
             }
             .frame(maxWidth: .infinity)
@@ -935,9 +995,64 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
                 .opacity(cards.count > 1 ? 1 : 0)
         }
-        .frame(maxWidth: .infinity, alignment: .top)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .padding(.horizontal, horizontalPadding)
         .padding(.top, 44)
+        .padding(.bottom, 14)
+    }
+
+    private func littleWinsCompletedTodayPlaceholderCard(width: CGFloat, height: CGFloat) -> some View {
+        let bg = Color(.systemGray6)
+        let primary = colorScheme == .dark ? Color.white.opacity(0.86) : Color.black.opacity(0.78)
+        let secondary = colorScheme == .dark ? Color.white.opacity(0.58) : Color.black.opacity(0.52)
+        let radarSideCount = max(3, min(7, fulfillmentMetrics.count))
+
+        return VStack(spacing: 0) {
+            Text("Completed Today")
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(secondary)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .padding(.horizontal, 18)
+                .padding(.top, 10)
+                .padding(.bottom, 18)
+
+            Spacer(minLength: 0)
+
+            VStack(spacing: 8) {
+                Text("All Little Win Cards Completed")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(primary)
+                    .multilineTextAlignment(.center)
+                Text("Come back tomorrow to continue!")
+                    .font(.subheadline)
+                    .foregroundStyle(secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, 30)
+
+            Spacer(minLength: 0)
+
+            Text("Little Wins")
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(primary)
+                .padding(.horizontal, 18)
+                .padding(.top, 10)
+                .padding(.bottom, 14)
+        }
+        .frame(width: width, height: height, alignment: .top)
+        .background {
+            littleWinsCardBackground(
+                cardColor: bg,
+                titleColor: Color(.systemGray3),
+                patternText: "Completed Little Wins",
+                width: width,
+                height: height,
+                radarSideCount: radarSideCount
+            )
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .shadow(color: Color.black.opacity(0.10), radius: 10, x: 0, y: 6)
     }
 
     private func littleWinsDeckDragGesture(cards: [LittleWinsCardData], cardWidth: CGFloat) -> some Gesture {
@@ -988,16 +1103,21 @@ struct ContentView: View {
         return HStack(spacing: 8) {
             ForEach(dates, id: \.self) { date in
                 let isToday = calendar.isDateInToday(date)
+                let completedCardsForDate = isToday ? completedTodayCards : littleWinsCompletedCards(on: date)
                 let miniCardWidth: CGFloat = 28
                 let miniCardHeight: CGFloat = miniCardWidth * 1.42
                 VStack(spacing: 3) {
-                    if isToday {
+                    if !completedCardsForDate.isEmpty {
                         littleWinsCompletedTodayMiniCardStack(
-                            cards: completedTodayCards,
+                            cards: completedCardsForDate,
                             cardWidth: miniCardWidth,
-                            cardHeight: miniCardHeight
+                            cardHeight: miniCardHeight,
+                            usesMatchedGeometry: isToday
                         )
                         .frame(width: miniCardWidth, height: miniCardHeight, alignment: .top)
+                    } else if isToday {
+                        Color.clear
+                            .frame(width: miniCardWidth, height: miniCardHeight)
                     } else {
                         RoundedRectangle(cornerRadius: 4, style: .continuous)
                             .fill(Color(.systemGray5))
@@ -1029,19 +1149,40 @@ struct ContentView: View {
         .padding(.top, 2)
     }
 
+    private func littleWinsCompletedCards(on date: Date) -> [LittleWinsCardData] {
+        let calendar = Calendar.current
+        let completedFocusIDsForDay = Set(
+            littleWinsDailyCompletions
+                .filter { calendar.isDate($0.day, inSameDayAs: date) }
+                .map(\.focusId)
+        )
+
+        guard !completedFocusIDsForDay.isEmpty else { return [] }
+        return littleWinsCards.filter { card in
+            !card.items.isEmpty && card.items.allSatisfy { completedFocusIDsForDay.contains($0.id) }
+        }
+    }
+
     private func littleWinsCompletedTodayMiniCardStack(
         cards: [LittleWinsCardData],
         cardWidth: CGFloat,
-        cardHeight: CGFloat
+        cardHeight: CGFloat,
+        usesMatchedGeometry: Bool = true
     ) -> some View {
         let visible = Array(cards.suffix(3))
         return ZStack {
             ForEach(Array(visible.enumerated()), id: \.element.id) { index, card in
                 let depth = CGFloat(visible.count - 1 - index)
-                littleWinsCompletedMiniCard(card, width: cardWidth, height: cardHeight)
+                Group {
+                    if usesMatchedGeometry {
+                        littleWinsCompletedMiniCard(card, width: cardWidth, height: cardHeight)
+                            .matchedGeometryEffect(id: "lw-card-\(card.id.uuidString)", in: littleWinsCompletionNamespace)
+                    } else {
+                        littleWinsCompletedMiniCard(card, width: cardWidth, height: cardHeight)
+                    }
+                }
                     .offset(y: -(depth * 3))
                     .zIndex(Double(index))
-                    .matchedGeometryEffect(id: "lw-card-\(card.id.uuidString)", in: littleWinsCompletionNamespace)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -1189,6 +1330,7 @@ struct ContentView: View {
                     littleWinsCompletedFocusIDs.insert(item.id)
                 }
             }
+            persistLittleWinToggle(focusId: item.id, isCompleted: isCompleted)
         }
     }
 
@@ -1198,16 +1340,34 @@ struct ContentView: View {
         height: CGFloat,
         radarSideCount: Int
     ) -> some View {
+        littleWinsCardBackground(
+            cardColor: card.cardColor,
+            titleColor: card.titleColor,
+            patternText: card.categoryTitle,
+            width: width,
+            height: height,
+            radarSideCount: radarSideCount
+        )
+    }
+
+    private func littleWinsCardBackground(
+        cardColor: Color,
+        titleColor: Color,
+        patternText: String,
+        width: CGFloat,
+        height: CGFloat,
+        radarSideCount: Int
+    ) -> some View {
         let cornerShapeSize: CGFloat = 52
         let cornerShapePadding: CGFloat = 14
         let topTitleCutoutWidth = min(max(width * 0.62, 200), width - 86)
         let bottomTitleCutoutWidth = min(max(width * 0.32, 120), 180)
         return RoundedRectangle(cornerRadius: 18, style: .continuous)
-            .fill(card.cardColor)
+            .fill(cardColor)
             .overlay {
                 littleWinsCardTextPatternBackground(
-                    categoryTitle: card.categoryTitle,
-                    color: card.titleColor,
+                    categoryTitle: patternText,
+                    color: titleColor,
                     width: width,
                     height: height
                 )
@@ -1247,7 +1407,7 @@ struct ContentView: View {
                 littleWinsInsetGuideLine(
                     inset: 18,
                     cornerRadius: 28,
-                    strokeColor: card.titleColor.opacity(0.22),
+                    strokeColor: titleColor.opacity(0.22),
                     lineWidth: 4,
                     width: width,
                     height: height,
@@ -1263,7 +1423,7 @@ struct ContentView: View {
                 littleWinsInsetGuideLine(
                     inset: 30,
                     cornerRadius: 24,
-                    strokeColor: card.titleColor.opacity(0.14),
+                    strokeColor: titleColor.opacity(0.14),
                     lineWidth: 4,
                     width: width,
                     height: height,
@@ -1277,7 +1437,7 @@ struct ContentView: View {
             }
             .overlay(alignment: .topLeading) {
                 RadarPolygonOutline(sides: radarSideCount)
-                    .stroke(card.titleColor, style: StrokeStyle(lineWidth: 6))
+                    .stroke(titleColor, style: StrokeStyle(lineWidth: 6))
                     .frame(width: cornerShapeSize, height: cornerShapeSize)
                     .padding(.leading, cornerShapePadding)
                     .padding(.top, cornerShapePadding)
@@ -1285,7 +1445,7 @@ struct ContentView: View {
             }
             .overlay(alignment: .bottomTrailing) {
                 RadarPolygonOutline(sides: radarSideCount)
-                    .stroke(card.titleColor, style: StrokeStyle(lineWidth: 6))
+                    .stroke(titleColor, style: StrokeStyle(lineWidth: 6))
                     .frame(width: cornerShapeSize, height: cornerShapeSize)
                     .padding(.trailing, cornerShapePadding)
                     .padding(.bottom, cornerShapePadding)

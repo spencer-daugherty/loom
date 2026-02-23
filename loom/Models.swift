@@ -288,6 +288,26 @@ final class FulfillmentFocusArchive {
 }
 
 @Model
+final class LittleWinsDailyCompletion {
+  @Attribute(.unique) var id: UUID
+  var focusId: UUID
+  var day: Date
+  var completedAt: Date
+
+  init(
+    id: UUID = .init(),
+    focusId: UUID,
+    day: Date,
+    completedAt: Date = .now
+  ) {
+    self.id = id
+    self.focusId = focusId
+    self.day = day
+    self.completedAt = completedAt
+  }
+}
+
+@Model
 final class FulfillmentResources {
   @Attribute(.unique) var id: UUID
   var category_id: UUID
