@@ -1156,6 +1156,15 @@ struct ContentView: View {
                                     }
                                     .frame(maxWidth: .infinity, alignment: .leading)
 
+                                    Button {
+                                        // Placeholder only (no-op for now)
+                                    } label: {
+                                        Text("Manage Little Wins")
+                                            .font(.caption2.weight(.semibold))
+                                            .foregroundStyle(.blue)
+                                    }
+                                    .buttonStyle(.plain)
+
                                     HStack(spacing: 8) {
                                         ForEach(0..<7, id: \.self) { idx in
                                             Group {
