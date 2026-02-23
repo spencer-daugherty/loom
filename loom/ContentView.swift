@@ -47,6 +47,8 @@ struct ContentView: View {
     @State private var littleWinsCardOrder: [UUID] = []
     @State private var littleWinsCompletedFocusIDs: Set<UUID> = []
     @State private var littleWinsDeckDragX: CGFloat = 0
+    @State private var littleWinsDeckIsDragging = false
+    @State private var littleWinsSuppressRowTapUntil: Date = .distantPast
     @Environment(\.modelContext) private var modelContext
     private let drivingBounceTimer = Timer.publish(every: 2.0, on: .main, in: .common).autoconnect()
 
@@ -191,6 +193,9 @@ struct ContentView: View {
                                     cardSpacing: cardSpacing,
                                     cardDensity: cardDensity
                                 )
+                                .safeAreaInset(edge: .bottom, spacing: 10) {
+                                    footer
+                                }
                                 .tag(HomeSwipePage.home.rawValue)
 
                                 placeholderMiddlePage(title: "Social")
@@ -206,8 +211,6 @@ struct ContentView: View {
                                 }
                             }
                             .environment(\.contentCardDensity, cardDensity)
-
-                            footer
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -850,7 +853,12 @@ struct ContentView: View {
                         ForEach(Array(visibleCards.enumerated()), id: \.element.id) { index, card in
                             let depth = CGFloat(index)
                             let isTop = index == 0
-                            littleWinsCardView(card, width: cardWidth, height: cardHeight)
+                            littleWinsCardView(
+                                card,
+                                width: cardWidth,
+                                height: cardHeight,
+                                isFrontmost: isTop
+                            )
                                 .offset(
                                     x: isTop ? littleWinsDeckDragX : 0,
                                     y: -(depth * backStep)
@@ -862,15 +870,16 @@ struct ContentView: View {
                                 .allowsHitTesting(isTop)
                         }
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .padding(.horizontal, horizontalPadding)
-                    .padding(.top, backStep * 3)
+                    .padding(.top, 44)
                     .contentShape(Rectangle())
                     .simultaneousGesture(
                         DragGesture(minimumDistance: 10, coordinateSpace: .local)
                             .onChanged { value in
                                 guard cards.count > 1 else { return }
                                 guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                                littleWinsDeckIsDragging = true
                                 guard value.translation.width > 0 else {
                                     littleWinsDeckDragX = 0
                                     return
@@ -886,6 +895,8 @@ struct ContentView: View {
                                 let threshold = min(120, cardWidth * 0.18)
                                 let shouldNavigateToHome = horizontalDominant && value.translation.width < -threshold
                                 let shouldRotate = horizontalDominant && value.translation.width > threshold
+                                littleWinsDeckIsDragging = false
+                                littleWinsSuppressRowTapUntil = Date().addingTimeInterval(0.2)
 
                                 if shouldNavigateToHome {
                                     withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.82, blendDuration: 0.12)) {
@@ -894,8 +905,8 @@ struct ContentView: View {
                                     }
                                 } else if shouldRotate {
                                     var nextOrder = cards.map(\.id)
-                                    let last = nextOrder.removeLast()
-                                    nextOrder.insert(last, at: 0)
+                                    let first = nextOrder.removeFirst()
+                                    nextOrder.append(first)
                                     withAnimation(.interactiveSpring(response: 0.34, dampingFraction: 0.78, blendDuration: 0.15)) {
                                         littleWinsCardOrder = nextOrder
                                         littleWinsDeckDragX = 0
@@ -919,17 +930,35 @@ struct ContentView: View {
         }
     }
 
-    private func littleWinsCardView(_ card: LittleWinsCardData, width: CGFloat, height: CGFloat) -> some View {
+    private func littleWinsCardView(
+        _ card: LittleWinsCardData,
+        width: CGFloat,
+        height: CGFloat,
+        isFrontmost: Bool
+    ) -> some View {
         let fixedPrimaryText = Color.black.opacity(0.82)
         let fixedSecondaryText = Color.black.opacity(0.56)
         let radarSideCount = max(3, min(7, fulfillmentMetrics.count))
+        let checkedCount = card.items.reduce(into: 0) { count, item in
+            if littleWinsCompletedFocusIDs.contains(item.id) { count += 1 }
+        }
+        let totalCount = card.items.count
         return VStack(spacing: 0) {
-            HStack {
-                Spacer()
+            ZStack {
                 Text("Little Wins")
                     .font(.headline.weight(.semibold))
                     .foregroundStyle(fixedPrimaryText)
-                Spacer()
+
+                if !isFrontmost && checkedCount > 0 {
+                    HStack {
+                        Spacer()
+                        Text("\(checkedCount)/\(totalCount)")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(fixedPrimaryText)
+                            .padding(.trailing, 2)
+                            .offset(y: -4)
+                    }
+                }
             }
             .padding(.horizontal, 18)
             .padding(.top, 10)
@@ -992,31 +1021,32 @@ struct ContentView: View {
         fixedSecondaryText: Color
     ) -> some View {
         let isCompleted = littleWinsCompletedFocusIDs.contains(item.id)
-        return Button {
+        return HStack(alignment: .top, spacing: 10) {
+            Image(systemName: isCompleted ? "checkmark.circle.fill" : "circle")
+                .font(.system(size: 26, weight: .regular))
+                .foregroundStyle(isCompleted ? titleColor : fixedSecondaryText)
+                .padding(.top, 6)
+                .frame(width: 30, alignment: .center)
+
+            Text(item.activity)
+                .font(.system(size: 36, weight: .semibold, design: .default))
+                .foregroundStyle(fixedPrimaryText)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .strikethrough(isCompleted, color: fixedPrimaryText.opacity(0.7))
+                .opacity(isCompleted ? 0.72 : 1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard !littleWinsDeckIsDragging else { return }
+            guard Date() >= littleWinsSuppressRowTapUntil else { return }
             if isCompleted {
                 littleWinsCompletedFocusIDs.remove(item.id)
             } else {
                 littleWinsCompletedFocusIDs.insert(item.id)
             }
-        } label: {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: isCompleted ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 26, weight: .regular))
-                    .foregroundStyle(isCompleted ? titleColor : fixedSecondaryText)
-                    .padding(.top, 6)
-
-                Text(item.activity)
-                    .font(.system(size: 36, weight: .semibold, design: .default))
-                    .foregroundStyle(fixedPrimaryText)
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .strikethrough(isCompleted, color: fixedPrimaryText.opacity(0.7))
-                    .opacity(isCompleted ? 0.72 : 1)
-            }
-            .contentShape(Rectangle())
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .buttonStyle(.plain)
     }
 
     private func littleWinsCardBackground(
