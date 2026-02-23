@@ -91,6 +91,7 @@ struct ActionView: View {
     @State private var showCheckmarkLimitAlert: Bool = false
     @State private var autosaveTask: Task<Void, Never>? = nil
     @State private var isHeaderCollapsed: Bool = false
+    @State private var dismissActionBlocksCautionCard: Bool = false
     @State private var lastScrollY: CGFloat = 0
     @State private var lastScrollTimestamp: TimeInterval = Date().timeIntervalSinceReferenceDate
     @State private var isKeyboardVisible: Bool = false
@@ -994,6 +995,7 @@ struct ActionView: View {
             Button("OK", role: .cancel) { }
         }
         .onAppear {
+            dismissActionBlocksCautionCard = false
             ensureStateRowsExistForWeek()
             applyCarriedProfilesToWeekActionsIfNeeded()
             cleanupAllBlankActions()
@@ -1052,7 +1054,7 @@ struct ActionView: View {
 
             if !isHeaderCollapsed {
                 instructionsRow
-                if shouldShowActionBlocksOldCautionCard {
+                if shouldShowActionBlocksOldCautionCard && !dismissActionBlocksCautionCard {
                     cautionRow
                 }
                 if !areAllActionBlocksCollapsed {
@@ -1097,9 +1099,10 @@ struct ActionView: View {
     @ViewBuilder
     private var cautionRow: some View {
         let cautionAgeDays = blocksAgeDays ?? (devManualWarningCardsEnabled && devActionBlocksWarningOldBlocks ? 8 : 0)
+        let cautionForeground = Color.black.opacity(0.7)
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(cautionForeground)
                 .font(.subheadline)
                 .padding(.top, 1)
 
@@ -1111,7 +1114,7 @@ struct ActionView: View {
                     + Text(" to a new capture list and start a new plan to keep it fresh.")
                 )
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(cautionForeground)
 
                 if hasUncompletedActions {
                     Button("Click here") {
@@ -1125,12 +1128,22 @@ struct ActionView: View {
             }
 
             Spacer(minLength: 0)
+
+            Button {
+                dismissActionBlocksCautionCard = true
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(cautionForeground)
+                    .frame(width: 22, height: 22)
+            }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 10)
-                .fill(Color.yellow.opacity(colorScheme == .dark ? 0.22 : 0.28))
+                .fill(Color(red: 0.98, green: 0.92, blue: 0.72))
         )
     }
 
@@ -4433,7 +4446,6 @@ private struct ActionSwipeRow: View {
     let onOpenSensitivity: () -> Void
     let onOpenAttachments: () -> Void
 
-    @State private var localStatus: ActionExecutionStatus
     @State private var localIsMust: Bool
 
     init(
@@ -4484,7 +4496,6 @@ private struct ActionSwipeRow: View {
         self.onOpenLeverage = onOpenLeverage
         self.onOpenSensitivity = onOpenSensitivity
         self.onOpenAttachments = onOpenAttachments
-        _localStatus = State(initialValue: status)
         _localIsMust = State(initialValue: isMust)
     }
 
@@ -4495,7 +4506,7 @@ private struct ActionSwipeRow: View {
     private var isSwipeInteracting: Bool { false }
 
     private var effectiveStatus: ActionExecutionStatus {
-        localStatus
+        status
     }
 
     private var effectiveIsMust: Bool {
@@ -4637,9 +4648,6 @@ private struct ActionSwipeRow: View {
                 .stroke(effectiveStatus == .inProgress ? rowAccent : Color.black.opacity(0.12), lineWidth: effectiveStatus == .inProgress ? 3 : 1)
         )
         .contentShape(Rectangle())
-        .onChange(of: status) { _, newValue in
-            localStatus = newValue
-        }
         .onChange(of: isMust) { _, newValue in
             localIsMust = newValue
         }

@@ -30,6 +30,7 @@ struct ContentView: View {
     @State private var fulfillmentRadarSelectedIndex: Int = 0
     @Environment(\.colorScheme) private var colorScheme
     @Namespace private var graphNamespace
+    @Namespace private var pageIndicatorNamespace
     @State private var showSplash: Bool = true
     @State private var splashMinimumElapsed: Bool = false
     @State private var splashPreparationFinished: Bool = false
@@ -41,6 +42,7 @@ struct ContentView: View {
     @State private var highlightFulfillmentRequirement: Bool = false
     @State private var playBlockedResetWorkItem: DispatchWorkItem? = nil
     @State private var drivingCardBounceOn = false
+    @State private var homePageIndex: Int = 1
     @Environment(\.modelContext) private var modelContext
     private let drivingBounceTimer = Timer.publish(every: 2.0, on: .main, in: .common).autoconnect()
 
@@ -59,6 +61,12 @@ struct ContentView: View {
     private enum PlayBlockedHintKind {
         case drivingAndFulfillmentForObjectives
         case drivingForFulfillment
+    }
+
+    private enum HomeSwipePage: Int {
+        case social = 0
+        case home = 1
+        case littleWins = 2
     }
 
     private var isActivePlan: Bool {
@@ -170,47 +178,21 @@ struct ContentView: View {
                         VStack(spacing: 10) {
                             header
 
-                            ViewThatFits(in: .vertical) {
-                                GeometryReader { middleProxy in
-                                    let middleHeight = middleProxy.size.height
-                                    let drivingHeight = measuredCardHeights["driving"] ?? 170
-                                    let fulfillmentHeight = measuredCardHeights["fulfillment"] ?? 170
-                                    let objectivesHeight = measuredCardHeights["objectives"] ?? 170
-                                    let totalCardHeight = drivingHeight + fulfillmentHeight + objectivesHeight
-                                    let uniformGap = max(0, (middleHeight - totalCardHeight) / 4)
+                            TabView(selection: $homePageIndex) {
+                                placeholderMiddlePage(title: "Little Wins")
+                                    .tag(HomeSwipePage.social.rawValue)
 
-                                    VStack(spacing: 0) {
-                                        Color.clear.frame(height: uniformGap)
-                                        measuredCard("driving") {
-                                            drivingForceSection
-                                                .padding(.horizontal)
-                                        }
-                                        Color.clear.frame(height: uniformGap)
-                                        measuredCard("fulfillment") {
-                                            fulfillmentSection
-                                                .padding(.horizontal)
-                                        }
-                                        Color.clear.frame(height: uniformGap)
-                                        measuredCard("objectives") {
-                                            objectivesSection
-                                                .padding(.horizontal)
-                                        }
-                                        Color.clear.frame(height: uniformGap)
-                                    }
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                                }
-                                .padding(.vertical, max(0, outerVerticalPadding - 2))
+                                centerHomepageMiddleContent(
+                                    outerVerticalPadding: outerVerticalPadding,
+                                    cardSpacing: cardSpacing,
+                                    cardDensity: cardDensity
+                                )
+                                .tag(HomeSwipePage.home.rawValue)
 
-                                ScrollView(showsIndicators: false) {
-                                    VStack(spacing: cardSpacing) {
-                                        measuredCard("driving") { drivingForceSection }
-                                        measuredCard("fulfillment") { fulfillmentSection }
-                                        measuredCard("objectives") { objectivesSection }
-                                    }
-                                    .padding(.horizontal)
-                                    .padding(.vertical, outerVerticalPadding)
-                                }
+                                placeholderMiddlePage(title: "Social")
+                                    .tag(HomeSwipePage.littleWins.rawValue)
                             }
+                            .tabViewStyle(.page(indexDisplayMode: .never))
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .onPreferenceChange(HomeCardHeightPreferenceKey.self) { heights in
                                 var updated = measuredCardHeights
@@ -604,33 +586,165 @@ struct ContentView: View {
     }
 
     private var header: some View {
-        ZStack {
-            HStack {
-                Text(Date()
-                    .formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
+        VStack(spacing: 4) {
+            ZStack {
+                HStack {
+                    if homePageIndex != HomeSwipePage.social.rawValue {
+                        Text(Date()
+                            .formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    } else {
+                        Color.clear.frame(width: 1, height: 1)
+                    }
 
-                Spacer()
+                    Spacer()
 
-                NavigationLink {
-                    AccountView()
-                } label: {
-                    Image(systemName: "person.circle")
-                        .font(.system(size: 28))
+                    if homePageIndex != HomeSwipePage.littleWins.rawValue {
+                        NavigationLink {
+                            AccountView()
+                        } label: {
+                            Image(systemName: "person.circle")
+                                .font(.system(size: 28))
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Color.clear.frame(width: 28, height: 28)
+                    }
                 }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal)
-            .padding(.top, 8) // Added thin padding above header
+                .padding(.horizontal)
+                .padding(.top, 8)
+                .overlay {
+                    HStack(spacing: 0) {
+                        Group {
+                            if homePageIndex == HomeSwipePage.social.rawValue {
+                                Text("Little Wins")
+                                    .font(.headline.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
 
-            // Center-aligned logo
-            Image("logo")
-                .resizable()
-                .scaledToFit()
-                .frame(height: 40)
-                .modifier(DarkModeInvertImage())
+                        Color.clear.frame(maxWidth: .infinity)
+
+                        Group {
+                            if homePageIndex == HomeSwipePage.littleWins.rawValue {
+                                Text("Social")
+                                    .font(.headline.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .padding(.horizontal, 8)
+                }
+
+                Image("logo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(height: 40)
+                    .modifier(DarkModeInvertImage())
+            }
+
+            pagePositionIndicator
+                .padding(.top, 2)
+                .padding(.horizontal, 24)
         }
+    }
+
+    @ViewBuilder
+    private var pagePositionIndicator: some View {
+        GeometryReader { proxy in
+            let totalWidth = proxy.size.width
+            let laneWidth = totalWidth / 3
+            let indicatorWidth = max(64, laneWidth * 0.98)
+
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.primary.opacity(0.06))
+                    .frame(height: 4)
+
+                HStack(spacing: 0) {
+                    ForEach(0..<3, id: \.self) { idx in
+                        ZStack {
+                            if idx == homePageIndex {
+                                Capsule()
+                                    .fill(Color.primary.opacity(0.22))
+                                    .frame(width: indicatorWidth, height: 4)
+                                    .matchedGeometryEffect(id: "home_page_indicator", in: pageIndicatorNamespace)
+                                    .shadow(color: Color.primary.opacity(0.06), radius: 3, x: 0, y: 1)
+                            }
+                        }
+                        .frame(width: laneWidth, height: 4)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+        }
+        .frame(height: 4)
+        .animation(.interactiveSpring(response: 0.34, dampingFraction: 0.72, blendDuration: 0.2), value: homePageIndex)
+    }
+
+    @ViewBuilder
+    private func centerHomepageMiddleContent(
+        outerVerticalPadding: CGFloat,
+        cardSpacing: CGFloat,
+        cardDensity: CGFloat
+    ) -> some View {
+        ViewThatFits(in: .vertical) {
+            GeometryReader { middleProxy in
+                let middleHeight = middleProxy.size.height
+                let drivingHeight = measuredCardHeights["driving"] ?? 170
+                let fulfillmentHeight = measuredCardHeights["fulfillment"] ?? 170
+                let objectivesHeight = measuredCardHeights["objectives"] ?? 170
+                let totalCardHeight = drivingHeight + fulfillmentHeight + objectivesHeight
+                let uniformGap = max(0, (middleHeight - totalCardHeight) / 4)
+
+                VStack(spacing: 0) {
+                    Color.clear.frame(height: uniformGap)
+                    measuredCard("driving") {
+                        drivingForceSection
+                            .padding(.horizontal)
+                    }
+                    Color.clear.frame(height: uniformGap)
+                    measuredCard("fulfillment") {
+                        fulfillmentSection
+                            .padding(.horizontal)
+                    }
+                    Color.clear.frame(height: uniformGap)
+                    measuredCard("objectives") {
+                        objectivesSection
+                            .padding(.horizontal)
+                    }
+                    Color.clear.frame(height: uniformGap)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            }
+            .padding(.vertical, max(0, outerVerticalPadding - 2))
+
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: cardSpacing) {
+                    measuredCard("driving") { drivingForceSection }
+                    measuredCard("fulfillment") { fulfillmentSection }
+                    measuredCard("objectives") { objectivesSection }
+                }
+                .padding(.horizontal)
+                .padding(.vertical, outerVerticalPadding)
+            }
+        }
+        .environment(\.contentCardDensity, cardDensity)
+    }
+
+    private func placeholderMiddlePage(title: String) -> some View {
+        VStack {
+            Spacer()
+            Text(title)
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
     }
 
     private var footer: some View {

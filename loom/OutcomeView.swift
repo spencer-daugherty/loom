@@ -79,6 +79,8 @@ struct OutcomeView: View {
     @State private var isShowingGoalMetConfirmAlert = false
     @State private var isShowingMeasureCheckAlert = false
     @State private var isShowingTargetDatePicker = false
+    @State private var dismissTargetPassedBanner = false
+    @State private var dismissGoalAchievedBanner = false
     @State private var completionValidationMessage: String = ""
     @State private var filterConnectedBlocksOnly = true
     @State private var selectedCompletedArchiveActionIDs: Set<UUID> = []
@@ -120,7 +122,7 @@ struct OutcomeView: View {
     }
 
     private var popupForegroundColor: Color {
-        colorScheme == .dark ? .black : .primary
+        Color.black.opacity(0.7)
     }
 
     private var categoryOptions: [String] {
@@ -491,7 +493,7 @@ struct OutcomeView: View {
 
     private var formContent: some View {
         Form {
-            if showTargetPassedBanner {
+            if showTargetPassedBanner && !dismissTargetPassedBanner {
                 Section {
                     HStack(alignment: .top, spacing: 10) {
                         Image(systemName: "exclamationmark.triangle.fill")
@@ -509,6 +511,15 @@ struct OutcomeView: View {
                             .foregroundStyle(.blue)
                         }
                         Spacer(minLength: 0)
+                        Button {
+                            dismissTargetPassedBanner = true
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(popupForegroundColor)
+                                .frame(width: 22, height: 22)
+                        }
+                        .buttonStyle(.plain)
                     }
                     .padding(8)
                     .background(
@@ -520,7 +531,7 @@ struct OutcomeView: View {
                 }
             }
 
-            if showGoalAchievedEarlyBanner {
+            if showGoalAchievedEarlyBanner && !dismissGoalAchievedBanner {
                 Section {
                     HStack(alignment: .top, spacing: 10) {
                         Image(systemName: "flag.fill")
@@ -537,6 +548,15 @@ struct OutcomeView: View {
                             .foregroundStyle(.blue)
                         }
                         Spacer(minLength: 0)
+                        Button {
+                            dismissGoalAchievedBanner = true
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(popupForegroundColor)
+                                .frame(width: 22, height: 22)
+                        }
+                        .buttonStyle(.plain)
                     }
                     .padding(8)
                     .background(
@@ -672,6 +692,8 @@ struct OutcomeView: View {
             .onAppear {
                 hydrateMeasureFromLatestEntry()
                 syncSelectedCategoryToFulfillmentAreas()
+                dismissTargetPassedBanner = false
+                dismissGoalAchievedBanner = false
             }
             .onChange(of: fulfillments.map(\.category)) { _, _ in
                 syncSelectedCategoryToFulfillmentAreas()
