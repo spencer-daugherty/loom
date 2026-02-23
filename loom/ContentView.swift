@@ -46,6 +46,7 @@ struct ContentView: View {
     @State private var measuredHeaderLogoWidth: CGFloat = 118
     @State private var littleWinsCardOrder: [UUID] = []
     @State private var littleWinsCompletedFocusIDs: Set<UUID> = []
+    @State private var littleWinsDeckDragX: CGFloat = 0
     @Environment(\.modelContext) private var modelContext
     private let drivingBounceTimer = Timer.publish(every: 2.0, on: .main, in: .common).autoconnect()
 
@@ -842,25 +843,71 @@ struct ContentView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    List {
-                        ForEach(cards) { card in
+                    let visibleCards = Array(cards.prefix(4))
+                    let backStep = cardHeight * 0.05
+
+                    ZStack {
+                        ForEach(Array(visibleCards.enumerated()), id: \.element.id) { index, card in
+                            let depth = CGFloat(index)
+                            let isTop = index == 0
                             littleWinsCardView(card, width: cardWidth, height: cardHeight)
-                                .listRowInsets(EdgeInsets(top: 6, leading: horizontalPadding, bottom: 6, trailing: horizontalPadding))
-                                .listRowBackground(Color.clear)
-                                .listRowSeparator(.hidden)
-                                .moveDisabled(cards.count <= 1)
-                        }
-                        .onMove { from, to in
-                            guard cards.count > 1 else { return }
-                            var next = littleWinsCardOrder.isEmpty ? cards.map(\.id) : littleWinsCardOrder
-                            next.move(fromOffsets: from, toOffset: to)
-                            littleWinsCardOrder = next
+                                .offset(
+                                    x: isTop ? littleWinsDeckDragX : 0,
+                                    y: -(depth * backStep)
+                                )
+                                .rotationEffect(.degrees(isTop ? Double(littleWinsDeckDragX / 28) : 0))
+                                .scaleEffect(isTop ? 1.0 : max(0.94, 1.0 - (depth * 0.02)))
+                                .opacity(index > 2 ? 0.92 : 1.0)
+                                .zIndex(Double(visibleCards.count - index))
+                                .allowsHitTesting(isTop)
                         }
                     }
-                    .listStyle(.plain)
-                    .scrollContentBackground(.hidden)
-                    .background(Color.clear)
-                    .environment(\.editMode, .constant(.inactive))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    .padding(.horizontal, horizontalPadding)
+                    .padding(.top, backStep * 3)
+                    .contentShape(Rectangle())
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 10, coordinateSpace: .local)
+                            .onChanged { value in
+                                guard cards.count > 1 else { return }
+                                guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                                guard value.translation.width > 0 else {
+                                    littleWinsDeckDragX = 0
+                                    return
+                                }
+                                littleWinsDeckDragX = value.translation.width
+                            }
+                            .onEnded { value in
+                                guard cards.count > 1 else {
+                                    littleWinsDeckDragX = 0
+                                    return
+                                }
+                                let horizontalDominant = abs(value.translation.width) > abs(value.translation.height)
+                                let threshold = min(120, cardWidth * 0.18)
+                                let shouldNavigateToHome = horizontalDominant && value.translation.width < -threshold
+                                let shouldRotate = horizontalDominant && value.translation.width > threshold
+
+                                if shouldNavigateToHome {
+                                    withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.82, blendDuration: 0.12)) {
+                                        homePageIndex = HomeSwipePage.home.rawValue
+                                        littleWinsDeckDragX = 0
+                                    }
+                                } else if shouldRotate {
+                                    var nextOrder = cards.map(\.id)
+                                    let last = nextOrder.removeLast()
+                                    nextOrder.insert(last, at: 0)
+                                    withAnimation(.interactiveSpring(response: 0.34, dampingFraction: 0.78, blendDuration: 0.15)) {
+                                        littleWinsCardOrder = nextOrder
+                                        littleWinsDeckDragX = 0
+                                    }
+                                } else {
+                                    withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82, blendDuration: 0.1)) {
+                                        littleWinsDeckDragX = 0
+                                    }
+                                }
+                            }
+                    )
+                    .animation(.interactiveSpring(response: 0.34, dampingFraction: 0.80, blendDuration: 0.15), value: littleWinsCardOrder)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -889,26 +936,25 @@ struct ContentView: View {
             .padding(.bottom, 18)
 
             GeometryReader { middleGeo in
-                ScrollView(showsIndicators: false) {
-                    VStack {
-                        Spacer(minLength: 0)
+                VStack {
+                    Spacer(minLength: 0)
 
-                        VStack(alignment: .leading, spacing: 12) {
-                            ForEach(card.items, id: \.id) { item in
-                                littleWinsItemRow(
-                                    item: item,
-                                    titleColor: card.titleColor,
-                                    fixedPrimaryText: fixedPrimaryText,
-                                    fixedSecondaryText: fixedSecondaryText
-                                )
-                            }
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(card.items, id: \.id) { item in
+                            littleWinsItemRow(
+                                item: item,
+                                titleColor: card.titleColor,
+                                fixedPrimaryText: fixedPrimaryText,
+                                fixedSecondaryText: fixedSecondaryText
+                            )
                         }
-                        Spacer(minLength: 0)
                     }
-                    .padding(.horizontal, 38)
-                    .padding(.vertical, 14)
-                    .frame(maxWidth: .infinity, minHeight: middleGeo.size.height, alignment: .center)
+                    Spacer(minLength: 0)
                 }
+                .padding(.horizontal, 38)
+                .padding(.vertical, 14)
+                .frame(maxWidth: .infinity, minHeight: middleGeo.size.height, alignment: .center)
+                .clipped()
             }
 
             Spacer(minLength: 0)
