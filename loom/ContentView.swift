@@ -43,6 +43,7 @@ struct ContentView: View {
     @State private var playBlockedResetWorkItem: DispatchWorkItem? = nil
     @State private var drivingCardBounceOn = false
     @State private var homePageIndex: Int = 1
+    @State private var measuredHeaderLogoWidth: CGFloat = 118
     @Environment(\.modelContext) private var modelContext
     private let drivingBounceTimer = Timer.publish(every: 2.0, on: .main, in: .common).autoconnect()
 
@@ -615,28 +616,23 @@ struct ContentView: View {
                 .padding(.horizontal)
                 .padding(.top, 8)
                 .overlay {
-                    HStack(spacing: 0) {
-                        Group {
+                    GeometryReader { proxy in
+                        ZStack {
                             if homePageIndex == HomeSwipePage.social.rawValue {
                                 Text("Little Wins")
                                     .font(.headline.weight(.semibold))
                                     .foregroundStyle(.secondary)
+                                    .position(x: proxy.size.width * 0.20, y: (proxy.size.height / 2) + 4)
                             }
-                        }
-                        .frame(maxWidth: .infinity)
 
-                        Color.clear.frame(maxWidth: .infinity)
-
-                        Group {
                             if homePageIndex == HomeSwipePage.littleWins.rawValue {
                                 Text("Social")
                                     .font(.headline.weight(.semibold))
                                     .foregroundStyle(.secondary)
+                                    .position(x: proxy.size.width * 0.80, y: (proxy.size.height / 2) + 4)
                             }
                         }
-                        .frame(maxWidth: .infinity)
                     }
-                    .padding(.horizontal, 8)
                 }
 
                 Image("logo")
@@ -644,11 +640,23 @@ struct ContentView: View {
                     .scaledToFit()
                     .frame(height: 40)
                     .modifier(DarkModeInvertImage())
+                    .background(
+                        GeometryReader { proxy in
+                            Color.clear
+                                .preference(key: HeaderLogoWidthPreferenceKey.self, value: proxy.size.width)
+                        }
+                    )
             }
 
             pagePositionIndicator
                 .padding(.top, 2)
                 .padding(.horizontal, 24)
+        }
+        .onPreferenceChange(HeaderLogoWidthPreferenceKey.self) { width in
+            guard width > 0 else { return }
+            if abs(width - measuredHeaderLogoWidth) > 0.5 {
+                measuredHeaderLogoWidth = width
+            }
         }
     }
 
@@ -1525,6 +1533,15 @@ private struct HomeCardHeightPreferenceKey: PreferenceKey {
 
     static func reduce(value: inout [String: CGFloat], nextValue: () -> [String: CGFloat]) {
         value.merge(nextValue()) { _, new in new }
+    }
+}
+
+private struct HeaderLogoWidthPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        let next = nextValue()
+        if next > 0 { value = next }
     }
 }
 
