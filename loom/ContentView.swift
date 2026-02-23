@@ -44,6 +44,8 @@ struct ContentView: View {
     @State private var drivingCardBounceOn = false
     @State private var homePageIndex: Int = 1
     @State private var measuredHeaderLogoWidth: CGFloat = 118
+    @State private var littleWinsCardOrder: [UUID] = []
+    @State private var littleWinsCompletedFocusIDs: Set<UUID> = []
     @Environment(\.modelContext) private var modelContext
     private let drivingBounceTimer = Timer.publish(every: 2.0, on: .main, in: .common).autoconnect()
 
@@ -180,7 +182,7 @@ struct ContentView: View {
                             header
 
                             TabView(selection: $homePageIndex) {
-                                placeholderMiddlePage(title: "Little Wins")
+                                littleWinsMiddlePage()
                                     .tag(HomeSwipePage.social.rawValue)
 
                                 centerHomepageMiddleContent(
@@ -461,6 +463,61 @@ struct ContentView: View {
         guard let rec = recordForCategory(categoryTitle) else { return [] }
         return foci.filter { $0.category_id == rec.category_id }
             .sorted { $0.rank < $1.rank }
+    }
+
+    private struct LittleWinsCardData: Identifiable {
+        let id: UUID
+        let categoryTitle: String
+        let cardColor: Color
+        let titleColor: Color
+        let items: [FulfillmentFocus]
+    }
+
+    private var littleWinsCards: [LittleWinsCardData] {
+        let sourceCards = orderedFulfillmentRecords.compactMap { record -> LittleWinsCardData? in
+            let wins = fociForCategory(record.category)
+                .filter { !$0.activity.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            guard !wins.isEmpty else { return nil }
+            return LittleWinsCardData(
+                id: record.category_id,
+                categoryTitle: record.category,
+                cardColor: FulfillmentCategoryTheme.lightColor(for: record.category),
+                titleColor: FulfillmentCategoryTheme.color(for: record.category),
+                items: wins
+            )
+        }
+
+        guard !littleWinsCardOrder.isEmpty else { return sourceCards }
+        let byID = Dictionary(uniqueKeysWithValues: sourceCards.map { ($0.id, $0) })
+        var ordered: [LittleWinsCardData] = []
+        for id in littleWinsCardOrder {
+            if let card = byID[id] { ordered.append(card) }
+        }
+        let remaining = sourceCards.filter { card in !littleWinsCardOrder.contains(card.id) }
+        ordered.append(contentsOf: remaining)
+        return ordered
+    }
+
+    private var littleWinsSourceCardIDs: [UUID] {
+        orderedFulfillmentRecords.compactMap { record in
+            let hasWins = foci.contains {
+                $0.category_id == record.category_id &&
+                !$0.activity.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+            return hasWins ? record.category_id : nil
+        }
+    }
+
+    private func syncLittleWinsCardOrder() {
+        let sourceIDs = littleWinsSourceCardIDs
+        let sourceIDSet = Set(sourceIDs)
+        var next = littleWinsCardOrder.filter { sourceIDSet.contains($0) }
+        for id in sourceIDs where !next.contains(id) {
+            next.append(id)
+        }
+        if next != littleWinsCardOrder {
+            littleWinsCardOrder = next
+        }
     }
 
     private func resourcesForCategory(_ categoryTitle: String) -> [FulfillmentResources] {
@@ -759,6 +816,354 @@ struct ContentView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
+    }
+
+    private func littleWinsMiddlePage() -> some View {
+        GeometryReader { proxy in
+            let horizontalPadding: CGFloat = 16
+            let cardWidth = max(0, proxy.size.width - (horizontalPadding * 2))
+            let cardHeight = min(max(cardWidth * 1.42, 360), max(380, proxy.size.height - 36))
+            let cards = littleWinsCards
+
+            Group {
+                if cards.isEmpty {
+                    VStack {
+                        Spacer()
+                        Text("No Little Wins yet")
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Text("Add Little Wins inside Fulfillment Areas to see them here.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.top, 4)
+                            .padding(.horizontal, 24)
+                        Spacer()
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List {
+                        ForEach(cards) { card in
+                            littleWinsCardView(card, width: cardWidth, height: cardHeight)
+                                .listRowInsets(EdgeInsets(top: 6, leading: horizontalPadding, bottom: 6, trailing: horizontalPadding))
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
+                                .moveDisabled(cards.count <= 1)
+                        }
+                        .onMove { from, to in
+                            guard cards.count > 1 else { return }
+                            var next = littleWinsCardOrder.isEmpty ? cards.map(\.id) : littleWinsCardOrder
+                            next.move(fromOffsets: from, toOffset: to)
+                            littleWinsCardOrder = next
+                        }
+                    }
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                    .background(Color.clear)
+                    .environment(\.editMode, .constant(.inactive))
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        }
+        .contentShape(Rectangle())
+        .onAppear(perform: syncLittleWinsCardOrder)
+        .onChange(of: littleWinsSourceCardIDs) { _, _ in
+            syncLittleWinsCardOrder()
+        }
+    }
+
+    private func littleWinsCardView(_ card: LittleWinsCardData, width: CGFloat, height: CGFloat) -> some View {
+        let fixedPrimaryText = Color.black.opacity(0.82)
+        let fixedSecondaryText = Color.black.opacity(0.56)
+        let radarSideCount = max(3, min(7, fulfillmentMetrics.count))
+        return VStack(spacing: 0) {
+            HStack {
+                Spacer()
+                Text("Little Wins")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(fixedPrimaryText)
+                Spacer()
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 10)
+            .padding(.bottom, 18)
+
+            GeometryReader { middleGeo in
+                ScrollView(showsIndicators: false) {
+                    VStack {
+                        Spacer(minLength: 0)
+
+                        VStack(alignment: .leading, spacing: 12) {
+                            ForEach(card.items, id: \.id) { item in
+                                littleWinsItemRow(
+                                    item: item,
+                                    titleColor: card.titleColor,
+                                    fixedPrimaryText: fixedPrimaryText,
+                                    fixedSecondaryText: fixedSecondaryText
+                                )
+                            }
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 38)
+                    .padding(.vertical, 14)
+                    .frame(maxWidth: .infinity, minHeight: middleGeo.size.height, alignment: .center)
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            HStack {
+                Spacer()
+                Text(card.categoryTitle)
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(card.titleColor)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                Spacer()
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 10)
+            .padding(.bottom, 16)
+        }
+        .frame(width: width, height: height, alignment: .top)
+        .background {
+            littleWinsCardBackground(
+                card: card,
+                width: width,
+                height: height,
+                radarSideCount: radarSideCount
+            )
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .shadow(color: Color.black.opacity(0.10), radius: 10, x: 0, y: 6)
+    }
+
+    private func littleWinsItemRow(
+        item: FulfillmentFocus,
+        titleColor: Color,
+        fixedPrimaryText: Color,
+        fixedSecondaryText: Color
+    ) -> some View {
+        let isCompleted = littleWinsCompletedFocusIDs.contains(item.id)
+        return Button {
+            if isCompleted {
+                littleWinsCompletedFocusIDs.remove(item.id)
+            } else {
+                littleWinsCompletedFocusIDs.insert(item.id)
+            }
+        } label: {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: isCompleted ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 26, weight: .regular))
+                    .foregroundStyle(isCompleted ? titleColor : fixedSecondaryText)
+                    .padding(.top, 6)
+
+                Text(item.activity)
+                    .font(.system(size: 36, weight: .semibold, design: .default))
+                    .foregroundStyle(fixedPrimaryText)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .strikethrough(isCompleted, color: fixedPrimaryText.opacity(0.7))
+                    .opacity(isCompleted ? 0.72 : 1)
+            }
+            .contentShape(Rectangle())
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func littleWinsCardBackground(
+        card: LittleWinsCardData,
+        width: CGFloat,
+        height: CGFloat,
+        radarSideCount: Int
+    ) -> some View {
+        let cornerShapeSize: CGFloat = 52
+        let cornerShapePadding: CGFloat = 14
+        return RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .fill(card.cardColor)
+            .overlay {
+                littleWinsCardTextPatternBackground(
+                    categoryTitle: card.categoryTitle,
+                    color: card.titleColor,
+                    width: width,
+                    height: height
+                )
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.12),
+                                Color.clear,
+                                Color.black.opacity(0.02)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+            }
+            .overlay {
+                ZStack {
+                    ForEach(0..<18, id: \.self) { idx in
+                        RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                            .fill(Color.white.opacity(0.05))
+                            .frame(width: width * 0.9, height: 1)
+                            .rotationEffect(.degrees(-14))
+                            .offset(x: -width * 0.14, y: CGFloat(idx) * 16 - (height * 0.38))
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .opacity(0.55)
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.white.opacity(0.28), lineWidth: 1)
+            }
+            .overlay {
+                littleWinsInsetGuideLine(
+                    inset: 18,
+                    cornerRadius: 28,
+                    strokeColor: card.titleColor.opacity(0.22),
+                    lineWidth: 4,
+                    width: width,
+                    height: height,
+                    topLeadingShapeCutout: .init(width: 112, height: 112),
+                    bottomTrailingShapeCutout: .init(width: 112, height: 112),
+                    shapePadding: cornerShapePadding,
+                    shapeSize: cornerShapeSize
+                )
+            }
+            .overlay {
+                littleWinsInsetGuideLine(
+                    inset: 30,
+                    cornerRadius: 24,
+                    strokeColor: card.titleColor.opacity(0.14),
+                    lineWidth: 4,
+                    width: width,
+                    height: height,
+                    topLeadingShapeCutout: .init(width: 96, height: 96),
+                    bottomTrailingShapeCutout: .init(width: 96, height: 96),
+                    shapePadding: cornerShapePadding,
+                    shapeSize: cornerShapeSize
+                )
+            }
+            .overlay(alignment: .topLeading) {
+                RadarPolygonOutline(sides: radarSideCount)
+                    .stroke(card.titleColor, style: StrokeStyle(lineWidth: 6))
+                    .frame(width: cornerShapeSize, height: cornerShapeSize)
+                    .padding(.leading, cornerShapePadding)
+                    .padding(.top, cornerShapePadding)
+                    .opacity(0.9)
+            }
+            .overlay(alignment: .bottomTrailing) {
+                RadarPolygonOutline(sides: radarSideCount)
+                    .stroke(card.titleColor, style: StrokeStyle(lineWidth: 6))
+                    .frame(width: cornerShapeSize, height: cornerShapeSize)
+                    .padding(.trailing, cornerShapePadding)
+                    .padding(.bottom, cornerShapePadding)
+                    .opacity(0.9)
+            }
+    }
+
+    private func littleWinsInsetGuideLine(
+        inset: CGFloat,
+        cornerRadius: CGFloat,
+        strokeColor: Color,
+        lineWidth: CGFloat,
+        width: CGFloat,
+        height: CGFloat,
+        topLeadingShapeCutout: CGSize = .zero,
+        bottomTrailingShapeCutout: CGSize = .zero
+        ,
+        shapePadding: CGFloat = 14,
+        shapeSize: CGFloat = 52
+    ) -> some View {
+        let topCutoutWidth = min(max(width * 0.34, 120), 190)
+        let bottomCutoutWidth = min(max(width * 0.56, 180), width - (inset * 2) - 20)
+        let topY = inset
+        let bottomY = height - inset
+        let topLeadingCutoutCenter = CGPoint(
+            x: shapePadding + (shapeSize / 2),
+            y: shapePadding + (shapeSize / 2)
+        )
+        let bottomTrailingCutoutCenter = CGPoint(
+            x: width - shapePadding - (shapeSize / 2),
+            y: height - shapePadding - (shapeSize / 2)
+        )
+
+        return ZStack {
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .inset(by: inset)
+                .stroke(strokeColor, lineWidth: lineWidth)
+
+            Rectangle()
+                .fill(Color.black)
+                .frame(width: topCutoutWidth, height: lineWidth + 10)
+                .position(x: width / 2, y: topY)
+
+            Rectangle()
+                .fill(Color.black)
+                .frame(width: bottomCutoutWidth, height: lineWidth + 10)
+                .position(x: width / 2, y: bottomY)
+        }
+        .compositingGroup()
+        .blendMode(.normal)
+        .mask(
+            Rectangle()
+                .overlay {
+                    Rectangle().fill(Color.white)
+                    Rectangle()
+                        .frame(width: topCutoutWidth, height: lineWidth + 12)
+                        .position(x: width / 2, y: topY)
+                        .blendMode(.destinationOut)
+                    Rectangle()
+                        .frame(width: bottomCutoutWidth, height: lineWidth + 12)
+                        .position(x: width / 2, y: bottomY)
+                        .blendMode(.destinationOut)
+                    if topLeadingShapeCutout != .zero {
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .frame(width: topLeadingShapeCutout.width, height: topLeadingShapeCutout.height)
+                            .position(topLeadingCutoutCenter)
+                            .blendMode(.destinationOut)
+                    }
+                    if bottomTrailingShapeCutout != .zero {
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .frame(width: bottomTrailingShapeCutout.width, height: bottomTrailingShapeCutout.height)
+                            .position(bottomTrailingCutoutCenter)
+                            .blendMode(.destinationOut)
+                    }
+                }
+                .compositingGroup()
+        )
+    }
+
+    private func littleWinsCardTextPatternBackground(
+        categoryTitle: String,
+        color: Color,
+        width: CGFloat,
+        height: CGFloat
+    ) -> some View {
+        let textSize: CGFloat = 8.5 // ~50% of headline-sized "Little Wins" title
+        let rowHeight: CGFloat = 9
+        let rowCount = max(1, Int(ceil(height / rowHeight)) + 2)
+        let repeatedLine = String(repeating: categoryTitle + " ", count: max(8, Int(width / 28)))
+
+        return VStack(alignment: .leading, spacing: 0) {
+            ForEach(0..<rowCount, id: \.self) { row in
+                Text(repeatedLine)
+                    .font(.system(size: textSize, weight: .semibold, design: .rounded))
+                    .foregroundStyle(color.opacity(row.isMultiple(of: 2) ? 0.1 : 0.2))
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 0)
+            }
+        }
+        .frame(width: width, height: height, alignment: .topLeading)
+        .clipped()
+        .allowsHitTesting(false)
     }
 
     private var footer: some View {
@@ -1548,6 +1953,33 @@ private struct HeaderLogoWidthPreferenceKey: PreferenceKey {
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         let next = nextValue()
         if next > 0 { value = next }
+    }
+}
+
+private struct RadarPolygonOutline: Shape {
+    let sides: Int
+
+    func path(in rect: CGRect) -> Path {
+        let clampedSides = max(3, min(7, sides))
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let radius = min(rect.width, rect.height) / 2
+        let startAngle = -CGFloat.pi / 2
+
+        var path = Path()
+        for idx in 0..<clampedSides {
+            let angle = startAngle + (CGFloat(idx) * 2 * .pi / CGFloat(clampedSides))
+            let point = CGPoint(
+                x: center.x + cos(angle) * radius,
+                y: center.y + sin(angle) * radius
+            )
+            if idx == 0 {
+                path.move(to: point)
+            } else {
+                path.addLine(to: point)
+            }
+        }
+        path.closeSubpath()
+        return path
     }
 }
 
