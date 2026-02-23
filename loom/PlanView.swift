@@ -1,10 +1,18 @@
 import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
+#if canImport(EventKit)
+import EventKit
+#endif
 
 private struct PlannedActionDueSnapshot: Codable {
     let dueDate: Date
     let attentionDays: Int
+}
+
+private struct PlanViewSourceDueDateOverrideRecord: Codable {
+    let hasDueDate: Bool
+    let dueDateUnix: TimeInterval
 }
 
 private struct PlanStepProgressBar: View {
@@ -684,7 +692,6 @@ struct PlanStepTwoView: View {
     @State private var step2ValidationResetWorkItem: DispatchWorkItem?
     @AppStorage("capture_default_due_date_attention_days")
     private var dueDateAttentionDays: Int = 7
-
     private let hiddenUntilLaterIconName = "clock.arrow.trianglehead.clockwise.rotate.90.path.dotted"
 
     private func normalizedActionText(_ text: String) -> String {
@@ -3917,6 +3924,8 @@ struct PlanStepFiveView: View {
     @State private var isShowingStartConfirmation: Bool = false
     @AppStorage("capture_default_due_date_attention_days")
     private var dueDateAttentionDays: Int = 7
+    @AppStorage("capture_source_due_date_overrides_json")
+    private var sourceDueDateOverridesJSON: String = "{}"
 
     // Robust "did anything change?" trigger for routine saving
     @State private var step5ChangeTick: Int = 0
@@ -5400,11 +5409,72 @@ struct PlanStepFiveView: View {
     private func updateDueDateEditor(forActionId actionId: UUID, with updated: DueDateEditorState) {
         guard let item = captureItemForPlannedActionID(actionId) else { return }
         let normalizedDue = Calendar.current.startOfDay(for: updated.dueDate)
-        item.dueDate = updated.hasDueDate ? normalizedDue : nil
+        let resolvedDue = updated.hasDueDate ? normalizedDue : nil
+        item.dueDate = resolvedDue
         item.dueDateAttentionDays = min(max(updated.attentionDays, 7), 30)
+        persistSourceDueDateOverrideIfNeeded(for: item, dueDate: resolvedDue)
+        applyAppleReminderDueDateUpdateIfNeeded(for: item, dueDate: resolvedDue)
         markStep5DirtyAndAutosave()
         // Persist immediately so due-date edits survive exiting Step 6 before "Start".
         try? modelContext.save()
+    }
+
+    private func sourceOverrideKey(sourceType: String, sourceID: String) -> String {
+        "\(sourceType)|\(sourceID)"
+    }
+
+    private func decodedSourceDueDateOverrides() -> [String: PlanViewSourceDueDateOverrideRecord] {
+        guard let data = sourceDueDateOverridesJSON.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode([String: PlanViewSourceDueDateOverrideRecord].self, from: data) else {
+            return [:]
+        }
+        return decoded
+    }
+
+    private func saveSourceDueDateOverrides(_ map: [String: PlanViewSourceDueDateOverrideRecord]) {
+        guard let data = try? JSONEncoder().encode(map),
+              let json = String(data: data, encoding: .utf8) else { return }
+        sourceDueDateOverridesJSON = json
+    }
+
+    private func persistSourceDueDateOverrideIfNeeded(for item: RollingCaptureItem, dueDate: Date?) {
+        guard let sourceType = item.sourceType,
+              let sourceID = item.sourceExternalID,
+              !sourceID.isEmpty else { return }
+        var map = decodedSourceDueDateOverrides()
+        let normalizedDate = dueDate.map { Calendar.current.startOfDay(for: $0) }
+        map[sourceOverrideKey(sourceType: sourceType, sourceID: sourceID)] = .init(
+            hasDueDate: normalizedDate != nil,
+            dueDateUnix: normalizedDate?.timeIntervalSince1970 ?? 0
+        )
+        saveSourceDueDateOverrides(map)
+    }
+
+    private func applyAppleReminderDueDateUpdateIfNeeded(for item: RollingCaptureItem, dueDate: Date?) {
+        guard item.sourceType == "apple_reminder" else { return }
+        guard let externalID = item.sourceExternalID, !externalID.isEmpty else { return }
+        #if canImport(EventKit)
+        let store = EKEventStore()
+        let runUpdate: (Bool) -> Void = { granted in
+            guard granted else { return }
+            guard let reminder = store.calendarItem(withIdentifier: externalID) as? EKReminder else { return }
+            do {
+                if let dueDate {
+                    var comps = Calendar.current.dateComponents([.year, .month, .day], from: dueDate)
+                    comps.calendar = Calendar.current
+                    reminder.dueDateComponents = comps
+                } else {
+                    reminder.dueDateComponents = nil
+                }
+                try store.save(reminder, commit: true)
+            } catch { }
+        }
+        if #available(iOS 17.0, *) {
+            store.requestFullAccessToReminders { granted, _ in runUpdate(granted) }
+        } else {
+            store.requestAccess(to: .reminder) { granted, _ in runUpdate(granted) }
+        }
+        #endif
     }
 
     private func markStep5DirtyAndAutosave() {

@@ -513,24 +513,24 @@ struct AccountView: View {
                 Toggle("Enable Projects", isOn: $enableProjectsFeature)
                 Toggle("Blank Homepage", isOn: $blankHomepageMode)
                 Toggle("Setup Homepage", isOn: $setupHomepageMode)
-                Toggle("Manual Warning Cards", isOn: $devManualWarningCardsEnabled)
+                Toggle("Warning Cards", isOn: $devManualWarningCardsEnabled)
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Outcomes")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Toggle("Outcome date passed", isOn: $devOutcomeWarningTargetPassed)
-                    Toggle("Outcome achieved", isOn: $devOutcomeWarningGoalAchieved)
-                }
-                .disabled(!devManualWarningCardsEnabled)
+                if devManualWarningCardsEnabled {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Outcomes")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Toggle("Outcome date passed", isOn: $devOutcomeWarningTargetPassed)
+                        Toggle("Outcome achieved", isOn: $devOutcomeWarningGoalAchieved)
+                    }
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Action Blocks")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Toggle("Action Blocks are old", isOn: $devActionBlocksWarningOldBlocks)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Action Blocks")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Toggle("Action Blocks are old", isOn: $devActionBlocksWarningOldBlocks)
+                    }
                 }
-                .disabled(!devManualWarningCardsEnabled)
 
                 Button {
                     pendingDeleteScope = .fulfillmentOnly
@@ -560,6 +560,12 @@ struct AccountView: View {
         .navigationTitle("Account Manager")
         .onAppear {
             RecentlyDeletedStore.purgeExpired(in: context)
+        }
+        .onChange(of: devManualWarningCardsEnabled) { _, isEnabled in
+            guard !isEnabled else { return }
+            devOutcomeWarningTargetPassed = false
+            devOutcomeWarningGoalAchieved = false
+            devActionBlocksWarningOldBlocks = false
         }
         .sheet(isPresented: $showDeleteAllDataSheet) {
             NavigationStack {

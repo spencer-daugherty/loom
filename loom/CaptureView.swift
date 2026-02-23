@@ -946,9 +946,7 @@ struct CaptureView: View {
                                 item.dueDate = updatedDueDate
                                 item.dueDateAttentionDays = min(max(editingItemAttentionDays, 7), 30)
                                 if dueDateSettingsChanged {
-                                    if item.sourceType != "apple_reminder" {
-                                        persistSourceDueDateOverrideIfNeeded(for: item, dueDate: updatedDueDate)
-                                    }
+                                    persistSourceDueDateOverrideIfNeeded(for: item, dueDate: updatedDueDate)
                                     applyAppleReminderDueDateUpdateIfNeeded(for: item, dueDate: updatedDueDate)
                                 }
                                 if editingItemIsGhost {
@@ -3315,7 +3313,13 @@ struct CaptureView: View {
                 return cal.startOfDay(for: date)
             }()
             let override = sourceDueDateOverrideIfAny(sourceType: "microsoft_todo", sourceID: sourceID)
-            let dueDate = override.hasOverride ? override.dueDate : sourceDueDate
+            let dueDate: Date?
+            if override.hasOverride && override.dueDate == sourceDueDate {
+                clearSourceDueDateOverride(sourceType: "microsoft_todo", sourceID: sourceID)
+                dueDate = sourceDueDate
+            } else {
+                dueDate = override.hasOverride ? override.dueDate : sourceDueDate
+            }
 
             if let existing = existingBySourceID[sourceID] {
                 existing.text = title
@@ -3451,7 +3455,13 @@ struct CaptureView: View {
                 return cal.startOfDay(for: date)
             }()
             let override = sourceDueDateOverrideIfAny(sourceType: "google_tasks", sourceID: sourceID)
-            let dueDate = override.hasOverride ? override.dueDate : sourceDueDate
+            let dueDate: Date?
+            if override.hasOverride && override.dueDate == sourceDueDate {
+                clearSourceDueDateOverride(sourceType: "google_tasks", sourceID: sourceID)
+                dueDate = sourceDueDate
+            } else {
+                dueDate = override.hasOverride ? override.dueDate : sourceDueDate
+            }
             if let existing = existingBySourceID[sourceID] {
                 existing.text = title
                 existing.dueDate = dueDate
@@ -3659,8 +3669,14 @@ struct CaptureView: View {
                       let date = cal.date(from: comps) else { return nil }
                 return cal.startOfDay(for: date)
             }()
-            let dueDate = sourceDueDate
-            clearSourceDueDateOverride(sourceType: "apple_reminder", sourceID: sourceID)
+            let override = sourceDueDateOverrideIfAny(sourceType: "apple_reminder", sourceID: sourceID)
+            let dueDate: Date?
+            if override.hasOverride && override.dueDate == sourceDueDate {
+                clearSourceDueDateOverride(sourceType: "apple_reminder", sourceID: sourceID)
+                dueDate = sourceDueDate
+            } else {
+                dueDate = override.hasOverride ? override.dueDate : sourceDueDate
+            }
 
             if let existing = existingBySourceID[sourceID] {
                 existing.text = title

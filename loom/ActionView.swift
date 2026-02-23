@@ -4,10 +4,18 @@ import UniformTypeIdentifiers
 #if canImport(UIKit)
 import UIKit
 #endif
+#if canImport(EventKit)
+import EventKit
+#endif
 
 private struct PlannedActionDueSnapshot: Codable {
     let dueDate: Date
     let attentionDays: Int
+}
+
+private struct ActionViewSourceDueDateOverrideRecord: Codable {
+    let hasDueDate: Bool
+    let dueDateUnix: TimeInterval
 }
 
 struct ActionView: View {
@@ -50,6 +58,8 @@ struct ActionView: View {
     private var activePlanStates: [ActivePlanState]
     @AppStorage("capture_default_due_date_attention_days")
     private var dueDateAttentionDays: Int = 7
+    @AppStorage("capture_source_due_date_overrides_json")
+    private var sourceDueDateOverridesJSON: String = "{}"
     @AppStorage("action_collapsed_metrics_use_percentage")
     private var collapsedMetricsUsePercentage: Bool = false
     @AppStorage("dev_manual_warning_cards_enabled")
@@ -2111,14 +2121,25 @@ struct ActionView: View {
         usePercentage: Bool
     ) -> some View {
         let totalForPercent = total ?? max(completed + remaining, 0)
+        let formattedValue: (Int) -> String = { value in
+            guard fractionSuffix == "m" else {
+                return fractionSuffix.isEmpty ? "\(value)" : "\(value)\(fractionSuffix)"
+            }
+            let minutes = max(0, value)
+            guard minutes >= 60 else { return "\(minutes)m" }
+            let hours = minutes / 60
+            let mins = minutes % 60
+            if mins == 0 { return "\(hours)h" }
+            return "\(hours)h \(mins)m"
+        }
         let leadText: String = {
             if usePercentage {
                 let percent = totalForPercent > 0 ? Int((Double(completed) / Double(totalForPercent) * 100.0).rounded()) : 0
                 return "\(percent)%"
             }
-            let lhsCompleted = fractionSuffix.isEmpty ? "\(completed)" : "\(completed)\(fractionSuffix)"
-            let lhsRemaining = fractionSuffix.isEmpty ? "\(remaining)" : "\(remaining)\(fractionSuffix)"
-            let rhsTotal = fractionSuffix.isEmpty ? "\(totalForPercent)" : "\(totalForPercent)\(fractionSuffix)"
+            let lhsCompleted = formattedValue(completed)
+            let lhsRemaining = formattedValue(remaining)
+            let rhsTotal = formattedValue(totalForPercent)
             if fractionUsesRemainingOverTotal {
                 return "\(lhsRemaining)/\(rhsTotal)"
             }
@@ -2306,9 +2327,70 @@ struct ActionView: View {
     private func updateDueDateEditor(forActionId actionId: UUID, with updated: DueDateEditorState) {
         guard let item = captureItemForPlannedActionID(actionId) else { return }
         let normalizedDue = Calendar.current.startOfDay(for: updated.dueDate)
-        item.dueDate = updated.hasDueDate ? normalizedDue : nil
+        let resolvedDue = updated.hasDueDate ? normalizedDue : nil
+        item.dueDate = resolvedDue
         item.dueDateAttentionDays = min(max(updated.attentionDays, 7), 30)
+        persistSourceDueDateOverrideIfNeeded(for: item, dueDate: resolvedDue)
+        applyAppleReminderDueDateUpdateIfNeeded(for: item, dueDate: resolvedDue)
         scheduleAutosave()
+    }
+
+    private func sourceOverrideKey(sourceType: String, sourceID: String) -> String {
+        "\(sourceType)|\(sourceID)"
+    }
+
+    private func decodedSourceDueDateOverrides() -> [String: ActionViewSourceDueDateOverrideRecord] {
+        guard let data = sourceDueDateOverridesJSON.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode([String: ActionViewSourceDueDateOverrideRecord].self, from: data) else {
+            return [:]
+        }
+        return decoded
+    }
+
+    private func saveSourceDueDateOverrides(_ map: [String: ActionViewSourceDueDateOverrideRecord]) {
+        guard let data = try? JSONEncoder().encode(map),
+              let json = String(data: data, encoding: .utf8) else { return }
+        sourceDueDateOverridesJSON = json
+    }
+
+    private func persistSourceDueDateOverrideIfNeeded(for item: RollingCaptureItem, dueDate: Date?) {
+        guard let sourceType = item.sourceType,
+              let sourceID = item.sourceExternalID,
+              !sourceID.isEmpty else { return }
+        var map = decodedSourceDueDateOverrides()
+        let normalizedDate = dueDate.map { Calendar.current.startOfDay(for: $0) }
+        map[sourceOverrideKey(sourceType: sourceType, sourceID: sourceID)] = .init(
+            hasDueDate: normalizedDate != nil,
+            dueDateUnix: normalizedDate?.timeIntervalSince1970 ?? 0
+        )
+        saveSourceDueDateOverrides(map)
+    }
+
+    private func applyAppleReminderDueDateUpdateIfNeeded(for item: RollingCaptureItem, dueDate: Date?) {
+        guard item.sourceType == "apple_reminder" else { return }
+        guard let externalID = item.sourceExternalID, !externalID.isEmpty else { return }
+        #if canImport(EventKit)
+        let store = EKEventStore()
+        let runUpdate: (Bool) -> Void = { granted in
+            guard granted else { return }
+            guard let reminder = store.calendarItem(withIdentifier: externalID) as? EKReminder else { return }
+            do {
+                if let dueDate {
+                    var comps = Calendar.current.dateComponents([.year, .month, .day], from: dueDate)
+                    comps.calendar = Calendar.current
+                    reminder.dueDateComponents = comps
+                } else {
+                    reminder.dueDateComponents = nil
+                }
+                try store.save(reminder, commit: true)
+            } catch { }
+        }
+        if #available(iOS 17.0, *) {
+            store.requestFullAccessToReminders { granted, _ in runUpdate(granted) }
+        } else {
+            store.requestAccess(to: .reminder) { granted, _ in runUpdate(granted) }
+        }
+        #endif
     }
 
     private func insertAction(
