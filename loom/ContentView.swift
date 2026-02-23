@@ -590,48 +590,54 @@ struct ContentView: View {
         VStack(spacing: 4) {
             ZStack {
                 HStack {
-                    if homePageIndex != HomeSwipePage.social.rawValue {
-                        Text(Date()
-                            .formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    } else {
-                        Color.clear.frame(width: 1, height: 1)
-                    }
+                    Text(Date()
+                        .formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .opacity(homePageIndex == HomeSwipePage.social.rawValue ? 0 : 1)
 
                     Spacer()
 
-                    if homePageIndex != HomeSwipePage.littleWins.rawValue {
-                        NavigationLink {
-                            AccountView()
-                        } label: {
-                            Image(systemName: "person.circle")
-                                .font(.system(size: 28))
-                        }
-                        .buttonStyle(.plain)
-                    } else {
-                        Color.clear.frame(width: 28, height: 28)
+                    NavigationLink {
+                        AccountView()
+                    } label: {
+                        Image(systemName: "person.circle")
+                            .font(.system(size: 28))
+                            .opacity(homePageIndex == HomeSwipePage.littleWins.rawValue ? 0 : 1)
                     }
+                    .buttonStyle(.plain)
                 }
                 .padding(.horizontal)
                 .padding(.top, 8)
+                .animation(.easeInOut(duration: 0.2), value: homePageIndex)
                 .overlay {
                     GeometryReader { proxy in
+                        let centerX = proxy.size.width / 2
+                        let titleY = (proxy.size.height / 2) + 4
                         ZStack {
-                            if homePageIndex == HomeSwipePage.social.rawValue {
-                                Text("Little Wins")
-                                    .font(.headline.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                    .position(x: proxy.size.width * 0.20, y: (proxy.size.height / 2) + 4)
-                            }
+                            Text("Little Wins")
+                                .font(.headline.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .opacity(homePageIndex == HomeSwipePage.social.rawValue ? 1 : 0)
+                                .position(
+                                    x: homePageIndex == HomeSwipePage.social.rawValue
+                                        ? proxy.size.width * 0.20
+                                        : centerX,
+                                    y: titleY
+                                )
 
-                            if homePageIndex == HomeSwipePage.littleWins.rawValue {
-                                Text("Social")
-                                    .font(.headline.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                    .position(x: proxy.size.width * 0.80, y: (proxy.size.height / 2) + 4)
-                            }
+                            Text("Social")
+                                .font(.headline.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .opacity(homePageIndex == HomeSwipePage.littleWins.rawValue ? 1 : 0)
+                                .position(
+                                    x: homePageIndex == HomeSwipePage.littleWins.rawValue
+                                        ? proxy.size.width * 0.80
+                                        : centerX,
+                                    y: titleY
+                                )
                         }
+                        .animation(.interactiveSpring(response: 0.34, dampingFraction: 0.72, blendDuration: 0.2), value: homePageIndex)
                     }
                 }
 
