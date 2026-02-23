@@ -5826,6 +5826,63 @@ private struct SensitivitySheet: View {
                     }
                 }
 
+                if dueDateEditor != nil {
+                    Section("Due Date") {
+                        HStack {
+                            Text("Due Date")
+                            Spacer()
+                            Menu {
+                                Button("No") { localHasDueDate = false }
+                                Button("Yes") { localHasDueDate = true }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Text(localHasDueDate ? "Yes" : "No")
+                                    Image(systemName: "chevron.up.chevron.down")
+                                }
+                                .foregroundStyle(.blue)
+                            }
+                        }
+
+                        if localHasDueDate {
+                            HStack {
+                                Text("Set Due Date")
+                                Spacer()
+                                DatePicker(
+                                    "",
+                                    selection: $localDueDate,
+                                    in: localMinimumDate...,
+                                    displayedComponents: .date
+                                )
+                                .labelsHidden()
+                                .datePickerStyle(.compact)
+                            }
+
+                            HStack {
+                                Text("Attention")
+                                Spacer()
+                                Menu {
+                                    ForEach(7...30, id: \.self) { value in
+                                        Button("\(value) days") {
+                                            localAttentionDays = value
+                                        }
+                                    }
+                                } label: {
+                                    HStack(spacing: 4) {
+                                        Text("\(min(max(localAttentionDays, 7), 30)) days")
+                                        Image(systemName: "chevron.up.chevron.down")
+                                    }
+                                    .foregroundStyle(.blue)
+                                }
+                            }
+
+                            Text("Attention triggers countdown to display.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                }
+
                 Section("Places") {
                     Button {
                         isNewPlaceMode = true
@@ -5893,62 +5950,6 @@ private struct SensitivitySheet: View {
                     }
                 }
 
-                if dueDateEditor != nil {
-                    Section("Due Date") {
-                        HStack {
-                            Text("Due Date")
-                            Spacer()
-                            Menu {
-                                Button("No") { localHasDueDate = false }
-                                Button("Yes") { localHasDueDate = true }
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Text(localHasDueDate ? "Yes" : "No")
-                                    Image(systemName: "chevron.up.chevron.down")
-                                }
-                                .foregroundStyle(.blue)
-                            }
-                        }
-
-                        if localHasDueDate {
-                            HStack {
-                                Text("Set Due Date")
-                                Spacer()
-                                DatePicker(
-                                    "",
-                                    selection: $localDueDate,
-                                    in: localMinimumDate...,
-                                    displayedComponents: .date
-                                )
-                                .labelsHidden()
-                                .datePickerStyle(.compact)
-                            }
-
-                            HStack {
-                                Text("Attention")
-                                Spacer()
-                                Menu {
-                                    ForEach(7...30, id: \.self) { value in
-                                        Button("\(value) days") {
-                                            localAttentionDays = value
-                                        }
-                                    }
-                                } label: {
-                                    HStack(spacing: 4) {
-                                        Text("\(min(max(localAttentionDays, 7), 30)) days")
-                                        Image(systemName: "chevron.up.chevron.down")
-                                    }
-                                    .foregroundStyle(.blue)
-                                }
-                            }
-
-                            Text("Attention triggers countdown to display.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-                }
             }
             .navigationTitle("Sensitivities")
             .navigationBarTitleDisplayMode(.inline)

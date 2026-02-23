@@ -161,6 +161,10 @@ struct CaptureView: View {
     private var recurringDispatches: [RecurringCaptureDispatch]
     @Query(sort: \LeverageResource.createdAt, order: .forward)
     private var leverageCatalog: [LeverageResource]
+    @Query(sort: \PlannedChunkAction.createdAt, order: .forward)
+    private var plannedActions: [PlannedChunkAction]
+    @Query(sort: \ActivePlanState.id, order: .forward)
+    private var activePlanStates: [ActivePlanState]
 
     @State private var input: String = ""
     @State private var isGhostOn: Bool = false
@@ -2702,6 +2706,33 @@ struct CaptureView: View {
         }
     }
 
+    private func normalizedCaptureText(_ text: String) -> String {
+        text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+    }
+
+    private var activePlanWeekStart: Date? {
+        let state = activePlanStates.first
+        guard state?.isActive == true else { return nil }
+        return state?.weekStart
+    }
+
+    private var activePlannedActionNormalizedTextSet: Set<String> {
+        guard let activeWeekStart = activePlanWeekStart else { return [] }
+        return Set(
+            plannedActions
+                .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: activeWeekStart) }
+                .map { normalizedCaptureText($0.text) }
+        )
+    }
+
+    private func shouldKeepIntegratedItemHiddenDuringActivePlan(existingItem: RollingCaptureItem, incomingTitle: String) -> Bool {
+        guard existingItem.sourceType?.isEmpty == false else { return false }
+        guard activePlanWeekStart != nil else { return false }
+        return activePlannedActionNormalizedTextSet.contains(normalizedCaptureText(incomingTitle))
+    }
+
     private func sourceOverrideKey(sourceType: String, sourceID: String) -> String {
         "\(sourceType)|\(sourceID)"
     }
@@ -3325,8 +3356,13 @@ struct CaptureView: View {
                 existing.text = title
                 existing.dueDate = dueDate
                 existing.dueDateAttentionDays = min(max(existing.dueDateAttentionDays ?? dueDateAttentionDays, 7), 30)
-                existing.isGhost = false
-                existing.unhideDate = nil
+                if shouldKeepIntegratedItemHiddenDuringActivePlan(existingItem: existing, incomingTitle: title) {
+                    existing.isGhost = true
+                    existing.unhideDate = nil
+                } else {
+                    existing.isGhost = false
+                    existing.unhideDate = nil
+                }
             } else {
                 let createdAtForInsert: Date = {
                     if isInitialImport, dueDate == nil {
@@ -3466,8 +3502,13 @@ struct CaptureView: View {
                 existing.text = title
                 existing.dueDate = dueDate
                 existing.dueDateAttentionDays = min(max(existing.dueDateAttentionDays ?? dueDateAttentionDays, 7), 30)
-                existing.isGhost = false
-                existing.unhideDate = nil
+                if shouldKeepIntegratedItemHiddenDuringActivePlan(existingItem: existing, incomingTitle: title) {
+                    existing.isGhost = true
+                    existing.unhideDate = nil
+                } else {
+                    existing.isGhost = false
+                    existing.unhideDate = nil
+                }
             } else {
                 let createdAtForInsert: Date = {
                     if isInitialImport, dueDate == nil {
@@ -3682,8 +3723,13 @@ struct CaptureView: View {
                 existing.text = title
                 existing.dueDate = dueDate
                 existing.dueDateAttentionDays = min(max(existing.dueDateAttentionDays ?? dueDateAttentionDays, 7), 30)
-                existing.isGhost = false
-                existing.unhideDate = nil
+                if shouldKeepIntegratedItemHiddenDuringActivePlan(existingItem: existing, incomingTitle: title) {
+                    existing.isGhost = true
+                    existing.unhideDate = nil
+                } else {
+                    existing.isGhost = false
+                    existing.unhideDate = nil
+                }
             } else {
                 let createdAtForInsert: Date = {
                     // On first import, load existing no-due reminders at the bottom.
