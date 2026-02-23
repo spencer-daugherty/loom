@@ -1250,22 +1250,25 @@ struct FulfillmentView: View {
                                 Button {
                                     presentLittleWinsEditor(for: f, categoryTitle: record.category)
                                 } label: {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(f.activity)
-                                            .foregroundStyle(.primary)
-                                            .lineLimit(nil)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                        let summary = activeWeekdaySummary(for: f)
-                                        if summary != "Any day" {
-                                            Text(summary)
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
+                                    HStack(spacing: 0) {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(f.activity)
+                                                .foregroundStyle(.primary)
+                                                .lineLimit(nil)
+                                                .fixedSize(horizontal: false, vertical: true)
+                                            let summary = activeWeekdaySummary(for: f)
+                                            if summary != "Any day" {
+                                                Text(summary)
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+                                            }
                                         }
+                                        Spacer(minLength: 0)
                                     }
-                                    .frame(maxWidth: .infinity, alignment: .leading)
                                     .frame(minHeight: 44, alignment: .leading)
                                     .padding(.vertical, 6)
                                     .padding(.horizontal, 14)
+                                    .contentShape(Rectangle())
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .contentShape(Rectangle())
