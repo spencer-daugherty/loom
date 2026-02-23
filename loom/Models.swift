@@ -1,6 +1,91 @@
 import Foundation
 import SwiftData
 
+extension Notification.Name {
+  static let littleWinsScheduleDidChange = Notification.Name("littleWinsScheduleDidChange")
+  static let littleWinsOpenNewEditor = Notification.Name("littleWinsOpenNewEditor")
+}
+
+struct LittleWinsScheduleRule: Codable, Equatable {
+  static let everyDayMask = 0b1111111
+  static let `default` = LittleWinsScheduleRule(canCompleteAnyDay: true, activeWeekdayMask: everyDayMask)
+
+  var canCompleteAnyDay: Bool
+  var activeWeekdayMask: Int
+
+  var normalized: LittleWinsScheduleRule {
+    if canCompleteAnyDay {
+      return .default
+    }
+    let masked = activeWeekdayMask & Self.everyDayMask
+    return LittleWinsScheduleRule(
+      canCompleteAnyDay: false,
+      activeWeekdayMask: masked == 0 ? Self.everyDayMask : masked
+    )
+  }
+}
+
+enum LittleWinsScheduleStore {
+  private static let defaultsKey = "littleWinsScheduleRules.v1"
+
+  static func rule(for focusID: UUID) -> LittleWinsScheduleRule {
+    allRules()[focusID]?.normalized ?? .default
+  }
+
+  static func allRules() -> [UUID: LittleWinsScheduleRule] {
+    guard let data = UserDefaults.standard.data(forKey: defaultsKey) else { return [:] }
+    guard let raw = try? JSONDecoder().decode([String: LittleWinsScheduleRule].self, from: data) else {
+      return [:]
+    }
+    var result: [UUID: LittleWinsScheduleRule] = [:]
+    for (key, value) in raw {
+      guard let id = UUID(uuidString: key) else { continue }
+      result[id] = value.normalized
+    }
+    return result
+  }
+
+  static func setRule(_ rule: LittleWinsScheduleRule, for focusID: UUID) {
+    var rules = allRules()
+    let normalized = rule.normalized
+    if normalized == .default {
+      rules.removeValue(forKey: focusID)
+    } else {
+      rules[focusID] = normalized
+    }
+    saveAllRules(rules)
+  }
+
+  static func removeRule(for focusID: UUID) {
+    var rules = allRules()
+    guard rules.removeValue(forKey: focusID) != nil else { return }
+    saveAllRules(rules)
+  }
+
+  static func removeRules(for focusIDs: [UUID]) {
+    var rules = allRules()
+    var changed = false
+    for id in focusIDs {
+      if rules.removeValue(forKey: id) != nil {
+        changed = true
+      }
+    }
+    if changed {
+      saveAllRules(rules)
+    }
+  }
+
+  private static func saveAllRules(_ rules: [UUID: LittleWinsScheduleRule]) {
+    let raw = Dictionary(uniqueKeysWithValues: rules.map { ($0.key.uuidString, $0.value.normalized) })
+    if let data = try? JSONEncoder().encode(raw) {
+      UserDefaults.standard.set(data, forKey: defaultsKey)
+    } else {
+      UserDefaults.standard.removeObject(forKey: defaultsKey)
+    }
+    NotificationCenter.default.post(name: .littleWinsScheduleDidChange, object: nil)
+  }
+}
+
 @Model
 final class DrivingForce {
   @Attribute(.unique) var id: UUID

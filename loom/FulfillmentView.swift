@@ -135,6 +135,22 @@ struct PassionsSectionView: View {
 }
 
 struct FulfillmentView: View {
+    private struct LittleWinsManagerTarget: Identifiable {
+        let id: UUID
+        let categoryTitle: String
+    }
+    private struct LittleWinsEditorTarget: Identifiable {
+        let categoryID: UUID
+        let categoryTitle: String
+        let focusID: UUID?
+        let autoFocus: Bool
+
+        var id: String {
+            if let focusID { return "edit-\(focusID.uuidString)" }
+            return "new-\(categoryID.uuidString)-\(autoFocus ? "focus" : "nofocus")"
+        }
+    }
+
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var colorScheme
 
@@ -169,6 +185,9 @@ struct FulfillmentView: View {
     @State private var isShowingInstructions = false
     @State private var highlightedCategoryIndex: Int = 0
     @State private var radarAutoRotatePausedUntil: Date = .distantPast
+    @State private var littleWinsManagerTarget: LittleWinsManagerTarget?
+    @State private var littleWinsEditorTarget: LittleWinsEditorTarget?
+    @State private var littleWinsScheduleStoreRevision = 0
     @FocusState private var focusedField: Field?
     @FocusState private var focusedVisionCategoryID: UUID?
     @FocusState private var focusedPurposeCategoryID: UUID?
@@ -212,6 +231,10 @@ struct FulfillmentView: View {
             .sorted { $0.category.localizedCaseInsensitiveCompare($1.category) == .orderedAscending }
         ordered.append(contentsOf: extras)
         return Array(ordered.prefix(7))
+    }
+
+    private var isAnyLittleWinsSheetPresented: Bool {
+        littleWinsManagerTarget != nil || littleWinsEditorTarget != nil
     }
 
     var body: some View {
@@ -264,14 +287,16 @@ struct FulfillmentView: View {
                 }
                 .buttonStyle(.plain)
             }
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer(minLength: 0)
-                Button("Done") {
-                    commitVisionDraft(for: focusedVisionCategoryID)
-                    commitPurposeDraft(for: focusedPurposeCategoryID)
-                    focusedVisionCategoryID = nil
-                    focusedPurposeCategoryID = nil
-                    focusedField = nil
+            if !isAnyLittleWinsSheetPresented {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer(minLength: 0)
+                    Button("Done") {
+                        commitVisionDraft(for: focusedVisionCategoryID)
+                        commitPurposeDraft(for: focusedPurposeCategoryID)
+                        focusedVisionCategoryID = nil
+                        focusedPurposeCategoryID = nil
+                        focusedField = nil
+                    }
                 }
             }
         }
@@ -290,8 +315,22 @@ struct FulfillmentView: View {
             if highlightedCategoryIndex >= orderedFulfillments.count { highlightedCategoryIndex = 0 }
             highlightedCategoryIndex = (highlightedCategoryIndex + 1) % orderedFulfillments.count
         }
+        .onReceive(NotificationCenter.default.publisher(for: .littleWinsScheduleDidChange)) { _ in
+            littleWinsScheduleStoreRevision &+= 1
+        }
         .sheet(isPresented: $isShowingInstructions) {
             fulfillmentInstructionsSheet()
+        }
+        .sheet(item: $littleWinsManagerTarget) { target in
+            LittleWinsManagerSheetView(categoryID: target.id, categoryTitle: target.categoryTitle)
+        }
+        .sheet(item: $littleWinsEditorTarget) { target in
+            LittleWinEditorSheetView(
+                categoryID: target.categoryID,
+                categoryTitle: target.categoryTitle,
+                focusID: target.focusID,
+                autoFocusTextField: target.autoFocus
+            )
         }
         .alert("Move to Recently Deleted?", isPresented: $showDeletePreviousAlert, presenting: pendingDeletePrevious) { snapshot in
             Button("Cancel", role: .cancel) {
@@ -1100,15 +1139,10 @@ struct FulfillmentView: View {
                     let rolesForRecord = getRoles(for: record)
                     let showsRoleInputRow = isAddingRole || rolesForRecord.count < 3
                     let fociForRecord = getFoci(for: record)
-                    let showsFocusInputRow = isAddingFocus || fociForRecord.count < 3
                     let resourcesForRecord = getResources(for: record)
                     let rolesContentHeight = estimatedListContentHeight(
                         items: rolesForRecord.map(\.role),
                         hasInputRow: showsRoleInputRow
-                    )
-                    let fociContentHeight = estimatedListContentHeight(
-                        items: fociForRecord.map(\.activity),
-                        hasInputRow: showsFocusInputRow
                     )
                     let resourcesContentHeight = estimatedListContentHeight(
                         items: resourcesForRecord.map(\.resource),
@@ -1192,51 +1226,65 @@ struct FulfillmentView: View {
                     Text("Little Wins")
                         .font(.headline)
                         .foregroundColor(.black)
-                    List {
-                        ForEach(getFoci(for: record), id: \.id) { f in
-                            Text(f.activity)
-                                .lineLimit(nil)
-                                .fixedSize(horizontal: false, vertical: true)
+                    VStack(spacing: 0) {
+                        Button {
+                            if fociForRecord.isEmpty {
+                                presentLittleWinsEditorForNew(record: record)
+                            } else {
+                                presentLittleWinsManager(for: record)
+                            }
+                        } label: {
+                            HStack {
+                                Text(fociForRecord.isEmpty ? "Add Little Win" : "Manage Little Wins")
+                                    .foregroundStyle(Color.accentColor)
+                                Spacer()
+                            }
+                            .frame(minHeight: 44, alignment: .center)
+                            .padding(.horizontal, 14)
                         }
-                        .onMove { from, to in
-                            moveFoci(from: from, to: to, record: record)
-                        }
-                        .onDelete { idx in
-                            deleteFoci(at: idx, record: record)
-                        }
+                        .buttonStyle(.plain)
 
-                        if isAddingFocus {
-                            HStack {
-                                TextField("yoga classes", text: $newFocusText)
-                                    .submitLabel(.done)
-                                    .focused($focusedField, equals: .focus)
-                                    .onSubmit {
-                                        addFocus(text: newFocusText, record: record)
-                                        newFocusText = ""
-                                        isAddingFocus = false
-                                        focusedField = nil
+                        if !fociForRecord.isEmpty {
+                            Divider()
+                            ForEach(Array(fociForRecord.enumerated()), id: \.element.id) { index, f in
+                                Button {
+                                    presentLittleWinsEditor(for: f, categoryTitle: record.category)
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(f.activity)
+                                            .foregroundStyle(.primary)
+                                            .lineLimit(nil)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                        let summary = activeWeekdaySummary(for: f)
+                                        if summary != "Any day" {
+                                            Text(summary)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
                                     }
-                                Spacer()
-                            }
-                            .padding(.vertical, 4)
-                            .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
-                        } else if fociForRecord.count < 3 {
-                            HStack {
-                                Button("Add Focus") {
-                                    withAnimation { isAddingFocus = true }
-                                    DispatchQueue.main.async { focusedField = .focus }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .frame(minHeight: 44, alignment: .leading)
+                                    .padding(.vertical, 6)
+                                    .padding(.horizontal, 14)
                                 }
-                                .foregroundColor(.blue)
-                                Spacer()
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                                .buttonStyle(.plain)
+
+                                if index < fociForRecord.count - 1 {
+                                    Divider()
+                                }
                             }
-                            .padding(.vertical, 4)
-                            .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
                         }
                     }
-                    .listStyle(.plain)
-                    .scrollDisabled(fociContentHeight <= 220)
-                    .environment(\.editMode, .constant(.active))
-                    .frame(height: min(fociContentHeight, 220))
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Color(.secondarySystemBackground))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(Color(.separator).opacity(0.4), lineWidth: 1)
+                    )
 
                     Text("Resources")
                         .font(.headline)
@@ -1530,6 +1578,63 @@ struct FulfillmentView: View {
             .sorted { $0.rank < $1.rank }
     }
 
+    private func activeWeekdaySummary(for focus: FulfillmentFocus) -> String {
+        _ = littleWinsScheduleStoreRevision
+        let rule = LittleWinsScheduleStore.rule(for: focus.id)
+        if rule.canCompleteAnyDay { return "Any day" }
+        let normalizedMask = rule.activeWeekdayMask & LittleWinsScheduleRule.everyDayMask
+        if normalizedMask == 0b0111110 { return "Weekdays" } // Mon-Fri
+        if normalizedMask == 0b1000001 { return "Weekend" } // Sun+Sat
+        let labels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+        let selected = labels.enumerated().compactMap { index, label in
+            (normalizedMask & (1 << index)) != 0 ? label : nil
+        }
+        return selected.isEmpty ? "No days selected" : selected.joined(separator: ", ")
+    }
+
+    private func presentLittleWinsManager(for record: Fulfillment) {
+        prepareForLittleWinsSheetPresentation()
+        let target = LittleWinsManagerTarget(id: record.category_id, categoryTitle: record.category)
+        DispatchQueue.main.async {
+            littleWinsManagerTarget = target
+        }
+    }
+
+    private func presentLittleWinsEditorForNew(record: Fulfillment) {
+        prepareForLittleWinsSheetPresentation()
+        let target = LittleWinsEditorTarget(
+            categoryID: record.category_id,
+            categoryTitle: record.category,
+            focusID: nil,
+            autoFocus: true
+        )
+        DispatchQueue.main.async {
+            littleWinsEditorTarget = target
+        }
+    }
+
+    private func presentLittleWinsEditor(for focus: FulfillmentFocus, categoryTitle: String) {
+        prepareForLittleWinsSheetPresentation()
+        let target = LittleWinsEditorTarget(
+            categoryID: focus.category_id,
+            categoryTitle: categoryTitle,
+            focusID: focus.id,
+            autoFocus: false
+        )
+        DispatchQueue.main.async {
+            littleWinsEditorTarget = target
+        }
+    }
+
+    private func prepareForLittleWinsSheetPresentation() {
+        commitInlineIfNeeded()
+        commitVisionDraft(for: focusedVisionCategoryID)
+        commitPurposeDraft(for: focusedPurposeCategoryID)
+        focusedField = nil
+        focusedVisionCategoryID = nil
+        focusedPurposeCategoryID = nil
+    }
+
     private func addFocus(text: String, record: Fulfillment) {
         guard !text.isEmpty else { return }
         guard getFoci(for: record).count < 3 else { return }
@@ -1569,6 +1674,7 @@ struct FulfillmentView: View {
                 archivedAt: Date()
             )
             modelContext.insert(archive)
+            LittleWinsScheduleStore.removeRule(for: f.id)
             RecentlyDeletedStore.trash(f, in: modelContext)
         }
     }
@@ -1618,6 +1724,388 @@ struct FulfillmentView: View {
             modelContext.insert(archive)
             RecentlyDeletedStore.trash(r, in: modelContext)
         }
+    }
+}
+
+private struct LittleWinsManagerSheetView: View {
+    private struct EditorTarget: Identifiable {
+        let focusID: UUID?
+        let categoryID: UUID
+        let categoryTitle: String
+        let autoFocus: Bool
+
+        var id: String {
+            if let focusID { return "edit-\(focusID.uuidString)" }
+            return "new-\(categoryID.uuidString)-\(autoFocus ? "focus" : "nofocus")"
+        }
+    }
+
+    let categoryID: UUID
+    let categoryTitle: String
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @Query private var foci: [FulfillmentFocus]
+
+    @State private var isDeleteMode = false
+    @State private var selectedIDsForDelete: Set<UUID> = []
+    @State private var editorTarget: EditorTarget?
+
+    private let weekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+
+    private var littleWins: [FulfillmentFocus] {
+        foci.filter { $0.category_id == categoryID }
+            .sorted { $0.rank < $1.rank }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    if !isDeleteMode && littleWins.count < 3 {
+                        Button {
+                            startCreatingNew()
+                        } label: {
+                            HStack {
+                                Text("Add Little Win")
+                                    .foregroundStyle(Color.accentColor)
+                                Spacer()
+                            }
+                            .frame(minHeight: 44, alignment: .center)
+                            .padding(.horizontal, 14)
+                        }
+                        .buttonStyle(.plain)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                    }
+
+                    ForEach(littleWins, id: \.id) { focus in
+                        Button {
+                            guard !isDeleteMode else {
+                                toggleDeleteSelection(for: focus.id)
+                                return
+                            }
+                            beginEditing(focus)
+                        } label: {
+                            HStack(spacing: 10) {
+                                if isDeleteMode {
+                                    Image(systemName: selectedIDsForDelete.contains(focus.id) ? "checkmark.circle.fill" : "circle")
+                                        .foregroundStyle(selectedIDsForDelete.contains(focus.id) ? .red : .secondary)
+                                }
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(focus.activity)
+                                        .foregroundStyle(.primary)
+                                    let summary = weekdaySummary(for: LittleWinsScheduleStore.rule(for: focus.id))
+                                    if summary != "Any day" {
+                                        Text(summary)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                Spacer()
+                                if !isDeleteMode {
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("Manage Little Wins")
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarBackButtonHidden(isDeleteMode)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    if isDeleteMode {
+                        Button("Cancel") {
+                            isDeleteMode = false
+                            selectedIDsForDelete.removeAll()
+                        }
+                    } else {
+                        Button("Done") { dismiss() }
+                    }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    if isDeleteMode {
+                        Button("Delete") { deleteSelected() }
+                            .foregroundStyle(selectedIDsForDelete.isEmpty ? Color.secondary : Color.red)
+                            .disabled(selectedIDsForDelete.isEmpty)
+                    } else if !littleWins.isEmpty {
+                        Button("Edit") {
+                            isDeleteMode = true
+                            selectedIDsForDelete.removeAll()
+                        }
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .sheet(item: $editorTarget) { target in
+            LittleWinEditorSheetView(
+                categoryID: target.categoryID,
+                categoryTitle: target.categoryTitle,
+                focusID: target.focusID,
+                autoFocusTextField: target.autoFocus
+            )
+        }
+    }
+
+    private func beginEditing(_ focus: FulfillmentFocus) {
+        editorTarget = .init(
+            focusID: focus.id,
+            categoryID: categoryID,
+            categoryTitle: categoryTitle,
+            autoFocus: false
+        )
+    }
+
+    private func startCreatingNew() {
+        guard littleWins.count < 3 else { return }
+        editorTarget = .init(
+            focusID: nil,
+            categoryID: categoryID,
+            categoryTitle: categoryTitle,
+            autoFocus: true
+        )
+    }
+
+    private func toggleDeleteSelection(for id: UUID) {
+        if selectedIDsForDelete.contains(id) {
+            selectedIDsForDelete.remove(id)
+        } else {
+            selectedIDsForDelete.insert(id)
+        }
+    }
+
+    private func weekdaySummary(for rule: LittleWinsScheduleRule) -> String {
+        let normalized = rule.normalized
+        if normalized.canCompleteAnyDay { return "Any day" }
+        let normalizedMask = normalized.activeWeekdayMask & LittleWinsScheduleRule.everyDayMask
+        if normalizedMask == 0b0111110 { return "Weekdays" } // Mon-Fri
+        if normalizedMask == 0b1000001 { return "Weekend" } // Sun+Sat
+        let selected = weekdayLabels.enumerated().compactMap { idx, label in
+            (normalizedMask & (1 << idx)) != 0 ? label : nil
+        }
+        return selected.isEmpty ? "No days selected" : selected.joined(separator: ", ")
+    }
+
+    private func deleteSelected() {
+        let targets = littleWins.filter { selectedIDsForDelete.contains($0.id) }
+        for focus in targets {
+            modelContext.insert(
+                FulfillmentFocusArchive(
+                    category_id: focus.category_id,
+                    updatedAt: focus.updatedAt,
+                    activity: focus.activity,
+                    rank: focus.rank,
+                    archivedAt: Date()
+                )
+            )
+            LittleWinsScheduleStore.removeRule(for: focus.id)
+            RecentlyDeletedStore.trash(focus, in: modelContext)
+        }
+        try? modelContext.save()
+        selectedIDsForDelete.removeAll()
+        isDeleteMode = false
+    }
+}
+
+struct LittleWinEditorSheetView: View {
+    let categoryID: UUID
+    let categoryTitle: String
+    let focusID: UUID?
+    let autoFocusTextField: Bool
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @Query private var foci: [FulfillmentFocus]
+
+    @State private var draftText = ""
+    @State private var draftCanAnyDay = true
+    @State private var draftWeekdayMask = LittleWinsScheduleRule.everyDayMask
+    @State private var didHydrate = false
+    @FocusState private var isTextFocused: Bool
+
+    private let weekdayLetterLabels = ["S", "M", "T", "W", "T", "F", "S"]
+
+    private var littleWins: [FulfillmentFocus] {
+        foci.filter { $0.category_id == categoryID }
+            .sorted { $0.rank < $1.rank }
+    }
+
+    private var editingFocus: FulfillmentFocus? {
+        guard let focusID else { return nil }
+        return foci.first { $0.id == focusID }
+    }
+
+    private var isEditing: Bool { focusID != nil }
+
+    private var doneDisabled: Bool {
+        draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section(isEditing ? "Edit Little Win" : "New Little Win") {
+                    TextField("yoga classes", text: $draftText)
+                        .focused($isTextFocused)
+                        .textInputAutocapitalization(.sentences)
+
+                    HStack {
+                        Text("Can be completed any day")
+                        Spacer()
+                        Menu {
+                            Button("Yes") { setCanAnyDay(true) }
+                            Button("No") { setCanAnyDay(false) }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(draftCanAnyDay ? "Yes" : "No")
+                                Image(systemName: "chevron.up.chevron.down")
+                            }
+                            .foregroundStyle(.blue)
+                        }
+                    }
+
+                    if !draftCanAnyDay {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(spacing: 0) {
+                                ForEach(Array(weekdayLetterLabels.enumerated()), id: \.offset) { index, label in
+                                    let isSelected = (draftWeekdayMask & (1 << index)) != 0
+                                    Button {
+                                        toggleWeekday(index)
+                                    } label: {
+                                        Text(label)
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(isSelected ? .white : .primary)
+                                            .frame(width: 34, height: 34)
+                                            .background(
+                                                Circle()
+                                                    .fill(isSelected ? Color.accentColor : Color(.systemGray6))
+                                            )
+                                            .overlay(
+                                                Circle()
+                                                    .stroke(Color(.separator).opacity(isSelected ? 0 : 0.35), lineWidth: 1)
+                                            )
+                                            .frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .frame(maxWidth: .infinity)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle(isEditing ? "Edit Little Win" : "Add Little Win")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        saveAndDismiss()
+                    }
+                    .disabled(doneDisabled)
+                }
+            }
+        }
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
+        .onAppear {
+            hydrateIfNeeded()
+            guard autoFocusTextField else { return }
+            DispatchQueue.main.async {
+                isTextFocused = true
+            }
+        }
+    }
+
+    private func hydrateIfNeeded() {
+        guard !didHydrate else { return }
+        didHydrate = true
+        if let focus = editingFocus {
+            let rule = LittleWinsScheduleStore.rule(for: focus.id)
+            draftText = focus.activity
+            draftCanAnyDay = rule.canCompleteAnyDay
+            draftWeekdayMask = rule.activeWeekdayMask
+        } else {
+            draftText = ""
+            draftCanAnyDay = true
+            draftWeekdayMask = LittleWinsScheduleRule.everyDayMask
+        }
+    }
+
+    private func setCanAnyDay(_ value: Bool) {
+        draftCanAnyDay = value
+        if value {
+            draftWeekdayMask = LittleWinsScheduleRule.everyDayMask
+        } else {
+            draftWeekdayMask = 0
+        }
+    }
+
+    private func toggleWeekday(_ index: Int) {
+        let bit = 1 << index
+        if (draftWeekdayMask & bit) != 0 {
+            draftWeekdayMask &= ~bit
+        } else {
+            draftWeekdayMask |= bit
+        }
+    }
+
+    private func saveAndDismiss() {
+        let trimmed = draftText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        var finalCanAnyDay = draftCanAnyDay
+        var finalMask = draftWeekdayMask & LittleWinsScheduleRule.everyDayMask
+        if !finalCanAnyDay && finalMask == 0 {
+            finalCanAnyDay = true
+            finalMask = LittleWinsScheduleRule.everyDayMask
+        }
+        if !finalCanAnyDay && finalMask == LittleWinsScheduleRule.everyDayMask {
+            finalCanAnyDay = true
+        }
+
+        let rule = LittleWinsScheduleRule(canCompleteAnyDay: finalCanAnyDay, activeWeekdayMask: finalMask).normalized
+
+        if let focus = editingFocus {
+            if focus.activity != trimmed {
+                modelContext.insert(
+                    FulfillmentFocusArchive(
+                        category_id: focus.category_id,
+                        updatedAt: focus.updatedAt,
+                        activity: focus.activity,
+                        rank: focus.rank,
+                        archivedAt: Date()
+                    )
+                )
+                focus.activity = trimmed
+                focus.updatedAt = Date()
+            }
+            LittleWinsScheduleStore.setRule(rule, for: focus.id)
+        } else {
+            guard littleWins.count < 3 else { return }
+            let nextRank = (littleWins.map(\.rank).max() ?? 0) + 1
+            let focus = FulfillmentFocus(category_id: categoryID, activity: trimmed, rank: nextRank)
+            modelContext.insert(focus)
+            LittleWinsScheduleStore.setRule(rule, for: focus.id)
+        }
+
+        try? modelContext.save()
+        dismiss()
     }
 }
 

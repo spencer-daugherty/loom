@@ -54,6 +54,8 @@ struct ContentView: View {
     @State private var littleWinsCompletionStateHydrated = false
     @State private var littleWinsCalendarPreviewDate: Date? = nil
     @State private var littleWinsShowHiddenPlaceholder = false
+    @State private var isPresentingLittleWinsManagerSheet = false
+    @State private var littleWinsScheduleStoreRevision = 0
     @State private var littleWinsDeckDragX: CGFloat = 0
     @State private var littleWinsDeckIsDragging = false
     @State private var littleWinsSuppressRowTapUntil: Date = .distantPast
@@ -209,7 +211,7 @@ struct ContentView: View {
                                 }
                                 .tag(HomeSwipePage.home.rawValue)
 
-                                placeholderMiddlePage(title: "Social")
+                                placeholderMiddlePage(title: "Sharing")
                                     .tag(HomeSwipePage.littleWins.rawValue)
                             }
                             .tabViewStyle(.page(indexDisplayMode: .never))
@@ -307,6 +309,11 @@ struct ContentView: View {
         .sheet(isPresented: $isPresentingCaptureView) {
             CaptureView()
                 .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $isPresentingLittleWinsManagerSheet) {
+            ContentLittleWinsManagerSheetView(
+                categories: orderedFulfillmentRecords.map { ($0.category_id, $0.category) }
+            )
         }
         .onChange(of: isActivePlan) { _, newValue in
             // When Plan Step 5 activates the plan, automatically launch ActionView.
@@ -508,6 +515,7 @@ struct ContentView: View {
         let cardColor: Color
         let titleColor: Color
         let items: [FulfillmentFocus]
+        let activeTodayItemIDs: Set<UUID>
     }
 
     private struct LittleWinsHistoricalCompletionItem: Identifiable {
@@ -537,17 +545,68 @@ struct ContentView: View {
         }
     }
 
-    private var littleWinsCards: [LittleWinsCardData] {
+    private func littleWinsWeekdayBit(for date: Date) -> Int {
+        let weekday = Calendar.current.component(.weekday, from: date) // 1=Sun...7=Sat
+        return 1 << max(0, min(6, weekday - 1))
+    }
+
+    private func littleWinsScheduleRule(for focus: FulfillmentFocus) -> LittleWinsScheduleRule {
+        LittleWinsScheduleStore.rule(for: focus.id)
+    }
+
+    private func isLittleWinFocusActive(_ focus: FulfillmentFocus, on date: Date) -> Bool {
+        let rule = littleWinsScheduleRule(for: focus)
+        if rule.canCompleteAnyDay { return true }
+        return (rule.activeWeekdayMask & littleWinsWeekdayBit(for: date)) != 0
+    }
+
+    private func littleWinsWeekdaySummary(mask: Int) -> String {
+        let normalizedMask = mask & LittleWinsScheduleRule.everyDayMask
+        if normalizedMask == 0b0111110 { return "Weekdays" } // Mon-Fri
+        if normalizedMask == 0b1000001 { return "Weekend" } // Sun+Sat
+        let labels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+        let selected = labels.enumerated().compactMap { index, label in
+            (normalizedMask & (1 << index)) != 0 ? label : nil
+        }
+        return selected.isEmpty ? "No days selected" : selected.joined(separator: ", ")
+    }
+
+    private func littleWinsActiveDaysSummary(for card: LittleWinsCardData) -> String? {
+        guard !card.items.isEmpty else { return nil }
+        var unionMask = 0
+        var hasRestricted = false
+        for item in card.items {
+            let rule = littleWinsScheduleRule(for: item)
+            if rule.canCompleteAnyDay { continue }
+            hasRestricted = true
+            unionMask |= (rule.activeWeekdayMask & LittleWinsScheduleRule.everyDayMask)
+        }
+        guard hasRestricted else { return nil }
+        return littleWinsWeekdaySummary(mask: unionMask)
+    }
+
+    private func littleWinsCards(showHidden: Bool) -> [LittleWinsCardData] {
+        _ = littleWinsScheduleStoreRevision
+        let filterDate = todayStartDate
+        let completedToday = littleWinsCompletionStateHydrated
+            ? littleWinsCompletedFocusIDs
+            : littleWinsCompletedFocusIDsFromStoreToday
         let sourceCards = orderedFulfillmentRecords.compactMap { record -> LittleWinsCardData? in
-            let wins = fociForCategory(record.category)
+            let allWins = fociForCategory(record.category)
                 .filter { !$0.activity.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            guard !wins.isEmpty else { return nil }
+            let activeWins = allWins.filter { isLittleWinFocusActive($0, on: filterDate) }
+            let activeWinIDs = Set(activeWins.map(\.id))
+            let displayedWins = showHidden
+                ? allWins
+                : allWins.filter { activeWinIDs.contains($0.id) || completedToday.contains($0.id) }
+            guard !displayedWins.isEmpty else { return nil }
             return LittleWinsCardData(
                 id: record.category_id,
                 categoryTitle: record.category,
                 cardColor: FulfillmentCategoryTheme.lightColor(for: record.category),
                 titleColor: FulfillmentCategoryTheme.color(for: record.category),
-                items: wins
+                items: displayedWins,
+                activeTodayItemIDs: Set(activeWins.map(\.id))
             )
         }
 
@@ -560,6 +619,14 @@ struct ContentView: View {
         let remaining = sourceCards.filter { card in !littleWinsCardOrder.contains(card.id) }
         ordered.append(contentsOf: remaining)
         return ordered
+    }
+
+    private var littleWinsCards: [LittleWinsCardData] {
+        littleWinsCards(showHidden: littleWinsShowHiddenPlaceholder)
+    }
+
+    private var littleWinsCardsIncludingHiddenToday: [LittleWinsCardData] {
+        littleWinsCards(showHidden: true)
     }
 
     private var littleWinsSourceCardIDs: [UUID] {
@@ -588,7 +655,23 @@ struct ContentView: View {
         let completedFocusIDs = littleWinsCompletionStateHydrated
             ? littleWinsCompletedFocusIDs
             : littleWinsCompletedFocusIDsFromStoreToday
-        return !card.items.isEmpty && card.items.allSatisfy { completedFocusIDs.contains($0.id) }
+        if littleWinsShowHiddenPlaceholder {
+            return !card.items.isEmpty && card.items.allSatisfy { completedFocusIDs.contains($0.id) }
+        }
+        let eligibleIDs = card.activeTodayItemIDs
+        if eligibleIDs.isEmpty {
+            return !card.items.isEmpty && card.items.allSatisfy { completedFocusIDs.contains($0.id) }
+        }
+        return eligibleIDs.allSatisfy { completedFocusIDs.contains($0) }
+    }
+
+    private func isLittleWinsCardCompletedForActiveTodayStreak(_ card: LittleWinsCardData) -> Bool {
+        let completedFocusIDs = littleWinsCompletionStateHydrated
+            ? littleWinsCompletedFocusIDs
+            : littleWinsCompletedFocusIDsFromStoreToday
+        let eligibleIDs = card.activeTodayItemIDs
+        guard !eligibleIDs.isEmpty else { return false }
+        return eligibleIDs.allSatisfy { completedFocusIDs.contains($0) }
     }
 
     private var hasIncompleteLittleWinsCards: Bool {
@@ -619,10 +702,14 @@ struct ContentView: View {
         Calendar.current.startOfDay(for: Date())
     }
 
-    private func currentLittleWinsFocusCount(for categoryID: UUID) -> Int? {
+    private func currentLittleWinsFocusCount(
+        for categoryID: UUID,
+        on date: Date = Calendar.current.startOfDay(for: Date())
+    ) -> Int? {
         let count = foci.filter {
             $0.category_id == categoryID &&
-            !$0.activity.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            !$0.activity.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            isLittleWinFocusActive($0, on: date)
         }.count
         return count > 0 ? count : nil
     }
@@ -714,7 +801,8 @@ struct ContentView: View {
                     categoryTitle: category.categoryTitle,
                     cardColor: FulfillmentCategoryTheme.lightColor(for: category.categoryTitle),
                     titleColor: FulfillmentCategoryTheme.color(for: category.categoryTitle),
-                    items: []
+                    items: [],
+                    activeTodayItemIDs: Set<UUID>()
                 )
             }
     }
@@ -751,7 +839,7 @@ struct ContentView: View {
             let categoryID = focus?.category_id
             let categoryTitle = categoryID.flatMap { recordForCategoryID($0)?.category }
             let focusTitle = focus?.activity.trimmingCharacters(in: .whitespacesAndNewlines)
-            let categoryFocusCount = categoryID.flatMap { currentLittleWinsFocusCount(for: $0) }
+            let categoryFocusCount = categoryID.flatMap { currentLittleWinsFocusCount(for: $0, on: todayStartDate) }
             modelContext.insert(
                 LittleWinsDailyCompletion(
                     focusId: focusId,
@@ -930,7 +1018,7 @@ struct ContentView: View {
                                     y: titleY
                                 )
 
-                            Text("Social")
+                            Text("Sharing")
                                 .font(.headline.weight(.semibold))
                                 .foregroundStyle(.secondary)
                                 .opacity(homePageIndex == HomeSwipePage.littleWins.rawValue ? 1 : 0)
@@ -1083,8 +1171,9 @@ struct ContentView: View {
             let cardWidth = max(0, proxy.size.width - (horizontalPadding * 2))
             let cardHeight = min(max(cardWidth * 1.42, 360), max(380, proxy.size.height - 36))
             let cards = littleWinsCards
+            let allTodayCards = littleWinsCardsIncludingHiddenToday
             let activeCards = cards.filter { !isLittleWinsCardCompleted($0) }
-            let completedCards = cards.filter { isLittleWinsCardCompleted($0) }
+            let completedCards = allTodayCards.filter { isLittleWinsCardCompleted($0) }
             let allActiveCardsCompleted = !cards.isEmpty && activeCards.isEmpty
             let todayHasCompletedCard = !completedCards.isEmpty
             let streakShowsTodayComplete = allActiveCardsCompleted && todayHasCompletedCard
@@ -1157,7 +1246,7 @@ struct ContentView: View {
                                     .frame(maxWidth: .infinity, alignment: .leading)
 
                                     Button {
-                                        // Placeholder only (no-op for now)
+                                        isPresentingLittleWinsManagerSheet = true
                                     } label: {
                                         Text("Manage Little Wins")
                                             .font(.caption2.weight(.semibold))
@@ -1221,6 +1310,9 @@ struct ContentView: View {
         .onChange(of: littleWinsSourceCardIDs) { _, _ in
             syncLittleWinsCardOrder()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .littleWinsScheduleDidChange)) { _ in
+            littleWinsScheduleStoreRevision &+= 1
+        }
         .onChange(of: homePageIndex) { _, _ in
             if littleWinsCalendarPreviewDate != nil {
                 withAnimation(.easeOut(duration: 0.12)) {
@@ -1236,12 +1328,18 @@ struct ContentView: View {
     private func littleWinsCompletedCardStreakCount() -> Int {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
-        let startsAtToday = !littleWinsCompletedCards(on: today).isEmpty
+        let startsAtToday = littleWinsCardsIncludingHiddenToday.contains { isLittleWinsCardCompletedForActiveTodayStreak($0) }
         var streak = 0
 
         for dayOffset in (startsAtToday ? 0 : 1)...30 {
             guard let date = calendar.date(byAdding: .day, value: -dayOffset, to: today) else { break }
-            if littleWinsCompletedCards(on: date).isEmpty {
+            let hasCompletedCardOnDay: Bool
+            if calendar.isDate(date, inSameDayAs: today) {
+                hasCompletedCardOnDay = littleWinsCardsIncludingHiddenToday.contains { isLittleWinsCardCompletedForActiveTodayStreak($0) }
+            } else {
+                hasCompletedCardOnDay = !littleWinsCompletedCards(on: date).isEmpty
+            }
+            if !hasCompletedCardOnDay {
                 break
             }
             streak += 1
@@ -1554,10 +1652,18 @@ struct ContentView: View {
         let gridSpacing: CGFloat = 12
         let availableWidth = max(0, containerSize.width - (horizontalPadding * 2))
         let availableHeight = max(0, containerSize.height - (verticalPadding * 2) - 64)
-        let cardWidth = max(120, (availableWidth - gridSpacing) / 2)
-        let cardHeightCap = max(140, (availableHeight - gridSpacing) / 2)
-        let cardHeight = min(cardWidth * 1.42, cardHeightCap)
         let completedCardCount = categories.filter(\.isCompletedCard).count
+        let gridColumnsCount: Int = completedCardCount <= 4 ? 2 : 3
+        let targetRowsCount: Int = completedCardCount <= 4 ? 2 : (completedCardCount <= 6 ? 2 : 3)
+        let totalHorizontalSpacing = CGFloat(max(0, gridColumnsCount - 1)) * gridSpacing
+        let totalVerticalSpacing = CGFloat(max(0, targetRowsCount - 1)) * gridSpacing
+        let cardWidth = max(100, (availableWidth - totalHorizontalSpacing) / CGFloat(gridColumnsCount))
+        let cardHeightCap = max(120, (availableHeight - totalVerticalSpacing) / CGFloat(targetRowsCount))
+        let cardHeight = min(cardWidth * 1.42, cardHeightCap)
+        let gridColumns = Array(
+            repeating: GridItem(.flexible(), spacing: gridSpacing, alignment: .top),
+            count: gridColumnsCount
+        )
 
         return ZStack {
             VStack(alignment: .leading, spacing: 10) {
@@ -1579,10 +1685,7 @@ struct ContentView: View {
 
                 ScrollView(.vertical, showsIndicators: false) {
                     LazyVGrid(
-                        columns: [
-                            GridItem(.flexible(), spacing: gridSpacing, alignment: .top),
-                            GridItem(.flexible(), spacing: gridSpacing, alignment: .top)
-                        ],
+                        columns: gridColumns,
                         spacing: gridSpacing
                     ) {
                         ForEach(categories) { category in
@@ -1741,6 +1844,10 @@ struct ContentView: View {
             if littleWinsCompletedFocusIDs.contains(item.id) { count += 1 }
         }
         let totalCount = card.items.count
+        let hasAnyActiveToday = !card.activeTodayItemIDs.isEmpty
+        let isFullyUnhiddenToday = littleWinsShowHiddenPlaceholder && !hasAnyActiveToday
+        let hasAnyUnhiddenHiddenItems = littleWinsShowHiddenPlaceholder && card.items.contains { !card.activeTodayItemIDs.contains($0.id) }
+        let activeDaysSummary = littleWinsActiveDaysSummary(for: card)
         return VStack(spacing: 0) {
             ZStack {
                 Text(card.categoryTitle)
@@ -1762,7 +1869,28 @@ struct ContentView: View {
             }
             .padding(.horizontal, 18)
             .padding(.top, 10)
-            .padding(.bottom, 18)
+            .padding(.bottom, activeDaysSummary != nil && hasAnyUnhiddenHiddenItems ? 8 : 18)
+
+            if hasAnyUnhiddenHiddenItems, let activeDaysSummary {
+                HStack(spacing: 6) {
+                    Image(systemName: littleWinsHiddenClockIconName)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(activeDaysSummary)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color(.systemGray5))
+                )
+                .padding(.horizontal, 18)
+                .padding(.bottom, 10)
+            }
 
             GeometryReader { middleGeo in
                 VStack {
@@ -1772,6 +1900,8 @@ struct ContentView: View {
                         ForEach(card.items, id: \.id) { item in
                             littleWinsItemRow(
                                 item: item,
+                                isActiveToday: card.activeTodayItemIDs.contains(item.id),
+                                isInsideFullyHiddenCard: isFullyUnhiddenToday,
                                 titleColor: card.titleColor,
                                 fixedPrimaryText: fixedPrimaryText,
                                 fixedSecondaryText: fixedSecondaryText
@@ -1808,23 +1938,44 @@ struct ContentView: View {
                 radarSideCount: radarSideCount
             )
         }
+        .overlay {
+            if isFullyUnhiddenToday {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(style: StrokeStyle(lineWidth: 4, dash: [6]))
+                    .foregroundStyle(.blue)
+            }
+        }
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .shadow(color: Color.black.opacity(0.10), radius: 10, x: 0, y: 6)
     }
 
     private func littleWinsItemRow(
         item: FulfillmentFocus,
+        isActiveToday: Bool,
+        isInsideFullyHiddenCard: Bool,
         titleColor: Color,
         fixedPrimaryText: Color,
         fixedSecondaryText: Color
     ) -> some View {
         let isCompleted = littleWinsCompletedFocusIDs.contains(item.id)
+        let isInactiveHiddenToday = littleWinsShowHiddenPlaceholder && !isActiveToday
+        let showDashedCircleOnly = isInactiveHiddenToday && !isInsideFullyHiddenCard
         return HStack(alignment: .top, spacing: 10) {
-            Image(systemName: isCompleted ? "checkmark.circle.fill" : "circle")
-                .font(.system(size: 26, weight: .regular))
-                .foregroundStyle(isCompleted ? titleColor : fixedSecondaryText)
-                .padding(.top, 6)
-                .frame(width: 30, alignment: .center)
+            Group {
+                if showDashedCircleOnly && !isCompleted {
+                    Circle()
+                        .stroke(style: StrokeStyle(lineWidth: 2, dash: [6]))
+                        .foregroundStyle(.blue)
+                        .frame(width: 22, height: 22)
+                        .padding(.top, 8)
+                } else {
+                    Image(systemName: isCompleted ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 26, weight: .regular))
+                        .foregroundStyle(isCompleted ? titleColor : fixedSecondaryText)
+                        .padding(.top, 6)
+                }
+            }
+            .frame(width: 30, alignment: .center)
 
             Text(item.activity)
                 .font(.system(size: 36, weight: .semibold, design: .default))
@@ -1832,11 +1983,12 @@ struct ContentView: View {
                 .multilineTextAlignment(.leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .strikethrough(isCompleted, color: fixedPrimaryText.opacity(0.7))
-                .opacity(isCompleted ? 0.72 : 1)
+                .opacity(isCompleted ? 0.72 : (isInactiveHiddenToday ? 0.78 : 1))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
         .onTapGesture {
+            guard isActiveToday || littleWinsShowHiddenPlaceholder || isInsideFullyHiddenCard || isCompleted else { return }
             guard !littleWinsDeckIsDragging else { return }
             guard Date() >= littleWinsSuppressRowTapUntil else { return }
             withAnimation(.interactiveSpring(response: 0.38, dampingFraction: 0.82, blendDuration: 0.12)) {
@@ -3301,6 +3453,252 @@ struct CategoryFulfillmentPopupOverlay: View {
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .shadow(color: Color.black.opacity(0.2), radius: 10, x: 0, y: 6)
         .padding()
+    }
+}
+
+private struct ContentLittleWinsManagerSheetView: View {
+    private struct EditorTarget: Identifiable {
+        let categoryID: UUID
+        let categoryTitle: String
+        let focusID: UUID?
+        let autoFocus: Bool
+
+        var id: String {
+            if let focusID { return "edit-\(focusID.uuidString)" }
+            return "new-\(categoryID.uuidString)-\(autoFocus ? "focus" : "nofocus")"
+        }
+    }
+
+    let categories: [(id: UUID, title: String)]
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @Query private var foci: [FulfillmentFocus]
+    @State private var selectedCategoryID: UUID?
+    @State private var isDeleteMode = false
+    @State private var selectedIDsForDelete: Set<UUID> = []
+    @State private var editorTarget: EditorTarget?
+
+    private let placeholder = "Select Fulfillment Area"
+
+    private var selectedCategoryTitle: String {
+        guard let id = selectedCategoryID else { return "" }
+        return categories.first(where: { $0.id == id })?.title ?? ""
+    }
+
+    private var selectedCategoryColor: Color {
+        selectedCategoryTitle.isEmpty ? .blue : FulfillmentCategoryTheme.color(for: selectedCategoryTitle)
+    }
+
+    private var selectedDisplayText: String {
+        selectedCategoryTitle.isEmpty ? placeholder : selectedCategoryTitle
+    }
+
+    private var littleWinsForSelection: [FulfillmentFocus] {
+        guard let selectedCategoryID else { return [] }
+        return foci
+            .filter { $0.category_id == selectedCategoryID }
+            .sorted { $0.rank < $1.rank }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    HStack(spacing: 8) {
+                        Text("Fulfillment Area")
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Spacer(minLength: 8)
+                        Menu {
+                            Button(placeholder) {
+                                selectCategory(nil)
+                            }
+                            ForEach(categories, id: \.id) { category in
+                                Button(category.title) {
+                                    selectCategory(category.id)
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(selectedDisplayText)
+                                    .foregroundStyle(selectedCategoryColor)
+                                    .fontWeight(selectedCategoryTitle.isEmpty ? .regular : .bold)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.caption2)
+                                    .foregroundStyle(selectedCategoryColor)
+                            }
+                            .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
+                Section {
+                    Button {
+                        startCreatingNew()
+                    } label: {
+                        HStack {
+                            Text("Add Little Win")
+                                .foregroundStyle(selectedCategoryID == nil ? Color.secondary : Color.accentColor)
+                            Spacer()
+                        }
+                        .frame(minHeight: 44, alignment: .center)
+                        .padding(.horizontal, 14)
+                    }
+                    .buttonStyle(.plain)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                    .disabled(selectedCategoryID == nil || isDeleteMode || littleWinsForSelection.count >= 3)
+
+                    if selectedCategoryID != nil {
+                        ForEach(littleWinsForSelection, id: \.id) { focus in
+                            Button {
+                                guard !isDeleteMode else {
+                                    toggleDeleteSelection(for: focus.id)
+                                    return
+                                }
+                                beginEditing(focus)
+                            } label: {
+                                HStack(spacing: 10) {
+                                    if isDeleteMode {
+                                        Image(systemName: selectedIDsForDelete.contains(focus.id) ? "checkmark.circle.fill" : "circle")
+                                            .foregroundStyle(selectedIDsForDelete.contains(focus.id) ? .red : .secondary)
+                                    }
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(focus.activity)
+                                            .foregroundStyle(.primary)
+                                        let rule = LittleWinsScheduleStore.rule(for: focus.id)
+                                        if !rule.canCompleteAnyDay {
+                                            Text(weekdaySummary(rule.activeWeekdayMask))
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    Spacer()
+                                    if !isDeleteMode {
+                                        Image(systemName: "chevron.right")
+                                            .font(.caption2.weight(.semibold))
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+            .listStyle(.insetGrouped)
+            .animation(nil, value: selectedCategoryID)
+            .navigationTitle("Manage Little Wins")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    if isDeleteMode {
+                        Button("Cancel") {
+                            isDeleteMode = false
+                            selectedIDsForDelete.removeAll()
+                        }
+                    } else {
+                        Button("Done") { dismiss() }
+                    }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    if isDeleteMode {
+                        Button("Delete") { deleteSelected() }
+                            .foregroundStyle(selectedIDsForDelete.isEmpty ? Color.secondary : Color.red)
+                            .disabled(selectedIDsForDelete.isEmpty)
+                    } else if selectedCategoryID != nil && !littleWinsForSelection.isEmpty {
+                        Button("Edit") {
+                            isDeleteMode = true
+                            selectedIDsForDelete.removeAll()
+                        }
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .sheet(item: $editorTarget) { target in
+            LittleWinEditorSheetView(
+                categoryID: target.categoryID,
+                categoryTitle: target.categoryTitle,
+                focusID: target.focusID,
+                autoFocusTextField: target.autoFocus
+            )
+        }
+    }
+
+    private func startCreatingNew() {
+        guard let selectedCategoryID else { return }
+        guard littleWinsForSelection.count < 3 else { return }
+        editorTarget = .init(
+            categoryID: selectedCategoryID,
+            categoryTitle: selectedCategoryTitle,
+            focusID: nil,
+            autoFocus: true
+        )
+    }
+
+    private func selectCategory(_ id: UUID?) {
+        var transaction = Transaction()
+        transaction.animation = nil
+        withTransaction(transaction) {
+            selectedCategoryID = id
+            isDeleteMode = false
+            selectedIDsForDelete.removeAll()
+        }
+    }
+
+    private func beginEditing(_ focus: FulfillmentFocus) {
+        guard let category = categories.first(where: { $0.id == focus.category_id }) else { return }
+        editorTarget = .init(
+            categoryID: focus.category_id,
+            categoryTitle: category.title,
+            focusID: focus.id,
+            autoFocus: false
+        )
+    }
+
+    private func toggleDeleteSelection(for id: UUID) {
+        if selectedIDsForDelete.contains(id) {
+            selectedIDsForDelete.remove(id)
+        } else {
+            selectedIDsForDelete.insert(id)
+        }
+    }
+
+    private func weekdaySummary(_ mask: Int) -> String {
+        let normalizedMask = mask & LittleWinsScheduleRule.everyDayMask
+        if normalizedMask == 0b0111110 { return "Weekdays" } // Mon-Fri
+        if normalizedMask == 0b1000001 { return "Weekend" } // Sun+Sat
+        let labels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+        let selected = labels.enumerated().compactMap { index, label in
+            (normalizedMask & (1 << index)) != 0 ? label : nil
+        }
+        return selected.isEmpty ? "No days selected" : selected.joined(separator: ", ")
+    }
+
+    private func deleteSelected() {
+        let targets = littleWinsForSelection.filter { selectedIDsForDelete.contains($0.id) }
+        for focus in targets {
+            modelContext.insert(
+                FulfillmentFocusArchive(
+                    category_id: focus.category_id,
+                    updatedAt: focus.updatedAt,
+                    activity: focus.activity,
+                    rank: focus.rank,
+                    archivedAt: Date()
+                )
+            )
+            LittleWinsScheduleStore.removeRule(for: focus.id)
+            RecentlyDeletedStore.trash(focus, in: modelContext)
+        }
+        try? modelContext.save()
+        selectedIDsForDelete.removeAll()
+        isDeleteMode = false
     }
 }
 
