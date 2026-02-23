@@ -31,6 +31,7 @@ struct ContentView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Namespace private var graphNamespace
     @Namespace private var pageIndicatorNamespace
+    @Namespace private var littleWinsCompletionNamespace
     @State private var showSplash: Bool = true
     @State private var splashMinimumElapsed: Bool = false
     @State private var splashPreparationFinished: Bool = false
@@ -194,7 +195,10 @@ struct ContentView: View {
                                     cardDensity: cardDensity
                                 )
                                 .safeAreaInset(edge: .bottom, spacing: 10) {
-                                    footer
+                                    VStack(spacing: 0) {
+                                        footer
+                                        Color.clear.frame(height: 8)
+                                    }
                                 }
                                 .tag(HomeSwipePage.home.rawValue)
 
@@ -399,6 +403,8 @@ struct ContentView: View {
     @Query private var roles: [FulfillmentRoles]
     @Query private var foci: [FulfillmentFocus]
     @Query private var resources: [FulfillmentResources]
+    @Query(sort: \ActionBlocksReflectionArchive.completedAt, order: .reverse)
+    private var reflectionArchives: [ActionBlocksReflectionArchive]
 
     // MARK: - Helpers to simplify complex expressions
     private func categoryTextColor(for category: String) -> Color {
@@ -522,6 +528,10 @@ struct ContentView: View {
         if next != littleWinsCardOrder {
             littleWinsCardOrder = next
         }
+    }
+
+    private func isLittleWinsCardCompleted(_ card: LittleWinsCardData) -> Bool {
+        !card.items.isEmpty && card.items.allSatisfy { littleWinsCompletedFocusIDs.contains($0.id) }
     }
 
     private func resourcesForCategory(_ categoryTitle: String) -> [FulfillmentResources] {
@@ -828,6 +838,8 @@ struct ContentView: View {
             let cardWidth = max(0, proxy.size.width - (horizontalPadding * 2))
             let cardHeight = min(max(cardWidth * 1.42, 360), max(380, proxy.size.height - 36))
             let cards = littleWinsCards
+            let activeCards = cards.filter { !isLittleWinsCardCompleted($0) }
+            let completedCards = cards.filter { isLittleWinsCardCompleted($0) }
 
             Group {
                 if cards.isEmpty {
@@ -847,7 +859,7 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     littleWinsDeckView(
-                        cards: cards,
+                        cards: activeCards,
                         cardWidth: cardWidth,
                         cardHeight: cardHeight,
                         horizontalPadding: horizontalPadding
@@ -855,6 +867,23 @@ struct ContentView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .safeAreaInset(edge: .bottom, spacing: 10) {
+                if !cards.isEmpty {
+                    VStack(spacing: 0) {
+                        VStack(spacing: 6) {
+                            HStack {
+                                littleWinsLastWeekCalendarRow(completedTodayCards: completedCards)
+                            }
+                            .frame(height: 60)
+                            .padding(.horizontal)
+                            .padding(.top, 6)
+                            .padding(.bottom, 0)
+                        }
+                        Color.clear.frame(height: 8)
+                    }
+                    .background(Color(.systemGroupedBackground))
+                }
+            }
         }
         .contentShape(Rectangle())
         .onAppear(perform: syncLittleWinsCardOrder)
@@ -892,6 +921,7 @@ struct ContentView: View {
                     .opacity(index > 2 ? 0.92 : 1.0)
                     .zIndex(Double(visibleCards.count - index))
                     .allowsHitTesting(isTop)
+                    .matchedGeometryEffect(id: "lw-card-\(card.id.uuidString)", in: littleWinsCompletionNamespace)
                 }
             }
             .frame(maxWidth: .infinity)
@@ -913,24 +943,20 @@ struct ContentView: View {
     private func littleWinsDeckDragGesture(cards: [LittleWinsCardData], cardWidth: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 10, coordinateSpace: .local)
             .onChanged { value in
-                guard cards.count > 1 else { return }
                 guard abs(value.translation.width) > abs(value.translation.height) else { return }
-                littleWinsDeckIsDragging = true
                 guard value.translation.width > 0 else {
                     littleWinsDeckDragX = 0
                     return
                 }
+                guard cards.count > 1 else { return }
+                littleWinsDeckIsDragging = true
                 littleWinsDeckDragX = value.translation.width
             }
             .onEnded { value in
-                guard cards.count > 1 else {
-                    littleWinsDeckDragX = 0
-                    return
-                }
                 let horizontalDominant = abs(value.translation.width) > abs(value.translation.height)
                 let threshold = min(120, cardWidth * 0.18)
                 let shouldNavigateToHome = horizontalDominant && value.translation.width < -threshold
-                let shouldRotate = horizontalDominant && value.translation.width > threshold
+                let shouldRotate = cards.count > 1 && horizontalDominant && value.translation.width > threshold
                 littleWinsDeckIsDragging = false
                 littleWinsSuppressRowTapUntil = Date().addingTimeInterval(0.2)
 
@@ -953,6 +979,96 @@ struct ContentView: View {
                     }
                 }
             }
+    }
+
+    private func littleWinsLastWeekCalendarRow(completedTodayCards: [LittleWinsCardData]) -> some View {
+        let dates = lastSevenDatesEndingToday()
+        let calendar = Calendar.current
+
+        return HStack(spacing: 8) {
+            ForEach(dates, id: \.self) { date in
+                let isToday = calendar.isDateInToday(date)
+                let miniCardWidth: CGFloat = 28
+                let miniCardHeight: CGFloat = miniCardWidth * 1.42
+                VStack(spacing: 3) {
+                    if isToday {
+                        littleWinsCompletedTodayMiniCardStack(
+                            cards: completedTodayCards,
+                            cardWidth: miniCardWidth,
+                            cardHeight: miniCardHeight
+                        )
+                        .frame(width: miniCardWidth, height: miniCardHeight, alignment: .top)
+                    } else {
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(Color(.systemGray5))
+                            .frame(width: miniCardWidth, height: miniCardHeight)
+                            .overlay {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 17.5, weight: .semibold))
+                                    .foregroundStyle(Color(.systemGray2))
+                            }
+                    }
+
+                    Text(date.formatted(.dateTime.weekday(.narrow)))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+
+                    Text(date.formatted(.dateTime.day()))
+                        .font(.caption.weight(isToday ? .semibold : .regular))
+                        .foregroundStyle(isToday ? .primary : .secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.top, 6)
+                .padding(.bottom, 1)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(isToday ? Color.primary.opacity(0.08) : Color.clear)
+                )
+            }
+        }
+        .padding(.top, 2)
+    }
+
+    private func littleWinsCompletedTodayMiniCardStack(
+        cards: [LittleWinsCardData],
+        cardWidth: CGFloat,
+        cardHeight: CGFloat
+    ) -> some View {
+        let visible = Array(cards.suffix(3))
+        return ZStack {
+            ForEach(Array(visible.enumerated()), id: \.element.id) { index, card in
+                let depth = CGFloat(visible.count - 1 - index)
+                littleWinsCompletedMiniCard(card, width: cardWidth, height: cardHeight)
+                    .offset(y: -(depth * 3))
+                    .zIndex(Double(index))
+                    .matchedGeometryEffect(id: "lw-card-\(card.id.uuidString)", in: littleWinsCompletionNamespace)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private func littleWinsCompletedMiniCard(
+        _ card: LittleWinsCardData,
+        width: CGFloat,
+        height: CGFloat
+    ) -> some View {
+        let radarSideCount = max(3, min(7, fulfillmentMetrics.count))
+        return RoundedRectangle(cornerRadius: 4, style: .continuous)
+            .fill(card.cardColor)
+            .frame(width: width, height: height)
+            .overlay {
+                RadarPolygonOutline(sides: radarSideCount)
+                    .stroke(card.titleColor, style: StrokeStyle(lineWidth: 1.8))
+                    .padding(4)
+            }
+    }
+
+    private func lastSevenDatesEndingToday() -> [Date] {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        return (0..<7).compactMap { offset in
+            calendar.date(byAdding: .day, value: -(6 - offset), to: today)
+        }
     }
 
     private func littleWinsCardView(
@@ -1066,10 +1182,12 @@ struct ContentView: View {
         .onTapGesture {
             guard !littleWinsDeckIsDragging else { return }
             guard Date() >= littleWinsSuppressRowTapUntil else { return }
-            if isCompleted {
-                littleWinsCompletedFocusIDs.remove(item.id)
-            } else {
-                littleWinsCompletedFocusIDs.insert(item.id)
+            withAnimation(.interactiveSpring(response: 0.38, dampingFraction: 0.82, blendDuration: 0.12)) {
+                if isCompleted {
+                    littleWinsCompletedFocusIDs.remove(item.id)
+                } else {
+                    littleWinsCompletedFocusIDs.insert(item.id)
+                }
             }
         }
     }
