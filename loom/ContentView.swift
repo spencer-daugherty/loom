@@ -914,7 +914,8 @@ struct ContentView: View {
                         cards: activeCards,
                         cardWidth: cardWidth,
                         cardHeight: cardHeight,
-                        horizontalPadding: horizontalPadding
+                        horizontalPadding: horizontalPadding,
+                        availableHeight: proxy.size.height
                     )
                 }
             }
@@ -952,10 +953,19 @@ struct ContentView: View {
         cards: [LittleWinsCardData],
         cardWidth: CGFloat,
         cardHeight: CGFloat,
-        horizontalPadding: CGFloat
+        horizontalPadding: CGFloat,
+        availableHeight: CGFloat
     ) -> some View {
         let visibleCards = Array(cards.prefix(4))
         let backStep = cardHeight * 0.05
+        let stackRise = backStep * CGFloat(max(0, visibleCards.count - 1))
+        let hintHeight: CGFloat = 18
+        let hintSpacing: CGFloat = 6
+        let bottomCalendarBandReserve: CGFloat = 84 // matches bottom safe-area calendar band footprint
+        let deckVisibleHeight = cardHeight + stackRise
+        let contentHeight = deckVisibleHeight + hintSpacing + hintHeight
+        let freeHeight = max(0, availableHeight - bottomCalendarBandReserve - contentHeight)
+        let dynamicTopPadding = max(12 + stackRise, freeHeight * 0.35 + stackRise)
 
         return VStack(spacing: 6) {
             ZStack {
@@ -997,7 +1007,7 @@ struct ContentView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .padding(.horizontal, horizontalPadding)
-        .padding(.top, 44)
+        .padding(.top, dynamicTopPadding)
         .padding(.bottom, 14)
     }
 
