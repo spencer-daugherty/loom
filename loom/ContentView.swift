@@ -846,79 +846,12 @@ struct ContentView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    let visibleCards = Array(cards.prefix(4))
-                    let backStep = cardHeight * 0.05
-
-                    ZStack {
-                        ForEach(Array(visibleCards.enumerated()), id: \.element.id) { index, card in
-                            let depth = CGFloat(index)
-                            let isTop = index == 0
-                            littleWinsCardView(
-                                card,
-                                width: cardWidth,
-                                height: cardHeight,
-                                isFrontmost: isTop
-                            )
-                                .offset(
-                                    x: isTop ? littleWinsDeckDragX : 0,
-                                    y: -(depth * backStep)
-                                )
-                                .rotationEffect(.degrees(isTop ? Double(littleWinsDeckDragX / 28) : 0))
-                                .scaleEffect(isTop ? 1.0 : max(0.94, 1.0 - (depth * 0.02)))
-                                .opacity(index > 2 ? 0.92 : 1.0)
-                                .zIndex(Double(visibleCards.count - index))
-                                .allowsHitTesting(isTop)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    .padding(.horizontal, horizontalPadding)
-                    .padding(.top, 44)
-                    .contentShape(Rectangle())
-                    .simultaneousGesture(
-                        DragGesture(minimumDistance: 10, coordinateSpace: .local)
-                            .onChanged { value in
-                                guard cards.count > 1 else { return }
-                                guard abs(value.translation.width) > abs(value.translation.height) else { return }
-                                littleWinsDeckIsDragging = true
-                                guard value.translation.width > 0 else {
-                                    littleWinsDeckDragX = 0
-                                    return
-                                }
-                                littleWinsDeckDragX = value.translation.width
-                            }
-                            .onEnded { value in
-                                guard cards.count > 1 else {
-                                    littleWinsDeckDragX = 0
-                                    return
-                                }
-                                let horizontalDominant = abs(value.translation.width) > abs(value.translation.height)
-                                let threshold = min(120, cardWidth * 0.18)
-                                let shouldNavigateToHome = horizontalDominant && value.translation.width < -threshold
-                                let shouldRotate = horizontalDominant && value.translation.width > threshold
-                                littleWinsDeckIsDragging = false
-                                littleWinsSuppressRowTapUntil = Date().addingTimeInterval(0.2)
-
-                                if shouldNavigateToHome {
-                                    withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.82, blendDuration: 0.12)) {
-                                        homePageIndex = HomeSwipePage.home.rawValue
-                                        littleWinsDeckDragX = 0
-                                    }
-                                } else if shouldRotate {
-                                    var nextOrder = cards.map(\.id)
-                                    let first = nextOrder.removeFirst()
-                                    nextOrder.append(first)
-                                    withAnimation(.interactiveSpring(response: 0.34, dampingFraction: 0.78, blendDuration: 0.15)) {
-                                        littleWinsCardOrder = nextOrder
-                                        littleWinsDeckDragX = 0
-                                    }
-                                } else {
-                                    withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82, blendDuration: 0.1)) {
-                                        littleWinsDeckDragX = 0
-                                    }
-                                }
-                            }
+                    littleWinsDeckView(
+                        cards: cards,
+                        cardWidth: cardWidth,
+                        cardHeight: cardHeight,
+                        horizontalPadding: horizontalPadding
                     )
-                    .animation(.interactiveSpring(response: 0.34, dampingFraction: 0.80, blendDuration: 0.15), value: littleWinsCardOrder)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -928,6 +861,98 @@ struct ContentView: View {
         .onChange(of: littleWinsSourceCardIDs) { _, _ in
             syncLittleWinsCardOrder()
         }
+    }
+
+    private func littleWinsDeckView(
+        cards: [LittleWinsCardData],
+        cardWidth: CGFloat,
+        cardHeight: CGFloat,
+        horizontalPadding: CGFloat
+    ) -> some View {
+        let visibleCards = Array(cards.prefix(4))
+        let backStep = cardHeight * 0.05
+
+        return VStack(spacing: 6) {
+            ZStack {
+                ForEach(Array(visibleCards.enumerated()), id: \.element.id) { index, card in
+                    let depth = CGFloat(index)
+                    let isTop = index == 0
+                    littleWinsCardView(
+                        card,
+                        width: cardWidth,
+                        height: cardHeight,
+                        isFrontmost: isTop
+                    )
+                    .offset(
+                        x: isTop ? littleWinsDeckDragX : 0,
+                        y: -(depth * backStep)
+                    )
+                    .rotationEffect(.degrees(isTop ? Double(littleWinsDeckDragX / 28) : 0))
+                    .scaleEffect(isTop ? 1.0 : max(0.94, 1.0 - (depth * 0.02)))
+                    .opacity(index > 2 ? 0.92 : 1.0)
+                    .zIndex(Double(visibleCards.count - index))
+                    .allowsHitTesting(isTop)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: cardHeight, alignment: .top)
+            .contentShape(Rectangle())
+            .simultaneousGesture(littleWinsDeckDragGesture(cards: cards, cardWidth: cardWidth))
+            .animation(.interactiveSpring(response: 0.34, dampingFraction: 0.80, blendDuration: 0.15), value: littleWinsCardOrder)
+
+            Text("swipe right to rearrange")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .opacity(cards.count > 1 ? 1 : 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .top)
+        .padding(.horizontal, horizontalPadding)
+        .padding(.top, 44)
+    }
+
+    private func littleWinsDeckDragGesture(cards: [LittleWinsCardData], cardWidth: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 10, coordinateSpace: .local)
+            .onChanged { value in
+                guard cards.count > 1 else { return }
+                guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                littleWinsDeckIsDragging = true
+                guard value.translation.width > 0 else {
+                    littleWinsDeckDragX = 0
+                    return
+                }
+                littleWinsDeckDragX = value.translation.width
+            }
+            .onEnded { value in
+                guard cards.count > 1 else {
+                    littleWinsDeckDragX = 0
+                    return
+                }
+                let horizontalDominant = abs(value.translation.width) > abs(value.translation.height)
+                let threshold = min(120, cardWidth * 0.18)
+                let shouldNavigateToHome = horizontalDominant && value.translation.width < -threshold
+                let shouldRotate = horizontalDominant && value.translation.width > threshold
+                littleWinsDeckIsDragging = false
+                littleWinsSuppressRowTapUntil = Date().addingTimeInterval(0.2)
+
+                if shouldNavigateToHome {
+                    withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.82, blendDuration: 0.12)) {
+                        homePageIndex = HomeSwipePage.home.rawValue
+                        littleWinsDeckDragX = 0
+                    }
+                } else if shouldRotate {
+                    var nextOrder = cards.map(\.id)
+                    let first = nextOrder.removeFirst()
+                    nextOrder.append(first)
+                    withAnimation(.interactiveSpring(response: 0.34, dampingFraction: 0.78, blendDuration: 0.15)) {
+                        littleWinsCardOrder = nextOrder
+                        littleWinsDeckDragX = 0
+                    }
+                } else {
+                    withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82, blendDuration: 0.1)) {
+                        littleWinsDeckDragX = 0
+                    }
+                }
+            }
     }
 
     private func littleWinsCardView(
@@ -945,9 +970,11 @@ struct ContentView: View {
         let totalCount = card.items.count
         return VStack(spacing: 0) {
             ZStack {
-                Text("Little Wins")
+                Text(card.categoryTitle)
                     .font(.headline.weight(.semibold))
-                    .foregroundStyle(fixedPrimaryText)
+                    .foregroundStyle(card.titleColor)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
 
                 if !isFrontmost && checkedCount > 0 {
                     HStack {
@@ -990,16 +1017,14 @@ struct ContentView: View {
 
             HStack {
                 Spacer()
-                Text(card.categoryTitle)
+                Text("Little Wins")
                     .font(.headline.weight(.semibold))
-                    .foregroundStyle(card.titleColor)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
+                    .foregroundStyle(fixedPrimaryText)
                 Spacer()
             }
             .padding(.horizontal, 18)
             .padding(.top, 10)
-            .padding(.bottom, 16)
+            .padding(.bottom, 14)
         }
         .frame(width: width, height: height, alignment: .top)
         .background {
@@ -1057,6 +1082,8 @@ struct ContentView: View {
     ) -> some View {
         let cornerShapeSize: CGFloat = 52
         let cornerShapePadding: CGFloat = 14
+        let topTitleCutoutWidth = min(max(width * 0.62, 200), width - 86)
+        let bottomTitleCutoutWidth = min(max(width * 0.32, 120), 180)
         return RoundedRectangle(cornerRadius: 18, style: .continuous)
             .fill(card.cardColor)
             .overlay {
@@ -1109,7 +1136,9 @@ struct ContentView: View {
                     topLeadingShapeCutout: .init(width: 112, height: 112),
                     bottomTrailingShapeCutout: .init(width: 112, height: 112),
                     shapePadding: cornerShapePadding,
-                    shapeSize: cornerShapeSize
+                    shapeSize: cornerShapeSize,
+                    topCutoutWidth: topTitleCutoutWidth,
+                    bottomCutoutWidth: bottomTitleCutoutWidth
                 )
             }
             .overlay {
@@ -1123,7 +1152,9 @@ struct ContentView: View {
                     topLeadingShapeCutout: .init(width: 96, height: 96),
                     bottomTrailingShapeCutout: .init(width: 96, height: 96),
                     shapePadding: cornerShapePadding,
-                    shapeSize: cornerShapeSize
+                    shapeSize: cornerShapeSize,
+                    topCutoutWidth: topTitleCutoutWidth,
+                    bottomCutoutWidth: bottomTitleCutoutWidth
                 )
             }
             .overlay(alignment: .topLeading) {
@@ -1155,10 +1186,12 @@ struct ContentView: View {
         bottomTrailingShapeCutout: CGSize = .zero
         ,
         shapePadding: CGFloat = 14,
-        shapeSize: CGFloat = 52
+        shapeSize: CGFloat = 52,
+        topCutoutWidth: CGFloat? = nil,
+        bottomCutoutWidth: CGFloat? = nil
     ) -> some View {
-        let topCutoutWidth = min(max(width * 0.34, 120), 190)
-        let bottomCutoutWidth = min(max(width * 0.56, 180), width - (inset * 2) - 20)
+        let topCutoutWidth = topCutoutWidth ?? min(max(width * 0.34, 120), 190)
+        let bottomCutoutWidth = bottomCutoutWidth ?? min(max(width * 0.56, 180), width - (inset * 2) - 20)
         let topY = inset
         let bottomY = height - inset
         let topLeadingCutoutCenter = CGPoint(
