@@ -1,6 +1,35 @@
 import SwiftUI
 import SwiftData
 
+private enum ObjectivesContributingLittleWinsStore {
+    private static let defaultsKey = "outcome_contributing_little_wins_v1"
+
+    private static func loadMap() -> [String: [String]] {
+        guard let data = UserDefaults.standard.data(forKey: defaultsKey),
+              let decoded = try? JSONDecoder().decode([String: [String]].self, from: data) else {
+            return [:]
+        }
+        return decoded
+    }
+
+    private static func saveMap(_ map: [String: [String]]) {
+        guard let data = try? JSONEncoder().encode(map) else { return }
+        UserDefaults.standard.set(data, forKey: defaultsKey)
+    }
+
+    static func focusIDs(for outcomeID: UUID) -> [UUID] {
+        (loadMap()[outcomeID.uuidString] ?? []).compactMap(UUID.init(uuidString:))
+    }
+
+    static func setFocusIDs(_ focusIDs: [UUID], for outcomeID: UUID) {
+        var map = loadMap()
+        let key = outcomeID.uuidString
+        let unique = Array(Set(focusIDs.map(\.uuidString)))
+        if unique.isEmpty { map.removeValue(forKey: key) } else { map[key] = unique }
+        saveMap(map)
+    }
+}
+
 private func sanitizeDecimalInput(_ input: String, maxFractionDigits: Int = 4) -> String {
     var out = ""
     var seenDot = false
@@ -71,6 +100,9 @@ struct ObjectivesAddView: View {
     @State private var isShowingDeleteAlert = false
     @State private var isShowingDeleteOutcomeAlert = false
     @State private var isShowingAddMeasureSheet = false
+    @State private var isShowingContributingLittleWinsSheet = false
+    @State private var isShowingManageLittleWinsSheet = false
+    @State private var selectedContributingLittleWinIDs: Set<UUID> = []
     @State private var isMeasurable = false
     @State private var measureGoal: String = ""
     @State private var measureCurrent: String = ""
@@ -83,6 +115,7 @@ struct ObjectivesAddView: View {
     private let outcome: Outcomes?
     private let outcomeMeasure: OutcomesMeasure?
     @Query(sort: \Fulfillment.category, order: .forward) private var fulfillments: [Fulfillment]
+    @Query private var allLittleWins: [FulfillmentFocus]
     @Query(sort: \OutcomesMeasureEntry.measuredAt, order: .forward) private var allMeasureEntries: [OutcomesMeasureEntry]
 
     private static let categoryPlaceholder = "Select Fulfillment Area"
@@ -142,6 +175,31 @@ struct ObjectivesAddView: View {
             .filter { !$0.isEmpty }
         let unique = Array(Set(names)).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
         return [Self.categoryPlaceholder] + unique
+    }
+
+    private var selectedFulfillmentRecord: Fulfillment? {
+        fulfillments.first { $0.category.caseInsensitiveCompare(selectedCategory) == .orderedSame }
+    }
+
+    private var littleWinsManagerCategories: [(id: UUID, title: String)] {
+        fulfillments
+            .map { ($0.category_id, $0.category) }
+            .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+    }
+
+    private var currentCategoryLittleWins: [FulfillmentFocus] {
+        guard let categoryID = selectedFulfillmentRecord?.category_id else { return [] }
+        return allLittleWins
+            .filter { $0.category_id == categoryID }
+            .sorted { lhs, rhs in
+                if lhs.rank != rhs.rank { return lhs.rank < rhs.rank }
+                return lhs.activity.localizedCaseInsensitiveCompare(rhs.activity) == .orderedAscending
+            }
+    }
+
+    private var selectedContributingLittleWins: [FulfillmentFocus] {
+        let byID = Dictionary(uniqueKeysWithValues: currentCategoryLittleWins.map { ($0.id, $0) })
+        return selectedContributingLittleWinIDs.compactMap { byID[$0] }
     }
     
     enum MeasureFormat: String, CaseIterable, Identifiable {
@@ -315,6 +373,13 @@ struct ObjectivesAddView: View {
                     categories: fulfillmentAreaOptions,
                     placeholder: Self.categoryPlaceholder
                 )
+                ContributingLittleWinsSection(
+                    selectedItems: selectedContributingLittleWins,
+                    onAddTap: { isShowingContributingLittleWinsSheet = true },
+                    onUnassign: { focus in
+                        selectedContributingLittleWinIDs.remove(focus.id)
+                    }
+                )
                 if outcome != nil {
                     DeleteOutcomeSection(
                         isShowingDeleteOutcomeAlert: $isShowingDeleteOutcomeAlert,
@@ -405,9 +470,13 @@ struct ObjectivesAddView: View {
         .onAppear {
             hydrateMeasureFromLatestEntry()
             syncSelectedCategoryWithFulfillmentAreas()
+            loadContributingLittleWinsSelectionIfNeeded()
         }
         .onChange(of: fulfillments.map(\.category)) { _, _ in
             syncSelectedCategoryWithFulfillmentAreas()
+        }
+        .onChange(of: selectedCategory) { _, _ in
+            pruneContributingLittleWinsSelectionToCurrentCategory()
         }
         .sheet(isPresented: $isShowingAddMeasureSheet) {
             if let outcomeID = outcome?.outcome_id {
@@ -417,6 +486,81 @@ struct ObjectivesAddView: View {
                     unitRaw: measureUnit,
                     decimalPlaces: measureDecimalPlaces
                 )
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+            }
+        }
+        .sheet(isPresented: $isShowingContributingLittleWinsSheet) {
+            NavigationStack {
+                Form {
+                    Section {
+                        if currentCategoryLittleWins.isEmpty {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("No Little Wins found for this Fulfillment Area.")
+                                    .foregroundStyle(.secondary)
+                                Button("Manage Little Wins") {
+                                    isShowingContributingLittleWinsSheet = false
+                                    DispatchQueue.main.async {
+                                        isShowingManageLittleWinsSheet = true
+                                    }
+                                }
+                                .foregroundStyle(selectedFulfillmentRecord == nil ? Color.secondary : Color.blue)
+                                .disabled(selectedFulfillmentRecord == nil)
+                            }
+                        } else {
+                            ForEach(currentCategoryLittleWins, id: \.id) { focus in
+                                Button {
+                                    toggleContributingLittleWinSelection(focus.id)
+                                } label: {
+                                    HStack {
+                                        Text(focus.activity)
+                                            .foregroundStyle(.primary)
+                                        Spacer()
+                                        if selectedContributingLittleWinIDs.contains(focus.id) {
+                                            Image(systemName: "checkmark")
+                                                .foregroundStyle(.blue)
+                                        }
+                                    }
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+                .navigationTitle("Contributing Little Wins")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("Done") { isShowingContributingLittleWinsSheet = false }
+                    }
+                }
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $isShowingManageLittleWinsSheet, onDismiss: {
+            pruneContributingLittleWinsSelectionToCurrentCategory()
+        }) {
+            if let locked = selectedFulfillmentRecord {
+                ContentLittleWinsManagerSheetView(
+                    categories: littleWinsManagerCategories,
+                    lockedCategoryID: locked.category_id
+                )
+            } else {
+                NavigationStack {
+                    List {
+                        Text("Select a Fulfillment Area first.")
+                            .foregroundStyle(.secondary)
+                    }
+                    .navigationTitle("Manage Little Wins")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button("Done") { isShowingManageLittleWinsSheet = false }
+                        }
+                    }
+                }
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
             }
@@ -435,6 +579,7 @@ struct ObjectivesAddView: View {
         var newlyCreatedOutcomeID: UUID?
 
         if let existingOutcome = outcome {
+            ObjectivesContributingLittleWinsStore.setFocusIDs(Array(selectedContributingLittleWinIDs), for: existingOutcome.outcome_id)
             let previousEndDate = existingOutcome.end
             if existingOutcome.outcome != goal ||
                existingOutcome.reasons != reasons ||
@@ -541,6 +686,7 @@ struct ObjectivesAddView: View {
             )
             newlyCreatedOutcomeID = newOutcome.outcome_id
             modelContext.insert(newOutcome)
+            ObjectivesContributingLittleWinsStore.setFocusIDs(Array(selectedContributingLittleWinIDs), for: newOutcome.outcome_id)
             
             if isMeasurable {
                 let newMeasure = OutcomesMeasure(
@@ -604,6 +750,28 @@ struct ObjectivesAddView: View {
         }
     }
 
+    private func loadContributingLittleWinsSelectionIfNeeded() {
+        guard let outcomeID = outcome?.outcome_id else {
+            pruneContributingLittleWinsSelectionToCurrentCategory()
+            return
+        }
+        selectedContributingLittleWinIDs = Set(ObjectivesContributingLittleWinsStore.focusIDs(for: outcomeID))
+        pruneContributingLittleWinsSelectionToCurrentCategory()
+    }
+
+    private func pruneContributingLittleWinsSelectionToCurrentCategory() {
+        let validIDs = Set(currentCategoryLittleWins.map(\.id))
+        selectedContributingLittleWinIDs = selectedContributingLittleWinIDs.intersection(validIDs)
+    }
+
+    private func toggleContributingLittleWinSelection(_ focusID: UUID) {
+        if selectedContributingLittleWinIDs.contains(focusID) {
+            selectedContributingLittleWinIDs.remove(focusID)
+        } else {
+            selectedContributingLittleWinIDs.insert(focusID)
+        }
+    }
+
 }
 
 struct ChartSection: View {
@@ -628,6 +796,43 @@ struct ChartSection: View {
                         )
                     }
                     .padding(.vertical, 8)
+                }
+            }
+        }
+    }
+
+}
+
+private struct ContributingLittleWinsSection: View {
+    let selectedItems: [FulfillmentFocus]
+    let onAddTap: () -> Void
+    let onUnassign: (FulfillmentFocus) -> Void
+
+    var body: some View {
+        Section("Contributing Little Wins") {
+            Button(action: onAddTap) {
+                Text("+ Contributing Little Wins")
+                    .foregroundStyle(.blue)
+            }
+
+            if selectedItems.isEmpty {
+                Text("No contributing little wins selected yet.")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(selectedItems, id: \.id) { focus in
+                    HStack(alignment: .top, spacing: 10) {
+                        Text(focus.activity)
+                            .font(.body)
+                            .foregroundStyle(.primary)
+                        Spacer(minLength: 8)
+                    }
+                    .padding(.vertical, 2)
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        Button("Unassign") {
+                            onUnassign(focus)
+                        }
+                        .tint(.gray)
+                    }
                 }
             }
         }

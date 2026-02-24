@@ -3964,7 +3964,7 @@ struct CategoryFulfillmentPopupOverlay: View {
     }
 }
 
-private struct ContentLittleWinsManagerSheetView: View {
+struct ContentLittleWinsManagerSheetView: View {
     private struct EditorTarget: Identifiable {
         let categoryID: UUID
         let categoryTitle: String
@@ -3978,6 +3978,7 @@ private struct ContentLittleWinsManagerSheetView: View {
     }
 
     let categories: [(id: UUID, title: String)]
+    let lockedCategoryID: UUID?
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
@@ -3989,6 +3990,15 @@ private struct ContentLittleWinsManagerSheetView: View {
     @State private var showDeleteGuardHint = false
 
     private let placeholder = "Select Fulfillment Area"
+
+    init(
+        categories: [(id: UUID, title: String)],
+        lockedCategoryID: UUID? = nil
+    ) {
+        self.categories = categories
+        self.lockedCategoryID = lockedCategoryID
+        _selectedCategoryID = State(initialValue: lockedCategoryID)
+    }
 
     private var selectedCategoryTitle: String {
         guard let id = selectedCategoryID else { return "" }
@@ -4019,29 +4029,42 @@ private struct ContentLittleWinsManagerSheetView: View {
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                         Spacer(minLength: 8)
-                        Menu {
-                            Button(placeholder) {
-                                selectCategory(nil)
-                            }
-                            ForEach(categories, id: \.id) { category in
-                                Button(category.title) {
-                                    selectCategory(category.id)
+                        Group {
+                            if lockedCategoryID != nil {
+                                HStack(spacing: 4) {
+                                    Text(selectedDisplayText)
+                                        .foregroundStyle(selectedCategoryColor.opacity(0.6))
+                                        .fontWeight(selectedCategoryTitle.isEmpty ? .regular : .bold)
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
                                 }
+                                .fixedSize(horizontal: false, vertical: true)
+                            } else {
+                                Menu {
+                                    Button(placeholder) {
+                                        selectCategory(nil)
+                                    }
+                                    ForEach(categories, id: \.id) { category in
+                                        Button(category.title) {
+                                            selectCategory(category.id)
+                                        }
+                                    }
+                                } label: {
+                                    HStack(spacing: 4) {
+                                        Text(selectedDisplayText)
+                                            .foregroundStyle(selectedCategoryColor)
+                                            .fontWeight(selectedCategoryTitle.isEmpty ? .regular : .bold)
+                                            .lineLimit(1)
+                                            .truncationMode(.tail)
+                                        Image(systemName: "chevron.up.chevron.down")
+                                            .font(.caption2)
+                                            .foregroundStyle(selectedCategoryColor)
+                                    }
+                                    .fixedSize(horizontal: false, vertical: true)
+                                }
+                                .buttonStyle(.plain)
                             }
-                        } label: {
-                            HStack(spacing: 4) {
-                                Text(selectedDisplayText)
-                                    .foregroundStyle(selectedCategoryColor)
-                                    .fontWeight(selectedCategoryTitle.isEmpty ? .regular : .bold)
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
-                                Image(systemName: "chevron.up.chevron.down")
-                                    .font(.caption2)
-                                    .foregroundStyle(selectedCategoryColor)
-                            }
-                            .fixedSize(horizontal: false, vertical: true)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
 

@@ -676,7 +676,7 @@ struct FulfillmentStartView: View {
 
     private var currentStepDisplayTitle: String {
         if isAddSingleAreaMode && step == .createCategories {
-            return "Create Category"
+            return "Add Fulfillment Area"
         }
         return step.title
     }
