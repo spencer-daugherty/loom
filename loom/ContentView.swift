@@ -1542,7 +1542,9 @@ struct ContentView: View {
         let calendarBadgeVisualLift = todayMiniStackTopOverflow + calendarBadgeRowHeight + 34
         let calendarBadgeHitAreaTopPadding = calendarBadgeRowHeight + 8
         let calendarRowHeight: CGFloat = 84 + todayMiniStackTopOverflow
-        let calendarBandReserve: CGFloat = 132 + todayMiniStackTopOverflow
+        // Reserve only the actual laid-out calendar band height (row + paddings/spacers),
+        // so the deck can use remaining space before hiding back cards.
+        let calendarBandReserve: CGFloat = calendarRowHeight + 14
         let isCalendarPreviewActive = littleWinsCalendarPreviewDate != nil
 
         return Group {
@@ -1752,21 +1754,40 @@ struct ContentView: View {
         availableHeight: CGFloat,
         bottomCalendarBandReserve: CGFloat
     ) -> some View {
-        let backStep = cardHeight * 0.05
+        let baseBackStep = cardHeight * 0.05
         let hintHeight: CGFloat = 18
         let hintSpacing: CGFloat = 6
+        let minimumTopStackSpacing: CGFloat = 0
+        let minimumBottomControlsSpacing: CGFloat = 30
         let contentHeight = cardHeight + hintSpacing + hintHeight
-        let freeHeight = max(0, availableHeight - bottomCalendarBandReserve - contentHeight)
-        let minimumTopHeaderSpacing: CGFloat = 8
-        let minimumBottomControlsSpacing: CGFloat = 12
-        // Stack rise should only be limited after both top and bottom gaps have been
-        // reduced to their minimums.
-        let maxAllowedStackRise = max(0, freeHeight - minimumTopHeaderSpacing - minimumBottomControlsSpacing)
-        let maxVisibleByTopSpacing = 1 + Int(floor(maxAllowedStackRise / max(backStep, 1)))
-        let visibleCardLimit = max(1, min(7, maxVisibleByTopSpacing))
-        let visibleCards = Array(cards.prefix(visibleCardLimit))
-        let visibleStackRise = backStep * CGFloat(max(0, visibleCards.count - 1))
-        let deckTopPadding = minimumTopHeaderSpacing + visibleStackRise
+        let availableDeckBandHeight = max(0, availableHeight - bottomCalendarBandReserve)
+        let visibleCards = cards
+        let stackCount = max(0, visibleCards.count)
+        let effectiveBackStep: CGFloat
+        if stackCount <= 1 {
+            effectiveBackStep = baseBackStep
+        } else {
+            let maxAllowedStackRise = max(
+                0,
+                availableDeckBandHeight - contentHeight - minimumTopStackSpacing - minimumBottomControlsSpacing
+            )
+            let maxFittableStep = maxAllowedStackRise / CGFloat(max(1, stackCount - 1))
+            effectiveBackStep = max(0, min(baseBackStep, maxFittableStep))
+        }
+        let visibleStackRise = effectiveBackStep * CGFloat(max(0, stackCount - 1))
+        let remainingVerticalSlack = max(
+            0,
+            availableDeckBandHeight - contentHeight - visibleStackRise - minimumTopStackSpacing - minimumBottomControlsSpacing
+        )
+        let deckTopPadding: CGFloat
+        if stackCount <= 1 {
+            deckTopPadding = minimumTopStackSpacing
+        } else {
+            // Position the stack so the extra available space is balanced above the
+            // back-most card and below the hint text (while keeping the bottom band fixed).
+            let topGapForBackMost = minimumTopStackSpacing + (remainingVerticalSlack * 0.5)
+            deckTopPadding = topGapForBackMost + visibleStackRise
+        }
 
         return VStack(spacing: 6) {
             ZStack {
@@ -1784,10 +1805,10 @@ struct ContentView: View {
                         )
                         .offset(
                             x: isTop ? littleWinsDeckDragX : 0,
-                            y: -(depth * backStep)
+                            y: -(depth * effectiveBackStep)
                         )
                         .rotationEffect(.degrees(isTop ? Double(littleWinsDeckDragX / 28) : 0))
-                        .scaleEffect(isTop ? 1.0 : max(0.94, 1.0 - (depth * 0.02)))
+                        .scaleEffect(isTop ? 1.0 : max(0.94, 1.0 - (depth * 0.02)), anchor: .top)
                         .opacity(index > 2 ? 0.92 : 1.0)
                         .zIndex(Double(visibleCards.count - index))
                         .allowsHitTesting(isTop)
