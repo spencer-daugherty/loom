@@ -1528,6 +1528,7 @@ struct ContentView: View {
         let cardHeight = min(max(cardWidth * 1.42, 360), max(380, proxy.size.height - 36))
         let cards = littleWinsCards
         let allTodayCards = littleWinsCardsIncludingHiddenToday
+        let showsSetupLittleWinsPlaceholder = setupHomepageMode || allTodayCards.isEmpty
         let activeCards = cards.filter { !isLittleWinsCardCompleted($0) }
         let completedCards = allTodayCards.filter { isLittleWinsCardCompleted($0) }
         let visibleItemIDs = Set(cards.flatMap { $0.items.map(\.id) })
@@ -1548,37 +1549,21 @@ struct ContentView: View {
         let isCalendarPreviewActive = littleWinsCalendarPreviewDate != nil
 
         return Group {
-            if cards.isEmpty {
-                VStack {
-                    Spacer()
-                    Text("No Little Wins yet")
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text("Add Little Wins inside Fulfillment Areas to see them here.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.top, 4)
-                        .padding(.horizontal, 24)
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                littleWinsDeckView(
-                    cards: activeCards,
-                    cardWidth: cardWidth,
-                    cardHeight: cardHeight,
-                    horizontalPadding: horizontalPadding,
-                    availableHeight: proxy.size.height,
-                    bottomCalendarBandReserve: calendarBandReserve
-                )
-            }
+            littleWinsDeckView(
+                cards: activeCards,
+                cardWidth: cardWidth,
+                cardHeight: cardHeight,
+                horizontalPadding: horizontalPadding,
+                availableHeight: proxy.size.height,
+                bottomCalendarBandReserve: calendarBandReserve,
+                showsSetupPlaceholder: showsSetupLittleWinsPlaceholder
+            )
         }
         .opacity(isCalendarPreviewActive ? 0 : 1)
         .animation(.easeInOut(duration: 0.18), value: isCalendarPreviewActive)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .safeAreaInset(edge: .bottom, spacing: 10) {
-            if !cards.isEmpty {
+            if !cards.isEmpty || showsSetupLittleWinsPlaceholder {
                 VStack(spacing: 0) {
                     VStack(spacing: 6) {
                         HStack {
@@ -1616,6 +1601,8 @@ struct ContentView: View {
                                         .foregroundStyle(.blue)
                                 }
                                 .buttonStyle(.plain)
+                                .opacity(showsSetupLittleWinsPlaceholder ? 0 : 1)
+                                .allowsHitTesting(!showsSetupLittleWinsPlaceholder)
 
                                 HStack(spacing: 8) {
                                     ForEach(0..<7, id: \.self) { idx in
@@ -1752,7 +1739,8 @@ struct ContentView: View {
         cardHeight: CGFloat,
         horizontalPadding: CGFloat,
         availableHeight: CGFloat,
-        bottomCalendarBandReserve: CGFloat
+        bottomCalendarBandReserve: CGFloat,
+        showsSetupPlaceholder: Bool = false
     ) -> some View {
         let baseBackStep = cardHeight * 0.05
         let hintHeight: CGFloat = 18
@@ -1792,7 +1780,11 @@ struct ContentView: View {
         return VStack(spacing: 6) {
             ZStack {
                 if visibleCards.isEmpty {
-                    littleWinsCompletedTodayPlaceholderCard(width: cardWidth, height: cardHeight)
+                    littleWinsCompletedTodayPlaceholderCard(
+                        width: cardWidth,
+                        height: cardHeight,
+                        isSetupPlaceholder: showsSetupPlaceholder
+                    )
                 } else {
                     ForEach(Array(visibleCards.enumerated()), id: \.element.id) { index, card in
                         let depth = CGFloat(index)
@@ -1834,14 +1826,21 @@ struct ContentView: View {
         .padding(.bottom, minimumBottomControlsSpacing)
     }
 
-    private func littleWinsCompletedTodayPlaceholderCard(width: CGFloat, height: CGFloat) -> some View {
+    private func littleWinsCompletedTodayPlaceholderCard(
+        width: CGFloat,
+        height: CGFloat,
+        isSetupPlaceholder: Bool = false
+    ) -> some View {
         let bg = Color(.systemGray6)
         let primary = colorScheme == .dark ? Color.white.opacity(0.86) : Color.black.opacity(0.78)
         let secondary = colorScheme == .dark ? Color.white.opacity(0.58) : Color.black.opacity(0.52)
         let radarSideCount = max(3, min(7, fulfillmentMetrics.count))
+        let headerTitle = isSetupPlaceholder ? "Setup Card" : "Completed Today"
+        let headlineText = isSetupPlaceholder ? "Setup Little Wins" : "All Little Win Cards Completed"
+        let subheadlineText = isSetupPlaceholder ? "Set Fulfillment Areas to continue" : "Come back tomorrow to continue"
 
         return VStack(spacing: 0) {
-            Text("Completed Today")
+            Text(headerTitle)
                 .font(.headline.weight(.semibold))
                 .foregroundStyle(secondary)
                 .multilineTextAlignment(.center)
@@ -1853,11 +1852,11 @@ struct ContentView: View {
             Spacer(minLength: 0)
 
             VStack(spacing: 8) {
-                Text("All Little Win Cards Completed")
+                Text(headlineText)
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(primary)
                     .multilineTextAlignment(.center)
-                Text("Come back tomorrow to continue")
+                Text(subheadlineText)
                     .font(.subheadline)
                     .foregroundStyle(secondary)
                     .multilineTextAlignment(.center)
@@ -1878,7 +1877,7 @@ struct ContentView: View {
             littleWinsCardBackground(
                 cardColor: bg,
                 titleColor: Color(.systemGray3),
-                patternText: "Completed Little Wins",
+                patternText: isSetupPlaceholder ? "Setup Little Wins" : "Completed Little Wins",
                 width: width,
                 height: height,
                 radarSideCount: radarSideCount

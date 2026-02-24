@@ -150,6 +150,7 @@ struct CaptureView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage("setup_homepage_mode") private var setupHomepageMode = false
 
     @Query(sort: \RollingCaptureItem.createdAt, order: .reverse)
     private var allItems: [RollingCaptureItem]
@@ -382,6 +383,7 @@ struct CaptureView: View {
     private let recurringDispatchTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
     private var displayItems: [RollingCaptureItem] {
+        if setupHomepageMode { return [] }
         // After auto-unhide runs, anything due will have isGhost=false, so filtering is straightforward.
         let base: [RollingCaptureItem]
         if isSearchMode {
@@ -441,8 +443,7 @@ struct CaptureView: View {
 
     private var earliestUnhideDate: Date { Calendar.current.date(byAdding: .day, value: 7, to: Date())! }
     private var shouldShowCaptureIntro: Bool {
-        allItems.isEmpty
-        && !isSearchMode
+        (setupHomepageMode || allItems.isEmpty) && !isSearchMode
     }
     private var captureIntroBoxBackground: Color {
         colorScheme == .dark ? Color(.systemGroupedBackground) : Color.white
