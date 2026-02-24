@@ -537,7 +537,7 @@ struct ReflectView: View {
                                 .minimumScaleFactor(0.8)
                                 .frame(width: titleBlockWidth, alignment: .center)
                             Text("COMPLETE")
-                                .font(.system(size: 50, weight: .black))
+                                .font(.system(size: 50, weight: .regular))
                                 .kerning(1.2)
                                 .foregroundStyle(titleColor)
                                 .lineLimit(1)
@@ -1553,7 +1553,7 @@ private struct ReflectionLoadingStyleLinesBackground: View {
     private let verticalBandFraction: Double = 0.57
     private let verticalShift: CGFloat = 0
 
-    private let funnelMinScale: CGFloat = 0.22
+    private let funnelMinScale: CGFloat = 0.44
     private let funnelCurve: CGFloat = 1.55
     private let radarCircleExtraDiameter: CGFloat = 18
 
