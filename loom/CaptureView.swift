@@ -182,12 +182,9 @@ struct CaptureView: View {
     @State private var duplicateMessage: String = "Duplicate: action is already entered"
     @State private var highlightedDuplicateItemID: UUID? = nil
     @State private var duplicateResetWorkItem: DispatchWorkItem? = nil
-    @State private var captureIntroSwipeDemoOffsetX: CGFloat = 0
-    @State private var captureIntroSwipeDemoTask: Task<Void, Never>? = nil
-    @State private var captureIntroDeleteDemoDragX: CGFloat = 0
-    @State private var captureIntroCompleteDemoDragX: CGFloat = 0
     @State private var captureIntroShowsDeleteDemoRow: Bool = true
     @State private var captureIntroShowsQuickCompleteDemoRow: Bool = true
+    @State private var captureIntroShowsSettingsDemoRow: Bool = true
     @State private var isSearchMode: Bool = false
     @State private var showFullTextEditorSheet: Bool = false
     @State private var editingItemID: UUID?
@@ -629,6 +626,73 @@ struct CaptureView: View {
                     .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 2, trailing: 16))
                     .listRowSeparator(.hidden)
                     .transition(.opacity)
+
+                if captureIntroShowsDeleteDemoRow {
+                    captureIntroDemoSwipeRow(
+                        text: "Swipe left to delete an action",
+                        trailingActionLabel: "Delete",
+                        trailingTint: .red,
+                        leadingActionLabel: nil,
+                        leadingTint: nil,
+                        trailingIconName: nil,
+                        showsGearIcon: false,
+                        onLeadingCommit: nil,
+                        onTrailingCommit: {
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                captureIntroShowsDeleteDemoRow = false
+                            }
+                        }
+                    )
+                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                }
+
+                if captureIntroShowsQuickCompleteDemoRow {
+                    captureIntroDemoSwipeRow(
+                        text: "Swipe right to Quick Complete an action",
+                        trailingActionLabel: nil,
+                        trailingTint: nil,
+                        leadingActionLabel: "Quick Complete",
+                        leadingTint: .green,
+                        trailingIconName: nil,
+                        showsGearIcon: false,
+                        onLeadingCommit: {
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                captureIntroShowsQuickCompleteDemoRow = false
+                            }
+                        },
+                        onTrailingCommit: nil
+                    )
+                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                }
+
+                if captureIntroShowsSettingsDemoRow {
+                    captureIntroDemoSwipeRow(
+                        text: "Set recurring actions, set due date attentions, and integrate in settings.",
+                        trailingActionLabel: "Delete",
+                        trailingTint: .red,
+                        leadingActionLabel: "Quick Complete",
+                        leadingTint: .green,
+                        trailingIconName: nil,
+                        showsGearIcon: true,
+                        onLeadingCommit: {
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                captureIntroShowsSettingsDemoRow = false
+                            }
+                        },
+                        onTrailingCommit: {
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                captureIntroShowsSettingsDemoRow = false
+                            }
+                        }
+                    )
+                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                }
             }
 
             ForEach(displayItems) { item in
@@ -1237,178 +1301,70 @@ struct CaptureView: View {
                     .lineLimit(nil)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Divider()
-
-                if captureIntroShowsDeleteDemoRow {
-                    captureIntroDemoSwipeRow(
-                        text: "Swipe left to delete an action",
-                        offsetX: min(0, captureIntroSwipeDemoOffsetX) + captureIntroDeleteDemoDragX,
-                        trailingActionLabel: "Delete",
-                        trailingTint: .red,
-                        leadingActionLabel: nil,
-                        leadingTint: nil,
-                        allowsLeadingSwipe: false,
-                        allowsTrailingSwipe: true,
-                        dragOffset: $captureIntroDeleteDemoDragX,
-                        onLeadingCommit: nil,
-                        onTrailingCommit: {
-                            withAnimation(.easeInOut(duration: 0.18)) {
-                                captureIntroShowsDeleteDemoRow = false
-                            }
-                        }
-                    )
-                }
-
-                if captureIntroShowsQuickCompleteDemoRow {
-                    captureIntroDemoSwipeRow(
-                        text: "Swipe right to Quick Complete an action",
-                        offsetX: max(0, captureIntroSwipeDemoOffsetX) + captureIntroCompleteDemoDragX,
-                        trailingActionLabel: nil,
-                        trailingTint: nil,
-                        leadingActionLabel: "Quick Complete",
-                        leadingTint: .green,
-                        allowsLeadingSwipe: true,
-                        allowsTrailingSwipe: false,
-                        dragOffset: $captureIntroCompleteDemoDragX,
-                        onLeadingCommit: {
-                            withAnimation(.easeInOut(duration: 0.18)) {
-                                captureIntroShowsQuickCompleteDemoRow = false
-                            }
-                        },
-                        onTrailingCommit: nil
-                    )
-                }
             }
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(captureIntroBoxBackground, in: RoundedRectangle(cornerRadius: 12))
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .onAppear(perform: startCaptureIntroSwipeDemo)
-        .onDisappear(perform: stopCaptureIntroSwipeDemo)
     }
 
     private func captureIntroDemoSwipeRow(
         text: String,
-        offsetX: CGFloat,
         trailingActionLabel: String?,
         trailingTint: Color?,
         leadingActionLabel: String?,
         leadingTint: Color?,
-        allowsLeadingSwipe: Bool,
-        allowsTrailingSwipe: Bool,
-        dragOffset: Binding<CGFloat>,
+        trailingIconName: String?,
+        showsGearIcon: Bool,
         onLeadingCommit: (() -> Void)?,
         onTrailingCommit: (() -> Void)?
     ) -> some View {
-        ZStack {
-            HStack(spacing: 8) {
-                if let leadingActionLabel, let leadingTint {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(leadingTint)
-                        .frame(width: 124, height: 44)
-                        .overlay {
-                            Text(leadingActionLabel)
-                                .font(.caption.weight(.semibold))
-                            .foregroundStyle(.white)
-                        }
-                } else {
-                    Color.clear.frame(width: 124, height: 44)
-                }
-                Spacer(minLength: 0)
-                if let trailingActionLabel, let trailingTint {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(trailingTint)
-                        .frame(width: trailingActionLabel == "Delete" ? 72 : 124, height: 44)
-                        .overlay {
-                            Text(trailingActionLabel)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.white)
-                        }
-                } else {
-                    Color.clear.frame(width: 72, height: 44)
-                }
-            }
-
-            HStack(spacing: 10) {
-                Text(text)
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-                Image(systemName: "ellipsis.rectangle")
-                    .font(.system(size: 20, weight: .semibold))
+        HStack(spacing: 10) {
+            if showsGearIcon {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(.secondary)
             }
-            .padding(8)
-            .padding(.vertical, 2)
-            .frame(height: 44)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .offset(x: offsetX)
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 5)
-                    .onChanged { value in
-                        let raw = value.translation.width
-                        if raw > 0 {
-                            guard allowsLeadingSwipe else { dragOffset.wrappedValue = 0; return }
-                            dragOffset.wrappedValue = min(60, raw)
-                        } else if raw < 0 {
-                            guard allowsTrailingSwipe else { dragOffset.wrappedValue = 0; return }
-                            dragOffset.wrappedValue = max(-52, raw)
-                        } else {
-                            dragOffset.wrappedValue = 0
-                        }
-                    }
-                    .onEnded { _ in
-                        let final = dragOffset.wrappedValue
-                        if final >= 44, allowsLeadingSwipe {
-                            onLeadingCommit?()
-                        } else if final <= -40, allowsTrailingSwipe {
-                            onTrailingCommit?()
-                        }
-                        withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.84, blendDuration: 0.1)) {
-                            dragOffset.wrappedValue = 0
-                        }
-                    }
-            )
+            Text(text)
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+            Spacer(minLength: 0)
+            Image(systemName: "ellipsis.rectangle")
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(.secondary)
         }
-        .frame(height: 44)
-    }
-
-    private func startCaptureIntroSwipeDemo() {
-        guard captureIntroSwipeDemoTask == nil else { return }
-        captureIntroSwipeDemoTask = Task { @MainActor in
-            while !Task.isCancelled {
-                withAnimation(.interactiveSpring(response: 0.34, dampingFraction: 0.78, blendDuration: 0.1)) {
-                    captureIntroSwipeDemoOffsetX = -42
+        .padding(8)
+        .padding(.vertical, 2)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+        .padding(.vertical, 1)
+        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+            if let leadingActionLabel, let leadingTint {
+                Button {
+                    onLeadingCommit?()
+                } label: {
+                    Text(leadingActionLabel)
                 }
-                try? await Task.sleep(nanoseconds: 1_700_000_000)
-                withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.84, blendDuration: 0.1)) {
-                    captureIntroSwipeDemoOffsetX = 0
+                .tint(leadingTint)
+            }
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            if let trailingActionLabel, let trailingTint {
+                Button {
+                    onTrailingCommit?()
+                } label: {
+                    if let trailingIconName {
+                        Label(trailingActionLabel, systemImage: trailingIconName)
+                    } else {
+                        Text(trailingActionLabel)
+                    }
                 }
-                try? await Task.sleep(nanoseconds: 900_000_000)
-                withAnimation(.interactiveSpring(response: 0.34, dampingFraction: 0.78, blendDuration: 0.1)) {
-                    captureIntroSwipeDemoOffsetX = 52
-                }
-                try? await Task.sleep(nanoseconds: 1_700_000_000)
-                withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.84, blendDuration: 0.1)) {
-                    captureIntroSwipeDemoOffsetX = 0
-                }
-                try? await Task.sleep(nanoseconds: 1_800_000_000)
+                .tint(trailingTint)
             }
         }
     }
 
-    private func stopCaptureIntroSwipeDemo() {
-        captureIntroSwipeDemoTask?.cancel()
-        captureIntroSwipeDemoTask = nil
-        captureIntroSwipeDemoOffsetX = 0
-        captureIntroDeleteDemoDragX = 0
-        captureIntroCompleteDemoDragX = 0
-        captureIntroShowsDeleteDemoRow = true
-        captureIntroShowsQuickCompleteDemoRow = true
-    }
 
     private func recurringSettingsSheet() -> some View {
         NavigationStack {
