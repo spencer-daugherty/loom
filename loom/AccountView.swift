@@ -1602,6 +1602,7 @@ struct ManageFulfillmentCategoriesView: View {
     @State private var showMinimumCategoryAlert: Bool = false
     @State private var showCannotDeleteCategoryPopup: Bool = false
     @State private var showArchiveCompletePopup: Bool = false
+    @State private var showAddAreaFlow: Bool = false
     @FocusState private var isAddCategoryFocused: Bool
 
     private var categories: [String] {
@@ -1693,6 +1694,11 @@ struct ManageFulfillmentCategoriesView: View {
             .presentationDetents([.medium])
             .presentationDragIndicator(.visible)
         }
+        .fullScreenCover(isPresented: $showAddAreaFlow) {
+            NavigationStack {
+                FulfillmentStartView(entryMode: .addSingleArea)
+            }
+        }
     }
 
     @ViewBuilder
@@ -1757,8 +1763,7 @@ struct ManageFulfillmentCategoriesView: View {
                 .padding(.vertical, 4)
             } else {
                 Button("+ Add Area") {
-                    isAddingCategory = true
-                    isAddCategoryFocused = true
+                    showAddAreaFlow = true
                 }
                 .foregroundStyle(.blue)
             }

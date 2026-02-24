@@ -1613,7 +1613,7 @@ struct ContentView: View {
                                 HStack(spacing: 8) {
                                     ForEach(0..<7, id: \.self) { idx in
                                         Group {
-                                            if idx == 6 && completedCardStreakCount > 0 {
+                                            if idx == 6 && completedCardStreakCount >= 2 {
                                                 HStack(spacing: 4) {
                                                     Image(systemName: streakShowsTodayComplete ? "bolt.badge.checkmark.fill" : "bolt.fill")
                                                         .font(.caption2.weight(.semibold))

@@ -32,6 +32,10 @@ fileprivate let fulfillmentStartSelectableDefaultCategories: [String] = [
 
 struct FulfillmentStartView: View {
     private static let draftStorageKey = "fulfillment_start_onboarding_draft_v1"
+    enum EntryMode {
+        case onboarding
+        case addSingleArea
+    }
 
     private struct DraftFulfillmentRow: Codable {
         var categoryID: UUID
@@ -108,6 +112,12 @@ struct FulfillmentStartView: View {
     @Query(sort: \Outcomes.updatedAt, order: .reverse) private var allOutcomes: [Outcomes]
     @Query(sort: \PlanLabel.category, order: .forward) private var planLabels: [PlanLabel]
 
+    private let entryMode: EntryMode
+
+    init(entryMode: EntryMode = .onboarding) {
+        self.entryMode = entryMode
+    }
+
 
     @State private var step: Step = .intro
     @State private var visionIndex: Int = 0
@@ -159,6 +169,7 @@ struct FulfillmentStartView: View {
     @State private var highlightInvalid = false
     @State private var invalidCategoryIDs = Set<UUID>()
     @State private var isAllSummaryExpanded = false
+    @State private var addModeInitialActiveCategoryKeys = Set<String>()
 
     @FocusState private var focusedField: Field?
     private enum Field: Hashable {
@@ -196,6 +207,8 @@ struct FulfillmentStartView: View {
             }
         }
     }
+
+    private var isAddSingleAreaMode: Bool { entryMode == .addSingleArea }
 
     private var orderedFulfillments: [Fulfillment] {
         let baseRows = fulfillmentSnapshot.isEmpty ? fulfillments : fulfillmentSnapshot
@@ -246,7 +259,7 @@ struct FulfillmentStartView: View {
     }
 
     private var deepCategoryIDs: [UUID] {
-        priorityCategoryIDs
+        isAddSingleAreaMode ? orderedFulfillments.map(\.category_id) : priorityCategoryIDs
     }
 
     private var currentDeepRecord: Fulfillment? {
@@ -256,6 +269,18 @@ struct FulfillmentStartView: View {
     }
 
     private var progressCurrentStep: Int {
+        if isAddSingleAreaMode {
+            switch step {
+            case .createCategories: return 1
+            case .visionSweep: return 2
+            case .purposeSweep: return 3
+            case .roles: return 4
+            case .littleWins: return 5
+            case .resources: return 6
+            case .passions: return 7
+            default: return 0
+            }
+        }
         switch step {
         case .createCategories: return 1
         case .visionSweep: return 2
@@ -270,7 +295,9 @@ struct FulfillmentStartView: View {
         }
     }
 
-    private let progressTotalSteps: Int = 9
+    private var progressTotalSteps: Int {
+        isAddSingleAreaMode ? 7 : 9
+    }
 
     private var editorSurfaceColor: Color {
         colorScheme == .dark ? Color(.secondarySystemBackground) : .white
@@ -292,7 +319,7 @@ struct FulfillmentStartView: View {
     private var isNextDisabled: Bool {
         switch step {
         case .createCategories:
-            return !canStartOnboarding
+            return isAddSingleAreaMode ? !canAddSingleArea : !canStartOnboarding
         case .visionSweep:
             guard let record = currentVisionRecord else { return true }
             let text = (visionDrafts[record.category_id] ?? record.category_vision)
@@ -307,11 +334,14 @@ struct FulfillmentStartView: View {
             guard let record = currentRoleRecord else { return true }
             return getRoles(for: record).isEmpty
         case .priorities:
+            if isAddSingleAreaMode { return false }
             return priorityCategoryIDs.isEmpty
         case .littleWins:
+            if isAddSingleAreaMode { return false }
             guard let record = currentDeepRecord else { return true }
             return getFoci(for: record).isEmpty
         case .resources:
+            if isAddSingleAreaMode { return false }
             guard let record = currentDeepRecord else { return true }
             return getResources(for: record).isEmpty
         case .passions:
@@ -344,6 +374,17 @@ struct FulfillmentStartView: View {
         return !hasCreateCategoriesColorConflict
     }
 
+    private var canAddSingleArea: Bool {
+        let names = selectedCategoryNames
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard names.count == 1 else { return false }
+        let uniqueCount = Set(names.map { $0.lowercased() }).count
+        guard uniqueCount == 1 else { return false }
+        guard !hasCreateCategoriesColorConflict else { return false }
+        return true
+    }
+
     private var conflictingSelectedCategories: Set<String> {
         var grouped: [String: [String]] = [:]
         for category in selectedCategoryNames {
@@ -368,6 +409,14 @@ struct FulfillmentStartView: View {
         let baseRows = availableCategoryNames.count + 1 // + custom row/input row
         let contentHeight = CGFloat(baseRows) * 56 + 14
         return contentHeight + 28
+    }
+
+    private var existingActiveCategoryKeys: Set<String> {
+        if isAddSingleAreaMode {
+            return addModeInitialActiveCategoryKeys
+        }
+        let sourceRows = fulfillmentSnapshot.isEmpty ? fulfillments : fulfillmentSnapshot
+        return Set(sourceRows.map(\.category).map { categoryKey($0) })
     }
 
     private var missingDefaultCategories: [String] {
@@ -463,12 +512,16 @@ struct FulfillmentStartView: View {
             // Nothing should be committed to shared app data until Summary -> Continue.
             usesDraftPersistence = true
             modelContext.autosaveEnabled = false
-            if !restoreDraftIfAvailable() {
+            if isAddSingleAreaMode {
+                usesDraftPersistence = false
+                step = .createCategories
+                loadFromPersistentData()
+            } else if !restoreDraftIfAvailable() {
                 loadFromPersistentData()
             }
         }
         .onDisappear {
-            if !didFinalizeOnboarding {
+            if usesDraftPersistence && !didFinalizeOnboarding {
                 persistDraft()
             }
             if usesDraftPersistence && !didFinalizeOnboarding {
@@ -614,11 +667,18 @@ struct FulfillmentStartView: View {
                 .frame(maxWidth: .infinity, alignment: .center)
             }
 
-            Text(step.title)
+            Text(currentStepDisplayTitle)
                 .font(.largeTitle)
                 .fontWeight(.bold)
                 .frame(maxWidth: .infinity, alignment: .center)
         }
+    }
+
+    private var currentStepDisplayTitle: String {
+        if isAddSingleAreaMode && step == .createCategories {
+            return "Create Category"
+        }
+        return step.title
     }
 
     private var progressStrip: some View {
@@ -773,7 +833,7 @@ struct FulfillmentStartView: View {
                         advanceFromCurrentStep()
                     }
                 } label: {
-                    Text("Next")
+                    Text(footerPrimaryButtonTitle)
                         .frame(maxWidth: .infinity)
                         .contentShape(Rectangle())
                 }
@@ -783,6 +843,23 @@ struct FulfillmentStartView: View {
             }
         }
         .contentShape(Rectangle())
+    }
+
+    private var footerPrimaryButtonTitle: String {
+        if isAddSingleAreaMode && step == .passions {
+            return "Completed"
+        }
+        if isAddSingleAreaMode && step == .littleWins,
+           let record = currentDeepRecord,
+           getFoci(for: record).isEmpty {
+            return "Skip"
+        }
+        if isAddSingleAreaMode && step == .resources,
+           let record = currentDeepRecord,
+           getResources(for: record).isEmpty {
+            return "Skip"
+        }
+        return "Next"
     }
 
     private var introStep: some View {
@@ -806,16 +883,20 @@ struct FulfillmentStartView: View {
 
     private var createCategoriesStep: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("What 3-7 areas of your life must you consistently improve to succeed?")
+            Text(isAddSingleAreaMode
+                 ? "What area of your life must you consistently improve to succeed?"
+                 : "What 3-7 areas of your life must you consistently improve to succeed?")
                 .fontWeight(.bold)
                 .foregroundStyle(.primary)
 
             List {
                 ForEach(availableCategoryNames, id: \.self) { category in
                     let selected = selectedCategoryNames.contains(category)
+                    let isActiveExisting = isAddSingleAreaMode && existingActiveCategoryKeys.contains(categoryKey(category))
                     let isConflicting = conflictingSelectedCategories.contains(category)
                     HStack(spacing: 8) {
                         Button {
+                            guard !isActiveExisting else { return }
                             colorPickerCategory = category
                             showColorPicker = true
                         } label: {
@@ -831,10 +912,12 @@ struct FulfillmentStartView: View {
                                 )
                         }
                         .buttonStyle(.plain)
+                        .disabled(isActiveExisting)
 
                         Text(category)
                             .font(.system(size: 20))
                             .foregroundStyle(fulfillmentCategoryColor(for: category))
+                            .opacity(isActiveExisting ? 0.5 : 1.0)
 
                         Spacer()
                         if isConflicting {
@@ -844,24 +927,33 @@ struct FulfillmentStartView: View {
                         }
 
                         Button {
+                            guard !isActiveExisting else { return }
                             toggleCategorySelection(category)
                         } label: {
-                            Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(selected ? Color.blue : Color.secondary)
+                            Image(systemName: (selected || isActiveExisting) ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(
+                                    isActiveExisting ? Color.secondary.opacity(0.6) :
+                                        (selected ? Color.blue : Color.secondary)
+                                )
                         }
                         .buttonStyle(.plain)
+                        .disabled(isActiveExisting)
                     }
+                    .opacity(isActiveExisting ? 0.62 : 1.0)
                     .contentShape(Rectangle())
                     .onTapGesture {
+                        guard !isActiveExisting else { return }
                         toggleCategorySelection(category)
                     }
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        if !isActiveExisting {
                         Button(role: .destructive) {
                             attemptRemoveCategoryFromStepList(category)
                         } label: {
                             Text("Delete")
                         }
                         .tint(.red)
+                        }
                     }
                     .listRowBackground(rowSurfaceColor)
                 }
@@ -1718,7 +1810,11 @@ struct FulfillmentStartView: View {
         }
         switch step {
         case .createCategories:
-            step = .intro
+            if isAddSingleAreaMode {
+                dismiss()
+            } else {
+                step = .intro
+            }
         case .visionSweep:
             if visionIndex > 0 {
                 visionIndex -= 1
@@ -1746,7 +1842,7 @@ struct FulfillmentStartView: View {
             if deepIndex > 0 {
                 deepIndex -= 1
             } else {
-                step = .priorities
+                step = isAddSingleAreaMode ? .roles : .priorities
             }
         case .resources:
             if deepIndex > 0 {
@@ -1792,11 +1888,16 @@ struct FulfillmentStartView: View {
             if roleIndex < roleCategoryIDs.count - 1 {
                 roleIndex += 1
             } else {
-                step = .priorities
-                deepIndex = 0
-                if !didOpenPriorities {
-                    priorityCategoryIDs.removeAll()
-                    didOpenPriorities = true
+                if isAddSingleAreaMode {
+                    deepIndex = 0
+                    step = .littleWins
+                } else {
+                    step = .priorities
+                    deepIndex = 0
+                    if !didOpenPriorities {
+                        priorityCategoryIDs.removeAll()
+                        didOpenPriorities = true
+                    }
                 }
             }
         case .priorities:
@@ -1826,7 +1927,11 @@ struct FulfillmentStartView: View {
             if passionIndex < roleCategoryIDs.count - 1 {
                 passionIndex += 1
             } else {
-                step = .summary
+                if isAddSingleAreaMode {
+                    finalizeAddedAreaAndDismiss()
+                } else {
+                    step = .summary
+                }
             }
         default:
             break
@@ -1883,13 +1988,21 @@ struct FulfillmentStartView: View {
         let categoriesFromFulfillment = sourceRows
             .map { $0.category.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-        let categoriesFromLabels = planLabels
+        let categoriesFromLabels = isAddSingleAreaMode ? [] : planLabels
             .map { $0.category.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         let existingCategories = Array(Set(categoriesFromFulfillment + categoriesFromLabels))
             .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
-        selectedCategoryNames = existingCategories
-        customCategoryNames = existingCategories.filter { !fulfillmentStartSelectableDefaultCategories.contains($0) }
+        if isAddSingleAreaMode {
+            addModeInitialActiveCategoryKeys = Set(categoriesFromFulfillment.map { categoryKey($0) })
+        }
+        if isAddSingleAreaMode {
+            selectedCategoryNames = []
+            customCategoryNames = existingCategories.filter { !fulfillmentStartSelectableDefaultCategories.contains($0) }
+        } else {
+            selectedCategoryNames = existingCategories
+            customCategoryNames = existingCategories.filter { !fulfillmentStartSelectableDefaultCategories.contains($0) }
+        }
         var map = FulfillmentCategoryTheme.persistedColorKeys()
         let cycleKeys = onboardingColorCycleKeys
         if !cycleKeys.isEmpty {
@@ -1953,6 +2066,9 @@ struct FulfillmentStartView: View {
 
         priorityCategoryIDs = priorityCategoryIDs.filter { id in
             orderedFulfillments.contains(where: { $0.category_id == id })
+        }
+        if isAddSingleAreaMode {
+            priorityCategoryIDs = []
         }
         visionIndex = min(visionIndex, max(orderedFulfillments.count - 1, 0))
         purposeIndex = min(purposeIndex, max(orderedFulfillments.count - 1, 0))
@@ -2065,9 +2181,13 @@ struct FulfillmentStartView: View {
         }
 
         if shouldSelect {
-            guard selectedCategoryNames.count < 7 else { return }
-            if !selectedCategoryNames.contains(category) {
-                selectedCategoryNames.append(category)
+            if isAddSingleAreaMode {
+                selectedCategoryNames = [category]
+            } else {
+                guard selectedCategoryNames.count < 7 else { return }
+                if !selectedCategoryNames.contains(category) {
+                    selectedCategoryNames.append(category)
+                }
             }
             assignDefaultColorIfNeeded(for: category)
         } else {
@@ -2082,6 +2202,7 @@ struct FulfillmentStartView: View {
     }
 
     private func applyCategorySelectionToLiveDataIfNeeded() {
+        guard !isAddSingleAreaMode else { return }
         guard !usesDraftPersistence else { return }
         insertSelectedCategoriesIntoLiveData()
         pruneUnselectedCategoriesFromLiveData()
@@ -2178,7 +2299,7 @@ struct FulfillmentStartView: View {
     }
 
     private func persistDraftIfNeeded() {
-        guard !didFinalizeOnboarding else { return }
+        guard usesDraftPersistence, !didFinalizeOnboarding else { return }
         persistDraft()
     }
 
@@ -2334,6 +2455,73 @@ struct FulfillmentStartView: View {
         }
     }
 
+    private func finalizeAddedAreaAndDismiss() {
+        commitStagedFulfillmentRowsToContextAdditive()
+        FulfillmentCategoryTheme.persistColorKeys(categoryColorKeys)
+        try? modelContext.save()
+        didFinalizeOnboarding = true
+        dismiss()
+    }
+
+    private func commitStagedFulfillmentRowsToContextAdditive() {
+        let stagedRows = orderedFulfillments
+        let liveRows = (try? modelContext.fetch(FetchDescriptor<Fulfillment>())) ?? []
+        let liveRoles = (try? modelContext.fetch(FetchDescriptor<FulfillmentRoles>())) ?? []
+        let liveFoci = (try? modelContext.fetch(FetchDescriptor<FulfillmentFocus>())) ?? []
+        let liveResources = (try? modelContext.fetch(FetchDescriptor<FulfillmentResources>())) ?? []
+        let liveJoins = (try? modelContext.fetch(FetchDescriptor<PassionFulfillmentJoin>())) ?? []
+
+        var resolvedCategoryIDByDraftID: [UUID: UUID] = [:]
+        for staged in stagedRows {
+            if let existing = liveRows.first(where: {
+                $0.category_id == staged.category_id ||
+                categoryKey($0.category) == categoryKey(staged.category)
+            }) {
+                existing.category = staged.category
+                existing.category_identitiy = staged.category_identitiy
+                existing.category_vision = staged.category_vision
+                existing.category_purpose = staged.category_purpose
+                existing.updatedAt = Date()
+                resolvedCategoryIDByDraftID[staged.category_id] = existing.category_id
+            } else {
+                resolvedCategoryIDByDraftID[staged.category_id] = staged.category_id
+                modelContext.insert(
+                    Fulfillment(
+                        category_id: staged.category_id,
+                        updatedAt: staged.updatedAt,
+                        category: staged.category,
+                        category_identitiy: staged.category_identitiy,
+                        category_vision: staged.category_vision,
+                        category_purpose: staged.category_purpose
+                    )
+                )
+            }
+        }
+
+        let keptIDs = Set(resolvedCategoryIDByDraftID.values)
+        for role in liveRoles where keptIDs.contains(role.category_id) { modelContext.delete(role) }
+        for focus in liveFoci where keptIDs.contains(focus.category_id) { modelContext.delete(focus) }
+        for resource in liveResources where keptIDs.contains(resource.category_id) { modelContext.delete(resource) }
+        for join in liveJoins where keptIDs.contains(join.category_id) { modelContext.delete(join) }
+
+        for row in draftRoles {
+            let categoryID = resolvedCategoryIDByDraftID[row.categoryID] ?? row.categoryID
+            modelContext.insert(FulfillmentRoles(id: row.id, category_id: categoryID, updatedAt: row.updatedAt, role: row.role, rank: row.rank))
+        }
+        for row in draftFoci {
+            let categoryID = resolvedCategoryIDByDraftID[row.categoryID] ?? row.categoryID
+            modelContext.insert(FulfillmentFocus(id: row.id, category_id: categoryID, updatedAt: row.updatedAt, activity: row.activity, rank: row.rank))
+        }
+        for row in draftResources {
+            let categoryID = resolvedCategoryIDByDraftID[row.categoryID] ?? row.categoryID
+            modelContext.insert(FulfillmentResources(id: row.id, category_id: categoryID, updatedAt: row.updatedAt, resource: row.resource, rank: row.rank))
+        }
+        for row in draftPassionJoins {
+            let categoryID = resolvedCategoryIDByDraftID[row.categoryID] ?? row.categoryID
+            modelContext.insert(PassionFulfillmentJoin(id: row.id, passion_id: row.passionID, category_id: categoryID))
+        }
+    }
+
     private func commitStagedFulfillmentRowsToContext() {
         let stagedRows = orderedFulfillments
         let selectedKeys = Set(selectedCategoryNames.map { categoryKey($0) })
@@ -2463,7 +2651,7 @@ struct FulfillmentStartView: View {
         case .createCategories:
             validationHintText = hasCreateCategoriesColorConflict
                 ? "Each color can only be used once."
-                : "Create at least 3 life categories."
+                : (isAddSingleAreaMode ? "Select 1 category to continue." : "Create at least 3 life categories.")
         case .visionSweep:
             validationHintText = "Add a vision to continue."
             if let record = currentVisionRecord {
