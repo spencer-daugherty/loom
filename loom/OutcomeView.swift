@@ -75,6 +75,45 @@ private enum CompletedOutcomePassionsStore {
     }
 }
 
+enum CompletedOutcomeContributingLittleWinsStore {
+    struct Snapshot: Codable, Identifiable {
+        var id: UUID { focusID }
+        let focusID: UUID
+        let focusTitle: String
+        let completedCountInOutcomeWindow: Int
+    }
+
+    private static let defaultsKey = "completed_outcome_contributing_little_wins_v1"
+
+    private static func loadMap() -> [String: [Snapshot]] {
+        guard let data = UserDefaults.standard.data(forKey: defaultsKey),
+              let decoded = try? JSONDecoder().decode([String: [Snapshot]].self, from: data) else {
+            return [:]
+        }
+        return decoded
+    }
+
+    private static func saveMap(_ map: [String: [Snapshot]]) {
+        guard let data = try? JSONEncoder().encode(map) else { return }
+        UserDefaults.standard.set(data, forKey: defaultsKey)
+    }
+
+    static func snapshots(for completedArchiveID: UUID) -> [Snapshot] {
+        loadMap()[completedArchiveID.uuidString] ?? []
+    }
+
+    static func setSnapshots(_ snapshots: [Snapshot], for completedArchiveID: UUID) {
+        var map = loadMap()
+        let key = completedArchiveID.uuidString
+        if snapshots.isEmpty {
+            map.removeValue(forKey: key)
+        } else {
+            map[key] = snapshots
+        }
+        saveMap(map)
+    }
+}
+
 private func displayEmotionLabelOutcome(_ raw: String) -> String {
     switch raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
     case "just": return "Hate"
@@ -1354,6 +1393,28 @@ struct OutcomeView: View {
                 )
             }
         CompletedOutcomePassionsStore.setSnapshots(completedPassionSnapshots, for: archive.id)
+        let completionStartDay = cal.startOfDay(for: outcome.start)
+        let completionEndDay = cal.startOfDay(for: completionRecordedDate)
+        let completionCountsByFocusID = Dictionary(
+            grouping: littleWinsDailyCompletions.filter { row in
+                let rowDay = cal.startOfDay(for: row.day)
+                return rowDay >= completionStartDay && rowDay <= completionEndDay
+            },
+            by: \.focusId
+        ).mapValues { rows in rows.count }
+        let littleWinByID = Dictionary(uniqueKeysWithValues: allLittleWins.map { ($0.id, $0) })
+        let completedLittleWinSnapshots: [CompletedOutcomeContributingLittleWinsStore.Snapshot] =
+            selectedContributingLittleWinIDs.compactMap { (focusID: UUID) -> CompletedOutcomeContributingLittleWinsStore.Snapshot? in
+            guard let focus = littleWinByID[focusID] else { return nil }
+            let title = focus.activity.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+            guard !title.isEmpty else { return nil }
+            return CompletedOutcomeContributingLittleWinsStore.Snapshot(
+                focusID: focusID,
+                focusTitle: title,
+                completedCountInOutcomeWindow: completionCountsByFocusID[focusID] ?? 0
+            )
+        }
+        CompletedOutcomeContributingLittleWinsStore.setSnapshots(completedLittleWinSnapshots, for: archive.id)
         FulfillmentCategoryTheme.saveCompletedOutcomeColorKey(
             FulfillmentCategoryTheme.colorKey(for: outcome.category),
             archiveId: archive.id

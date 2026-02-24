@@ -41,6 +41,7 @@ struct ReflectView: View {
     @Query private var allOutcomeLinks: [PlannedChunkOutcomeLink]
     @Query private var allChunkSelections: [PlanChunkSelection]
     @Query(sort: \Outcomes.rank, order: .forward) private var outcomes: [Outcomes]
+    @Query(sort: \Fulfillment.updatedAt, order: .forward) private var fulfillments: [Fulfillment]
     @Query(sort: \OutcomesMeasure.measuredAt, order: .reverse) private var outcomeMeasures: [OutcomesMeasure]
     @Query(sort: \OutcomesMeasureEntry.measuredAt, order: .forward) private var outcomeMeasureEntries: [OutcomesMeasureEntry]
     @Query private var allMindsetRows: [WeeklyMindsetEntry.Fields]
@@ -63,11 +64,7 @@ struct ReflectView: View {
     @State private var contributionOutcomeIndex: Int = 0
     @State private var contributionTempSelection: Set<UUID> = []
     @State private var contributionSelectionsByOutcome: [UUID: Set<UUID>] = [:]
-    @State private var celebrationRadarSelectedIndex: Int = 0
-
-    @Namespace private var reflectionNamespace
-
-    private let palette: [Color] = [.blue, .indigo, .green, .purple, .red, .orange]
+    private let fallbackPalette: [Color] = [.blue, .indigo, .green, .purple, .red, .orange]
 
     private enum JournalField: Hashable {
         case achievements
@@ -517,42 +514,20 @@ struct ReflectView: View {
     private var celebrationView: some View {
         ZStack {
             GeometryReader { geo in
-                let radarDiameter: CGFloat = 72
                 let focusYFraction: CGFloat = 0.50
-                let radarX: CGFloat = geo.size.width * 0.76
-                let radarY: CGFloat = geo.size.height * focusYFraction
 
-                WindLinesBackground(colors: palette)
+                ReflectionLoadingStyleLinesBackground(
+                    colors: celebrationLineColors,
+                    focusXFraction: 1.03,
+                    focusYFraction: focusYFraction,
+                    radarDiameter: 0
+                )
                 .ignoresSafeArea()
 
-                TimelineView(.animation) { context in
-                    let t = context.date.timeIntervalSinceReferenceDate
-                    let pulse = loadingStylePulsedMetrics(at: t * 0.45)
+                TimelineView(.animation) { _ in
                     ZStack {
-                        FulfillmentInteractiveRadar(
-                            metrics: pulse,
-                            selectedIndex: $celebrationRadarSelectedIndex,
-                            onManualSelect: {},
-                            enableInteraction: false,
-                            customDotDiameter: 10
-                        )
-                        .matchedGeometryEffect(id: "reflect-radar", in: reflectionNamespace)
-                        .frame(width: radarDiameter, height: radarDiameter)
-                        .rotationEffect(.degrees(t * 168.75))
-                        .background(
-                            Circle()
-                                .fill(Color(.systemBackground))
-                                .frame(width: radarDiameter + 18, height: radarDiameter + 18)
-                        )
-                        .position(x: radarX, y: radarY)
-
                         let titleColor: Color = colorScheme == .dark ? .white : .black
-                        let titleBlockWidth: CGFloat = 206
-                        let actionFont = UIFont.systemFont(ofSize: 28, weight: .bold)
-                        let doneFont = UIFont.systemFont(ofSize: 50, weight: .black)
-                        let actionWidth = ("Action Blocks" as NSString).size(withAttributes: [.font: actionFont]).width
-                        let doneWidth = ("DONE!" as NSString).size(withAttributes: [.font: doneFont]).width
-                        let doneScaleX = max(0.1, actionWidth / max(doneWidth, 1))
+                        let titleBlockWidth: CGFloat = 272
 
                         VStack(spacing: 0) {
                             Text("Action Blocks")
@@ -561,21 +536,16 @@ struct ReflectView: View {
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.8)
                                 .frame(width: titleBlockWidth, alignment: .center)
-                            Text("DONE!")
+                            Text("COMPLETE")
                                 .font(.system(size: 50, weight: .black))
                                 .kerning(1.2)
                                 .foregroundStyle(titleColor)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.6)
-                                .scaleEffect(x: doneScaleX, y: 1.0, anchor: .center)
                                 .frame(width: titleBlockWidth, alignment: .center)
                         }
                         .padding(.vertical, 6)
                         .padding(.horizontal, 3)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 16)
-                                .stroke(titleColor, lineWidth: 4)
-                        )
                         .position(
                             x: geo.size.width * 0.5,
                             y: max(geo.safeAreaInsets.top + 62, geo.size.height * 0.16)
@@ -591,6 +561,12 @@ struct ReflectView: View {
                 }
             }
         }
+    }
+
+    private var celebrationLineColors: [Color] {
+        let active = fulfillments
+            .map { FulfillmentCategoryTheme.color(for: $0.category) }
+        return active.isEmpty ? fallbackPalette : active
     }
 
     private var insightsStep: some View {
@@ -1574,10 +1550,10 @@ private struct ReflectionLoadingStyleLinesBackground: View {
 
     private let lineCount: Int = 102
     private let leftInset: CGFloat = -40
-    private let verticalBandFraction: Double = 0.82
+    private let verticalBandFraction: Double = 0.57
     private let verticalShift: CGFloat = 0
 
-    private let funnelMinScale: CGFloat = 0.08
+    private let funnelMinScale: CGFloat = 0.22
     private let funnelCurve: CGFloat = 1.55
     private let radarCircleExtraDiameter: CGFloat = 18
 
@@ -1595,7 +1571,7 @@ private struct ReflectionLoadingStyleLinesBackground: View {
                 let focusX = size.width * focusXFraction
                 let startX = leftInset
                 let circleRadius = (radarDiameter + radarCircleExtraDiameter) / 2
-                let endX = max(startX + 40, focusX - circleRadius)
+                let endX = max(startX + 40, min(size.width + 24, focusX - circleRadius + 24))
 
                 Canvas { ctx, sz in
                     let t = context.date.timeIntervalSinceReferenceDate
@@ -1721,10 +1697,14 @@ private struct ReflectionLoadingStyleLinesBackground: View {
         .mask {
             GeometryReader { geo in
                 let w = max(1, geo.size.width)
+                if radarDiameter <= 0 {
+                    Rectangle()
+                        .fill(Color.white)
+                } else {
                 let focusX = w * focusXFraction
                 let circleRadius = (radarDiameter + radarCircleExtraDiameter) / 2
                 let startX = leftInset
-                let endX = max(startX + 40, focusX - circleRadius)
+                let endX = max(startX + 40, min(w + 24, focusX - circleRadius + 24))
                 let lineLength = max(1, endX - startX)
                 let fadeStartX = endX - (lineLength * 0.48) // longer fade run before the radar
 
@@ -1742,6 +1722,7 @@ private struct ReflectionLoadingStyleLinesBackground: View {
                     startPoint: .leading,
                     endPoint: .trailing
                 )
+                }
             }
         }
     }

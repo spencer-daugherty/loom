@@ -800,6 +800,10 @@ struct CompletedOutcomeDetailView: View {
         }
     }
 
+    private var contributingLittleWinSnapshots: [CompletedOutcomeContributingLittleWinsStore.Snapshot] {
+        CompletedOutcomeContributingLittleWinsStore.snapshots(for: archive.id)
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -827,6 +831,26 @@ struct CompletedOutcomeDetailView: View {
                             )
                         } label: {
                             Text("Show All Data")
+                        }
+                    }
+                }
+
+                Section("Contributing Little Wins") {
+                    if contributingLittleWinSnapshots.isEmpty {
+                        Text("No contributing little wins connected.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(contributingLittleWinSnapshots) { snap in
+                            HStack(alignment: .top, spacing: 10) {
+                                Text(snap.focusTitle)
+                                    .font(.body)
+                                Spacer()
+                                Text(completedLittleWinSummaryText(for: snap))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.trailing)
+                            }
+                            .padding(.vertical, 2)
                         }
                     }
                 }
@@ -1061,6 +1085,18 @@ struct CompletedOutcomeDetailView: View {
         if !learned.isEmpty { lines.append("Learned: \(learned)") }
         if !next.isEmpty { lines.append("Next: \(next)") }
         return lines.isEmpty ? "—" : lines.joined(separator: "\n\n")
+    }
+
+    private func completedLittleWinSummaryText(for snapshot: CompletedOutcomeContributingLittleWinsStore.Snapshot) -> String {
+        let count = snapshot.completedCountInOutcomeWindow
+        let countText = "\(count) \(count == 1 ? "completed" : "completed")"
+        return "\(countText) from \(compactMonthDay(archive.start)) to \(compactMonthDay(archive.completedAt))"
+    }
+
+    private func compactMonthDay(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "M/d"
+        return formatter.string(from: date)
     }
 
     private func journalBox(title: String, text: String) -> some View {
