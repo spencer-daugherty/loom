@@ -557,6 +557,11 @@ struct ContentView: View {
             .sorted { $0.rank < $1.rank }
     }
 
+    private func fociForCategoryID(_ categoryID: UUID) -> [FulfillmentFocus] {
+        foci.filter { $0.category_id == categoryID }
+            .sorted { $0.rank < $1.rank }
+    }
+
     private struct LittleWinsCardData: Identifiable {
         let id: UUID
         let categoryTitle: String
@@ -655,7 +660,7 @@ struct ContentView: View {
             ? littleWinsCompletedFocusIDs
             : littleWinsCompletedFocusIDsFromStoreToday
         let sourceCards = orderedFulfillmentRecords.compactMap { record -> LittleWinsCardData? in
-            let allWins = fociForCategory(record.category)
+            let allWins = fociForCategoryID(record.category_id)
                 .filter { !$0.activity.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             let activeWins = allWins.filter { isLittleWinFocusActive($0, on: filterDate) }
             let activeWinIDs = Set(activeWins.map(\.id))
@@ -1528,12 +1533,13 @@ struct ContentView: View {
         let cardHeight = min(max(cardWidth * 1.42, 360), max(380, proxy.size.height - 36))
         let cards = littleWinsCards
         let allTodayCards = littleWinsCardsIncludingHiddenToday
+        let baselineVisibleCards = littleWinsCards(showHidden: false)
         let showsSetupLittleWinsPlaceholder = setupHomepageMode || allTodayCards.isEmpty
         let activeCards = cards.filter { !isLittleWinsCardCompleted($0) }
         let completedCards = allTodayCards.filter { isLittleWinsCardCompleted($0) }
-        let visibleItemIDs = Set(cards.flatMap { $0.items.map(\.id) })
+        let visibleItemIDs = Set(baselineVisibleCards.flatMap { $0.items.map(\.id) })
         let allItemIDs = Set(allTodayCards.flatMap { $0.items.map(\.id) })
-        let hasHiddenLittleWinsToReveal = !allItemIDs.subtracting(visibleItemIDs).isEmpty
+        let hasHiddenLittleWinsToReveal = littleWinsShowHiddenPlaceholder || !allItemIDs.subtracting(visibleItemIDs).isEmpty
         let allActiveCardsCompleted = !cards.isEmpty && activeCards.isEmpty
         let todayHasCompletedCard = !completedCards.isEmpty
         let streakShowsTodayComplete = allActiveCardsCompleted && todayHasCompletedCard

@@ -142,6 +142,34 @@ struct FulfillmentView: View {
         let id: UUID
         let categoryTitle: String
     }
+    private struct RolesManagerTarget: Identifiable {
+        let id: UUID
+        let categoryTitle: String
+    }
+    private struct RoleEditorTarget: Identifiable {
+        let categoryID: UUID
+        let categoryTitle: String
+        let roleID: UUID?
+        let autoFocus: Bool
+        var id: String {
+            if let roleID { return "edit-\(roleID.uuidString)" }
+            return "new-\(categoryID.uuidString)-\(autoFocus ? "focus" : "nofocus")"
+        }
+    }
+    private struct ResourcesManagerTarget: Identifiable {
+        let id: UUID
+        let categoryTitle: String
+    }
+    private struct ResourceEditorTarget: Identifiable {
+        let categoryID: UUID
+        let categoryTitle: String
+        let resourceID: UUID?
+        let autoFocus: Bool
+        var id: String {
+            if let resourceID { return "edit-\(resourceID.uuidString)" }
+            return "new-\(categoryID.uuidString)-\(autoFocus ? "focus" : "nofocus")"
+        }
+    }
     private struct LittleWinsEditorTarget: Identifiable {
         let categoryID: UUID
         let categoryTitle: String
@@ -190,12 +218,85 @@ struct FulfillmentView: View {
     @State private var radarAutoRotatePausedUntil: Date = .distantPast
     @State private var littleWinsManagerTarget: LittleWinsManagerTarget?
     @State private var littleWinsEditorTarget: LittleWinsEditorTarget?
+    @State private var rolesManagerTarget: RolesManagerTarget?
+    @State private var roleEditorTarget: RoleEditorTarget?
+    @State private var resourcesManagerTarget: ResourcesManagerTarget?
+    @State private var resourceEditorTarget: ResourceEditorTarget?
     @State private var littleWinsScheduleStoreRevision = 0
     @FocusState private var focusedField: Field?
     @FocusState private var focusedVisionCategoryID: UUID?
     @FocusState private var focusedPurposeCategoryID: UUID?
     private enum Field { case role, focus, resource }
+    private struct SimpleManageListItem: Identifiable {
+        let id: UUID
+        let title: String
+        let subtitle: String?
+    }
     private let radarTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
+
+    @ViewBuilder
+    private func styledManageListBox(
+        primaryRowTitle: String,
+        items: [SimpleManageListItem],
+        onPrimaryTap: @escaping () -> Void,
+        onItemTap: @escaping (UUID) -> Void
+    ) -> some View {
+        VStack(spacing: 0) {
+            Button(action: onPrimaryTap) {
+                HStack {
+                    Text(primaryRowTitle)
+                        .foregroundStyle(Color.accentColor)
+                    Spacer()
+                }
+                .frame(minHeight: 44, alignment: .center)
+                .padding(.horizontal, 14)
+            }
+            .buttonStyle(.plain)
+
+            if !items.isEmpty {
+                Divider()
+                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                    Button {
+                        onItemTap(item.id)
+                    } label: {
+                        HStack(spacing: 0) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(item.title)
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(nil)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                if let subtitle = item.subtitle, !subtitle.isEmpty {
+                                    Text(subtitle)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .frame(minHeight: 44, alignment: .leading)
+                        .padding(.vertical, 6)
+                        .padding(.horizontal, 14)
+                        .contentShape(Rectangle())
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .buttonStyle(.plain)
+
+                    if index < items.count - 1 {
+                        Divider()
+                    }
+                }
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color(.separator).opacity(0.4), lineWidth: 1)
+        )
+    }
     private func categoryKey(_ raw: String) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !trimmed.isEmpty else { return "" }
@@ -237,7 +338,9 @@ struct FulfillmentView: View {
     }
 
     private var isAnyLittleWinsSheetPresented: Bool {
-        littleWinsManagerTarget != nil || littleWinsEditorTarget != nil
+        littleWinsManagerTarget != nil || littleWinsEditorTarget != nil ||
+        rolesManagerTarget != nil || roleEditorTarget != nil ||
+        resourcesManagerTarget != nil || resourceEditorTarget != nil
     }
 
     var body: some View {
@@ -332,6 +435,28 @@ struct FulfillmentView: View {
                 categoryID: target.categoryID,
                 categoryTitle: target.categoryTitle,
                 focusID: target.focusID,
+                autoFocusTextField: target.autoFocus
+            )
+        }
+        .sheet(item: $rolesManagerTarget) { target in
+            RolesManagerSheetView(categoryID: target.id, categoryTitle: target.categoryTitle)
+        }
+        .sheet(item: $roleEditorTarget) { target in
+            RoleEditorSheetView(
+                categoryID: target.categoryID,
+                categoryTitle: target.categoryTitle,
+                roleID: target.roleID,
+                autoFocusTextField: target.autoFocus
+            )
+        }
+        .sheet(item: $resourcesManagerTarget) { target in
+            ResourcesManagerSheetView(categoryID: target.id, categoryTitle: target.categoryTitle)
+        }
+        .sheet(item: $resourceEditorTarget) { target in
+            ResourceEditorSheetView(
+                categoryID: target.categoryID,
+                categoryTitle: target.categoryTitle,
+                resourceID: target.resourceID,
                 autoFocusTextField: target.autoFocus
             )
         }
@@ -1140,17 +1265,8 @@ struct FulfillmentView: View {
 
                 if isExpanded {
                     let rolesForRecord = getRoles(for: record)
-                    let showsRoleInputRow = isAddingRole || rolesForRecord.count < 3
                     let fociForRecord = getFoci(for: record)
                     let resourcesForRecord = getResources(for: record)
-                    let rolesContentHeight = estimatedListContentHeight(
-                        items: rolesForRecord.map(\.role),
-                        hasInputRow: showsRoleInputRow
-                    )
-                    let resourcesContentHeight = estimatedListContentHeight(
-                        items: resourcesForRecord.map(\.resource),
-                        hasInputRow: true
-                    )
 
                     VStack(alignment: .leading, spacing: 16) {
                     Text("Vision")
@@ -1180,51 +1296,21 @@ struct FulfillmentView: View {
                     Text("Roles")
                         .font(.headline)
                         .foregroundColor(.black)
-                    List {
-                        ForEach(getRoles(for: record), id: \.id) { r in
-                            Text(r.role)
-                                .lineLimit(nil)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        .onMove { from, to in
-                            moveRoles(from: from, to: to, record: record)
-                        }
-                        .onDelete { idx in
-                            deleteRoles(at: idx, record: record)
-                        }
-
-                        if isAddingRole {
-                            HStack {
-                                TextField("H2O lover", text: $newRoleText)
-                                    .submitLabel(.done)
-                                    .focused($focusedField, equals: .role)
-                                    .onSubmit {
-                                        addRole(text: newRoleText, record: record)
-                                        newRoleText = ""
-                                        isAddingRole = false
-                                        focusedField = nil
-                                    }
-                                Spacer()
+                    styledManageListBox(
+                        primaryRowTitle: rolesForRecord.isEmpty ? "Add Role" : "Manage Roles",
+                        items: rolesForRecord.map { .init(id: $0.id, title: $0.role, subtitle: nil) },
+                        onPrimaryTap: {
+                            if rolesForRecord.isEmpty {
+                                presentRoleEditorForNew(record: record)
+                            } else {
+                                presentRolesManager(for: record)
                             }
-                            .padding(.vertical, 4)
-                            .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
-                        } else if rolesForRecord.count < 3 {
-                            HStack {
-                                Button("Add Role") {
-                                    withAnimation { isAddingRole = true }
-                                    DispatchQueue.main.async { focusedField = .role }
-                                }
-                                .foregroundColor(.blue)
-                                Spacer()
-                            }
-                            .padding(.vertical, 4)
-                            .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
+                        },
+                        onItemTap: { id in
+                            guard let role = rolesForRecord.first(where: { $0.id == id }) else { return }
+                            presentRoleEditor(for: role, categoryTitle: record.category)
                         }
-                    }
-                    .listStyle(.plain)
-                    .scrollDisabled(rolesContentHeight <= 220)
-                    .environment(\.editMode, .constant(.active))
-                    .frame(height: min(rolesContentHeight, 220))
+                    )
 
                     Text("Little Wins")
                         .font(.headline)
@@ -1295,51 +1381,21 @@ struct FulfillmentView: View {
                     Text("Resources")
                         .font(.headline)
                         .foregroundColor(.black)
-                    List {
-                        ForEach(resourcesForRecord, id: \.id) { res in
-                            Text(res.resource)
-                                .lineLimit(nil)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        .onMove { from, to in
-                            moveResources(from: from, to: to, record: record)
-                        }
-                        .onDelete { idx in
-                            deleteResources(at: idx, record: record)
-                        }
-
-                        if isAddingResource {
-                            HStack {
-                                TextField("great gym nearby", text: $newResourceText)
-                                    .submitLabel(.done)
-                                    .focused($focusedField, equals: .resource)
-                                    .onSubmit {
-                                        addResource(text: newResourceText, record: record)
-                                        newResourceText = ""
-                                        isAddingResource = false
-                                        focusedField = nil
-                                    }
-                                Spacer()
+                    styledManageListBox(
+                        primaryRowTitle: resourcesForRecord.isEmpty ? "Add Resource" : "Manage Resources",
+                        items: resourcesForRecord.map { .init(id: $0.id, title: $0.resource, subtitle: nil) },
+                        onPrimaryTap: {
+                            if resourcesForRecord.isEmpty {
+                                presentResourceEditorForNew(record: record)
+                            } else {
+                                presentResourcesManager(for: record)
                             }
-                            .padding(.vertical, 4)
-                            .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
-                        } else {
-                            HStack {
-                                Button("Add Resource") {
-                                    withAnimation { isAddingResource = true }
-                                    DispatchQueue.main.async { focusedField = .resource }
-                                }
-                                .foregroundColor(.blue)
-                                Spacer()
-                            }
-                            .padding(.vertical, 4)
-                            .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
+                        },
+                        onItemTap: { id in
+                            guard let resource = resourcesForRecord.first(where: { $0.id == id }) else { return }
+                            presentResourceEditor(for: resource, categoryTitle: record.category)
                         }
-                    }
-                    .listStyle(.plain)
-                    .scrollDisabled(resourcesContentHeight <= 260)
-                    .environment(\.editMode, .constant(.active))
-                    .frame(height: min(resourcesContentHeight, 260))
+                    )
 
                     PassionsSectionView(record: record)
                     }
@@ -1639,6 +1695,54 @@ struct FulfillmentView: View {
         focusedField = nil
         focusedVisionCategoryID = nil
         focusedPurposeCategoryID = nil
+    }
+
+    private func presentRolesManager(for record: Fulfillment) {
+        prepareForLittleWinsSheetPresentation()
+        let target = RolesManagerTarget(id: record.category_id, categoryTitle: record.category)
+        DispatchQueue.main.async {
+            rolesManagerTarget = target
+        }
+    }
+
+    private func presentRoleEditorForNew(record: Fulfillment) {
+        prepareForLittleWinsSheetPresentation()
+        let target = RoleEditorTarget(categoryID: record.category_id, categoryTitle: record.category, roleID: nil, autoFocus: true)
+        DispatchQueue.main.async {
+            roleEditorTarget = target
+        }
+    }
+
+    private func presentRoleEditor(for role: FulfillmentRoles, categoryTitle: String) {
+        prepareForLittleWinsSheetPresentation()
+        let target = RoleEditorTarget(categoryID: role.category_id, categoryTitle: categoryTitle, roleID: role.id, autoFocus: false)
+        DispatchQueue.main.async {
+            roleEditorTarget = target
+        }
+    }
+
+    private func presentResourcesManager(for record: Fulfillment) {
+        prepareForLittleWinsSheetPresentation()
+        let target = ResourcesManagerTarget(id: record.category_id, categoryTitle: record.category)
+        DispatchQueue.main.async {
+            resourcesManagerTarget = target
+        }
+    }
+
+    private func presentResourceEditorForNew(record: Fulfillment) {
+        prepareForLittleWinsSheetPresentation()
+        let target = ResourceEditorTarget(categoryID: record.category_id, categoryTitle: record.category, resourceID: nil, autoFocus: true)
+        DispatchQueue.main.async {
+            resourceEditorTarget = target
+        }
+    }
+
+    private func presentResourceEditor(for resource: FulfillmentResources, categoryTitle: String) {
+        prepareForLittleWinsSheetPresentation()
+        let target = ResourceEditorTarget(categoryID: resource.category_id, categoryTitle: categoryTitle, resourceID: resource.id, autoFocus: false)
+        DispatchQueue.main.async {
+            resourceEditorTarget = target
+        }
     }
 
     private func addFocus(text: String, record: Fulfillment) {
@@ -1971,6 +2075,535 @@ private struct LittleWinsManagerSheetView: View {
     }
 }
 
+private struct RolesManagerSheetView: View {
+    private struct EditorTarget: Identifiable {
+        let roleID: UUID?
+        let categoryID: UUID
+        let categoryTitle: String
+        let autoFocus: Bool
+
+        var id: String {
+            if let roleID { return "edit-\(roleID.uuidString)" }
+            return "new-\(categoryID.uuidString)-\(autoFocus ? "focus" : "nofocus")"
+        }
+    }
+
+    let categoryID: UUID
+    let categoryTitle: String
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @Query private var roles: [FulfillmentRoles]
+
+    @State private var isDeleteMode = false
+    @State private var selectedIDsForDelete: Set<UUID> = []
+    @State private var editorTarget: EditorTarget?
+
+    private var categoryRoles: [FulfillmentRoles] {
+        roles.filter { $0.category_id == categoryID }
+            .sorted { $0.rank < $1.rank }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    if !isDeleteMode && categoryRoles.count < 3 {
+                        Button {
+                            editorTarget = .init(roleID: nil, categoryID: categoryID, categoryTitle: categoryTitle, autoFocus: true)
+                        } label: {
+                            HStack {
+                                Text("Add Role")
+                                    .foregroundStyle(Color.accentColor)
+                                Spacer()
+                            }
+                            .frame(minHeight: 44, alignment: .center)
+                            .padding(.horizontal, 14)
+                        }
+                        .buttonStyle(.plain)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                    }
+
+                    ForEach(categoryRoles, id: \.id) { role in
+                        Button {
+                            guard !isDeleteMode else {
+                                toggleDeleteSelection(for: role.id)
+                                return
+                            }
+                            editorTarget = .init(roleID: role.id, categoryID: categoryID, categoryTitle: categoryTitle, autoFocus: false)
+                        } label: {
+                            HStack(spacing: 10) {
+                                if isDeleteMode {
+                                    Image(systemName: selectedIDsForDelete.contains(role.id) ? "checkmark.circle.fill" : "circle")
+                                        .foregroundStyle(selectedIDsForDelete.contains(role.id) ? .red : .secondary)
+                                }
+                                Text(role.role)
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(nil)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Spacer()
+                                if !isDeleteMode {
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("Manage Roles")
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarBackButtonHidden(isDeleteMode)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    if isDeleteMode {
+                        Button("Cancel") {
+                            isDeleteMode = false
+                            selectedIDsForDelete.removeAll()
+                        }
+                    } else {
+                        Button("Done") { dismiss() }
+                    }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    if isDeleteMode {
+                        Button("Delete") { deleteSelected() }
+                            .foregroundStyle(selectedIDsForDelete.isEmpty ? Color.secondary : Color.red)
+                            .disabled(selectedIDsForDelete.isEmpty)
+                    } else if !categoryRoles.isEmpty {
+                        Button("Edit") {
+                            isDeleteMode = true
+                            selectedIDsForDelete.removeAll()
+                        }
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .sheet(item: $editorTarget) { target in
+            RoleEditorSheetView(
+                categoryID: target.categoryID,
+                categoryTitle: target.categoryTitle,
+                roleID: target.roleID,
+                autoFocusTextField: target.autoFocus
+            )
+        }
+    }
+
+    private func toggleDeleteSelection(for id: UUID) {
+        if selectedIDsForDelete.contains(id) {
+            selectedIDsForDelete.remove(id)
+        } else {
+            selectedIDsForDelete.insert(id)
+        }
+    }
+
+    private func deleteSelected() {
+        let targets = categoryRoles.filter { selectedIDsForDelete.contains($0.id) }
+        guard !targets.isEmpty else { return }
+        for role in targets {
+            modelContext.insert(
+                FulfillmentRolesArchive(
+                    category_id: role.category_id,
+                    updatedAt: role.updatedAt,
+                    role: role.role,
+                    rank: role.rank,
+                    archivedAt: Date()
+                )
+            )
+            RecentlyDeletedStore.trash(role, in: modelContext)
+        }
+        try? modelContext.save()
+        selectedIDsForDelete.removeAll()
+        isDeleteMode = false
+    }
+}
+
+private struct RoleEditorSheetView: View {
+    let categoryID: UUID
+    let categoryTitle: String
+    let roleID: UUID?
+    let autoFocusTextField: Bool
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @Query private var roles: [FulfillmentRoles]
+    @Query private var fulfillments: [Fulfillment]
+
+    @State private var draftText = ""
+    @State private var didHydrate = false
+    @FocusState private var isTextFocused: Bool
+
+    private var categoryRoles: [FulfillmentRoles] {
+        roles.filter { $0.category_id == categoryID }
+            .sorted { $0.rank < $1.rank }
+    }
+
+    private var editingRole: FulfillmentRoles? {
+        guard let roleID else { return nil }
+        return roles.first { $0.id == roleID }
+    }
+
+    private var categoryRecord: Fulfillment? {
+        fulfillments.first { $0.category_id == categoryID }
+    }
+
+    private var isEditing: Bool { roleID != nil }
+    private var doneDisabled: Bool { draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section(isEditing ? "Edit Role" : "Add Role") {
+                    TextField("H2O lover", text: $draftText)
+                        .focused($isTextFocused)
+                        .textInputAutocapitalization(.sentences)
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle(isEditing ? "Edit Role" : "Add Role")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") { saveAndDismiss() }
+                        .disabled(doneDisabled)
+                }
+            }
+        }
+        .presentationDetents([.height(220), .medium])
+        .presentationDragIndicator(.visible)
+        .onAppear {
+            hydrateIfNeeded()
+            guard autoFocusTextField else { return }
+            DispatchQueue.main.async { isTextFocused = true }
+        }
+    }
+
+    private func hydrateIfNeeded() {
+        guard !didHydrate else { return }
+        didHydrate = true
+        if let editingRole {
+            draftText = editingRole.role
+        }
+    }
+
+    private func saveAndDismiss() {
+        let trimmed = draftText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        if let editingRole {
+            guard editingRole.role != trimmed else {
+                dismiss()
+                return
+            }
+            modelContext.insert(
+                FulfillmentRolesArchive(
+                    category_id: editingRole.category_id,
+                    updatedAt: editingRole.updatedAt,
+                    role: editingRole.role,
+                    rank: editingRole.rank,
+                    archivedAt: Date()
+                )
+            )
+            editingRole.role = trimmed
+            editingRole.updatedAt = Date()
+
+            if editingRole.rank == 1, let categoryRecord, categoryRecord.category_identitiy != trimmed {
+                archiveAndUpdateCategoryIdentity(record: categoryRecord, newIdentity: trimmed)
+            }
+        } else {
+            guard let categoryRecord else { return }
+            guard categoryRoles.count < 3 else {
+                dismiss()
+                return
+            }
+            let nextRank = (categoryRoles.map(\.rank).max() ?? 0) + 1
+            let role = FulfillmentRoles(category_id: categoryID, role: trimmed, rank: nextRank)
+            modelContext.insert(role)
+            if nextRank == 1 {
+                archiveAndUpdateCategoryIdentity(record: categoryRecord, newIdentity: trimmed)
+            }
+        }
+
+        try? modelContext.save()
+        dismiss()
+    }
+
+    private func archiveAndUpdateCategoryIdentity(record: Fulfillment, newIdentity: String) {
+        modelContext.insert(
+            FulfillmentArchive(
+                category_id: record.category_id,
+                updatedAt: record.updatedAt,
+                category: record.category,
+                category_identitiy: record.category_identitiy,
+                category_vision: record.category_vision,
+                category_purpose: record.category_purpose,
+                archivedAt: Date()
+            )
+        )
+        record.category_identitiy = newIdentity
+        record.updatedAt = Date()
+    }
+}
+
+private struct ResourcesManagerSheetView: View {
+    private struct EditorTarget: Identifiable {
+        let resourceID: UUID?
+        let categoryID: UUID
+        let categoryTitle: String
+        let autoFocus: Bool
+
+        var id: String {
+            if let resourceID { return "edit-\(resourceID.uuidString)" }
+            return "new-\(categoryID.uuidString)-\(autoFocus ? "focus" : "nofocus")"
+        }
+    }
+
+    let categoryID: UUID
+    let categoryTitle: String
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @Query private var resources: [FulfillmentResources]
+
+    @State private var isDeleteMode = false
+    @State private var selectedIDsForDelete: Set<UUID> = []
+    @State private var editorTarget: EditorTarget?
+
+    private var categoryResources: [FulfillmentResources] {
+        resources.filter { $0.category_id == categoryID }
+            .sorted { $0.rank < $1.rank }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    if !isDeleteMode {
+                        Button {
+                            editorTarget = .init(resourceID: nil, categoryID: categoryID, categoryTitle: categoryTitle, autoFocus: true)
+                        } label: {
+                            HStack {
+                                Text("Add Resource")
+                                    .foregroundStyle(Color.accentColor)
+                                Spacer()
+                            }
+                            .frame(minHeight: 44, alignment: .center)
+                            .padding(.horizontal, 14)
+                        }
+                        .buttonStyle(.plain)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                    }
+
+                    ForEach(categoryResources, id: \.id) { resource in
+                        Button {
+                            guard !isDeleteMode else {
+                                toggleDeleteSelection(for: resource.id)
+                                return
+                            }
+                            editorTarget = .init(resourceID: resource.id, categoryID: categoryID, categoryTitle: categoryTitle, autoFocus: false)
+                        } label: {
+                            HStack(spacing: 10) {
+                                if isDeleteMode {
+                                    Image(systemName: selectedIDsForDelete.contains(resource.id) ? "checkmark.circle.fill" : "circle")
+                                        .foregroundStyle(selectedIDsForDelete.contains(resource.id) ? .red : .secondary)
+                                }
+                                Text(resource.resource)
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(nil)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Spacer()
+                                if !isDeleteMode {
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("Manage Resources")
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarBackButtonHidden(isDeleteMode)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    if isDeleteMode {
+                        Button("Cancel") {
+                            isDeleteMode = false
+                            selectedIDsForDelete.removeAll()
+                        }
+                    } else {
+                        Button("Done") { dismiss() }
+                    }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    if isDeleteMode {
+                        Button("Delete") { deleteSelected() }
+                            .foregroundStyle(selectedIDsForDelete.isEmpty ? Color.secondary : Color.red)
+                            .disabled(selectedIDsForDelete.isEmpty)
+                    } else if !categoryResources.isEmpty {
+                        Button("Edit") {
+                            isDeleteMode = true
+                            selectedIDsForDelete.removeAll()
+                        }
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .sheet(item: $editorTarget) { target in
+            ResourceEditorSheetView(
+                categoryID: target.categoryID,
+                categoryTitle: target.categoryTitle,
+                resourceID: target.resourceID,
+                autoFocusTextField: target.autoFocus
+            )
+        }
+    }
+
+    private func toggleDeleteSelection(for id: UUID) {
+        if selectedIDsForDelete.contains(id) {
+            selectedIDsForDelete.remove(id)
+        } else {
+            selectedIDsForDelete.insert(id)
+        }
+    }
+
+    private func deleteSelected() {
+        let targets = categoryResources.filter { selectedIDsForDelete.contains($0.id) }
+        guard !targets.isEmpty else { return }
+        for resource in targets {
+            modelContext.insert(
+                FulfillmentResourcesArchive(
+                    category_id: resource.category_id,
+                    updatedAt: resource.updatedAt,
+                    resource: resource.resource,
+                    rank: resource.rank,
+                    archivedAt: Date()
+                )
+            )
+            RecentlyDeletedStore.trash(resource, in: modelContext)
+        }
+        try? modelContext.save()
+        selectedIDsForDelete.removeAll()
+        isDeleteMode = false
+    }
+}
+
+private struct ResourceEditorSheetView: View {
+    let categoryID: UUID
+    let categoryTitle: String
+    let resourceID: UUID?
+    let autoFocusTextField: Bool
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @Query private var resources: [FulfillmentResources]
+
+    @State private var draftText = ""
+    @State private var didHydrate = false
+    @FocusState private var isTextFocused: Bool
+
+    private var categoryResources: [FulfillmentResources] {
+        resources.filter { $0.category_id == categoryID }
+            .sorted { $0.rank < $1.rank }
+    }
+
+    private var editingResource: FulfillmentResources? {
+        guard let resourceID else { return nil }
+        return resources.first { $0.id == resourceID }
+    }
+
+    private var isEditing: Bool { resourceID != nil }
+    private var doneDisabled: Bool { draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section(isEditing ? "Edit Resource" : "Add Resource") {
+                    TextField("great gym nearby", text: $draftText)
+                        .focused($isTextFocused)
+                        .textInputAutocapitalization(.sentences)
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle(isEditing ? "Edit Resource" : "Add Resource")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") { saveAndDismiss() }
+                        .disabled(doneDisabled)
+                }
+            }
+        }
+        .presentationDetents([.height(220), .medium])
+        .presentationDragIndicator(.visible)
+        .onAppear {
+            hydrateIfNeeded()
+            guard autoFocusTextField else { return }
+            DispatchQueue.main.async { isTextFocused = true }
+        }
+    }
+
+    private func hydrateIfNeeded() {
+        guard !didHydrate else { return }
+        didHydrate = true
+        if let editingResource {
+            draftText = editingResource.resource
+        }
+    }
+
+    private func saveAndDismiss() {
+        let trimmed = draftText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        if let editingResource {
+            guard editingResource.resource != trimmed else {
+                dismiss()
+                return
+            }
+            modelContext.insert(
+                FulfillmentResourcesArchive(
+                    category_id: editingResource.category_id,
+                    updatedAt: editingResource.updatedAt,
+                    resource: editingResource.resource,
+                    rank: editingResource.rank,
+                    archivedAt: Date()
+                )
+            )
+            editingResource.resource = trimmed
+            editingResource.updatedAt = Date()
+        } else {
+            let nextRank = (categoryResources.map(\.rank).max() ?? 0) + 1
+            let resource = FulfillmentResources(category_id: categoryID, resource: trimmed, rank: nextRank)
+            modelContext.insert(resource)
+        }
+
+        try? modelContext.save()
+        dismiss()
+    }
+}
+
 struct LittleWinEditorSheetView: View {
     private struct IntegrationSetupTarget: Identifiable {
         let source: LittleWinsIntegrationConfig.Source
@@ -2037,6 +2670,37 @@ struct LittleWinEditorSheetView: View {
                         }
                     }
 
+                    if !draftCanAnyDay {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(spacing: 0) {
+                                ForEach(Array(weekdayLetterLabels.enumerated()), id: \.offset) { index, label in
+                                    let isSelected = (draftWeekdayMask & (1 << index)) != 0
+                                    Button {
+                                        toggleWeekday(index)
+                                    } label: {
+                                        Text(label)
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(isSelected ? .white : .primary)
+                                            .frame(width: 34, height: 34)
+                                            .background(
+                                                Circle()
+                                                    .fill(isSelected ? Color.accentColor : Color(.systemGray6))
+                                            )
+                                            .overlay(
+                                                Circle()
+                                                    .stroke(Color(.separator).opacity(isSelected ? 0 : 0.35), lineWidth: 1)
+                                            )
+                                            .frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .frame(maxWidth: .infinity)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .padding(.vertical, 2)
+                    }
+
                     HStack {
                         Text("Integrate")
                         Spacer()
@@ -2083,36 +2747,6 @@ struct LittleWinEditorSheetView: View {
                         .padding(.vertical, 2)
                     }
 
-                    if !draftCanAnyDay {
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack(spacing: 0) {
-                                ForEach(Array(weekdayLetterLabels.enumerated()), id: \.offset) { index, label in
-                                    let isSelected = (draftWeekdayMask & (1 << index)) != 0
-                                    Button {
-                                        toggleWeekday(index)
-                                    } label: {
-                                        Text(label)
-                                            .font(.caption.weight(.semibold))
-                                            .foregroundStyle(isSelected ? .white : .primary)
-                                            .frame(width: 34, height: 34)
-                                            .background(
-                                                Circle()
-                                                    .fill(isSelected ? Color.accentColor : Color(.systemGray6))
-                                            )
-                                            .overlay(
-                                                Circle()
-                                                    .stroke(Color(.separator).opacity(isSelected ? 0 : 0.35), lineWidth: 1)
-                                            )
-                                            .frame(maxWidth: .infinity)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .frame(maxWidth: .infinity)
-                                }
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .padding(.vertical, 2)
-                    }
                 }
             }
             .listStyle(.insetGrouped)
