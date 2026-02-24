@@ -2,6 +2,33 @@ import SwiftUI
 import SwiftData
 import Charts
 
+private enum CompletedOutcomePassionsDetailStore {
+    struct Snapshot: Codable, Identifiable {
+        var id: UUID { passionID }
+        let passionID: UUID
+        let emotion: String
+        let passion: String
+    }
+
+    private static let defaultsKey = "completed_outcome_passions_v1"
+
+    static func snapshots(for completedArchiveID: UUID) -> [Snapshot] {
+        guard let data = UserDefaults.standard.data(forKey: defaultsKey),
+              let decoded = try? JSONDecoder().decode([String: [Snapshot]].self, from: data) else {
+            return []
+        }
+        return decoded[completedArchiveID.uuidString] ?? []
+    }
+}
+
+private func displayEmotionLabelObjectives(_ raw: String) -> String {
+    switch raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+    case "just": return "Hate"
+    case "vows": return "Vow"
+    default: return raw.capitalized
+    }
+}
+
 struct ObjectivesView: View {
     let autoOpenAddOutcome: Bool
     @Environment(\.colorScheme) private var colorScheme
@@ -713,6 +740,7 @@ struct CompletedOutcomeDetailView: View {
     @Query(sort: \CompletedOutcomeContributionArchive.completedAt, order: .forward) private var contributionRows: [CompletedOutcomeContributionArchive]
     @Query(sort: \CompletedOutcomeMeasurePointArchive.measuredAt, order: .forward) private var measureRows: [CompletedOutcomeMeasurePointArchive]
     @Query(sort: \OutcomeAnalyticsEvent.occurredAt, order: .reverse) private var allOutcomeEvents: [OutcomeAnalyticsEvent]
+    @Query(sort: \Passion.date, order: .forward) private var allPassions: [Passion]
     @State private var isShowingDeleteAlert = false
     @State private var insightDetailSheet: InsightDetailSheetType? = nil
 
@@ -759,6 +787,17 @@ struct CompletedOutcomeDetailView: View {
 
     private var targetPushEvents: [OutcomeAnalyticsEvent] {
         outcomeEvents.filter { $0.eventType == "target_changed" }
+    }
+
+    private var connectedPassionRows: [String] {
+        let snapshots = CompletedOutcomePassionsDetailStore.snapshots(for: archive.id)
+        let liveByID = Dictionary(uniqueKeysWithValues: allPassions.map { ($0.passion_id, $0) })
+        return snapshots.map { snap in
+            if let live = liveByID[snap.passionID] {
+                return "\(displayEmotionLabelObjectives(live.emotion)): \(live.passion)"
+            }
+            return "\(displayEmotionLabelObjectives(snap.emotion)): \(snap.passion)"
+        }
     }
 
     var body: some View {
@@ -863,7 +902,6 @@ struct CompletedOutcomeDetailView: View {
                             insightDetailSheet = .targetPushes
                         }
                     } else {
-                        insightRow("Goal changes", "\(archive.goalPushCount)")
                         insightRow("Target date pushes", "\(archive.targetChangeCount)")
                     }
                     if !contributionByDay.isEmpty {
@@ -879,7 +917,26 @@ struct CompletedOutcomeDetailView: View {
                 }
 
                 Section("Journal") {
-                    journalBox(title: "Journal", text: combinedJournalText(for: archive))
+                    journalBox(title: "", text: combinedJournalText(for: archive))
+                }
+
+                Section("Passions") {
+                    if connectedPassionRows.isEmpty {
+                        Text("No passions connected.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(Array(connectedPassionRows.enumerated()), id: \.offset) { _, row in
+                                Text(row)
+                                    .font(.subheadline)
+                                    .padding(.vertical, 8)
+                                    .padding(.horizontal, 10)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
                 }
 
                 Section {
@@ -1008,8 +1065,10 @@ struct CompletedOutcomeDetailView: View {
 
     private func journalBox(title: String, text: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(.subheadline.weight(.semibold))
+            if !title.isEmpty {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+            }
             Text(text)
                 .font(.body)
                 .foregroundStyle(.secondary)

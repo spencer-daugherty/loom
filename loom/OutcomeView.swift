@@ -36,6 +36,53 @@ private enum OutcomeContributingLittleWinsStore {
     }
 }
 
+private enum CompletedOutcomePassionsStore {
+    struct Snapshot: Codable, Identifiable {
+        var id: UUID { passionID }
+        let passionID: UUID
+        let emotion: String
+        let passion: String
+    }
+
+    private static let defaultsKey = "completed_outcome_passions_v1"
+
+    private static func loadMap() -> [String: [Snapshot]] {
+        guard let data = UserDefaults.standard.data(forKey: defaultsKey),
+              let decoded = try? JSONDecoder().decode([String: [Snapshot]].self, from: data) else {
+            return [:]
+        }
+        return decoded
+    }
+
+    private static func saveMap(_ map: [String: [Snapshot]]) {
+        guard let data = try? JSONEncoder().encode(map) else { return }
+        UserDefaults.standard.set(data, forKey: defaultsKey)
+    }
+
+    static func snapshots(for completedArchiveID: UUID) -> [Snapshot] {
+        loadMap()[completedArchiveID.uuidString] ?? []
+    }
+
+    static func setSnapshots(_ snapshots: [Snapshot], for completedArchiveID: UUID) {
+        var map = loadMap()
+        let key = completedArchiveID.uuidString
+        if snapshots.isEmpty {
+            map.removeValue(forKey: key)
+        } else {
+            map[key] = snapshots
+        }
+        saveMap(map)
+    }
+}
+
+private func displayEmotionLabelOutcome(_ raw: String) -> String {
+    switch raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+    case "just": return "Hate"
+    case "vows": return "Vow"
+    default: return raw.capitalized
+    }
+}
+
 private func sanitizeAndFormatDecimalInputOutcome(_ input: String, maxFractionDigits: Int = 3) -> String {
     let sanitized = input.replacingOccurrences(of: ",", with: "")
     var output = ""
@@ -134,6 +181,8 @@ struct OutcomeView: View {
     @FocusState private var isUpdateGoalFieldFocused: Bool
     @State private var completionSuccessLevel: Int = 3
     @State private var completionJournalText: String = ""
+    @State private var selectedCompletionPassionIDs: Set<UUID> = []
+    @State private var isShowingCompletionPassionsSheet = false
     @State private var completionRecordedDate: Date = Calendar.current.startOfDay(for: .now)
     @FocusState private var isCompletionJournalFocused: Bool
     @State private var changeTargetDateDraft: Date = .now
@@ -147,6 +196,7 @@ struct OutcomeView: View {
     @Query private var allReflectionOutcomes: [ActionBlocksReflectionArchiveOutcome]
     @Query(sort: \Fulfillment.category, order: .forward) private var fulfillments: [Fulfillment]
     @Query private var allLittleWins: [FulfillmentFocus]
+    @Query(sort: \Passion.date, order: .forward) private var passions: [Passion]
     @Query(sort: \LittleWinsDailyCompletion.completedAt, order: .reverse) private var littleWinsDailyCompletions: [LittleWinsDailyCompletion]
     @Query private var allReflectionArchives: [ActionBlocksReflectionArchive]
 
@@ -171,6 +221,10 @@ struct OutcomeView: View {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         return Array(Set(titles)).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    private var selectedCompletionPassions: [Passion] {
+        passions.filter { selectedCompletionPassionIDs.contains($0.passion_id) }
     }
 
     init(outcome: Outcomes, outcomeMeasure: OutcomesMeasure?) {
@@ -1070,11 +1124,30 @@ struct OutcomeView: View {
                         .lineLimit(4...8)
                         .focused($isCompletionJournalFocused)
                     }
+
+                    Section("Passions") {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text("What passions drove this outcome?")
+                            Spacer(minLength: 8)
+                            Button("Connect Passions") {
+                                isShowingCompletionPassionsSheet = true
+                            }
+                            .foregroundStyle(.blue)
+                        }
+
+                        if !selectedCompletionPassions.isEmpty {
+                            ForEach(selectedCompletionPassions, id: \.passion_id) { passion in
+                                Text("\(displayEmotionLabelOutcome(passion.emotion)): \(passion.passion)")
+                                    .foregroundStyle(.primary)
+                            }
+                        }
+                    }
                 }
                 .navigationTitle("Complete Outcome")
                 .navigationBarTitleDisplayMode(.inline)
                 .onAppear {
                     completionRecordedDate = Calendar.current.startOfDay(for: .now)
+                    selectedCompletionPassionIDs.removeAll()
                 }
                 .toolbar {
                     ToolbarItemGroup(placement: .keyboard) {
@@ -1098,6 +1171,42 @@ struct OutcomeView: View {
             }
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
+            .sheet(isPresented: $isShowingCompletionPassionsSheet) {
+                NavigationStack {
+                    List {
+                        ForEach(passions, id: \.passion_id) { passion in
+                            Button {
+                                if selectedCompletionPassionIDs.contains(passion.passion_id) {
+                                    selectedCompletionPassionIDs.remove(passion.passion_id)
+                                } else {
+                                    selectedCompletionPassionIDs.insert(passion.passion_id)
+                                }
+                            } label: {
+                                HStack {
+                                    Text("\(displayEmotionLabelOutcome(passion.emotion)): \(passion.passion)")
+                                        .foregroundStyle(.primary)
+                                    Spacer()
+                                    if selectedCompletionPassionIDs.contains(passion.passion_id) {
+                                        Image(systemName: "checkmark")
+                                            .foregroundStyle(.blue)
+                                    }
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .navigationTitle("Connect Passions")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button("Done") { isShowingCompletionPassionsSheet = false }
+                        }
+                    }
+                }
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+            }
         }
         .sheet(isPresented: $isShowingCompletedActionSheet, onDismiss: {
             applySelectedCompletedActions()
@@ -1235,6 +1344,16 @@ struct OutcomeView: View {
             journalNext: ""
         )
         modelContext.insert(archive)
+        let completedPassionSnapshots = passions
+            .filter { selectedCompletionPassionIDs.contains($0.passion_id) }
+            .map {
+                CompletedOutcomePassionsStore.Snapshot(
+                    passionID: $0.passion_id,
+                    emotion: $0.emotion,
+                    passion: $0.passion
+                )
+            }
+        CompletedOutcomePassionsStore.setSnapshots(completedPassionSnapshots, for: archive.id)
         FulfillmentCategoryTheme.saveCompletedOutcomeColorKey(
             FulfillmentCategoryTheme.colorKey(for: outcome.category),
             archiveId: archive.id
