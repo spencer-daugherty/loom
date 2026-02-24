@@ -1393,6 +1393,16 @@ struct OutcomeView: View {
                 )
             }
         CompletedOutcomePassionsStore.setSnapshots(completedPassionSnapshots, for: archive.id)
+        for passion in passions.filter({ selectedCompletionPassionIDs.contains($0.passion_id) }) {
+            modelContext.insert(
+                CompletedOutcomePassionLinkArchive(
+                    completedOutcomeArchiveId: archive.id,
+                    passionID: passion.passion_id,
+                    emotionSnapshot: passion.emotion,
+                    passionSnapshot: passion.passion
+                )
+            )
+        }
         let completionStartDay = cal.startOfDay(for: outcome.start)
         let completionEndDay = cal.startOfDay(for: completionRecordedDate)
         let completionCountsByFocusID = Dictionary(

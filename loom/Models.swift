@@ -1233,6 +1233,32 @@ final class CompletedOutcomeContributionArchive {
 }
 
 @Model
+final class CompletedOutcomePassionLinkArchive {
+    @Attribute(.unique) var id: UUID
+    var completedOutcomeArchiveId: UUID
+    var passionID: UUID
+    var emotionSnapshot: String
+    var passionSnapshot: String
+    var createdAt: Date
+
+    init(
+        id: UUID = .init(),
+        completedOutcomeArchiveId: UUID,
+        passionID: UUID,
+        emotionSnapshot: String,
+        passionSnapshot: String,
+        createdAt: Date = .now
+    ) {
+        self.id = id
+        self.completedOutcomeArchiveId = completedOutcomeArchiveId
+        self.passionID = passionID
+        self.emotionSnapshot = emotionSnapshot
+        self.passionSnapshot = passionSnapshot
+        self.createdAt = createdAt
+    }
+}
+
+@Model
 final class CompletedOutcomeMeasurePointArchive {
     @Attribute(.unique) var id: UUID
     var completedOutcomeArchiveId: UUID

@@ -184,6 +184,7 @@ struct FulfillmentView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
 
     @Query private var fulfillments: [Fulfillment]
     @Query private var roles: [FulfillmentRoles]
@@ -191,6 +192,11 @@ struct FulfillmentView: View {
     @Query private var resources: [FulfillmentResources]
     @Query private var passionJoins: [PassionFulfillmentJoin]
     @Query private var passions: [Passion]
+    @Query(sort: \LittleWinsDailyCompletion.completedAt, order: .reverse) private var littleWinsDailyCompletions: [LittleWinsDailyCompletion]
+    @Query(sort: \ActionBlocksReflectionArchive.completedAt, order: .reverse) private var reflectionArchives: [ActionBlocksReflectionArchive]
+    @Query(sort: \Outcomes.updatedAt, order: .reverse) private var outcomes: [Outcomes]
+    @Query(sort: \FulfillmentCategoryScoreSnapshot.weekStartDate, order: .reverse)
+    private var fulfillmentCategoryScoreSnapshots: [FulfillmentCategoryScoreSnapshot]
     @Query(sort: \ReplacedFulfillmentCategoryArchive.replacedAt, order: .reverse)
     private var replacedCategoryArchives: [ReplacedFulfillmentCategoryArchive]
 
@@ -344,6 +350,10 @@ struct FulfillmentView: View {
     }
 
     var body: some View {
+        fulfillmentScreen
+    }
+
+    private var fulfillmentBaseContent: some View {
         ScrollView {
             ZStack {
                 if isAddingRole || isAddingFocus || isAddingResource {
@@ -382,49 +392,127 @@ struct FulfillmentView: View {
                 }
             }
         }
-        .navigationTitle("Fulfillment")
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    isShowingInstructions = true
-                } label: {
-                    Image(systemName: "graduationcap")
-                        .font(.title2)
-                }
-                .buttonStyle(.plain)
+    }
+
+    private var fulfillmentScreenCore: some View {
+        fulfillmentBaseContent
+            .navigationTitle("Fulfillment")
+            .toolbar { fulfillmentToolbarContent }
+    }
+
+    @ToolbarContentBuilder
+    private var fulfillmentToolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .navigationBarTrailing) {
+            Button {
+                isShowingInstructions = true
+            } label: {
+                Image(systemName: "graduationcap")
+                    .font(.title2)
             }
-            if !isAnyLittleWinsSheetPresented {
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer(minLength: 0)
-                    Button("Done") {
-                        commitVisionDraft(for: focusedVisionCategoryID)
-                        commitPurposeDraft(for: focusedPurposeCategoryID)
-                        focusedVisionCategoryID = nil
-                        focusedPurposeCategoryID = nil
-                        focusedField = nil
-                    }
+            .buttonStyle(.plain)
+        }
+        if !isAnyLittleWinsSheetPresented {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer(minLength: 0)
+                Button("Done") {
+                    commitVisionDraft(for: focusedVisionCategoryID)
+                    commitPurposeDraft(for: focusedPurposeCategoryID)
+                    focusedVisionCategoryID = nil
+                    focusedPurposeCategoryID = nil
+                    focusedField = nil
                 }
             }
         }
-        .onChange(of: focusedField) { _, new in
-            commitInlineExcluding(new)
-        }
-        .onChange(of: focusedVisionCategoryID) { old, _ in
-            commitVisionDraft(for: old)
-        }
-        .onChange(of: focusedPurposeCategoryID) { old, _ in
-            commitPurposeDraft(for: old)
-        }
-        .onReceive(radarTimer) { _ in
-            guard !orderedFulfillments.isEmpty else { return }
-            guard Date() >= radarAutoRotatePausedUntil else { return }
-            if highlightedCategoryIndex >= orderedFulfillments.count { highlightedCategoryIndex = 0 }
-            highlightedCategoryIndex = (highlightedCategoryIndex + 1) % orderedFulfillments.count
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .littleWinsScheduleDidChange)) { _ in
-            littleWinsScheduleStoreRevision &+= 1
-        }
-        .sheet(isPresented: $isShowingInstructions) {
+    }
+
+    private var fulfillmentScreenFocusObservers: some View {
+        fulfillmentScreenCore
+            .onChange(of: focusedField) { _, new in
+                commitInlineExcluding(new)
+            }
+            .onChange(of: focusedVisionCategoryID) { old, _ in
+                commitVisionDraft(for: old)
+            }
+            .onChange(of: focusedPurposeCategoryID) { old, _ in
+                commitPurposeDraft(for: old)
+            }
+    }
+
+    private var fulfillmentScreenInteractionObservers: some View {
+        fulfillmentScreenFocusObservers
+            .onReceive(radarTimer) { _ in
+                guard !orderedFulfillments.isEmpty else { return }
+                guard Date() >= radarAutoRotatePausedUntil else { return }
+                if highlightedCategoryIndex >= orderedFulfillments.count { highlightedCategoryIndex = 0 }
+                highlightedCategoryIndex = (highlightedCategoryIndex + 1) % orderedFulfillments.count
+            }
+    }
+
+    private var fulfillmentScreenAppearObserver: some View {
+        fulfillmentScreenInteractionObservers
+            .onAppear {
+                refreshFulfillmentCategoryScoresForCurrentWeek()
+            }
+    }
+
+    private var fulfillmentScreenLifecycleObservers: some View {
+        fulfillmentScreenAppearObserver
+            .onChange(of: scenePhase) { _, phase in
+                guard phase == .active else { return }
+                refreshFulfillmentCategoryScoresForCurrentWeek()
+            }
+    }
+
+    private var fulfillmentScreenPrimaryDataObservers: some View {
+        fulfillmentScreenLifecycleObservers
+            .onChange(of: fulfillments.map(\.updatedAt)) { _, _ in
+                refreshFulfillmentCategoryScoresForCurrentWeek()
+            }
+            .onChange(of: roles.map(\.id)) { _, _ in
+                refreshFulfillmentCategoryScoresForCurrentWeek()
+            }
+            .onChange(of: foci.map(\.id)) { _, _ in
+                refreshFulfillmentCategoryScoresForCurrentWeek()
+            }
+            .onChange(of: resources.map(\.id)) { _, _ in
+                refreshFulfillmentCategoryScoresForCurrentWeek()
+            }
+    }
+
+    private var fulfillmentScreenCoreDataObservers: some View {
+        fulfillmentScreenPrimaryDataObservers
+            .onChange(of: passions.map(\.passion_id)) { _, _ in
+                refreshFulfillmentCategoryScoresForCurrentWeek()
+            }
+    }
+
+    private var fulfillmentScreenDataObservers: some View {
+        fulfillmentScreenCoreDataObservers
+            .onChange(of: passionJoins.map(\.id)) { _, _ in
+                refreshFulfillmentCategoryScoresForCurrentWeek()
+            }
+            .onChange(of: littleWinsDailyCompletions.map(\.id)) { _, _ in
+                refreshFulfillmentCategoryScoresForCurrentWeek()
+            }
+            .onChange(of: reflectionArchives.map(\.id)) { _, _ in
+                refreshFulfillmentCategoryScoresForCurrentWeek()
+            }
+            .onChange(of: outcomes.map(\.updatedAt)) { _, _ in
+                refreshFulfillmentCategoryScoresForCurrentWeek()
+            }
+    }
+
+    private var fulfillmentScreenObserved: some View {
+        fulfillmentScreenDataObservers
+            .onReceive(NotificationCenter.default.publisher(for: .littleWinsScheduleDidChange)) { _ in
+                littleWinsScheduleStoreRevision &+= 1
+                refreshFulfillmentCategoryScoresForCurrentWeek()
+            }
+    }
+
+    private var fulfillmentScreen: some View {
+        fulfillmentScreenObserved
+            .sheet(isPresented: $isShowingInstructions) {
             fulfillmentInstructionsSheet()
         }
         .sheet(item: $littleWinsManagerTarget) { target in
@@ -1479,6 +1567,9 @@ struct FulfillmentView: View {
     }
 
     private func batteryPercentage(for record: Fulfillment) -> Double {
+        if let score = latestFulfillmentWeeklyScore(for: record) {
+            return ((FulfillmentScoringMath.clamp(score, 1, 5) - 1.0) / 4.0) * 100.0
+        }
         let count = completionCount(for: record)
         switch count {
         case 0: return 0
@@ -1487,6 +1578,18 @@ struct FulfillmentView: View {
         case 5: return 75
         default: return 100
         }
+    }
+
+    private func latestFulfillmentWeeklyScore(for record: Fulfillment) -> Double? {
+        let weekStart = FulfillmentScoringMath.weekWindow(for: .now).weekStart
+        return fulfillmentCategoryScoreSnapshots.first(where: {
+            $0.categoryID == record.category_id &&
+            Calendar.current.isDate($0.weekStartDate, inSameDayAs: weekStart)
+        })?.score
+    }
+
+    private func refreshFulfillmentCategoryScoresForCurrentWeek() {
+        _ = try? FulfillmentScoringService().computeAndPersistCurrentWeek(in: modelContext)
     }
 
     // MARK: - Data Helpers

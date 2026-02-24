@@ -177,192 +177,262 @@ struct ContentView: View {
             )
     }
     
-    var body: some View {
+    var body: some View { contentViewScreen }
+
+    private var contentViewNavigationRoot: some View {
         NavigationStack {
-            ZStack {
-                Color(.systemGroupedBackground)
-                    .ignoresSafeArea()
+            contentViewNavigationStackBody
+        }
+    }
 
-                GeometryReader { proxy in
-                    let availableHeight = proxy.size.height - proxy.safeAreaInsets.top - proxy.safeAreaInsets.bottom
-                    let cardSpacing: CGFloat = availableHeight < 760 ? 10 : (availableHeight > 900 ? 20 : 16)
-                    let outerVerticalPadding: CGFloat = availableHeight < 760 ? 4 : (availableHeight > 900 ? 14 : 8)
-                    let cardDensity: CGFloat = availableHeight < 760 ? 0.88 : (availableHeight > 900 ? 1.06 : 1.0)
+    private var contentViewNavigationStackBody: some View {
+        ZStack {
+            Color(.systemGroupedBackground)
+                .ignoresSafeArea()
 
-                    ZStack {
-                        // Background
-                        Color(.systemGroupedBackground)
-                            .edgesIgnoringSafeArea(.all)
+            GeometryReader { proxy in
+                contentViewGeometryContent(proxy: proxy)
+            }
+            .opacity(showSplash ? 0.001 : 1)
+            .allowsHitTesting(!showSplash)
 
-                        // Main content with fixed top and bottom regions, and a flexible middle.
-                        VStack(spacing: 10) {
-                            header
-
-                            TabView(selection: $homePageIndex) {
-                                littleWinsMiddlePage()
-                                    .tag(HomeSwipePage.social.rawValue)
-
-                                centerHomepageMiddleContent(
-                                    outerVerticalPadding: outerVerticalPadding,
-                                    cardSpacing: cardSpacing,
-                                    cardDensity: cardDensity
-                                )
-                                .safeAreaInset(edge: .bottom, spacing: 10) {
-                                    VStack(spacing: 0) {
-                                        footer
-                                        Color.clear.frame(height: 8)
-                                    }
-                                }
-                                .tag(HomeSwipePage.home.rawValue)
-
-                                placeholderMiddlePage(title: "Sharing")
-                                    .tag(HomeSwipePage.littleWins.rawValue)
-                            }
-                            .tabViewStyle(.page(indexDisplayMode: .never))
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .onPreferenceChange(HomeCardHeightPreferenceKey.self) { heights in
-                                var updated = measuredCardHeights
-                                updated.merge(heights) { _, new in new }
-                                if updated != measuredCardHeights {
-                                    measuredCardHeights = updated
-                                }
-                            }
-                            .environment(\.contentCardDensity, cardDensity)
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                        if let emotion = pressedEmotion {
-                            PassionPopupOverlay(
-                                emotionTitle: displayTitle(for: emotion),
-                                items: passions(for: emotion)
-                            )
-                            .allowsHitTesting(false)
-                            .transition(.scale(scale: 0.9).combined(with: .opacity))
-                            .zIndex(1)
-                            .animation(.spring(response: 0.3, dampingFraction: 0.85), value: pressedEmotion)
-                        } else if showVisionPurposePopup {
-                            VisionPurposePopupOverlay(
-                                vision: (drivingForces.first?.ultimateVision ?? ""),
-                                purpose: (drivingForces.first?.ultimatePurpose ?? "")
-                            )
-                            .allowsHitTesting(false)
-                            .transition(.scale(scale: 0.9).combined(with: .opacity))
-                            .zIndex(1)
-                            .animation(.spring(response: 0.3, dampingFraction: 0.85), value: showVisionPurposePopup)
-                        }
-                        else if let selectedOutcome = pressedOutcome {
-                            OutcomePopupOverlay(
-                                outcome: selectedOutcome,
-                                measure: latestMeasure(for: selectedOutcome)
-                            )
-                            .allowsHitTesting(false)
-                            .transition(.scale(scale: 0.9).combined(with: .opacity))
-                            .zIndex(1)
-                            .animation(.spring(response: 0.3, dampingFraction: 0.85), value: pressedOutcome)
-                        }
-                        else if let category = pressedCategoryTitle {
-                            CategoryFulfillmentPopupOverlay(
-                                category: category,
-                                tint: categoryBackgroundColor(for: category),
-                                titleColor: categoryTextColor(for: category),
-                                vision: recordForCategory(category)?.category_vision ?? "",
-                                purpose: recordForCategory(category)?.category_purpose ?? "",
-                                roles: rolesForCategory(category).map { $0.role },
-                                foci: fociForCategory(category).map { $0.activity },
-                                resources: resourcesForCategory(category).map { $0.resource },
-                                passions: passionsForCategory(category)
-                            )
-                            .allowsHitTesting(false)
-                            .transition(.scale(scale: 0.9).combined(with: .opacity))
-                            .zIndex(1)
-                            .animation(.spring(response: 0.3, dampingFraction: 0.85), value: pressedCategoryTitle)
+            if showSplash {
+                LoadingSplashView(
+                    metrics: splashMetrics,
+                    namespace: graphNamespace,
+                    minimumDisplayDuration: 3.0,
+                    onMinimumElapsed: {
+                        Task { @MainActor in
+                            splashMinimumElapsed = true
+                            dismissSplashIfReady()
                         }
                     }
-                    .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
-                }
-                .opacity(showSplash ? 0.001 : 1)
-                .allowsHitTesting(!showSplash)
-
-                if showSplash {
-                    LoadingSplashView(
-                        metrics: splashMetrics,
-                        namespace: graphNamespace,
-                        minimumDisplayDuration: 3.0,
-                        onMinimumElapsed: {
-                            Task { @MainActor in
-                                splashMinimumElapsed = true
-                                dismissSplashIfReady()
-                            }
-                        }
-                    )
-                    .transition(.opacity)
-                    .zIndex(2)
-                }
-            }
-            .ignoresSafeArea(.keyboard)
-        }
-        .navigationDestination(isPresented: $navigateToFulfillmentFromOnboarding) {
-            FulfillmentView()
-        }
-        .fullScreenCover(item: $playSheetDestination) { destination in
-            switch destination {
-            case .action:
-                ActionView()
+                )
+                .transition(.opacity)
+                .zIndex(2)
             }
         }
-        .sheet(isPresented: $isPresentingCaptureView) {
-            CaptureView()
-                .presentationDragIndicator(.visible)
-        }
-        .sheet(isPresented: $isPresentingLittleWinsManagerSheet) {
-            ContentLittleWinsManagerSheetView(
-                categories: orderedFulfillmentRecords.map { ($0.category_id, $0.category) }
-            )
-        }
-        .onChange(of: isActivePlan) { _, newValue in
-            // When Plan Step 5 activates the plan, automatically launch ActionView.
-            if newValue == true {
-                playSheetDestination = .action
-            }
-        }
-        .onAppear {
-            beginStartupPreparationIfNeeded()
-            if shouldShowAnyOnboardingBounce {
-                bounceDrivingCardOnce()
-            }
-            if shouldShowLittleWinsLogoDot {
-                bounceLittleWinsLogoDotOnce()
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("open_fulfillment_after_onboarding"))) { _ in
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                navigateToFulfillmentFromOnboarding = true
-            }
-        }
-        .onChange(of: shouldShowAnyOnboardingBounce) { _, shouldShow in
-            if shouldShow {
-                bounceDrivingCardOnce()
-            } else {
-                drivingCardBounceOn = false
-            }
-        }
-        .onChange(of: shouldShowLittleWinsLogoDot) { _, shouldShow in
-            if shouldShow {
-                bounceLittleWinsLogoDotOnce()
-            } else {
-                littleWinsLogoDotBounceOn = false
-            }
-        }
-        .onReceive(drivingBounceTimer) { _ in
-            guard shouldShowAnyOnboardingBounce else { return }
-            bounceDrivingCardOnce()
-        }
-        .onReceive(drivingBounceTimer) { _ in
-            guard shouldShowLittleWinsLogoDot else { return }
-            bounceLittleWinsLogoDotOnce()
-        }
-        .tint(Color.accentColor)
         .ignoresSafeArea(.keyboard)
+    }
+
+    private func contentViewGeometryContent(proxy: GeometryProxy) -> some View {
+        let availableHeight = proxy.size.height - proxy.safeAreaInsets.top - proxy.safeAreaInsets.bottom
+        let cardSpacing: CGFloat = availableHeight < 760 ? 10 : (availableHeight > 900 ? 20 : 16)
+        let outerVerticalPadding: CGFloat = availableHeight < 760 ? 4 : (availableHeight > 900 ? 14 : 8)
+        let cardDensity: CGFloat = availableHeight < 760 ? 0.88 : (availableHeight > 900 ? 1.06 : 1.0)
+
+        return ZStack {
+            Color(.systemGroupedBackground)
+                .edgesIgnoringSafeArea(.all)
+
+            VStack(spacing: 10) {
+                header
+
+                TabView(selection: $homePageIndex) {
+                    littleWinsMiddlePage()
+                        .tag(HomeSwipePage.social.rawValue)
+
+                    centerHomepageMiddleContent(
+                        outerVerticalPadding: outerVerticalPadding,
+                        cardSpacing: cardSpacing,
+                        cardDensity: cardDensity
+                    )
+                    .safeAreaInset(edge: .bottom, spacing: 10) {
+                        VStack(spacing: 0) {
+                            footer
+                            Color.clear.frame(height: 8)
+                        }
+                    }
+                    .tag(HomeSwipePage.home.rawValue)
+
+                    placeholderMiddlePage(title: "Sharing features coming soon")
+                        .tag(HomeSwipePage.littleWins.rawValue)
+                }
+                .tabViewStyle(.page(indexDisplayMode: .never))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .onPreferenceChange(HomeCardHeightPreferenceKey.self) { heights in
+                    var updated = measuredCardHeights
+                    updated.merge(heights) { _, new in new }
+                    if updated != measuredCardHeights {
+                        measuredCardHeights = updated
+                    }
+                }
+                .environment(\.contentCardDensity, cardDensity)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            contentViewPopupOverlay
+        }
+        .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
+    }
+
+    @ViewBuilder
+    private var contentViewPopupOverlay: some View {
+        if let emotion = pressedEmotion {
+            PassionPopupOverlay(
+                emotionTitle: displayTitle(for: emotion),
+                items: passions(for: emotion)
+            )
+            .allowsHitTesting(false)
+            .transition(.scale(scale: 0.9).combined(with: .opacity))
+            .zIndex(1)
+            .animation(.spring(response: 0.3, dampingFraction: 0.85), value: pressedEmotion)
+        } else if showVisionPurposePopup {
+            VisionPurposePopupOverlay(
+                vision: (drivingForces.first?.ultimateVision ?? ""),
+                purpose: (drivingForces.first?.ultimatePurpose ?? "")
+            )
+            .allowsHitTesting(false)
+            .transition(.scale(scale: 0.9).combined(with: .opacity))
+            .zIndex(1)
+            .animation(.spring(response: 0.3, dampingFraction: 0.85), value: showVisionPurposePopup)
+        } else if let selectedOutcome = pressedOutcome {
+            OutcomePopupOverlay(
+                outcome: selectedOutcome,
+                measure: latestMeasure(for: selectedOutcome)
+            )
+            .allowsHitTesting(false)
+            .transition(.scale(scale: 0.9).combined(with: .opacity))
+            .zIndex(1)
+            .animation(.spring(response: 0.3, dampingFraction: 0.85), value: pressedOutcome)
+        } else if let category = pressedCategoryTitle {
+            CategoryFulfillmentPopupOverlay(
+                category: category,
+                tint: categoryBackgroundColor(for: category),
+                titleColor: categoryTextColor(for: category),
+                vision: recordForCategory(category)?.category_vision ?? "",
+                purpose: recordForCategory(category)?.category_purpose ?? "",
+                roles: rolesForCategory(category).map { $0.role },
+                foci: fociForCategory(category).map { $0.activity },
+                resources: resourcesForCategory(category).map { $0.resource },
+                passions: passionsForCategory(category)
+            )
+            .allowsHitTesting(false)
+            .transition(.scale(scale: 0.9).combined(with: .opacity))
+            .zIndex(1)
+            .animation(.spring(response: 0.3, dampingFraction: 0.85), value: pressedCategoryTitle)
+        }
+    }
+
+    private var contentViewNavigationLayer: some View {
+        contentViewNavigationRoot
+            .navigationDestination(isPresented: $navigateToFulfillmentFromOnboarding) {
+                FulfillmentView()
+            }
+            .fullScreenCover(item: $playSheetDestination) { destination in
+                switch destination {
+                case .action:
+                    ActionView()
+                }
+            }
+    }
+
+    private var contentViewPresentationLayer: some View {
+        contentViewNavigationLayer
+            .sheet(isPresented: $isPresentingCaptureView) {
+                CaptureView()
+                    .presentationDragIndicator(.visible)
+            }
+            .sheet(isPresented: $isPresentingLittleWinsManagerSheet) {
+                ContentLittleWinsManagerSheetView(
+                    categories: orderedFulfillmentRecords.map { ($0.category_id, $0.category) }
+                )
+            }
+    }
+
+    private var contentViewLifecycleLayer: some View {
+        contentViewPresentationLayer
+            .onChange(of: isActivePlan) { _, newValue in
+                if newValue == true {
+                    playSheetDestination = .action
+                }
+            }
+            .onAppear {
+                beginStartupPreparationIfNeeded()
+                refreshFulfillmentCategoryScoresForCurrentWeek()
+                if shouldShowAnyOnboardingBounce {
+                    bounceDrivingCardOnce()
+                }
+                if shouldShowLittleWinsLogoDot {
+                    bounceLittleWinsLogoDotOnce()
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("open_fulfillment_after_onboarding"))) { _ in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    navigateToFulfillmentFromOnboarding = true
+                }
+            }
+    }
+
+    private var contentViewBounceObservers: some View {
+        contentViewLifecycleLayer
+            .onChange(of: shouldShowAnyOnboardingBounce) { _, shouldShow in
+                if shouldShow {
+                    bounceDrivingCardOnce()
+                } else {
+                    drivingCardBounceOn = false
+                }
+            }
+            .onChange(of: shouldShowLittleWinsLogoDot) { _, shouldShow in
+                if shouldShow {
+                    bounceLittleWinsLogoDotOnce()
+                } else {
+                    littleWinsLogoDotBounceOn = false
+                }
+            }
+            .onReceive(drivingBounceTimer) { _ in
+                guard shouldShowAnyOnboardingBounce else { return }
+                bounceDrivingCardOnce()
+            }
+            .onReceive(drivingBounceTimer) { _ in
+                guard shouldShowLittleWinsLogoDot else { return }
+                bounceLittleWinsLogoDotOnce()
+            }
+    }
+
+    private var contentViewPrimaryRefreshObservers: some View {
+        contentViewBounceObservers
+            .onChange(of: scenePhase) { _, phase in
+                guard phase == .active else { return }
+                refreshFulfillmentCategoryScoresForCurrentWeek()
+            }
+            .onChange(of: fulfillments.map(\.updatedAt)) { _, _ in
+                refreshFulfillmentCategoryScoresForCurrentWeek()
+            }
+            .onChange(of: roles.map(\.id)) { _, _ in
+                refreshFulfillmentCategoryScoresForCurrentWeek()
+            }
+            .onChange(of: foci.map(\.id)) { _, _ in
+                refreshFulfillmentCategoryScoresForCurrentWeek()
+            }
+            .onChange(of: resources.map(\.id)) { _, _ in
+                refreshFulfillmentCategoryScoresForCurrentWeek()
+            }
+    }
+
+    private var contentViewRefreshObservers: some View {
+        contentViewPrimaryRefreshObservers
+            .onChange(of: passions.map(\.passion_id)) { _, _ in
+                refreshFulfillmentCategoryScoresForCurrentWeek()
+            }
+            .onChange(of: passionJoins.map(\.id)) { _, _ in
+                refreshFulfillmentCategoryScoresForCurrentWeek()
+            }
+            .onChange(of: littleWinsDailyCompletions.map(\.id)) { _, _ in
+                refreshFulfillmentCategoryScoresForCurrentWeek()
+            }
+            .onChange(of: reflectionArchives.map(\.id)) { _, _ in
+                refreshFulfillmentCategoryScoresForCurrentWeek()
+            }
+            .onChange(of: outcomes.map(\.updatedAt)) { _, _ in
+                refreshFulfillmentCategoryScoresForCurrentWeek()
+            }
+    }
+
+    private var contentViewScreen: some View {
+        contentViewRefreshObservers
+            .tint(Color.accentColor)
+            .ignoresSafeArea(.keyboard)
     }
 
     @MainActor
@@ -430,6 +500,8 @@ struct ContentView: View {
     
     @Query(sort: \PassionFulfillmentJoin.id, order: .forward)
     private var passionJoins: [PassionFulfillmentJoin]
+    @Query(sort: \PassionScoreSnapshot.monthStartDate, order: .reverse)
+    private var passionScoreSnapshots: [PassionScoreSnapshot]
 
     @Query private var fulfillments: [Fulfillment]
     @Query private var roles: [FulfillmentRoles]
@@ -439,6 +511,8 @@ struct ContentView: View {
     private var littleWinsDailyCompletions: [LittleWinsDailyCompletion]
     @Query(sort: \ActionBlocksReflectionArchive.completedAt, order: .reverse)
     private var reflectionArchives: [ActionBlocksReflectionArchive]
+    @Query(sort: \FulfillmentCategoryScoreSnapshot.weekStartDate, order: .reverse)
+    private var fulfillmentCategoryScoreSnapshots: [FulfillmentCategoryScoreSnapshot]
 
     // MARK: - Helpers to simplify complex expressions
     private func categoryTextColor(for category: String) -> Color {
@@ -1192,9 +1266,31 @@ struct ContentView: View {
 
     private func usagePoints(for emotionLabel: String) -> Int {
         let key = emotionKey(for: emotionLabel)
+        if let score = latestMonthlyPassionScore(forEmotionKey: key) {
+            return Int(PassionScoringMath.clamp(score.rounded(), min: 0, max: 4))
+        }
         let ids = Set(passions.filter { $0.emotion == key }.map { $0.passion_id })
         let count = passionJoins.filter { ids.contains($0.passion_id) }.count
         return min(4, count)
+    }
+
+    private func latestMonthlyPassionScore(forEmotionKey emotionKey: String) -> Double? {
+        guard let type = passionType(forEmotionKey: emotionKey) else { return nil }
+        let monthStart = PassionScoringMath.monthWindow(for: .now).monthStart
+        return passionScoreSnapshots.first(where: {
+            $0.passionTypeRaw == type.rawValue &&
+            Calendar.current.isDate($0.monthStartDate, inSameDayAs: monthStart)
+        })?.score
+    }
+
+    private func passionType(forEmotionKey emotionKey: String) -> PassionType? {
+        switch emotionKey {
+        case "love": return .love
+        case "vows": return .vows
+        case "thrill": return .thrill
+        case "just": return .hate
+        default: return nil
+        }
     }
 
     private func categoryKey(_ raw: String) -> String {
@@ -1257,6 +1353,9 @@ struct ContentView: View {
     }
 
     private func batteryPercentage(for record: Fulfillment) -> Double {
+        if let score = latestFulfillmentWeeklyScore(for: record) {
+            return ((FulfillmentScoringMath.clamp(score, 1, 5) - 1.0) / 4.0) * 100.0
+        }
         let count = completionCount(for: record)
         switch count {
         case 0: return 0
@@ -1265,6 +1364,18 @@ struct ContentView: View {
         case 5: return 75
         default: return 100
         }
+    }
+
+    private func latestFulfillmentWeeklyScore(for record: Fulfillment) -> Double? {
+        let weekStart = FulfillmentScoringMath.weekWindow(for: .now).weekStart
+        return fulfillmentCategoryScoreSnapshots.first(where: {
+            $0.categoryID == record.category_id &&
+            Calendar.current.isDate($0.weekStartDate, inSameDayAs: weekStart)
+        })?.score
+    }
+
+    private func refreshFulfillmentCategoryScoresForCurrentWeek() {
+        _ = try? FulfillmentScoringService().computeAndPersistCurrentWeek(in: modelContext)
     }
 
     private func progressTrim(for measure: OutcomesMeasure, outcomeID: UUID) -> Double {

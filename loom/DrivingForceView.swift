@@ -53,6 +53,8 @@ struct DrivingForceView: View {
     ) private var justPassions: [Passion]
     @Query(sort: \PassionFulfillmentJoin.id, order: .forward)
     private var passionJoins: [PassionFulfillmentJoin]
+    @Query(sort: \PassionScoreSnapshot.monthStartDate, order: .reverse)
+    private var passionScoreSnapshots: [PassionScoreSnapshot]
     
     // Consolidated passion categories
     private var passionQueries: [PassionCategory] {
@@ -171,9 +173,11 @@ struct DrivingForceView: View {
                 visionTextDraft = existing.ultimateVision
                 purposeTextDraft = existing.ultimatePurpose
             }
+            refreshPassionScoresForCurrentMonthIfNeeded()
             maybeAutoOpenCreateVision()
         }
         .onAppear {
+            refreshPassionScoresForCurrentMonthIfNeeded()
             maybeAutoOpenCreateVision()
         }
         .onChange(of: focusedField) { oldValue, newValue in
@@ -497,7 +501,7 @@ struct DrivingForceView: View {
                 .stroke(colorScheme == .dark ? Color.white : Color.black, lineWidth: 3)
                 .frame(width: 92, height: 58)
                 .overlay {
-                    Text("\(totalPassionSignalScore)/16")
+                    Text(totalPassionSignalScoreText)
                         .font(.system(size: 26, weight: .bold))
                         .foregroundStyle(.primary)
                 }
@@ -549,6 +553,13 @@ struct DrivingForceView: View {
     }
 
     private func usagePoints(for emotionKey: String) -> Int {
+        if let snapScore = latestMonthlyPassionScore(for: emotionKey) {
+            return Int(PassionScoringMath.clamp(snapScore.rounded(), min: 0, max: 4))
+        }
+        return legacyUsagePoints(for: emotionKey)
+    }
+
+    private func legacyUsagePoints(for emotionKey: String) -> Int {
         let ids: Set<UUID>
         switch emotionKey {
         case "love":
@@ -566,11 +577,45 @@ struct DrivingForceView: View {
         return min(4, count)
     }
 
-    private var totalPassionSignalScore: Int {
-        usagePoints(for: "love")
-        + usagePoints(for: "vows")
-        + usagePoints(for: "thrill")
-        + usagePoints(for: "just")
+    private var totalPassionSignalScoreText: String {
+        let values = ["love", "vows", "thrill", "just"].map { passionDisplayScore(for: $0) }
+        let total = values.reduce(0, +)
+        if abs(total.rounded() - total) < 0.001 {
+            return "\(Int(total.rounded()))/16"
+        }
+        return String(format: "%.1f/16", total)
+    }
+
+    private func passionDisplayScore(for emotionKey: String) -> Double {
+        if let snapScore = latestMonthlyPassionScore(for: emotionKey) {
+            return PassionScoringMath.clamp(snapScore, min: 0, max: 4)
+        }
+        return Double(legacyUsagePoints(for: emotionKey))
+    }
+
+    private func latestMonthlyPassionScore(for emotionKey: String) -> Double? {
+        guard let passionType = passionType(forEmotionKey: emotionKey) else { return nil }
+        let monthStart = PassionScoringMath.monthWindow(for: .now).monthStart
+        return passionScoreSnapshots.first(where: {
+            $0.passionTypeRaw == passionType.rawValue &&
+            Calendar.current.isDate($0.monthStartDate, inSameDayAs: monthStart)
+        })?.score
+    }
+
+    private func passionType(forEmotionKey emotionKey: String) -> PassionType? {
+        switch emotionKey {
+        case "love": return .love
+        case "vows": return .vows
+        case "thrill": return .thrill
+        case "just": return .hate
+        default: return nil
+        }
+    }
+
+    private func refreshPassionScoresForCurrentMonthIfNeeded() {
+        let service = PassionScoringService()
+        let monthStart = PassionScoringMath.monthWindow(for: .now).monthStart
+        _ = try? service.computeAndPersistSnapshots(for: monthStart, in: context)
     }
 
     @ViewBuilder

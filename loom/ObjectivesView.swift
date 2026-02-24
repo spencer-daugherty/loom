@@ -741,6 +741,7 @@ struct CompletedOutcomeDetailView: View {
     @Query(sort: \CompletedOutcomeMeasurePointArchive.measuredAt, order: .forward) private var measureRows: [CompletedOutcomeMeasurePointArchive]
     @Query(sort: \OutcomeAnalyticsEvent.occurredAt, order: .reverse) private var allOutcomeEvents: [OutcomeAnalyticsEvent]
     @Query(sort: \Passion.date, order: .forward) private var allPassions: [Passion]
+    @Query(sort: \CompletedOutcomePassionLinkArchive.createdAt, order: .forward) private var completedOutcomePassionLinks: [CompletedOutcomePassionLinkArchive]
     @State private var isShowingDeleteAlert = false
     @State private var insightDetailSheet: InsightDetailSheetType? = nil
 
@@ -790,6 +791,13 @@ struct CompletedOutcomeDetailView: View {
     }
 
     private var connectedPassionRows: [String] {
+        let archivedLinks = completedOutcomePassionLinks.filter { $0.completedOutcomeArchiveId == archive.id }
+        if !archivedLinks.isEmpty {
+            return archivedLinks.map {
+                "\(displayEmotionLabelObjectives($0.emotionSnapshot)): \($0.passionSnapshot)"
+            }
+        }
+
         let snapshots = CompletedOutcomePassionsDetailStore.snapshots(for: archive.id)
         let liveByID = Dictionary(uniqueKeysWithValues: allPassions.map { ($0.passion_id, $0) })
         return snapshots.map { snap in
