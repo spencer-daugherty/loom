@@ -74,6 +74,7 @@ struct ContentView: View {
     @State private var navigateToFulfillmentFromOnboarding = false
     @State private var isPresentingVacationModeFromBanner = false
     @State private var dismissVacationModeBanner = false
+    @State private var enableHeaderPageAnimations = false
 
     private enum PlayDestination: String, Identifiable, Hashable {
         case action
@@ -89,6 +90,16 @@ struct ContentView: View {
         case social = 0
         case home = 1
         case littleWins = 2
+    }
+
+    private var headerPageFadeAnimation: Animation? {
+        enableHeaderPageAnimations ? .easeInOut(duration: 0.2) : nil
+    }
+
+    private var headerPageSpringAnimation: Animation? {
+        enableHeaderPageAnimations
+            ? .interactiveSpring(response: 0.34, dampingFraction: 0.72, blendDuration: 0.2)
+            : nil
     }
 
     private var isActivePlan: Bool {
@@ -1564,7 +1575,7 @@ struct ContentView: View {
                 }
                 .padding(.horizontal)
                 .padding(.top, 8)
-                .animation(.easeInOut(duration: 0.2), value: homePageIndex)
+                .animation(headerPageFadeAnimation, value: homePageIndex)
                 .overlay {
                     GeometryReader { proxy in
                         let centerX = proxy.size.width / 2
@@ -1581,9 +1592,10 @@ struct ContentView: View {
                                     y: titleY
                                 )
 
-                            Text("Sharing")
-                                .font(.headline.weight(.semibold))
-                                .foregroundStyle(.secondary)
+                            Image("LoomAI")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 26, height: 26)
                                 .opacity(homePageIndex == HomeSwipePage.littleWins.rawValue ? 1 : 0)
                                 .position(
                                     x: homePageIndex == HomeSwipePage.littleWins.rawValue
@@ -1592,7 +1604,7 @@ struct ContentView: View {
                                     y: titleY
                                 )
                         }
-                        .animation(.interactiveSpring(response: 0.34, dampingFraction: 0.72, blendDuration: 0.2), value: homePageIndex)
+                        .animation(headerPageSpringAnimation, value: homePageIndex)
                     }
                 }
 
@@ -1631,6 +1643,13 @@ struct ContentView: View {
                 measuredHeaderLogoWidth = width
             }
         }
+        .onAppear {
+            if !enableHeaderPageAnimations {
+                DispatchQueue.main.async {
+                    enableHeaderPageAnimations = true
+                }
+            }
+        }
     }
 
     @ViewBuilder
@@ -1650,7 +1669,7 @@ struct ContentView: View {
                         ZStack {
                             if idx == homePageIndex {
                                 Capsule()
-                                    .fill(Color.primary.opacity(0.22))
+                                    .fill(pageIndicatorSelectedFill(for: idx))
                                     .frame(width: indicatorWidth, height: 4)
                                     .matchedGeometryEffect(id: "home_page_indicator", in: pageIndicatorNamespace)
                                     .shadow(color: Color.primary.opacity(0.06), radius: 3, x: 0, y: 1)
@@ -1663,7 +1682,7 @@ struct ContentView: View {
             .frame(maxWidth: .infinity, alignment: .center)
         }
         .frame(height: 4)
-        .animation(.interactiveSpring(response: 0.34, dampingFraction: 0.72, blendDuration: 0.2), value: homePageIndex)
+        .animation(headerPageSpringAnimation, value: homePageIndex)
     }
 
     @ViewBuilder
@@ -1727,13 +1746,41 @@ struct ContentView: View {
     private func placeholderMiddlePage(title: String) -> some View {
         VStack {
             Spacer()
-            Text(title)
-                .font(.title2.weight(.semibold))
-                .foregroundStyle(.secondary)
+            if title == "Sharing features coming soon" {
+                Image("LoomAI")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 64, height: 64)
+            } else {
+                Text(title)
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
+    }
+
+    private func pageIndicatorSelectedFill(for idx: Int) -> some ShapeStyle {
+        if idx == HomeSwipePage.littleWins.rawValue {
+            return AnyShapeStyle(
+                AngularGradient(
+                    colors: [
+                        Color(red: 0.22, green: 0.47, blue: 1.0),
+                        Color(red: 0.15, green: 0.83, blue: 0.95),
+                        Color(red: 0.62, green: 0.40, blue: 0.95),
+                        Color(red: 0.80, green: 0.38, blue: 0.78),
+                        Color(red: 0.98, green: 0.36, blue: 0.58),
+                        Color(red: 0.75, green: 0.42, blue: 0.74),
+                        Color(red: 0.22, green: 0.47, blue: 1.0)
+                    ],
+                    center: .center,
+                    angle: .degrees(0)
+                )
+            )
+        }
+        return AnyShapeStyle(Color.primary.opacity(0.22))
     }
 
     private func littleWinsMiddlePage() -> some View {
