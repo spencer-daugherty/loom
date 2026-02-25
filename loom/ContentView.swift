@@ -1445,13 +1445,24 @@ struct ContentView: View {
     }
 
     private var header: some View {
-        VStack(spacing: 4) {
+        let headerScreenWidth = UIScreen.main.bounds.width
+        let useShortWeekdayHeaderDate = headerScreenWidth <= 430
+        let leftDateMaxWidth = max(88, ((headerScreenWidth - max(measuredHeaderLogoWidth, 56)) / 2) - 24)
+        return VStack(spacing: 4) {
             ZStack {
                 HStack {
                     Text(Date()
-                        .formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
+                        .formatted(
+                            useShortWeekdayHeaderDate
+                            ? .dateTime.weekday(.abbreviated).month(.abbreviated).day()
+                            : .dateTime.weekday(.wide).month(.abbreviated).day()
+                        ))
                         .font(.subheadline)
                         .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .allowsTightening(true)
+                        .frame(maxWidth: leftDateMaxWidth, alignment: .leading)
                         .opacity(homePageIndex == HomeSwipePage.social.rawValue ? 0 : 1)
 
                     Spacer()

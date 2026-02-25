@@ -434,6 +434,22 @@ struct FulfillmentStartView: View {
         ["blue", "indigo", "green", "purple", "red", "orange"]
     }
 
+    private var screenHeight: CGFloat { UIScreen.main.bounds.height }
+    private var screenWidth: CGFloat { UIScreen.main.bounds.width }
+    private var isCompactIntroLayout: Bool { screenHeight <= 740 || screenWidth <= 390 }
+    private var introSubtextFont: Font { isCompactIntroLayout ? .system(size: 14) : .body }
+    private var introHeroHeight: CGFloat {
+        switch screenHeight {
+        case ...680: return 210
+        case ...740: return 240
+        case ...812: return 300
+        default: return 420
+        }
+    }
+    private var introFooterReserve: CGFloat {
+        screenHeight <= 680 ? 122 : (screenHeight <= 740 ? 112 : 92)
+    }
+
     private func categoryKey(_ raw: String) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !trimmed.isEmpty else { return "" }
@@ -618,7 +634,7 @@ struct FulfillmentStartView: View {
             }
         }
         .padding(.horizontal)
-        .padding(.bottom, step == .summary ? 100 : 0)
+        .padding(.bottom, step == .intro ? introFooterReserve : (step == .summary ? 100 : 0))
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
@@ -635,11 +651,11 @@ struct FulfillmentStartView: View {
                             .resizable()
                             .scaledToFit()
                             .frame(maxWidth: .infinity)
-                            .frame(height: 420)
+                            .frame(height: introHeroHeight)
                             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
                 }
-                .frame(height: 420)
+                .frame(height: introHeroHeight)
                 .padding(.bottom, 2)
             }
 
@@ -650,19 +666,19 @@ struct FulfillmentStartView: View {
             if step == .intro {
                 HStack(spacing: 6) {
                     Image(systemName: "clock.fill")
-                        .font(.caption)
+                        .font(isCompactIntroLayout ? .caption2 : .caption)
                     Text("~7 minutes")
-                        .font(.caption.weight(.bold))
+                        .font((isCompactIntroLayout ? Font.caption2 : .caption).weight(.bold))
                 }
                 .foregroundStyle(.secondary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
+                .padding(.horizontal, isCompactIntroLayout ? 8 : 10)
+                .padding(.vertical, isCompactIntroLayout ? 4 : 6)
                 .background(Color(.systemGray5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .frame(maxWidth: .infinity, alignment: .center)
             }
 
             Text(currentStepDisplayTitle)
-                .font(.largeTitle)
+                .font(isCompactIntroLayout && step == .intro ? .title2 : .largeTitle)
                 .fontWeight(.bold)
                 .frame(maxWidth: .infinity, alignment: .center)
         }
@@ -852,21 +868,30 @@ struct FulfillmentStartView: View {
     }
 
     private var introStep: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: isCompactIntroLayout ? 8 : 10) {
             Text("Design the most important areas of your life.")
+                .font(introSubtextFont)
                 .foregroundStyle(.secondary)
                 .lineLimit(nil)
+                .minimumScaleFactor(0.8)
+                .allowsTightening(true)
                 .fixedSize(horizontal: false, vertical: true)
             Text("These are core categories that drive fulfillment. When they're out of balance, life is harder.")
+                .font(introSubtextFont)
                 .foregroundStyle(.secondary)
                 .lineLimit(nil)
+                .minimumScaleFactor(0.8)
+                .allowsTightening(true)
                 .fixedSize(horizontal: false, vertical: true)
             Text("They're never finished. You continually improve them to stay moving forward.")
+                .font(introSubtextFont)
                 .foregroundStyle(.secondary)
                 .lineLimit(nil)
+                .minimumScaleFactor(0.8)
+                .allowsTightening(true)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(14)
+        .padding(isCompactIntroLayout ? 12 : 14)
         .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
     }
 

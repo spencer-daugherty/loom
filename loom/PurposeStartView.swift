@@ -120,6 +120,10 @@ struct PurposeStartView: View {
     private var contentBottomPadding: CGFloat {
         step == .summary ? 100 : 0
     }
+    private var screenHeight: CGFloat { UIScreen.main.bounds.height }
+    private var screenWidth: CGFloat { UIScreen.main.bounds.width }
+    private var isCompactIntroLayout: Bool { screenHeight <= 740 || screenWidth <= 390 }
+    private var introSubtextFont: Font { isCompactIntroLayout ? .system(size: 14) : .body }
 
     var body: some View {
         ZStack {
@@ -396,21 +400,21 @@ struct PurposeStartView: View {
     private var introStep: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("This isn’t long-term goals.")
-                .font(.body)
+                .font(introSubtextFont)
                 .lineLimit(nil)
                 .minimumScaleFactor(0.8)
                 .allowsTightening(true)
                 .fixedSize(horizontal: false, vertical: true)
                 .foregroundStyle(.secondary)
             Text("It’s who you are: your values, principles, and high-level direction that tends to stay stable over time.")
-                .font(.body)
+                .font(introSubtextFont)
                 .lineLimit(nil)
                 .minimumScaleFactor(0.8)
                 .allowsTightening(true)
                 .fixedSize(horizontal: false, vertical: true)
                 .foregroundStyle(.secondary)
             Text("Wording can evolve, but the themes should remain a compass.")
-                .font(.body)
+                .font(introSubtextFont)
                 .lineLimit(nil)
                 .minimumScaleFactor(0.8)
                 .allowsTightening(true)
