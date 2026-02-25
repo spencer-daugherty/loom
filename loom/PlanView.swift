@@ -354,8 +354,7 @@ struct PlanView: View {
     }
 
     private var isNextDisabled: Bool {
-        morningPowerQuestion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-        incantation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        false
     }
 
     private var isMorningMissing: Bool {
@@ -364,6 +363,10 @@ struct PlanView: View {
 
     private var isIncantationMissing: Bool {
         incantation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var isStep1CompletelyEmpty: Bool {
+        isMorningMissing && isIncantationMissing
     }
 
     private var secondaryButtonTextColor: Color {
@@ -389,7 +392,7 @@ struct PlanView: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("What am I happy for or grateful about in life right now?")
+                Text("What am I happy for or grateful about in life right now? (Optional)")
                     .font(.headline)
                 TextField("My dreams, aspirations, and goals", text: $morningPowerQuestion)
                     .font(weeklyPlanningFieldFont)
@@ -409,7 +412,7 @@ struct PlanView: View {
             .padding(.top, 16)
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("What’s a simple phrase that inspires you?")
+                Text("What’s a simple phrase that inspires you? (Optional)")
                     .font(.headline)
                 TextField("Where I focus improves", text: $incantation)
                     .font(weeklyPlanningFieldFont)
@@ -455,7 +458,7 @@ struct PlanView: View {
                         saveStepOneAndAdvance()
                     }
                 } label: {
-                    Text("Next")
+                    Text(isStep1CompletelyEmpty ? "Skip" : "Next")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
@@ -701,6 +704,7 @@ struct PlanStepTwoView: View {
     @AppStorage("capture_default_due_date_attention_days")
     private var dueDateAttentionDays: Int = 7
     private let hiddenUntilLaterIconName = "clock.arrow.trianglehead.clockwise.rotate.90.path.dotted"
+    private let minimumActiveCaptureActionsRequired = 6
 
     private func normalizedActionText(_ text: String) -> String {
         text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -732,6 +736,18 @@ struct PlanStepTwoView: View {
 
     private var hasDraftInput: Bool {
         !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var activeCaptureActionCount: Int {
+        allItems.filter { !$0.isGhost }.count
+    }
+
+    private var hasMinimumActiveCaptureActions: Bool {
+        activeCaptureActionCount >= minimumActiveCaptureActionsRequired
+    }
+
+    private var remainingActiveCaptureActionsNeeded: Int {
+        max(0, minimumActiveCaptureActionsRequired - activeCaptureActionCount)
     }
 
     var body: some View {
@@ -783,6 +799,29 @@ struct PlanStepTwoView: View {
                 }
 
                 Spacer(minLength: 0)
+            }
+
+            if !hasMinimumActiveCaptureActions {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(Color.black.opacity(0.7))
+                        .padding(.top, 1)
+
+                    Text("Add \(remainingActiveCaptureActionsNeeded) more action\(remainingActiveCaptureActionsNeeded == 1 ? "" : "s") to continue.")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Color.black.opacity(0.7))
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color(red: 0.98, green: 0.92, blue: 0.72))
+                )
             }
 
             HStack(spacing: 10) {
@@ -924,6 +963,8 @@ struct PlanStepTwoView: View {
                 Button {
                     if hasDraftInput {
                         triggerStep2InputValidationFeedback()
+                    } else if !hasMinimumActiveCaptureActions {
+                        triggerStep2MinimumCountFeedback()
                     } else {
                         isShowingNextConfirmation = true
                     }
@@ -932,7 +973,7 @@ struct PlanStepTwoView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(hasDraftInput ? Color(.systemGray3) : .accentColor)
+                .tint((hasDraftInput || !hasMinimumActiveCaptureActions) ? Color(.systemGray3) : .accentColor)
             }
             .padding(.bottom, 2)
         }
@@ -962,6 +1003,14 @@ struct PlanStepTwoView: View {
         }
         .onChange(of: input) { _, newValue in
             if newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                shouldHighlightStep2InputValidation = false
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    showStep2ValidationHint = false
+                }
+            }
+        }
+        .onChange(of: allItems.map(\.id)) { _, _ in
+            if hasMinimumActiveCaptureActions {
                 shouldHighlightStep2InputValidation = false
                 withAnimation(.easeInOut(duration: 0.15)) {
                     showStep2ValidationHint = false
@@ -1123,6 +1172,28 @@ struct PlanStepTwoView: View {
         step2ValidationResetWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.8, execute: workItem)
     }
+
+    private func triggerStep2MinimumCountFeedback() {
+        step2ValidationResetWorkItem?.cancel()
+        let remaining = max(0, minimumActiveCaptureActionsRequired - activeCaptureActionCount)
+        let noun = remaining == 1 ? "action" : "actions"
+        step2ValidationMessage = "Add \(remaining) more \(noun) to continue"
+        shouldHighlightStep2InputValidation = false
+        highlightedDuplicateItemID = nil
+        withAnimation(.easeInOut(duration: 0.15)) {
+            showStep2ValidationHint = true
+        }
+
+        let workItem = DispatchWorkItem {
+            shouldHighlightStep2InputValidation = false
+            highlightedDuplicateItemID = nil
+            withAnimation(.easeInOut(duration: 0.15)) {
+                showStep2ValidationHint = false
+            }
+        }
+        step2ValidationResetWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8, execute: workItem)
+    }
 }
 
 // MARK: - Step 3
@@ -1161,6 +1232,7 @@ struct PlanStepThreeView: View {
 
     @State private var showHidden: Bool = false
     @State private var isCategorizeExpanded: Bool = false
+    @State private var autoGroupOutlineAngle: Double = 0
 
     @State private var poolItemIDs: [UUID] = []
     @State private var chunks: [ChunkContainerState] = []
@@ -1339,6 +1411,22 @@ struct PlanStepThreeView: View {
             }
         }
         return result
+    }
+
+    private var autoGroupGradient: AngularGradient {
+        AngularGradient(
+            colors: [
+                Color(red: 0.22, green: 0.47, blue: 1.0),
+                Color(red: 0.15, green: 0.83, blue: 0.95),
+                Color(red: 0.62, green: 0.40, blue: 0.95),
+                Color(red: 0.80, green: 0.38, blue: 0.78),
+                Color(red: 0.98, green: 0.36, blue: 0.58),
+                Color(red: 0.75, green: 0.42, blue: 0.74),
+                Color(red: 0.22, green: 0.47, blue: 1.0)
+            ],
+            center: .center,
+            angle: .degrees(autoGroupOutlineAngle)
+        )
     }
 
     private func formatDueDate(_ date: Date) -> String {
@@ -1624,6 +1712,37 @@ struct PlanStepThreeView: View {
                 .buttonStyle(.plain)
                 .padding(.bottom, 2)
             }
+
+            HStack {
+                Spacer(minLength: 0)
+                Button {
+                    // Placeholder for future auto-group behavior.
+                } label: {
+                    HStack(spacing: 6) {
+                        Image("LoomAI")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 27, height: 27)
+                        Text("AutoGroup")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(autoGroupGradient)
+                    }
+                    .padding(.horizontal, 15)
+                    .padding(.vertical, 9)
+                    .overlay(
+                        Capsule()
+                            .stroke(autoGroupGradient, lineWidth: 2.25)
+                    )
+                }
+                .buttonStyle(.plain)
+                .onAppear {
+                    guard autoGroupOutlineAngle == 0 else { return }
+                    withAnimation(.linear(duration: 8).repeatForever(autoreverses: false)) {
+                        autoGroupOutlineAngle = 360
+                    }
+                }
+            }
+            .padding(.bottom, 2)
 
             HStack(spacing: 12) {
                 Button {
