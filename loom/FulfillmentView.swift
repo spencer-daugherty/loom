@@ -3491,6 +3491,13 @@ private struct FulfillmentTrendsView: View {
         selectedWeekSnapshots.max(by: { $0.score < $1.score })
     }
 
+    private var strongestSnapshotIfUnique: FulfillmentCategoryScoreSnapshot? {
+        guard let bestSnapshot else { return nil }
+        let bestRounded = roundedTenth(bestSnapshot.score)
+        let tiedCount = selectedWeekSnapshots.filter { roundedTenth($0.score) == bestRounded }.count
+        return tiedCount == 1 ? bestSnapshot : nil
+    }
+
     private var averageScore: Double {
         guard !selectedWeekSnapshots.isEmpty else { return 0 }
         return selectedWeekSnapshots.map(\.score).reduce(0, +) / Double(selectedWeekSnapshots.count)
@@ -3498,11 +3505,15 @@ private struct FulfillmentTrendsView: View {
 
     private var biggestMover: (FulfillmentCategoryScoreSnapshot, Double)? {
         guard let _ = baselineVisibleWeekStart else { return nil }
-        return selectedWeekSnapshots.compactMap { snap in
+        let deltas: [(FulfillmentCategoryScoreSnapshot, Double)] = selectedWeekSnapshots.compactMap { (snap: FulfillmentCategoryScoreSnapshot) -> (FulfillmentCategoryScoreSnapshot, Double)? in
             guard let delta = categoryDisplayedDelta(for: snap) else { return nil }
             return (snap, delta)
         }
-        .max(by: { abs($0.1) < abs($1.1) })
+        let result = deltas.max(by: { (lhs: (FulfillmentCategoryScoreSnapshot, Double), rhs: (FulfillmentCategoryScoreSnapshot, Double)) in
+            abs(lhs.1) < abs(rhs.1)
+        })
+        if let result, abs(result.1) < 0.05 { return nil }
+        return result
     }
 
     private var baselineVisibleWeekStart: Date? {
@@ -3730,13 +3741,13 @@ private struct FulfillmentTrendsView: View {
             )
             summaryTile(
                 title: "Strongest",
-                value: bestSnapshot.map { shortLabel($0.categoryTitleSnapshot) } ?? "—",
-                subtitle: bestSnapshot.map { String(format: "%.1f/5", $0.score) } ?? "no data"
+                value: strongestSnapshotIfUnique.map { shortLabel($0.categoryTitleSnapshot) } ?? "—",
+                subtitle: strongestSnapshotIfUnique.map { String(format: "%.1f/5", $0.score) } ?? "—"
             )
             summaryTile(
                 title: "Mover",
                 value: biggestMover.map { shortLabel($0.0.categoryTitleSnapshot) } ?? "—",
-                subtitle: biggestMover.map { String(format: "%@%.1f", $0.1 >= 0 ? "+" : "", $0.1) } ?? "no prior"
+                subtitle: biggestMover.map { String(format: "%@%.1f", $0.1 >= 0 ? "+" : "", $0.1) } ?? "—"
             )
         }
     }
