@@ -790,14 +790,31 @@ struct AccountView: View {
 }
 
 struct VacationModeView: View {
+    private struct VacationPassionSnapshot: Codable, Hashable {
+        var passionID: UUID
+        var emotion: String
+        var passion: String
+    }
+
+    @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
-    @State private var startToday = false
+    @Query(sort: \Passion.date, order: .forward) private var passions: [Passion]
+    @Query(sort: \VacationModeArchive.endedAt, order: .reverse) private var vacationArchives: [VacationModeArchive]
+    @State private var startToday = true
     @State private var startDate = Calendar.current.startOfDay(for: Date())
     @State private var returnDate = Calendar.current.startOfDay(for: Date())
+    @State private var attentionDays = 30
+    @State private var selectedPassionIDs: Set<UUID> = []
     @State private var savedConfig = VacationModeStore.config()
+    @State private var isShowingPassionsSheet = false
+    @State private var isShowingPreviousVacations = false
 
     private var today: Date { Calendar.current.startOfDay(for: .now) }
     private var effectiveStartDate: Date { startToday ? today : startDate }
+    private var minimumReturnDate: Date {
+        Calendar.current.date(byAdding: .day, value: 1, to: effectiveStartDate) ?? effectiveStartDate
+    }
+    private var previousVacationsAvailable: Bool { !vacationArchives.isEmpty }
 
     private var hasChanges: Bool {
         currentConfigToSave != savedConfig.normalized
@@ -807,7 +824,9 @@ struct VacationModeView: View {
         VacationModeConfig(
             isEnabled: true,
             startDate: effectiveStartDate,
-            returnDate: max(returnDate, effectiveStartDate)
+            returnDate: max(returnDate, minimumReturnDate),
+            attentionDays: attentionDays,
+            passionIDs: Array(selectedPassionIDs).sorted { $0.uuidString < $1.uuidString }
         ).normalized
     }
 
@@ -846,12 +865,43 @@ struct VacationModeView: View {
                 DatePicker(
                     "Return",
                     selection: Binding(
-                        get: { max(returnDate, effectiveStartDate) },
+                        get: { max(returnDate, minimumReturnDate) },
                         set: { returnDate = $0 }
                     ),
-                    in: effectiveStartDate...,
+                    in: minimumReturnDate...,
                     displayedComponents: [.date]
                 )
+            }
+
+            if !startToday {
+                Section("Attention") {
+                    HStack {
+                        Text("Vacation Attention")
+                        Spacer()
+                        Picker("", selection: $attentionDays) {
+                            ForEach(7...60, id: \.self) { dayCount in
+                                Text("\(dayCount) days").tag(dayCount)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
+
+                    Text("Countdown will display on the top of the Loom homescreen.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Section("Passions") {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Select related passions")
+                    Spacer(minLength: 8)
+                    Button("Connect Passions") {
+                        isShowingPassionsSheet = true
+                    }
+                    .foregroundStyle(.blue)
+                }
             }
 
             Section {
@@ -865,34 +915,272 @@ struct VacationModeView: View {
 
                 if savedConfig.isEnabled {
                     Button("Turn Off Vacation Mode", role: .destructive) {
+                        archiveVacationIfEligibleIfNeeded(config: savedConfig, endedByUser: true)
                         let next = VacationModeConfig(
                             isEnabled: false,
                             startDate: savedConfig.startDate,
-                            returnDate: savedConfig.returnDate
+                            returnDate: savedConfig.returnDate,
+                            attentionDays: savedConfig.attentionDays,
+                            passionIDs: []
                         )
                         VacationModeStore.setConfig(next)
                         savedConfig = next
                         startDate = next.startDate
+                        selectedPassionIDs = []
                     }
                     .frame(maxWidth: .infinity, alignment: .center)
                 }
             }
 
             Section {
-                Text("Vacation mode ensures your Purpose and Fulfillment scores are not reduced from low activity when you're taking a break. Temproary freeze your progress until you come back.")
+                Text("Vacation mode ensures your Purpose and Fulfillment score, as well as your Little Wins completion streaks, are not damaged from low activity when you’re taking a break. Temporarily freeze your progress until you come back.\n\nNote: Actions with due dates and attentions will continue to operate as scheduled.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if previousVacationsAvailable {
+                previousVacationsToggleRow
+                previousVacationsRowsSection
             }
         }
         .navigationTitle("Vacation Mode")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
+            autoArchiveExpiredVacationIfNeeded()
             let cfg = VacationModeStore.config().normalized
             savedConfig = cfg
-            startToday = cfg.isEnabled ? Calendar.current.isDate(cfg.startDate, inSameDayAs: today) : false
+            startToday = cfg.isEnabled ? Calendar.current.isDate(cfg.startDate, inSameDayAs: today) : true
             startDate = cfg.startDate
             returnDate = cfg.returnDate
+            attentionDays = cfg.attentionDays
+            selectedPassionIDs = cfg.isEnabled ? Set(cfg.passionIDs) : []
+        }
+        .sheet(isPresented: $isShowingPassionsSheet, onDismiss: {
+            persistActiveVacationPassionsIfNeeded()
+        }) {
+            NavigationStack {
+                List {
+                    ForEach(passions, id: \.passion_id) { passion in
+                        Button {
+                            if selectedPassionIDs.contains(passion.passion_id) {
+                                selectedPassionIDs.remove(passion.passion_id)
+                            } else {
+                                selectedPassionIDs.insert(passion.passion_id)
+                            }
+                        } label: {
+                            HStack {
+                                Text("\(displayEmotionLabelForVacation(passion.emotion)): \(passion.passion)")
+                                    .foregroundStyle(.primary)
+                                Spacer()
+                                if selectedPassionIDs.contains(passion.passion_id) {
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(.blue)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .navigationTitle("Connect Passions")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("Done") { isShowingPassionsSheet = false }
+                    }
+                }
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
+    }
+
+    private var previousVacationsToggleRow: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isShowingPreviousVacations.toggle()
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: isShowingPreviousVacations ? "chevron.up" : "chevron.down")
+                    .font(.caption2.weight(.semibold))
+                Text("Previous Vacations")
+                    .font(.caption2.weight(.semibold))
+            }
+            .foregroundStyle(.primary)
+            .padding(.vertical, 5)
+            .padding(.horizontal, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(.systemGray4))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.black.opacity(0.15), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 2, trailing: 16))
+        .listRowBackground(Color.clear)
+    }
+
+    @ViewBuilder
+    private var previousVacationsRowsSection: some View {
+        if isShowingPreviousVacations {
+            Section {
+                ForEach(vacationArchives) { archive in
+                    previousVacationRow(archive)
+                }
+            }
+        }
+    }
+
+    private func previousVacationRow(_ archive: VacationModeArchive) -> some View {
+        let cal = Calendar.current
+        let start = cal.startOfDay(for: archive.startDate)
+        let end = cal.startOfDay(for: archive.returnDate)
+        let days = max(1, (cal.dateComponents([.day], from: start, to: end).day ?? 0) + 1)
+        let passionList = decodedVacationPassionSnapshots(from: archive).map {
+            "\(displayEmotionLabelForVacation($0.emotion)): \($0.passion)"
+        }
+
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("\(archive.startDate.formatted(.dateTime.month().day())) - \(archive.returnDate.formatted(.dateTime.month().day()))")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text("\(days)d")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+            }
+
+            if archive.endedByUser {
+                Text("Ended early")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if !passionList.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(passionList, id: \.self) { passion in
+                        HStack(alignment: .top, spacing: 6) {
+                            Text("•")
+                                .foregroundStyle(.secondary)
+                            Text(passion)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .font(.caption)
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 2)
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            Button("Delete", role: .destructive) {
+                RecentlyDeletedStore.trash(archive, in: context)
+                try? context.save()
+            }
+            .tint(.red)
+        }
+    }
+
+    private func autoArchiveExpiredVacationIfNeeded() {
+        let cfg = VacationModeStore.config().normalized
+        guard cfg.isEnabled, Calendar.current.startOfDay(for: .now) > Calendar.current.startOfDay(for: cfg.returnDate) else { return }
+        archiveVacationIfEligibleIfNeeded(config: cfg, endedByUser: false)
+        let disabled = VacationModeConfig(
+            isEnabled: false,
+            startDate: cfg.startDate,
+            returnDate: cfg.returnDate,
+            attentionDays: cfg.attentionDays,
+            passionIDs: []
+        )
+        VacationModeStore.setConfig(disabled)
+        savedConfig = disabled
+        selectedPassionIDs = []
+    }
+
+    private func persistActiveVacationPassionsIfNeeded() {
+        guard savedConfig.isEnabled else { return }
+        let normalizedPassionIDs = Array(selectedPassionIDs).sorted { $0.uuidString < $1.uuidString }
+        guard normalizedPassionIDs != savedConfig.passionIDs else { return }
+
+        let updated = VacationModeConfig(
+            isEnabled: true,
+            startDate: savedConfig.startDate,
+            returnDate: savedConfig.returnDate,
+            attentionDays: savedConfig.attentionDays,
+            passionIDs: normalizedPassionIDs
+        ).normalized
+        VacationModeStore.setConfig(updated)
+        savedConfig = updated
+    }
+
+    private func archiveVacationIfEligibleIfNeeded(config: VacationModeConfig, endedByUser: Bool) {
+        let cfg = config.normalized
+        let cal = Calendar.current
+        let start = cal.startOfDay(for: cfg.startDate)
+        let end = cal.startOfDay(for: cfg.returnDate)
+        let today = cal.startOfDay(for: .now)
+        let daySpan = max(0, cal.dateComponents([.day], from: start, to: end).day ?? 0)
+        let isManualEarlyEndToday = endedByUser && today < end
+        if isManualEarlyEndToday {
+            for archive in vacationArchives where
+                cal.isDate(archive.startDate, inSameDayAs: cfg.startDate) &&
+                cal.isDate(archive.returnDate, inSameDayAs: cfg.returnDate) {
+                context.delete(archive)
+            }
+            try? context.save()
+            return
+        }
+        // If manually ended on the same day it started, do not archive it.
+        if endedByUser && daySpan == 0 { return }
+        let durationDays = daySpan + 1
+        guard durationDays > 1 else { return }
+        guard !vacationArchives.contains(where: {
+            cal.isDate($0.startDate, inSameDayAs: cfg.startDate) &&
+            cal.isDate($0.returnDate, inSameDayAs: cfg.returnDate)
+        }) else { return }
+
+        let passionsByID = Dictionary(uniqueKeysWithValues: passions.map { ($0.passion_id, $0) })
+        let snapshots = cfg.passionIDs.compactMap { id -> VacationPassionSnapshot? in
+            guard let p = passionsByID[id] else { return nil }
+            return VacationPassionSnapshot(passionID: id, emotion: p.emotion, passion: p.passion)
+        }
+        let payloadData = (try? JSONEncoder().encode(snapshots)) ?? Data()
+        let payload = String(data: payloadData, encoding: .utf8) ?? "[]"
+
+        context.insert(
+            VacationModeArchive(
+                startDate: cfg.startDate,
+                returnDate: cfg.returnDate,
+                attentionDays: cfg.attentionDays,
+                endedAt: .now,
+                endedByUser: endedByUser,
+                passionSnapshotsJSON: payload
+            )
+        )
+        try? context.save()
+    }
+
+    private func decodedVacationPassionSnapshots(from archive: VacationModeArchive) -> [VacationPassionSnapshot] {
+        guard let data = archive.passionSnapshotsJSON.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode([VacationPassionSnapshot].self, from: data) else {
+            return []
+        }
+        return decoded
+    }
+
+    private func displayEmotionLabelForVacation(_ emotion: String) -> String {
+        switch emotion.lowercased() {
+        case "love": return "Love"
+        case "vows": return "Vows"
+        case "thrill": return "Thrill"
+        case "hate": return "Hate"
+        default: return emotion.capitalized
         }
     }
 }

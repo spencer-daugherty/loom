@@ -110,13 +110,32 @@ struct ContentView: View {
         blankHomepageMode || setupHomepageMode
     }
 
-    private var activeVacationModeConfig: VacationModeConfig? {
-        VacationModeStore.activeConfig()
+    private var vacationModeBannerText: String? {
+        let calendar = Calendar.current
+        let cfg = VacationModeStore.config().normalized
+        guard cfg.isEnabled else { return nil }
+
+        let today = calendar.startOfDay(for: .now)
+        let start = calendar.startOfDay(for: cfg.startDate)
+        let end = calendar.startOfDay(for: cfg.returnDate)
+
+        if today >= start && today <= end {
+            return "Vacation Mode On"
+        }
+
+        guard today < start,
+              let attentionStart = calendar.date(byAdding: .day, value: -cfg.attentionDays, to: start).map({ calendar.startOfDay(for: $0) }),
+              today >= attentionStart else {
+            return nil
+        }
+
+        let daysUntilStart = max(0, calendar.dateComponents([.day], from: today, to: start).day ?? 0)
+        return "Vacation Starts in \(daysUntilStart)d on \(start.formatted(.dateTime.month().day()))"
     }
 
     private var shouldShowVacationModeBanner: Bool {
         homePageIndex == HomeSwipePage.home.rawValue &&
-        activeVacationModeConfig != nil &&
+        vacationModeBannerText != nil &&
         !dismissVacationModeBanner
     }
 
@@ -288,10 +307,13 @@ struct ContentView: View {
                 .padding(.top, 1)
 
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("Vacation Mode On")
+                Text(vacationModeBannerText ?? "Vacation Mode On")
                     .font(.subheadline)
                     .fontWeight(.bold)
                     .foregroundStyle(cautionForeground)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.85)
+                    .allowsTightening(true)
 
                 Button("Manage") {
                     isPresentingVacationModeFromBanner = true
@@ -1940,6 +1962,27 @@ struct ContentView: View {
         let today = calendar.startOfDay(for: Date())
         let startsAtToday = littleWinsCardsIncludingHiddenToday.contains { isLittleWinsCardCompletedForActiveTodayStreak($0) }
         var streak = 0
+        let vacationConfig = VacationModeStore.config().normalized
+        let vacationStart = calendar.startOfDay(for: vacationConfig.startDate)
+        let vacationReturn = calendar.startOfDay(for: vacationConfig.returnDate)
+        let postVacationGraceDay = calendar.date(byAdding: .day, value: 1, to: vacationReturn).map { calendar.startOfDay(for: $0) }
+
+        func isVacationProtectedNoProgressDay(_ date: Date, hasCompletedCardOnDay: Bool) -> Bool {
+            guard !hasCompletedCardOnDay else { return false }
+            let day = calendar.startOfDay(for: date)
+
+            // Freeze streak breaks during the configured vacation window, even after turning vacation mode off.
+            if day >= vacationStart && day <= vacationReturn {
+                return true
+            }
+
+            // After vacation mode is turned off, allow one day to resume before the streak breaks.
+            if let graceDay = postVacationGraceDay, day == graceDay {
+                return true
+            }
+
+            return false
+        }
 
         for dayOffset in (startsAtToday ? 0 : 1)...30 {
             guard let date = calendar.date(byAdding: .day, value: -dayOffset, to: today) else { break }
@@ -1950,6 +1993,9 @@ struct ContentView: View {
                 hasCompletedCardOnDay = !littleWinsCompletedCards(on: date).isEmpty
             }
             if !hasCompletedCardOnDay {
+                if isVacationProtectedNoProgressDay(date, hasCompletedCardOnDay: hasCompletedCardOnDay) {
+                    continue
+                }
                 break
             }
             streak += 1

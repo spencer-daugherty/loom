@@ -10,6 +10,17 @@ enum RecentlyDeletedStore {
         var archivedAt: Date
     }
 
+    private struct VacationModeArchiveSnapshot: Codable {
+        var id: UUID
+        var startDate: Date
+        var returnDate: Date
+        var attentionDays: Int
+        var endedAt: Date
+        var endedByUser: Bool
+        var passionSnapshotsJSON: String
+        var createdAt: Date
+    }
+
     private struct ReplacedFulfillmentCategoryArchiveSnapshot: Codable {
         var id: UUID
         var category_id: UUID
@@ -468,6 +479,30 @@ enum RecentlyDeletedStore {
             context.delete(item)
             return .restored
 
+        case "VacationModeArchive":
+            guard
+                let payload = item.payloadJSON,
+                let data = payload.data(using: .utf8),
+                let decoded = try? decoder.decode(VacationModeArchiveSnapshot.self, from: data)
+            else { return .failed }
+
+            let allRows = (try? context.fetch(FetchDescriptor<VacationModeArchive>())) ?? []
+            let finalID = allRows.contains(where: { $0.id == decoded.id }) ? UUID() : decoded.id
+            context.insert(
+                VacationModeArchive(
+                    id: finalID,
+                    startDate: decoded.startDate,
+                    returnDate: decoded.returnDate,
+                    attentionDays: decoded.attentionDays,
+                    endedAt: decoded.endedAt,
+                    endedByUser: decoded.endedByUser,
+                    passionSnapshotsJSON: decoded.passionSnapshotsJSON,
+                    createdAt: decoded.createdAt
+                )
+            )
+            context.delete(item)
+            return .restored
+
         case "ReplacedFulfillmentCategoryArchive":
             guard
                 let payload = item.payloadJSON,
@@ -805,6 +840,9 @@ enum RecentlyDeletedStore {
             if !purpose.isEmpty { return purpose }
             return "Purpose"
         }
+        if let m = model as? VacationModeArchive {
+            return "Vacation • \(shortDate(m.startDate)) - \(shortDate(m.returnDate))"
+        }
         if let m = model as? ReplacedFulfillmentCategoryArchive {
             return m.category
         }
@@ -834,6 +872,9 @@ enum RecentlyDeletedStore {
         }
         if model is DrivingForceArchive {
             return "Purpose"
+        }
+        if model is VacationModeArchive {
+            return "Previous Vacation"
         }
         if model is ReplacedFulfillmentCategoryArchive {
             return "Previous Category"
@@ -934,6 +975,22 @@ enum RecentlyDeletedStore {
                 plannedChunkActionId: m.plannedChunkActionId,
                 actionText: m.actionText,
                 completedAt: m.completedAt
+            )
+            if let data = try? encoder.encode(snapshot) {
+                return String(data: data, encoding: .utf8)
+            }
+        }
+
+        if let m = model as? VacationModeArchive {
+            let snapshot = VacationModeArchiveSnapshot(
+                id: m.id,
+                startDate: m.startDate,
+                returnDate: m.returnDate,
+                attentionDays: m.attentionDays,
+                endedAt: m.endedAt,
+                endedByUser: m.endedByUser,
+                passionSnapshotsJSON: m.passionSnapshotsJSON,
+                createdAt: m.createdAt
             )
             if let data = try? encoder.encode(snapshot) {
                 return String(data: data, encoding: .utf8)

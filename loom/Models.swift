@@ -19,13 +19,42 @@ struct VacationModeConfig: Codable, Equatable {
   var isEnabled: Bool
   var startDate: Date
   var returnDate: Date
+  var attentionDays: Int
+  var passionIDs: [UUID]
+
+  enum CodingKeys: String, CodingKey {
+    case isEnabled
+    case startDate
+    case returnDate
+    case attentionDays
+    case passionIDs
+  }
+
+  init(isEnabled: Bool, startDate: Date, returnDate: Date, attentionDays: Int = 30, passionIDs: [UUID] = []) {
+    self.isEnabled = isEnabled
+    self.startDate = startDate
+    self.returnDate = returnDate
+    self.attentionDays = attentionDays
+    self.passionIDs = passionIDs
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    isEnabled = try container.decode(Bool.self, forKey: .isEnabled)
+    startDate = try container.decode(Date.self, forKey: .startDate)
+    returnDate = try container.decode(Date.self, forKey: .returnDate)
+    attentionDays = try container.decodeIfPresent(Int.self, forKey: .attentionDays) ?? 30
+    passionIDs = try container.decodeIfPresent([UUID].self, forKey: .passionIDs) ?? []
+  }
 
   static var `default`: VacationModeConfig {
     let today = Calendar.current.startOfDay(for: .now)
     return VacationModeConfig(
       isEnabled: false,
       startDate: today,
-      returnDate: Calendar.current.date(byAdding: .day, value: 7, to: today) ?? today
+      returnDate: Calendar.current.date(byAdding: .day, value: 7, to: today) ?? today,
+      attentionDays: 30,
+      passionIDs: []
     )
   }
 
@@ -37,6 +66,8 @@ struct VacationModeConfig: Codable, Equatable {
     if copy.returnDate < copy.startDate {
       copy.returnDate = copy.startDate
     }
+    copy.attentionDays = max(7, min(60, copy.attentionDays))
+    copy.passionIDs = Array(Set(copy.passionIDs)).sorted { $0.uuidString < $1.uuidString }
     return copy
   }
 
@@ -45,6 +76,38 @@ struct VacationModeConfig: Codable, Equatable {
     let vacationStart = cal.startOfDay(for: startDate)
     let vacationEndExclusive = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: returnDate)) ?? endExclusive
     return vacationStart < endExclusive && vacationEndExclusive > start
+  }
+}
+
+@Model
+final class VacationModeArchive {
+  @Attribute(.unique) var id: UUID
+  var startDate: Date
+  var returnDate: Date
+  var attentionDays: Int
+  var endedAt: Date
+  var endedByUser: Bool
+  var passionSnapshotsJSON: String
+  var createdAt: Date
+
+  init(
+    id: UUID = .init(),
+    startDate: Date,
+    returnDate: Date,
+    attentionDays: Int,
+    endedAt: Date,
+    endedByUser: Bool,
+    passionSnapshotsJSON: String,
+    createdAt: Date = .now
+  ) {
+    self.id = id
+    self.startDate = startDate
+    self.returnDate = returnDate
+    self.attentionDays = attentionDays
+    self.endedAt = endedAt
+    self.endedByUser = endedByUser
+    self.passionSnapshotsJSON = passionSnapshotsJSON
+    self.createdAt = createdAt
   }
 }
 
