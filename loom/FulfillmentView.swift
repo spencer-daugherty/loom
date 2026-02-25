@@ -1278,7 +1278,7 @@ struct FulfillmentView: View {
                     NavigationLink {
                         FulfillmentTrendsView()
                     } label: {
-                        Text("Show trends")
+                        Text("Show insights")
                             .font(.subheadline)
                             .fontWeight(.semibold)
                             .foregroundStyle(.blue)
@@ -3471,6 +3471,7 @@ private struct FulfillmentTrendsView: View {
     @State private var selectedTimeline: TimelineOption = .all
     @State private var selectedWeekRaw: Date?
     @State private var selectedCategoryID: UUID?
+    @State private var trendsInsightOutlineAngle: Double = 0
 
     private var allWeekStarts: [Date] {
         Array(Set(snapshots.map { Calendar.current.startOfDay(for: $0.weekStartDate) })).sorted()
@@ -3757,7 +3758,7 @@ private struct FulfillmentTrendsView: View {
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .navigationTitle("Fulfillment Trends")
+        .navigationTitle("Fulfillment Insights")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             if selectedWeekRaw == nil {
@@ -3969,6 +3970,19 @@ private struct FulfillmentTrendsView: View {
 
             if let snap = selectedSnapshot {
                 if let summaryInsight = primaryInsightMessage(for: snap) {
+                    let loomAIGradient = AngularGradient(
+                        colors: [
+                            Color(red: 0.22, green: 0.47, blue: 1.0),
+                            Color(red: 0.15, green: 0.83, blue: 0.95),
+                            Color(red: 0.62, green: 0.40, blue: 0.95),
+                            Color(red: 0.80, green: 0.38, blue: 0.78),
+                            Color(red: 0.98, green: 0.36, blue: 0.58),
+                            Color(red: 0.75, green: 0.42, blue: 0.74),
+                            Color(red: 0.22, green: 0.47, blue: 1.0)
+                        ],
+                        center: .center,
+                        angle: .degrees(trendsInsightOutlineAngle)
+                    )
                     HStack(alignment: .center, spacing: 10) {
                         Image("LoomAI")
                             .resizable()
@@ -3981,7 +3995,16 @@ private struct FulfillmentTrendsView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(10)
-                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(loomAIGradient.opacity(0.95), lineWidth: 2)
+                    )
+                    .onAppear {
+                        guard trendsInsightOutlineAngle == 0 else { return }
+                        withAnimation(.linear(duration: 7).repeatForever(autoreverses: false)) {
+                            trendsInsightOutlineAngle = 360
+                        }
+                    }
                 }
 
                 VStack(spacing: 8) {
