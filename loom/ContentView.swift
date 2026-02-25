@@ -1374,6 +1374,35 @@ struct ContentView: View {
         })?.score
     }
 
+    private func contentFulfillmentWeekDelta(for record: Fulfillment) -> Double? {
+        let currentWeek = FulfillmentScoringMath.weekWindow(for: .now).weekStart
+        guard let priorWeek = Calendar.current.date(byAdding: .day, value: -7, to: currentWeek) else { return nil }
+        guard let current = fulfillmentCategoryScoreSnapshots.first(where: {
+            $0.categoryID == record.category_id && Calendar.current.isDate($0.weekStartDate, inSameDayAs: currentWeek)
+        })?.score else { return nil }
+        guard let prior = fulfillmentCategoryScoreSnapshots.first(where: {
+            $0.categoryID == record.category_id && Calendar.current.isDate($0.weekStartDate, inSameDayAs: priorWeek)
+        })?.score else { return nil }
+        let delta = contentRoundedTenth(current) - contentRoundedTenth(prior)
+        return abs(delta) < 0.05 ? 0 : delta
+    }
+
+    private func contentFulfillmentDeltaGlyph(_ delta: Double?) -> String {
+        guard let delta else { return "—" }
+        if abs(delta) < 0.05 { return "→" }
+        return delta > 0 ? "↑" : "↓"
+    }
+
+    private func contentFulfillmentDeltaColor(_ delta: Double?) -> Color {
+        guard let delta else { return .secondary }
+        if abs(delta) < 0.05 { return .secondary }
+        return delta > 0 ? .green : .red
+    }
+
+    private func contentRoundedTenth(_ value: Double) -> Double {
+        (value * 10).rounded() / 10
+    }
+
     private func refreshFulfillmentCategoryScoresForCurrentWeek() {
         _ = try? FulfillmentScoringService().computeAndBackfillWeeklySnapshots(in: modelContext)
         _ = try? PassionScoringService().computeAndBackfillMonthlySnapshots(in: modelContext)
@@ -3195,7 +3224,7 @@ struct ContentView: View {
                             .fill(Color(.systemGray5))
                     )
                 } else {
-                    HStack(alignment: .center, spacing: 16) {
+                    HStack(alignment: .center, spacing: 10) {
                         ZStack {
                             FulfillmentInteractiveRadar(
                                 metrics: fulfillmentMetrics,
@@ -3206,8 +3235,7 @@ struct ContentView: View {
                                 emphasizeSelectedSlice: false
                             )
                         }
-                        .frame(width: 140, height: 140)
-                        .padding(.top, 10)
+                        .frame(width: 132, height: 132)
                         .matchedGeometryEffect(
                             id: "fulfillmentGraph",
                             in: graphNamespace,
@@ -3219,27 +3247,35 @@ struct ContentView: View {
                         VStack(alignment: .leading, spacing: 6) {
                             let metrics = fulfillmentMetrics
                             ForEach(metrics, id: \.0) { metric in
-                                Text(metric.0)
-                                    .foregroundColor(metric.1)
-                                    .fontWeight(.bold)
-                                    .contentShape(Rectangle())
-                                    .pressHighlight(pressedCategoryTitle == metric.0, cornerRadius: 6, inset: 2)
-                                    .onLongPressGesture(
-                                        minimumDuration: 0.5,
-                                        maximumDistance: 50,
-                                        pressing: { isPressing in
-                                            if !isPressing {
-                                                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-                                                    pressedCategoryTitle = nil
-                                                }
-                                            }
-                                        },
-                                        perform: {
+                                let record = orderedFulfillmentRecords.first(where: { $0.category == metric.0 })
+                                let delta = record.flatMap { contentFulfillmentWeekDelta(for: $0) }
+                                HStack(spacing: 6) {
+                                    Text(contentFulfillmentDeltaGlyph(delta))
+                                        .foregroundStyle(contentFulfillmentDeltaColor(delta))
+                                        .font(.caption.weight(.bold))
+                                        .frame(width: 12)
+                                    Text(metric.0)
+                                        .foregroundColor(metric.1)
+                                        .fontWeight(.bold)
+                                }
+                                .contentShape(Rectangle())
+                                .pressHighlight(pressedCategoryTitle == metric.0, cornerRadius: 6, inset: 2)
+                                .onLongPressGesture(
+                                    minimumDuration: 0.5,
+                                    maximumDistance: 50,
+                                    pressing: { isPressing in
+                                        if !isPressing {
                                             withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-                                                pressedCategoryTitle = metric.0
+                                                pressedCategoryTitle = nil
                                             }
                                         }
-                                    )
+                                    },
+                                    perform: {
+                                        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                                            pressedCategoryTitle = metric.0
+                                        }
+                                    }
+                                )
                             }
                         }
                         .font(.subheadline)
