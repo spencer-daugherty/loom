@@ -3388,16 +3388,34 @@ private struct FulfillmentTrendsView: View {
     }
 
     private var chartCategoryIDs: [UUID] {
-        let source = latestWeekSnapshots.isEmpty ? snapshots : latestWeekSnapshots
-        let sorted = source.sorted {
-            if $0.score == $1.score {
-                return $0.categoryTitleSnapshot.localizedCaseInsensitiveCompare($1.categoryTitleSnapshot) == .orderedAscending
-            }
-            return $0.score > $1.score
-        }
-        let ids = Array(sorted.prefix(7).map(\.categoryID))
+        let ids = Array(fulfillmentDisplayOrderCategoryIDs.prefix(7))
         if !ids.isEmpty { return ids }
         return Array(fulfillments.prefix(7).map(\.category_id))
+    }
+
+    private var fulfillmentDisplayOrderCategoryIDs: [UUID] {
+        var ordered: [UUID] = []
+        var seen = Set<UUID>()
+
+        for row in fulfillments {
+            if seen.insert(row.category_id).inserted {
+                ordered.append(row.category_id)
+            }
+        }
+
+        let snapshotFallbackIDs = snapshots
+            .sorted { lhs, rhs in
+                if lhs.weekStartDate == rhs.weekStartDate {
+                    return lhs.categoryTitleSnapshot.localizedCaseInsensitiveCompare(rhs.categoryTitleSnapshot) == .orderedAscending
+                }
+                return lhs.weekStartDate > rhs.weekStartDate
+            }
+            .map(\.categoryID)
+
+        for id in snapshotFallbackIDs where seen.insert(id).inserted {
+            ordered.append(id)
+        }
+        return ordered
     }
 
     private var chartRows: [FulfillmentTrendRow] {
@@ -3430,6 +3448,10 @@ private struct FulfillmentTrendsView: View {
 
     private var categoryOrderIndex: [UUID: Int] {
         Dictionary(uniqueKeysWithValues: chartCategoryIDs.enumerated().map { ($0.element, $0.offset) })
+    }
+
+    private var categoriesListOrderIndex: [UUID: Int] {
+        Dictionary(uniqueKeysWithValues: fulfillmentDisplayOrderCategoryIDs.enumerated().map { ($0.element, $0.offset) })
     }
 
     private var chartYMax: Double {
@@ -3486,6 +3508,20 @@ private struct FulfillmentTrendsView: View {
             return (snap, snap.score - prior.score)
         }
         .max(by: { abs($0.1) < abs($1.1) })
+    }
+
+    private var priorWeekSnapshotsByCategory: [UUID: FulfillmentCategoryScoreSnapshot] {
+        guard let selectedWeekStart,
+              let priorWeek = Calendar.current.date(byAdding: .day, value: -7, to: selectedWeekStart)
+        else { return [:] }
+        return Dictionary(uniqueKeysWithValues: snapshots
+            .filter { Calendar.current.isDate($0.weekStartDate, inSameDayAs: priorWeek) }
+            .map { ($0.categoryID, $0) })
+    }
+
+    private func categoryWeekOverWeekDelta(for snap: FulfillmentCategoryScoreSnapshot) -> Double? {
+        guard let prior = priorWeekSnapshotsByCategory[snap.categoryID] else { return nil }
+        return snap.score - prior.score
     }
 
     private var selectedSnapshot: FulfillmentCategoryScoreSnapshot? {
@@ -3754,10 +3790,12 @@ private struct FulfillmentTrendsView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Categories").font(.headline)
             ForEach(selectedWeekSnapshots.sorted(by: { lhs, rhs in
-                if lhs.score == rhs.score {
+                let li = categoriesListOrderIndex[lhs.categoryID] ?? Int.max
+                let ri = categoriesListOrderIndex[rhs.categoryID] ?? Int.max
+                if li == ri {
                     return lhs.categoryTitleSnapshot.localizedCaseInsensitiveCompare(rhs.categoryTitleSnapshot) == .orderedAscending
                 }
-                return lhs.score > rhs.score
+                return li < ri
             }), id: \.categoryID) { snap in
                 Button {
                     selectedCategoryID = snap.categoryID
@@ -3772,9 +3810,21 @@ private struct FulfillmentTrendsView: View {
                         Spacer(minLength: 0)
                         Text(String(format: "%.1f/5", snap.score))
                             .foregroundStyle(.secondary)
-                        Text(momentumGlyph(snap.momentum))
-                            .foregroundStyle(momentumColor(snap.momentum))
+                        let delta = categoryWeekOverWeekDelta(for: snap)
+                        Text(categoryDeltaGlyph(delta))
+                            .foregroundStyle(categoryDeltaGlyphColor(delta))
                             .frame(width: 18)
+                        if let delta {
+                            Text(categoryDeltaText(delta))
+                                .font(.subheadline)
+                                .foregroundStyle(categoryDeltaColor(delta))
+                                .frame(width: 40, alignment: .trailing)
+                        } else {
+                            Text("—")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .frame(width: 40, alignment: .trailing)
+                        }
                     }
                     .padding(.horizontal, 12)
                     .frame(minHeight: 42)
@@ -3860,6 +3910,31 @@ private struct FulfillmentTrendsView: View {
         let v = FulfillmentScoringMath.clamp(value, -1, 1)
         if abs(v) < 0.12 { return .secondary }
         return v > 0 ? .green : .orange
+    }
+
+    private func categoryDeltaText(_ delta: Double) -> String {
+        if abs(delta) < 0.05 {
+            return "—"
+        }
+        return String(format: "%@%.1f", delta > 0 ? "+" : "", delta)
+    }
+
+    private func categoryDeltaColor(_ delta: Double) -> Color {
+        if abs(delta) < 0.05 {
+            return .secondary
+        }
+        return delta > 0 ? .green : .orange
+    }
+
+    private func categoryDeltaGlyph(_ delta: Double?) -> String {
+        guard let delta else { return "—" }
+        if abs(delta) < 0.05 { return "→" }
+        return delta > 0 ? "↑" : "↓"
+    }
+
+    private func categoryDeltaGlyphColor(_ delta: Double?) -> Color {
+        guard let delta else { return .secondary }
+        return categoryDeltaColor(delta)
     }
 }
 
