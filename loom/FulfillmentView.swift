@@ -3294,80 +3294,216 @@ private struct LittleWinIntegrationSetupSheet: View {
 }
 
 private struct FulfillmentTrendRow: Identifiable {
-    let id = UUID()
-    let monthIndex: Int
-    let month: String
+    let id: String
+    let weekStart: Date
+    let categoryID: UUID
     let category: String
     let value: Double
 }
 
 private struct FulfillmentTrendsView: View {
-    @Query(sort: \Fulfillment.updatedAt, order: .forward) private var fulfillments: [Fulfillment]
-    private let months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-    private var categoryTitles: [String] {
-        let titles = fulfillments.map(\.category)
-            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        if titles.isEmpty {
-            return defaultFulfillmentCategoryTitles
+    private enum TimelineOption: String, CaseIterable, Identifiable {
+        case all = "All"
+        case oneWeek = "2W"
+        case oneMonth = "1M"
+        case threeMonths = "3M"
+        case sixMonths = "6M"
+        case oneYear = "1Y"
+
+        var id: String { rawValue }
+
+        var rollingDays: Int? {
+            switch self {
+            case .all: return nil
+            case .oneWeek: return 14
+            case .oneMonth: return 30
+            case .threeMonths: return 90
+            case .sixMonths: return 180
+            case .oneYear: return 365
+            }
         }
-        return Array(Set(titles)).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
-    private var rows: [FulfillmentTrendRow] {
-        buildRows(categoryTitles: categoryTitles, months: months)
+
+    private struct TrendSegment: Identifiable {
+        let id: String
+        let color: Color
+        let height: CGFloat
     }
-    private var categoryRange: [Color] {
-        categoryTitles.map { FulfillmentCategoryTheme.color(for: $0) }
+
+    @Query(sort: \Fulfillment.updatedAt, order: .forward) private var fulfillments: [Fulfillment]
+    @Query(sort: \FulfillmentCategoryScoreSnapshot.weekStartDate, order: .forward)
+    private var snapshots: [FulfillmentCategoryScoreSnapshot]
+
+    @State private var selectedTimeline: TimelineOption = .all
+    @State private var selectedWeekRaw: Date?
+    @State private var selectedCategoryID: UUID?
+
+    private var allWeekStarts: [Date] {
+        Array(Set(snapshots.map { Calendar.current.startOfDay(for: $0.weekStartDate) })).sorted()
+    }
+
+    private var latestWeekStart: Date? { allWeekStarts.last }
+
+    private var visibleWeeks: [Date] {
+        guard let latestWeekStart else { return [] }
+        guard let days = selectedTimeline.rollingDays else { return allWeekStarts }
+        let start = Calendar.current.date(byAdding: .day, value: -(days - 1), to: latestWeekStart) ?? latestWeekStart
+        let filtered = allWeekStarts.filter { $0 >= start && $0 <= latestWeekStart }
+        return filtered.isEmpty ? (allWeekStarts.isEmpty ? [] : [latestWeekStart]) : filtered
+    }
+
+    private var timelineOptions: [TimelineOption] {
+        let count = allWeekStarts.count
+        var options: [TimelineOption] = [.all]
+        if count >= 1 { options.append(.oneWeek) }
+        if count >= 4 { options.append(.oneMonth) }
+        if count >= 12 { options.append(.threeMonths) }
+        if count >= 26 { options.append(.sixMonths) }
+        if count >= 52 { options.append(.oneYear) }
+        return options
+    }
+
+    private var categoryTitleByID: [UUID: String] {
+        var map = Dictionary(uniqueKeysWithValues: fulfillments.map { ($0.category_id, $0.category) })
+        for snap in snapshots where map[snap.categoryID] == nil {
+            map[snap.categoryID] = snap.categoryTitleSnapshot
+        }
+        return map
+    }
+
+    private var latestWeekSnapshots: [FulfillmentCategoryScoreSnapshot] {
+        guard let latestWeekStart else { return [] }
+        return snapshots.filter { Calendar.current.isDate($0.weekStartDate, inSameDayAs: latestWeekStart) }
+    }
+
+    private var selectedWeekStart: Date? {
+        guard let latest = latestWeekStart else { return nil }
+        guard let selectedWeekRaw else { return latest }
+        return nearestWeek(to: selectedWeekRaw) ?? latest
+    }
+
+    private var selectedWeekSnapshots: [FulfillmentCategoryScoreSnapshot] {
+        guard let selectedWeekStart else { return latestWeekSnapshots }
+        return snapshots.filter { Calendar.current.isDate($0.weekStartDate, inSameDayAs: selectedWeekStart) }
+    }
+
+    private var chartCategoryIDs: [UUID] {
+        let source = latestWeekSnapshots.isEmpty ? snapshots : latestWeekSnapshots
+        let sorted = source.sorted {
+            if $0.score == $1.score {
+                return $0.categoryTitleSnapshot.localizedCaseInsensitiveCompare($1.categoryTitleSnapshot) == .orderedAscending
+            }
+            return $0.score > $1.score
+        }
+        let ids = Array(sorted.prefix(7).map(\.categoryID))
+        if !ids.isEmpty { return ids }
+        return Array(fulfillments.prefix(7).map(\.category_id))
+    }
+
+    private var chartRows: [FulfillmentTrendRow] {
+        let cal = Calendar.current
+        let visibleSet = Set(visibleWeeks.map { cal.startOfDay(for: $0) })
+        let grouped = Dictionary(grouping: snapshots.filter { visibleSet.contains(cal.startOfDay(for: $0.weekStartDate)) }) {
+            "\(cal.startOfDay(for: $0.weekStartDate).timeIntervalSince1970)|\($0.categoryID.uuidString)"
+        }.compactMapValues { rows in rows.max(by: { $0.updatedAt < $1.updatedAt }) }
+
+        return chartCategoryIDs.flatMap { categoryID in
+            visibleWeeks.map { week in
+                let weekStart = cal.startOfDay(for: week)
+                let key = "\(weekStart.timeIntervalSince1970)|\(categoryID.uuidString)"
+                let snap = grouped[key]
+                let title = categoryTitleByID[categoryID] ?? snap?.categoryTitleSnapshot ?? "Category"
+                return FulfillmentTrendRow(
+                    id: "\(Int(weekStart.timeIntervalSince1970))|\(categoryID.uuidString)",
+                    weekStart: weekStart,
+                    categoryID: categoryID,
+                    category: title,
+                    value: snap?.score ?? 0
+                )
+            }
+        }
+    }
+
+    private var chartRowsByWeek: [Date: [FulfillmentTrendRow]] {
+        Dictionary(grouping: chartRows) { Calendar.current.startOfDay(for: $0.weekStart) }
+    }
+
+    private var categoryOrderIndex: [UUID: Int] {
+        Dictionary(uniqueKeysWithValues: chartCategoryIDs.enumerated().map { ($0.element, $0.offset) })
+    }
+
+    private var chartYMax: Double {
+        let count = max(1, chartCategoryIDs.count)
+        return max(25, ceil(Double(count * 5) / 5.0) * 5.0)
+    }
+
+    private var trendPlotHeight: CGFloat { 220 }
+    private let trendYAxisWidth: CGFloat = 24
+    private let trendLeadingPadding: CGFloat = 14
+    private let trendTrailingPadding: CGFloat = 8
+
+    private var columnWidth: CGFloat {
+        switch selectedTimeline {
+        case .oneWeek: return 34
+        case .oneMonth: return 22
+        case .threeMonths: return 16
+        case .sixMonths: return 14
+        case .oneYear: return 12
+        case .all: return 12
+        }
+    }
+
+    private var columnSpacing: CGFloat {
+        switch selectedTimeline {
+        case .oneWeek: return 4
+        case .oneMonth: return 3
+        default: return 2
+        }
+    }
+
+    private var yTicks: [Double] {
+        Array(stride(from: 0.0, through: chartYMax, by: 5.0))
+    }
+
+    private var bestSnapshot: FulfillmentCategoryScoreSnapshot? {
+        selectedWeekSnapshots.max(by: { $0.score < $1.score })
+    }
+
+    private var averageScore: Double {
+        guard !selectedWeekSnapshots.isEmpty else { return 0 }
+        return selectedWeekSnapshots.map(\.score).reduce(0, +) / Double(selectedWeekSnapshots.count)
+    }
+
+    private var biggestMover: (FulfillmentCategoryScoreSnapshot, Double)? {
+        guard let selectedWeekStart,
+              let priorWeek = Calendar.current.date(byAdding: .day, value: -7, to: selectedWeekStart)
+        else { return nil }
+        let priorByCategory = Dictionary(uniqueKeysWithValues: snapshots
+            .filter { Calendar.current.isDate($0.weekStartDate, inSameDayAs: priorWeek) }
+            .map { ($0.categoryID, $0) })
+        return selectedWeekSnapshots.compactMap { snap in
+            guard let prior = priorByCategory[snap.categoryID] else { return nil }
+            return (snap, snap.score - prior.score)
+        }
+        .max(by: { abs($0.1) < abs($1.1) })
+    }
+
+    private var selectedSnapshot: FulfillmentCategoryScoreSnapshot? {
+        if let selectedCategoryID,
+           let row = selectedWeekSnapshots.first(where: { $0.categoryID == selectedCategoryID }) {
+            return row
+        }
+        return bestSnapshot ?? selectedWeekSnapshots.first
     }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
-                Chart(rows) { row in
-                    AreaMark(
-                        x: .value("Month", row.monthIndex),
-                        y: .value("Score", row.value),
-                        stacking: .standard
-                    )
-                    .foregroundStyle(by: .value("Category", row.category))
-                    .interpolationMethod(.catmullRom)
-                }
-                .chartForegroundStyleScale(domain: categoryTitles, range: categoryRange)
-                .chartXScale(domain: 0...11)
-                .chartXAxis {
-                    AxisMarks(values: Array(0...11)) { value in
-                        AxisGridLine()
-                        AxisTick()
-                        AxisValueLabel {
-                            if let i = value.as(Int.self), i >= 0, i < months.count {
-                                Text(months[i])
-                            }
-                        }
-                    }
-                }
-                .chartYScale(domain: 0...25)
-                .chartYAxis {
-                    AxisMarks(position: .trailing, values: Array(stride(from: 0, through: 25, by: 5))) { _ in
-                        AxisGridLine()
-                        AxisTick()
-                        AxisValueLabel()
-                    }
-                }
-                .frame(height: 250)
-                .opacity(0.2)
-                .overlay {
-                    VStack(spacing: 4) {
-                        Text("Not Available Yet")
-                            .font(.title3)
-                            .fontWeight(.bold)
-                        Text("History and trends will be available over time.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 16)
-                }
-
-                insightsSkeleton
+            VStack(alignment: .leading, spacing: 12) {
+                summaryTiles
+                timelinePickerRow
+                trendGraphSection
+                categoriesSection
+                insightsSection
             }
             .padding(.horizontal)
             .padding(.top, 4)
@@ -3377,83 +3513,353 @@ private struct FulfillmentTrendsView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .navigationTitle("Fulfillment Trends")
         .navigationBarTitleDisplayMode(.inline)
-    }
-
-    private var insightsSkeleton: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
-                skeletonTile()
-                skeletonTile()
-                skeletonTile()
+        .onAppear {
+            if selectedWeekRaw == nil {
+                selectedWeekRaw = visibleWeeks.last ?? allWeekStarts.last
             }
-
-            VStack(alignment: .leading, spacing: 10) {
-                skeletonLine(width: 180, height: 12)
-                skeletonSignalRow()
-                skeletonSignalRow()
-                skeletonSignalRow()
+            if selectedCategoryID == nil {
+                selectedCategoryID = selectedSnapshot?.categoryID
             }
-            .padding(10)
-            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
-
-            VStack(alignment: .leading, spacing: 8) {
-                skeletonCapsuleRow()
-                skeletonCapsuleRow()
-                skeletonCapsuleRow()
+        }
+        .onChange(of: snapshots.count) { _, _ in
+            if selectedWeekRaw == nil || nearestWeek(to: selectedWeekRaw ?? .now) == nil {
+                selectedWeekRaw = visibleWeeks.last ?? allWeekStarts.last
             }
+            if let selectedCategoryID,
+               selectedWeekSnapshots.contains(where: { $0.categoryID == selectedCategoryID }) {
+                return
+            }
+            self.selectedCategoryID = selectedSnapshot?.categoryID
+        }
+        .onChange(of: selectedTimeline) { _, _ in
+            selectedWeekRaw = visibleWeeks.last ?? allWeekStarts.last
         }
     }
 
-    private func skeletonTile() -> some View {
+    @ViewBuilder
+    private var trendGraphSection: some View {
+        if visibleWeeks.isEmpty {
+            VStack(spacing: 6) {
+                Text("No Fulfillment Trends Yet").font(.headline)
+                Text("Weekly category scores will appear here as you use Loom.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 24)
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+        } else {
+            VStack(spacing: 8) {
+                GeometryReader { geo in
+                    let plotWidth = max(0, geo.size.width - trendYAxisWidth)
+                    HStack(spacing: 0) {
+                        yAxisView
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                barsView(plotWidth: plotWidth)
+                                xAxisView(plotWidth: plotWidth)
+                            }
+                        }
+                    }
+                }
+                .frame(height: trendPlotHeight + 16)
+            }
+            .padding(10)
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+        }
+    }
+
+    private var yAxisView: some View {
+        VStack(spacing: 0) {
+            ForEach(yTicks.reversed(), id: \.self) { tick in
+                Text("\(Int(tick))")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 24, height: trendPlotHeight / CGFloat(max(1, yTicks.count - 1)), alignment: .trailing)
+            }
+        }
+        .frame(height: trendPlotHeight)
+        .frame(width: trendYAxisWidth, alignment: .trailing)
+        .padding(.top, 2)
+    }
+
+    private func barsView(plotWidth: CGFloat) -> some View {
+        let width = effectiveColumnWidth(plotWidth: plotWidth)
+        let spacing = effectiveColumnSpacing
+        return LazyHStack(alignment: .bottom, spacing: spacing) {
+            ForEach(visibleWeeks, id: \.self) { week in
+                Button {
+                    selectedWeekRaw = week
+                } label: {
+                    ZStack(alignment: .bottom) {
+                        RoundedRectangle(cornerRadius: 5)
+                            .fill(Color(.systemBackground))
+                            .frame(width: width, height: trendPlotHeight)
+                        VStack(spacing: 0) {
+                            Spacer(minLength: 0)
+                            ForEach(segments(for: week)) { segment in
+                                Rectangle()
+                                    .fill(segment.color)
+                                    .frame(width: width, height: segment.height)
+                            }
+                        }
+                        .frame(width: width, height: trendPlotHeight, alignment: .bottom)
+
+                        if let selectedWeekStart, Calendar.current.isDate(selectedWeekStart, inSameDayAs: week) {
+                            RoundedRectangle(cornerRadius: 5)
+                                .stroke(Color.blue.opacity(0.45), lineWidth: 2)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 5)
+                                        .fill(Color.blue.opacity(0.08))
+                                )
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.leading, trendLeadingPadding)
+        .padding(.trailing, trendTrailingPadding)
+        .frame(minWidth: trendContentWidth(plotWidth: plotWidth, columnWidth: width, spacing: spacing), alignment: .leading)
+        .frame(height: trendPlotHeight, alignment: .bottom)
+    }
+
+    private func xAxisView(plotWidth: CGFloat) -> some View {
+        let width = effectiveColumnWidth(plotWidth: plotWidth)
+        let spacing = effectiveColumnSpacing
+        return LazyHStack(alignment: .top, spacing: spacing) {
+            ForEach(visibleWeeks, id: \.self) { week in
+                Text(weekLabel(week))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .frame(width: width)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.leading, trendLeadingPadding)
+        .padding(.trailing, trendTrailingPadding)
+        .frame(minWidth: trendContentWidth(plotWidth: plotWidth, columnWidth: width, spacing: spacing), alignment: .leading)
+        .frame(height: 16, alignment: .top)
+    }
+
+    private var effectiveColumnSpacing: CGFloat { columnSpacing }
+
+    private func effectiveColumnWidth(plotWidth: CGFloat) -> CGFloat {
+        let count = max(1, visibleWeeks.count)
+        let usable = max(
+            0,
+            plotWidth
+            - trendLeadingPadding
+            - trendTrailingPadding
+            - CGFloat(max(0, count - 1)) * effectiveColumnSpacing
+        )
+        let fillWidth = usable / CGFloat(count)
+        return max(columnWidth, fillWidth)
+    }
+
+    private func trendContentWidth(plotWidth: CGFloat, columnWidth: CGFloat, spacing: CGFloat) -> CGFloat {
+        let count = max(1, visibleWeeks.count)
+        let total = trendLeadingPadding
+            + trendTrailingPadding
+            + CGFloat(count) * columnWidth
+            + CGFloat(max(0, count - 1)) * spacing
+        return max(plotWidth, total)
+    }
+
+    private var timelinePickerRow: some View {
+        HStack {
+            Picker("", selection: $selectedTimeline) {
+                ForEach(timelineOptions) { option in
+                    Text(option.rawValue).tag(option)
+                }
+            }
+            .pickerStyle(.segmented)
+        }
+    }
+
+    private var summaryTiles: some View {
+        HStack(spacing: 10) {
+            summaryTile(
+                title: "Average",
+                value: selectedWeekSnapshots.isEmpty ? "—" : String(format: "%.1f/5", averageScore),
+                subtitle: selectedWeekStart.map(weekDateLabel) ?? "—"
+            )
+            summaryTile(
+                title: "Strongest",
+                value: bestSnapshot.map { shortLabel($0.categoryTitleSnapshot) } ?? "—",
+                subtitle: bestSnapshot.map { String(format: "%.1f/5", $0.score) } ?? "no data"
+            )
+            summaryTile(
+                title: "Mover",
+                value: biggestMover.map { shortLabel($0.0.categoryTitleSnapshot) } ?? "—",
+                subtitle: biggestMover.map { String(format: "%@%.1f", $0.1 >= 0 ? "+" : "", $0.1) } ?? "no prior"
+            )
+        }
+    }
+
+    private func summaryTile(title: String, value: String, subtitle: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            skeletonLine(width: 54, height: 8)
-            skeletonLine(width: 42, height: 16)
-            skeletonLine(width: 62, height: 8)
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            Text(value).font(.headline).lineLimit(1).minimumScaleFactor(0.75)
+            Text(subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.75)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
     }
 
-    private func skeletonSignalRow() -> some View {
-        HStack(spacing: 8) {
-            RoundedRectangle(cornerRadius: 4)
-                .fill(Color(.systemGray4))
-                .frame(width: 14, height: 14)
-            skeletonLine(width: 130, height: 11)
-            Spacer(minLength: 0)
-            skeletonLine(width: 70, height: 11)
-        }
-    }
+    private var insightsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Insights").font(.headline)
+                Spacer()
+                if let snap = selectedSnapshot {
+                    Text(snap.categoryTitleSnapshot)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(FulfillmentCategoryTheme.color(for: snap.categoryTitleSnapshot))
+                }
+            }
 
-    private func skeletonCapsuleRow() -> some View {
-        HStack(spacing: 8) {
-            skeletonLine(width: 140, height: 12)
-            Spacer(minLength: 0)
-            Capsule()
-                .fill(Color(.systemGray4))
-                .frame(width: 42, height: 20)
-        }
-    }
-
-    private func skeletonLine(width: CGFloat, height: CGFloat) -> some View {
-        RoundedRectangle(cornerRadius: max(4, height / 2))
-            .fill(Color(.systemGray4))
-            .frame(width: width, height: height)
-    }
-
-    private func buildRows(categoryTitles: [String], months: [String]) -> [FulfillmentTrendRow] {
-        return months.enumerated().flatMap { monthIndex, month in
-            categoryTitles.enumerated().map { categoryIndex, category in
-                // Deterministic but varied whole-number values in 1...5.
-                let baseSeed = monthIndex * 131 + categoryIndex * 59 + 17
-                let wave1 = sin(Double(baseSeed) * 0.51 + Double(monthIndex) * 0.93)
-                let wave2 = cos(Double(baseSeed) * 0.27 + Double(categoryIndex) * 1.21)
-                let mixed = (wave1 * 0.55 + wave2 * 0.45 + 1.0) * 0.5
-                let score = min(5.0, max(1.0, round(mixed * 5.0)))
-                return FulfillmentTrendRow(monthIndex: monthIndex, month: month, category: category, value: score)
+            if let snap = selectedSnapshot {
+                VStack(spacing: 8) {
+                    insightRow("Weekly score", String(format: "%.1f/5", snap.score))
+                    insightRow("Target", String(format: "%.1f/5", snap.targetScore))
+                    insightRow("Momentum", momentumText(snap.momentum))
+                    insightRow("Consistency", percentText(snap.consistency))
+                    Divider()
+                    insightRow("Structure", percentText(snap.structure))
+                    insightRow("Outcomes", percentText(snap.outcomes))
+                    insightRow("Action blocks", percentText(snap.actionBlocks))
+                    insightRow("Little Wins", percentText(snap.littleWins))
+                    insightRow("Engagement", percentText(snap.engagement))
+                    insightRow("Strategic behavior", percentText(snap.strategicBalance))
+                    insightRow("Carryover penalty", percentText(snap.carryoverPenalty), color: .red)
+                }
+                .padding(10)
+                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
             }
         }
+    }
+
+    private func insightRow(_ label: String, _ value: String, color: Color = .secondary) -> some View {
+        HStack(spacing: 8) {
+            Text(label).font(.subheadline)
+            Spacer(minLength: 0)
+            Text(value).font(.subheadline.weight(.semibold)).foregroundStyle(color)
+        }
+    }
+
+    private var categoriesSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Categories").font(.headline)
+            ForEach(selectedWeekSnapshots.sorted(by: { lhs, rhs in
+                if lhs.score == rhs.score {
+                    return lhs.categoryTitleSnapshot.localizedCaseInsensitiveCompare(rhs.categoryTitleSnapshot) == .orderedAscending
+                }
+                return lhs.score > rhs.score
+            }), id: \.categoryID) { snap in
+                Button {
+                    selectedCategoryID = snap.categoryID
+                } label: {
+                    HStack(spacing: 10) {
+                        Circle()
+                            .fill(FulfillmentCategoryTheme.color(for: snap.categoryTitleSnapshot))
+                            .frame(width: 10, height: 10)
+                        Text(snap.categoryTitleSnapshot)
+                            .foregroundStyle(.primary)
+                            .fontWeight(selectedCategoryID == snap.categoryID ? .semibold : .regular)
+                        Spacer(minLength: 0)
+                        Text(String(format: "%.1f/5", snap.score))
+                            .foregroundStyle(.secondary)
+                        Text(momentumGlyph(snap.momentum))
+                            .foregroundStyle(momentumColor(snap.momentum))
+                            .frame(width: 18)
+                    }
+                    .padding(.horizontal, 12)
+                    .frame(minHeight: 42)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(selectedCategoryID == snap.categoryID ? Color(.systemGray5) : Color(.secondarySystemBackground))
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func segments(for week: Date) -> [TrendSegment] {
+        let weekKey = Calendar.current.startOfDay(for: week)
+        let rows = (chartRowsByWeek[weekKey] ?? []).sorted { lhs, rhs in
+            let li = categoryOrderIndex[lhs.categoryID] ?? Int.max
+            let ri = categoryOrderIndex[rhs.categoryID] ?? Int.max
+            return li < ri
+        }
+        return rows.compactMap { row in
+            guard row.value > 0 else { return nil }
+            let height = CGFloat(row.value / chartYMax) * trendPlotHeight
+            guard height > 0 else { return nil }
+            return TrendSegment(
+                id: row.id,
+                color: FulfillmentCategoryTheme.color(for: row.category),
+                height: height
+            )
+        }
+    }
+
+    private func weekLabel(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.setLocalizedDateFormatFromTemplate("M/d")
+        return f.string(from: date)
+    }
+
+    private func weekDateLabel(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.setLocalizedDateFormatFromTemplate("M/d")
+        return f.string(from: date)
+    }
+
+    private func nearestWeek(to date: Date) -> Date? {
+        let candidates = visibleWeeks
+        guard !candidates.isEmpty else { return nil }
+        let target = Calendar.current.startOfDay(for: date)
+        return candidates.min(by: { abs($0.timeIntervalSince(target)) < abs($1.timeIntervalSince(target)) })
+    }
+
+    private func shortLabel(_ title: String) -> String {
+        switch title {
+        case "Career & Business": return "Career"
+        case "Love & Relationships": return "Love"
+        case "Health & Vitality", "Health & Energy": return "Health"
+        case "Mind & Meaning": return "Mind"
+        case "Wealth & Lifestyle": return "Wealth"
+        case "Leadership & Impact": return "Impact"
+        default: return title
+        }
+    }
+
+    private func percentText(_ value: Double) -> String {
+        "\(Int((FulfillmentScoringMath.clamped01(value) * 100).rounded()))%"
+    }
+
+    private func momentumText(_ value: Double) -> String {
+        let v = FulfillmentScoringMath.clamp(value, -1, 1)
+        if abs(v) < 0.12 { return "Stable" }
+        return v > 0 ? "Improving" : "Declining"
+    }
+
+    private func momentumGlyph(_ value: Double) -> String {
+        let v = FulfillmentScoringMath.clamp(value, -1, 1)
+        if abs(v) < 0.12 { return "→" }
+        return v > 0 ? "↑" : "↓"
+    }
+
+    private func momentumColor(_ value: Double) -> Color {
+        let v = FulfillmentScoringMath.clamp(value, -1, 1)
+        if abs(v) < 0.12 { return .secondary }
+        return v > 0 ? .green : .orange
     }
 }
 

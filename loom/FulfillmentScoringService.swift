@@ -195,6 +195,31 @@ struct FulfillmentScoringService {
     }
 
     @discardableResult
+    func computeAndBackfillWeeklySnapshots(in context: ModelContext, now: Date = .now, maxLookbackWeeks: Int = 104) throws -> [FulfillmentCategoryScoreSnapshot] {
+        let currentWeekStart = FulfillmentScoringMath.weekWindow(for: now, calendar: calendar).weekStart
+        let earliestCandidate = try earliestRelevantDate(in: context) ?? currentWeekStart
+        let earliestWeekStart = FulfillmentScoringMath.weekWindow(for: earliestCandidate, calendar: calendar).weekStart
+        let boundedStart = calendar.date(byAdding: .day, value: -(maxLookbackWeeks - 1) * 7, to: currentWeekStart) ?? earliestWeekStart
+        let startWeek = max(earliestWeekStart, boundedStart)
+        let existingSnapshots = try context.fetch(FetchDescriptor<FulfillmentCategoryScoreSnapshot>())
+        let existingWeekStarts = Set(existingSnapshots.map { calendar.startOfDay(for: $0.weekStartDate) })
+
+        var all: [FulfillmentCategoryScoreSnapshot] = []
+        var cursor = startWeek
+        while cursor <= currentWeekStart {
+            let normalizedCursor = calendar.startOfDay(for: cursor)
+            let shouldCompute = normalizedCursor == calendar.startOfDay(for: currentWeekStart) || !existingWeekStarts.contains(normalizedCursor)
+            if shouldCompute {
+                let rows = try computeAndPersist(weekStartDate: cursor, in: context)
+                all.append(contentsOf: rows)
+            }
+            guard let next = calendar.date(byAdding: .day, value: 7, to: cursor) else { break }
+            cursor = next
+        }
+        return all
+    }
+
+    @discardableResult
     func computeAndPersist(weekStartDate: Date, in context: ModelContext) throws -> [FulfillmentCategoryScoreSnapshot] {
         let window = FulfillmentScoringMath.weekWindow(for: weekStartDate, calendar: calendar)
 
@@ -379,6 +404,29 @@ struct FulfillmentScoringService {
 
         try context.save()
         return persisted
+    }
+
+    private func earliestRelevantDate(in context: ModelContext) throws -> Date? {
+        var dates: [Date] = []
+        if let d = try earliestDate(type: Fulfillment.self, sortBy: SortDescriptor(\Fulfillment.updatedAt, order: .forward), keyPath: \.updatedAt, in: context) { dates.append(d) }
+        if let d = try earliestDate(type: LittleWinsDailyCompletion.self, sortBy: SortDescriptor(\LittleWinsDailyCompletion.completedAt, order: .forward), keyPath: \.completedAt, in: context) { dates.append(d) }
+        if let d = try earliestDate(type: ActionBlocksReflectionArchive.self, sortBy: SortDescriptor(\ActionBlocksReflectionArchive.completedAt, order: .forward), keyPath: \.completedAt, in: context) { dates.append(d) }
+        if let d = try earliestDate(type: Outcomes.self, sortBy: SortDescriptor(\Outcomes.start, order: .forward), keyPath: \.start, in: context) { dates.append(d) }
+        if let d = try earliestDate(type: CompletedOutcomeArchive.self, sortBy: SortDescriptor(\CompletedOutcomeArchive.completedAt, order: .forward), keyPath: \.completedAt, in: context) { dates.append(d) }
+        if let d = try earliestDate(type: FulfillmentCategoryScoreSnapshot.self, sortBy: SortDescriptor(\FulfillmentCategoryScoreSnapshot.weekStartDate, order: .forward), keyPath: \.weekStartDate, in: context) { dates.append(d) }
+        return dates.min()
+    }
+
+    private func earliestDate<T: PersistentModel>(
+        type: T.Type,
+        sortBy: SortDescriptor<T>,
+        keyPath: KeyPath<T, Date>,
+        in context: ModelContext
+    ) throws -> Date? {
+        _ = type
+        var descriptor = FetchDescriptor<T>(sortBy: [sortBy])
+        descriptor.fetchLimit = 1
+        return try context.fetch(descriptor).first.map { $0[keyPath: keyPath] }
     }
 
     func computeScore(signals: FulfillmentCategorySignals, history: [FulfillmentCategoryScoreSnapshot]) -> FulfillmentCategoryScoreResult {

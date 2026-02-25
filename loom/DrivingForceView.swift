@@ -614,8 +614,7 @@ struct DrivingForceView: View {
 
     private func refreshPassionScoresForCurrentMonthIfNeeded() {
         let service = PassionScoringService()
-        let monthStart = PassionScoringMath.monthWindow(for: .now).monthStart
-        _ = try? service.computeAndPersistSnapshots(for: monthStart, in: context)
+        _ = try? service.computeAndBackfillMonthlySnapshots(in: context)
     }
 
     @ViewBuilder

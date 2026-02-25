@@ -1375,7 +1375,8 @@ struct ContentView: View {
     }
 
     private func refreshFulfillmentCategoryScoresForCurrentWeek() {
-        _ = try? FulfillmentScoringService().computeAndPersistCurrentWeek(in: modelContext)
+        _ = try? FulfillmentScoringService().computeAndBackfillWeeklySnapshots(in: modelContext)
+        _ = try? PassionScoringService().computeAndBackfillMonthlySnapshots(in: modelContext)
     }
 
     private func progressTrim(for measure: OutcomesMeasure, outcomeID: UUID) -> Double {
@@ -1407,8 +1408,15 @@ struct ContentView: View {
     private var fulfillmentMetrics: [(String, Color, Double)] {
         orderedFulfillmentRecords.map { record in
             let title = record.category
-            return (title, FulfillmentCategoryTheme.color(for: title), batteryPercentage(for: record))
+            return (title, FulfillmentCategoryTheme.color(for: title), fulfillmentRadarPercentage(for: record))
         }
+    }
+
+    private func fulfillmentRadarPercentage(for record: Fulfillment) -> Double {
+        if let score = latestFulfillmentWeeklyScore(for: record) {
+            return (FulfillmentScoringMath.clamp(score, 1, 5) / 5.0) * 100.0
+        }
+        return batteryPercentage(for: record)
     }
 
     private var header: some View {

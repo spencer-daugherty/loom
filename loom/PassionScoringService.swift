@@ -702,6 +702,31 @@ struct PassionScoringService {
         return persisted
     }
 
+    @discardableResult
+    func computeAndBackfillMonthlySnapshots(in modelContext: ModelContext, now: Date = .now, maxLookbackMonths: Int = 60) throws -> [PassionScoreSnapshot] {
+        let currentMonthStart = PassionScoringMath.monthWindow(for: now, calendar: calendar).monthStart
+        let earliestCandidate = try earliestRelevantDate(in: modelContext) ?? currentMonthStart
+        let earliestMonthStart = PassionScoringMath.monthWindow(for: earliestCandidate, calendar: calendar).monthStart
+        let boundedStart = calendar.date(byAdding: .month, value: -(maxLookbackMonths - 1), to: currentMonthStart) ?? earliestMonthStart
+        let startMonth = max(earliestMonthStart, boundedStart)
+        let existingSnapshots = try modelContext.fetch(FetchDescriptor<PassionScoreSnapshot>())
+        let existingMonthStarts = Set(existingSnapshots.map { calendar.startOfDay(for: $0.monthStartDate) })
+
+        var all: [PassionScoreSnapshot] = []
+        var cursor = startMonth
+        while cursor <= currentMonthStart {
+            let normalizedCursor = calendar.startOfDay(for: cursor)
+            let shouldCompute = normalizedCursor == calendar.startOfDay(for: currentMonthStart) || !existingMonthStarts.contains(normalizedCursor)
+            if shouldCompute {
+                let rows = try computeAndPersistSnapshots(for: cursor, in: modelContext)
+                all.append(contentsOf: rows)
+            }
+            guard let next = calendar.date(byAdding: .month, value: 1, to: cursor) else { break }
+            cursor = next
+        }
+        return all
+    }
+
     func computeMonthlyScore(
         monthStartDate: Date,
         passion: PassionType,
@@ -944,5 +969,28 @@ struct PassionScoringService {
         )
         modelContext.insert(snapshot)
         return snapshot
+    }
+
+    private func earliestRelevantDate(in modelContext: ModelContext) throws -> Date? {
+        var dates: [Date] = []
+        if let d = try earliestDate(type: Passion.self, sortBy: SortDescriptor(\Passion.date, order: .forward), keyPath: \.date, in: modelContext) { dates.append(d) }
+        if let d = try earliestDate(type: LittleWinsDailyCompletion.self, sortBy: SortDescriptor(\LittleWinsDailyCompletion.completedAt, order: .forward), keyPath: \.completedAt, in: modelContext) { dates.append(d) }
+        if let d = try earliestDate(type: ActionBlocksReflectionArchive.self, sortBy: SortDescriptor(\ActionBlocksReflectionArchive.completedAt, order: .forward), keyPath: \.completedAt, in: modelContext) { dates.append(d) }
+        if let d = try earliestDate(type: Outcomes.self, sortBy: SortDescriptor(\Outcomes.start, order: .forward), keyPath: \.start, in: modelContext) { dates.append(d) }
+        if let d = try earliestDate(type: CompletedOutcomeArchive.self, sortBy: SortDescriptor(\CompletedOutcomeArchive.completedAt, order: .forward), keyPath: \.completedAt, in: modelContext) { dates.append(d) }
+        if let d = try earliestDate(type: PassionScoreSnapshot.self, sortBy: SortDescriptor(\PassionScoreSnapshot.monthStartDate, order: .forward), keyPath: \.monthStartDate, in: modelContext) { dates.append(d) }
+        return dates.min()
+    }
+
+    private func earliestDate<T: PersistentModel>(
+        type: T.Type,
+        sortBy: SortDescriptor<T>,
+        keyPath: KeyPath<T, Date>,
+        in modelContext: ModelContext
+    ) throws -> Date? {
+        _ = type
+        var descriptor = FetchDescriptor<T>(sortBy: [sortBy])
+        descriptor.fetchLimit = 1
+        return try modelContext.fetch(descriptor).first.map { $0[keyPath: keyPath] }
     }
 }
