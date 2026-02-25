@@ -251,13 +251,19 @@ struct ObjectivesAddViewChart: View {
                         x: .value("Start Date", Calendar.current.startOfDay(for: outcome.start))
                     )
                     .foregroundStyle(.green)
-                    .lineStyle(.init(lineWidth: 2, dash: [5, 5]))
+                    .lineStyle(todayIsOutcomeStartDate ? .init(lineWidth: 2) : .init(lineWidth: 2, dash: [5, 5]))
 
                     RuleMark(
                         x: .value("End Date", Calendar.current.startOfDay(for: outcome.end))
                     )
-                    .foregroundStyle(.red)
-                    .lineStyle(.init(lineWidth: 2, dash: [5, 5]))
+                    .foregroundStyle(.orange)
+                    .lineStyle(todayIsOutcomeEndDate ? .init(lineWidth: 2) : .init(lineWidth: 2, dash: [5, 5]))
+                }
+
+                if shouldShowTodayMarker {
+                    RuleMark(x: .value("Today", Calendar.current.startOfDay(for: .now)))
+                        .foregroundStyle(.black.opacity(0.75))
+                        .lineStyle(.init(lineWidth: 2))
                 }
 
                 ForEach(visibleRows) { row in
@@ -429,6 +435,26 @@ struct ObjectivesAddViewChart: View {
         let paddedStart = calendar.date(byAdding: .day, value: -30, to: minDate) ?? minDate
         let paddedEnd = calendar.date(byAdding: .day, value: 30, to: maxDate) ?? maxDate
         return paddedStart...paddedEnd
+    }
+
+    private var shouldShowTodayMarker: Bool {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: .now)
+        guard !todayIsOutcomeStartDate, !todayIsOutcomeEndDate else { return false }
+        let hasTodayPoint = visibleRows.contains { cal.isDate($0.measuredAt, inSameDayAs: today) }
+        guard !hasTodayPoint else { return false }
+        let range = fullDateRange()
+        return today >= range.lowerBound && today <= range.upperBound
+    }
+
+    private var todayIsOutcomeStartDate: Bool {
+        guard let outcome = outcomes.first else { return false }
+        return Calendar.current.isDate(outcome.start, inSameDayAs: .now)
+    }
+
+    private var todayIsOutcomeEndDate: Bool {
+        guard let outcome = outcomes.first else { return false }
+        return Calendar.current.isDate(outcome.end, inSameDayAs: .now)
     }
 
     private func yAxisRange() -> ClosedRange<Double> {

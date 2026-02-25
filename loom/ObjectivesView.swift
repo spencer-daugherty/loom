@@ -1790,6 +1790,7 @@ private struct CompletedOutcomeArchiveChart: View {
         }
     }
 
+
     private func visibleDomainLength() -> TimeInterval {
         let day: TimeInterval = 86_400
         switch selectedTimeRange {
