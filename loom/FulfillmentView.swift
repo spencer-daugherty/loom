@@ -230,6 +230,7 @@ struct FulfillmentView: View {
     @State private var resourceEditorTarget: ResourceEditorTarget?
     @State private var littleWinsScheduleStoreRevision = 0
     @State private var headerInsightOutlineAngle: Double = 0
+    @State private var fulfillmentRadarHeaderMeasuredWidth: CGFloat = 0
     @FocusState private var focusedField: Field?
     @FocusState private var focusedVisionCategoryID: UUID?
     @FocusState private var focusedPurposeCategoryID: UUID?
@@ -1149,8 +1150,8 @@ struct FulfillmentView: View {
     }
 
     private var fulfillmentRadarHeader: some View {
-        GeometryReader { geo in
-            let width = geo.size.width
+        let width = max(fulfillmentRadarHeaderMeasuredWidth, 320)
+        return Group {
             let baseGraphWidth = max(120, width * 0.40)
             let graphWidth = baseGraphWidth * 1.2
             let leftWidth = max(120, width - baseGraphWidth - 28)
@@ -1261,13 +1262,30 @@ struct FulfillmentView: View {
                     }
                 )
                 .frame(width: graphWidth, height: graphWidth)
-                .frame(width: baseGraphWidth, height: 245, alignment: .center)
+                .frame(width: baseGraphWidth, alignment: .center)
+                .frame(minHeight: 245, alignment: .center)
 
                 Spacer(minLength: 0)
                 }
             }
         }
-        .frame(height: 245)
+        .background(
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear {
+                        let newWidth = proxy.size.width
+                        if abs(newWidth - fulfillmentRadarHeaderMeasuredWidth) > 0.5 {
+                            fulfillmentRadarHeaderMeasuredWidth = newWidth
+                        }
+                    }
+                    .onChange(of: proxy.size.width) { _, newWidth in
+                        if abs(newWidth - fulfillmentRadarHeaderMeasuredWidth) > 0.5 {
+                            fulfillmentRadarHeaderMeasuredWidth = newWidth
+                        }
+                    }
+            }
+        )
+        .frame(minHeight: 245)
         .padding(.bottom, 8)
         .onAppear {
             guard headerInsightOutlineAngle == 0 else { return }
