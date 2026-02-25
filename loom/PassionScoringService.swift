@@ -140,6 +140,7 @@ struct PassionMonthlySignals: Sendable {
     var littleWinsScheduledCount: Int = 0
 
     var outcomes: [PassionOutcomeSignal] = []
+    var vacationCredit: Double = 0
 
     var isEmptyForBootstrap: Bool {
         passionItemCount == 0 &&
@@ -147,7 +148,8 @@ struct PassionMonthlySignals: Sendable {
         blocks.isEmpty &&
         littleWinsCompletedCount == 0 &&
         littleWinsScheduledCount == 0 &&
-        outcomes.isEmpty
+        outcomes.isEmpty &&
+        vacationCredit <= 0
     }
 }
 
@@ -318,6 +320,7 @@ struct SwiftDataPassionScoringSignalProvider: PassionScoringSignalProvider {
         let completedOutcomes = try modelContext.fetch(FetchDescriptor<CompletedOutcomeArchive>())
         let completedOutcomePassionLinks = try modelContext.fetch(FetchDescriptor<CompletedOutcomePassionLinkArchive>())
         let completedOutcomeMeasurePoints = try modelContext.fetch(FetchDescriptor<CompletedOutcomeMeasurePointArchive>())
+        let vacationArchives = try modelContext.fetch(FetchDescriptor<VacationModeArchive>())
 
         let emotionKey = emotionRaw(for: passion)
         let passionItems = passions.filter { normalizeEmotion($0.emotion) == emotionKey }
@@ -373,14 +376,58 @@ struct SwiftDataPassionScoringSignalProvider: PassionScoringSignalProvider {
             littleWinsScheduledCount: littleWinsScheduledCount
         )
 
+        let vacationCredit = monthlyVacationCredit(
+            passion: passion,
+            window: window,
+            vacationArchives: vacationArchives
+        )
+
         return PassionMonthlySignals(
             passionItemCount: passionItems.count,
             fulfillmentLinkCount: linkedJoins.count,
             blocks: blockSignals,
             littleWinsCompletedCount: littleWinsCompletedCount,
             littleWinsScheduledCount: littleWinsScheduledCount,
-            outcomes: outcomeSignals
+            outcomes: outcomeSignals,
+            vacationCredit: vacationCredit
         )
+    }
+
+    private func monthlyVacationCredit(
+        passion: PassionType,
+        window: PassionMonthWindow,
+        vacationArchives: [VacationModeArchive]
+    ) -> Double {
+        struct VacationPassionSnapshot: Decodable {
+            let passionID: UUID
+            let emotion: String
+            let passion: String
+        }
+
+        let cal = Calendar.current
+        let targetEmotion = emotionRaw(for: passion)
+        let relevantArchives = vacationArchives.filter { archive in
+            archive.endedAt >= window.monthStart && archive.endedAt < window.monthEnd
+        }
+
+        let credits: [Double] = relevantArchives.compactMap { archive in
+            let start = cal.startOfDay(for: archive.startDate)
+            let end = cal.startOfDay(for: archive.returnDate)
+            let daySpan = max(0, cal.dateComponents([.day], from: start, to: end).day ?? 0)
+            let durationDays = daySpan + 1
+            guard durationDays > 1 else { return nil }
+
+            guard let data = archive.passionSnapshotsJSON.data(using: .utf8),
+                  let snapshots = try? JSONDecoder().decode([VacationPassionSnapshot].self, from: data),
+                  snapshots.contains(where: { normalizeEmotion($0.emotion) == targetEmotion }) else {
+                return nil
+            }
+
+            // Positive-only bonus with saturation by duration; does not reward raw volume.
+            return PassionScoringMath.clamped01(Double(durationDays) / 14.0)
+        }
+
+        return PassionScoringMath.mean(credits) ?? 0
     }
 
     private func monthlyBlockSignals(
@@ -785,7 +832,8 @@ struct PassionScoringService {
             actionCoverage: actionCoverage,
             carryoverPenalty: carryoverPenalty,
             littleWinsCoverage: littleWinsCoverage,
-            outcomeCoverage: outcomeCoverage
+            outcomeCoverage: outcomeCoverage,
+            vacationCredit: signals.vacationCredit
         )
 
         let recentEvidence = Array(sortedHistory.suffix(3).map(\.evidenceStable)) + [evidence]
@@ -938,7 +986,8 @@ struct PassionScoringService {
         actionCoverage: Double,
         carryoverPenalty: Double,
         littleWinsCoverage: Double,
-        outcomeCoverage: Double?
+        outcomeCoverage: Double?,
+        vacationCredit: Double
     ) -> Double {
         var weights: [(Double, Double)] = []
         let structureWeight = 0.15
@@ -965,7 +1014,10 @@ struct PassionScoringService {
         let totalWeight = weights.reduce(0.0) { $0 + $1.0 }
         guard totalWeight > 0 else { return 0.5 }
         let weighted = weights.reduce(0.0) { partial, pair in partial + (pair.0 * pair.1) }
-        return PassionScoringMath.clamped01(weighted / totalWeight)
+        let baseEvidence = PassionScoringMath.clamped01(weighted / totalWeight)
+        // Vacation credit can only help (never hurt) and stays intentionally small.
+        let positiveVacationBoost = 0.08 * PassionScoringMath.clamped01(vacationCredit)
+        return PassionScoringMath.clamped01(max(baseEvidence, baseEvidence + positiveVacationBoost))
     }
 
     private func fetchSnapshots(

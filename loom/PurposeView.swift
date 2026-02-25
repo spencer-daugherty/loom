@@ -1805,6 +1805,7 @@ private struct DrivingForceTrendsView: View {
                     insightRow("Outcomes", percentTextOrDash(snap.outcomeCoverage ?? 0))
                     insightRow("Action blocks", percentTextOrDash(snap.actionCoverage))
                     insightRow("Little Wins", percentTextOrDash(snap.littleWinsCoverage))
+                    insightRow("Evidence", percentTextOrDash(snap.evidenceStable))
                     insightRow(
                         "Carryover penalty",
                         percentTextOrDash(snap.carryoverPenalty),
