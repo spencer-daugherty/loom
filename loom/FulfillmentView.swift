@@ -4152,7 +4152,7 @@ private struct FulfillmentTrendsView: View {
             guard height > 0 else { return nil }
             return TrendSegment(
                 id: row.id,
-                color: FulfillmentCategoryTheme.color(for: row.category),
+                color: FulfillmentCategoryTheme.color(for: row.category).opacity(0.75),
                 height: height
             )
         }
