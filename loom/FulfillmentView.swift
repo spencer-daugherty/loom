@@ -1160,7 +1160,7 @@ struct FulfillmentView: View {
                 let selectedIndex = min(max(0, highlightedCategoryIndex), max(0, orderedFulfillments.count - 1))
                 let selected = orderedFulfillments[selectedIndex]
                 let selectedTitle = selected.category
-                let selectedScore = Int(round((batteryPercentage(for: selected) / 100.0) * 5.0))
+                let selectedScore = roundedTenth(latestFulfillmentWeeklyScore(for: selected) ?? ((batteryPercentage(for: selected) / 100.0) * 5.0))
                 let selectedDelta = fulfillmentWeekOverWeekDelta(for: selected)
                 let selectedInsightSnapshot = latestFulfillmentWeeklySnapshot(for: selected)
 
@@ -1180,7 +1180,7 @@ struct FulfillmentView: View {
                             .fill(FulfillmentCategoryTheme.color(for: selectedTitle))
                             .frame(width: 92, height: 58)
                             .overlay {
-                                Text("\(selectedScore)/5")
+                                Text(String(format: "%.1f/5", selectedScore))
                                     .font(.system(size: 26, weight: .bold))
                                     .foregroundStyle(.white)
                             }
@@ -1541,9 +1541,16 @@ struct FulfillmentView: View {
     private var fulfillmentMetrics: [(String, Color, Double)] {
         orderedFulfillments.map { record in
             let title = record.category
-            let pct = batteryPercentage(for: record)
+            let pct = fulfillmentRadarPercentage(for: record)
             return (title, FulfillmentCategoryTheme.color(for: title), pct)
         }
+    }
+
+    private func fulfillmentRadarPercentage(for record: Fulfillment) -> Double {
+        if let score = latestFulfillmentWeeklyScore(for: record) {
+            return (FulfillmentScoringMath.clamp(score, 1, 5) / 5.0) * 100.0
+        }
+        return batteryPercentage(for: record)
     }
 
     private func batteryPercentage(for record: Fulfillment) -> Double {
