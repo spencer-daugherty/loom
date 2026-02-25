@@ -510,6 +510,9 @@ struct FulfillmentView: View {
                 littleWinsScheduleStoreRevision &+= 1
                 refreshFulfillmentCategoryScoresForCurrentWeek()
             }
+            .onReceive(NotificationCenter.default.publisher(for: .vacationModeDidChange)) { _ in
+                refreshFulfillmentCategoryScoresForCurrentWeek()
+            }
     }
 
     private var fulfillmentScreen: some View {

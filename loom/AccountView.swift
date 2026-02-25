@@ -527,6 +527,22 @@ struct AccountView: View {
                 }
 
                 NavigationLink {
+                    VacationModeView()
+                } label: {
+                    HStack {
+                        Text("Vacation Mode")
+                        Spacer()
+                        let cfg = VacationModeStore.config().normalized
+                        let today = Calendar.current.startOfDay(for: .now)
+                        if cfg.isEnabled && today >= Calendar.current.startOfDay(for: cfg.startDate) {
+                            Text("On until \(cfg.returnDate, format: .dateTime.month().day())")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                NavigationLink {
                     RecentlyDeletedView()
                 } label: {
                     HStack {
@@ -769,6 +785,114 @@ struct AccountView: View {
         guard let rows = try? context.fetch(descriptor) else { return }
         for row in rows {
             context.delete(row)
+        }
+    }
+}
+
+struct VacationModeView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var startToday = false
+    @State private var startDate = Calendar.current.startOfDay(for: Date())
+    @State private var returnDate = Calendar.current.startOfDay(for: Date())
+    @State private var savedConfig = VacationModeStore.config()
+
+    private var today: Date { Calendar.current.startOfDay(for: .now) }
+    private var effectiveStartDate: Date { startToday ? today : startDate }
+
+    private var hasChanges: Bool {
+        currentConfigToSave != savedConfig.normalized
+    }
+
+    private var currentConfigToSave: VacationModeConfig {
+        VacationModeConfig(
+            isEnabled: true,
+            startDate: effectiveStartDate,
+            returnDate: max(returnDate, effectiveStartDate)
+        ).normalized
+    }
+
+    var body: some View {
+        Form {
+            Section("Start Vacation") {
+                if !savedConfig.isEnabled {
+                    HStack {
+                        Text("Today")
+                        Spacer()
+                        Toggle("", isOn: $startToday)
+                            .labelsHidden()
+                    }
+                } else if startToday {
+                    HStack {
+                        Text("Start")
+                        Spacer()
+                        Text(savedConfig.startDate, format: .dateTime.month().day())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if !startToday {
+                    DatePicker(
+                        "Start",
+                        selection: Binding(
+                            get: { max(startDate, today) },
+                            set: { startDate = $0 }
+                        ),
+                        in: today...,
+                        displayedComponents: [.date]
+                    )
+                }
+            }
+
+            Section("End Vacation") {
+                DatePicker(
+                    "Return",
+                    selection: Binding(
+                        get: { max(returnDate, effectiveStartDate) },
+                        set: { returnDate = $0 }
+                    ),
+                    in: effectiveStartDate...,
+                    displayedComponents: [.date]
+                )
+            }
+
+            Section {
+                Button("Save") {
+                    let next = currentConfigToSave
+                    VacationModeStore.setConfig(next)
+                    savedConfig = next
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
+                .disabled(!hasChanges)
+
+                if savedConfig.isEnabled {
+                    Button("Turn Off Vacation Mode", role: .destructive) {
+                        let next = VacationModeConfig(
+                            isEnabled: false,
+                            startDate: savedConfig.startDate,
+                            returnDate: savedConfig.returnDate
+                        )
+                        VacationModeStore.setConfig(next)
+                        savedConfig = next
+                        startDate = next.startDate
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
+                }
+            }
+
+            Section {
+                Text("Vacation mode ensures your Purpose and Fulfillment scores are not reduced from low activity when you're taking a break. Temproary freeze your progress until you come back.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .navigationTitle("Vacation Mode")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            let cfg = VacationModeStore.config().normalized
+            savedConfig = cfg
+            startToday = cfg.isEnabled ? Calendar.current.isDate(cfg.startDate, inSameDayAs: today) : false
+            startDate = cfg.startDate
+            returnDate = cfg.returnDate
         }
     }
 }

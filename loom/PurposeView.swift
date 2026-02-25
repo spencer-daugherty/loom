@@ -195,6 +195,9 @@ struct PurposeView: View {
         .onReceive(NotificationCenter.default.publisher(for: .littleWinsPassionsDidChange)) { _ in
             refreshPassionScoresForCurrentMonthIfNeeded(force: true)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .vacationModeDidChange)) { _ in
+            refreshPassionScoresForCurrentMonthIfNeeded(force: true)
+        }
         .sheet(isPresented: $isShowingInstructions, content: instructionsSheet)
         .navigationDestination(isPresented: $showDrivingForceTrends) {
             DrivingForceTrendsView(snapshots: passionScoreSnapshots)

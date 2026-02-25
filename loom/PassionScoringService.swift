@@ -698,12 +698,15 @@ struct PassionScoringService {
         in modelContext: ModelContext
     ) throws -> [PassionScoreSnapshot] {
         let window = PassionScoringMath.monthWindow(for: monthStartDate, calendar: calendar)
+        let isVacationMonth = VacationModeStore.overlappingConfig(start: window.monthStart, endExclusive: window.monthEnd) != nil
         var persisted: [PassionScoreSnapshot] = []
 
         for passion in PassionType.allCases {
             let signals = try provider.monthlySignals(for: passion, window: window, modelContext: modelContext)
             let history = try fetchSnapshots(for: passion, before: window.monthStart, in: modelContext)
-            let result = computeMonthlyScore(monthStartDate: window.monthStart, passion: passion, signals: signals, history: history)
+            let result = isVacationMonth
+                ? frozenVacationMonthlyResult(history: history)
+                : computeMonthlyScore(monthStartDate: window.monthStart, passion: passion, signals: signals, history: history)
             let snapshot = try upsertSnapshot(
                 monthStartDate: window.monthStart,
                 passion: passion,
@@ -817,6 +820,44 @@ struct PassionScoringService {
             momentum: momentum
         )
         return PassionScoreComputationResult(score: score, breakdown: breakdown)
+    }
+
+    private func frozenVacationMonthlyResult(history: [PassionScoreSnapshot]) -> PassionScoreComputationResult {
+        let sortedHistory = history.sorted { $0.monthStartDate < $1.monthStartDate }
+        if let prev = sortedHistory.last {
+            return PassionScoreComputationResult(
+                score: prev.score,
+                breakdown: .init(
+                    structure: prev.structure,
+                    actionCoverage: prev.actionCoverage,
+                    carryoverPenalty: prev.carryoverPenalty,
+                    littleWinsCoverage: prev.littleWinsCoverage,
+                    outcomeCoverage: prev.outcomeCoverage,
+                    consistency: prev.consistency,
+                    evidence: prev.evidence,
+                    evidenceStable: prev.evidenceStable,
+                    targetScore: prev.targetScore,
+                    emaTarget: prev.emaTarget,
+                    momentum: 0
+                )
+            )
+        }
+        return PassionScoreComputationResult(
+            score: 2.0,
+            breakdown: .init(
+                structure: 0,
+                actionCoverage: 0,
+                carryoverPenalty: 0,
+                littleWinsCoverage: 0,
+                outcomeCoverage: nil,
+                consistency: 1,
+                evidence: 0.5,
+                evidenceStable: 0.5,
+                targetScore: 2.0,
+                emaTarget: 2.0,
+                momentum: 0
+            )
+        )
     }
 
     func computeStructure(_ signals: PassionMonthlySignals) -> Double {

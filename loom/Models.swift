@@ -12,6 +12,75 @@ extension Notification.Name {
   static let littleWinsOpenNewEditor = Notification.Name("littleWinsOpenNewEditor")
   static let littleWinsIntegrationDidChange = Notification.Name("littleWinsIntegrationDidChange")
   static let littleWinsPassionsDidChange = Notification.Name("littleWinsPassionsDidChange")
+  static let vacationModeDidChange = Notification.Name("vacationModeDidChange")
+}
+
+struct VacationModeConfig: Codable, Equatable {
+  var isEnabled: Bool
+  var startDate: Date
+  var returnDate: Date
+
+  static var `default`: VacationModeConfig {
+    let today = Calendar.current.startOfDay(for: .now)
+    return VacationModeConfig(
+      isEnabled: false,
+      startDate: today,
+      returnDate: Calendar.current.date(byAdding: .day, value: 7, to: today) ?? today
+    )
+  }
+
+  var normalized: VacationModeConfig {
+    let cal = Calendar.current
+    var copy = self
+    copy.startDate = cal.startOfDay(for: copy.startDate)
+    copy.returnDate = cal.startOfDay(for: copy.returnDate)
+    if copy.returnDate < copy.startDate {
+      copy.returnDate = copy.startDate
+    }
+    return copy
+  }
+
+  func overlaps(start: Date, endExclusive: Date) -> Bool {
+    let cal = Calendar.current
+    let vacationStart = cal.startOfDay(for: startDate)
+    let vacationEndExclusive = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: returnDate)) ?? endExclusive
+    return vacationStart < endExclusive && vacationEndExclusive > start
+  }
+}
+
+enum VacationModeStore {
+  private static let defaultsKey = "vacationModeConfig.v1"
+
+  static func config() -> VacationModeConfig {
+    guard let data = UserDefaults.standard.data(forKey: defaultsKey),
+          let decoded = try? JSONDecoder().decode(VacationModeConfig.self, from: data) else {
+      return .default
+    }
+    return decoded.normalized
+  }
+
+  static func setConfig(_ config: VacationModeConfig) {
+    let normalized = config.normalized
+    if let data = try? JSONEncoder().encode(normalized) {
+      UserDefaults.standard.set(data, forKey: defaultsKey)
+    }
+    NotificationCenter.default.post(name: .vacationModeDidChange, object: nil)
+  }
+
+  static func activeConfig(now: Date = .now) -> VacationModeConfig? {
+    let cfg = config()
+    guard cfg.isEnabled else { return nil }
+    let today = Calendar.current.startOfDay(for: now)
+    guard today >= Calendar.current.startOfDay(for: cfg.startDate),
+          today <= Calendar.current.startOfDay(for: cfg.returnDate) else { return nil }
+    return cfg
+  }
+
+  static func overlappingConfig(start: Date, endExclusive: Date) -> VacationModeConfig? {
+    let cfg = config()
+    guard cfg.isEnabled, cfg.overlaps(start: start, endExclusive: endExclusive) else { return nil }
+    return cfg
+  }
 }
 
 struct LittleWinsScheduleRule: Codable, Equatable {

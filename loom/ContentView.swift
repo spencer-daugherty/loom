@@ -72,6 +72,8 @@ struct ContentView: View {
 
     @State private var playSheetDestination: PlayDestination? = nil
     @State private var navigateToFulfillmentFromOnboarding = false
+    @State private var isPresentingVacationModeFromBanner = false
+    @State private var dismissVacationModeBanner = false
 
     private enum PlayDestination: String, Identifiable, Hashable {
         case action
@@ -106,6 +108,16 @@ struct ContentView: View {
 
     private var shouldShowBlankHomepageAppearance: Bool {
         blankHomepageMode || setupHomepageMode
+    }
+
+    private var activeVacationModeConfig: VacationModeConfig? {
+        VacationModeStore.activeConfig()
+    }
+
+    private var shouldShowVacationModeBanner: Bool {
+        homePageIndex == HomeSwipePage.home.rawValue &&
+        activeVacationModeConfig != nil &&
+        !dismissVacationModeBanner
     }
 
     private var isDrivingForceEmptyState: Bool {
@@ -267,6 +279,49 @@ struct ContentView: View {
     }
 
     @ViewBuilder
+    private var vacationModeCautionBanner: some View {
+        let cautionForeground = Color.black.opacity(0.7)
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "beach.umbrella.fill")
+                .foregroundStyle(cautionForeground)
+                .font(.subheadline)
+                .padding(.top, 1)
+
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("Vacation Mode On")
+                    .font(.subheadline)
+                    .fontWeight(.bold)
+                    .foregroundStyle(cautionForeground)
+
+                Button("Manage") {
+                    isPresentingVacationModeFromBanner = true
+                }
+                .buttonStyle(.plain)
+                .font(.subheadline)
+                .foregroundStyle(.blue)
+            }
+
+            Spacer(minLength: 0)
+
+            Button {
+                dismissVacationModeBanner = true
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(cautionForeground)
+                    .frame(width: 22, height: 22)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(red: 0.98, green: 0.92, blue: 0.72))
+        )
+    }
+
+    @ViewBuilder
     private var contentViewPopupOverlay: some View {
         if let emotion = pressedEmotion {
             PassionPopupOverlay(
@@ -336,6 +391,11 @@ struct ContentView: View {
                     categories: orderedFulfillmentRecords.map { ($0.category_id, $0.category) }
                 )
             }
+            .sheet(isPresented: $isPresentingVacationModeFromBanner) {
+                NavigationStack {
+                    VacationModeView()
+                }
+            }
     }
 
     private var contentViewLifecycleLayer: some View {
@@ -359,6 +419,10 @@ struct ContentView: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                     navigateToFulfillmentFromOnboarding = true
                 }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .vacationModeDidChange)) { _ in
+                dismissVacationModeBanner = false
+                refreshFulfillmentCategoryScoresForCurrentWeek()
             }
     }
 
@@ -1586,45 +1650,53 @@ struct ContentView: View {
         cardSpacing: CGFloat,
         cardDensity: CGFloat
     ) -> some View {
-        ViewThatFits(in: .vertical) {
-            GeometryReader { middleProxy in
-                let middleHeight = middleProxy.size.height
-                let drivingHeight = measuredCardHeights["driving"] ?? 170
-                let fulfillmentHeight = measuredCardHeights["fulfillment"] ?? 170
-                let objectivesHeight = measuredCardHeights["objectives"] ?? 170
-                let totalCardHeight = drivingHeight + fulfillmentHeight + objectivesHeight
-                let uniformGap = max(0, (middleHeight - totalCardHeight) / 4)
-
-                VStack(spacing: 0) {
-                    Color.clear.frame(height: uniformGap)
-                    measuredCard("driving") {
-                        drivingForceSection
-                            .padding(.horizontal)
-                    }
-                    Color.clear.frame(height: uniformGap)
-                    measuredCard("fulfillment") {
-                        fulfillmentSection
-                            .padding(.horizontal)
-                    }
-                    Color.clear.frame(height: uniformGap)
-                    measuredCard("objectives") {
-                        objectivesSection
-                            .padding(.horizontal)
-                    }
-                    Color.clear.frame(height: uniformGap)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        VStack(spacing: 10) {
+            if shouldShowVacationModeBanner {
+                vacationModeCautionBanner
+                    .padding(.horizontal)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
-            .padding(.vertical, max(0, outerVerticalPadding - 2))
 
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: cardSpacing) {
-                    measuredCard("driving") { drivingForceSection }
-                    measuredCard("fulfillment") { fulfillmentSection }
-                    measuredCard("objectives") { objectivesSection }
+            ViewThatFits(in: .vertical) {
+                GeometryReader { middleProxy in
+                    let middleHeight = middleProxy.size.height
+                    let drivingHeight = measuredCardHeights["driving"] ?? 170
+                    let fulfillmentHeight = measuredCardHeights["fulfillment"] ?? 170
+                    let objectivesHeight = measuredCardHeights["objectives"] ?? 170
+                    let totalCardHeight = drivingHeight + fulfillmentHeight + objectivesHeight
+                    let uniformGap = max(0, (middleHeight - totalCardHeight) / 4)
+
+                    VStack(spacing: 0) {
+                        Color.clear.frame(height: uniformGap)
+                        measuredCard("driving") {
+                            drivingForceSection
+                                .padding(.horizontal)
+                        }
+                        Color.clear.frame(height: uniformGap)
+                        measuredCard("fulfillment") {
+                            fulfillmentSection
+                                .padding(.horizontal)
+                        }
+                        Color.clear.frame(height: uniformGap)
+                        measuredCard("objectives") {
+                            objectivesSection
+                                .padding(.horizontal)
+                        }
+                        Color.clear.frame(height: uniformGap)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 }
-                .padding(.horizontal)
-                .padding(.vertical, outerVerticalPadding)
+                .padding(.vertical, max(0, outerVerticalPadding - 2))
+
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: cardSpacing) {
+                        measuredCard("driving") { drivingForceSection }
+                        measuredCard("fulfillment") { fulfillmentSection }
+                        measuredCard("objectives") { objectivesSection }
+                    }
+                    .padding(.horizontal)
+                    .padding(.vertical, outerVerticalPadding)
+                }
             }
         }
         .environment(\.contentCardDensity, cardDensity)
@@ -2995,6 +3067,14 @@ struct ContentView: View {
     // MARK: - Extracted Sections to reduce body complexity
     private var drivingForceSection: some View {
         let ultimateVision = drivingForces.first?.ultimateVision ?? ""
+        let condenseForVacationBanner = shouldShowVacationModeBanner
+        let purposeCardVerticalSpacing: CGFloat = condenseForVacationBanner ? 8 : 12
+        let purposeVisionGroupSpacing: CGFloat = condenseForVacationBanner ? 8 : 12
+        let purposeVisionLineLimit: Int = condenseForVacationBanner ? 2 : 3
+        let purposeEmptyStackSpacing: CGFloat = condenseForVacationBanner ? 6 : 12
+        let purposeEmptyInnerSpacing: CGFloat = condenseForVacationBanner ? 1 : 4
+        let purposeEmptyMinHeight: CGFloat = condenseForVacationBanner ? 106 : 132
+        let purposeEmptyVerticalPadding: CGFloat = condenseForVacationBanner ? 6 : 12
         let drivingForceCardBackground: Color = isDrivingForceEmptyState
             ? Color(.systemGray5)
             : Color(.secondarySystemBackground)
@@ -3015,8 +3095,8 @@ struct ContentView: View {
                 backgroundColor: drivingForceCardBackground
             ) {
                 if isDrivingForceEmptyState {
-                    VStack(spacing: 12) {
-                        VStack(spacing: 4) {
+                    VStack(spacing: purposeEmptyStackSpacing) {
+                        VStack(spacing: purposeEmptyInnerSpacing) {
                             Text("No core identities")
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(.gray)
@@ -3036,17 +3116,17 @@ struct ContentView: View {
                                     .fill(Color(.systemGray6))
                             )
                     }
-                    .frame(maxWidth: .infinity, minHeight: 132)
-                    .padding(.vertical, 12)
+                    .frame(maxWidth: .infinity, minHeight: purposeEmptyMinHeight)
+                    .padding(.vertical, purposeEmptyVerticalPadding)
                     .background(
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
                             .fill(Color(.systemGray5))
                     )
                 } else {
-                    VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: purposeCardVerticalSpacing) {
 
                         // Vision group
-                        VStack(alignment: .leading, spacing: 12) {
+                        VStack(alignment: .leading, spacing: purposeVisionGroupSpacing) {
 
                             // Vision
                             VStack(alignment: .leading, spacing: 4) {
@@ -3058,7 +3138,7 @@ struct ContentView: View {
                                 Text(ultimateVision)
                                     .font(.body)
                                     .foregroundColor(.primary)
-                                    .lineLimit(3)
+                                    .lineLimit(purposeVisionLineLimit)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
 

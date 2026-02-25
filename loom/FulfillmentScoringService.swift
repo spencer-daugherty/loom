@@ -222,6 +222,7 @@ struct FulfillmentScoringService {
     @discardableResult
     func computeAndPersist(weekStartDate: Date, in context: ModelContext) throws -> [FulfillmentCategoryScoreSnapshot] {
         let window = FulfillmentScoringMath.weekWindow(for: weekStartDate, calendar: calendar)
+        let isVacationWeek = VacationModeStore.overlappingConfig(start: window.weekStart, endExclusive: window.weekEnd) != nil
 
         let fulfillments = try context.fetch(FetchDescriptor<Fulfillment>())
         let roles = try context.fetch(FetchDescriptor<FulfillmentRoles>())
@@ -392,7 +393,7 @@ struct FulfillmentScoringService {
             )
 
             let history = scoreHistory.filter { $0.categoryID == categoryID && $0.weekStartDate < window.weekStart }
-            let result = computeScore(signals: signals, history: history)
+            let result = isVacationWeek ? frozenVacationResult(history: history) : computeScore(signals: signals, history: history)
             let snapshot = try upsertSnapshot(
                 weekStart: window.weekStart,
                 category: fulfillment,
@@ -494,6 +495,47 @@ struct FulfillmentScoringService {
                 targetScore: targetScore,
                 smoothedScore: smoothedTarget,
                 momentum: momentum
+            )
+        )
+    }
+
+    private func frozenVacationResult(history: [FulfillmentCategoryScoreSnapshot]) -> FulfillmentCategoryScoreResult {
+        let sortedHistory = history.sorted { $0.weekStartDate < $1.weekStartDate }
+        if let prev = sortedHistory.last {
+            return FulfillmentCategoryScoreResult(
+                score: prev.score,
+                breakdown: .init(
+                    structure: prev.structure,
+                    outcomes: prev.outcomes,
+                    actionBlocks: prev.actionBlocks,
+                    carryoverPenalty: prev.carryoverPenalty,
+                    littleWins: prev.littleWins,
+                    engagement: prev.engagement,
+                    strategicBalance: prev.strategicBalance,
+                    consistency: prev.consistency,
+                    evidence: prev.evidence,
+                    targetScore: prev.targetScore,
+                    smoothedScore: prev.smoothedScore,
+                    momentum: 0
+                )
+            )
+        }
+
+        return FulfillmentCategoryScoreResult(
+            score: 3.0,
+            breakdown: .init(
+                structure: 0,
+                outcomes: 0.5,
+                actionBlocks: 0.5,
+                carryoverPenalty: 0,
+                littleWins: 0,
+                engagement: 0,
+                strategicBalance: 0.5,
+                consistency: 1,
+                evidence: 0.5,
+                targetScore: 3.0,
+                smoothedScore: 3.0,
+                momentum: 0
             )
         )
     }
