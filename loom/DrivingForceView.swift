@@ -81,7 +81,11 @@ struct DrivingForceView: View {
     @State private var didAutoOpenCreateVision: Bool = false
     @State private var showDrivingForceTrends: Bool = false
     @State private var lastPassionScoreRefreshMonthStart: Date?
+    @State private var highlightedPassionEmotionKey: String = "love"
+    @State private var passionAutoRotatePausedUntil: Date = .distantPast
+    @State private var drivingForceHeaderInsightOutlineAngle: Double = 0
     @FocusState private var focusedField: Field?
+    private let passionHeaderTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
 
     private enum DrivingForceEditor: String, Identifiable {
         case vision
@@ -187,6 +191,10 @@ struct DrivingForceView: View {
             if oldValue == .purpose && newValue != .purpose {
                 savePurposeInline()
             }
+        }
+        .onReceive(passionHeaderTimer) { now in
+            guard now >= passionAutoRotatePausedUntil else { return }
+            rotateHighlightedPassion()
         }
         .sheet(isPresented: $isShowingInstructions, content: instructionsSheet)
         .navigationDestination(isPresented: $showDrivingForceTrends) {
@@ -439,12 +447,12 @@ struct DrivingForceView: View {
     }
 
     private var drivingForceInsightsHeader: some View {
-        HStack(alignment: .center, spacing: 16) {
+        HStack(alignment: .top, spacing: 6) {
             VStack(alignment: .leading, spacing: 12) {
-                passionSignalRow(icon: "heart.fill", label: "Love", value: usagePoints(for: "love"))
-                passionSignalRow(icon: "lock.fill", label: "Vows", value: usagePoints(for: "vows"))
-                passionSignalRow(icon: "bolt.fill", label: "Thrill", value: usagePoints(for: "thrill"))
-                passionSignalRow(icon: "shield.fill", label: "Hate", value: usagePoints(for: "just"))
+                passionSignalRow(icon: "heart.fill", label: "Love", emotionKey: "love", value: usagePoints(for: "love"))
+                passionSignalRow(icon: "lock.fill", label: "Vows", emotionKey: "vows", value: usagePoints(for: "vows"))
+                passionSignalRow(icon: "bolt.fill", label: "Thrill", emotionKey: "thrill", value: usagePoints(for: "thrill"))
+                passionSignalRow(icon: "shield.fill", label: "Hate", emotionKey: "just", value: usagePoints(for: "just"))
 
                 Button {
                     showDrivingForceTrends = true
@@ -455,35 +463,75 @@ struct DrivingForceView: View {
                         .foregroundStyle(.blue)
                 }
                 .buttonStyle(.plain)
-                .padding(.top, 8)
+                .padding(.top, 4)
+                .padding(.leading, 14)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
 
-            VStack(alignment: .leading, spacing: 4) {
-                Spacer(minLength: 0)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .center, spacing: 8) {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(colorScheme == .dark ? Color.white : Color.black, lineWidth: 3)
+                        .frame(width: 98, height: 58)
+                        .overlay {
+                            Text(totalPassionSignalScoreText)
+                                .font(.system(size: 24, weight: .bold))
+                                .foregroundStyle(.primary)
+                        }
 
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("analyzed:")
-                        .font(.caption)
-                        .fontWeight(.bold)
-                        .foregroundStyle(.gray)
-                    Text("• Outcome Completion")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    Text("• Reflection Reports")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    Text("• Action Done")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    Text("• Momentum")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 1) {
+                        HStack(spacing: 4) {
+                            let aggregateDelta = totalPassionMonthOverMonthDelta()
+                            Text(headerPassionDeltaGlyph(aggregateDelta))
+                                .font(.title3.weight(.bold))
+                                .foregroundStyle(headerPassionDeltaColor(aggregateDelta))
+                            Text(headerPassionDeltaText(aggregateDelta))
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(headerPassionDeltaColor(aggregateDelta))
+                        }
+                        Text("month")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
-                .frame(maxWidth: .infinity, alignment: .trailing)
+
+                if let snap = selectedHeaderPassionSnapshot,
+                   let summaryInsight = primaryDrivingForceHeaderInsightMessage(for: snap) {
+                    let loomAIGradient = AngularGradient(
+                        colors: [
+                            Color(red: 0.22, green: 0.47, blue: 1.0),
+                            Color(red: 0.15, green: 0.83, blue: 0.95),
+                            Color(red: 0.62, green: 0.40, blue: 0.95),
+                            Color(red: 0.80, green: 0.38, blue: 0.78),
+                            Color(red: 0.98, green: 0.36, blue: 0.58),
+                            Color(red: 0.75, green: 0.42, blue: 0.74),
+                            Color(red: 0.22, green: 0.47, blue: 1.0)
+                        ],
+                        center: .center,
+                        angle: .degrees(drivingForceHeaderInsightOutlineAngle)
+                    )
+                    HStack(alignment: .center, spacing: 10) {
+                        Image("LoomAI")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 32, height: 32)
+                        Text(summaryInsight)
+                            .font(.footnote)
+                            .foregroundStyle(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 10)
+                    .padding(.leading, 6)
+                    .padding(8)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(loomAIGradient.opacity(0.95), lineWidth: 2)
+                    )
+                }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            .frame(width: 166, alignment: .topTrailing)
         }
         .padding(.horizontal, 15)
         .padding(.vertical, 15)
@@ -496,17 +544,14 @@ struct DrivingForceView: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(Color.black.opacity(0.08), lineWidth: 1)
         )
-        .overlay(alignment: .topTrailing) {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(colorScheme == .dark ? Color.white : Color.black, lineWidth: 3)
-                .frame(width: 92, height: 58)
-                .overlay {
-                    Text(totalPassionSignalScoreText)
-                        .font(.system(size: 26, weight: .bold))
-                        .foregroundStyle(.primary)
-                }
-                .padding(.top, 15)
-                .padding(.trailing, 15)
+        .onAppear {
+            if highlightedPassionEmotionKey.isEmpty {
+                highlightedPassionEmotionKey = "love"
+            }
+            guard drivingForceHeaderInsightOutlineAngle == 0 else { return }
+            withAnimation(.linear(duration: 7).repeatForever(autoreverses: false)) {
+                drivingForceHeaderInsightOutlineAngle = 360
+            }
         }
     }
 
@@ -542,14 +587,63 @@ struct DrivingForceView: View {
         .frame(width: radius * 2, height: radius * 2)
     }
 
-    private func passionSignalRow(icon: String, label: String, value: Int) -> some View {
-        HStack(spacing: 10) {
-            passionSignalCircle(icon: icon, value: value)
-            Text(label)
-                .font(.title2.weight(.semibold))
-                .foregroundStyle(.primary)
-                .lineLimit(1)
+    private func passionSignalRow(icon: String, label: String, emotionKey: String, value: Int) -> some View {
+        let delta = passionMonthOverMonthDelta(for: emotionKey)
+        return Button {
+            highlightedPassionEmotionKey = emotionKey
+            passionAutoRotatePausedUntil = Date().addingTimeInterval(20)
+        } label: {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(
+                        highlightedPassionEmotionKey == emotionKey
+                        ? AnyShapeStyle(
+                            AngularGradient(
+                                colors: [
+                                    Color(red: 0.22, green: 0.47, blue: 1.0),
+                                    Color(red: 0.15, green: 0.83, blue: 0.95),
+                                    Color(red: 0.62, green: 0.40, blue: 0.95),
+                                    Color(red: 0.80, green: 0.38, blue: 0.78),
+                                    Color(red: 0.98, green: 0.36, blue: 0.58),
+                                    Color(red: 0.75, green: 0.42, blue: 0.74),
+                                    Color(red: 0.22, green: 0.47, blue: 1.0)
+                                ],
+                                center: .center,
+                                angle: .degrees(24)
+                            )
+                        )
+                        : AnyShapeStyle(Color.clear)
+                    )
+                    .frame(width: 7, height: 7)
+                passionSignalCircle(icon: icon, value: value)
+                Text(label)
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .layoutPriority(1)
+                    .frame(minWidth: 52, maxWidth: 66, alignment: .leading)
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 3) {
+                        Text(headerPassionDeltaGlyph(delta))
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(headerPassionDeltaColor(delta))
+                        Text(headerPassionDeltaText(delta))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(headerPassionDeltaColor(delta))
+                    }
+                    Text("month")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.leading, -1)
+                .fixedSize(horizontal: true, vertical: false)
+            }
+            .padding(.leading, 2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
     }
 
     private func usagePoints(for emotionKey: String) -> Int {
@@ -594,12 +688,122 @@ struct DrivingForceView: View {
     }
 
     private func latestMonthlyPassionScore(for emotionKey: String) -> Double? {
+        latestMonthlyPassionSnapshot(for: emotionKey)?.score
+    }
+
+    private func latestMonthlyPassionSnapshot(for emotionKey: String) -> PassionScoreSnapshot? {
         guard let passionType = passionType(forEmotionKey: emotionKey) else { return nil }
         let monthStart = PassionScoringMath.monthWindow(for: .now).monthStart
         return passionScoreSnapshots.first(where: {
             $0.passionTypeRaw == passionType.rawValue &&
             Calendar.current.isDate($0.monthStartDate, inSameDayAs: monthStart)
-        })?.score
+        })
+    }
+
+    private func previousMonthlyPassionSnapshot(for emotionKey: String) -> PassionScoreSnapshot? {
+        guard let passionType = passionType(forEmotionKey: emotionKey) else { return nil }
+        let currentMonthStart = PassionScoringMath.monthWindow(for: .now).monthStart
+        guard let priorMonthStart = Calendar.current.date(byAdding: .month, value: -1, to: currentMonthStart) else { return nil }
+        return passionScoreSnapshots.first(where: {
+            $0.passionTypeRaw == passionType.rawValue &&
+            Calendar.current.isDate($0.monthStartDate, inSameDayAs: priorMonthStart)
+        })
+    }
+
+    private var selectedHeaderPassionSnapshot: PassionScoreSnapshot? {
+        latestMonthlyPassionSnapshot(for: highlightedPassionEmotionKey)
+    }
+
+    private func passionMonthOverMonthDelta(for emotionKey: String) -> Double? {
+        guard let current = latestMonthlyPassionSnapshot(for: emotionKey)?.score,
+              let prior = previousMonthlyPassionSnapshot(for: emotionKey)?.score else { return nil }
+        let delta = roundedTenth(current) - roundedTenth(prior)
+        return abs(delta) < 0.05 ? 0 : delta
+    }
+
+    private func totalPassionMonthOverMonthDelta() -> Double? {
+        let keys = ["love", "vows", "thrill", "just"]
+        let currentScores = keys.compactMap { latestMonthlyPassionSnapshot(for: $0)?.score }
+        let priorScores = keys.compactMap { previousMonthlyPassionSnapshot(for: $0)?.score }
+        guard currentScores.count == keys.count, priorScores.count == keys.count else { return nil }
+        let currentTotal = roundedTenth(currentScores.reduce(0, +))
+        let priorTotal = roundedTenth(priorScores.reduce(0, +))
+        let delta = currentTotal - priorTotal
+        return abs(delta) < 0.05 ? 0 : delta
+    }
+
+    private func headerPassionDeltaText(_ delta: Double?) -> String {
+        guard let delta else { return "—" }
+        if abs(delta) < 0.05 { return "—" }
+        return String(format: "%@%.1f", delta > 0 ? "+" : "", delta)
+    }
+
+    private func headerPassionDeltaGlyph(_ delta: Double?) -> String {
+        guard let delta else { return "—" }
+        if abs(delta) < 0.05 { return "→" }
+        return delta > 0 ? "↑" : "↓"
+    }
+
+    private func headerPassionDeltaColor(_ delta: Double?) -> Color {
+        guard let delta else { return .secondary }
+        if abs(delta) < 0.05 { return .secondary }
+        return delta > 0 ? .green : .orange
+    }
+
+    private func rotateHighlightedPassion() {
+        let order = ["love", "vows", "thrill", "just"]
+        guard !order.isEmpty else { return }
+        let currentIndex = order.firstIndex(of: highlightedPassionEmotionKey) ?? -1
+        let nextIndex = (currentIndex + 1) % order.count
+        highlightedPassionEmotionKey = order[nextIndex]
+    }
+
+    private func primaryDrivingForceHeaderInsightMessage(for snap: PassionScoreSnapshot) -> String? {
+        let structure = PassionScoringMath.clamped01(snap.structure)
+        let outcomes = PassionScoringMath.clamped01(snap.outcomeCoverage ?? 0)
+        let actions = PassionScoringMath.clamped01(snap.actionCoverage)
+        let wins = PassionScoringMath.clamped01(snap.littleWinsCoverage)
+        let carry = PassionScoringMath.clamped01(snap.carryoverPenalty)
+        let consistency = PassionScoringMath.clamped01(snap.consistency)
+
+        let structurePct = Int((structure * 100).rounded())
+        let outcomesPct = Int((outcomes * 100).rounded())
+        let actionPct = Int((actions * 100).rounded())
+        let winsPct = Int((wins * 100).rounded())
+        let carryPct = Int((carry * 100).rounded())
+        let consistencyPct = Int((consistency * 100).rounded())
+        let name = passionHeaderTitle(for: highlightedPassionEmotionKey)
+
+        if carry >= 0.30 {
+            return "Carryover is high (\(carryPct)% penalty) for \(name). Reduce scope or break supporting work into smaller actions."
+        }
+        if structure >= 0.65 && actions <= 0.45 {
+            return "\(name) has strong structure (\(structurePct)%) but weak execution (\(actionPct)% Action blocks)."
+        }
+        if wins >= 0.65 && outcomes <= 0.45 {
+            return "\(name) is supported by daily wins (\(winsPct)%), but outcomes are weak (\(outcomesPct)%)."
+        }
+        if consistency <= 0.35 {
+            return "\(name) is volatile (\(consistencyPct)% consistency). Steadier weekly support will improve this score."
+        }
+        if outcomes >= 0.7 && actions >= 0.7 && carry <= 0.15 {
+            return "\(name) is well supported with strong outcomes (\(outcomesPct)%) and execution (\(actionPct)%)."
+        }
+        return "\(name) is stable overall. Improve one support behavior this month to raise the score."
+    }
+
+    private func roundedTenth(_ value: Double) -> Double {
+        (value * 10).rounded() / 10
+    }
+
+    private func passionHeaderTitle(for emotionKey: String) -> String {
+        switch emotionKey {
+        case "love": return "Love"
+        case "vows": return "Vows"
+        case "thrill": return "Thrill"
+        case "just": return "Hate"
+        default: return emotionKey.capitalized
+        }
     }
 
     private func passionType(forEmotionKey emotionKey: String) -> PassionType? {

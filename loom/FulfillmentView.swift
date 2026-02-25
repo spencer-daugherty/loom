@@ -1202,7 +1202,7 @@ struct FulfillmentView: View {
                             .fontWeight(.bold)
                             .foregroundStyle(FulfillmentCategoryTheme.color(for: selectedTitle))
                             .lineLimit(2)
-                    Text("Tap raadar slice")
+                    Text("Tap cirles on the graph")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
