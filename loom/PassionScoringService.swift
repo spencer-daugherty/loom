@@ -327,8 +327,18 @@ struct SwiftDataPassionScoringSignalProvider: PassionScoringSignalProvider {
 
         let linkedFulfillments = fulfillments.filter { linkedCategoryIDs.contains($0.category_id) }
         let linkedCategoryNames = Set(linkedFulfillments.map { normalizedCategory($0.category) })
-        let linkedLittleWins = littleWins.filter { linkedCategoryIDs.contains($0.category_id) }
-        let linkedLittleWinIDs = Set(linkedLittleWins.map(\.id))
+        let linkedLittleWinsByCategory = littleWins.filter { linkedCategoryIDs.contains($0.category_id) }
+        let littleWinPassionLinks = LittleWinsPassionsStore.allLinks()
+        let explicitlyMappedLittleWinIDs = Set(littleWinPassionLinks.keys)
+        let explicitlyMappedLittleWinIDsForPassion = Set(
+            littleWinPassionLinks.compactMap { focusID, linkedPassionIDs in
+                Set(linkedPassionIDs).intersection(passionItemIDs).isEmpty ? nil : focusID
+            }
+        )
+        let explicitLittleWinsForPassion = littleWins.filter { explicitlyMappedLittleWinIDsForPassion.contains($0.id) }
+        let fallbackCategoryLittleWins = linkedLittleWinsByCategory.filter { !explicitlyMappedLittleWinIDs.contains($0.id) }
+        let littleWinsForPassion = dedupeLittleWins(explicitLittleWinsForPassion + fallbackCategoryLittleWins)
+        let littleWinsForPassionIDs = Set(littleWinsForPassion.map(\.id))
 
         let blockSignals = monthlyBlockSignals(
             window: window,
@@ -338,13 +348,13 @@ struct SwiftDataPassionScoringSignalProvider: PassionScoringSignalProvider {
         )
 
         let littleWinsCompletedCount = littleWinsCompletions.filter { row in
-            linkedLittleWinIDs.contains(row.focusId) &&
+            littleWinsForPassionIDs.contains(row.focusId) &&
             row.completedAt >= window.monthStart && row.completedAt < window.monthEnd
         }.count
 
         let littleWinsScheduledCount = monthlyScheduledLittleWinsCount(
             window: window,
-            littleWins: linkedLittleWins
+            littleWins: littleWinsForPassion
         )
 
         let outcomeSignals = monthlyOutcomeSignals(
@@ -430,6 +440,11 @@ struct SwiftDataPassionScoringSignalProvider: PassionScoringSignalProvider {
             day = next
         }
         return total
+    }
+
+    private func dedupeLittleWins(_ rows: [FulfillmentFocus]) -> [FulfillmentFocus] {
+        var seen = Set<UUID>()
+        return rows.filter { seen.insert($0.id).inserted }
     }
 
     private func monthlyOutcomeSignals(

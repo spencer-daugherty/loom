@@ -196,6 +196,9 @@ struct DrivingForceView: View {
             guard now >= passionAutoRotatePausedUntil else { return }
             rotateHighlightedPassion()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .littleWinsPassionsDidChange)) { _ in
+            refreshPassionScoresForCurrentMonthIfNeeded(force: true)
+        }
         .sheet(isPresented: $isShowingInstructions, content: instructionsSheet)
         .navigationDestination(isPresented: $showDrivingForceTrends) {
             DrivingForceTrendsView(snapshots: passionScoreSnapshots)
@@ -816,9 +819,9 @@ struct DrivingForceView: View {
         }
     }
 
-    private func refreshPassionScoresForCurrentMonthIfNeeded() {
+    private func refreshPassionScoresForCurrentMonthIfNeeded(force: Bool = false) {
         let monthStart = PassionScoringMath.monthWindow(for: .now).monthStart
-        if let last = lastPassionScoreRefreshMonthStart,
+        if !force, let last = lastPassionScoreRefreshMonthStart,
            Calendar.current.isDate(last, inSameDayAs: monthStart) {
             return
         }

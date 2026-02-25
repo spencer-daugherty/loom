@@ -2023,6 +2023,7 @@ struct FulfillmentView: View {
             modelContext.insert(archive)
             LittleWinsScheduleStore.removeRule(for: f.id)
             LittleWinsIntegrationStore.removeConfig(for: f.id)
+            LittleWinsPassionsStore.removePassions(for: f.id)
             RecentlyDeletedStore.trash(f, in: modelContext)
         }
     }
@@ -2273,6 +2274,7 @@ private struct LittleWinsManagerSheetView: View {
             )
             LittleWinsScheduleStore.removeRule(for: focus.id)
             LittleWinsIntegrationStore.removeConfig(for: focus.id)
+            LittleWinsPassionsStore.removePassions(for: focus.id)
             RecentlyDeletedStore.trash(focus, in: modelContext)
         }
         try? modelContext.save()
@@ -2855,6 +2857,7 @@ struct LittleWinEditorSheetView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Query private var foci: [FulfillmentFocus]
+    @Query(sort: \Passion.date, order: .forward) private var passions: [Passion]
 
     @State private var draftText = ""
     @State private var draftCanAnyDay = true
@@ -2864,6 +2867,8 @@ struct LittleWinEditorSheetView: View {
     @State private var integrationSetupTarget: IntegrationSetupTarget?
     @State private var didHydrate = false
     @State private var isShowingIntegrationDetails = false
+    @State private var isShowingLittleWinPassionsSheet = false
+    @State private var selectedLittleWinPassionIDs = Set<UUID>()
     @FocusState private var isTextFocused: Bool
 
     private let weekdayLetterLabels = ["S", "M", "T", "W", "T", "F", "S"]
@@ -2985,6 +2990,17 @@ struct LittleWinEditorSheetView: View {
                     }
 
                 }
+
+                Section("Passions") {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Select related passions")
+                        Spacer(minLength: 8)
+                        Button("Connect Passions") {
+                            isShowingLittleWinPassionsSheet = true
+                        }
+                        .foregroundStyle(.blue)
+                    }
+                }
             }
             .listStyle(.insetGrouped)
             .navigationTitle(isEditing ? "Edit Little Win" : "Add Little Win")
@@ -3019,6 +3035,42 @@ struct LittleWinEditorSheetView: View {
                 )
             )
         }
+        .sheet(isPresented: $isShowingLittleWinPassionsSheet) {
+            NavigationStack {
+                List {
+                    ForEach(passions, id: \.passion_id) { passion in
+                        Button {
+                            if selectedLittleWinPassionIDs.contains(passion.passion_id) {
+                                selectedLittleWinPassionIDs.remove(passion.passion_id)
+                            } else {
+                                selectedLittleWinPassionIDs.insert(passion.passion_id)
+                            }
+                        } label: {
+                            HStack {
+                                Text("\(displayEmotionLabelForLittleWinEditor(passion.emotion)): \(passion.passion)")
+                                    .foregroundStyle(.primary)
+                                Spacer()
+                                if selectedLittleWinPassionIDs.contains(passion.passion_id) {
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(.blue)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .navigationTitle("Connect Passions")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("Done") { isShowingLittleWinPassionsSheet = false }
+                    }
+                }
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
     }
 
     private func hydrateIfNeeded() {
@@ -3036,12 +3088,14 @@ struct LittleWinEditorSheetView: View {
                 draftIntegrate = false
                 draftIntegrationConfig = nil
             }
+            selectedLittleWinPassionIDs = LittleWinsPassionsStore.passionIDs(for: focus.id)
         } else {
             draftText = ""
             draftCanAnyDay = true
             draftWeekdayMask = LittleWinsScheduleRule.everyDayMask
             draftIntegrate = false
             draftIntegrationConfig = nil
+            selectedLittleWinPassionIDs = []
         }
     }
 
@@ -3109,6 +3163,7 @@ struct LittleWinEditorSheetView: View {
             }
             LittleWinsScheduleStore.setRule(rule, for: focus.id)
             LittleWinsIntegrationStore.setConfig(finalIntegrationConfig, for: focus.id)
+            LittleWinsPassionsStore.setPassionIDs(selectedLittleWinPassionIDs, for: focus.id)
         } else {
             guard littleWins.count < 3 else { return }
             let nextRank = (littleWins.map(\.rank).max() ?? 0) + 1
@@ -3116,6 +3171,7 @@ struct LittleWinEditorSheetView: View {
             modelContext.insert(focus)
             LittleWinsScheduleStore.setRule(rule, for: focus.id)
             LittleWinsIntegrationStore.setConfig(finalIntegrationConfig, for: focus.id)
+            LittleWinsPassionsStore.setPassionIDs(selectedLittleWinPassionIDs, for: focus.id)
         }
 
         try? modelContext.save()
@@ -3124,6 +3180,21 @@ struct LittleWinEditorSheetView: View {
             draftIntegrationConfig = nil
         }
         dismiss()
+    }
+
+    private func displayEmotionLabelForLittleWinEditor(_ emotion: String) -> String {
+        switch emotion.lowercased() {
+        case "love":
+            return "Love"
+        case "vows", "vow":
+            return "Vows"
+        case "thrill":
+            return "Thrill"
+        case "just", "hate":
+            return "Hate"
+        default:
+            return emotion.capitalized
+        }
     }
 
     private func littleWinIntegrationSourceRow(

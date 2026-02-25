@@ -4396,6 +4396,7 @@ struct ContentLittleWinsManagerSheetView: View {
             )
             LittleWinsScheduleStore.removeRule(for: focus.id)
             LittleWinsIntegrationStore.removeConfig(for: focus.id)
+            LittleWinsPassionsStore.removePassions(for: focus.id)
             RecentlyDeletedStore.trash(focus, in: modelContext)
         }
         try? modelContext.save()

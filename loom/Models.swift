@@ -11,6 +11,7 @@ extension Notification.Name {
   static let littleWinsScheduleDidChange = Notification.Name("littleWinsScheduleDidChange")
   static let littleWinsOpenNewEditor = Notification.Name("littleWinsOpenNewEditor")
   static let littleWinsIntegrationDidChange = Notification.Name("littleWinsIntegrationDidChange")
+  static let littleWinsPassionsDidChange = Notification.Name("littleWinsPassionsDidChange")
 }
 
 struct LittleWinsScheduleRule: Codable, Equatable {
@@ -248,6 +249,71 @@ enum LittleWinsIntegrationStore {
       UserDefaults.standard.removeObject(forKey: defaultsKey)
     }
     NotificationCenter.default.post(name: .littleWinsIntegrationDidChange, object: nil)
+  }
+}
+
+enum LittleWinsPassionsStore {
+  private static let defaultsKey = "littleWinsPassionLinks.v1"
+
+  static func passionIDs(for focusID: UUID) -> Set<UUID> {
+    Set(allLinks()[focusID] ?? [])
+  }
+
+  static func allLinks() -> [UUID: [UUID]] {
+    guard let data = UserDefaults.standard.data(forKey: defaultsKey) else { return [:] }
+    guard let raw = try? JSONDecoder().decode([String: [String]].self, from: data) else {
+      return [:]
+    }
+    var result: [UUID: [UUID]] = [:]
+    for (focusKey, passionKeys) in raw {
+      guard let focusID = UUID(uuidString: focusKey) else { continue }
+      let ids = passionKeys.compactMap(UUID.init(uuidString:))
+      if !ids.isEmpty {
+        result[focusID] = Array(Set(ids))
+      }
+    }
+    return result
+  }
+
+  static func setPassionIDs(_ passionIDs: Set<UUID>, for focusID: UUID) {
+    var map = allLinks()
+    if passionIDs.isEmpty {
+      map.removeValue(forKey: focusID)
+    } else {
+      map[focusID] = Array(passionIDs)
+    }
+    save(map)
+  }
+
+  static func removePassions(for focusID: UUID) {
+    var map = allLinks()
+    guard map.removeValue(forKey: focusID) != nil else { return }
+    save(map)
+  }
+
+  static func removePassions(for focusIDs: [UUID]) {
+    var map = allLinks()
+    var changed = false
+    for id in focusIDs {
+      if map.removeValue(forKey: id) != nil {
+        changed = true
+      }
+    }
+    if changed {
+      save(map)
+    }
+  }
+
+  private static func save(_ map: [UUID: [UUID]]) {
+    let raw = Dictionary(uniqueKeysWithValues: map.map { focusID, passionIDs in
+      (focusID.uuidString, Array(Set(passionIDs)).map(\.uuidString))
+    })
+    if let data = try? JSONEncoder().encode(raw) {
+      UserDefaults.standard.set(data, forKey: defaultsKey)
+    } else {
+      UserDefaults.standard.removeObject(forKey: defaultsKey)
+    }
+    NotificationCenter.default.post(name: .littleWinsPassionsDidChange, object: nil)
   }
 }
 
