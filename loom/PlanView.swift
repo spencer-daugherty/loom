@@ -84,7 +84,7 @@ struct PlanStartView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(nil)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text("You’ll effortlessly connect your daily actions to meaningful Outcomes, Fulfillment Areas, and your Driving Force.")
+                    Text("You’ll effortlessly connect your daily actions to meaningful Outcomes, Fulfillment Areas, and your Purpose.")
                         .foregroundStyle(.secondary)
                         .lineLimit(nil)
                         .fixedSize(horizontal: false, vertical: true)
@@ -3163,9 +3163,9 @@ struct PlanStepFourView: View {
                         .fontWeight(.bold)
                     Text("• Result")
                         .font(.footnote)
-                    Text("• Role")
+                    Text("• Identity")
                         .font(.footnote)
-                    Text("• Purpose")
+                    Text("• Mission")
                         .font(.footnote)
                 }
                 .multilineTextAlignment(.center)
@@ -3206,7 +3206,7 @@ struct PlanStepFourView: View {
         .sheet(item: $roleSheetChunkID) { wrapper in
             let chunk = plannedChunksForWeek.first(where: { $0.id == wrapper.id })
             RolePickerSheet(
-                title: "Connect Role",
+                title: "Connect Identity",
                 roles: availableRoles(forChunk: chunk),
                 selectedRoleID: Binding(
                     get: { selectedRoleIDByChunk[wrapper.id] ?? nil },
@@ -3554,7 +3554,7 @@ struct PlanStepFourView: View {
 
         private var purposeSection: some View {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("PURPOSE")
+                Text("MISSION")
                     .font(.caption)
                     .fontWeight(.bold)
                     .foregroundStyle(forcedDarkTextColor)
@@ -3575,7 +3575,7 @@ struct PlanStepFourView: View {
                 Button {
                     onPasteCategoryPurpose()
                 } label: {
-                    Text("\(pasteFromCategoryTitle) Purpose")
+                    Text("\(pasteFromCategoryTitle) Mission")
                         .font(.caption2)
                         .underline()
                 }
@@ -3607,7 +3607,7 @@ struct PlanStepFourView: View {
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
 
-                    Text("Connect Role")
+                    Text("Connect Identity")
                         .font(.subheadline)
                         .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
 

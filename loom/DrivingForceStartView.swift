@@ -25,7 +25,6 @@ struct DrivingForceStartView: View {
         "just": ""
     ]
     @State private var showNeedIdeasVision = false
-    @State private var showNeedIdeasPurpose = false
     @State private var showNeedIdeasPassions = false
     @State private var validationHintText: String = ""
     @State private var showValidationHint = false
@@ -50,9 +49,9 @@ struct DrivingForceStartView: View {
 
         var title: String {
             switch self {
-            case .intro: return "Set Your Driving Force"
-            case .vision: return "Ultimate Vision"
-            case .purpose: return "Ultimate Purpose"
+            case .intro: return "Set Your Purpose"
+            case .vision: return "Vision"
+            case .purpose: return "Purpose"
             case .passions: return "Passions"
             case .summary: return "Summary"
             }
@@ -74,13 +73,8 @@ struct DrivingForceStartView: View {
         visionText.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private var purposeTrimmed: String {
-        purposeText.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
     private var summaryCanSave: Bool {
         !visionTrimmed.isEmpty &&
-        !purposeTrimmed.isEmpty &&
         bucketOrder.allSatisfy { missingCount(draftPassions[$0.key] ?? []) == 0 }
     }
 
@@ -98,10 +92,6 @@ struct DrivingForceStartView: View {
         visionTrimmed.isEmpty
     }
 
-    private var isPurposeInvalid: Bool {
-        purposeTrimmed.isEmpty
-    }
-
     private var isPassionsInvalid: Bool {
         !missingPassionKeys.isEmpty
     }
@@ -109,7 +99,7 @@ struct DrivingForceStartView: View {
     private var isNextDisabled: Bool {
         switch step {
         case .vision: return isVisionInvalid
-        case .purpose: return isPurposeInvalid
+        case .purpose: return false
         case .passions: return isPassionsInvalid
         default: return false
         }
@@ -160,7 +150,7 @@ struct DrivingForceStartView: View {
                 case .vision:
                     focusedField = .vision
                 case .purpose:
-                    focusedField = .purpose
+                    focusedField = nil
                 case .passions:
                     if let key = firstIncompleteBucket {
                         focusedField = .passion(key)
@@ -183,7 +173,6 @@ struct DrivingForceStartView: View {
             }
         }
         .onChange(of: visionText) { _, _ in clearStepValidationIfResolved() }
-        .onChange(of: purposeText) { _, _ in clearStepValidationIfResolved() }
         .onChange(of: draftPassions) { _, _ in clearStepValidationIfResolved() }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
@@ -220,7 +209,7 @@ struct DrivingForceStartView: View {
             case .vision:
                 visionStep
             case .purpose:
-                purposeStep
+                passionsStep
             case .passions:
                 passionsStep
             case .summary:
@@ -318,7 +307,14 @@ struct DrivingForceStartView: View {
                 .disabled(!summaryCanSave)
             } else {
                 Button {
-                    step = Step(rawValue: max(0, step.rawValue - 1)) ?? .intro
+                    switch step {
+                    case .passions:
+                        step = .vision
+                    case .summary:
+                        step = .passions
+                    default:
+                        step = Step(rawValue: max(0, step.rawValue - 1)) ?? .intro
+                    }
                 } label: {
                     Text("Back")
                         .frame(maxWidth: .infinity)
@@ -361,11 +357,11 @@ struct DrivingForceStartView: View {
     private var stepTitle: String {
         switch step {
         case .intro:
-            return "Set Your Driving Force"
+            return "Set Your Purpose"
         case .vision:
-            return "Ultimate Vision"
+            return "Vision"
         case .purpose:
-            return "Ultimate Purpose"
+            return "Passions"
         case .passions:
             return "Passions"
         case .summary:
@@ -377,13 +373,13 @@ struct DrivingForceStartView: View {
         switch step {
         case .vision: return 1
         case .purpose: return 2
-        case .passions: return 3
-        case .summary: return 4
+        case .passions: return 2
+        case .summary: return 3
         case .intro: return 0
         }
     }
 
-    private let progressTotalSteps: Int = 4
+    private let progressTotalSteps: Int = 3
 
     private var progressStrip: some View {
         HStack(spacing: 6) {
@@ -447,59 +443,6 @@ struct DrivingForceStartView: View {
                             .font(.subheadline.weight(.semibold))
                             .padding(.top, 4)
                         Text("\"I live a life of purpose, growth, and freedom. I build meaningful work that creates value for others while giving me time, financial independence, and the ability to choose how I live. I am healthy, energized, and surrounded by strong relationships, and I continue to learn, lead, and make a positive impact.\"")
-                            .italic()
-                            .lineLimit(nil)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .padding(10)
-                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
-                    .padding(.top, 2)
-                }
-            }
-        }
-        .padding(14)
-        .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
-    }
-
-    private var purposeStep: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Why does this matter?")
-                .font(.headline)
-
-            multiLineEditor(
-                text: $purposeText,
-                placeholder: "Write your purpose...",
-                showError: shouldHighlightStepValidation && isPurposeInvalid
-            )
-            .focused($focusedField, equals: .purpose)
-
-            VStack(alignment: .leading, spacing: 6) {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        showNeedIdeasPurpose.toggle()
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        Text("Need ideas?")
-                        Image(systemName: showNeedIdeasPurpose ? "chevron.up" : "chevron.down")
-                            .font(.caption2.weight(.semibold))
-                    }
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.blue)
-                }
-                .buttonStyle(.plain)
-
-                if showNeedIdeasPurpose {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("• Why is this essential to me?")
-                        Text("• Who does this impact?")
-                        Text("• What does this give me emotionally?")
-                        Text("Example:")
-                            .font(.subheadline.weight(.semibold))
-                            .padding(.top, 4)
-                        Text("\"Because I don’t want to waste my life reacting to circumstances or other people’s expectations. I want to use my full potential, create something meaningful, support the people I love, and live with confidence, fulfillment, and peace.\"")
                             .italic()
                             .lineLimit(nil)
                             .fixedSize(horizontal: false, vertical: true)
@@ -650,12 +593,8 @@ struct DrivingForceStartView: View {
 
     private var summaryStep: some View {
         VStack(alignment: .leading, spacing: 12) {
-            summaryCard(title: "Ultimate Vision", body: visionTrimmed, onEdit: {
+            summaryCard(title: "Vision", body: visionTrimmed, onEdit: {
                 step = .vision
-            })
-
-            summaryCard(title: "Ultimate Purpose", body: purposeTrimmed, onEdit: {
-                step = .purpose
             })
 
             VStack(alignment: .leading, spacing: 8) {
@@ -864,7 +803,7 @@ struct DrivingForceStartView: View {
     private func advanceFromCurrentStep() {
         switch step {
         case .vision:
-            step = .purpose
+            step = .passions
         case .purpose:
             step = .passions
         case .passions:
@@ -882,7 +821,6 @@ struct DrivingForceStartView: View {
         }
 
         saveVisionIfChanged()
-        savePurposeIfChanged()
         dismiss()
     }
 
@@ -937,34 +875,6 @@ struct DrivingForceStartView: View {
         try? context.save()
     }
 
-    private func savePurposeIfChanged() {
-        let now = Date()
-        let trimmed = purposeTrimmed
-        if let existing = currentDrivingForce {
-            guard existing.ultimatePurpose != trimmed else { return }
-            // Same archive/write pattern as DrivingForceView.saveEditorChanges(.purpose)
-            context.insert(
-                DrivingForceArchive(
-                    visionSnapshot: "",
-                    purposeSnapshot: existing.ultimatePurpose,
-                    updatedAt: existing.updatedAt,
-                    archivedAt: now
-                )
-            )
-            existing.ultimatePurpose = trimmed
-            existing.updatedAt = now
-        } else {
-            context.insert(
-                DrivingForce(
-                    ultimateVision: "",
-                    ultimatePurpose: trimmed,
-                    updatedAt: now
-                )
-            )
-        }
-        try? context.save()
-    }
-
     private func bucketTitle(for key: String) -> String {
         bucketOrder.first(where: { $0.key == key })?.title ?? key.capitalized
     }
@@ -1001,9 +911,9 @@ struct DrivingForceStartView: View {
 
         switch step {
         case .vision:
-            validationHintText = "Please complete your Ultimate Vision"
+            validationHintText = "Please complete your Vision"
         case .purpose:
-            validationHintText = "Please complete your Ultimate Purpose"
+            validationHintText = "Please add your Passions"
         case .passions:
             validationHintText = "Please add at least 2 items in each Passion category"
         default:

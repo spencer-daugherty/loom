@@ -701,25 +701,10 @@ struct FulfillmentView: View {
                 fulfillmentInstructionBody("Every action you take will connect to one of these areas, helping you focus on what truly matters instead of reacting to what feels urgent.")
                 fulfillmentInstructionBody("Start simple. You can refine or change them anytime.")
 
-                fulfillmentInstructionSectionTitle("Define Vision")
-                fulfillmentInstructionBody("What does your ideal life look like in this area?")
-                fulfillmentInstructionLabel("Need ideas?")
-                fulfillmentInstructionBody("This is not a goal. It’s the long-term direction you want in this area.")
-                fulfillmentInstructionBody("Focus on how your life feels, how you show up, and what success looks like.")
-                fulfillmentInstructionBody("You can refine this anytime. Start simple.")
-                fulfillmentInstructionLabel("Examples:")
-                fulfillmentInstructionBullets([
-                    "I am healthy, energized, and strong, with habits that support long-term vitality and resilience.",
-                    "I feel calm, focused, and in control of this area, which allows me to show up fully in the rest of my life.",
-                    "I consistently grow and improve, creating stability, balance, and confidence in this area.",
-                    "I experience freedom and momentum here, knowing I’m building a strong foundation for my future.",
-                    "This area of my life supports my happiness, creativity, and overall sense of fulfillment."
-                ])
-
-                fulfillmentInstructionSectionTitle("Define Purpose")
+                fulfillmentInstructionSectionTitle("Define Mission")
                 fulfillmentInstructionBody("Why does improving this area truly matter?")
                 fulfillmentInstructionLabel("Need ideas?")
-                fulfillmentInstructionBody("Purpose is your deeper reason. It keeps you consistent when motivation fades.")
+                fulfillmentInstructionBody("Mission is your deeper reason. It keeps you consistent when motivation fades.")
                 fulfillmentInstructionBody("Think about why this matters and how your life improves when this area strengthens. When strong, everything feels easier.")
                 fulfillmentInstructionBody("You can refine this anytime. Start simple.")
                 fulfillmentInstructionLabel("Examples:")
@@ -732,10 +717,10 @@ struct FulfillmentView: View {
                     "This helps me feel grounded, focused, and fulfilled instead of reactive."
                 ])
 
-                fulfillmentInstructionSectionTitle("Identify Roles")
+                fulfillmentInstructionSectionTitle("Identify Identity")
                 fulfillmentInstructionBody("Who do you want to be in this area of your life?")
                 fulfillmentInstructionLabel("Need help?")
-                fulfillmentInstructionBody("Roles define your identity.")
+                fulfillmentInstructionBody("Identity defines who you are in this area.")
                 fulfillmentInstructionBody("They guide how you think, act, and make decisions before results show up. Instead of focusing only on goals, focus on the person who naturally creates those outcomes.")
                 fulfillmentInstructionBody("Choose identities that feel empowering and motivating. These should reflect the best version of yourself in this area.")
                 fulfillmentInstructionBody("You can update these anytime as you evolve.")
@@ -847,13 +832,11 @@ struct FulfillmentView: View {
     private func previousCategoryCard(_ archive: ReplacedFulfillmentCategoryArchive) -> some View {
         let roles = csvItems(from: archive.rolesCSV)
         let fociValues = csvItems(from: archive.fociCSV)
-        let resourcesValues = csvItems(from: archive.resourcesCSV)
         let passionValues = csvItems(from: archive.passionsCSV)
         let isExpanded = (expandedPreviousID == archive.id)
-        let hasVision = !archive.category_vision.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let hasPurpose = !archive.category_purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let hasIdentity = !archive.category_identitiy.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let completionCount = [hasVision, hasPurpose, hasIdentity, !roles.isEmpty, !fociValues.isEmpty, !resourcesValues.isEmpty, !passionValues.isEmpty].filter { $0 }.count
+        let completionCount = [hasPurpose, hasIdentity, !roles.isEmpty, !fociValues.isEmpty, !passionValues.isEmpty].filter { $0 }.count
         let iconName: String = {
             switch completionCount {
             case 0: return "battery.0"
@@ -895,25 +878,16 @@ struct FulfillmentView: View {
 
             if isExpanded {
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("Vision")
+                    Text("Mission")
                         .font(.headline)
                         .foregroundColor(.black)
-                    Text(archive.category_vision.isEmpty ? "No vision saved." : archive.category_vision)
+                    Text(archive.category_purpose.isEmpty ? "No mission saved." : archive.category_purpose)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(10)
                         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
 
-                    Text("Purpose")
-                        .font(.headline)
-                        .foregroundColor(.black)
-                    Text(archive.category_purpose.isEmpty ? "No purpose saved." : archive.category_purpose)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(10)
-                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
-
-                    Text("Roles")
+                    Text("Identity")
                         .font(.headline)
                         .foregroundColor(.black)
                     readOnlyRows(values: roles)
@@ -922,11 +896,6 @@ struct FulfillmentView: View {
                         .font(.headline)
                         .foregroundColor(.black)
                     readOnlyRows(values: fociValues)
-
-                    Text("Resources")
-                        .font(.headline)
-                        .foregroundColor(.black)
-                    readOnlyRows(values: resourcesValues)
 
                     Text("Passions")
                         .font(.headline)
@@ -1399,22 +1368,9 @@ struct FulfillmentView: View {
                 if isExpanded {
                     let rolesForRecord = getRoles(for: record)
                     let fociForRecord = getFoci(for: record)
-                    let resourcesForRecord = getResources(for: record)
 
                     VStack(alignment: .leading, spacing: 16) {
-                    Text("Vision")
-                        .font(.headline)
-                        .foregroundColor(.black)
-                    TextEditor(text: visionBinding(for: record))
-                        .focused($focusedVisionCategoryID, equals: record.category_id)
-                        .textInputAutocapitalization(.sentences)
-                        .autocorrectionDisabled(false)
-                        .scrollContentBackground(.hidden)
-                        .frame(minHeight: 120)
-                        .padding(8)
-                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
-
-                    Text("Purpose")
+                    Text("Mission")
                         .font(.headline)
                         .foregroundColor(.black)
                     TextEditor(text: purposeBinding(for: record))
@@ -1426,11 +1382,11 @@ struct FulfillmentView: View {
                         .padding(8)
                         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
 
-                    Text("Roles")
+                    Text("Identity")
                         .font(.headline)
                         .foregroundColor(.black)
                     styledManageListBox(
-                        primaryRowTitle: rolesForRecord.isEmpty ? "Add Role" : "Manage Roles",
+                        primaryRowTitle: rolesForRecord.isEmpty ? "Add Identity" : "Manage Identity",
                         items: rolesForRecord.map { .init(id: $0.id, title: $0.role, subtitle: nil) },
                         onPrimaryTap: {
                             if rolesForRecord.isEmpty {
@@ -1511,25 +1467,6 @@ struct FulfillmentView: View {
                             .stroke(Color(.separator).opacity(0.4), lineWidth: 1)
                     )
 
-                    Text("Resources")
-                        .font(.headline)
-                        .foregroundColor(.black)
-                    styledManageListBox(
-                        primaryRowTitle: resourcesForRecord.isEmpty ? "Add Resource" : "Manage Resources",
-                        items: resourcesForRecord.map { .init(id: $0.id, title: $0.resource, subtitle: nil) },
-                        onPrimaryTap: {
-                            if resourcesForRecord.isEmpty {
-                                presentResourceEditorForNew(record: record)
-                            } else {
-                                presentResourcesManager(for: record)
-                            }
-                        },
-                        onItemTap: { id in
-                            guard let resource = resourcesForRecord.first(where: { $0.id == id }) else { return }
-                            presentResourceEditor(for: resource, categoryTitle: record.category)
-                        }
-                    )
-
                     PassionsSectionView(record: record)
                     }
                     .padding()
@@ -1593,14 +1530,12 @@ struct FulfillmentView: View {
     }
 
     private func completionCount(for record: Fulfillment) -> Int {
-        let hasVision = !record.category_vision.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let hasPurpose = !record.category_purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let hasRole = roles.contains { $0.category_id == record.category_id }
         let hasFocus = foci.contains { $0.category_id == record.category_id }
-        let hasResource = resources.contains { $0.category_id == record.category_id }
         let passionIDs = Set(passions.map(\.passion_id))
         let hasPassion = passionJoins.contains { $0.category_id == record.category_id && passionIDs.contains($0.passion_id) }
-        return [hasVision, hasPurpose, hasRole, hasFocus, hasResource, hasPassion].filter { $0 }.count
+        return [hasPurpose, hasRole, hasFocus, hasPassion].filter { $0 }.count
     }
 
     private var fulfillmentMetrics: [(String, Color, Double)] {
@@ -2352,7 +2287,7 @@ private struct RolesManagerSheetView: View {
                             editorTarget = .init(roleID: nil, categoryID: categoryID, categoryTitle: categoryTitle, autoFocus: true)
                         } label: {
                             HStack {
-                                Text("Add Role")
+                                Text("Add Identity")
                                     .foregroundStyle(Color.accentColor)
                                 Spacer()
                             }
@@ -2396,7 +2331,7 @@ private struct RolesManagerSheetView: View {
                 }
             }
             .listStyle(.insetGrouped)
-            .navigationTitle("Manage Roles")
+            .navigationTitle("Manage Identity")
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarBackButtonHidden(isDeleteMode)
             .toolbar {
@@ -2500,14 +2435,14 @@ private struct RoleEditorSheetView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section(isEditing ? "Edit Role" : "Add Role") {
+                Section(isEditing ? "Edit Identity" : "Add Identity") {
                     TextField("H2O lover", text: $draftText)
                         .focused($isTextFocused)
                         .textInputAutocapitalization(.sentences)
                 }
             }
             .listStyle(.insetGrouped)
-            .navigationTitle(isEditing ? "Edit Role" : "Add Role")
+            .navigationTitle(isEditing ? "Edit Identity" : "Add Identity")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {

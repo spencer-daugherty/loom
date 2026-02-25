@@ -300,11 +300,9 @@ struct ContentView: View {
                 category: category,
                 tint: categoryBackgroundColor(for: category),
                 titleColor: categoryTextColor(for: category),
-                vision: recordForCategory(category)?.category_vision ?? "",
                 purpose: recordForCategory(category)?.category_purpose ?? "",
                 roles: rolesForCategory(category).map { $0.role },
                 foci: fociForCategory(category).map { $0.activity },
-                resources: resourcesForCategory(category).map { $0.resource },
                 passions: passionsForCategory(category)
             )
             .allowsHitTesting(false)
@@ -1342,14 +1340,12 @@ struct ContentView: View {
     }
 
     private func completionCount(for record: Fulfillment) -> Int {
-        let hasVision = !record.category_vision.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let hasPurpose = !record.category_purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let hasRole = roles.contains { $0.category_id == record.category_id }
         let hasFocus = foci.contains { $0.category_id == record.category_id }
-        let hasResource = resources.contains { $0.category_id == record.category_id }
         let passionIDs = Set(passions.map(\.passion_id))
         let hasPassion = passionJoins.contains { $0.category_id == record.category_id && passionIDs.contains($0.passion_id) }
-        return [hasVision, hasPurpose, hasRole, hasFocus, hasResource, hasPassion].filter { $0 }.count
+        return [hasPurpose, hasRole, hasFocus, hasPassion].filter { $0 }.count
     }
 
     private func batteryPercentage(for record: Fulfillment) -> Double {
@@ -2961,13 +2957,13 @@ struct ContentView: View {
         case .drivingAndFulfillmentForObjectives:
             return Text("Please complete both your ")
                 + Text(Image(systemName: "infinity"))
-                + Text(" Driving Force and ")
+                + Text(" Purpose and ")
                 + Text(Image(systemName: "trophy"))
                 + Text(" Fulfillment areas to continue.")
         case .drivingForFulfillment:
             return Text("Please complete your ")
                 + Text(Image(systemName: "infinity"))
-                + Text(" Driving Force to continue to ")
+                + Text(" Purpose to continue to ")
                 + Text(Image(systemName: "trophy"))
                 + Text(" Fulfillment.")
         }
@@ -2976,7 +2972,6 @@ struct ContentView: View {
     // MARK: - Extracted Sections to reduce body complexity
     private var drivingForceSection: some View {
         let ultimateVision = drivingForces.first?.ultimateVision ?? ""
-        let ultimatePurpose = drivingForces.first?.ultimatePurpose ?? ""
         let drivingForceCardBackground: Color = isDrivingForceEmptyState
             ? Color(.systemGray5)
             : Color(.secondarySystemBackground)
@@ -2992,7 +2987,7 @@ struct ContentView: View {
         } label: {
             SectionCard(
                 iconName: "infinity",
-                title: "Driving Force",
+                title: "Purpose",
                 headerHint: "who you are",
                 backgroundColor: drivingForceCardBackground
             ) {
@@ -3002,13 +2997,13 @@ struct ContentView: View {
                             Text("No core identities")
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(.gray)
-                            Text("Tap to add a vision and purpose")
+                            Text("Tap to add a vision")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                                 .multilineTextAlignment(.center)
                         }
 
-                        Text("Open Driving Force")
+                        Text("Open Purpose")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.gray)
                             .padding(.horizontal, 10)
@@ -3027,12 +3022,12 @@ struct ContentView: View {
                 } else {
                     VStack(alignment: .leading, spacing: 12) {
 
-                        // Ultimate Vision + Purpose group
+                        // Vision group
                         VStack(alignment: .leading, spacing: 12) {
 
-                            // Ultimate Vision
+                            // Vision
                             VStack(alignment: .leading, spacing: 4) {
-                                Text("ULTIMATE VISION")
+                                Text("VISION")
                                     .font(.caption)
                                     .fontWeight(.bold)
                                     .foregroundColor(.gray)
@@ -3040,22 +3035,10 @@ struct ContentView: View {
                                 Text(ultimateVision)
                                     .font(.body)
                                     .foregroundColor(.primary)
-                                    .lineLimit(1)
+                                    .lineLimit(3)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
 
-                            // Ultimate Purpose
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("ULTIMATE PURPOSE")
-                                    .font(.caption)
-                                    .fontWeight(.bold)
-                                    .foregroundColor(.gray)
-
-                                Text(ultimatePurpose)
-                                    .font(.body)
-                                    .foregroundColor(.primary)
-                                    .lineLimit(1)
-                            }
                         }
                         .contentShape(Rectangle())
                         .pressHighlight(showVisionPurposePopup, cornerRadius: 8, inset: 3)
@@ -3742,28 +3725,14 @@ struct VisionPurposePopupOverlay: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Ultimate Vision")
+            Text("Vision")
                 .font(.headline)
                 .fontWeight(.bold)
             if vision.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text("+ Add My Ultimate Vision")
+                Text("+ Add My Vision")
                     .foregroundColor(.secondary)
             } else {
                 Text(vision)
-                    .foregroundColor(.primary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Divider().padding(.vertical, 4)
-
-            Text("Ultimate Purpose")
-                .font(.headline)
-                .fontWeight(.bold)
-            if purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text("+ Add My Ultimate Purpose")
-                    .foregroundColor(.secondary)
-            } else {
-                Text(purpose)
                     .foregroundColor(.primary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -4017,11 +3986,9 @@ struct CategoryFulfillmentPopupOverlay: View {
     let category: String
     let tint: Color
     let titleColor: Color
-    let vision: String
     let purpose: String
     let roles: [String]
     let foci: [String]
-    let resources: [String]
     let passions: [Passion]
 
     private func sectionHeader(_ title: String) -> some View {
@@ -4054,21 +4021,10 @@ struct CategoryFulfillmentPopupOverlay: View {
                 .fontWeight(.semibold)
                 .foregroundColor(titleColor)
 
-            // Vision
-            sectionHeader("Vision")
-            if vision.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text("+ Add Vision")
-                    .foregroundColor(.black)
-            } else {
-                Text(vision)
-                    .foregroundColor(.black)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            // Purpose
-            sectionHeader("Purpose")
+            // Mission
+            sectionHeader("Mission")
             if purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text("+ Add Purpose")
+                Text("+ Add Mission")
                     .foregroundColor(.black)
             } else {
                 Text(purpose)
@@ -4076,17 +4032,13 @@ struct CategoryFulfillmentPopupOverlay: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            // Roles
-            sectionHeader("Roles")
+            // Identity
+            sectionHeader("Identity")
             bulletList(roles)
 
             // Little Wins
             sectionHeader("Little Wins")
             bulletList(foci)
-
-            // Resources
-            sectionHeader("Resources")
-            bulletList(resources)
 
             // Passions
             sectionHeader("Passions")

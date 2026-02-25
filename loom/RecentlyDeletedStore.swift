@@ -803,7 +803,7 @@ enum RecentlyDeletedStore {
             let purpose = m.purposeSnapshot.trimmingCharacters(in: .whitespacesAndNewlines)
             if !vision.isEmpty { return vision }
             if !purpose.isEmpty { return purpose }
-            return "Driving Force"
+            return "Purpose"
         }
         if let m = model as? ReplacedFulfillmentCategoryArchive {
             return m.category
@@ -833,7 +833,7 @@ enum RecentlyDeletedStore {
             return "Completed Action Blocks"
         }
         if model is DrivingForceArchive {
-            return "Driving Force"
+            return "Purpose"
         }
         if model is ReplacedFulfillmentCategoryArchive {
             return "Previous Category"

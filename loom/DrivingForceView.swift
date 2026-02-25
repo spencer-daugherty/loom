@@ -130,12 +130,8 @@ struct DrivingForceView: View {
         rows.reserveCapacity(drivingForceArchives.count * 2)
         for archive in drivingForceArchives {
             let vision = archive.visionSnapshot.trimmingCharacters(in: .whitespacesAndNewlines)
-            let purpose = archive.purposeSnapshot.trimmingCharacters(in: .whitespacesAndNewlines)
             if !vision.isEmpty {
                 rows.append(HistoricRow(archive: archive, kind: .vision, text: archive.visionSnapshot))
-            }
-            if !purpose.isEmpty {
-                rows.append(HistoricRow(archive: archive, kind: .purpose, text: archive.purposeSnapshot))
             }
         }
         return rows
@@ -160,7 +156,7 @@ struct DrivingForceView: View {
         .toolbar { topToolbar }
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
-                if focusedField == .vision || focusedField == .purpose {
+                if focusedField == .vision {
                     Spacer()
                     Button("Done") {
                         focusedField = nil
@@ -169,7 +165,7 @@ struct DrivingForceView: View {
                 }
             }
         }
-        .navigationTitle("Driving Force")
+        .navigationTitle("Purpose")
         .background(backgroundTapDismiss)
         .task {
             if let existing = drivingForces.first {
@@ -308,12 +304,12 @@ struct DrivingForceView: View {
                     .font(.headline.weight(.semibold))
                     .frame(maxWidth: .infinity, alignment: .center)
 
-                instructionSectionTitle("Set Your Driving Force")
+                instructionSectionTitle("Set Your Purpose")
                 instructionBody("This isn’t long-term goals.")
                 instructionBody("It’s who you are: your values, principles, and high-level direction that tends to stay stable over time.")
                 instructionBody("Wording can evolve, but the themes should remain a compass.")
 
-                instructionSectionTitle("Ultimate Vision")
+                instructionSectionTitle("Vision")
                 instructionLabel("Need ideas?")
                 instructionBullets([
                     "Who do I want to become?",
@@ -322,16 +318,6 @@ struct DrivingForceView: View {
                 ])
                 instructionLabel("Example:")
                 instructionExample("“I live a life of purpose, growth, and freedom. I build meaningful work that creates value for others while giving me time, financial independence, and the ability to choose how I live. I am healthy, energized, and surrounded by strong relationships, and I continue to learn, lead, and make a positive impact.”")
-
-                instructionSectionTitle("Ultimate Purpose")
-                instructionLabel("Need ideas?")
-                instructionBullets([
-                    "Why is this essential to me?",
-                    "Who does this impact?",
-                    "What does this give me emotionally?"
-                ])
-                instructionLabel("Example:")
-                instructionExample("“Because I don’t want to waste my life reacting to circumstances or other people’s expectations. I want to use my full potential, create something meaningful, support the people I love, and live with confidence, fulfillment, and peace.”")
 
                 instructionSectionTitle("Passions")
                 instructionLabel("Need ideas?")
@@ -833,17 +819,10 @@ struct DrivingForceView: View {
     @ViewBuilder
     private var drivingForceSections: some View {
         inlineDrivingForceSection(
-            title: "Ultimate Vision",
+            title: "Vision",
             placeholder: visionPlaceholder,
             text: $visionTextDraft,
             focus: .vision
-        )
-
-        inlineDrivingForceSection(
-            title: "Ultimate Purpose",
-            placeholder: purposePlaceholder,
-            text: $purposeTextDraft,
-            focus: .purpose
         )
     }
 
@@ -882,7 +861,7 @@ struct DrivingForceView: View {
             HStack(spacing: 6) {
                 Image(systemName: isShowingHistoric ? "chevron.up" : "chevron.down")
                     .font(.caption2.weight(.semibold))
-                Text("Previous Ultimate Visions/Purposes")
+                Text("Previous Visions")
                     .font(.caption2.weight(.semibold))
             }
             .foregroundStyle(.primary)
@@ -970,9 +949,9 @@ struct DrivingForceView: View {
     private func editorSheetTitle(for editor: DrivingForceEditor) -> String {
         let current = currentText(for: editor).trimmingCharacters(in: .whitespacesAndNewlines)
         if current.isEmpty {
-            return editor == .vision ? "Create Ultimate Vision" : "Create Ultimate Purpose"
+            return editor == .vision ? "Create Vision" : "Create Purpose"
         }
-        return editor == .vision ? "Edit Ultimate Vision" : "Edit Ultimate Purpose"
+        return editor == .vision ? "Edit Vision" : "Edit Purpose"
     }
 
     private func editorPlaceholder(for editor: DrivingForceEditor) -> String {
@@ -986,8 +965,7 @@ struct DrivingForceView: View {
     private func maybeAutoOpenCreateVision() {
         guard autoOpenCreateVision, !didAutoOpenCreateVision else { return }
         let hasMissingVision = visionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let hasMissingPurpose = purposeText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        guard hasMissingVision || hasMissingPurpose else { return }
+        guard hasMissingVision else { return }
         didAutoOpenCreateVision = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             focusedField = .vision
@@ -1171,12 +1149,12 @@ struct DrivingForceView: View {
                 archive.purposeSnapshot = ""
             }
             context.insert(deletedOnly)
-            RecentlyDeletedStore.trash(deletedOnly, in: context, source: "Driving Force Archive")
+            RecentlyDeletedStore.trash(deletedOnly, in: context, source: "Purpose Archive")
             try? context.save()
             return
         }
 
-        RecentlyDeletedStore.trash(archive, in: context, source: "Driving Force Archive")
+        RecentlyDeletedStore.trash(archive, in: context, source: "Purpose Archive")
         try? context.save()
     }
 
@@ -1389,7 +1367,7 @@ private struct DrivingForceTrendsView: View {
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .navigationTitle("Driving Force Insights")
+        .navigationTitle("Purpose Insights")
         .navigationBarTitleDisplayMode(.inline)
         .background(Color(.systemBackground))
         .onAppear {
@@ -1424,7 +1402,7 @@ private struct DrivingForceTrendsView: View {
     private var trendGraphSection: some View {
         if visibleMonths.isEmpty {
             VStack(spacing: 6) {
-                Text("No Driving Force Trends Yet").font(.headline)
+                Text("No Purpose Insights Yet").font(.headline)
                 Text("Monthly passion scores will appear here as you use Loom.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)

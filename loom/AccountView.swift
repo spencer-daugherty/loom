@@ -39,7 +39,7 @@ struct DataItem: Identifiable, Hashable {
 
             items.append(.init(
                 id: "vision-\(base)",
-                source: "Ultimate Vision",
+                source: "Vision",
                 content: df.ultimateVision,
                 date: ts,
                 emotion: nil,
@@ -51,7 +51,7 @@ struct DataItem: Identifiable, Hashable {
 
             items.append(.init(
                 id: "purpose-\(base)",
-                source: "Ultimate Purpose",
+                source: "Purpose",
                 content: df.ultimatePurpose,
                 date: ts,
                 emotion: nil,
@@ -69,7 +69,7 @@ struct DataItem: Identifiable, Hashable {
 
             items.append(.init(
                 id: "visionArch-\(base)",
-                source: "Ultimate Vision (Archived)",
+                source: "Vision (Archived)",
                 content: arch.visionSnapshot,
                 date: ts,
                 emotion: nil,
@@ -82,7 +82,7 @@ struct DataItem: Identifiable, Hashable {
 
             items.append(.init(
                 id: "purposeArch-\(base)",
-                source: "Ultimate Purpose (Archived)",
+                source: "Purpose (Archived)",
                 content: arch.purposeSnapshot,
                 date: ts,
                 emotion: nil,
@@ -818,21 +818,21 @@ struct RecentlyDeletedView: View {
                 if !vision.isEmpty { return vision }
                 if !purpose.isEmpty { return purpose }
             }
-            return "Driving Force"
+            return "Purpose"
         }
         return item.titleText
     }
     private func displaySubtitle(for item: RecentlyDeletedItem) -> String {
         if entityTypeMatches(item, "DrivingForceArchive") {
-            return "Driving Force"
+            return "Purpose"
         }
         return item.subtitleText
     }
     private func normalizeLegacyRecentlyDeletedRows() {
         var changed = false
         for item in items where entityTypeMatches(item, "DrivingForceArchive") {
-            if item.subtitleText != "Driving Force" {
-                item.subtitleText = "Driving Force"
+            if item.subtitleText != "Purpose" {
+                item.subtitleText = "Purpose"
                 changed = true
             }
             let trimmed = item.titleText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -842,13 +842,13 @@ struct RecentlyDeletedView: View {
                    let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                     let vision = (object["visionSnapshot"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                     let purpose = (object["purposeSnapshot"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                    let newTitle = !vision.isEmpty ? vision : (!purpose.isEmpty ? purpose : "Driving Force")
+                    let newTitle = !vision.isEmpty ? vision : (!purpose.isEmpty ? purpose : "Purpose")
                     if item.titleText != newTitle {
                         item.titleText = newTitle
                         changed = true
                     }
-                } else if item.titleText != "Driving Force" {
-                    item.titleText = "Driving Force"
+                } else if item.titleText != "Purpose" {
+                    item.titleText = "Purpose"
                     changed = true
                 }
             }
@@ -1197,10 +1197,10 @@ struct ManageRawDataView: View {
     @State private var showDeveloperData = false
 
     private let availableFilters: [ModelFilter] = [
-        .init(id: "vision", name: "Ultimate Vision"),
-        .init(id: "purpose", name: "Ultimate Purpose"),
-        .init(id: "visionArch", name: "Ultimate Vision (Archived)"),
-        .init(id: "purposeArch", name: "Ultimate Purpose (Archived)"),
+        .init(id: "vision", name: "Vision"),
+        .init(id: "purpose", name: "Purpose"),
+        .init(id: "visionArch", name: "Vision (Archived)"),
+        .init(id: "purposeArch", name: "Purpose (Archived)"),
         .init(id: "passion", name: "Passion"),
         .init(id: "passionArch", name: "Passion (Archived)"),
         .init(id: "fulfillment", name: "Fulfillment"),

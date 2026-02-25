@@ -196,9 +196,9 @@ struct FulfillmentStartView: View {
             switch self {
             case .intro: return "Set Fulfillment Areas"
             case .createCategories: return "Create Categories"
-            case .visionSweep: return "Define Vision"
-            case .purposeSweep: return "Define Purpose"
-            case .roles: return "Identify Roles"
+            case .visionSweep: return "Define Mission"
+            case .purposeSweep: return "Define Mission"
+            case .roles: return "Set Identity"
             case .priorities: return "Choose Your Focus"
             case .littleWins: return "List Little Wins"
             case .resources: return "Note Resources"
@@ -272,31 +272,31 @@ struct FulfillmentStartView: View {
         if isAddSingleAreaMode {
             switch step {
             case .createCategories: return 1
-            case .visionSweep: return 2
-            case .purposeSweep: return 3
-            case .roles: return 4
-            case .littleWins: return 5
-            case .resources: return 6
-            case .passions: return 7
+            case .visionSweep: return 0
+            case .purposeSweep: return 2
+            case .roles: return 3
+            case .littleWins: return 4
+            case .passions: return 5
+            case .resources: return 0
             default: return 0
             }
         }
         switch step {
         case .createCategories: return 1
-        case .visionSweep: return 2
-        case .purposeSweep: return 3
-        case .roles: return 4
-        case .priorities: return 5
-        case .littleWins: return 6
-        case .resources: return 7
-        case .passions: return 8
-        case .summary: return 9
+        case .visionSweep: return 0
+        case .purposeSweep: return 2
+        case .roles: return 3
+        case .priorities: return 4
+        case .littleWins: return 5
+        case .passions: return 6
+        case .summary: return 7
+        case .resources: return 0
         case .intro: return 0
         }
     }
 
     private var progressTotalSteps: Int {
-        isAddSingleAreaMode ? 7 : 9
+        isAddSingleAreaMode ? 5 : 7
     }
 
     private var editorSurfaceColor: Color {
@@ -309,7 +309,7 @@ struct FulfillmentStartView: View {
 
     private var isScrollableStep: Bool {
         switch step {
-        case .intro, .createCategories, .roles, .littleWins, .resources, .passions, .summary:
+        case .intro, .createCategories, .roles, .littleWins, .passions, .summary:
             return true
         default:
             return false
@@ -321,10 +321,7 @@ struct FulfillmentStartView: View {
         case .createCategories:
             return isAddSingleAreaMode ? !canAddSingleArea : !canStartOnboarding
         case .visionSweep:
-            guard let record = currentVisionRecord else { return true }
-            let text = (visionDrafts[record.category_id] ?? record.category_vision)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            return text.isEmpty
+            return false
         case .purposeSweep:
             guard let record = currentPurposeRecord else { return true }
             let text = (purposeDrafts[record.category_id] ?? record.category_purpose)
@@ -341,9 +338,7 @@ struct FulfillmentStartView: View {
             guard let record = currentDeepRecord else { return true }
             return getFoci(for: record).isEmpty
         case .resources:
-            if isAddSingleAreaMode { return false }
-            guard let record = currentDeepRecord else { return true }
-            return getResources(for: record).isEmpty
+            return false
         case .passions:
             guard let record = currentPassionRecord else { return true }
             return selectedPassions(for: record.category_id).isEmpty
@@ -358,7 +353,6 @@ struct FulfillmentStartView: View {
         for id in roleCategoryIDs {
             guard let record = orderedFulfillments.first(where: { $0.category_id == id }) else { return false }
             if priorityCategoryIDs.contains(id), getFoci(for: record).isEmpty { return false }
-            if priorityCategoryIDs.contains(id), getResources(for: record).isEmpty { return false }
             if selectedPassions(for: id).isEmpty { return false }
         }
         return true
@@ -584,11 +578,11 @@ struct FulfillmentStartView: View {
         .onChange(of: step) { _, newValue in
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
                 switch newValue {
-                case .visionSweep: focusedField = .vision
+                case .visionSweep: focusedField = nil
                 case .purposeSweep: focusedField = .purpose
                 case .roles: focusedField = addingRole ? .role : nil
                 case .littleWins: focusedField = addingFocus ? .focus : nil
-                case .resources: focusedField = addingResource ? .resource : nil
+                case .resources: focusedField = nil
                 default: focusedField = nil
                 }
             }
@@ -606,7 +600,7 @@ struct FulfillmentStartView: View {
             case .createCategories:
                 createCategoriesStep
             case .visionSweep:
-                visionSweepStep
+                purposeSweepStep
             case .purposeSweep:
                 purposeSweepStep
             case .priorities:
@@ -616,7 +610,7 @@ struct FulfillmentStartView: View {
             case .littleWins:
                 littleWinsStep
             case .resources:
-                resourcesStep
+                passionsStep
             case .passions:
                 passionsStep
             case .summary:
@@ -745,7 +739,7 @@ struct FulfillmentStartView: View {
             let total = roleCategoryIDs.count
             guard total > 1 else { return nil }
             return CGFloat(roleIndex + 1) / CGFloat(total)
-        case .littleWins, .resources:
+        case .littleWins:
             let total = deepCategoryIDs.count
             guard total > 1 else { return nil }
             return CGFloat(deepIndex + 1) / CGFloat(total)
@@ -852,11 +846,6 @@ struct FulfillmentStartView: View {
         if isAddSingleAreaMode && step == .littleWins,
            let record = currentDeepRecord,
            getFoci(for: record).isEmpty {
-            return "Skip"
-        }
-        if isAddSingleAreaMode && step == .resources,
-           let record = currentDeepRecord,
-           getResources(for: record).isEmpty {
             return "Skip"
         }
         return "Next"
@@ -1141,7 +1130,7 @@ struct FulfillmentStartView: View {
                 VStack(spacing: 0) {
                     if rolesItems.count < 3 {
                         if addingRole {
-                            TextField("Add Role", text: $roleEntry)
+                            TextField("Add Identity", text: $roleEntry)
                                 .focused($focusedField, equals: .role)
                                 .textInputAutocapitalization(.sentences)
                                 .autocorrectionDisabled(false)
@@ -1153,7 +1142,7 @@ struct FulfillmentStartView: View {
                                 .padding(.horizontal, 10)
                                 .background(isInvalid ? Color.red.opacity(0.08) : rowSurfaceColor)
                         } else {
-                            Button("+ Add Role") {
+                            Button("+ Add Identity") {
                                 addingRole = true
                                 roleEntry = ""
                                 focusedField = .role
@@ -1589,14 +1578,12 @@ struct FulfillmentStartView: View {
             .font(.subheadline.weight(.semibold))
 
             if includeVisionPurpose {
-                summarySubBullet(title: "Vision", values: [record.category_vision])
-                summarySubBullet(title: "Purpose", values: [record.category_purpose])
+                summarySubBullet(title: "Mission", values: [record.category_purpose])
             }
 
-            summaryNestedBullets(title: "Roles", values: getRoles(for: record).map(\.role))
+            summaryNestedBullets(title: "Identity", values: getRoles(for: record).map(\.role))
             if includeLittleWinsResources {
                 summaryNestedBullets(title: "Little Wins", values: getFoci(for: record).map(\.activity))
-                summaryNestedBullets(title: "Resources", values: getResources(for: record).map(\.resource))
             }
             if includePassions {
                 summaryNestedBullets(
@@ -1816,17 +1803,12 @@ struct FulfillmentStartView: View {
                 step = .intro
             }
         case .visionSweep:
-            if visionIndex > 0 {
-                visionIndex -= 1
-            } else {
-                step = .createCategories
-            }
+            step = .createCategories
         case .purposeSweep:
             if purposeIndex > 0 {
                 purposeIndex -= 1
             } else {
-                step = .visionSweep
-                visionIndex = max(orderedFulfillments.count - 1, 0)
+                step = .createCategories
             }
         case .roles:
             if roleIndex > 0 {
@@ -1855,7 +1837,7 @@ struct FulfillmentStartView: View {
             if passionIndex > 0 {
                 passionIndex -= 1
             } else {
-                step = .resources
+                step = .littleWins
                 deepIndex = max(deepCategoryIDs.count - 1, 0)
             }
         case .summary:
@@ -1876,7 +1858,7 @@ struct FulfillmentStartView: View {
             deepIndex = 0
             passionIndex = 0
             didOpenPriorities = false
-            step = .visionSweep
+            step = .purposeSweep
         case .visionSweep:
             moveVisionForward(saveCurrent: true)
         case .purposeSweep:
@@ -1910,19 +1892,12 @@ struct FulfillmentStartView: View {
             if deepIndex < deepCategoryIDs.count - 1 {
                 deepIndex += 1
             } else {
-                deepIndex = 0
-                step = .resources
-            }
-        case .resources:
-            if let record = currentDeepRecord, addingResource {
-                commitResource(record)
-            }
-            if deepIndex < deepCategoryIDs.count - 1 {
-                deepIndex += 1
-            } else {
                 passionIndex = 0
                 step = .passions
             }
+        case .resources:
+            passionIndex = 0
+            step = .passions
         case .passions:
             if passionIndex < roleCategoryIDs.count - 1 {
                 passionIndex += 1
@@ -2658,12 +2633,12 @@ struct FulfillmentStartView: View {
                 invalidCategoryIDs.insert(record.category_id)
             }
         case .purposeSweep:
-            validationHintText = "Add a purpose to continue."
+            validationHintText = "Add a mission to continue."
             if let record = currentPurposeRecord {
                 invalidCategoryIDs.insert(record.category_id)
             }
         case .roles:
-            validationHintText = "List 1 or more roles to continue."
+            validationHintText = "List 1 or more identities to continue."
             if let record = currentRoleRecord {
                 invalidCategoryIDs.insert(record.category_id)
             }
@@ -2675,10 +2650,7 @@ struct FulfillmentStartView: View {
                 invalidCategoryIDs.insert(record.category_id)
             }
         case .resources:
-            validationHintText = "List 1 or more resources to continue."
-            if let record = currentDeepRecord {
-                invalidCategoryIDs.insert(record.category_id)
-            }
+            validationHintText = "Please continue."
         case .passions:
             validationHintText = "Connect at least 1 passion to continue."
             if let record = currentPassionRecord {
