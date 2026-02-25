@@ -106,7 +106,7 @@ struct PurposeStartView: View {
     }
 
     private var isScrollableStep: Bool {
-        step == .summary
+        step == .vision || step == .summary
     }
 
     private var editorSurfaceColor: Color {

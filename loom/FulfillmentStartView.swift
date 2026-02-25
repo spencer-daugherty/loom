@@ -309,7 +309,7 @@ struct FulfillmentStartView: View {
 
     private var isScrollableStep: Bool {
         switch step {
-        case .createCategories, .roles, .littleWins, .passions, .summary:
+        case .createCategories, .visionSweep, .purposeSweep, .roles, .littleWins, .passions, .summary:
             return true
         default:
             return false

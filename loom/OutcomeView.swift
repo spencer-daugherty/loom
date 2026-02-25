@@ -536,7 +536,7 @@ struct OutcomeView: View {
     }
 
     private var completionFormValid: Bool {
-        let universalValid = !completionJournalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let universalValid = true
         if isMeasurable {
             return universalValid
         }
@@ -1023,6 +1023,21 @@ struct OutcomeView: View {
                             .foregroundStyle(.secondary)
                     }
                     HStack {
+                        Text("Current Goal")
+                        Spacer()
+                        if let currentGoalValue {
+                            Text(formatMetricValue(currentGoalValue, format: measureFormat.rawValue))
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("Not set")
+                                .foregroundStyle(.secondary)
+                        }
+                        if !measureFormat.suffix.isEmpty {
+                            Text(measureFormat.suffix)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    HStack {
                         Text("New Goal")
                         Spacer()
                         if measureFormat == .dollars {
@@ -1032,6 +1047,9 @@ struct OutcomeView: View {
                         TextField("Goal", text: $updateGoalInput)
                             .keyboardType(.decimalPad)
                             .focused($isUpdateGoalFieldFocused)
+                            .onAppear {
+                                triggerUpdateGoalFieldFocus()
+                            }
                             .multilineTextAlignment(.trailing)
                             .frame(width: 120)
                             .onChange(of: updateGoalInput) { _, newValue in
@@ -1049,13 +1067,7 @@ struct OutcomeView: View {
                 .onAppear {
                     updateGoalDate = Calendar.current.startOfDay(for: .now)
                     updateGoalInput = ""
-                    isUpdateGoalFieldFocused = true
-                    DispatchQueue.main.async {
-                        isUpdateGoalFieldFocused = true
-                    }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                        isUpdateGoalFieldFocused = true
-                    }
+                    triggerUpdateGoalFieldFocus()
                 }
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
@@ -1154,16 +1166,6 @@ struct OutcomeView: View {
                         )
                     }
 
-                    Section("Journal") {
-                        TextField(
-                            "How was the goal progressed? What did I learn? What will I do next?",
-                            text: $completionJournalText,
-                            axis: .vertical
-                        )
-                        .lineLimit(4...8)
-                        .focused($isCompletionJournalFocused)
-                    }
-
                     Section("Passions") {
                         HStack(alignment: .firstTextBaseline) {
                             Text("What passions drove this outcome?")
@@ -1180,6 +1182,16 @@ struct OutcomeView: View {
                                     .foregroundStyle(.primary)
                             }
                         }
+                    }
+
+                    Section("Journal") {
+                        TextField(
+                            "How was the goal progressed? What did I learn? What will I do next?",
+                            text: $completionJournalText,
+                            axis: .vertical
+                        )
+                        .lineLimit(4...8)
+                        .focused($isCompletionJournalFocused)
                     }
                 }
                 .navigationTitle("Complete Outcome")
@@ -1213,6 +1225,14 @@ struct OutcomeView: View {
             .sheet(isPresented: $isShowingCompletionPassionsSheet) {
                 NavigationStack {
                     List {
+                        Section {
+                            Text("Select 1 or more passions that drove this outcome")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .listRowSeparator(.hidden)
+                        }
+
                         ForEach(passions, id: \.passion_id) { passion in
                             Button {
                                 if selectedCompletionPassionIDs.contains(passion.passion_id) {
@@ -1315,6 +1335,19 @@ struct OutcomeView: View {
             }
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
+        }
+    }
+
+    private func triggerUpdateGoalFieldFocus() {
+        isUpdateGoalFieldFocused = false
+        DispatchQueue.main.async {
+            isUpdateGoalFieldFocused = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            isUpdateGoalFieldFocused = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            isUpdateGoalFieldFocused = true
         }
     }
 
