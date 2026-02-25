@@ -1450,35 +1450,7 @@ private struct DrivingForceTrendsView: View {
 
             if let snap = selectedSnapshot {
                 if let message = primaryInsightMessage(for: snap) {
-                    let loomAIGradient = AngularGradient(
-                        colors: [
-                            Color(red: 0.22, green: 0.47, blue: 1.0),
-                            Color(red: 0.15, green: 0.83, blue: 0.95),
-                            Color(red: 0.62, green: 0.40, blue: 0.95),
-                            Color(red: 0.80, green: 0.38, blue: 0.78),
-                            Color(red: 0.98, green: 0.36, blue: 0.58),
-                            Color(red: 0.75, green: 0.42, blue: 0.74),
-                            Color(red: 0.22, green: 0.47, blue: 1.0)
-                        ],
-                        center: .center,
-                        angle: .degrees(24)
-                    )
-                    HStack(alignment: .center, spacing: 10) {
-                        Image("LoomAI")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 26, height: 26)
-                        Text(message)
-                            .font(.subheadline)
-                            .foregroundStyle(.primary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(loomAIGradient.opacity(0.95), lineWidth: 2)
-                    )
+                    DrivingForceAnimatedInsightCallout(message: message)
                 }
 
                 VStack(spacing: 8) {
@@ -1684,6 +1656,52 @@ private struct DrivingForceTrendsView: View {
 
         return items.max(by: { $0.priority < $1.priority })?.text
             ?? "\(passionTitle(for: snap.passionType)) is stable overall. Improve one support behavior this month to lift the score."
+    }
+}
+
+private struct DrivingForceAnimatedInsightCallout: View {
+    let message: String
+    @State private var outlineAngle: Double = 0
+
+    private var outlineGradient: AngularGradient {
+        AngularGradient(
+            colors: [
+                Color(red: 0.22, green: 0.47, blue: 1.0),
+                Color(red: 0.15, green: 0.83, blue: 0.95),
+                Color(red: 0.62, green: 0.40, blue: 0.95),
+                Color(red: 0.80, green: 0.38, blue: 0.78),
+                Color(red: 0.98, green: 0.36, blue: 0.58),
+                Color(red: 0.75, green: 0.42, blue: 0.74),
+                Color(red: 0.22, green: 0.47, blue: 1.0)
+            ],
+            center: .center,
+            angle: .degrees(outlineAngle)
+        )
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Image("LoomAI")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 26, height: 26)
+            Text(message)
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(outlineGradient.opacity(0.95), lineWidth: 2)
+        )
+        .onAppear {
+            guard outlineAngle == 0 else { return }
+            withAnimation(.linear(duration: 7).repeatForever(autoreverses: false)) {
+                outlineAngle = 360
+            }
+        }
     }
 }
 
