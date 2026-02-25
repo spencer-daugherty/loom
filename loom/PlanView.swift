@@ -1549,6 +1549,29 @@ struct PlanStepThreeView: View {
                 Spacer(minLength: 0)
             }
 
+            if !isStep3NextEnabled {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(Color.black.opacity(0.7))
+                        .padding(.top, 1)
+
+                    Text("Add at least 2 groups with 3 actions. Only add for this week.")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Color.black.opacity(0.7))
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color(red: 0.98, green: 0.92, blue: 0.72))
+                )
+            }
+
             HStack(spacing: 10) {
                 Toggle(
                     isOn: Binding(
@@ -1587,7 +1610,6 @@ struct PlanStepThreeView: View {
                 let collapsedGroupHeight = availableHeight * 0.5
                 let expandedGroupHeight = availableHeight * expandedGroupAreaRatio
                 let collapsedBoundedGroupHeight = min(max(collapsedGroupHeight, 220), availableHeight - 60)
-                let expandedBoundedGroupHeight = min(max(expandedGroupHeight, 220), availableHeight - 60)
 
                 let measuredChunkRowsHeight = chunks.reduce(CGFloat(0)) { partial, chunk in
                     // Include row vertical insets (8 top + 8 bottom) used by each chunk row.
@@ -1598,7 +1620,13 @@ struct PlanStepThreeView: View {
                     : 0
                 let estimatedBottomContentHeight = measuredChunkRowsHeight + measuredAddGroupRowHeight + 8
 
-                let shouldExpandGroupArea = isDraggingOverGroupArea && estimatedBottomContentHeight > collapsedBoundedGroupHeight
+                let estimatedPoolContentHeight = max(60, CGFloat(max(poolItems.count, 0)) * 60 + 12)
+                let expandedPoolReserve = min(180, estimatedPoolContentHeight)
+                let expandedBoundedGroupHeight = min(max(expandedGroupHeight, 220), availableHeight - expandedPoolReserve)
+
+                // When dragging into groups, always expand the group area. If the pool is short,
+                // use the freed space instead of leaving empty room above.
+                let shouldExpandGroupArea = isDraggingOverGroupArea
                 let boundedGroupHeight = shouldExpandGroupArea ? expandedBoundedGroupHeight : collapsedBoundedGroupHeight
                 let poolHeight = max(60, availableHeight - boundedGroupHeight - 10)
 
@@ -1713,37 +1741,6 @@ struct PlanStepThreeView: View {
                 .padding(.bottom, 2)
             }
 
-            HStack {
-                Spacer(minLength: 0)
-                Button {
-                    // Placeholder for future auto-group behavior.
-                } label: {
-                    HStack(spacing: 6) {
-                        Image("LoomAI")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 27, height: 27)
-                        Text("AutoGroup")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(autoGroupGradient)
-                    }
-                    .padding(.horizontal, 15)
-                    .padding(.vertical, 9)
-                    .overlay(
-                        Capsule()
-                            .stroke(autoGroupGradient, lineWidth: 2.25)
-                    )
-                }
-                .buttonStyle(.plain)
-                .onAppear {
-                    guard autoGroupOutlineAngle == 0 else { return }
-                    withAnimation(.linear(duration: 8).repeatForever(autoreverses: false)) {
-                        autoGroupOutlineAngle = 360
-                    }
-                }
-            }
-            .padding(.bottom, 2)
-
             HStack(spacing: 12) {
                 Button {
                     if let onBack { onBack() } else { dismiss() }
@@ -1773,6 +1770,40 @@ struct PlanStepThreeView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(isStep3NextEnabled ? .accentColor : Color(.systemGray3))
+            }
+            .padding(.top, isRefreshVisible ? 10 : 0)
+            .overlay(alignment: .topTrailing) {
+                Button {
+                    // Placeholder for future auto-group behavior.
+                } label: {
+                    HStack(spacing: 6) {
+                        Image("LoomAI")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 27, height: 27)
+                        Text("AutoGroup")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(autoGroupGradient)
+                    }
+                    .padding(.horizontal, 15)
+                    .padding(.vertical, 9)
+                    .background(
+                        Capsule()
+                            .fill(Color(.systemGroupedBackground))
+                    )
+                    .overlay(
+                        Capsule()
+                            .stroke(autoGroupGradient, lineWidth: 2.25)
+                    )
+                }
+                .buttonStyle(.plain)
+                .offset(x: 0, y: -58)
+                .onAppear {
+                    guard autoGroupOutlineAngle == 0 else { return }
+                    withAnimation(.linear(duration: 8).repeatForever(autoreverses: false)) {
+                        autoGroupOutlineAngle = 360
+                    }
+                }
             }
             .padding(.bottom, 2)
         }
@@ -2674,6 +2705,7 @@ struct PlanStepThreeLabelView: View {
     @State private var showValidationHint: Bool = false
     @State private var shouldHighlightMissingLabels: Bool = false
     @State private var validationResetWorkItem: DispatchWorkItem?
+    @State private var isShowingAddFulfillmentAreaSheet = false
 
     private struct Step3SelectableLabel: Hashable {
         let id: UUID
@@ -2816,6 +2848,7 @@ struct PlanStepThreeLabelView: View {
                             labelChunkCard(chunk)
                         }
                     }
+
                 }
                 .padding(.bottom, 12)
             }
@@ -2875,6 +2908,11 @@ struct PlanStepThreeLabelView: View {
         }
         .safeAreaPadding(.bottom)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .sheet(isPresented: $isShowingAddFulfillmentAreaSheet) {
+            NavigationStack {
+                FulfillmentStartView(entryMode: .addSingleArea)
+            }
+        }
     }
 
     @ViewBuilder
@@ -2905,6 +2943,10 @@ struct PlanStepThreeLabelView: View {
                         Button(label.label) {
                             applySelection(label.id, to: chunk)
                         }
+                    }
+                    Divider()
+                    Button("Add Fulfillment Area") {
+                        isShowingAddFulfillmentAreaSheet = true
                     }
                 } label: {
                     let selectedColor = selectedName.map { FulfillmentCategoryTheme.color(for: $0) } ?? .blue
