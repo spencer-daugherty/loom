@@ -3497,31 +3497,38 @@ private struct FulfillmentTrendsView: View {
     }
 
     private var biggestMover: (FulfillmentCategoryScoreSnapshot, Double)? {
-        guard let selectedWeekStart,
-              let priorWeek = Calendar.current.date(byAdding: .day, value: -7, to: selectedWeekStart)
-        else { return nil }
-        let priorByCategory = Dictionary(uniqueKeysWithValues: snapshots
-            .filter { Calendar.current.isDate($0.weekStartDate, inSameDayAs: priorWeek) }
-            .map { ($0.categoryID, $0) })
+        guard let _ = baselineVisibleWeekStart else { return nil }
         return selectedWeekSnapshots.compactMap { snap in
-            guard let prior = priorByCategory[snap.categoryID] else { return nil }
-            return (snap, snap.score - prior.score)
+            guard let delta = categoryDisplayedDelta(for: snap) else { return nil }
+            return (snap, delta)
         }
         .max(by: { abs($0.1) < abs($1.1) })
     }
 
-    private var priorWeekSnapshotsByCategory: [UUID: FulfillmentCategoryScoreSnapshot] {
-        guard let selectedWeekStart,
-              let priorWeek = Calendar.current.date(byAdding: .day, value: -7, to: selectedWeekStart)
-        else { return [:] }
-        return Dictionary(uniqueKeysWithValues: snapshots
-            .filter { Calendar.current.isDate($0.weekStartDate, inSameDayAs: priorWeek) }
-            .map { ($0.categoryID, $0) })
+    private var baselineVisibleWeekStart: Date? {
+        visibleWeeks.first
+    }
+
+    private var chartRowValueByWeekCategory: [String: Double] {
+        Dictionary(uniqueKeysWithValues: chartRows.map { row in
+            (chartWeekCategoryKey(weekStart: row.weekStart, categoryID: row.categoryID), row.value)
+        })
     }
 
     private func categoryWeekOverWeekDelta(for snap: FulfillmentCategoryScoreSnapshot) -> Double? {
-        guard let prior = priorWeekSnapshotsByCategory[snap.categoryID] else { return nil }
-        return snap.score - prior.score
+        categoryDisplayedDelta(for: snap)
+    }
+
+    private func categoryDisplayedDelta(for snap: FulfillmentCategoryScoreSnapshot) -> Double? {
+        guard let baselineWeek = baselineVisibleWeekStart,
+              let selectedWeekStart else { return nil }
+        let baselineKey = chartWeekCategoryKey(weekStart: baselineWeek, categoryID: snap.categoryID)
+        let selectedKey = chartWeekCategoryKey(weekStart: selectedWeekStart, categoryID: snap.categoryID)
+        guard let baseline = chartRowValueByWeekCategory[baselineKey],
+              let selected = chartRowValueByWeekCategory[selectedKey] else { return nil }
+        let baselineShown = roundedTenth(baseline)
+        let selectedShown = roundedTenth(selected)
+        return selectedShown - baselineShown
     }
 
     private var selectedSnapshot: FulfillmentCategoryScoreSnapshot? {
@@ -3876,6 +3883,14 @@ private struct FulfillmentTrendsView: View {
         guard !candidates.isEmpty else { return nil }
         let target = Calendar.current.startOfDay(for: date)
         return candidates.min(by: { abs($0.timeIntervalSince(target)) < abs($1.timeIntervalSince(target)) })
+    }
+
+    private func chartWeekCategoryKey(weekStart: Date, categoryID: UUID) -> String {
+        "\(Int(Calendar.current.startOfDay(for: weekStart).timeIntervalSince1970))|\(categoryID.uuidString)"
+    }
+
+    private func roundedTenth(_ value: Double) -> Double {
+        (value * 10).rounded() / 10
     }
 
     private func shortLabel(_ title: String) -> String {
