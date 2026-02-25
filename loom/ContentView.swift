@@ -2979,9 +2979,9 @@ struct ContentView: View {
         return NavigationLink {
             Group {
                 if isDrivingForceEmptyState {
-                    DrivingForceStartView()
+                    PurposeStartView()
                 } else {
-                    DrivingForceView(autoOpenCreateVision: false)
+                    PurposeView(autoOpenCreateVision: false)
                 }
             }
         } label: {
