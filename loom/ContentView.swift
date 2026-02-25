@@ -2846,7 +2846,19 @@ struct ContentView: View {
                 .buttonStyle(.plain)
 
                 Group {
-                    if !canOpenPlanOrActionFlow {
+                    if setupHomepageMode {
+                        NavigationLink {
+                            PlanStartView()
+                        } label: {
+                            Image(systemName: "play.fill")
+                                .font(.title)
+                                .foregroundColor(Color(.systemBackground))
+                                .frame(width: 60, height: 60)
+                                .background(Color.accentColor)
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                    } else if !canOpenPlanOrActionFlow {
                         Button(action: {
                             triggerPlayBlockedFeedback()
                         }) {

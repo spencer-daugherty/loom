@@ -36,6 +36,11 @@ struct PlanStartView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var navigateToPlan = false
 
+    private var screenHeight: CGFloat { UIScreen.main.bounds.height }
+    private var screenWidth: CGFloat { UIScreen.main.bounds.width }
+    private var isCompactIntroLayout: Bool { screenHeight <= 740 || screenWidth <= 390 }
+    private var introSubtextFont: Font { isCompactIntroLayout ? .system(size: 14) : .body }
+
     var body: some View {
         ZStack {
             Color(.systemGroupedBackground)
@@ -77,14 +82,17 @@ struct PlanStartView: View {
 
                 VStack(alignment: .leading, spacing: 10) {
                     Text("This is where you turn ideas into results.")
+                        .font(introSubtextFont)
                         .foregroundStyle(.secondary)
                         .lineLimit(nil)
                         .fixedSize(horizontal: false, vertical: true)
                     Text("This process helps you focus on the results that matter most, not busywork.")
+                        .font(introSubtextFont)
                         .foregroundStyle(.secondary)
                         .lineLimit(nil)
                         .fixedSize(horizontal: false, vertical: true)
                     Text("You’ll effortlessly connect your daily actions to meaningful Outcomes, Fulfillment Areas, and your Purpose.")
+                        .font(introSubtextFont)
                         .foregroundStyle(.secondary)
                         .lineLimit(nil)
                         .fixedSize(horizontal: false, vertical: true)
