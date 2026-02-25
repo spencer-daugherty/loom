@@ -458,7 +458,7 @@ struct PurposeView: View {
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
 
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .trailing, spacing: 8) {
                 HStack(alignment: .center, spacing: 8) {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .stroke(colorScheme == .dark ? Color.white : Color.black, lineWidth: 3)
@@ -484,6 +484,9 @@ struct PurposeView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Spacer(minLength: 0)
 
                 if let snap = selectedHeaderPassionSnapshot,
                    let summaryInsight = primaryDrivingForceHeaderInsightMessage(for: snap) {
@@ -500,19 +503,14 @@ struct PurposeView: View {
                         center: .center,
                         angle: .degrees(drivingForceHeaderInsightOutlineAngle)
                     )
-                    VStack(alignment: .leading, spacing: 6) {
-                        Image("LoomAI")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 32, height: 32)
-                            .frame(maxWidth: .infinity, alignment: .center)
-                        Text(summaryInsight)
-                            .font(.footnote)
-                            .foregroundStyle(.primary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    PurposeInlineInsightText(
+                        imageName: "LoomAI",
+                        text: summaryInsight,
+                        font: UIFont.preferredFont(forTextStyle: .footnote),
+                        textColor: UIColor.label,
+                        imageSize: CGSize(width: 32, height: 32)
+                    )
+                    .frame(maxWidth: .infinity, alignment: .trailing)
                     .padding(.top, 8)
                     .padding(.bottom, 8)
                     .padding(.leading, 12)
@@ -523,7 +521,8 @@ struct PurposeView: View {
                     )
                 }
             }
-            .frame(width: 166, alignment: .topTrailing)
+            .frame(width: 166)
+            .frame(maxHeight: .infinity, alignment: .topTrailing)
         }
         .padding(.horizontal, 15)
         .padding(.vertical, 15)
@@ -1167,6 +1166,71 @@ struct PurposeView: View {
         return formatter.string(from: date)
     }
 }
+
+#if canImport(UIKit)
+private struct PurposeInlineInsightText: UIViewRepresentable {
+    let imageName: String
+    let text: String
+    let font: UIFont
+    let textColor: UIColor
+    let imageSize: CGSize
+
+    private let imageTag = 9_431
+    private let imageTextSpacing: CGFloat = 8
+
+    func makeUIView(context: Context) -> UITextView {
+        let view = UITextView()
+        view.isEditable = false
+        view.isSelectable = false
+        view.isScrollEnabled = false
+        view.backgroundColor = .clear
+        view.textContainerInset = .zero
+        view.textContainer.lineFragmentPadding = 0
+        view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let imageView = UIImageView()
+        imageView.tag = imageTag
+        imageView.contentMode = .scaleAspectFit
+        imageView.backgroundColor = .clear
+        view.addSubview(imageView)
+        return view
+    }
+
+    func updateUIView(_ view: UITextView, context: Context) {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byWordWrapping
+
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: textColor,
+            .paragraphStyle: paragraph
+        ]
+        let output = NSMutableAttributedString()
+        output.append(NSAttributedString(string: text, attributes: attrs))
+        view.attributedText = output
+
+        if let imageView = view.viewWithTag(imageTag) as? UIImageView {
+            imageView.image = UIImage(named: imageName)
+            imageView.frame = CGRect(origin: .zero, size: imageSize)
+        }
+
+        let exclusionRect = CGRect(
+            x: 0,
+            y: 0,
+            width: imageSize.width + imageTextSpacing,
+            height: imageSize.height
+        )
+        let path = UIBezierPath(rect: exclusionRect)
+        view.textContainer.exclusionPaths = [path]
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
+        let width = proposal.width ?? 160
+        let fitting = CGSize(width: width, height: .greatestFiniteMagnitude)
+        let size = uiView.sizeThatFits(fitting)
+        return CGSize(width: width, height: ceil(size.height))
+    }
+}
+#endif
 
 private struct DrivingForceTrendRow: Identifiable {
     let id: String
