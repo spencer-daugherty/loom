@@ -80,6 +80,7 @@ struct DrivingForceView: View {
     @State private var editorShouldFocus: Bool = false
     @State private var didAutoOpenCreateVision: Bool = false
     @State private var showDrivingForceTrends: Bool = false
+    @State private var lastPassionScoreRefreshMonthStart: Date?
     @FocusState private var focusedField: Field?
 
     private enum DrivingForceEditor: String, Identifiable {
@@ -177,7 +178,6 @@ struct DrivingForceView: View {
             maybeAutoOpenCreateVision()
         }
         .onAppear {
-            refreshPassionScoresForCurrentMonthIfNeeded()
             maybeAutoOpenCreateVision()
         }
         .onChange(of: focusedField) { oldValue, newValue in
@@ -190,7 +190,7 @@ struct DrivingForceView: View {
         }
         .sheet(isPresented: $isShowingInstructions, content: instructionsSheet)
         .navigationDestination(isPresented: $showDrivingForceTrends) {
-            DrivingForceTrendsView()
+            DrivingForceTrendsView(snapshots: passionScoreSnapshots)
         }
         .alert("Delete Historic Item?", isPresented: deleteHistoricBinding, actions: deleteHistoricActions, message: deleteHistoricMessage)
     }
@@ -449,7 +449,7 @@ struct DrivingForceView: View {
                 Button {
                     showDrivingForceTrends = true
                 } label: {
-                    Text("Show trends")
+                    Text("Show insights")
                         .font(.subheadline)
                         .fontWeight(.semibold)
                         .foregroundStyle(.blue)
@@ -613,8 +613,14 @@ struct DrivingForceView: View {
     }
 
     private func refreshPassionScoresForCurrentMonthIfNeeded() {
+        let monthStart = PassionScoringMath.monthWindow(for: .now).monthStart
+        if let last = lastPassionScoreRefreshMonthStart,
+           Calendar.current.isDate(last, inSameDayAs: monthStart) {
+            return
+        }
         let service = PassionScoringService()
         _ = try? service.computeAndBackfillMonthlySnapshots(in: context)
+        lastPassionScoreRefreshMonthStart = monthStart
     }
 
     @ViewBuilder
@@ -974,21 +980,710 @@ struct DrivingForceView: View {
     }
 }
 
+private struct DrivingForceTrendRow: Identifiable {
+    let id: String
+    let monthStart: Date
+    let passionType: PassionType
+    let title: String
+    let value: Double
+}
+
 private struct DrivingForceTrendsView: View {
+    private enum TimelineOption: String, CaseIterable, Identifiable {
+        case all = "All"
+        case threeMonths = "3M"
+        case sixMonths = "6M"
+        case oneYear = "1Y"
+        case threeYears = "3Y"
+
+        var id: String { rawValue }
+
+        var rollingMonths: Int? {
+            switch self {
+            case .all: return nil
+            case .threeMonths: return 3
+            case .sixMonths: return 6
+            case .oneYear: return 12
+            case .threeYears: return 36
+            }
+        }
+    }
+
+    private struct TrendSegment: Identifiable {
+        let id: String
+        let color: Color
+        let height: CGFloat
+    }
+
+    @Environment(\.colorScheme) private var colorScheme
+    let snapshots: [PassionScoreSnapshot]
+
+    @State private var selectedTimeline: TimelineOption = .all
+    @State private var selectedMonthRaw: Date?
+    @State private var selectedPassionTypeRaw: String?
+    @State private var trendsContentIsReady = false
+
+    private let chartPassionOrder: [PassionType] = [.love, .vows, .thrill, .hate]
+    private let plotHeight: CGFloat = 220
+    private let yAxisWidth: CGFloat = 24
+    private let leadingPadding: CGFloat = 14
+    private let trailingPadding: CGFloat = 8
+
+    private var allMonthStarts: [Date] {
+        Array(Set(snapshots.map { Calendar.current.startOfDay(for: $0.monthStartDate) })).sorted()
+    }
+
+    private var latestMonthStart: Date? { allMonthStarts.last }
+
+    private var visibleMonths: [Date] {
+        guard let latestMonthStart else { return [] }
+        guard let months = selectedTimeline.rollingMonths else { return allMonthStarts }
+        let cal = Calendar.current
+        let start = cal.date(byAdding: .month, value: -(months - 1), to: latestMonthStart) ?? latestMonthStart
+        let filtered = allMonthStarts.filter { $0 >= start && $0 <= latestMonthStart }
+        return filtered.isEmpty ? [latestMonthStart] : filtered
+    }
+
+    private var timelineOptions: [TimelineOption] {
+        let count = allMonthStarts.count
+        var options: [TimelineOption] = [.all]
+        if count >= 3 { options.append(.threeMonths) }
+        if count >= 6 { options.append(.sixMonths) }
+        if count >= 12 { options.append(.oneYear) }
+        if count >= 24 { options.append(.threeYears) }
+        return options
+    }
+
+    private var selectedMonthStart: Date? {
+        guard let latestMonthStart else { return nil }
+        guard let selectedMonthRaw else { return latestMonthStart }
+        return nearestMonth(to: selectedMonthRaw) ?? latestMonthStart
+    }
+
+    private var latestMonthSnapshots: [PassionScoreSnapshot] {
+        guard let latestMonthStart else { return [] }
+        return snapshots.filter { Calendar.current.isDate($0.monthStartDate, inSameDayAs: latestMonthStart) }
+    }
+
+    private var selectedMonthSnapshots: [PassionScoreSnapshot] {
+        guard let selectedMonthStart else { return latestMonthSnapshots }
+        return snapshots.filter { Calendar.current.isDate($0.monthStartDate, inSameDayAs: selectedMonthStart) }
+    }
+
+    private var selectedSnapshot: PassionScoreSnapshot? {
+        if let raw = selectedPassionTypeRaw,
+           let row = selectedMonthSnapshots.first(where: { $0.passionTypeRaw == raw }) {
+            return row
+        }
+        return selectedMonthSnapshots.sorted(by: passionSnapshotSort).first
+    }
+
+    private func passionSnapshotSort(_ lhs: PassionScoreSnapshot, _ rhs: PassionScoreSnapshot) -> Bool {
+        let li = chartPassionOrder.firstIndex(of: lhs.passionType) ?? Int.max
+        let ri = chartPassionOrder.firstIndex(of: rhs.passionType) ?? Int.max
+        return li < ri
+    }
+
+    private var chartRows: [DrivingForceTrendRow] {
+        let cal = Calendar.current
+        let visibleSet = Set(visibleMonths.map { cal.startOfDay(for: $0) })
+        let latestByKey = Dictionary(grouping: snapshots.filter {
+            visibleSet.contains(cal.startOfDay(for: $0.monthStartDate))
+        }) { snap in
+            "\(Int(cal.startOfDay(for: snap.monthStartDate).timeIntervalSince1970))|\(snap.passionTypeRaw)"
+        }.compactMapValues { rows in
+            rows.max(by: { $0.updatedAt < $1.updatedAt })
+        }
+
+        return chartPassionOrder.flatMap { passion in
+            visibleMonths.map { month in
+                let monthStart = cal.startOfDay(for: month)
+                let key = "\(Int(monthStart.timeIntervalSince1970))|\(passion.rawValue)"
+                let snap = latestByKey[key]
+                return DrivingForceTrendRow(
+                    id: key,
+                    monthStart: monthStart,
+                    passionType: passion,
+                    title: passionTitle(for: passion),
+                    value: snap?.score ?? 0
+                )
+            }
+        }
+    }
+
+    private var chartRowsByMonth: [Date: [DrivingForceTrendRow]] {
+        Dictionary(grouping: chartRows) { Calendar.current.startOfDay(for: $0.monthStart) }
+    }
+
+    private var actualSnapshotValueByMonthPassion: [String: Double] {
+        let visibleSet = Set(visibleMonths.map { Calendar.current.startOfDay(for: $0) })
+        let latestVisibleSnapshots = Dictionary(grouping: snapshots.filter {
+            visibleSet.contains(Calendar.current.startOfDay(for: $0.monthStartDate))
+        }) {
+            monthPassionKey(monthStart: $0.monthStartDate, passionType: $0.passionType)
+        }.compactMapValues { rows in
+            rows.max(by: { $0.updatedAt < $1.updatedAt })
+        }
+        return latestVisibleSnapshots.mapValues(\.score)
+    }
+
+    private var yTicks: [Double] { Array(stride(from: 0.0, through: 16.0, by: 4.0)) }
+    private var chartYMax: Double { 16.0 }
+
+    private var baselineVisibleMonthStart: Date? { visibleMonths.first }
+
+    private var averageScore: Double {
+        guard !selectedMonthSnapshots.isEmpty else { return 0 }
+        return selectedMonthSnapshots.map(\.score).reduce(0, +) / Double(selectedMonthSnapshots.count)
+    }
+
+    private var strongestSnapshotIfUnique: PassionScoreSnapshot? {
+        guard let best = selectedMonthSnapshots.max(by: { $0.score < $1.score }) else { return nil }
+        let bestRounded = roundedTenth(best.score)
+        let ties = selectedMonthSnapshots.filter { roundedTenth($0.score) == bestRounded }.count
+        return ties == 1 ? best : nil
+    }
+
+    private var biggestMover: (PassionScoreSnapshot, Double)? {
+        let deltas: [(PassionScoreSnapshot, Double)] = selectedMonthSnapshots.compactMap { snap in
+            guard let delta = displayedDelta(for: snap) else { return nil }
+            return (snap, delta)
+        }
+        let result = deltas.max { abs($0.1) < abs($1.1) }
+        if let result, abs(result.1) < 0.05 { return nil }
+        return result
+    }
+
     var body: some View {
-        VStack(spacing: 8) {
-            Text("Not Available Yet")
-                .font(.headline)
-                .fontWeight(.bold)
-            Text("History and trends will be available over time.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                if trendsContentIsReady {
+                    summaryTiles
+                    timelinePickerRow
+                    trendGraphSection
+                    passionsSection
+                    insightsSection
+                } else {
+                    VStack(spacing: 10) {
+                        ProgressView()
+                        Text("Loading insights…")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: 220)
+                    .padding(.vertical, 24)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+                }
+            }
+            .padding(.horizontal)
+            .padding(.top, 4)
+            .padding(.bottom, 12)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .padding(.top, 24)
-        .navigationTitle("Driving Force Trends")
+        .navigationTitle("Driving Force Insights")
         .navigationBarTitleDisplayMode(.inline)
         .background(Color(.systemBackground))
+        .onAppear {
+            if selectedMonthRaw == nil {
+                selectedMonthRaw = visibleMonths.last ?? allMonthStarts.last
+            }
+            if selectedPassionTypeRaw == nil {
+                selectedPassionTypeRaw = selectedSnapshot?.passionTypeRaw
+            }
+            if !trendsContentIsReady {
+                DispatchQueue.main.async {
+                    trendsContentIsReady = true
+                }
+            }
+        }
+        .onChange(of: snapshots.count) { _, _ in
+            if selectedMonthRaw == nil || nearestMonth(to: selectedMonthRaw ?? .now) == nil {
+                selectedMonthRaw = visibleMonths.last ?? allMonthStarts.last
+            }
+            if let selectedPassionTypeRaw,
+               selectedMonthSnapshots.contains(where: { $0.passionTypeRaw == selectedPassionTypeRaw }) {
+                return
+            }
+            self.selectedPassionTypeRaw = selectedSnapshot?.passionTypeRaw
+        }
+        .onChange(of: selectedTimeline) { _, _ in
+            selectedMonthRaw = visibleMonths.last ?? allMonthStarts.last
+        }
+    }
+
+    @ViewBuilder
+    private var trendGraphSection: some View {
+        if visibleMonths.isEmpty {
+            VStack(spacing: 6) {
+                Text("No Driving Force Trends Yet").font(.headline)
+                Text("Monthly passion scores will appear here as you use Loom.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 24)
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+        } else {
+            VStack(spacing: 8) {
+                let rowsByMonth = chartRowsByMonth
+                GeometryReader { geo in
+                    let plotWidth = max(0, geo.size.width - yAxisWidth)
+                    HStack(spacing: 0) {
+                        yAxisView
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                barsView(plotWidth: plotWidth, rowsByMonth: rowsByMonth)
+                                xAxisView(plotWidth: plotWidth)
+                            }
+                        }
+                    }
+                }
+                .frame(height: plotHeight + 16)
+            }
+            .padding(10)
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+        }
+    }
+
+    private var yAxisView: some View {
+        VStack(spacing: 0) {
+            ForEach(yTicks.reversed(), id: \.self) { tick in
+                Text("\(Int(tick))")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 24, height: plotHeight / CGFloat(max(1, yTicks.count - 1)), alignment: .trailing)
+            }
+        }
+        .frame(height: plotHeight)
+        .frame(width: yAxisWidth, alignment: .trailing)
+        .padding(.top, 2)
+    }
+
+    private func barsView(plotWidth: CGFloat, rowsByMonth: [Date: [DrivingForceTrendRow]]) -> some View {
+        let width = effectiveColumnWidth(plotWidth: plotWidth)
+        let spacing = effectiveColumnSpacing
+        return LazyHStack(alignment: .bottom, spacing: spacing) {
+            ForEach(visibleMonths, id: \.self) { month in
+                Button {
+                    selectedMonthRaw = month
+                } label: {
+                    ZStack(alignment: .bottom) {
+                        RoundedRectangle(cornerRadius: 5)
+                            .fill(Color(.systemBackground))
+                            .frame(width: width, height: plotHeight)
+                        VStack(spacing: 0) {
+                            Spacer(minLength: 0)
+                            ForEach(segments(for: month, rowsByMonth: rowsByMonth)) { segment in
+                                Rectangle()
+                                    .fill(segment.color)
+                                    .frame(width: width, height: segment.height)
+                            }
+                        }
+                        .frame(width: width, height: plotHeight, alignment: .bottom)
+
+                        if let selectedMonthStart, Calendar.current.isDate(selectedMonthStart, inSameDayAs: month) {
+                            RoundedRectangle(cornerRadius: 5)
+                                .stroke(Color.blue.opacity(0.45), lineWidth: 2)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 5)
+                                        .fill(Color.blue.opacity(0.08))
+                                )
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.leading, leadingPadding)
+        .padding(.trailing, trailingPadding)
+        .frame(minWidth: trendContentWidth(plotWidth: plotWidth, columnWidth: width, spacing: spacing), alignment: .leading)
+        .frame(height: plotHeight, alignment: .bottom)
+    }
+
+    private func xAxisView(plotWidth: CGFloat) -> some View {
+        let width = effectiveColumnWidth(plotWidth: plotWidth)
+        let spacing = effectiveColumnSpacing
+        return LazyHStack(alignment: .top, spacing: spacing) {
+            ForEach(visibleMonths, id: \.self) { month in
+                Text(monthLabel(month))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .frame(width: width)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.leading, leadingPadding)
+        .padding(.trailing, trailingPadding)
+        .frame(minWidth: trendContentWidth(plotWidth: plotWidth, columnWidth: width, spacing: spacing), alignment: .leading)
+        .frame(height: 16, alignment: .top)
+    }
+
+    private var effectiveColumnSpacing: CGFloat {
+        switch selectedTimeline {
+        case .threeMonths: return 4
+        case .sixMonths: return 3
+        default: return 2
+        }
+    }
+
+    private var baseColumnWidth: CGFloat {
+        switch selectedTimeline {
+        case .threeMonths: return 34
+        case .sixMonths: return 24
+        case .oneYear: return 16
+        case .threeYears, .all: return 12
+        }
+    }
+
+    private func effectiveColumnWidth(plotWidth: CGFloat) -> CGFloat {
+        let count = max(1, visibleMonths.count)
+        let usable = max(0, plotWidth - leadingPadding - trailingPadding - CGFloat(max(0, count - 1)) * effectiveColumnSpacing)
+        let fillWidth = usable / CGFloat(count)
+        return max(baseColumnWidth, fillWidth)
+    }
+
+    private func trendContentWidth(plotWidth: CGFloat, columnWidth: CGFloat, spacing: CGFloat) -> CGFloat {
+        let count = max(1, visibleMonths.count)
+        let total = leadingPadding + trailingPadding + CGFloat(count) * columnWidth + CGFloat(max(0, count - 1)) * spacing
+        return max(plotWidth, total)
+    }
+
+    private var timelinePickerRow: some View {
+        Picker("", selection: $selectedTimeline) {
+            ForEach(timelineOptions) { option in
+                Text(option.rawValue).tag(option)
+            }
+        }
+        .pickerStyle(.segmented)
+    }
+
+    private var summaryTiles: some View {
+        HStack(spacing: 10) {
+            summaryTile(
+                title: "Average",
+                value: selectedMonthSnapshots.isEmpty ? "—" : String(format: "%.1f/4", averageScore),
+                subtitle: selectedMonthStart.map(monthDateLabel) ?? "—"
+            )
+            summaryTile(
+                title: "Strongest",
+                value: strongestSnapshotIfUnique.map { passionTitle(for: $0.passionType) } ?? "—",
+                subtitle: strongestSnapshotIfUnique.map { String(format: "%.1f/4", $0.score) } ?? "—"
+            )
+            summaryTile(
+                title: "Mover",
+                value: biggestMover.map { passionTitle(for: $0.0.passionType) } ?? "—",
+                subtitle: biggestMover.map { String(format: "%@%.1f", $0.1 >= 0 ? "+" : "", $0.1) } ?? "—"
+            )
+        }
+    }
+
+    private func summaryTile(title: String, value: String, subtitle: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            Text(value).font(.headline).lineLimit(1).minimumScaleFactor(0.75)
+            Text(subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.75)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var passionsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Passions").font(.headline)
+            ForEach(selectedMonthSnapshots.sorted(by: passionSnapshotSort), id: \.passionTypeRaw) { snap in
+                Button {
+                    selectedPassionTypeRaw = snap.passionTypeRaw
+                } label: {
+                    HStack(spacing: 10) {
+                        Circle()
+                            .fill(passionColor(for: snap.passionType))
+                            .frame(width: 10, height: 10)
+                        Text(passionTitle(for: snap.passionType))
+                            .foregroundStyle(.primary)
+                            .fontWeight(selectedPassionTypeRaw == snap.passionTypeRaw ? .semibold : .regular)
+                        Spacer(minLength: 0)
+                        Text(String(format: "%.1f/4", snap.score))
+                            .foregroundStyle(.secondary)
+                        let delta = displayedDelta(for: snap)
+                        Text(deltaGlyph(delta))
+                            .foregroundStyle(deltaColor(delta))
+                            .frame(width: 18)
+                        if let delta {
+                            Text(deltaText(delta))
+                                .font(.subheadline)
+                                .foregroundStyle(deltaColor(delta))
+                                .frame(width: 40, alignment: .trailing)
+                        } else {
+                            Text("—")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .frame(width: 40, alignment: .trailing)
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .frame(minHeight: 42)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(selectedPassionTypeRaw == snap.passionTypeRaw ? Color(.systemGray5) : Color(.secondarySystemBackground))
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var insightsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Insights").font(.headline)
+                Spacer()
+                if let snap = selectedSnapshot {
+                    Text(passionTitle(for: snap.passionType))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(insightsPassionTitleColor(for: snap.passionType))
+                }
+            }
+
+            if let snap = selectedSnapshot {
+                if let message = primaryInsightMessage(for: snap) {
+                    let loomAIGradient = AngularGradient(
+                        colors: [
+                            Color(red: 0.22, green: 0.47, blue: 1.0),
+                            Color(red: 0.15, green: 0.83, blue: 0.95),
+                            Color(red: 0.62, green: 0.40, blue: 0.95),
+                            Color(red: 0.80, green: 0.38, blue: 0.78),
+                            Color(red: 0.98, green: 0.36, blue: 0.58),
+                            Color(red: 0.75, green: 0.42, blue: 0.74),
+                            Color(red: 0.22, green: 0.47, blue: 1.0)
+                        ],
+                        center: .center,
+                        angle: .degrees(24)
+                    )
+                    HStack(alignment: .center, spacing: 10) {
+                        Image("LoomAI")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 26, height: 26)
+                        Text(message)
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(loomAIGradient.opacity(0.95), lineWidth: 2)
+                    )
+                }
+
+                VStack(spacing: 8) {
+                    insightRow("Current Score", String(format: "%.1f/4", snap.score))
+                    insightRow("Month Score", String(format: "%.1f/4", snap.targetScore))
+                    insightRow("Momentum", momentumText(snap.momentum))
+                    insightRow("Consistency", consistencyText(snap.consistency))
+                    Divider()
+                    insightRow("Structure", percentTextOrDash(snap.structure))
+                    insightRow("Outcomes", percentTextOrDash(snap.outcomeCoverage ?? 0))
+                    insightRow("Action blocks", percentTextOrDash(snap.actionCoverage))
+                    insightRow("Little Wins", percentTextOrDash(snap.littleWinsCoverage))
+                    insightRow(
+                        "Carryover penalty",
+                        percentTextOrDash(snap.carryoverPenalty),
+                        color: snap.carryoverPenalty > 0.30 ? .red : .secondary
+                    )
+                }
+                .padding(10)
+                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+            }
+        }
+    }
+
+    private func insightRow(_ label: String, _ value: String, color: Color = .secondary) -> some View {
+        HStack(spacing: 8) {
+            Text(label).font(.subheadline)
+            Spacer(minLength: 0)
+            Text(value)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(color)
+        }
+    }
+
+    private func segments(for month: Date, rowsByMonth: [Date: [DrivingForceTrendRow]]) -> [TrendSegment] {
+        let key = Calendar.current.startOfDay(for: month)
+        let rows = (rowsByMonth[key] ?? []).sorted {
+            (chartPassionOrder.firstIndex(of: $0.passionType) ?? Int.max) < (chartPassionOrder.firstIndex(of: $1.passionType) ?? Int.max)
+        }
+        return rows.compactMap { row in
+            guard row.value > 0 else { return nil }
+            let height = CGFloat(row.value / chartYMax) * plotHeight
+            guard height > 0 else { return nil }
+            return TrendSegment(id: row.id, color: passionColor(for: row.passionType), height: height)
+        }
+    }
+
+    private func displayedDelta(for snap: PassionScoreSnapshot) -> Double? {
+        guard let baseline = baselineVisibleMonthStart, let selected = selectedMonthStart else { return nil }
+        let baseKey = monthPassionKey(monthStart: baseline, passionType: snap.passionType)
+        let selectedKey = monthPassionKey(monthStart: selected, passionType: snap.passionType)
+        guard let base = actualSnapshotValueByMonthPassion[baseKey],
+              let current = actualSnapshotValueByMonthPassion[selectedKey] else { return nil }
+        return roundedTenth(current) - roundedTenth(base)
+    }
+
+    private func monthPassionKey(monthStart: Date, passionType: PassionType) -> String {
+        "\(Int(Calendar.current.startOfDay(for: monthStart).timeIntervalSince1970))|\(passionType.rawValue)"
+    }
+
+    private func nearestMonth(to date: Date) -> Date? {
+        guard !visibleMonths.isEmpty else { return nil }
+        let target = Calendar.current.startOfDay(for: date)
+        return visibleMonths.min(by: { abs($0.timeIntervalSince(target)) < abs($1.timeIntervalSince(target)) })
+    }
+
+    private func monthLabel(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.setLocalizedDateFormatFromTemplate("M/yy")
+        return f.string(from: date)
+    }
+
+    private func monthDateLabel(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.setLocalizedDateFormatFromTemplate("MMM y")
+        return f.string(from: date)
+    }
+
+    private func roundedTenth(_ value: Double) -> Double {
+        (value * 10).rounded() / 10
+    }
+
+    private func percentTextOrDash(_ value: Double) -> String {
+        let pct = Int((PassionScoringMath.clamped01(value) * 100).rounded())
+        return pct == 0 ? "—" : "\(pct)%"
+    }
+
+    private func momentumText(_ value: Double) -> String {
+        let v = PassionScoringMath.clamp(value, min: -1, max: 1)
+        if abs(v) < 0.12 { return "Stable" }
+        return v > 0 ? "Improving" : "Declining"
+    }
+
+    private func consistencyText(_ value: Double) -> String {
+        let v = PassionScoringMath.clamp(value, min: 0, max: 1)
+        if v >= 0.75 { return "Stable" }
+        if v >= 0.4 { return "Mixed" }
+        return "Volatile"
+    }
+
+    private func deltaText(_ delta: Double) -> String {
+        if abs(delta) < 0.05 { return "—" }
+        return String(format: "%@%.1f", delta > 0 ? "+" : "", delta)
+    }
+
+    private func deltaGlyph(_ delta: Double?) -> String {
+        guard let delta else { return "—" }
+        if abs(delta) < 0.05 { return "→" }
+        return delta > 0 ? "↑" : "↓"
+    }
+
+    private func deltaColor(_ delta: Double?) -> Color {
+        guard let delta else { return .secondary }
+        if abs(delta) < 0.05 { return .secondary }
+        return delta > 0 ? .green : .orange
+    }
+
+    private func passionTitle(for passionType: PassionType) -> String {
+        switch passionType {
+        case .love: return "Love"
+        case .vows: return "Vows"
+        case .thrill: return "Thrill"
+        case .hate: return "Hate"
+        }
+    }
+
+    private func passionColor(for passionType: PassionType) -> Color {
+        switch passionType {
+        case .love: return Color(white: 0.82)
+        case .vows: return Color(white: 0.56)
+        case .thrill: return Color(white: 0.30)
+        case .hate: return Color(white: 0.08)
+        }
+    }
+
+    private func insightsPassionTitleColor(for passionType: PassionType) -> Color {
+        if colorScheme == .dark {
+            return Color(white: 0.88)
+        }
+        return passionColor(for: passionType)
+    }
+
+    private func primaryInsightMessage(for snap: PassionScoreSnapshot) -> String? {
+        struct Candidate {
+            let priority: Double
+            let text: String
+        }
+
+        let structure = PassionScoringMath.clamped01(snap.structure)
+        let outcomes = PassionScoringMath.clamped01(snap.outcomeCoverage ?? 0)
+        let actions = PassionScoringMath.clamped01(snap.actionCoverage)
+        let wins = PassionScoringMath.clamped01(snap.littleWinsCoverage)
+        let carry = PassionScoringMath.clamped01(snap.carryoverPenalty)
+        let consistency = PassionScoringMath.clamped01(snap.consistency)
+        let evidence = PassionScoringMath.clamped01(snap.evidenceStable)
+
+        let structurePct = Int((structure * 100).rounded())
+        let outcomesPct = Int((outcomes * 100).rounded())
+        let actionPct = Int((actions * 100).rounded())
+        let winsPct = Int((wins * 100).rounded())
+        let carryPct = Int((carry * 100).rounded())
+        let consistencyPct = Int((consistency * 100).rounded())
+        let evidencePct = Int((evidence * 100).rounded())
+
+        var items: [Candidate] = []
+
+        if structure >= 0.65 && actions <= 0.45 {
+            items.append(.init(
+                priority: (1 - actions) * 1.4,
+                text: "\(passionTitle(for: snap.passionType)) has strong structure (\(structurePct)%) but weak execution (\(actionPct)% Action blocks). Focus on finishing the most important supporting work."
+            ))
+        }
+
+        if wins >= 0.65 && outcomes <= 0.45 {
+            items.append(.init(
+                priority: (1 - outcomes) * 1.35,
+                text: "\(passionTitle(for: snap.passionType)) is supported by daily wins (\(winsPct)%), but outcomes are weak (\(outcomesPct)%). Make sure monthly outcomes reflect this passion directly."
+            ))
+        }
+
+        if carry >= 0.30 {
+            items.append(.init(
+                priority: carry * 1.5,
+                text: "Carryover is high (\(carryPct)% penalty) for \(passionTitle(for: snap.passionType)). Reduce scope or break support work into smaller actions."
+            ))
+        }
+
+        if consistency <= 0.35 {
+            items.append(.init(
+                priority: (1 - consistency) * 1.2,
+                text: "\(passionTitle(for: snap.passionType)) is volatile (\(consistencyPct)% consistency). Aim for steadier weekly execution instead of spikes."
+            ))
+        }
+
+        if evidence >= 0.70 && carry < 0.20 {
+            items.append(.init(
+                priority: evidence * 0.8,
+                text: "\(passionTitle(for: snap.passionType)) is performing well (\(evidencePct)% evidence). Keep the current support pattern consistent."
+            ))
+        }
+
+        return items.max(by: { $0.priority < $1.priority })?.text
+            ?? "\(passionTitle(for: snap.passionType)) is stable overall. Improve one support behavior this month to lift the score."
     }
 }
 
