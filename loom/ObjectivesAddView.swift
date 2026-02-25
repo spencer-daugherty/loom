@@ -850,9 +850,7 @@ struct ChartActionsSection: View {
     @Query(sort: \OutcomesMeasureEntry.measuredAt, order: .forward) private var allMeasureEntries: [OutcomesMeasureEntry]
 
     private var addMeasureTitle: String {
-        guard let outcomeId else { return "Add Measure" }
-        let hasAnyMeasureEntries = allMeasureEntries.contains { $0.outcome_id == outcomeId }
-        return hasAnyMeasureEntries ? "Add Measure" : "Add Starting Measure"
+        "Add Measure"
     }
 
     var body: some View {
