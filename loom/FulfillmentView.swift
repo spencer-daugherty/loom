@@ -1221,16 +1221,13 @@ struct FulfillmentView: View {
                             center: .center,
                             angle: .degrees(headerInsightOutlineAngle)
                         )
-                        HStack(alignment: .center, spacing: 10) {
-                            Image("LoomAI")
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: 35, height: 35)
-                            Text(summaryInsight)
-                                .font(.footnote)
-                                .foregroundStyle(.primary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
+                        FulfillmentInlineInsightText(
+                            imageName: "LoomAI",
+                            text: summaryInsight,
+                            font: UIFont.preferredFont(forTextStyle: .footnote),
+                            textColor: UIColor.label,
+                            imageSize: CGSize(width: 35, height: 35)
+                        )
                         .frame(maxWidth: leftWidth - 50, alignment: .leading)
                         .padding(.trailing, 16)
                         .padding(8)
@@ -3479,15 +3476,21 @@ private struct FulfillmentTrendsView: View {
 
     @Query(sort: \Fulfillment.updatedAt, order: .forward) private var fulfillments: [Fulfillment]
     @Query(sort: \FulfillmentCategoryScoreSnapshot.weekStartDate, order: .forward)
-    private var snapshots: [FulfillmentCategoryScoreSnapshot]
+    private var allSnapshots: [FulfillmentCategoryScoreSnapshot]
 
     @State private var selectedTimeline: TimelineOption = .all
     @State private var selectedWeekRaw: Date?
     @State private var selectedCategoryID: UUID?
     @State private var trendsInsightOutlineAngle: Double = 0
+    @State private var cachedFilteredSnapshots: [FulfillmentCategoryScoreSnapshot] = []
+    @State private var cachedDisplayCategoryTitleByID: [UUID: String] = [:]
+
+    private var snapshots: [FulfillmentCategoryScoreSnapshot] {
+        cachedFilteredSnapshots
+    }
 
     private var allWeekStarts: [Date] {
-        Array(Set(snapshots.map { Calendar.current.startOfDay(for: $0.weekStartDate) })).sorted()
+        Array(Set(cachedFilteredSnapshots.map { Calendar.current.startOfDay(for: $0.weekStartDate) })).sorted()
     }
 
     private var latestWeekStart: Date? { allWeekStarts.last }
@@ -3511,12 +3514,16 @@ private struct FulfillmentTrendsView: View {
         return options
     }
 
-    private var categoryTitleByID: [UUID: String] {
-        var map = Dictionary(uniqueKeysWithValues: fulfillments.map { ($0.category_id, $0.category) })
-        for snap in snapshots where map[snap.categoryID] == nil {
-            map[snap.categoryID] = snap.categoryTitleSnapshot
-        }
-        return map
+    private var displayCategoryTitleByID: [UUID: String] {
+        cachedDisplayCategoryTitleByID
+    }
+
+    private func trendsDisplayCategoryTitle(for snapshot: FulfillmentCategoryScoreSnapshot) -> String {
+        displayCategoryTitleByID[snapshot.categoryID] ?? snapshot.categoryTitleSnapshot
+    }
+
+    private func trendsDisplayCategoryTitle(categoryID: UUID, fallbackSnapshotTitle: String) -> String {
+        displayCategoryTitleByID[categoryID] ?? fallbackSnapshotTitle
     }
 
     private var latestWeekSnapshots: [FulfillmentCategoryScoreSnapshot] {
@@ -3584,7 +3591,7 @@ private struct FulfillmentTrendsView: View {
         let snapshotFallbackIDs = snapshots
             .sorted { lhs, rhs in
                 if lhs.weekStartDate == rhs.weekStartDate {
-                    return lhs.categoryTitleSnapshot.localizedCaseInsensitiveCompare(rhs.categoryTitleSnapshot) == .orderedAscending
+                    return trendsDisplayCategoryTitle(for: lhs).localizedCaseInsensitiveCompare(trendsDisplayCategoryTitle(for: rhs)) == .orderedAscending
                 }
                 return lhs.weekStartDate > rhs.weekStartDate
             }
@@ -3622,8 +3629,9 @@ private struct FulfillmentTrendsView: View {
                 let weekStart = cal.startOfDay(for: week)
                 let key = "\(weekStart.timeIntervalSince1970)|\(categoryID.uuidString)"
                 let snap = grouped[key]
-                // Freeze historical category naming for this trends view using the snapshot title when present.
-                let title = snap?.categoryTitleSnapshot ?? categoryTitleByID[categoryID] ?? "Category"
+                let title = snap.map { trendsDisplayCategoryTitle(for: $0) }
+                    ?? displayCategoryTitleByID[categoryID]
+                    ?? "Category"
                 return FulfillmentTrendRow(
                     id: "\(Int(weekStart.timeIntervalSince1970))|\(categoryID.uuidString)",
                     weekStart: weekStart,
@@ -3774,6 +3782,7 @@ private struct FulfillmentTrendsView: View {
         .navigationTitle("Fulfillment Insights")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
+            rebuildTrendsCaches()
             if selectedWeekRaw == nil {
                 selectedWeekRaw = visibleWeeks.last ?? allWeekStarts.last
             }
@@ -3794,6 +3803,35 @@ private struct FulfillmentTrendsView: View {
         .onChange(of: selectedTimeline) { _, _ in
             selectedWeekRaw = visibleWeeks.last ?? allWeekStarts.last
         }
+        .onChange(of: allSnapshots.count) { _, _ in
+            rebuildTrendsCaches()
+        }
+        .onChange(of: fulfillments.map(\.updatedAt)) { _, _ in
+            rebuildTrendsCaches()
+        }
+    }
+
+    private func rebuildTrendsCaches() {
+        let cal = Calendar.current
+        let liveCategoryIDs = Set(fulfillments.map(\.category_id))
+
+        var weeksByCategory: [UUID: Set<Date>] = [:]
+        weeksByCategory.reserveCapacity(max(4, allSnapshots.count / 4))
+        for snap in allSnapshots {
+            weeksByCategory[snap.categoryID, default: []].insert(cal.startOfDay(for: snap.weekStartDate))
+        }
+
+        let filtered = allSnapshots.filter { snap in
+            if liveCategoryIDs.contains(snap.categoryID) { return true }
+            return (weeksByCategory[snap.categoryID]?.count ?? 0) >= 2
+        }
+        cachedFilteredSnapshots = filtered
+
+        var titleMap = Dictionary(uniqueKeysWithValues: fulfillments.map { ($0.category_id, $0.category) })
+        for snap in filtered where titleMap[snap.categoryID] == nil {
+            titleMap[snap.categoryID] = snap.categoryTitleSnapshot
+        }
+        cachedDisplayCategoryTitleByID = titleMap
     }
 
     @ViewBuilder
@@ -3947,12 +3985,12 @@ private struct FulfillmentTrendsView: View {
             )
             summaryTile(
                 title: "Strongest",
-                value: strongestSnapshotIfUnique.map { shortLabel($0.categoryTitleSnapshot) } ?? "—",
+                value: strongestSnapshotIfUnique.map { shortLabel(trendsDisplayCategoryTitle(for: $0)) } ?? "—",
                 subtitle: strongestSnapshotIfUnique.map { String(format: "%.1f/5", $0.score) } ?? "—"
             )
             summaryTile(
                 title: "Mover",
-                value: biggestMover.map { shortLabel($0.0.categoryTitleSnapshot) } ?? "—",
+                value: biggestMover.map { shortLabel(trendsDisplayCategoryTitle(for: $0.0)) } ?? "—",
                 subtitle: biggestMover.map { String(format: "%@%.1f", $0.1 >= 0 ? "+" : "", $0.1) } ?? "—"
             )
         }
@@ -3975,9 +4013,9 @@ private struct FulfillmentTrendsView: View {
                 Text("Insights").font(.headline)
                 Spacer()
                 if let snap = selectedSnapshot {
-                    Text(snap.categoryTitleSnapshot)
+                    Text(trendsDisplayCategoryTitle(for: snap))
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(FulfillmentCategoryTheme.color(for: snap.categoryTitleSnapshot))
+                        .foregroundStyle(FulfillmentCategoryTheme.color(for: trendsDisplayCategoryTitle(for: snap)))
                 }
             }
 
@@ -3996,16 +4034,13 @@ private struct FulfillmentTrendsView: View {
                         center: .center,
                         angle: .degrees(trendsInsightOutlineAngle)
                     )
-                    HStack(alignment: .center, spacing: 10) {
-                        Image("LoomAI")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 33, height: 33)
-                        Text(summaryInsight)
-                            .font(.subheadline)
-                            .foregroundStyle(.primary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                    FulfillmentInlineInsightText(
+                        imageName: "LoomAI",
+                        text: summaryInsight,
+                        font: UIFont.preferredFont(forTextStyle: .subheadline),
+                        textColor: UIColor.label,
+                        imageSize: CGSize(width: 33, height: 33)
+                    )
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(10)
                     .overlay(
@@ -4059,7 +4094,7 @@ private struct FulfillmentTrendsView: View {
                 let li = categoriesListOrderIndex[lhs.categoryID] ?? Int.max
                 let ri = categoriesListOrderIndex[rhs.categoryID] ?? Int.max
                 if li == ri {
-                    return lhs.categoryTitleSnapshot.localizedCaseInsensitiveCompare(rhs.categoryTitleSnapshot) == .orderedAscending
+                    return trendsDisplayCategoryTitle(for: lhs).localizedCaseInsensitiveCompare(trendsDisplayCategoryTitle(for: rhs)) == .orderedAscending
                 }
                 return li < ri
             }), id: \.categoryID) { snap in
@@ -4068,9 +4103,9 @@ private struct FulfillmentTrendsView: View {
                 } label: {
                     HStack(spacing: 10) {
                         Circle()
-                            .fill(FulfillmentCategoryTheme.color(for: snap.categoryTitleSnapshot))
+                            .fill(FulfillmentCategoryTheme.color(for: trendsDisplayCategoryTitle(for: snap)))
                             .frame(width: 10, height: 10)
-                        Text(snap.categoryTitleSnapshot)
+                        Text(trendsDisplayCategoryTitle(for: snap))
                             .foregroundStyle(.primary)
                             .fontWeight(selectedCategoryID == snap.categoryID ? .semibold : .regular)
                         Spacer(minLength: 0)
@@ -4250,7 +4285,7 @@ private struct FulfillmentTrendsView: View {
         if structure >= 0.7 && actionBlocks <= 0.45 {
             candidates.append(.init(
                 priority: (1 - actionBlocks) * 1.4,
-                text: "\(snap.categoryTitleSnapshot) is well designed (\(structurePct)% Structure), but execution is weak (\(actionPct)% Action blocks). Focus on finishing planned work this week."
+                text: "\(trendsDisplayCategoryTitle(for: snap)) is well designed (\(structurePct)% Structure), but execution is weak (\(actionPct)% Action blocks). Focus on finishing planned work this week."
             ))
         }
 
@@ -4316,6 +4351,69 @@ private struct FulfillmentTrendsView: View {
         return candidates.max(by: { $0.priority < $1.priority })?.text
     }
 }
+
+#if canImport(UIKit)
+private struct FulfillmentInlineInsightText: UIViewRepresentable {
+    let imageName: String
+    let text: String
+    let font: UIFont
+    let textColor: UIColor
+    let imageSize: CGSize
+
+    private let imageTag = 9_432
+    private let imageTextSpacing: CGFloat = 8
+
+    func makeUIView(context: Context) -> UITextView {
+        let view = UITextView()
+        view.isEditable = false
+        view.isSelectable = false
+        view.isScrollEnabled = false
+        view.backgroundColor = .clear
+        view.textContainerInset = .zero
+        view.textContainer.lineFragmentPadding = 0
+        view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let imageView = UIImageView()
+        imageView.tag = imageTag
+        imageView.contentMode = .scaleAspectFit
+        imageView.backgroundColor = .clear
+        view.addSubview(imageView)
+        return view
+    }
+
+    func updateUIView(_ view: UITextView, context: Context) {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byWordWrapping
+
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: textColor,
+            .paragraphStyle: paragraph
+        ]
+
+        view.attributedText = NSAttributedString(string: text, attributes: attrs)
+
+        if let imageView = view.viewWithTag(imageTag) as? UIImageView {
+            imageView.image = UIImage(named: imageName)
+            imageView.frame = CGRect(origin: .zero, size: imageSize)
+        }
+
+        let exclusionRect = CGRect(
+            x: 0,
+            y: 0,
+            width: imageSize.width + imageTextSpacing,
+            height: imageSize.height
+        )
+        view.textContainer.exclusionPaths = [UIBezierPath(rect: exclusionRect)]
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
+        let width = proposal.width ?? 160
+        let fitting = CGSize(width: width, height: .greatestFiniteMagnitude)
+        let size = uiView.sizeThatFits(fitting)
+        return CGSize(width: width, height: ceil(size.height))
+    }
+}
+#endif
 
 struct FulfillmentInteractiveRadar: View {
     private static let fallbackMetrics: [(String, Color, Double)] = [

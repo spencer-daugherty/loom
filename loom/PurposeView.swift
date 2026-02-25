@@ -443,6 +443,8 @@ struct PurposeView: View {
                 passionSignalRow(icon: "bolt.fill", label: "Thrill", emotionKey: "thrill", value: usagePoints(for: "thrill"))
                 passionSignalRow(icon: "shield.fill", label: "Hate", emotionKey: "just", value: usagePoints(for: "just"))
 
+                Spacer(minLength: 0)
+
                 Button {
                     showDrivingForceTrends = true
                 } label: {
@@ -486,6 +488,19 @@ struct PurposeView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
+                HStack(spacing: 6) {
+                    purposeHeaderSummaryTile(
+                        title: "Strongest",
+                        value: purposeHeaderStrongestTitle,
+                        subtitle: purposeHeaderStrongestSubtitle
+                    )
+                    purposeHeaderSummaryTile(
+                        title: "Mover",
+                        value: purposeHeaderMoverTitle,
+                        subtitle: purposeHeaderMoverSubtitle
+                    )
+                }
+
                 Spacer(minLength: 0)
 
                 if let snap = selectedHeaderPassionSnapshot,
@@ -511,7 +526,7 @@ struct PurposeView: View {
                         imageSize: CGSize(width: 32, height: 32)
                     )
                     .frame(maxWidth: .infinity, alignment: .trailing)
-                    .padding(.top, 8)
+                    .padding(.top, 6)
                     .padding(.bottom, 8)
                     .padding(.leading, 12)
                     .padding(.trailing, 8)
@@ -723,6 +738,69 @@ struct PurposeView: View {
         return abs(delta) < 0.05 ? 0 : delta
     }
 
+    private var currentMonthPassionSnapshots: [PassionScoreSnapshot] {
+        let monthStart = PassionScoringMath.monthWindow(for: .now).monthStart
+        return passionScoreSnapshots.filter {
+            Calendar.current.isDate($0.monthStartDate, inSameDayAs: monthStart)
+        }
+    }
+
+    private var purposeHeaderStrongestSnapshotIfUnique: PassionScoreSnapshot? {
+        guard let best = currentMonthPassionSnapshots.max(by: { $0.score < $1.score }) else { return nil }
+        let bestRounded = roundedTenth(best.score)
+        let tieCount = currentMonthPassionSnapshots.filter { roundedTenth($0.score) == bestRounded }.count
+        return tieCount == 1 ? best : nil
+    }
+
+    private var purposeHeaderMover: (PassionScoreSnapshot, Double)? {
+        let deltas: [(PassionScoreSnapshot, Double)] = currentMonthPassionSnapshots.compactMap { snap in
+            guard let delta = passionMonthOverMonthDelta(for: emotionKey(for: snap.passionType)) else { return nil }
+            return (snap, delta)
+        }
+        let best = deltas.max(by: { abs($0.1) < abs($1.1) })
+        if let best, abs(best.1) < 0.05 { return nil }
+        return best
+    }
+
+    private var purposeHeaderStrongestTitle: String {
+        purposeHeaderStrongestSnapshotIfUnique.map { passionHeaderTitle(for: emotionKey(for: $0.passionType)) } ?? "—"
+    }
+
+    private var purposeHeaderStrongestSubtitle: String {
+        purposeHeaderStrongestSnapshotIfUnique.map { String(format: "%.1f/4", $0.score) } ?? "—"
+    }
+
+    private var purposeHeaderMoverTitle: String {
+        purposeHeaderMover.map { passionHeaderTitle(for: emotionKey(for: $0.0.passionType)) } ?? "—"
+    }
+
+    private var purposeHeaderMoverSubtitle: String {
+        purposeHeaderMover.map { String(format: "%@%.1f", $0.1 >= 0 ? "+" : "", $0.1) } ?? "—"
+    }
+
+    private func purposeHeaderSummaryTile(title: String, value: String, subtitle: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Text(value)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(subtitle)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
     private func headerPassionDeltaText(_ delta: Double?) -> String {
         guard let delta else { return "—" }
         if abs(delta) < 0.05 { return "—" }
@@ -794,6 +872,15 @@ struct PurposeView: View {
         case "thrill": return "Thrill"
         case "just": return "Hate"
         default: return emotionKey.capitalized
+        }
+    }
+
+    private func emotionKey(for passionType: PassionType) -> String {
+        switch passionType {
+        case .love: return "love"
+        case .vows: return "vows"
+        case .thrill: return "thrill"
+        case .hate: return "just"
         }
     }
 
