@@ -229,6 +229,7 @@ struct FulfillmentView: View {
     @State private var resourcesManagerTarget: ResourcesManagerTarget?
     @State private var resourceEditorTarget: ResourceEditorTarget?
     @State private var littleWinsScheduleStoreRevision = 0
+    @State private var headerInsightOutlineAngle: Double = 0
     @FocusState private var focusedField: Field?
     @FocusState private var focusedVisionCategoryID: UUID?
     @FocusState private var focusedPurposeCategoryID: UUID?
@@ -1191,6 +1192,8 @@ struct FulfillmentView: View {
                 let selected = orderedFulfillments[selectedIndex]
                 let selectedTitle = selected.category
                 let selectedScore = Int(round((batteryPercentage(for: selected) / 100.0) * 5.0))
+                let selectedDelta = fulfillmentWeekOverWeekDelta(for: selected)
+                let selectedInsightSnapshot = latestFulfillmentWeeklySnapshot(for: selected)
 
                 HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
@@ -1199,39 +1202,75 @@ struct FulfillmentView: View {
                             .fontWeight(.bold)
                             .foregroundStyle(FulfillmentCategoryTheme.color(for: selectedTitle))
                             .lineLimit(2)
-                    Text("Tap radar slice to focus")
+                    Text("Tap raadar slice")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(FulfillmentCategoryTheme.color(for: selectedTitle))
-                        .frame(width: 92, height: 58)
-                        .overlay {
-                            Text("\(selectedScore)/5")
-                                .font(.system(size: 26, weight: .bold))
-                                .foregroundStyle(.white)
-                        }
+                    HStack(alignment: .center, spacing: 8) {
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(FulfillmentCategoryTheme.color(for: selectedTitle))
+                            .frame(width: 92, height: 58)
+                            .overlay {
+                                Text("\(selectedScore)/5")
+                                    .font(.system(size: 26, weight: .bold))
+                                    .foregroundStyle(.white)
+                            }
 
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("analyzed:")
-                            .font(.caption)
-                            .fontWeight(.bold)
-                            .foregroundStyle(.gray)
-                        Text("• Outcome progress")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        Text("• Action block completion")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        Text("• Little Wins consistency")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        Text("• Category engagement")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        Text("• Momentum")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 1) {
+                            HStack(spacing: 4) {
+                                Text(headerCategoryDeltaGlyph(selectedDelta))
+                                    .font(.title3.weight(.bold))
+                                    .foregroundStyle(headerCategoryDeltaColor(selectedDelta))
+                                if let selectedDelta {
+                                    Text(headerCategoryDeltaText(selectedDelta))
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(headerCategoryDeltaColor(selectedDelta))
+                                } else {
+                                    Text("—")
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            Text("week")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    if let snap = selectedInsightSnapshot,
+                       let summaryInsight = primaryFulfillmentHeaderInsightMessage(for: snap) {
+                        let loomAIGradient = AngularGradient(
+                            colors: [
+                                Color(red: 0.22, green: 0.47, blue: 1.0),
+                                Color(red: 0.15, green: 0.83, blue: 0.95),
+                                Color(red: 0.62, green: 0.40, blue: 0.95),
+                                Color(red: 0.80, green: 0.38, blue: 0.78),
+                                Color(red: 0.98, green: 0.36, blue: 0.58),
+                                Color(red: 0.75, green: 0.42, blue: 0.74),
+                                Color(red: 0.22, green: 0.47, blue: 1.0)
+                            ],
+                            center: .center,
+                            angle: .degrees(headerInsightOutlineAngle)
+                        )
+                        HStack(alignment: .center, spacing: 10) {
+                            Image("LoomAI")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 35, height: 35)
+                            Text(summaryInsight)
+                                .font(.footnote)
+                                .foregroundStyle(.primary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .frame(maxWidth: leftWidth - 50, alignment: .leading)
+                        .padding(.trailing, 16)
+                        .padding(8)
+                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(loomAIGradient.opacity(0.95), lineWidth: 2)
+                        )
+                        .padding(.top, 4)
                     }
 
                     Spacer(minLength: 4)
@@ -1264,6 +1303,12 @@ struct FulfillmentView: View {
         }
         .frame(height: 245)
         .padding(.bottom, 8)
+        .onAppear {
+            guard headerInsightOutlineAngle == 0 else { return }
+            withAnimation(.linear(duration: 7).repeatForever(autoreverses: false)) {
+                headerInsightOutlineAngle = 360
+            }
+        }
     }
 
     private func commitInlineIfNeeded() {
@@ -1586,6 +1631,95 @@ struct FulfillmentView: View {
             $0.categoryID == record.category_id &&
             Calendar.current.isDate($0.weekStartDate, inSameDayAs: weekStart)
         })?.score
+    }
+
+    private func latestFulfillmentWeeklySnapshot(for record: Fulfillment) -> FulfillmentCategoryScoreSnapshot? {
+        let weekStart = FulfillmentScoringMath.weekWindow(for: .now).weekStart
+        return fulfillmentCategoryScoreSnapshots.first(where: {
+            $0.categoryID == record.category_id &&
+            Calendar.current.isDate($0.weekStartDate, inSameDayAs: weekStart)
+        })
+    }
+
+    private func fulfillmentWeekOverWeekDelta(for record: Fulfillment) -> Double? {
+        let currentWeek = FulfillmentScoringMath.weekWindow(for: .now).weekStart
+        guard let priorWeek = Calendar.current.date(byAdding: .day, value: -7, to: currentWeek) else { return nil }
+        guard let current = fulfillmentCategoryScoreSnapshots.first(where: {
+            $0.categoryID == record.category_id && Calendar.current.isDate($0.weekStartDate, inSameDayAs: currentWeek)
+        })?.score else { return nil }
+        guard let prior = fulfillmentCategoryScoreSnapshots.first(where: {
+            $0.categoryID == record.category_id && Calendar.current.isDate($0.weekStartDate, inSameDayAs: priorWeek)
+        })?.score else { return nil }
+        let currentShown = roundedTenth(current)
+        let priorShown = roundedTenth(prior)
+        let delta = currentShown - priorShown
+        return abs(delta) < 0.05 ? 0 : delta
+    }
+
+    private func headerCategoryDeltaText(_ delta: Double?) -> String {
+        guard let delta else { return "—" }
+        if abs(delta) < 0.05 { return "—" }
+        return String(format: "%@%.1f", delta > 0 ? "+" : "", delta)
+    }
+
+    private func headerCategoryDeltaGlyph(_ delta: Double?) -> String {
+        guard let delta else { return "—" }
+        if abs(delta) < 0.05 { return "→" }
+        return delta > 0 ? "↑" : "↓"
+    }
+
+    private func headerCategoryDeltaColor(_ delta: Double?) -> Color {
+        guard let delta else { return .secondary }
+        if abs(delta) < 0.05 { return .secondary }
+        return delta > 0 ? .green : .orange
+    }
+
+    private func primaryFulfillmentHeaderInsightMessage(for snap: FulfillmentCategoryScoreSnapshot) -> String? {
+        let structure = FulfillmentScoringMath.clamped01(snap.structure)
+        let outcomes = FulfillmentScoringMath.clamped01(snap.outcomes)
+        let actionBlocks = FulfillmentScoringMath.clamped01(snap.actionBlocks)
+        let littleWins = FulfillmentScoringMath.clamped01(snap.littleWins)
+        let engagement = FulfillmentScoringMath.clamped01(snap.engagement)
+        let strategic = FulfillmentScoringMath.clamped01(snap.strategicBalance)
+        let carry = FulfillmentScoringMath.clamped01(snap.carryoverPenalty)
+
+        let structurePct = Int((structure * 100).rounded())
+        let outcomesPct = Int((outcomes * 100).rounded())
+        let actionPct = Int((actionBlocks * 100).rounded())
+        let winsPct = Int((littleWins * 100).rounded())
+        let engagementPct = Int((engagement * 100).rounded())
+        let strategicPct = Int((strategic * 100).rounded())
+        let carryPct = Int((carry * 100).rounded())
+
+        if carry >= 0.30 {
+            return "Carryover is high (\(carryPct)% penalty). Reduce scope or break tasks into smaller chunks."
+        }
+        if structure >= 0.7 && actionBlocks <= 0.45 {
+            return "Well designed (\(structurePct)% Structure), but execution is weak (\(actionPct)% Action blocks)."
+        }
+        if littleWins >= 0.65 && outcomes <= 0.45 {
+            return "Little Wins are strong (\(winsPct)%), but outcomes are lagging (\(outcomesPct)%)."
+        }
+        if engagement <= 0.30 {
+            return "Engagement is low (\(engagementPct)%). Touch this area on more days this week."
+        }
+        if strategic <= 0.40 && actionBlocks >= 0.40 {
+            return "Strategic behavior is low (\(strategicPct)%). Prioritize must-do work first."
+        }
+        if structure <= 0.35 {
+            return "Foundation is weak (\(structurePct)% Structure). Clarify vision, purpose, or roles."
+        }
+        if outcomes >= 0.7 && actionBlocks >= 0.7 && carry <= 0.15 {
+            return "Strong outcomes (\(outcomesPct)%) and execution (\(actionPct)%) with low carryover."
+        }
+        if actionBlocks >= 0.55 && littleWins <= 0.35 {
+            return "Action blocks are stronger than daily consistency (\(actionPct)% vs \(winsPct)% Little Wins)."
+        }
+        return "This area is stable overall. Improve one weak signal this week to raise the score."
+    }
+
+    private func roundedTenth(_ value: Double) -> Double {
+        (value * 10).rounded() / 10
     }
 
     private func refreshFulfillmentCategoryScoresForCurrentWeek() {
@@ -3394,13 +3528,43 @@ private struct FulfillmentTrendsView: View {
     }
 
     private var fulfillmentDisplayOrderCategoryIDs: [UUID] {
+        let defaultIDs: [UUID] = [
+            "Career & Business",
+            "Leadership & Impact",
+            "Wealth & Lifestyle",
+            "Mind & Meaning",
+            "Love & Relationships",
+            "Health & Vitality"
+        ].compactMap { PlanLabelSeeder.categoryIDs[$0] }
+
         var ordered: [UUID] = []
         var seen = Set<UUID>()
+        var byID = Dictionary(uniqueKeysWithValues: fulfillments.map { ($0.category_id, $0) })
+        var seenTitleKeys = Set<String>()
 
-        for row in fulfillments {
-            if seen.insert(row.category_id).inserted {
-                ordered.append(row.category_id)
+        for id in defaultIDs {
+            if let row = byID.removeValue(forKey: id) {
+                let key = fulfillmentCategoryKey(row.category)
+                guard !key.isEmpty, !seenTitleKeys.contains(key) else { continue }
+                if seen.insert(row.category_id).inserted {
+                    ordered.append(row.category_id)
+                    seenTitleKeys.insert(key)
+                }
             }
+        }
+
+        let extras = byID.values
+            .sorted { $0.updatedAt > $1.updatedAt }
+            .filter { row in
+                let key = fulfillmentCategoryKey(row.category)
+                guard !key.isEmpty, !seenTitleKeys.contains(key) else { return false }
+                seenTitleKeys.insert(key)
+                return true
+            }
+            .sorted { $0.category.localizedCaseInsensitiveCompare($1.category) == .orderedAscending }
+
+        for row in extras where seen.insert(row.category_id).inserted {
+            ordered.append(row.category_id)
         }
 
         let snapshotFallbackIDs = snapshots
@@ -3418,6 +3582,20 @@ private struct FulfillmentTrendsView: View {
         return ordered
     }
 
+    private func fulfillmentCategoryKey(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !trimmed.isEmpty else { return "" }
+        let andNormalized = trimmed.replacingOccurrences(of: "&", with: " and ")
+        let cleaned = andNormalized.replacingOccurrences(
+            of: "[^a-z0-9]+",
+            with: " ",
+            options: .regularExpression
+        )
+        return cleaned
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+    }
+
     private var chartRows: [FulfillmentTrendRow] {
         let cal = Calendar.current
         let visibleSet = Set(visibleWeeks.map { cal.startOfDay(for: $0) })
@@ -3430,7 +3608,8 @@ private struct FulfillmentTrendsView: View {
                 let weekStart = cal.startOfDay(for: week)
                 let key = "\(weekStart.timeIntervalSince1970)|\(categoryID.uuidString)"
                 let snap = grouped[key]
-                let title = categoryTitleByID[categoryID] ?? snap?.categoryTitleSnapshot ?? "Category"
+                // Freeze historical category naming for this trends view using the snapshot title when present.
+                let title = snap?.categoryTitleSnapshot ?? categoryTitleByID[categoryID] ?? "Category"
                 return FulfillmentTrendRow(
                     id: "\(Int(weekStart.timeIntervalSince1970))|\(categoryID.uuidString)",
                     weekStart: weekStart,
@@ -3526,6 +3705,18 @@ private struct FulfillmentTrendsView: View {
         })
     }
 
+    private var actualSnapshotValueByWeekCategory: [String: Double] {
+        let visibleSet = Set(visibleWeeks.map { Calendar.current.startOfDay(for: $0) })
+        let latestVisibleSnapshots = Dictionary(grouping: snapshots.filter {
+            visibleSet.contains(Calendar.current.startOfDay(for: $0.weekStartDate))
+        }) {
+            chartWeekCategoryKey(weekStart: $0.weekStartDate, categoryID: $0.categoryID)
+        }.compactMapValues { rows in
+            rows.max(by: { $0.updatedAt < $1.updatedAt })
+        }
+        return latestVisibleSnapshots.mapValues(\.score)
+    }
+
     private func categoryWeekOverWeekDelta(for snap: FulfillmentCategoryScoreSnapshot) -> Double? {
         categoryDisplayedDelta(for: snap)
     }
@@ -3535,8 +3726,9 @@ private struct FulfillmentTrendsView: View {
               let selectedWeekStart else { return nil }
         let baselineKey = chartWeekCategoryKey(weekStart: baselineWeek, categoryID: snap.categoryID)
         let selectedKey = chartWeekCategoryKey(weekStart: selectedWeekStart, categoryID: snap.categoryID)
-        guard let baseline = chartRowValueByWeekCategory[baselineKey],
-              let selected = chartRowValueByWeekCategory[selectedKey] else { return nil }
+        // Use actual snapshot presence so newly added categories don't compare against zero-filled graph placeholders.
+        guard let baseline = actualSnapshotValueByWeekCategory[baselineKey],
+              let selected = actualSnapshotValueByWeekCategory[selectedKey] else { return nil }
         let baselineShown = roundedTenth(baseline)
         let selectedShown = roundedTenth(selected)
         return selectedShown - baselineShown
@@ -3776,19 +3968,39 @@ private struct FulfillmentTrendsView: View {
             }
 
             if let snap = selectedSnapshot {
+                if let summaryInsight = primaryInsightMessage(for: snap) {
+                    HStack(alignment: .center, spacing: 10) {
+                        Image("LoomAI")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 33, height: 33)
+                        Text(summaryInsight)
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+                }
+
                 VStack(spacing: 8) {
-                    insightRow("Weekly score", String(format: "%.1f/5", snap.score))
-                    insightRow("Target", String(format: "%.1f/5", snap.targetScore))
+                    insightRow("Current Score", String(format: "%.1f/5", snap.score))
+                    insightRow("Week Score", String(format: "%.1f/5", snap.targetScore))
                     insightRow("Momentum", momentumText(snap.momentum))
-                    insightRow("Consistency", percentText(snap.consistency))
+                    insightRow("Consistency", consistencyText(snap.consistency))
                     Divider()
-                    insightRow("Structure", percentText(snap.structure))
-                    insightRow("Outcomes", percentText(snap.outcomes))
-                    insightRow("Action blocks", percentText(snap.actionBlocks))
-                    insightRow("Little Wins", percentText(snap.littleWins))
-                    insightRow("Engagement", percentText(snap.engagement))
-                    insightRow("Strategic behavior", percentText(snap.strategicBalance))
-                    insightRow("Carryover penalty", percentText(snap.carryoverPenalty), color: .red)
+                    insightRow("Structure", percentTextOrDash(snap.structure))
+                    insightRow("Outcomes", percentTextOrDash(snap.outcomes))
+                    insightRow("Action blocks", percentTextOrDash(snap.actionBlocks))
+                    insightRow("Little Wins", percentTextOrDash(snap.littleWins))
+                    insightRow("Engagement", percentTextOrDash(snap.engagement))
+                    insightRow("Strategic behavior", percentTextOrDash(snap.strategicBalance))
+                    insightRow(
+                        "Carryover penalty",
+                        percentTextOrDash(snap.carryoverPenalty),
+                        color: snap.carryoverPenalty > 0.30 ? .red : .secondary
+                    )
                 }
                 .padding(10)
                 .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
@@ -3806,7 +4018,7 @@ private struct FulfillmentTrendsView: View {
 
     private var categoriesSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Categories").font(.headline)
+            Text("Areas").font(.headline)
             ForEach(selectedWeekSnapshots.sorted(by: { lhs, rhs in
                 let li = categoriesListOrderIndex[lhs.categoryID] ?? Int.max
                 let ri = categoriesListOrderIndex[rhs.categoryID] ?? Int.max
@@ -3920,10 +4132,22 @@ private struct FulfillmentTrendsView: View {
         "\(Int((FulfillmentScoringMath.clamped01(value) * 100).rounded()))%"
     }
 
+    private func percentTextOrDash(_ value: Double) -> String {
+        let pct = Int((FulfillmentScoringMath.clamped01(value) * 100).rounded())
+        return pct == 0 ? "—" : "\(pct)%"
+    }
+
     private func momentumText(_ value: Double) -> String {
         let v = FulfillmentScoringMath.clamp(value, -1, 1)
         if abs(v) < 0.12 { return "Stable" }
         return v > 0 ? "Improving" : "Declining"
+    }
+
+    private func consistencyText(_ value: Double) -> String {
+        let v = FulfillmentScoringMath.clamp(value, 0, 1)
+        if v >= 0.75 { return "Stable" }
+        if v >= 0.4 { return "Mixed" }
+        return "Volatile"
     }
 
     private func momentumGlyph(_ value: Double) -> String {
@@ -3961,6 +4185,99 @@ private struct FulfillmentTrendsView: View {
     private func categoryDeltaGlyphColor(_ delta: Double?) -> Color {
         guard let delta else { return .secondary }
         return categoryDeltaColor(delta)
+    }
+
+    private func primaryInsightMessage(for snap: FulfillmentCategoryScoreSnapshot) -> String? {
+        struct InsightCandidate {
+            let priority: Double
+            let text: String
+        }
+
+        let structure = FulfillmentScoringMath.clamped01(snap.structure)
+        let outcomes = FulfillmentScoringMath.clamped01(snap.outcomes)
+        let actionBlocks = FulfillmentScoringMath.clamped01(snap.actionBlocks)
+        let littleWins = FulfillmentScoringMath.clamped01(snap.littleWins)
+        let engagement = FulfillmentScoringMath.clamped01(snap.engagement)
+        let strategic = FulfillmentScoringMath.clamped01(snap.strategicBalance)
+        let carry = FulfillmentScoringMath.clamped01(snap.carryoverPenalty)
+
+        let structurePct = Int((structure * 100).rounded())
+        let outcomesPct = Int((outcomes * 100).rounded())
+        let actionPct = Int((actionBlocks * 100).rounded())
+        let winsPct = Int((littleWins * 100).rounded())
+        let engagementPct = Int((engagement * 100).rounded())
+        let strategicPct = Int((strategic * 100).rounded())
+        let carryPct = Int((carry * 100).rounded())
+
+        var candidates: [InsightCandidate] = []
+
+        if structure >= 0.7 && actionBlocks <= 0.45 {
+            candidates.append(.init(
+                priority: (1 - actionBlocks) * 1.4,
+                text: "\(snap.categoryTitleSnapshot) is well designed (\(structurePct)% Structure), but execution is weak (\(actionPct)% Action blocks). Focus on finishing planned work this week."
+            ))
+        }
+
+        if littleWins >= 0.65 && outcomes <= 0.45 {
+            candidates.append(.init(
+                priority: (1 - outcomes) * 1.35,
+                text: "Daily follow-through is happening (\(winsPct)% Little Wins), but outcomes are lagging (\(outcomesPct)% Outcomes). Make sure this week’s actions move an active outcome forward."
+            ))
+        }
+
+        if actionBlocks >= 0.65 && outcomes <= 0.45 {
+            candidates.append(.init(
+                priority: (1 - outcomes) * 1.25,
+                text: "Execution volume looks solid (\(actionPct)% Action blocks), but outcomes are not converting (\(outcomesPct)% Outcomes). Re-check whether your actions are tied to the right outcome milestones."
+            ))
+        }
+
+        if carry >= 0.30 {
+            candidates.append(.init(
+                priority: carry * 1.5,
+                text: "Carryover is high (\(carryPct)% penalty), which is dragging this area down. Reduce weekly scope or break actions into smaller chunks."
+            ))
+        }
+
+        if engagement <= 0.30 {
+            candidates.append(.init(
+                priority: (1 - engagement) * 1.2,
+                text: "Engagement is low (\(engagementPct)%), so this area is not getting consistent attention. Touch it on more days, even with small progress."
+            ))
+        }
+
+        if strategic <= 0.40 && actionBlocks >= 0.40 {
+            candidates.append(.init(
+                priority: (1 - strategic) * 1.2,
+                text: "Work is getting done, but strategic behavior is low (\(strategicPct)%). Prioritize must-do actions before reactive tasks."
+            ))
+        }
+
+        if structure <= 0.35 {
+            candidates.append(.init(
+                priority: (1 - structure) * 1.1,
+                text: "This area lacks foundation (\(structurePct)% Structure). Clarifying vision, purpose, roles, or Little Wins would improve score stability quickly."
+            ))
+        }
+
+        if littleWins <= 0.35 && actionBlocks >= 0.55 {
+            candidates.append(.init(
+                priority: (1 - littleWins) * 1.1,
+                text: "Action blocks are stronger than daily consistency (\(actionPct)% vs \(winsPct)% Little Wins). Strengthen routine execution to sustain progress."
+            ))
+        }
+
+        if outcomes >= 0.7 && actionBlocks >= 0.7 && carry <= 0.15 {
+            candidates.append(.init(
+                priority: 0.4,
+                text: "This area is performing well: strong outcomes (\(outcomesPct)%), execution (\(actionPct)%), and low carryover (\(carryPct)%). Keep the current pace."
+            ))
+        }
+
+        if candidates.isEmpty {
+            return "This area is stable overall. Focus on one small improvement this week to raise the score."
+        }
+        return candidates.max(by: { $0.priority < $1.priority })?.text
     }
 }
 

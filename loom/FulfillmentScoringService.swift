@@ -466,9 +466,15 @@ struct FulfillmentScoringService {
         let targetScore = FulfillmentScoringMath.clamp((evidence * 4.0) + 1.0, 1.0, 5.0)
         let prevScore = prev?.score ?? 3.0
         let prevEMA = prev?.smoothedScore ?? 3.0
-        let smoothedTarget = FulfillmentScoringMath.ema(alpha: config.emaAlpha, target: targetScore, previous: prevEMA)
-        let delta = FulfillmentScoringMath.clamp(smoothedTarget - prevScore, -config.maxWeeklyDelta, config.maxWeeklyDelta)
-        let finalScore = FulfillmentScoringMath.clamp(prevScore + delta, 1.0, 5.0)
+        let smoothedTarget = prev == nil
+            ? 3.0
+            : FulfillmentScoringMath.ema(alpha: config.emaAlpha, target: targetScore, previous: prevEMA)
+        let delta = prev == nil
+            ? 0.0
+            : FulfillmentScoringMath.clamp(smoothedTarget - prevScore, -config.maxWeeklyDelta, config.maxWeeklyDelta)
+        let finalScore = prev == nil
+            ? 3.0
+            : FulfillmentScoringMath.clamp(prevScore + delta, 1.0, 5.0)
 
         let momentumSeries = Array(sortedHistory.suffix(3).map(\.evidence)) + [evidence]
         let momentum = FulfillmentScoringMath.momentum(lastEvidence: momentumSeries)
