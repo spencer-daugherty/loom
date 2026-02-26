@@ -19,6 +19,7 @@ struct LoomAIChatView: View {
     @State private var showDebugErrorDetails = false
     @State private var activeThreadKey = LoomAIChatThreadSelectionStore.currentThreadKey()
     @State private var appliedSuggestedActionIDs: Set<String> = []
+    @State private var chipCategoryOverrides: [String: String] = [:]
     @FocusState private var isInputFocused: Bool
     private let keyboardTopGap: CGFloat = 12
 
@@ -70,6 +71,7 @@ struct LoomAIChatView: View {
                 .onChange(of: messages.last?.id) { _, newID in
                     guard newID != nil else { return }
                     appliedSuggestedActionIDs = []
+                    chipCategoryOverrides = [:]
                     withAnimation(.easeOut(duration: 0.2)) {
                         proxy.scrollTo(bottomScrollAnchorID, anchor: .bottom)
                     }
@@ -196,28 +198,111 @@ struct LoomAIChatView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 ForEach(viewModel.suggestedPromptChips, id: \.self) { chip in
-                    Button {
-                        sendPrompt(chip)
-                    } label: {
-                        Text(chip)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.primary)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(
-                                Capsule(style: .continuous)
-                                    .fill(colorScheme == .dark ? Color(.secondarySystemBackground) : Color(.systemBackground))
-                            )
-                            .overlay(
-                                Capsule(style: .continuous)
-                                    .stroke(Color.primary.opacity(colorScheme == .dark ? 0.10 : 0.08), lineWidth: 1)
-                            )
-                    }
-                    .buttonStyle(.plain)
+                    suggestedPromptChip(chip)
                 }
             }
             .padding(.horizontal, 2)
         }
+    }
+
+    private func suggestedPromptChip(_ chip: String) -> some View {
+        let resolvedChip = resolvedPromptChipText(for: chip)
+        let matchedCategory = fulfillmentCategoryMatch(in: resolvedChip)
+        let categoryColor = matchedCategory.map { FulfillmentCategoryTheme.color(for: $0) } ?? .primary
+
+        return HStack(spacing: 0) {
+            Button {
+                sendPrompt(resolvedChip)
+            } label: {
+                promptChipLabelText(chipText: resolvedChip, highlightedCategory: matchedCategory)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .padding(.leading, 12)
+                    .padding(.trailing, matchedCategory == nil ? 12 : 8)
+                    .padding(.vertical, 8)
+            }
+            .buttonStyle(.plain)
+
+            if let matchedCategory {
+                Divider()
+                    .frame(height: 16)
+                    .overlay(Color.primary.opacity(colorScheme == .dark ? 0.10 : 0.08))
+                    .padding(.trailing, 2)
+
+                Menu {
+                    ForEach(fulfillmentCategoryNamesForChipSelection, id: \.self) { category in
+                        Button {
+                            chipCategoryOverrides[chip] = replacingCategory(in: chip, with: category)
+                        } label: {
+                            if category == matchedCategory {
+                                Label(category, systemImage: "checkmark")
+                            } else {
+                                Text(category)
+                            }
+                        }
+                    }
+                } label: {
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(categoryColor)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 8)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .background(
+            Capsule(style: .continuous)
+                .fill(colorScheme == .dark ? Color(.secondarySystemBackground) : Color(.systemBackground))
+        )
+        .overlay(
+            Capsule(style: .continuous)
+                .stroke(Color.primary.opacity(colorScheme == .dark ? 0.10 : 0.08), lineWidth: 1)
+        )
+    }
+
+    private func promptChipLabelText(chipText: String, highlightedCategory: String?) -> Text {
+        guard let highlightedCategory,
+              let range = chipText.range(of: highlightedCategory) else {
+            return Text(chipText)
+        }
+
+        let prefix = String(chipText[..<range.lowerBound])
+        let middle = String(chipText[range])
+        let suffix = String(chipText[range.upperBound...])
+        let color = FulfillmentCategoryTheme.color(for: highlightedCategory)
+
+        return Text(prefix)
+        + Text(middle).bold().foregroundColor(color)
+        + Text(suffix)
+    }
+
+    private var fulfillmentCategoryNamesForChipSelection: [String] {
+        let dynamic = fulfillments.map(\.category)
+        var seen = Set<String>()
+        return dynamic
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .filter { seen.insert($0.lowercased()).inserted }
+            .sorted()
+    }
+
+    private func fulfillmentCategoryMatch(in chipText: String) -> String? {
+        fulfillmentCategoryNamesForChipSelection
+            .sorted { $0.count > $1.count }
+            .first(where: { chipText.localizedCaseInsensitiveContains($0) })
+    }
+
+    private func resolvedPromptChipText(for originalChip: String) -> String {
+        chipCategoryOverrides[originalChip] ?? originalChip
+    }
+
+    private func replacingCategory(in chip: String, with newCategory: String) -> String {
+        guard let current = fulfillmentCategoryMatch(in: chip),
+              let range = chip.range(of: current, options: [.caseInsensitive]) else {
+            return chip
+        }
+        return chip.replacingCharacters(in: range, with: newCategory)
     }
 
     private var emptyState: some View {
