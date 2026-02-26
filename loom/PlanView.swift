@@ -1249,6 +1249,8 @@ struct PlanStepThreeView: View {
     @State private var isDraggingOverGroupArea: Bool = false
     @State private var measuredStep3ChunkHeights: [UUID: CGFloat] = [:]
     @State private var measuredStep3AddGroupRowHeight: CGFloat = 0
+    @State private var autoGroupFeedback: AutoGroupFeedback?
+    @State private var isAutoGrouping = false
     @AppStorage("capture_default_due_date_attention_days")
     private var dueDateAttentionDays: Int = 7
 
@@ -1256,6 +1258,33 @@ struct PlanStepThreeView: View {
     private let maxChunks = 8
     private let fulfillmentAreasSectionTitle = "Fulfillment Areas"
     private let expandedGroupAreaRatio: CGFloat = 0.90
+
+    private struct AutoGroupFeedback: Identifiable {
+        let id = UUID()
+        let title: String
+        let message: String
+        let canGroupMore: Bool
+    }
+
+    private struct AutoGroupAssignmentPlan {
+        var title: String
+        var fulfillmentLabelID: UUID?
+        var itemIDs: [UUID]
+        var confidence: Double
+    }
+
+    private struct AIAutoGroupResponse: Decodable {
+        struct Group: Decodable {
+            var name: String?
+            var fulfillmentArea: String?
+            var actionIDs: [String]?
+        }
+        var confidence: String?
+        var reason: String?
+        var groups: [Group]
+    }
+
+    private let loomAIService = LoomAIService()
 
     private var secondaryButtonTextColor: Color {
         colorScheme == .dark ? Color(.secondaryLabel) : .black
@@ -1611,15 +1640,6 @@ struct PlanStepThreeView: View {
                 let expandedGroupHeight = availableHeight * expandedGroupAreaRatio
                 let collapsedBoundedGroupHeight = min(max(collapsedGroupHeight, 220), availableHeight - 60)
 
-                let measuredChunkRowsHeight = chunks.reduce(CGFloat(0)) { partial, chunk in
-                    // Include row vertical insets (8 top + 8 bottom) used by each chunk row.
-                    partial + (measuredStep3ChunkHeights[chunk.id] ?? 72) + 16
-                }
-                let measuredAddGroupRowHeight = chunks.count < maxChunks
-                    ? (measuredStep3AddGroupRowHeight > 0 ? measuredStep3AddGroupRowHeight + 16 : 72)
-                    : 0
-                let estimatedBottomContentHeight = measuredChunkRowsHeight + measuredAddGroupRowHeight + 8
-
                 let estimatedPoolContentHeight = max(60, CGFloat(max(poolItems.count, 0)) * 60 + 12)
                 let expandedPoolReserve = min(180, estimatedPoolContentHeight)
                 let expandedBoundedGroupHeight = min(max(expandedGroupHeight, 220), availableHeight - expandedPoolReserve)
@@ -1774,7 +1794,7 @@ struct PlanStepThreeView: View {
             .padding(.top, isRefreshVisible ? 10 : 0)
             .overlay(alignment: .topTrailing) {
                 Button {
-                    // Placeholder for future auto-group behavior.
+                    Task { await autoGroupRecentCaptureActions() }
                 } label: {
                     HStack(spacing: 6) {
                         Image("LoomAI")
@@ -1784,6 +1804,11 @@ struct PlanStepThreeView: View {
                         Text("AutoGroup")
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(autoGroupGradient)
+                        if isAutoGrouping {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                                .tint(.secondary)
+                        }
                     }
                     .padding(.horizontal, 15)
                     .padding(.vertical, 9)
@@ -1797,6 +1822,8 @@ struct PlanStepThreeView: View {
                     )
                 }
                 .buttonStyle(.plain)
+                .disabled(isAutoGrouping)
+                .opacity(isAutoGrouping ? 0.7 : 1)
                 .offset(x: 0, y: -58)
                 .onAppear {
                     guard autoGroupOutlineAngle == 0 else { return }
@@ -1883,6 +1910,24 @@ struct PlanStepThreeView: View {
             guard hasInitializedStep3State else { return }
             isDraggingOverGroupArea = false
             persistStep3Plan(force: true)
+        }
+        .alert(item: $autoGroupFeedback) { feedback in
+            if feedback.canGroupMore {
+                return Alert(
+                    title: Text(feedback.title),
+                    message: Text(feedback.message),
+                    primaryButton: .default(Text("AutoGroup More")) {
+                        Task { await autoGroupRecentCaptureActions() }
+                    },
+                    secondaryButton: .default(Text("OK"))
+                )
+            } else {
+                return Alert(
+                    title: Text(feedback.title),
+                    message: Text(feedback.message),
+                    dismissButton: .default(Text("OK"))
+                )
+            }
         }
     }
 
@@ -2671,6 +2716,459 @@ struct PlanStepThreeView: View {
         enforceShowHiddenIfNeeded()
         syncPoolWithVisibility()
         persistStep3Plan(force: true)
+    }
+
+    private func autoGroupRecentCaptureActions() async {
+        guard !isAutoGrouping else { return }
+        isAutoGrouping = true
+        defer { isAutoGrouping = false }
+
+        let candidates = Array(poolItems.sorted { $0.createdAt > $1.createdAt }.prefix(25))
+        let totalPoolCount = poolItems.count
+        let reviewCount = candidates.count
+
+        guard reviewCount >= 6 else {
+            autoGroupFeedback = AutoGroupFeedback(
+                title: "Couldn’t AutoGroup Yet",
+                message: reviewCount == 0
+                    ? "There are no ungrouped Capture actions available right now."
+                    : "AutoGroup needs at least 6 ungrouped actions so it can form at least 2 groups with 3 actions each.",
+                canGroupMore: false
+            )
+            return
+        }
+
+        guard let plans = await buildAutoGroupPlansViaLoomAI(for: candidates) else {
+            autoGroupFeedback = AutoGroupFeedback(
+                title: "Low Confidence Grouping",
+                message: "LoomAI couldn’t confidently group these actions into at least 2 strong groups of 3+ actions. Try grouping manually or refine the actions first.",
+                canGroupMore: false
+            )
+            return
+        }
+
+        let emptyChunkIndices = chunks.indices.filter { chunks[$0].itemIDs.isEmpty }
+        let additionalSlotsAvailable = max(0, maxChunks - chunks.count)
+        let placeableGroupCount = min(plans.count, emptyChunkIndices.count + additionalSlotsAvailable)
+
+        guard placeableGroupCount >= 2 else {
+            autoGroupFeedback = AutoGroupFeedback(
+                title: "Not Enough Group Slots",
+                message: "AutoGroup needs at least 2 empty group slots. Clear or add group space, then try again.",
+                canGroupMore: false
+            )
+            return
+        }
+
+        let selectedPlans = Array(plans.prefix(placeableGroupCount))
+        let itemIDsToMove = Set(selectedPlans.flatMap(\.itemIDs))
+        guard itemIDsToMove.count >= 6 else {
+            autoGroupFeedback = AutoGroupFeedback(
+                title: "Low Confidence Grouping",
+                message: "AutoGroup found patterns, but not enough strong matches to build reliable groups yet.",
+                canGroupMore: false
+            )
+            return
+        }
+
+        while chunks.indices.filter({ chunks[$0].itemIDs.isEmpty }).count < selectedPlans.count, chunks.count < maxChunks {
+            chunks.append(ChunkContainerState(isLocked: chunks.count < 2))
+        }
+
+        let targetChunkIndices = Array(chunks.indices.filter { chunks[$0].itemIDs.isEmpty }.prefix(selectedPlans.count))
+        guard targetChunkIndices.count == selectedPlans.count else {
+            autoGroupFeedback = AutoGroupFeedback(
+                title: "Not Enough Group Slots",
+                message: "AutoGroup couldn’t create enough group slots (max 8 groups).",
+                canGroupMore: false
+            )
+            return
+        }
+
+        for (chunkIndex, plan) in zip(targetChunkIndices, selectedPlans) {
+            for itemID in plan.itemIDs {
+                moveItem(itemID, toChunkAt: chunkIndex)
+            }
+            if let labelID = plan.fulfillmentLabelID {
+                setChunkSelection(chunkIndex: chunkIndex, toLabelId: labelID)
+            } else {
+                setChunkSelection(chunkIndex: chunkIndex, toLabelId: nil)
+            }
+        }
+
+        enforceShowHiddenIfNeeded()
+        syncPoolWithVisibility()
+        persistStep3Plan()
+
+        let groupedCount = itemIDsToMove.count
+        let skippedFromReviewed = max(reviewCount - groupedCount, 0)
+        let canGroupMore = totalPoolCount > groupedCount
+        let message: String
+        if groupedCount == totalPoolCount {
+            message = "Grouped all \(groupedCount) available Capture actions into \(selectedPlans.count) groups."
+        } else if skippedFromReviewed > 0 {
+            let remaining = max(totalPoolCount - groupedCount, 0)
+            let remainingText = remaining > 0 ? "\(remaining) remain in Capture." : ""
+            message = "Grouped \(groupedCount) high-confidence Capture actions into \(selectedPlans.count) groups and left \(skippedFromReviewed) unclear actions for manual grouping. \(remainingText)"
+        } else if groupedCount == 25 {
+            let remaining = max(totalPoolCount - groupedCount, 0)
+            message = "Grouped the most recent 25 Capture actions into \(selectedPlans.count) groups. \(remaining > 0 ? "\(remaining) remain." : "") Want to AutoGroup another batch?"
+        } else {
+            let remaining = max(totalPoolCount - groupedCount, 0)
+            message = "Grouped \(groupedCount) Capture actions into \(selectedPlans.count) groups. \(remaining > 0 ? "\(remaining) still need grouping." : "")"
+        }
+
+        autoGroupFeedback = AutoGroupFeedback(
+            title: "AutoGroup Complete",
+            message: message,
+            canGroupMore: canGroupMore && poolItems.count >= 6
+        )
+    }
+
+    private func buildAutoGroupPlans(for items: [RollingCaptureItem]) -> [AutoGroupAssignmentPlan]? {
+        guard items.count >= 6 else { return nil }
+
+        struct WorkingGroup {
+            var title: String
+            var fulfillmentLabelID: UUID?
+            var tokenSignature: Set<String>
+            var itemIDs: [UUID]
+            var supportScore: Double
+            var explicitFulfillmentMatch: Bool
+        }
+
+        let fulfillmentSeeds: [(label: Step3SelectableLabel, tokens: Set<String>)] = selectableLabels.compactMap { label in
+            let tokens = Set(significantTokens(in: label.label))
+            guard !tokens.isEmpty else { return nil }
+            return (label, tokens)
+        }
+
+        let itemTokenMap: [UUID: [String]] = Dictionary(uniqueKeysWithValues: items.map { item in
+            (item.id, significantTokens(in: item.text))
+        })
+        let tokenFrequency = Dictionary(items.flatMap { item in
+            Array(Set(itemTokenMap[item.id] ?? [])).map { ($0, 1) }
+        }, uniquingKeysWith: +)
+
+        func bestFulfillmentMatch(for item: RollingCaptureItem) -> (Step3SelectableLabel, Double)? {
+            let tokens = Set(itemTokenMap[item.id] ?? [])
+            guard !tokens.isEmpty else { return nil }
+            let rawText = item.text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+
+            var best: (Step3SelectableLabel, Double)?
+            for seed in fulfillmentSeeds {
+                let overlap = tokens.intersection(seed.tokens)
+                var score = Double(overlap.count)
+                let wholeLabel = seed.label.label.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+                if !wholeLabel.isEmpty, rawText.contains(wholeLabel) {
+                    score += 1.5
+                }
+                if score <= 0 { continue }
+                if best == nil || score > best!.1 {
+                    best = (seed.label, score)
+                }
+            }
+            return best
+        }
+
+        var explicitGroups: [UUID: WorkingGroup] = [:]
+        var unassignedItems: [RollingCaptureItem] = []
+        var explicitAssignmentCount = 0
+
+        for item in items {
+            if let (label, score) = bestFulfillmentMatch(for: item), score >= 1.0 {
+                var group = explicitGroups[label.id] ?? WorkingGroup(
+                    title: label.label,
+                    fulfillmentLabelID: label.id,
+                    tokenSignature: Set(significantTokens(in: label.label)),
+                    itemIDs: [],
+                    supportScore: 0,
+                    explicitFulfillmentMatch: true
+                )
+                group.itemIDs.append(item.id)
+                group.supportScore += score
+                group.tokenSignature.formUnion(itemTokenMap[item.id] ?? [])
+                explicitGroups[label.id] = group
+                explicitAssignmentCount += 1
+            } else {
+                unassignedItems.append(item)
+            }
+        }
+
+        var workingGroups = Array(explicitGroups.values)
+
+        let frequentTokens = tokenFrequency
+            .filter { key, count in count >= 3 && !autoGroupStopwords.contains(key) }
+            .sorted { lhs, rhs in
+                if lhs.value != rhs.value { return lhs.value > rhs.value }
+                return lhs.key < rhs.key
+            }
+            .map(\.key)
+
+        var consumedUnassigned = Set<UUID>()
+        for seed in frequentTokens {
+            if workingGroups.count >= maxChunks { break }
+            let matching = unassignedItems.filter { item in
+                !consumedUnassigned.contains(item.id) &&
+                (itemTokenMap[item.id] ?? []).contains(seed)
+            }
+            guard matching.count >= 3 else { continue }
+
+            let seedTitle = seed.split(separator: " ").map { $0.capitalized }.joined(separator: " ")
+            let support = matching.reduce(0.0) { partial, item in
+                partial + Double((itemTokenMap[item.id] ?? []).filter { $0 == seed }.count)
+            }
+            workingGroups.append(
+                WorkingGroup(
+                    title: seedTitle.isEmpty ? "Related Actions" : seedTitle,
+                    fulfillmentLabelID: nil,
+                    tokenSignature: Set([seed]),
+                    itemIDs: matching.map(\.id),
+                    supportScore: support,
+                    explicitFulfillmentMatch: false
+                )
+            )
+            matching.forEach { consumedUnassigned.insert($0.id) }
+        }
+
+        let residualItems = unassignedItems.filter { !consumedUnassigned.contains($0.id) }
+        for item in residualItems {
+            guard !workingGroups.isEmpty else { break }
+            let tokens = Set(itemTokenMap[item.id] ?? [])
+            let bestIndex = workingGroups.indices.max(by: { lhs, rhs in
+                let lhsScore = similarityScore(itemTokens: tokens, groupTokens: workingGroups[lhs].tokenSignature)
+                let rhsScore = similarityScore(itemTokens: tokens, groupTokens: workingGroups[rhs].tokenSignature)
+                if lhsScore == rhsScore {
+                    return workingGroups[lhs].itemIDs.count < workingGroups[rhs].itemIDs.count
+                }
+                return lhsScore < rhsScore
+            })
+            if let bestIndex {
+                let bestScore = similarityScore(
+                    itemTokens: tokens,
+                    groupTokens: workingGroups[bestIndex].tokenSignature
+                )
+                guard bestScore >= 1 else { continue }
+                workingGroups[bestIndex].itemIDs.append(item.id)
+                workingGroups[bestIndex].tokenSignature.formUnion(tokens)
+            }
+        }
+
+        workingGroups = workingGroups.filter { !$0.itemIDs.isEmpty }
+
+        func mergeSmallGroups(_ groups: [WorkingGroup]) -> [WorkingGroup] {
+            var result = groups
+            var changed = true
+            while changed {
+                changed = false
+                guard let smallIndex = result.indices.first(where: { result[$0].itemIDs.count > 0 && result[$0].itemIDs.count < 3 }) else {
+                    break
+                }
+                let small = result[smallIndex]
+                let candidateIndices = result.indices.filter { $0 != smallIndex && !result[$0].itemIDs.isEmpty }
+                guard let targetIndex = candidateIndices.max(by: { lhs, rhs in
+                    let lhsScore = similarityScore(itemTokens: small.tokenSignature, groupTokens: result[lhs].tokenSignature)
+                    let rhsScore = similarityScore(itemTokens: small.tokenSignature, groupTokens: result[rhs].tokenSignature)
+                    if lhsScore == rhsScore {
+                        return result[lhs].itemIDs.count < result[rhs].itemIDs.count
+                    }
+                    return lhsScore < rhsScore
+                }) else {
+                    break
+                }
+                result[targetIndex].itemIDs.append(contentsOf: small.itemIDs)
+                result[targetIndex].tokenSignature.formUnion(small.tokenSignature)
+                result[targetIndex].supportScore += small.supportScore
+                result[smallIndex].itemIDs.removeAll()
+                changed = true
+            }
+            return result.filter { !$0.itemIDs.isEmpty }
+        }
+
+        workingGroups = mergeSmallGroups(workingGroups)
+
+        if workingGroups.count > maxChunks {
+            workingGroups = workingGroups
+                .sorted { lhs, rhs in
+                    if lhs.itemIDs.count != rhs.itemIDs.count { return lhs.itemIDs.count > rhs.itemIDs.count }
+                    return lhs.supportScore > rhs.supportScore
+                }
+            let overflow = Array(workingGroups.dropFirst(maxChunks))
+            workingGroups = Array(workingGroups.prefix(maxChunks))
+            for group in overflow {
+                if let targetIndex = workingGroups.indices.max(by: { workingGroups[$0].itemIDs.count < workingGroups[$1].itemIDs.count }) {
+                    workingGroups[targetIndex].itemIDs.append(contentsOf: group.itemIDs)
+                    workingGroups[targetIndex].tokenSignature.formUnion(group.tokenSignature)
+                    workingGroups[targetIndex].supportScore += group.supportScore
+                }
+            }
+            workingGroups = mergeSmallGroups(workingGroups)
+        }
+
+        let uniqueAssignedIDs = Set(workingGroups.flatMap(\.itemIDs))
+        let coverage = Double(uniqueAssignedIDs.count) / Double(items.count)
+        let largestGroupSize = workingGroups.map { $0.itemIDs.count }.max() ?? 0
+        let explicitCoverage = Double(explicitAssignmentCount) / Double(items.count)
+
+        guard workingGroups.count >= 2,
+              workingGroups.allSatisfy({ $0.itemIDs.count >= 3 }),
+              uniqueAssignedIDs.count >= 6 else {
+            return nil
+        }
+
+        let distributionReasonable = largestGroupSize <= max(3, Int(ceil(Double(items.count) * 0.78)))
+        let confidenceScore = min(1.0, (explicitCoverage * 0.55) + (coverage * 0.30) + (distributionReasonable ? 0.15 : 0))
+        guard confidenceScore >= 0.58 else { return nil }
+
+        let plans = workingGroups
+            .sorted { lhs, rhs in
+                if lhs.explicitFulfillmentMatch != rhs.explicitFulfillmentMatch {
+                    return lhs.explicitFulfillmentMatch && !rhs.explicitFulfillmentMatch
+                }
+                if lhs.itemIDs.count != rhs.itemIDs.count { return lhs.itemIDs.count > rhs.itemIDs.count }
+                return lhs.supportScore > rhs.supportScore
+            }
+            .map { group in
+                AutoGroupAssignmentPlan(
+                    title: group.title,
+                    fulfillmentLabelID: group.fulfillmentLabelID,
+                    itemIDs: group.itemIDs,
+                    confidence: confidenceScore
+                )
+            }
+
+        return plans
+    }
+
+    private func buildAutoGroupPlansViaLoomAI(for items: [RollingCaptureItem]) async -> [AutoGroupAssignmentPlan]? {
+        guard items.count >= 6 else { return nil }
+
+        do {
+            let contextSnapshot = try LoomAIViewModel().buildContextSnapshot(in: modelContext)
+            let selectableAreaNames = selectableLabels.map(\.label)
+
+            let actionLines = items.enumerated().map { index, item in
+                let cleanText = item.text
+                    .replacingOccurrences(of: "\n", with: " ")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                return "\(index + 1). id=\(item.id.uuidString) | text=\(cleanText)"
+            }
+
+            let instruction = """
+            You are helping with Loom Plan Step 3 (Group).
+            Group the provided Capture actions into meaningful topical groups inspired by the user's Fulfillment Areas when possible.
+
+            Hard rules:
+            - Return ONLY JSON
+            - High-confidence only. If confidence is not high, return confidence="low" and groups=[]
+            - Minimum 2 groups
+            - Each group must have at least 3 actions
+            - Maximum 8 groups
+            - Use only the provided actionIDs
+            - Do not duplicate an actionID across groups
+            - Prefer grouping by what the actions are related to (topic/domain), not by effort level or urgency
+            - If a group clearly aligns to a Fulfillment Area, set fulfillmentArea to one of the provided Fulfillment Area names exactly
+            - If not, leave fulfillmentArea as empty string and still create a useful topical group
+            - It is OK to leave low-confidence/ambiguous actions ungrouped if needed
+            - If leaving actions ungrouped, still satisfy the minimum grouping rules with the grouped subset
+
+            Return JSON exactly:
+            {"confidence":"high","reason":"short string","groups":[{"name":"string","fulfillmentArea":"string","actionIDs":["uuid"]}]}
+
+            Fulfillment Area options:
+            \(selectableAreaNames.joined(separator: ", "))
+
+            Capture actions to group (latest up to 25):
+            \(actionLines.joined(separator: "\n"))
+            """
+
+            let response = try await loomAIService.sendChat(
+                messages: [.init(role: "user", content: instruction)],
+                context: contextSnapshot
+            )
+
+            let raw = response.message.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let data = raw.data(using: .utf8) else { return nil }
+            let parsed = try JSONDecoder().decode(AIAutoGroupResponse.self, from: data)
+            guard (parsed.confidence ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "high" else {
+                return nil
+            }
+
+            let itemIDSet = Set(items.map(\.id))
+            let labelByNameLower = Dictionary(uniqueKeysWithValues: selectableLabels.map { ($0.label.lowercased(), $0.id) })
+
+            var seenActionIDs = Set<UUID>()
+            var plans: [AutoGroupAssignmentPlan] = []
+
+            for group in parsed.groups {
+                let ids = (group.actionIDs ?? []).compactMap(UUID.init(uuidString:))
+                let validIDs = ids.filter { itemIDSet.contains($0) }
+                guard validIDs.count >= 3 else { continue }
+                guard !validIDs.contains(where: { seenActionIDs.contains($0) }) else { return nil }
+                seenActionIDs.formUnion(validIDs)
+
+                let fulfillmentLabelID: UUID?
+                if let area = group.fulfillmentArea?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !area.isEmpty {
+                    fulfillmentLabelID = labelByNameLower[area.lowercased()]
+                } else {
+                    fulfillmentLabelID = nil
+                }
+
+                let name = (group.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                plans.append(
+                    AutoGroupAssignmentPlan(
+                        title: name.isEmpty ? "Related Actions" : name,
+                        fulfillmentLabelID: fulfillmentLabelID,
+                        itemIDs: validIDs,
+                        confidence: 0.9
+                    )
+                )
+            }
+
+            let uniqueAssigned = Set(plans.flatMap(\.itemIDs))
+            guard plans.count >= 2,
+                  plans.count <= 8,
+                  plans.allSatisfy({ $0.itemIDs.count >= 3 }),
+                  uniqueAssigned.count >= 6 else {
+                return nil
+            }
+
+            return plans
+        } catch {
+            return nil
+        }
+    }
+
+    private func similarityScore(itemTokens: Set<String>, groupTokens: Set<String>) -> Double {
+        guard !itemTokens.isEmpty, !groupTokens.isEmpty else { return 0 }
+        let overlap = itemTokens.intersection(groupTokens).count
+        return Double(overlap)
+    }
+
+    private func significantTokens(in text: String) -> [String] {
+        let normalized = text
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .lowercased()
+        let rawTokens = normalized
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        return rawTokens.filter { token in
+            guard token.count >= 3 else { return false }
+            guard !autoGroupStopwords.contains(token) else { return false }
+            guard Int(token) == nil else { return false }
+            return true
+        }
+    }
+
+    private var autoGroupStopwords: Set<String> {
+        [
+            "the","and","for","with","from","that","this","into","your","you","are","was","were","have","has",
+            "had","get","got","set","make","plan","task","todo","today","week","next","call","send","buy","pick",
+            "work","home","life","list","item","items","to","of","in","on","at","by","or","an","a","my"
+        ]
     }
 }
 

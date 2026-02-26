@@ -73,6 +73,7 @@ export default {
 
     const nonSystemMessages = normalizedMessages.filter((m) => m.role !== "system");
     const isFollowUpPromptMode = detectFollowUpPromptMode(nonSystemMessages);
+    const isAutoGroupMode = detectAutoGroupMode(nonSystemMessages);
 
     if (nonSystemMessages.length === 0) {
       return json(
@@ -93,9 +94,32 @@ export default {
         : [];
     const placeholderSignals = collectPlaceholderSignals(context);
 
-    const workerPromptVersion = isFollowUpPromptMode ? "followup-prompts-v1" : "grounding-cta-v3";
+    const workerPromptVersion = isAutoGroupMode
+      ? "autogroup-v1"
+      : (isFollowUpPromptMode ? "followup-prompts-v1" : "grounding-cta-v3");
 
-    const coreInstructions = isFollowUpPromptMode ? [
+    const coreInstructions = isAutoGroupMode ? [
+      "You generate AutoGroup plans for Loom Plan Step 3 (Group).",
+      "Use the provided Capture actions and APP_CONTEXT_JSON to group only the high-confidence items.",
+      "Use Fulfillment Areas as inspiration when relevant, but group by topic/relatedness.",
+      "Obvious practical topic clusters are valid even if they do not map perfectly to a Fulfillment Area (e.g., home/house chores, fitness/health, work/business, errands, food/cooking).",
+      "It is allowed to leave ambiguous or low-confidence actions ungrouped.",
+      "Do not force weak items into a group just to maximize coverage.",
+      "If there are at least 2 clear topical groups with 3+ actions each, treat that as high confidence even when some actions remain ungrouped.",
+      "Hard constraints:",
+      "- Return JSON ONLY",
+      "- confidence must be high to return groups; otherwise return confidence=low and groups=[]",
+      "- Minimum 2 groups",
+      "- Each group must contain at least 3 actionIDs",
+      "- Maximum 8 groups",
+      "- Use only actionIDs from the prompt",
+      "- Do not duplicate actionIDs across groups",
+      '- If a group aligns to a Fulfillment Area, set fulfillmentArea to one of the provided names exactly; otherwise use ""',
+      "Return JSON exactly in this shape:",
+      '{"confidence":"high","reason":"short string","groups":[{"name":"string","fulfillmentArea":"string","actionIDs":["uuid"]}]}',
+      "or",
+      '{"confidence":"low","reason":"short string","groups":[]}'
+    ].join("\n") : isFollowUpPromptMode ? [
       "You generate follow-up prompt chips for the Loom iOS app.",
       "Use APP_CONTEXT_JSON and the recent chat transcript to decide whether showing follow-up prompts is high-value.",
       "Only suggest follow-up prompts when confidence is high they will help the user make a better decision or take a better next step.",
@@ -245,7 +269,7 @@ export default {
           model,
           messages: groundedMessages,
           temperature,
-          max_tokens: isFollowUpPromptMode ? 350 : 900,
+          max_tokens: isAutoGroupMode ? 700 : (isFollowUpPromptMode ? 350 : 900),
           response_format: { type: "json_object" },
         }),
       });
@@ -324,6 +348,34 @@ export default {
     } catch {
       parsedModelJSON = null;
       parseMode = "parse_failed";
+    }
+
+    if (isAutoGroupMode) {
+      const autoGroup = normalizeAutoGroupPayload(parsedModelJSON, upstreamText);
+      const out = {
+        message: JSON.stringify(autoGroup),
+        actions: [],
+        debug: {
+          ...buildWorkerDebug({
+            model,
+            contextBytes,
+            contextHash,
+            contextKeys,
+            contextInfo,
+            workerPromptVersion,
+            messages,
+            nonSystemMessages,
+            upstreamStatus,
+            upstreamContentType,
+            parseMode,
+          }),
+          usedContext: contextBytes > 0,
+          claimedUsedContext: null,
+          evidence: [],
+          confidence: autoGroup.confidence || null,
+        },
+      };
+      return json(out, 200, corsHeaders(request));
     }
 
     if (isFollowUpPromptMode) {
@@ -481,6 +533,12 @@ function detectFollowUpPromptMode(nonSystemMessages) {
   return content.includes("Generate 0-3 high-confidence follow-up prompts for the user to ask next in Loom.");
 }
 
+function detectAutoGroupMode(nonSystemMessages) {
+  const latestUser = [...(nonSystemMessages || [])].reverse().find((m) => m?.role === "user");
+  const content = String(latestUser?.content || "");
+  return content.includes("You are helping with Loom Plan Step 3 (Group).");
+}
+
 function normalizeFollowUpPromptPayload(parsed, fallbackText) {
   let raw = parsed && typeof parsed === "object" ? parsed : null;
   if (!raw) {
@@ -519,6 +577,91 @@ function normalizeFollowUpPromptPayload(parsed, fallbackText) {
     showSuggestions,
     prompts: showSuggestions ? prompts : [],
     confidence: showSuggestions ? confidence : "low",
+  };
+}
+
+function normalizeAutoGroupPayload(parsed, fallbackText) {
+  let raw = parsed && typeof parsed === "object" ? parsed : null;
+  if (!raw) {
+    try {
+      raw = JSON.parse(String(fallbackText || ""));
+    } catch {
+      raw = null;
+    }
+  }
+
+  const confidenceRaw = typeof raw?.confidence === "string" ? raw.confidence.toLowerCase().trim() : "";
+  const confidence = ["high", "medium", "low"].includes(confidenceRaw) ? confidenceRaw : "low";
+  const reason = typeof raw?.reason === "string" ? truncateAtWordBoundary(raw.reason.trim(), 240) : "";
+
+  const groups = Array.isArray(raw?.groups) ? raw.groups : [];
+  const normalizedGroups = groups
+    .filter((g) => g && typeof g === "object")
+    .map((g) => {
+      const nameValue =
+        (typeof g.name === "string" && g.name.trim() ? g.name : null) ||
+        (typeof g.groupName === "string" && g.groupName.trim() ? g.groupName : null) ||
+        (typeof g.title === "string" && g.title.trim() ? g.title : null);
+      const name = nameValue ? truncateAtWordBoundary(nameValue.trim(), 80) : "Related Actions";
+      const fulfillmentAreaRaw =
+        (typeof g.fulfillmentArea === "string" ? g.fulfillmentArea : "") ||
+        (typeof g.category === "string" ? g.category : "");
+      const fulfillmentArea = truncateAtWordBoundary(String(fulfillmentAreaRaw || "").trim(), 80);
+      const ids =
+        Array.isArray(g.actionIDs) ? g.actionIDs :
+        (Array.isArray(g.actionIds) ? g.actionIds :
+        (Array.isArray(g.ids) ? g.ids :
+        (Array.isArray(g.actions) ? g.actions : [])));
+      const actionIDs = ids
+        .map((x) => {
+          if (typeof x === "string") return x.trim();
+          if (x && typeof x === "object") {
+            if (typeof x.id === "string") return x.id.trim();
+            if (typeof x.actionID === "string") return x.actionID.trim();
+            if (typeof x.actionId === "string") return x.actionId.trim();
+          }
+          return "";
+        })
+        .filter(Boolean)
+        .filter((x) => /^[0-9a-fA-F-]{36}$/.test(x));
+      return { name, fulfillmentArea, actionIDs };
+    })
+    .filter((g) => g.actionIDs.length >= 3)
+    .slice(0, 8);
+
+  const seen = new Set();
+  const dedupedGroups = [];
+  for (const group of normalizedGroups) {
+    let hasDup = false;
+    for (const id of group.actionIDs) {
+      if (seen.has(id)) {
+        hasDup = true;
+        break;
+      }
+    }
+    if (hasDup) continue;
+    group.actionIDs.forEach((id) => seen.add(id));
+    dedupedGroups.push(group);
+  }
+
+  const groupedCount = dedupedGroups.reduce((sum, g) => sum + g.actionIDs.length, 0);
+
+  if (dedupedGroups.length < 2 || groupedCount < 6) {
+    return { confidence: "low", reason: reason || "Not enough strong groups.", groups: [] };
+  }
+
+  // Be resilient: if the model returns a structurally valid grouping but marks confidence "medium",
+  // promote it so the app can use the result instead of failing closed.
+  const promotedConfidence = (confidence === "high" || confidence === "medium") ? "high" : "low";
+
+  if (promotedConfidence !== "high") {
+    return { confidence: "low", reason: reason || "Low confidence grouping.", groups: [] };
+  }
+
+  return {
+    confidence: promotedConfidence,
+    reason,
+    groups: dedupedGroups,
   };
 }
 

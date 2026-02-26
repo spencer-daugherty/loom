@@ -3539,6 +3539,10 @@ private struct FulfillmentTrendsView: View {
         cachedDisplayCategoryTitleByID
     }
 
+    private var liveFulfillmentCategoryIDs: Set<UUID> {
+        Set(fulfillments.map(\.category_id))
+    }
+
     private func trendsDisplayCategoryTitle(for snapshot: FulfillmentCategoryScoreSnapshot) -> String {
         displayCategoryTitleByID[snapshot.categoryID] ?? snapshot.categoryTitleSnapshot
     }
@@ -3549,7 +3553,10 @@ private struct FulfillmentTrendsView: View {
 
     private var latestWeekSnapshots: [FulfillmentCategoryScoreSnapshot] {
         guard let latestWeekStart else { return [] }
-        return snapshots.filter { Calendar.current.isDate($0.weekStartDate, inSameDayAs: latestWeekStart) }
+        return snapshots.filter {
+            Calendar.current.isDate($0.weekStartDate, inSameDayAs: latestWeekStart) &&
+            liveFulfillmentCategoryIDs.contains($0.categoryID)
+        }
     }
 
     private var selectedWeekStart: Date? {
@@ -3560,7 +3567,14 @@ private struct FulfillmentTrendsView: View {
 
     private var selectedWeekSnapshots: [FulfillmentCategoryScoreSnapshot] {
         guard let selectedWeekStart else { return latestWeekSnapshots }
-        return snapshots.filter { Calendar.current.isDate($0.weekStartDate, inSameDayAs: selectedWeekStart) }
+        let isLatestSelection = latestWeekStart.map { Calendar.current.isDate($0, inSameDayAs: selectedWeekStart) } ?? false
+        return snapshots.filter { snap in
+            guard Calendar.current.isDate(snap.weekStartDate, inSameDayAs: selectedWeekStart) else { return false }
+            if isLatestSelection {
+                return liveFulfillmentCategoryIDs.contains(snap.categoryID)
+            }
+            return true
+        }
     }
 
     private var chartCategoryIDs: [UUID] {
@@ -3641,6 +3655,7 @@ private struct FulfillmentTrendsView: View {
     private var chartRows: [FulfillmentTrendRow] {
         let cal = Calendar.current
         let visibleSet = Set(visibleWeeks.map { cal.startOfDay(for: $0) })
+        let latestVisibleWeek = latestWeekStart.map { cal.startOfDay(for: $0) }
         let grouped = Dictionary(grouping: snapshots.filter { visibleSet.contains(cal.startOfDay(for: $0.weekStartDate)) }) {
             "\(cal.startOfDay(for: $0.weekStartDate).timeIntervalSince1970)|\($0.categoryID.uuidString)"
         }.compactMapValues { rows in rows.max(by: { $0.updatedAt < $1.updatedAt }) }
@@ -3648,6 +3663,15 @@ private struct FulfillmentTrendsView: View {
         return chartCategoryIDs.flatMap { categoryID in
             visibleWeeks.map { week in
                 let weekStart = cal.startOfDay(for: week)
+                if let latestVisibleWeek, latestVisibleWeek == weekStart, !liveFulfillmentCategoryIDs.contains(categoryID) {
+                    return FulfillmentTrendRow(
+                        id: "\(Int(weekStart.timeIntervalSince1970))|\(categoryID.uuidString)",
+                        weekStart: weekStart,
+                        categoryID: categoryID,
+                        category: displayCategoryTitleByID[categoryID] ?? "Category",
+                        value: 0
+                    )
+                }
                 let key = "\(weekStart.timeIntervalSince1970)|\(categoryID.uuidString)"
                 let snap = grouped[key]
                 let title = snap.map { trendsDisplayCategoryTitle(for: $0) }
