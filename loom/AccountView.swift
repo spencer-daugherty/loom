@@ -1,6 +1,8 @@
 import SwiftUI
 import SwiftData
 
+fileprivate let loomAIInsightsRefreshToggleDefaultsKey = "loom.enableLoomAIInsightsRefresh"
+
 // MARK: - Flattened Display Model
 struct DataItem: Identifiable, Hashable {
     let id: String
@@ -445,6 +447,7 @@ struct AccountView: View {
 
     @Environment(\.modelContext) private var context
     @Query private var fulfillments: [Fulfillment]
+    @AppStorage(loomAIInsightsRefreshToggleDefaultsKey) private var enableLoomAIInsightsRefresh = false
     @AppStorage("enable_projects_feature") private var enableProjectsFeature = false
     @AppStorage("blank_homepage_mode") private var blankHomepageMode = false
     @AppStorage("setup_homepage_mode") private var setupHomepageMode = false
@@ -500,6 +503,14 @@ struct AccountView: View {
                 } label: {
                     HStack {
                         Text("Notifications")
+                    }
+                }
+
+                NavigationLink {
+                    PersonalizationPlaceholderView()
+                } label: {
+                    HStack {
+                        Text("Personalization")
                     }
                 }
 
@@ -568,6 +579,15 @@ struct AccountView: View {
                     }
                 }
 
+                NavigationLink {
+                    AccountLaunchReflectionView()
+                } label: {
+                    HStack {
+                        Text("Launch Reflection")
+                    }
+                }
+
+                Toggle("Enable LoomAI Insights Refresh", isOn: $enableLoomAIInsightsRefresh)
                 Toggle("Enable Projects", isOn: $enableProjectsFeature)
                 Toggle("Blank Homepage", isOn: $blankHomepageMode)
                 Toggle("Setup Homepage", isOn: $setupHomepageMode)
@@ -3452,5 +3472,29 @@ private struct NotificationsPlaceholderView: View {
         }
         .navigationTitle("Notifications")
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct PersonalizationPlaceholderView: View {
+    var body: some View {
+        List {
+            Section {
+                Text("Personalization settings are coming soon.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .navigationTitle("Personalization")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct AccountLaunchReflectionView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ReflectView(weekStart: .now) {
+            dismiss()
+        }
+        .navigationBarBackButtonHidden(true)
     }
 }

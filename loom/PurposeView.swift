@@ -1,6 +1,12 @@
 import SwiftUI
 import SwiftData
 
+fileprivate let loomAIInsightsRefreshToggleDefaultsKey = "loom.enableLoomAIInsightsRefresh"
+
+fileprivate func loomAIInsightsRefreshEnabled() -> Bool {
+    UserDefaults.standard.bool(forKey: loomAIInsightsRefreshToggleDefaultsKey)
+}
+
 // MARK: - Supporting Types
 struct PassionCategory {
     let emotion: String
@@ -18,6 +24,316 @@ enum Field: Hashable {
     case vision
     case purpose
     case passion(String)
+}
+
+@MainActor
+fileprivate enum PurposeReadableInsightRuntimeStore {
+    private static let defaultsPrefix = "loom.purposeReadableInsight."
+    private static var textByKey: [String: String] = [:]
+
+    static func value(for key: String) -> String? {
+        if let cached = textByKey[key] { return cached }
+        guard let persisted = UserDefaults.standard.string(forKey: defaultsPrefix + key), !persisted.isEmpty else {
+            return nil
+        }
+        textByKey[key] = persisted
+        return persisted
+    }
+
+    static func set(_ value: String, for key: String) {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        textByKey[key] = trimmed
+        UserDefaults.standard.set(trimmed, forKey: defaultsPrefix + key)
+    }
+}
+
+fileprivate struct PurposeReadableInsightRequestPayload: Codable {
+    let passionTypeRaw: String
+    let passionTitle: String
+    let monthStartISO8601: String
+    let score: Double
+    let monthScore: Double
+    let monthOverMonthDelta: Double?
+    let momentum: Double
+    let consistency: Double
+    let structure: Double
+    let outcomes: Double
+    let actionBlocks: Double
+    let littleWins: Double
+    let evidence: Double
+    let carryoverPenalty: Double
+    let peerAverageScore: Double?
+    let peerRank: Int?
+    let peerCount: Int?
+    let strongestPassion: String?
+    let strongestPassionScore: Double?
+    let biggestMoverPassion: String?
+    let biggestMoverDelta: Double?
+    let recentScores: [Double]
+}
+
+fileprivate func purposeReadableInsightScoreKey(for snap: PassionScoreSnapshot) -> String {
+    [
+        "v2",
+        snap.passionTypeRaw,
+        Calendar.current.startOfDay(for: snap.monthStartDate).ISO8601Format(),
+        String((snap.score * 10).rounded() / 10),
+        String((snap.targetScore * 10).rounded() / 10),
+        String((snap.momentum * 10).rounded() / 10),
+        String((snap.consistency * 10).rounded() / 10),
+        String((PassionScoringMath.clamped01(snap.structure) * 10).rounded() / 10),
+        String((PassionScoringMath.clamped01(snap.outcomeCoverage ?? 0) * 10).rounded() / 10),
+        String((PassionScoringMath.clamped01(snap.actionCoverage) * 10).rounded() / 10),
+        String((PassionScoringMath.clamped01(snap.littleWinsCoverage) * 10).rounded() / 10),
+        String((PassionScoringMath.clamped01(snap.evidenceStable) * 10).rounded() / 10),
+        String((PassionScoringMath.clamped01(snap.carryoverPenalty) * 10).rounded() / 10)
+    ].joined(separator: "|")
+}
+
+fileprivate func purposeReadableInsightPrompt(for payload: PurposeReadableInsightRequestPayload) -> String {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+    let payloadJSON = ((try? encoder.encode(payload)).flatMap { String(data: $0, encoding: .utf8) }) ?? "{}"
+
+    return """
+    Create a readable insight for one Purpose passion in Loom Purpose Insights.
+
+    Requirements:
+    - Use APP_CONTEXT plus the purpose passion insight payload below.
+    - Return exactly TWO short lines:
+      1) one high-value insight sentence (not a recap of obvious values already shown in the UI)
+      2) one very short practical call to action the user can do in Loom to improve
+    - Separate the lines with a newline.
+    - Keep the total under 220 characters and end each line as a complete sentence.
+    - No questions, no filler.
+    - Prefer the strongest supported interpretation from the available data.
+    - Do not mention the passion name directly (the UI already shows it).
+    - If you reference an insight metric, use the exact label and include the displayed value in parentheses.
+    - Use (X%) for percentage-based metrics and score components.
+    - If referencing Momentum or Consistency, use the displayed descriptor in parentheses (e.g., Momentum (Improving), Consistency (Stable)).
+    - Use these labels verbatim when referenced: Momentum, Consistency, Structure, Outcomes, Action Blocks, Little Wins, Evidence, Carryover penalty.
+    - Consider the full range of useful interpretations (choose the best fit):
+      - month-over-month trend / momentum shift
+      - consistency/volatility pattern
+      - strong structure but weak action support
+      - strong daily support but weak outcome coverage
+      - carryover penalty dragging score
+      - evidence stability strength/weakness
+      - imbalance across support signals
+      - peer-relative position (strongest / mover / rank)
+    - Do not invent values.
+    - Return only the readable insight text in the message field.
+
+    Purpose passion insight payload JSON:
+    \(payloadJSON)
+    """
+}
+
+fileprivate func limitPurposeReadableInsightText(_ text: String, maxCharacters: Int = 150) -> String {
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard trimmed.count > maxCharacters else { return trimmed }
+    let cutoffIndex = trimmed.index(trimmed.startIndex, offsetBy: maxCharacters)
+    let prefix = String(trimmed[..<cutoffIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+    if let sentenceEnd = prefix.lastIndex(where: { ".!?".contains($0) }) {
+        let sentence = String(prefix[...sentenceEnd]).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !sentence.isEmpty { return sentence }
+    }
+    if let naturalBreak = prefix.lastIndex(where: { ",;:".contains($0) }) {
+        let base = String(prefix[..<naturalBreak]).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !base.isEmpty { return base + "." }
+    }
+    if let lastSpace = prefix.lastIndex(of: " "), lastSpace > prefix.startIndex {
+        let base = String(prefix[..<lastSpace]).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !base.isEmpty { return base + "." }
+    }
+    return prefix + "."
+}
+
+fileprivate func purposeReadableInsightCTAParagraph(_ text: String?) -> String? {
+    guard let text else { return nil }
+    let parts = text
+        .replacingOccurrences(of: "\r\n", with: "\n")
+        .components(separatedBy: "\n")
+        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { !$0.isEmpty }
+    return parts.last
+}
+
+fileprivate func purposeReadableInsightMomentumDescriptor(_ value: Double) -> String {
+    let v = PassionScoringMath.clamp(value, min: -1, max: 1)
+    if abs(v) < 0.12 { return "Stable" }
+    return v > 0 ? "Improving" : "Declining"
+}
+
+fileprivate func purposeReadableInsightConsistencyDescriptor(_ value: Double) -> String {
+    let v = PassionScoringMath.clamp(value, min: 0, max: 1)
+    if v >= 0.75 { return "Stable" }
+    if v >= 0.4 { return "Mixed" }
+    return "Volatile"
+}
+
+fileprivate func normalizePurposeReadableInsightMetricReferences(
+    _ text: String,
+    payload: PurposeReadableInsightRequestPayload
+) -> String {
+    var output = text
+        .replacingOccurrences(of: "Action Block ", with: "Action Blocks ")
+        .replacingOccurrences(of: "action block ", with: "Action Blocks ")
+        .replacingOccurrences(of: "acieving", with: "achieving")
+
+    func pct(_ value: Double) -> String {
+        "\(Int((PassionScoringMath.clamped01(value) * 100).rounded()))%"
+    }
+
+    let replacements: [(label: String, value: String)] = [
+        ("Momentum", purposeReadableInsightMomentumDescriptor(payload.momentum)),
+        ("Consistency", purposeReadableInsightConsistencyDescriptor(payload.consistency)),
+        ("Structure", pct(payload.structure)),
+        ("Outcomes", pct(payload.outcomes)),
+        ("Action Blocks", pct(payload.actionBlocks)),
+        ("Little Wins", pct(payload.littleWins)),
+        ("Evidence", pct(payload.evidence)),
+        ("Carryover penalty", pct(payload.carryoverPenalty))
+    ]
+
+    for item in replacements.sorted(by: { $0.label.count > $1.label.count }) {
+        let escaped = NSRegularExpression.escapedPattern(for: item.label)
+        let pattern = "(?i)\\b\(escaped)\\b(?:\\s*\\([^\\)]*\\))?"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+        let source = output
+        let nsRange = NSRange(source.startIndex..<source.endIndex, in: source)
+        output = regex.stringByReplacingMatches(
+            in: source,
+            range: nsRange,
+            withTemplate: "\(item.label) (\(item.value))"
+        )
+    }
+
+    return ensurePurposeReadableInsightCTA(
+        repairPurposeReadableInsightLineIfNeeded(output, payload: payload),
+        payload: payload
+    )
+}
+
+fileprivate func ensurePurposeReadableInsightCTA(
+    _ text: String,
+    payload: PurposeReadableInsightRequestPayload
+) -> String {
+    let lines = text
+        .replacingOccurrences(of: "\r\n", with: "\n")
+        .split(separator: "\n", omittingEmptySubsequences: true)
+        .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { !$0.isEmpty }
+
+    guard let first = lines.first else {
+        let cta = normalizePurposeReadableInsightCTALine(defaultPurposeReadableInsightCTA(payload: payload))
+        return cta + (cta.hasSuffix(".") ? "" : ".")
+    }
+    if lines.count >= 2 {
+        let cta = normalizePurposeReadableInsightCTALine(lines[1])
+        return first + "\n\n" + cta
+    }
+    let cta = normalizePurposeReadableInsightCTALine(defaultPurposeReadableInsightCTA(payload: payload))
+    return first + "\n\n" + cta + (cta.hasSuffix(".") ? "" : ".")
+}
+
+fileprivate func repairPurposeReadableInsightLineIfNeeded(
+    _ text: String,
+    payload: PurposeReadableInsightRequestPayload
+) -> String {
+    let lines = text
+        .replacingOccurrences(of: "\r\n", with: "\n")
+        .split(separator: "\n", omittingEmptySubsequences: false)
+        .map(String.init)
+
+    guard let firstRaw = lines.first else { return text }
+    let first = firstRaw.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !first.isEmpty else { return text }
+
+    let lower = first.lowercased()
+    let shouldReplace =
+        lower.contains("score (0.") ||
+        (payload.outcomes >= 0.8 && lower.contains("weak outcome")) ||
+        (lower.contains("action blocks") && lower.contains("imbalance") && payload.littleWins + 0.12 < payload.actionBlocks)
+
+    guard shouldReplace else { return text }
+
+    let replacement = practicalPurposeInsightLine(payload: payload)
+    let remaining = lines.dropFirst().map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+    return ([replacement] + remaining).joined(separator: "\n")
+}
+
+fileprivate func practicalPurposeInsightLine(payload: PurposeReadableInsightRequestPayload) -> String {
+    func pct(_ value: Double) -> String { "\(Int((PassionScoringMath.clamped01(value) * 100).rounded()))%" }
+    let structure = payload.structure
+    let outcomes = payload.outcomes
+    let actionBlocks = payload.actionBlocks
+    let littleWins = payload.littleWins
+    let evidence = payload.evidence
+    let carry = payload.carryoverPenalty
+
+    if carry >= 0.4 {
+        return "Carryover penalty (\(pct(carry))) is suppressing progress despite stronger support signals."
+    }
+    if outcomes >= 0.8 && actionBlocks < 0.6 {
+        return "Outcomes (\(pct(outcomes))) are strong, but Action Blocks (\(pct(actionBlocks))) need more consistent follow-through."
+    }
+    if actionBlocks >= 0.7 && littleWins + 0.18 < actionBlocks {
+        return "Action Blocks (\(pct(actionBlocks))) are stronger than Little Wins (\(pct(littleWins))), reducing daily support."
+    }
+    if evidence < 0.6 && (structure >= 0.7 || outcomes >= 0.7) {
+        return "Evidence (\(pct(evidence))) is lagging stronger Structure (\(pct(structure))) and Outcomes (\(pct(outcomes)))."
+    }
+    if littleWins < 0.55 {
+        return "Little Wins (\(pct(littleWins))) are the weakest support signal for sustaining this passion."
+    }
+    return "Action Blocks (\(pct(actionBlocks))) are the clearest practical lever to improve this passion."
+}
+
+fileprivate func defaultPurposeReadableInsightCTA(payload: PurposeReadableInsightRequestPayload) -> String {
+    if payload.carryoverPenalty >= 0.4 {
+        return "Balance only adding essential actions and completing more actions"
+    }
+    if payload.littleWins + 0.12 < payload.actionBlocks && payload.littleWins < 0.55 {
+        return "Complete more Little Wins and Action Blocks"
+    }
+    let weakest = [
+        ("Action Blocks", payload.actionBlocks),
+        ("Little Wins", payload.littleWins),
+        ("Outcomes", payload.outcomes),
+        ("Evidence", payload.evidence),
+        ("Structure", payload.structure)
+    ].min(by: { $0.1 < $1.1 })?.0 ?? "Action Blocks"
+
+    switch weakest {
+    case "Action Blocks":
+        return "Add one Action Block tied to this passion"
+    case "Little Wins":
+        return "Add or revise one Little Win for this passion"
+    case "Outcomes":
+        return "Connect an Outcome that supports this passion"
+    case "Evidence":
+        return "Tag completed work to strengthen evidence"
+    case "Structure":
+        return "Refine your Vision or passion wording"
+    default:
+        return "Improve one weak support signal for this passion"
+    }
+}
+
+fileprivate func normalizePurposeReadableInsightCTALine(_ line: String) -> String {
+    var output = line.trimmingCharacters(in: .whitespacesAndNewlines)
+    output = output.replacingOccurrences(of: #"^(?i)in loom,\s*"#, with: "", options: .regularExpression)
+    output = output.replacingOccurrences(of: #"^(?i)in loom\s*"#, with: "", options: .regularExpression)
+    output = output.replacingOccurrences(of: "Action Block ", with: "Action Blocks ")
+    output = output.replacingOccurrences(of: "action block ", with: "Action Blocks ")
+    output = output.replacingOccurrences(
+        of: #"(?i)shorten or split one Action Blocks? to reduce carryover"#,
+        with: "Balance only adding essential actions and completing more actions",
+        options: .regularExpression
+    )
+    return output
 }
 
 struct PurposeView: View {
@@ -84,6 +400,8 @@ struct PurposeView: View {
     @State private var highlightedPassionEmotionKey: String = "love"
     @State private var passionAutoRotatePausedUntil: Date = .distantPast
     @State private var drivingForceHeaderInsightOutlineAngle: Double = 0
+    @State private var readableInsightsByScoreKey: [String: String] = [:]
+    @State private var readableInsightLoadingKeys: Set<String> = []
     @FocusState private var focusedField: Field?
     private let passionHeaderTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
 
@@ -506,8 +824,11 @@ struct PurposeView: View {
 
                 Spacer(minLength: 0)
 
-                if let snap = selectedHeaderPassionSnapshot,
-                   let summaryInsight = primaryDrivingForceHeaderInsightMessage(for: snap) {
+                if let snap = selectedHeaderPassionSnapshot {
+                    let insightKey = purposeReadableInsightScoreKey(for: snap)
+                    let summaryInsight = purposeReadableInsightCTAParagraph(aiPurposeHeaderInsightText(for: snap))
+                    let isLoadingInsight = readableInsightLoadingKeys.contains(insightKey)
+                    if isLoadingInsight || summaryInsight != nil {
                     let loomAIGradient = AngularGradient(
                         colors: [
                             Color(red: 0.22, green: 0.47, blue: 1.0),
@@ -521,14 +842,27 @@ struct PurposeView: View {
                         center: .center,
                         angle: .degrees(drivingForceHeaderInsightOutlineAngle)
                     )
-                    PurposeInlineInsightText(
-                        imageName: "LoomAI",
-                        text: summaryInsight,
-                        font: UIFont.preferredFont(forTextStyle: .footnote),
-                        textColor: UIColor.label,
-                        imageSize: CGSize(width: 32, height: 32)
-                    )
-                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    Group {
+                        if isLoadingInsight {
+                            HStack(spacing: 8) {
+                                Image("LoomAI")
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: 32, height: 32)
+                                PurposeLoomTypingDotsIndicator()
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        } else if let summaryInsight {
+                            PurposeInlineInsightText(
+                                imageName: "LoomAI",
+                                text: summaryInsight,
+                                font: UIFont.preferredFont(forTextStyle: .footnote),
+                                textColor: UIColor.label,
+                                imageSize: CGSize(width: 32, height: 32)
+                            )
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                        }
+                    }
                     .padding(.top, 6)
                     .padding(.bottom, 8)
                     .padding(.leading, 12)
@@ -537,6 +871,12 @@ struct PurposeView: View {
                         RoundedRectangle(cornerRadius: 10)
                             .stroke(loomAIGradient.opacity(0.95), lineWidth: 2)
                     )
+                    }
+                    Color.clear
+                        .frame(width: 0, height: 0)
+                        .task(id: purposeReadableInsightScoreKey(for: snap)) {
+                            await requestPurposeHeaderReadableInsightIfNeeded(for: snap)
+                        }
                 }
             }
             .frame(width: 166)
@@ -557,7 +897,7 @@ struct PurposeView: View {
             if highlightedPassionEmotionKey.isEmpty {
                 highlightedPassionEmotionKey = "love"
             }
-            guard drivingForceHeaderInsightOutlineAngle == 0 else { return }
+            drivingForceHeaderInsightOutlineAngle = 0
             withAnimation(.linear(duration: 7).repeatForever(autoreverses: false)) {
                 drivingForceHeaderInsightOutlineAngle = 360
             }
@@ -862,6 +1202,97 @@ struct PurposeView: View {
             return "\(name) is well supported with strong outcomes (\(outcomesPct)%) and execution (\(actionPct)%)."
         }
         return "\(name) is stable overall. Improve one support behavior this month to raise the score."
+    }
+
+    private func purposeHeaderReadableInsightPayload(for snap: PassionScoreSnapshot) -> PurposeReadableInsightRequestPayload {
+        let monthStart = Calendar.current.startOfDay(for: snap.monthStartDate)
+        let sameMonth = currentMonthPassionSnapshots
+        let sortedByScore = sameMonth.sorted { lhs, rhs in
+            if lhs.score == rhs.score { return lhs.passionTypeRaw < rhs.passionTypeRaw }
+            return lhs.score > rhs.score
+        }
+        let peerRank = sortedByScore.firstIndex(where: { $0.passionTypeRaw == snap.passionTypeRaw }).map { $0 + 1 }
+        let strongest = sortedByScore.first
+        let peerAverage = sameMonth.isEmpty ? nil : sameMonth.map(\.score).reduce(0, +) / Double(sameMonth.count)
+        let movers: [(PassionScoreSnapshot, Double)] = sameMonth.compactMap { row in
+            guard let delta = passionMonthOverMonthDelta(for: emotionKey(for: row.passionType)) else { return nil }
+            return (row, roundedTenth(delta))
+        }
+        let biggestMover = movers.max { abs($0.1) < abs($1.1) }
+        let recentScores = passionScoreSnapshots
+            .filter { $0.passionTypeRaw == snap.passionTypeRaw }
+            .sorted { $0.monthStartDate > $1.monthStartDate }
+            .prefix(8)
+            .map { roundedTenth($0.score) }
+
+        return .init(
+            passionTypeRaw: snap.passionTypeRaw,
+            passionTitle: passionHeaderTitle(for: emotionKey(for: snap.passionType)),
+            monthStartISO8601: monthStart.ISO8601Format(),
+            score: roundedTenth(snap.score),
+            monthScore: roundedTenth(snap.targetScore),
+            monthOverMonthDelta: passionMonthOverMonthDelta(for: emotionKey(for: snap.passionType)).map(roundedTenth),
+            momentum: roundedTenth(snap.momentum),
+            consistency: roundedTenth(snap.consistency),
+            structure: PassionScoringMath.clamped01(snap.structure),
+            outcomes: PassionScoringMath.clamped01(snap.outcomeCoverage ?? 0),
+            actionBlocks: PassionScoringMath.clamped01(snap.actionCoverage),
+            littleWins: PassionScoringMath.clamped01(snap.littleWinsCoverage),
+            evidence: PassionScoringMath.clamped01(snap.evidenceStable),
+            carryoverPenalty: PassionScoringMath.clamped01(snap.carryoverPenalty),
+            peerAverageScore: peerAverage.map(roundedTenth),
+            peerRank: peerRank,
+            peerCount: sameMonth.isEmpty ? nil : sameMonth.count,
+            strongestPassion: strongest.map { passionHeaderTitle(for: emotionKey(for: $0.passionType)) },
+            strongestPassionScore: strongest.map { roundedTenth($0.score) },
+            biggestMoverPassion: biggestMover.map { passionHeaderTitle(for: emotionKey(for: $0.0.passionType)) },
+            biggestMoverDelta: biggestMover.map { roundedTenth($0.1) },
+            recentScores: recentScores
+        )
+    }
+
+    private func aiPurposeHeaderInsightText(for snap: PassionScoreSnapshot) -> String? {
+        let key = purposeReadableInsightScoreKey(for: snap)
+        guard let base = readableInsightsByScoreKey[key] ?? PurposeReadableInsightRuntimeStore.value(for: key) else { return nil }
+        let payload = purposeHeaderReadableInsightPayload(for: snap)
+        return ensurePurposeReadableInsightCTA(base, payload: payload)
+    }
+
+    @MainActor
+    private func requestPurposeHeaderReadableInsightIfNeeded(for snap: PassionScoreSnapshot) async {
+        let key = purposeReadableInsightScoreKey(for: snap)
+        if !loomAIInsightsRefreshEnabled(),
+           let cached = readableInsightsByScoreKey[key] ?? PurposeReadableInsightRuntimeStore.value(for: key) {
+            readableInsightsByScoreKey[key] = cached
+            return
+        }
+        readableInsightLoadingKeys.insert(key)
+        defer { readableInsightLoadingKeys.remove(key) }
+
+        do {
+            let contextSnapshot = try LoomAIViewModel().buildContextSnapshot(in: self.context)
+            let payload = purposeHeaderReadableInsightPayload(for: snap)
+            let response = try await LoomAIService().sendChat(
+                messages: [.init(role: "user", content: purposeReadableInsightPrompt(for: payload))],
+                context: contextSnapshot
+            )
+            let normalized = normalizePurposeReadableInsightMetricReferences(response.message, payload: payload)
+            let text = limitPurposeReadableInsightText(normalized, maxCharacters: 220)
+            let trimmed = text.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            readableInsightsByScoreKey[key] = trimmed
+            PurposeReadableInsightRuntimeStore.set(trimmed, for: key)
+        } catch {
+            // Keep local heuristic fallback visible if API is unavailable.
+        }
+    }
+
+    private func stableDrivingForceHeaderInsightMessage(for snap: PassionScoreSnapshot) -> String? {
+        let key = purposeReadableInsightScoreKey(for: snap)
+        if let cached = readableInsightsByScoreKey[key] ?? PurposeReadableInsightRuntimeStore.value(for: key) {
+            return cached
+        }
+        return primaryDrivingForceHeaderInsightMessage(for: snap)
     }
 
     private func roundedTenth(_ value: Double) -> Double {
@@ -1258,6 +1689,61 @@ struct PurposeView: View {
 }
 
 #if canImport(UIKit)
+private func applyPurposeInsightMetricItalics(
+    to attributed: inout AttributedString
+) {
+    let labels = [
+        "Momentum",
+        "Consistency",
+        "Structure",
+        "Outcomes",
+        "Action Blocks",
+        "Action blocks",
+        "Little Wins",
+        "Evidence",
+        "Carryover penalty",
+        "Carryover Penalty"
+    ]
+    let source = String(attributed.characters)
+    let escaped = labels.map(NSRegularExpression.escapedPattern(for:)).joined(separator: "|")
+    let pattern = "(?i)\\b(?:\(escaped))\\b(?:\\s*\\([^\\)]+\\))?"
+    guard let regex = try? NSRegularExpression(pattern: pattern) else { return }
+    let nsRange = NSRange(source.startIndex..<source.endIndex, in: source)
+    for match in regex.matches(in: source, range: nsRange) {
+        if let range = Range(match.range, in: attributed) {
+            attributed[range].inlinePresentationIntent = .emphasized
+        }
+    }
+}
+
+private func applyPurposeInsightMetricItalics(
+    to attributed: NSMutableAttributedString,
+    source: String,
+    baseFont: UIFont
+) {
+    let labels = [
+        "Momentum",
+        "Consistency",
+        "Structure",
+        "Outcomes",
+        "Action Blocks",
+        "Action blocks",
+        "Little Wins",
+        "Evidence",
+        "Carryover penalty",
+        "Carryover Penalty"
+    ]
+    let escaped = labels.map(NSRegularExpression.escapedPattern(for:)).joined(separator: "|")
+    let pattern = "(?i)\\b(?:\(escaped))\\b(?:\\s*\\([^\\)]+\\))?"
+    guard let regex = try? NSRegularExpression(pattern: pattern) else { return }
+    let italicDescriptor = baseFont.fontDescriptor.withSymbolicTraits([.traitItalic]) ?? baseFont.fontDescriptor
+    let italicFont = UIFont(descriptor: italicDescriptor, size: baseFont.pointSize)
+    let nsRange = NSRange(source.startIndex..<source.endIndex, in: source)
+    for match in regex.matches(in: source, range: nsRange) {
+        attributed.addAttribute(.font, value: italicFont, range: match.range)
+    }
+}
+
 private struct PurposeInlineInsightText: UIViewRepresentable {
     let imageName: String
     let text: String
@@ -1296,6 +1782,7 @@ private struct PurposeInlineInsightText: UIViewRepresentable {
         ]
         let output = NSMutableAttributedString()
         output.append(NSAttributedString(string: text, attributes: attrs))
+        applyPurposeInsightMetricItalics(to: output, source: text, baseFont: font)
         view.attributedText = output
 
         if let imageView = view.viewWithTag(imageTag) as? UIImageView {
@@ -1357,6 +1844,7 @@ private struct DrivingForceTrendsView: View {
         let height: CGFloat
     }
 
+    @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var colorScheme
     let snapshots: [PassionScoreSnapshot]
 
@@ -1364,6 +1852,8 @@ private struct DrivingForceTrendsView: View {
     @State private var selectedMonthRaw: Date?
     @State private var selectedPassionTypeRaw: String?
     @State private var trendsContentIsReady = false
+    @State private var readableInsightsByScoreKey: [String: String] = [:]
+    @State private var readableInsightLoadingKeys: Set<String> = []
 
     private let chartPassionOrder: [PassionType] = [.love, .vows, .thrill, .hate]
     private let plotHeight: CGFloat = 220
@@ -1791,9 +2281,17 @@ private struct DrivingForceTrendsView: View {
             }
 
             if let snap = selectedSnapshot {
-                if let message = primaryInsightMessage(for: snap) {
-                    DrivingForceAnimatedInsightCallout(message: message)
+                let insightKey = purposeReadableInsightScoreKey(for: snap)
+                let message = aiPurposeTrendsInsightText(for: snap)
+                let isLoadingInsight = readableInsightLoadingKeys.contains(insightKey)
+                if isLoadingInsight || message != nil {
+                    DrivingForceAnimatedInsightCallout(message: message ?? "", isLoading: isLoadingInsight)
                 }
+                Color.clear
+                    .frame(width: 0, height: 0)
+                    .task(id: insightKey) {
+                        await requestPurposeTrendsReadableInsightIfNeeded(for: snap)
+                    }
 
                 VStack(spacing: 8) {
                     insightRow("Current Score", String(format: "%.1f/4", snap.score))
@@ -1913,6 +2411,88 @@ private struct DrivingForceTrendsView: View {
         return delta > 0 ? .green : .orange
     }
 
+    private func purposeTrendsReadableInsightPayload(for snap: PassionScoreSnapshot) -> PurposeReadableInsightRequestPayload {
+        let sameMonth = selectedMonthSnapshots
+        let sortedByScore = sameMonth.sorted { lhs, rhs in
+            if lhs.score == rhs.score { return lhs.passionTypeRaw < rhs.passionTypeRaw }
+            return lhs.score > rhs.score
+        }
+        let peerRank = sortedByScore.firstIndex(where: { $0.passionTypeRaw == snap.passionTypeRaw }).map { $0 + 1 }
+        let strongest = sortedByScore.first
+        let peerAverage = sameMonth.isEmpty ? nil : sameMonth.map(\.score).reduce(0, +) / Double(sameMonth.count)
+        let movers: [(PassionScoreSnapshot, Double)] = selectedMonthSnapshots.compactMap { row in
+            guard let delta = displayedDelta(for: row) else { return nil }
+            return (row, roundedTenth(delta))
+        }
+        let biggestMover = movers.max { abs($0.1) < abs($1.1) }
+        let recentScores = snapshots
+            .filter { $0.passionTypeRaw == snap.passionTypeRaw }
+            .sorted { $0.monthStartDate > $1.monthStartDate }
+            .prefix(8)
+            .map { roundedTenth($0.score) }
+
+        return .init(
+            passionTypeRaw: snap.passionTypeRaw,
+            passionTitle: passionTitle(for: snap.passionType),
+            monthStartISO8601: Calendar.current.startOfDay(for: snap.monthStartDate).ISO8601Format(),
+            score: roundedTenth(snap.score),
+            monthScore: roundedTenth(snap.targetScore),
+            monthOverMonthDelta: displayedDelta(for: snap).map(roundedTenth),
+            momentum: roundedTenth(snap.momentum),
+            consistency: roundedTenth(snap.consistency),
+            structure: PassionScoringMath.clamped01(snap.structure),
+            outcomes: PassionScoringMath.clamped01(snap.outcomeCoverage ?? 0),
+            actionBlocks: PassionScoringMath.clamped01(snap.actionCoverage),
+            littleWins: PassionScoringMath.clamped01(snap.littleWinsCoverage),
+            evidence: PassionScoringMath.clamped01(snap.evidenceStable),
+            carryoverPenalty: PassionScoringMath.clamped01(snap.carryoverPenalty),
+            peerAverageScore: peerAverage.map(roundedTenth),
+            peerRank: peerRank,
+            peerCount: sameMonth.isEmpty ? nil : sameMonth.count,
+            strongestPassion: strongest.map { passionTitle(for: $0.passionType) },
+            strongestPassionScore: strongest.map { roundedTenth($0.score) },
+            biggestMoverPassion: biggestMover.map { passionTitle(for: $0.0.passionType) },
+            biggestMoverDelta: biggestMover.map { roundedTenth($0.1) },
+            recentScores: recentScores
+        )
+    }
+
+    private func aiPurposeTrendsInsightText(for snap: PassionScoreSnapshot) -> String? {
+        let key = purposeReadableInsightScoreKey(for: snap)
+        guard let base = readableInsightsByScoreKey[key] ?? PurposeReadableInsightRuntimeStore.value(for: key) else { return nil }
+        let payload = purposeTrendsReadableInsightPayload(for: snap)
+        return ensurePurposeReadableInsightCTA(base, payload: payload)
+    }
+
+    @MainActor
+    private func requestPurposeTrendsReadableInsightIfNeeded(for snap: PassionScoreSnapshot) async {
+        let key = purposeReadableInsightScoreKey(for: snap)
+        if !loomAIInsightsRefreshEnabled(),
+           let cached = readableInsightsByScoreKey[key] ?? PurposeReadableInsightRuntimeStore.value(for: key) {
+            readableInsightsByScoreKey[key] = cached
+            return
+        }
+        readableInsightLoadingKeys.insert(key)
+        defer { readableInsightLoadingKeys.remove(key) }
+
+        do {
+            let contextSnapshot = try LoomAIViewModel().buildContextSnapshot(in: modelContext)
+            let payload = purposeTrendsReadableInsightPayload(for: snap)
+            let response = try await LoomAIService().sendChat(
+                messages: [.init(role: "user", content: purposeReadableInsightPrompt(for: payload))],
+                context: contextSnapshot
+            )
+            let normalized = normalizePurposeReadableInsightMetricReferences(response.message, payload: payload)
+            let text = limitPurposeReadableInsightText(normalized, maxCharacters: 220)
+            let trimmed = text.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            readableInsightsByScoreKey[key] = trimmed
+            PurposeReadableInsightRuntimeStore.set(trimmed, for: key)
+        } catch {
+            // Keep local heuristic fallback visible if API is unavailable.
+        }
+    }
+
     private func passionTitle(for passionType: PassionType) -> String {
         switch passionType {
         case .love: return "Love"
@@ -2000,10 +2580,19 @@ private struct DrivingForceTrendsView: View {
         return items.max(by: { $0.priority < $1.priority })?.text
             ?? "\(passionTitle(for: snap.passionType)) is stable overall. Improve one support behavior this month to lift the score."
     }
+
+    private func stablePrimaryInsightMessage(for snap: PassionScoreSnapshot) -> String? {
+        let key = purposeReadableInsightScoreKey(for: snap)
+        if let cached = readableInsightsByScoreKey[key] ?? PurposeReadableInsightRuntimeStore.value(for: key) {
+            return cached
+        }
+        return primaryInsightMessage(for: snap)
+    }
 }
 
 private struct DrivingForceAnimatedInsightCallout: View {
     let message: String
+    var isLoading: Bool = false
     @State private var outlineAngle: Double = 0
 
     private var outlineGradient: AngularGradient {
@@ -2028,10 +2617,15 @@ private struct DrivingForceAnimatedInsightCallout: View {
                 .resizable()
                 .scaledToFit()
                 .frame(width: 26, height: 26)
-            Text(message)
-                .font(.subheadline)
-                .foregroundStyle(.primary)
-                .fixedSize(horizontal: false, vertical: true)
+            if isLoading {
+                PurposeLoomTypingDotsIndicator()
+                    .frame(height: 20)
+            } else {
+                Text(styledMessage)
+                    .font(.subheadline)
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
@@ -2040,10 +2634,49 @@ private struct DrivingForceAnimatedInsightCallout: View {
                 .stroke(outlineGradient.opacity(0.95), lineWidth: 2)
         )
         .onAppear {
-            guard outlineAngle == 0 else { return }
+            outlineAngle = 0
             withAnimation(.linear(duration: 7).repeatForever(autoreverses: false)) {
                 outlineAngle = 360
             }
+        }
+    }
+
+    private var styledMessage: AttributedString {
+        var attributed = AttributedString(message)
+        applyPurposeInsightMetricItalics(to: &attributed)
+        return attributed
+    }
+}
+
+private struct PurposeLoomTypingDotsIndicator: View {
+    @State private var activeIndex: Int = 0
+
+    private let colors: [Color] = [
+        Color(red: 0.22, green: 0.47, blue: 1.0),
+        Color(red: 0.15, green: 0.83, blue: 0.95),
+        Color(red: 0.62, green: 0.40, blue: 0.95)
+    ]
+
+    var body: some View {
+        HStack(spacing: 5) {
+            ForEach(Array(colors.enumerated()), id: \.offset) { idx, color in
+                Circle()
+                    .fill(color.opacity(activeIndex == idx ? 1 : 0.35))
+                    .frame(width: 6, height: 6)
+                    .scaleEffect(activeIndex == idx ? 1.15 : 0.9)
+                    .animation(.easeInOut(duration: 0.2), value: activeIndex)
+            }
+        }
+        .onAppear {
+            guard activeIndex == 0 else { return }
+            animate()
+        }
+    }
+
+    private func animate() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+            activeIndex = (activeIndex + 1) % colors.count
+            animate()
         }
     }
 }

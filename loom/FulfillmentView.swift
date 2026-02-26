@@ -27,6 +27,421 @@ fileprivate let defaultFulfillmentCategoryTitles: [String] = [
     "Area 1", "Area 2", "Area 3", "Area 4", "Area 5", "Area 6"
 ]
 
+fileprivate let loomAIInsightsRefreshToggleDefaultsKey = "loom.enableLoomAIInsightsRefresh"
+
+fileprivate func loomAIInsightsRefreshEnabled() -> Bool {
+    UserDefaults.standard.bool(forKey: loomAIInsightsRefreshToggleDefaultsKey)
+}
+
+fileprivate struct FulfillmentReadableInsightRequestPayload: Codable {
+    let categoryID: UUID
+    let categoryTitle: String
+    let weekStartISO8601: String
+    let score: Double
+    let weekScore: Double
+    let weekOverWeekDelta: Double?
+    let momentum: Double
+    let consistency: Double
+    let structure: Double
+    let outcomes: Double
+    let actionBlocks: Double
+    let littleWins: Double
+    let engagement: Double
+    let strategicBehavior: Double
+    let carryoverPenalty: Double
+    let peerAverageScore: Double?
+    let peerRank: Int?
+    let peerCount: Int?
+    let strongestCategory: String?
+    let strongestCategoryScore: Double?
+    let biggestMoverCategory: String?
+    let biggestMoverDelta: Double?
+    let recentCategoryScores: [Double]
+}
+
+@MainActor
+fileprivate enum FulfillmentReadableInsightRuntimeStore {
+    private static let defaultsPrefix = "loom.fulfillmentReadableInsight."
+    private static var textByKey: [String: String] = [:]
+
+    static func value(for key: String) -> String? {
+        if let cached = textByKey[key] { return cached }
+        guard let persisted = UserDefaults.standard.string(forKey: defaultsPrefix + key), !persisted.isEmpty else {
+            return nil
+        }
+        textByKey[key] = persisted
+        return persisted
+    }
+
+    static func set(_ value: String, for key: String) {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        textByKey[key] = trimmed
+        UserDefaults.standard.set(trimmed, forKey: defaultsPrefix + key)
+    }
+}
+
+fileprivate func fulfillmentReadableInsightKey(for payload: FulfillmentReadableInsightRequestPayload) -> String {
+    struct ScoreSignature: Codable {
+        let categoryID: UUID
+        let weekStartISO8601: String
+        let score: Double
+        let weekScore: Double
+        let weekOverWeekDelta: Double?
+        let momentum: Double
+        let consistency: Double
+        let structure: Double
+        let outcomes: Double
+        let actionBlocks: Double
+        let littleWins: Double
+        let engagement: Double
+        let strategicBehavior: Double
+        let carryoverPenalty: Double
+    }
+
+    let signature = ScoreSignature(
+        categoryID: payload.categoryID,
+        weekStartISO8601: payload.weekStartISO8601,
+        score: payload.score,
+        weekScore: payload.weekScore,
+        weekOverWeekDelta: payload.weekOverWeekDelta,
+        momentum: payload.momentum,
+        consistency: payload.consistency,
+        structure: payload.structure,
+        outcomes: payload.outcomes,
+        actionBlocks: payload.actionBlocks,
+        littleWins: payload.littleWins,
+        engagement: payload.engagement,
+        strategicBehavior: payload.strategicBehavior,
+        carryoverPenalty: payload.carryoverPenalty
+    )
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+    if let data = try? encoder.encode(signature),
+       let string = String(data: data, encoding: .utf8) {
+        return string
+    }
+    return "\(payload.categoryID.uuidString)|\(payload.weekStartISO8601)|\(payload.score)|\(payload.weekScore)"
+}
+
+fileprivate func fulfillmentReadableInsightPrompt(for payload: FulfillmentReadableInsightRequestPayload) -> String {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+    let payloadJSON: String
+    if let data = try? encoder.encode(payload), let string = String(data: data, encoding: .utf8) {
+        payloadJSON = string
+    } else {
+        payloadJSON = "{}"
+    }
+
+    return """
+    Create a readable insight for one Fulfillment Area in Loom Fulfillment Insights.
+
+    Requirements:
+    - Use APP_CONTEXT plus the fulfillment insight payload below.
+    - Return exactly TWO short lines:
+      1) one high-value insight sentence (not a recap of obvious values already shown in the UI)
+      2) one very short practical call to action the user can do in Loom to improve
+    - Separate the lines with a newline.
+    - Keep the total under 220 characters and end each line as a complete sentence.
+    - No questions, no filler.
+    - Prefer the most meaningful interpretation based on evidence.
+    - If you reference an insight metric, use the exact label and include the displayed value in parentheses.
+    - Use (X%) for percentage-based metrics and score components.
+    - If referencing Momentum or Consistency, use the displayed descriptor in parentheses (e.g., Momentum (Improving), Consistency (Mixed)).
+    - If referencing area rank, format it as area rank (X of Y), not just area rank (X).
+    - Use these labels verbatim when referenced: Momentum, Consistency, Structure, Outcomes, Action Blocks, Little Wins, Engagement, Strategic Behavior, Carryover penalty.
+    - Do not append duplicate raw score values after a metric reference (for example, avoid "Action Blocks (50%) score (0.5)").
+    - If Outcomes is high, do not describe an "execution gap in achieving Outcomes"; frame it as a sustainability/support mismatch instead.
+    - Valid interpretation types include (choose the best fit):
+      - score trend / week-over-week change
+      - momentum vs consistency mismatch
+      - strong structure but weak action blocks
+      - strong execution but weak outcomes conversion
+      - little wins vs action blocks imbalance
+      - strategic behavior weakness despite activity
+      - carryover penalty dragging score
+      - strong performance sustained vs peers
+      - peer-relative context (strongest / mover / rank)
+    - Do not mention the fulfillment area name (the UI already shows it).
+    - Do not invent values.
+    - Return only the readable insight text in the message field.
+
+    Fulfillment insight payload JSON:
+    \(payloadJSON)
+    """
+}
+
+fileprivate func limitFulfillmentReadableInsightText(_ text: String, maxCharacters: Int = 150) -> String {
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard trimmed.count > maxCharacters else { return trimmed }
+    let cutoffIndex = trimmed.index(trimmed.startIndex, offsetBy: maxCharacters)
+    let prefix = String(trimmed[..<cutoffIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+
+    if let sentenceEnd = prefix.lastIndex(where: { ".!?".contains($0) }) {
+        let sentence = String(prefix[...sentenceEnd]).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !sentence.isEmpty { return sentence }
+    }
+    if let naturalBreak = prefix.lastIndex(where: { ",;:".contains($0) }) {
+        let base = String(prefix[..<naturalBreak]).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !base.isEmpty { return base + "." }
+    }
+    if let lastSpace = prefix.lastIndex(of: " "), lastSpace > prefix.startIndex {
+        let base = String(prefix[..<lastSpace]).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !base.isEmpty { return base + "." }
+    }
+    return prefix + "."
+}
+
+fileprivate func fulfillmentReadableInsightCTAParagraph(_ text: String?) -> String? {
+    guard let text else { return nil }
+    let parts = text
+        .replacingOccurrences(of: "\r\n", with: "\n")
+        .components(separatedBy: "\n")
+        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { !$0.isEmpty }
+    return parts.last
+}
+
+fileprivate func fulfillmentReadableInsightMomentumDescriptor(_ value: Double) -> String {
+    let v = FulfillmentScoringMath.clamp(value, -1, 1)
+    if abs(v) < 0.12 { return "Stable" }
+    return v > 0 ? "Improving" : "Declining"
+}
+
+fileprivate func fulfillmentReadableInsightConsistencyDescriptor(_ value: Double) -> String {
+    let v = FulfillmentScoringMath.clamp(value, 0, 1)
+    if v >= 0.75 { return "Stable" }
+    if v >= 0.4 { return "Mixed" }
+    return "Volatile"
+}
+
+fileprivate func normalizeFulfillmentReadableInsightMetricReferences(
+    _ text: String,
+    payload: FulfillmentReadableInsightRequestPayload
+) -> String {
+    var output = text
+        .replacingOccurrences(of: "Enagement", with: "Engagement")
+        .replacingOccurrences(of: "enagement", with: "Engagement")
+        .replacingOccurrences(of: "Action Block ", with: "Action Blocks ")
+        .replacingOccurrences(of: "action block ", with: "Action Blocks ")
+        .replacingOccurrences(of: "acieving", with: "achieving")
+
+    func pct(_ value: Double) -> String {
+        "\(Int((FulfillmentScoringMath.clamped01(value) * 100).rounded()))%"
+    }
+
+    let replacements: [(label: String, value: String)] = [
+        ("Momentum", fulfillmentReadableInsightMomentumDescriptor(payload.momentum)),
+        ("Consistency", fulfillmentReadableInsightConsistencyDescriptor(payload.consistency)),
+        ("Structure", pct(payload.structure)),
+        ("Outcomes", pct(payload.outcomes)),
+        ("Action Blocks", pct(payload.actionBlocks)),
+        ("Little Wins", pct(payload.littleWins)),
+        ("Engagement", pct(payload.engagement)),
+        ("Strategic Behavior", pct(payload.strategicBehavior)),
+        ("Carryover penalty", pct(payload.carryoverPenalty))
+    ]
+
+    for item in replacements.sorted(by: { $0.label.count > $1.label.count }) {
+        let escaped = NSRegularExpression.escapedPattern(for: item.label)
+        let pattern = "(?i)\\b\(escaped)\\b(?:\\s*\\([^\\)]*\\))?"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+        let source = output
+        let nsRange = NSRange(source.startIndex..<source.endIndex, in: source)
+        output = regex.stringByReplacingMatches(
+            in: source,
+            range: nsRange,
+            withTemplate: "\(item.label) (\(item.value))"
+        )
+    }
+
+    if let rank = payload.peerRank, let count = payload.peerCount {
+        let pattern = "(?i)\\barea rank\\b(?:\\s*\\([^\\)]*\\))?"
+        if let regex = try? NSRegularExpression(pattern: pattern) {
+            let source = output
+            let nsRange = NSRange(source.startIndex..<source.endIndex, in: source)
+            output = regex.stringByReplacingMatches(
+                in: source,
+                range: nsRange,
+                withTemplate: "area rank (\(rank) of \(count))"
+            )
+        }
+    }
+
+    // Remove duplicated raw-score tails after canonical metric parentheticals, e.g. "Action Blocks (50%) score (0.5)".
+    if let duplicateValueRegex = try? NSRegularExpression(
+        pattern: "(?i)(\\b(?:Momentum|Consistency|Structure|Outcomes|Action Blocks|Little Wins|Engagement|Strategic Behavior|Carryover penalty)\\b\\s*\\([^\\)]*\\))\\s+score\\s*\\([-+]?\\d*\\.?\\d+%?\\)"
+    ) {
+        let source = output
+        let nsRange = NSRange(source.startIndex..<source.endIndex, in: source)
+        output = duplicateValueRegex.stringByReplacingMatches(in: source, range: nsRange, withTemplate: "$1")
+    }
+
+    // If outcomes are high, avoid contradictory "execution gap in achieving Outcomes" phrasing.
+    if payload.outcomes >= 0.8,
+       let contradictionRegex = try? NSRegularExpression(
+        pattern: "(?i)execution gap\\s+in\\s+achiev(?:ing|e)\\s+Outcomes\\s*\\([^\\)]*\\)"
+       ) {
+        let source = output
+        let nsRange = NSRange(source.startIndex..<source.endIndex, in: source)
+        output = contradictionRegex.stringByReplacingMatches(
+            in: source,
+            range: nsRange,
+            withTemplate: "support mismatch despite Outcomes (\(pct(payload.outcomes)))"
+        )
+    }
+
+    return ensureFulfillmentReadableInsightCTA(
+        repairFulfillmentReadableInsightLineIfNeeded(output, payload: payload),
+        payload: payload
+    )
+}
+
+fileprivate func ensureFulfillmentReadableInsightCTA(
+    _ text: String,
+    payload: FulfillmentReadableInsightRequestPayload
+) -> String {
+    let lines = text
+        .replacingOccurrences(of: "\r\n", with: "\n")
+        .split(separator: "\n", omittingEmptySubsequences: true)
+        .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { !$0.isEmpty }
+
+    guard let first = lines.first else {
+        let cta = normalizeFulfillmentReadableInsightCTALine(defaultFulfillmentReadableInsightCTA(payload: payload))
+        return cta + (cta.hasSuffix(".") ? "" : ".")
+    }
+    if lines.count >= 2 {
+        let cta = normalizeFulfillmentReadableInsightCTALine(lines[1])
+        return first + "\n\n" + cta
+    }
+    let cta = normalizeFulfillmentReadableInsightCTALine(defaultFulfillmentReadableInsightCTA(payload: payload))
+    return first + "\n\n" + cta + (cta.hasSuffix(".") ? "" : ".")
+}
+
+fileprivate func repairFulfillmentReadableInsightLineIfNeeded(
+    _ text: String,
+    payload: FulfillmentReadableInsightRequestPayload
+) -> String {
+    let lines = text
+        .replacingOccurrences(of: "\r\n", with: "\n")
+        .split(separator: "\n", omittingEmptySubsequences: false)
+        .map(String.init)
+
+    guard let firstRaw = lines.first else { return text }
+    let first = firstRaw.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !first.isEmpty else { return text }
+
+    let lower = first.lowercased()
+    let shouldReplace =
+        lower.contains("enagement") ||
+        lower.contains("score (0.") ||
+        (payload.outcomes >= 0.8 && lower.contains("execution gap")) ||
+        (lower.contains("action blocks") && lower.contains("imbalance") && payload.littleWins + 0.12 < payload.actionBlocks)
+
+    guard shouldReplace else { return text }
+
+    let replacement = practicalFulfillmentInsightLine(payload: payload)
+    let remaining = lines.dropFirst().map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+    return ([replacement] + remaining).joined(separator: "\n")
+}
+
+fileprivate func practicalFulfillmentInsightLine(payload: FulfillmentReadableInsightRequestPayload) -> String {
+    func pct(_ value: Double) -> String { "\(Int((FulfillmentScoringMath.clamped01(value) * 100).rounded()))%" }
+    let structure = payload.structure
+    let outcomes = payload.outcomes
+    let actionBlocks = payload.actionBlocks
+    let littleWins = payload.littleWins
+    let engagement = payload.engagement
+    let strategic = payload.strategicBehavior
+    let carry = payload.carryoverPenalty
+
+    if carry >= 0.4 {
+        return "Carryover penalty (\(pct(carry))) is dragging this area despite stronger Structure (\(pct(structure)))."
+    }
+    if structure >= 0.8 && outcomes >= 0.8 && littleWins + 0.18 < actionBlocks {
+        return "Structure (\(pct(structure))) and Outcomes (\(pct(outcomes))) are strong, but Little Wins (\(pct(littleWins))) lag Action Blocks (\(pct(actionBlocks)))."
+    }
+    if outcomes >= 0.8 && actionBlocks < 0.6 {
+        return "Outcomes (\(pct(outcomes))) are strong, but Action Blocks (\(pct(actionBlocks))) need stronger execution support."
+    }
+    if strategic < 0.6 && (structure >= 0.75 || outcomes >= 0.75) {
+        return "Strategic Behavior (\(pct(strategic))) is lagging stronger Structure (\(pct(structure))) and Outcomes (\(pct(outcomes)))."
+    }
+    if engagement < 0.6 && littleWins < 0.6 {
+        return "Engagement (\(pct(engagement))) and Little Wins (\(pct(littleWins))) are the clearest drag on this area."
+    }
+    if actionBlocks < 0.55 {
+        return "Action Blocks (\(pct(actionBlocks))) are the clearest execution constraint on this area right now."
+    }
+    if littleWins < 0.55 {
+        return "Little Wins (\(pct(littleWins))) are lagging and may be weakening day-to-day support."
+    }
+    return "The weakest support signal is Engagement (\(pct(engagement))), which is limiting progress consistency."
+}
+
+fileprivate func defaultFulfillmentReadableInsightCTA(payload: FulfillmentReadableInsightRequestPayload) -> String {
+    if payload.carryoverPenalty >= 0.4 {
+        return "Balance only adding essential actions and completing more actions"
+    }
+    if payload.actionBlocks < 0.6 && payload.littleWins < 0.6 {
+        return "Complete more Little Wins and Action Blocks"
+    }
+    let weakest = [
+        ("Action Blocks", payload.actionBlocks),
+        ("Little Wins", payload.littleWins),
+        ("Engagement", payload.engagement),
+        ("Strategic Behavior", payload.strategicBehavior),
+        ("Structure", payload.structure),
+        ("Outcomes", payload.outcomes)
+    ].min(by: { $0.1 < $1.1 })?.0 ?? "Action Blocks"
+
+    if payload.littleWins + 0.12 < payload.actionBlocks && payload.littleWins < 0.55 {
+        return "Complete more Little Wins and Action Blocks"
+    }
+    if payload.strategicBehavior < 0.6 && (payload.structure >= 0.75 || payload.outcomes >= 0.75) {
+        return "Revise Mission or Identity to improve alignment"
+    }
+
+    switch weakest {
+    case "Action Blocks":
+        return "Complete more Action Blocks with realistic durations"
+    case "Little Wins":
+        return "Complete more Little Wins"
+    case "Engagement":
+        return "Complete one small action in this area today"
+    case "Strategic Behavior":
+        return "Revise Mission or Identity to improve alignment"
+    case "Structure":
+        return "Clarify the Mission and Identity for this area"
+    case "Outcomes":
+        return "Connect or refine an Outcome for this area"
+    default:
+        return "Improve one weak support signal in this area"
+    }
+}
+
+fileprivate func normalizeFulfillmentReadableInsightCTALine(_ line: String) -> String {
+    var output = line.trimmingCharacters(in: .whitespacesAndNewlines)
+    output = output.replacingOccurrences(of: #"^(?i)in loom,\s*"#, with: "", options: .regularExpression)
+    output = output.replacingOccurrences(of: #"^(?i)in loom\s*"#, with: "", options: .regularExpression)
+    output = output.replacingOccurrences(of: "Enagement", with: "Engagement")
+    output = output.replacingOccurrences(of: "enagement", with: "Engagement")
+    output = output.replacingOccurrences(of: "Action Block ", with: "Action Blocks ")
+    output = output.replacingOccurrences(of: "action block ", with: "Action Blocks ")
+    output = output.replacingOccurrences(
+        of: #"(?i)shorten or split one Action Blocks? to reduce carryover"#,
+        with: "Balance only adding essential actions and completing more actions",
+        options: .regularExpression
+    )
+    if output.lowercased().contains("add or replace one practical little win"),
+       output.lowercased().contains("action blocks") {
+        output = "Complete more Little Wins and Action Blocks"
+    }
+    return output
+}
+
 struct PassionsSectionView: View {
     @Environment(\.modelContext) private var modelContext
     @Query private var passions: [Passion]
@@ -218,6 +633,8 @@ struct FulfillmentView: View {
     @State private var isAddingResource = false
     @State private var newResourceText = ""
     @State private var visionDrafts: [UUID: String] = [:]
+    @State private var aiReadableInsightsByKey: [String: String] = [:]
+    @State private var aiReadableInsightLoadingKeys: Set<String> = []
     @State private var purposeDrafts: [UUID: String] = [:]
     @State private var isShowingInstructions = false
     @State private var highlightedCategoryIndex: Int = 0
@@ -1168,14 +1585,14 @@ struct FulfillmentView: View {
                 let selectedDelta = fulfillmentWeekOverWeekDelta(for: selected)
                 let selectedInsightSnapshot = latestFulfillmentWeeklySnapshot(for: selected)
 
-                HStack(alignment: .center, spacing: 12) {
+                HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
                         Text(selectedTitle)
                             .font(.headline)
                             .fontWeight(.bold)
                             .foregroundStyle(FulfillmentCategoryTheme.color(for: selectedTitle))
                             .lineLimit(2)
-                    Text("Tap cirles on the graph")
+                    Text("Tap circles on the graph")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
@@ -1210,37 +1627,33 @@ struct FulfillmentView: View {
                         }
                     }
 
-                    if let snap = selectedInsightSnapshot,
-                       let summaryInsight = primaryFulfillmentHeaderInsightMessage(for: snap) {
-                        let loomAIGradient = AngularGradient(
-                            colors: [
-                                Color(red: 0.22, green: 0.47, blue: 1.0),
-                                Color(red: 0.15, green: 0.83, blue: 0.95),
-                                Color(red: 0.62, green: 0.40, blue: 0.95),
-                                Color(red: 0.80, green: 0.38, blue: 0.78),
-                                Color(red: 0.98, green: 0.36, blue: 0.58),
-                                Color(red: 0.75, green: 0.42, blue: 0.74),
-                                Color(red: 0.22, green: 0.47, blue: 1.0)
-                            ],
-                            center: .center,
-                            angle: .degrees(headerInsightOutlineAngle)
-                        )
-                        FulfillmentInlineInsightText(
-                            imageName: "LoomAI",
-                            text: summaryInsight,
-                            font: UIFont.preferredFont(forTextStyle: .footnote),
-                            textColor: UIColor.label,
-                            imageSize: CGSize(width: 35, height: 35)
-                        )
-                        .frame(maxWidth: leftWidth - 50, alignment: .leading)
-                        .padding(.trailing, 16)
-                        .padding(8)
-                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .stroke(loomAIGradient.opacity(0.95), lineWidth: 2)
-                        )
-                        .padding(.top, 4)
+                    if let snap = selectedInsightSnapshot {
+                        let payload = fulfillmentReadableInsightPayload(for: snap, categoryTitle: selectedTitle, weekOverWeekDelta: selectedDelta)
+                        let insightKey = fulfillmentReadableInsightKey(for: payload)
+                        let summaryInsight = fulfillmentReadableInsightCTAParagraph(aiFulfillmentReadableInsightText(
+                            for: snap,
+                            categoryTitle: selectedTitle,
+                            weekOverWeekDelta: selectedDelta
+                        ))
+                        let isLoadingInsight = aiReadableInsightLoadingKeys.contains(insightKey)
+                        if isLoadingInsight || summaryInsight != nil {
+                            FulfillmentReadableInsightCard(
+                                text: summaryInsight,
+                                isLoading: isLoadingInsight,
+                                font: UIFont.preferredFont(forTextStyle: .footnote),
+                                imageSize: CGSize(width: 35, height: 35),
+                                cornerRadius: 10,
+                                fillColor: Color(.secondarySystemBackground)
+                            )
+                            .frame(maxWidth: leftWidth - 20, alignment: .leading)
+                            .padding(.trailing, 4)
+                            .padding(.top, 4)
+                        }
+                        Color.clear
+                            .frame(height: 0)
+                            .task(id: insightKey) {
+                                await requestFulfillmentReadableInsightIfNeeded(for: snap, categoryTitle: selectedTitle, weekOverWeekDelta: selectedDelta)
+                            }
                     }
 
                     Spacer(minLength: 4)
@@ -1266,7 +1679,8 @@ struct FulfillmentView: View {
                 )
                 .frame(width: graphWidth, height: graphWidth)
                 .frame(width: baseGraphWidth, alignment: .center)
-                .frame(minHeight: 245, alignment: .center)
+                .frame(minHeight: 245, alignment: .top)
+                .padding(.top, 8)
 
                 Spacer(minLength: 0)
                 }
@@ -1632,6 +2046,122 @@ struct FulfillmentView: View {
         guard let delta else { return .secondary }
         if abs(delta) < 0.05 { return .secondary }
         return delta > 0 ? .green : .orange
+    }
+
+    private func fulfillmentReadableInsightPayload(
+        for snap: FulfillmentCategoryScoreSnapshot,
+        categoryTitle: String,
+        weekOverWeekDelta: Double?
+    ) -> FulfillmentReadableInsightRequestPayload {
+        let weekStart = Calendar.current.startOfDay(for: snap.weekStartDate)
+        let sameWeek = fulfillmentCategoryScoreSnapshots.filter {
+            Calendar.current.isDate($0.weekStartDate, inSameDayAs: weekStart)
+        }
+        let sortedByScore = sameWeek.sorted { lhs, rhs in
+            if lhs.score == rhs.score {
+                return (lhs.categoryTitleSnapshot).localizedCaseInsensitiveCompare(rhs.categoryTitleSnapshot) == .orderedAscending
+            }
+            return lhs.score > rhs.score
+        }
+        let peerRank = sortedByScore.firstIndex(where: { $0.categoryID == snap.categoryID }).map { $0 + 1 }
+        let strongest = sortedByScore.first
+        let peerAverage = sameWeek.isEmpty ? nil : (sameWeek.map(\.score).reduce(0, +) / Double(sameWeek.count))
+
+        let priorWeek = Calendar.current.date(byAdding: .day, value: -7, to: weekStart)
+        let inferredDelta: Double? = {
+            if let weekOverWeekDelta { return roundedTenth(weekOverWeekDelta) }
+            guard let priorWeek else { return nil }
+            guard let prior = fulfillmentCategoryScoreSnapshots.first(where: {
+                $0.categoryID == snap.categoryID && Calendar.current.isDate($0.weekStartDate, inSameDayAs: priorWeek)
+            }) else { return nil }
+            return roundedTenth(snap.score) - roundedTenth(prior.score)
+        }()
+
+        let recentScores = fulfillmentCategoryScoreSnapshots
+            .filter { $0.categoryID == snap.categoryID }
+            .sorted { $0.weekStartDate > $1.weekStartDate }
+            .prefix(8)
+            .map { roundedTenth($0.score) }
+
+        let movers: [(FulfillmentCategoryScoreSnapshot, Double)] = sameWeek.compactMap { row in
+            guard let priorWeek else { return nil }
+            guard let prior = fulfillmentCategoryScoreSnapshots.first(where: {
+                $0.categoryID == row.categoryID && Calendar.current.isDate($0.weekStartDate, inSameDayAs: priorWeek)
+            }) else { return nil }
+            let delta = roundedTenth(row.score) - roundedTenth(prior.score)
+            return (row, delta)
+        }
+        let biggestMover = movers.max { abs($0.1) < abs($1.1) }
+
+        return FulfillmentReadableInsightRequestPayload(
+            categoryID: snap.categoryID,
+            categoryTitle: categoryTitle,
+            weekStartISO8601: weekStart.ISO8601Format(),
+            score: roundedTenth(snap.score),
+            weekScore: roundedTenth(snap.targetScore),
+            weekOverWeekDelta: inferredDelta,
+            momentum: roundedTenth(snap.momentum),
+            consistency: roundedTenth(snap.consistency),
+            structure: FulfillmentScoringMath.clamped01(snap.structure),
+            outcomes: FulfillmentScoringMath.clamped01(snap.outcomes),
+            actionBlocks: FulfillmentScoringMath.clamped01(snap.actionBlocks),
+            littleWins: FulfillmentScoringMath.clamped01(snap.littleWins),
+            engagement: FulfillmentScoringMath.clamped01(snap.engagement),
+            strategicBehavior: FulfillmentScoringMath.clamped01(snap.strategicBalance),
+            carryoverPenalty: FulfillmentScoringMath.clamped01(snap.carryoverPenalty),
+            peerAverageScore: peerAverage.map(roundedTenth),
+            peerRank: peerRank,
+            peerCount: sameWeek.isEmpty ? nil : sameWeek.count,
+            strongestCategory: strongest?.categoryTitleSnapshot,
+            strongestCategoryScore: strongest.map { roundedTenth($0.score) },
+            biggestMoverCategory: biggestMover.map { $0.0.categoryTitleSnapshot },
+            biggestMoverDelta: biggestMover.map { roundedTenth($0.1) },
+            recentCategoryScores: recentScores
+        )
+    }
+
+    private func aiFulfillmentReadableInsightText(
+        for snap: FulfillmentCategoryScoreSnapshot,
+        categoryTitle: String,
+        weekOverWeekDelta: Double?
+    ) -> String? {
+        let payload = fulfillmentReadableInsightPayload(for: snap, categoryTitle: categoryTitle, weekOverWeekDelta: weekOverWeekDelta)
+        let key = fulfillmentReadableInsightKey(for: payload)
+        guard let base = aiReadableInsightsByKey[key] ?? FulfillmentReadableInsightRuntimeStore.value(for: key) else { return nil }
+        return ensureFulfillmentReadableInsightCTA(base, payload: payload)
+    }
+
+    @MainActor
+    private func requestFulfillmentReadableInsightIfNeeded(
+        for snap: FulfillmentCategoryScoreSnapshot,
+        categoryTitle: String,
+        weekOverWeekDelta: Double?
+    ) async {
+        let payload = fulfillmentReadableInsightPayload(for: snap, categoryTitle: categoryTitle, weekOverWeekDelta: weekOverWeekDelta)
+        let key = fulfillmentReadableInsightKey(for: payload)
+        if !loomAIInsightsRefreshEnabled(),
+           let cached = aiReadableInsightsByKey[key] ?? FulfillmentReadableInsightRuntimeStore.value(for: key) {
+            aiReadableInsightsByKey[key] = cached
+            return
+        }
+        aiReadableInsightLoadingKeys.insert(key)
+        defer { aiReadableInsightLoadingKeys.remove(key) }
+
+        do {
+            let contextSnapshot = try LoomAIViewModel().buildContextSnapshot(in: modelContext)
+            let response = try await LoomAIService().sendChat(
+                messages: [.init(role: "user", content: fulfillmentReadableInsightPrompt(for: payload))],
+                context: contextSnapshot
+            )
+            let normalized = normalizeFulfillmentReadableInsightMetricReferences(response.message, payload: payload)
+            let text = limitFulfillmentReadableInsightText(normalized, maxCharacters: 220)
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            FulfillmentReadableInsightRuntimeStore.set(trimmed, for: key)
+            aiReadableInsightsByKey[key] = trimmed
+        } catch {
+            // Keep local heuristic fallback if the API is unavailable.
+        }
     }
 
     private func primaryFulfillmentHeaderInsightMessage(for snap: FulfillmentCategoryScoreSnapshot) -> String? {
@@ -3495,6 +4025,7 @@ private struct FulfillmentTrendsView: View {
         let height: CGFloat
     }
 
+    @Environment(\.modelContext) private var modelContext
     @Query(sort: \Fulfillment.updatedAt, order: .forward) private var fulfillments: [Fulfillment]
     @Query(sort: \FulfillmentCategoryScoreSnapshot.weekStartDate, order: .forward)
     private var allSnapshots: [FulfillmentCategoryScoreSnapshot]
@@ -3505,6 +4036,8 @@ private struct FulfillmentTrendsView: View {
     @State private var trendsInsightOutlineAngle: Double = 0
     @State private var cachedFilteredSnapshots: [FulfillmentCategoryScoreSnapshot] = []
     @State private var cachedDisplayCategoryTitleByID: [UUID: String] = [:]
+    @State private var aiReadableInsightsByKey: [String: String] = [:]
+    @State private var aiReadableInsightLoadingKeys: Set<String> = []
 
     private var snapshots: [FulfillmentCategoryScoreSnapshot] {
         cachedFilteredSnapshots
@@ -4065,33 +4598,19 @@ private struct FulfillmentTrendsView: View {
             }
 
             if let snap = selectedSnapshot {
-                if let summaryInsight = primaryInsightMessage(for: snap) {
-                    let loomAIGradient = AngularGradient(
-                        colors: [
-                            Color(red: 0.22, green: 0.47, blue: 1.0),
-                            Color(red: 0.15, green: 0.83, blue: 0.95),
-                            Color(red: 0.62, green: 0.40, blue: 0.95),
-                            Color(red: 0.80, green: 0.38, blue: 0.78),
-                            Color(red: 0.98, green: 0.36, blue: 0.58),
-                            Color(red: 0.75, green: 0.42, blue: 0.74),
-                            Color(red: 0.22, green: 0.47, blue: 1.0)
-                        ],
-                        center: .center,
-                        angle: .degrees(trendsInsightOutlineAngle)
-                    )
-                    FulfillmentInlineInsightText(
-                        imageName: "LoomAI",
+                let payload = trendsReadableInsightPayload(for: snap)
+                let insightKey = fulfillmentReadableInsightKey(for: payload)
+                let summaryInsight = aiTrendsReadableInsightText(for: snap)
+                let isLoadingInsight = aiReadableInsightLoadingKeys.contains(insightKey)
+                if isLoadingInsight || summaryInsight != nil {
+                    FulfillmentReadableInsightCard(
                         text: summaryInsight,
+                        isLoading: isLoadingInsight,
                         font: UIFont.preferredFont(forTextStyle: .subheadline),
-                        textColor: UIColor.label,
-                        imageSize: CGSize(width: 33, height: 33)
+                        imageSize: CGSize(width: 33, height: 33),
+                        cornerRadius: 12
                     )
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(loomAIGradient.opacity(0.95), lineWidth: 2)
-                    )
                     .onAppear {
                         guard trendsInsightOutlineAngle == 0 else { return }
                         withAnimation(.linear(duration: 7).repeatForever(autoreverses: false)) {
@@ -4099,6 +4618,11 @@ private struct FulfillmentTrendsView: View {
                         }
                     }
                 }
+                Color.clear
+                    .frame(height: 0)
+                    .task(id: insightKey) {
+                        await requestTrendsReadableInsightIfNeeded(for: snap)
+                    }
 
                 VStack(spacing: 8) {
                     insightRow("Current Score", String(format: "%.1f/5", snap.score))
@@ -4111,7 +4635,7 @@ private struct FulfillmentTrendsView: View {
                     insightRow("Action blocks", percentTextOrDash(snap.actionBlocks))
                     insightRow("Little Wins", percentTextOrDash(snap.littleWins))
                     insightRow("Engagement", percentTextOrDash(snap.engagement))
-                    insightRow("Strategic behavior", percentTextOrDash(snap.strategicBalance))
+                    insightRow("Strategic Behavior", percentTextOrDash(snap.strategicBalance))
                     insightRow(
                         "Carryover penalty",
                         percentTextOrDash(snap.carryoverPenalty),
@@ -4303,6 +4827,93 @@ private struct FulfillmentTrendsView: View {
         return categoryDeltaColor(delta)
     }
 
+    private func trendsReadableInsightPayload(for snap: FulfillmentCategoryScoreSnapshot) -> FulfillmentReadableInsightRequestPayload {
+        let categoryTitle = trendsDisplayCategoryTitle(for: snap)
+        let sameWeek = selectedWeekSnapshots
+        let sortedByScore = sameWeek.sorted { lhs, rhs in
+            if lhs.score == rhs.score {
+                return trendsDisplayCategoryTitle(for: lhs).localizedCaseInsensitiveCompare(trendsDisplayCategoryTitle(for: rhs)) == .orderedAscending
+            }
+            return lhs.score > rhs.score
+        }
+        let peerRank = sortedByScore.firstIndex(where: { $0.categoryID == snap.categoryID }).map { $0 + 1 }
+        let strongest = sortedByScore.first
+        let peerAverage = sameWeek.isEmpty ? nil : (sameWeek.map(\.score).reduce(0, +) / Double(sameWeek.count))
+        let delta = categoryDisplayedDelta(for: snap).map(roundedTenth)
+        let movers: [(FulfillmentCategoryScoreSnapshot, Double)] = selectedWeekSnapshots.compactMap { row in
+            guard let d = categoryDisplayedDelta(for: row) else { return nil }
+            return (row, d)
+        }
+        let biggestMover = movers.max { abs($0.1) < abs($1.1) }
+        let recentScores = snapshots
+            .filter { $0.categoryID == snap.categoryID }
+            .sorted { $0.weekStartDate > $1.weekStartDate }
+            .prefix(8)
+            .map { roundedTenth($0.score) }
+
+        return FulfillmentReadableInsightRequestPayload(
+            categoryID: snap.categoryID,
+            categoryTitle: categoryTitle,
+            weekStartISO8601: Calendar.current.startOfDay(for: snap.weekStartDate).ISO8601Format(),
+            score: roundedTenth(snap.score),
+            weekScore: roundedTenth(snap.targetScore),
+            weekOverWeekDelta: delta,
+            momentum: roundedTenth(snap.momentum),
+            consistency: roundedTenth(snap.consistency),
+            structure: FulfillmentScoringMath.clamped01(snap.structure),
+            outcomes: FulfillmentScoringMath.clamped01(snap.outcomes),
+            actionBlocks: FulfillmentScoringMath.clamped01(snap.actionBlocks),
+            littleWins: FulfillmentScoringMath.clamped01(snap.littleWins),
+            engagement: FulfillmentScoringMath.clamped01(snap.engagement),
+            strategicBehavior: FulfillmentScoringMath.clamped01(snap.strategicBalance),
+            carryoverPenalty: FulfillmentScoringMath.clamped01(snap.carryoverPenalty),
+            peerAverageScore: peerAverage.map(roundedTenth),
+            peerRank: peerRank,
+            peerCount: sameWeek.isEmpty ? nil : sameWeek.count,
+            strongestCategory: strongest.map { trendsDisplayCategoryTitle(for: $0) },
+            strongestCategoryScore: strongest.map { roundedTenth($0.score) },
+            biggestMoverCategory: biggestMover.map { trendsDisplayCategoryTitle(for: $0.0) },
+            biggestMoverDelta: biggestMover.map { roundedTenth($0.1) },
+            recentCategoryScores: recentScores
+        )
+    }
+
+    private func aiTrendsReadableInsightText(for snap: FulfillmentCategoryScoreSnapshot) -> String? {
+        let payload = trendsReadableInsightPayload(for: snap)
+        let key = fulfillmentReadableInsightKey(for: payload)
+        guard let base = aiReadableInsightsByKey[key] ?? FulfillmentReadableInsightRuntimeStore.value(for: key) else { return nil }
+        return ensureFulfillmentReadableInsightCTA(base, payload: payload)
+    }
+
+    @MainActor
+    private func requestTrendsReadableInsightIfNeeded(for snap: FulfillmentCategoryScoreSnapshot) async {
+        let payload = trendsReadableInsightPayload(for: snap)
+        let key = fulfillmentReadableInsightKey(for: payload)
+        if !loomAIInsightsRefreshEnabled(),
+           let cached = aiReadableInsightsByKey[key] ?? FulfillmentReadableInsightRuntimeStore.value(for: key) {
+            aiReadableInsightsByKey[key] = cached
+            return
+        }
+        aiReadableInsightLoadingKeys.insert(key)
+        defer { aiReadableInsightLoadingKeys.remove(key) }
+
+        do {
+            let contextSnapshot = try LoomAIViewModel().buildContextSnapshot(in: modelContext)
+            let response = try await LoomAIService().sendChat(
+                messages: [.init(role: "user", content: fulfillmentReadableInsightPrompt(for: payload))],
+                context: contextSnapshot
+            )
+            let normalized = normalizeFulfillmentReadableInsightMetricReferences(response.message, payload: payload)
+            let text = limitFulfillmentReadableInsightText(normalized, maxCharacters: 220)
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            FulfillmentReadableInsightRuntimeStore.set(trimmed, for: key)
+            aiReadableInsightsByKey[key] = trimmed
+        } catch {
+            // Keep local heuristic fallback if the API is unavailable.
+        }
+    }
+
     private func primaryInsightMessage(for snap: FulfillmentCategoryScoreSnapshot) -> String? {
         struct InsightCandidate {
             let priority: Double
@@ -4398,6 +5009,141 @@ private struct FulfillmentTrendsView: View {
 }
 
 #if canImport(UIKit)
+private func applyInsightMetricItalics(
+    to attributed: NSMutableAttributedString,
+    source: String,
+    baseFont: UIFont
+) {
+    let labels = [
+        "Momentum",
+        "Consistency",
+        "Structure",
+        "Outcomes",
+        "Action Blocks",
+        "Action blocks",
+        "Little Wins",
+        "Engagement",
+        "Strategic Behavior",
+        "Strategic Behavior",
+        "Carryover penalty",
+        "Carryover Penalty"
+    ]
+    let escaped = labels.map(NSRegularExpression.escapedPattern(for:)).joined(separator: "|")
+    let pattern = "(?i)\\b(?:\(escaped))\\b(?:\\s*\\([^\\)]+\\))?"
+    guard let regex = try? NSRegularExpression(pattern: pattern) else { return }
+
+    let italicDescriptor = baseFont.fontDescriptor.withSymbolicTraits([.traitItalic]) ?? baseFont.fontDescriptor
+    let italicFont = UIFont(descriptor: italicDescriptor, size: baseFont.pointSize)
+    let nsRange = NSRange(source.startIndex..<source.endIndex, in: source)
+    for match in regex.matches(in: source, range: nsRange) {
+        attributed.addAttribute(.font, value: italicFont, range: match.range)
+    }
+}
+
+private struct FulfillmentReadableInsightCard: View {
+    let text: String?
+    let isLoading: Bool
+    let font: UIFont
+    let imageSize: CGSize
+    let cornerRadius: CGFloat
+    var fillColor: Color? = nil
+
+    @State private var outlineAngle: Double = 0
+
+    private var outlineGradient: AngularGradient {
+        AngularGradient(
+            colors: [
+                Color(red: 0.22, green: 0.47, blue: 1.0),
+                Color(red: 0.15, green: 0.83, blue: 0.95),
+                Color(red: 0.62, green: 0.40, blue: 0.95),
+                Color(red: 0.80, green: 0.38, blue: 0.78),
+                Color(red: 0.98, green: 0.36, blue: 0.58),
+                Color(red: 0.75, green: 0.42, blue: 0.74),
+                Color(red: 0.22, green: 0.47, blue: 1.0)
+            ],
+            center: .center,
+            angle: .degrees(outlineAngle)
+        )
+    }
+
+    var body: some View {
+        Group {
+            if isLoading {
+                HStack(spacing: 8) {
+                    Image("LoomAI")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: imageSize.width, height: imageSize.height)
+                    FulfillmentLoomTypingDotsIndicator()
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else if let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                FulfillmentInlineInsightText(
+                    imageName: "LoomAI",
+                    text: text,
+                    font: font,
+                    textColor: UIColor.label,
+                    imageSize: imageSize
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            Group {
+                if let fillColor {
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .fill(fillColor)
+                }
+            }
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: cornerRadius)
+                .stroke(outlineGradient.opacity(0.95), lineWidth: 2)
+        )
+        .onAppear {
+            outlineAngle = 0
+            withAnimation(.linear(duration: 7).repeatForever(autoreverses: false)) {
+                outlineAngle = 360
+            }
+        }
+    }
+}
+
+private struct FulfillmentLoomTypingDotsIndicator: View {
+    @State private var activeIndex: Int = 0
+
+    private let colors: [Color] = [
+        Color(red: 0.22, green: 0.47, blue: 1.0),
+        Color(red: 0.15, green: 0.83, blue: 0.95),
+        Color(red: 0.62, green: 0.40, blue: 0.95)
+    ]
+
+    var body: some View {
+        HStack(spacing: 5) {
+            ForEach(Array(colors.enumerated()), id: \.offset) { idx, color in
+                Circle()
+                    .fill(color.opacity(activeIndex == idx ? 1 : 0.35))
+                    .frame(width: 6, height: 6)
+                    .scaleEffect(activeIndex == idx ? 1.15 : 0.9)
+                    .animation(.easeInOut(duration: 0.2), value: activeIndex)
+            }
+        }
+        .onAppear {
+            guard activeIndex == 0 else { return }
+            animate()
+        }
+    }
+
+    private func animate() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+            activeIndex = (activeIndex + 1) % colors.count
+            animate()
+        }
+    }
+}
+
 private struct FulfillmentInlineInsightText: UIViewRepresentable {
     let imageName: String
     let text: String
@@ -4434,8 +5180,9 @@ private struct FulfillmentInlineInsightText: UIViewRepresentable {
             .foregroundColor: textColor,
             .paragraphStyle: paragraph
         ]
-
-        view.attributedText = NSAttributedString(string: text, attributes: attrs)
+        let output = NSMutableAttributedString(string: text, attributes: attrs)
+        applyInsightMetricItalics(to: output, source: text, baseFont: font)
+        view.attributedText = output
 
         if let imageView = view.viewWithTag(imageTag) as? UIImageView {
             imageView.image = UIImage(named: imageName)

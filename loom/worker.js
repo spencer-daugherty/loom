@@ -75,6 +75,8 @@ export default {
     const isFollowUpPromptMode = detectFollowUpPromptMode(nonSystemMessages);
     const isAutoGroupMode = detectAutoGroupMode(nonSystemMessages);
     const isReflectReadableInsightsMode = detectReflectReadableInsightsMode(nonSystemMessages);
+    const isFulfillmentReadableInsightMode = detectFulfillmentReadableInsightMode(nonSystemMessages);
+    const isPurposeReadableInsightMode = detectPurposeReadableInsightMode(nonSystemMessages);
 
     if (nonSystemMessages.length === 0) {
       return json(
@@ -99,7 +101,11 @@ export default {
       ? "autogroup-v1"
       : (isFollowUpPromptMode
         ? "followup-prompts-v1"
-        : (isReflectReadableInsightsMode ? "reflect-readable-insights-v1" : "grounding-cta-v3"));
+        : (isReflectReadableInsightsMode
+          ? "reflect-readable-insights-v1"
+          : (isFulfillmentReadableInsightMode
+            ? "fulfillment-readable-insights-v1"
+            : (isPurposeReadableInsightMode ? "purpose-readable-insights-v1" : "grounding-cta-v3"))));
 
     const coreInstructions = isAutoGroupMode ? [
       "You generate AutoGroup plans for Loom Plan Step 3 (Group).",
@@ -154,6 +160,63 @@ export default {
       "Avoid filler phrases like 'During this session' or 'a total of'.",
       "Prefer naming the most important fulfillment area/outcome/pattern if supported by evidence.",
       "Do not invent values that are not present.",
+      "Return JSON ONLY in this exact shape:",
+      '{"message":"string","actions":[],"debug":{"usedContext":true,"evidence":["path.or.field.used"],"confidence":"high|medium|low"}}'
+    ].join("\n") : isFulfillmentReadableInsightMode ? [
+      "You generate one readable insight sentence for a Loom Fulfillment Area.",
+      "Use APP_CONTEXT_JSON and the provided fulfillment insight payload.",
+      "This is readable-insight mode. Do NOT return action buttons or suggested actions array items.",
+      "Do NOT end with a question.",
+      "Return exactly TWO short lines under 220 characters total.",
+      "Line 1 must be a real insight sentence (pattern, implication, imbalance, trend, or mismatch), not a recap of obvious displayed stats.",
+      "Line 2 must be a very short practical call to action the user can do in Loom to improve.",
+      "Separate the lines with a newline.",
+      "Line 2 should NOT start with 'In Loom,'.",
+      "Use practical action verbs in line 2 (prefer: Complete, Revise, Connect, Clarify, Add, Replace, Shorten, Split).",
+      "If both Little Wins and Action Blocks are weak, line 2 should address both together (for example: 'Complete more Little Wins and Action Blocks.').",
+      "If carryover is high, line 2 should give practical load-management advice (for example: 'Balance only adding essential actions and completing more actions.').",
+      "Avoid filler phrases like 'During this week' or 'a total of'.",
+      "Use plain language and be specific.",
+      "If referencing an insight metric, use the exact label and include the displayed value in parentheses.",
+      "Use (X%) for percentage-based metrics and score components.",
+      "If referencing Momentum or Consistency, use the displayed descriptor in parentheses (e.g., Momentum (Improving), Consistency (Mixed)).",
+      "If referencing area rank, format it as area rank (X of Y), not just area rank (X).",
+      "Use these labels verbatim when referenced: Momentum, Consistency, Structure, Outcomes, Action Blocks, Little Wins, Engagement, Strategic Behavior, Carryover penalty.",
+      "Do not append duplicate raw score values after a metric reference (for example, avoid 'Action Blocks (50%) score (0.5)').",
+      "If Outcomes is high, do not describe an 'execution gap in achieving Outcomes'; frame it as a sustainability/support mismatch instead.",
+      "Make the insight and CTA logically consistent with each other (the CTA should address the actual weakness named in line 1).",
+      "Use 'Action Blocks' (plural) and 'Engagement' (correct spelling).",
+      "If placeholders/low-signal values appear, treat them as placeholders and say so only if relevant.",
+      "Prefer the strongest supported interpretation from the payload: trend, carryover drag, execution/outcome mismatch, structure gap, little wins imbalance, strategic behavior, peer-relative position.",
+      "Do not mention the fulfillment area name directly (the UI already shows it).",
+      "Do not invent values.",
+      "Return JSON ONLY in this exact shape:",
+      '{"message":"string","actions":[],"debug":{"usedContext":true,"evidence":["path.or.field.used"],"confidence":"high|medium|low"}}'
+    ].join("\n") : isPurposeReadableInsightMode ? [
+      "You generate one readable insight sentence for a Loom Purpose passion.",
+      "Use APP_CONTEXT_JSON and the provided purpose passion insight payload.",
+      "This is readable-insight mode. Do NOT return action buttons or suggested actions array items.",
+      "Do NOT end with a question.",
+      "Return exactly TWO short lines under 220 characters total.",
+      "Line 1 must be a real insight sentence (pattern, implication, imbalance, trend, or mismatch), not a recap of obvious displayed stats.",
+      "Line 2 must be a very short practical call to action the user can do in Loom to improve.",
+      "Separate the lines with a newline.",
+      "Line 2 should NOT start with 'In Loom,'.",
+      "Use practical action verbs in line 2 (prefer: Complete, Revise, Connect, Clarify, Add, Replace, Shorten, Split).",
+      "If both Little Wins and Action Blocks are weak, line 2 should address both together (for example: 'Complete more Little Wins and Action Blocks.').",
+      "If carryover is high, line 2 should give practical load-management advice (for example: 'Balance only adding essential actions and completing more actions.').",
+      "Avoid filler phrases like 'During this month' or 'a total of'.",
+      "Use plain language and be specific.",
+      "Do not mention the passion name directly (the UI already shows it).",
+      "If referencing an insight metric, use the exact label and include the displayed value in parentheses.",
+      "Use (X%) for percentage-based metrics and score components.",
+      "If referencing Momentum or Consistency, use the displayed descriptor in parentheses (e.g., Momentum (Improving), Consistency (Stable)).",
+      "Use these labels verbatim when referenced: Momentum, Consistency, Structure, Outcomes, Action Blocks, Little Wins, Evidence, Carryover penalty.",
+      "Make the insight and CTA logically consistent with each other (the CTA should address the actual weakness named in line 1).",
+      "Use 'Action Blocks' (plural).",
+      "Use awareness of all relevant passion insight data in the payload (scores, momentum, consistency, support signals, evidence, carryover, peers, movers, recent trend).",
+      "Choose the strongest supported interpretation across different situations (trend shift, volatility, support mismatch, carryover drag, strong stable support, peer-relative context).",
+      "Do not invent values.",
       "Return JSON ONLY in this exact shape:",
       '{"message":"string","actions":[],"debug":{"usedContext":true,"evidence":["path.or.field.used"],"confidence":"high|medium|low"}}'
     ].join("\n") : [
@@ -288,7 +351,7 @@ export default {
           model,
           messages: groundedMessages,
           temperature,
-          max_tokens: isAutoGroupMode ? 700 : (isFollowUpPromptMode ? 350 : (isReflectReadableInsightsMode ? 650 : 900)),
+          max_tokens: isAutoGroupMode ? 700 : (isFollowUpPromptMode ? 350 : (isReflectReadableInsightsMode ? 650 : (isFulfillmentReadableInsightMode ? 450 : (isPurposeReadableInsightMode ? 450 : 900)))),
           response_format: { type: "json_object" },
         }),
       });
@@ -466,6 +529,88 @@ export default {
       return json(out, 200, corsHeaders(request));
     }
 
+    if (isFulfillmentReadableInsightMode) {
+      const normalized = normalizeReadableInsightsPayload(parsedModelJSON, upstreamText);
+      const modelDebug =
+        normalized.debug && typeof normalized.debug === "object" ? normalized.debug : {};
+      const modelEvidence = Array.isArray(modelDebug.evidence)
+        ? modelDebug.evidence.filter((x) => typeof x === "string").slice(0, 20)
+        : [];
+      const claimedUsedContext =
+        typeof modelDebug.usedContext === "boolean" ? modelDebug.usedContext : null;
+      const confidence = typeof modelDebug.confidence === "string" ? modelDebug.confidence : null;
+      const finalUsedContext =
+        typeof claimedUsedContext === "boolean"
+          ? claimedUsedContext
+          : contextBytes > 0 && modelEvidence.length > 0;
+
+      const out = {
+        message: normalizeFulfillmentReadableInsightMessage(normalized.message),
+        actions: [],
+        debug: {
+          ...buildWorkerDebug({
+            model,
+            contextBytes,
+            contextHash,
+            contextKeys,
+            contextInfo,
+            workerPromptVersion,
+            messages,
+            nonSystemMessages,
+            upstreamStatus,
+            upstreamContentType,
+            parseMode,
+          }),
+          usedContext: finalUsedContext,
+          claimedUsedContext,
+          evidence: modelEvidence,
+          confidence,
+        },
+      };
+      return json(out, 200, corsHeaders(request));
+    }
+
+    if (isPurposeReadableInsightMode) {
+      const normalized = normalizeReadableInsightsPayload(parsedModelJSON, upstreamText);
+      const modelDebug =
+        normalized.debug && typeof normalized.debug === "object" ? normalized.debug : {};
+      const modelEvidence = Array.isArray(modelDebug.evidence)
+        ? modelDebug.evidence.filter((x) => typeof x === "string").slice(0, 20)
+        : [];
+      const claimedUsedContext =
+        typeof modelDebug.usedContext === "boolean" ? modelDebug.usedContext : null;
+      const confidence = typeof modelDebug.confidence === "string" ? modelDebug.confidence : null;
+      const finalUsedContext =
+        typeof claimedUsedContext === "boolean"
+          ? claimedUsedContext
+          : contextBytes > 0 && modelEvidence.length > 0;
+
+      const out = {
+        message: normalizeFulfillmentReadableInsightMessage(normalized.message),
+        actions: [],
+        debug: {
+          ...buildWorkerDebug({
+            model,
+            contextBytes,
+            contextHash,
+            contextKeys,
+            contextInfo,
+            workerPromptVersion,
+            messages,
+            nonSystemMessages,
+            upstreamStatus,
+            upstreamContentType,
+            parseMode,
+          }),
+          usedContext: finalUsedContext,
+          claimedUsedContext,
+          evidence: modelEvidence,
+          confidence,
+        },
+      };
+      return json(out, 200, corsHeaders(request));
+    }
+
     const normalized = normalizeAssistantJSON(parsedModelJSON, upstreamText);
 
     const modelDebug =
@@ -603,6 +748,18 @@ function detectReflectReadableInsightsMode(nonSystemMessages) {
   const latestUser = [...(nonSystemMessages || [])].reverse().find((m) => m?.role === "user");
   const content = String(latestUser?.content || "");
   return content.includes("Create a readable insights summary for a completed Loom Action Blocks session.");
+}
+
+function detectFulfillmentReadableInsightMode(nonSystemMessages) {
+  const latestUser = [...(nonSystemMessages || [])].reverse().find((m) => m?.role === "user");
+  const content = String(latestUser?.content || "");
+  return content.includes("Create a readable insight for one Fulfillment Area in Loom Fulfillment Insights.");
+}
+
+function detectPurposeReadableInsightMode(nonSystemMessages) {
+  const latestUser = [...(nonSystemMessages || [])].reverse().find((m) => m?.role === "user");
+  const content = String(latestUser?.content || "");
+  return content.includes("Create a readable insight for one Purpose passion in Loom Purpose Insights.");
 }
 
 function normalizeFollowUpPromptPayload(parsed, fallbackText) {
@@ -761,6 +918,38 @@ function normalizeReadableInsightsPayload(parsed, fallbackText) {
     message: message || "Loom could not generate readable insights for this session.",
     debug,
   };
+}
+
+function normalizeFulfillmentReadableInsightMessage(message) {
+  let text = String(message || "").replace(/\s+/g, " ").trim();
+  if (!text) return "This Fulfillment Area shows a mixed pattern that needs closer review.";
+
+  // Prefer a complete sentence within ~150 chars.
+  if (text.length > 150) {
+    let prefix = text.slice(0, 150).trim();
+    const sentenceIdx = Math.max(prefix.lastIndexOf("."), prefix.lastIndexOf("!"), prefix.lastIndexOf("?"));
+    if (sentenceIdx > 20) {
+      prefix = prefix.slice(0, sentenceIdx + 1).trim();
+    } else {
+      const punctIdx = Math.max(prefix.lastIndexOf(","), prefix.lastIndexOf(";"), prefix.lastIndexOf(":"));
+      if (punctIdx > 20) {
+        prefix = prefix.slice(0, punctIdx).trim() + ".";
+      } else {
+        const spaceIdx = prefix.lastIndexOf(" ");
+        prefix = (spaceIdx > 20 ? prefix.slice(0, spaceIdx) : prefix).trim() + ".";
+      }
+    }
+    text = prefix;
+  }
+
+  // Reduce obvious recap/filler if model slips.
+  text = text
+    .replace(/^during (this|the) (loom )?fulfillment (area )?(week|insights?)[:,]?\s*/i, "")
+    .replace(/^during this week[:,]?\s*/i, "")
+    .replace(/^a total of\s+/i, "");
+
+  if (!/[.!?]$/.test(text)) text += ".";
+  return text.trim();
 }
 
 function isSupportedFollowUpPrompt(prompt) {
