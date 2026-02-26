@@ -121,6 +121,7 @@ final class LoomAIViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var latestSuggestedActions: [LoomAISuggestedAction] = []
     @Published var suggestedPromptChips: [String] = []
+    @Published var followUpPromptChips: [String] = []
     @Published var debugFailureDetail: DebugFailureDetail?
     #if DEBUG
     struct RequestDebugSummary {
@@ -136,6 +137,7 @@ final class LoomAIViewModel: ObservableObject {
     private var lastSendSignature: String?
     private var sendTimestamps: [Date] = []
     private let defaultThreadKey = "default"
+    private var lastFollowUpPromptSourceSignature: String?
 
     func refreshLatestActions(from messages: [LoomAIChatMessage]) {
         latestSuggestedActions = LoomAIChatMessageActionsCodec.decode(
@@ -256,6 +258,14 @@ final class LoomAIViewModel: ObservableObject {
                 try? context.save()
                 latestSuggestedActions = response.actions
             }
+            await refreshFollowUpPromptChipsViaAI(in: context, threadMessages: history + [LoomAIChatMessage(
+                threadID: thread.id,
+                threadKey: thread.threadKey,
+                roleRaw: LoomAIChatRole.assistant.rawValue,
+                content: finalReply,
+                actionsJSON: LoomAIChatMessageActionsCodec.encode(response.actions),
+                debugJSON: LoomAIDebugCodec.encode(response.debug)
+            )])
         } catch {
             let message = (error as NSError).localizedDescription
             let serviceError = error as? LoomAIService.LoomAIServiceError
@@ -272,6 +282,7 @@ final class LoomAIViewModel: ObservableObject {
                     try? context.save()
                 }
                 latestSuggestedActions = []
+                followUpPromptChips = []
                 errorMessage = serviceError?.message == "Could not parse response." ? "AI response format mismatch" : message
                 #if DEBUG
                 debugFailureDetail = DebugFailureDetail(
@@ -439,15 +450,122 @@ final class LoomAIViewModel: ObservableObject {
     }
 
     func refreshSuggestedPromptChips(in context: ModelContext, threadMessages: [LoomAIChatMessage]) {
+        if !threadMessages.isEmpty {
+            suggestedPromptChips = []
+            return
+        }
         do {
             let snapshot = try buildContextSnapshot(in: context)
             suggestedPromptChips = makeDynamicPromptChips(from: snapshot, threadMessages: threadMessages)
+            followUpPromptChips = []
         } catch {
             suggestedPromptChips = [
                 "What should I focus on this week?",
                 "Which fulfillment area is slipping?",
                 "What is my highest-leverage next action?"
             ].shuffled()
+            followUpPromptChips = []
+        }
+    }
+
+    func refreshFollowUpPromptChipsIfNeeded(in context: ModelContext, threadMessages: [LoomAIChatMessage]) async {
+        guard !threadMessages.isEmpty else {
+            followUpPromptChips = []
+            lastFollowUpPromptSourceSignature = nil
+            return
+        }
+        await refreshFollowUpPromptChipsViaAI(in: context, threadMessages: threadMessages)
+    }
+
+    private struct FollowUpPromptSuggestionResponse: Decodable {
+        let showSuggestions: Bool?
+        let prompts: [String]
+        let confidence: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case showSuggestions
+            case show
+            case prompts
+            case suggestions
+            case confidence
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            showSuggestions = (try? c.decode(Bool.self, forKey: .showSuggestions))
+                ?? (try? c.decode(Bool.self, forKey: .show))
+            prompts = (try? c.decode([String].self, forKey: .prompts))
+                ?? (try? c.decode([String].self, forKey: .suggestions))
+                ?? []
+            confidence = try? c.decode(String.self, forKey: .confidence)
+        }
+    }
+
+    private func refreshFollowUpPromptChipsViaAI(in context: ModelContext, threadMessages: [LoomAIChatMessage]) async {
+        guard threadMessages.contains(where: { $0.roleRaw == LoomAIChatRole.assistant.rawValue }) else {
+            followUpPromptChips = []
+            return
+        }
+        let recent = Array(threadMessages.suffix(8))
+        let signature = recent.map { "\($0.roleRaw)|\($0.content)" }.joined(separator: "\n---\n")
+        guard !signature.isEmpty else {
+            followUpPromptChips = []
+            return
+        }
+        if signature == lastFollowUpPromptSourceSignature {
+            return
+        }
+
+        do {
+            let snapshot = try buildContextSnapshot(in: context)
+            let transcriptLines = recent.map { message in
+                let role = message.roleRaw.capitalized
+                let content = message.content
+                    .replacingOccurrences(of: "\n", with: " ")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                return "\(role): \(content)"
+            }
+            let generatorInstruction = """
+            Generate 0-3 high-confidence follow-up prompts for the user to ask next in Loom.
+            Only suggest prompts if they are likely high-value based on:
+            1) the broader Loom app context
+            2) the most recent assistant response
+            3) the last few messages in this chat
+
+            Requirements:
+            - Return ONLY JSON
+            - If no strong follow-ups exist, set showSuggestions=false and prompts=[]
+            - Prompts should be concise, high-value, and actionable
+            - Prefer prompts that advance decision quality or execution
+            - Avoid repeating prompts already implied by the last assistant response
+            - Each prompt should be short (target under 80 chars)
+
+            Return JSON exactly:
+            {"showSuggestions":true,"prompts":["..."],"confidence":"high"}
+
+            Recent chat:
+            \(transcriptLines.joined(separator: "\n"))
+            """
+
+            let response = try await service.sendChat(
+                messages: [.init(role: "user", content: generatorInstruction)],
+                context: snapshot
+            )
+
+            let raw = response.message.trimmingCharacters(in: .whitespacesAndNewlines)
+            let data = Data(raw.utf8)
+            let parsed = try? JSONDecoder().decode(FollowUpPromptSuggestionResponse.self, from: data)
+            let prompts = (parsed?.prompts ?? [])
+                .map { $0.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .map { String($0.prefix(120)) }
+
+            let shouldShow = (parsed?.showSuggestions ?? false) && !(parsed?.confidence?.lowercased() == "low")
+            followUpPromptChips = shouldShow ? Array(prompts.prefix(3)) : []
+            lastFollowUpPromptSourceSignature = signature
+        } catch {
+            // Fail closed: hide post-chat suggestions if we can't generate them confidently.
+            followUpPromptChips = []
         }
     }
 

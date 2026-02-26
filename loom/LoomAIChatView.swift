@@ -32,6 +32,10 @@ struct LoomAIChatView: View {
         messages.last(where: { $0.roleRaw == LoomAIChatRole.assistant.rawValue })?.id
     }
 
+    private var visiblePromptChips: [String] {
+        messages.isEmpty ? viewModel.suggestedPromptChips : viewModel.followUpPromptChips
+    }
+
     var body: some View {
         VStack(spacing: 10) {
             ScrollViewReader { proxy in
@@ -78,6 +82,7 @@ struct LoomAIChatView: View {
                     }
                     viewModel.refreshLatestActions(from: messages)
                     viewModel.refreshSuggestedPromptChips(in: modelContext, threadMessages: messages)
+                    Task { await viewModel.refreshFollowUpPromptChipsIfNeeded(in: modelContext, threadMessages: messages) }
                 }
                 .onChange(of: viewModel.isSending) { _, _ in
                     withAnimation(.easeOut(duration: 0.2)) {
@@ -87,6 +92,7 @@ struct LoomAIChatView: View {
                 .onAppear {
                     viewModel.refreshLatestActions(from: messages)
                     viewModel.refreshSuggestedPromptChips(in: modelContext, threadMessages: messages)
+                    Task { await viewModel.refreshFollowUpPromptChipsIfNeeded(in: modelContext, threadMessages: messages) }
                     _ = try? viewModel.ensureThread(in: modelContext, threadKey: activeThreadKey)
                     DispatchQueue.main.async {
                         proxy.scrollTo(bottomScrollAnchorID, anchor: .bottom)
@@ -138,7 +144,7 @@ struct LoomAIChatView: View {
         .background(Color(.systemGroupedBackground))
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 8) {
-                if !viewModel.suggestedPromptChips.isEmpty {
+                if !visiblePromptChips.isEmpty {
                     suggestedPromptChipBar
                 }
                 composer
@@ -191,6 +197,7 @@ struct LoomAIChatView: View {
             activeThreadKey = newKey
             viewModel.refreshLatestActions(from: messages)
             viewModel.refreshSuggestedPromptChips(in: modelContext, threadMessages: messages)
+            Task { await viewModel.refreshFollowUpPromptChipsIfNeeded(in: modelContext, threadMessages: messages) }
             _ = try? viewModel.ensureThread(in: modelContext, threadKey: newKey)
         }
     }
@@ -198,7 +205,7 @@ struct LoomAIChatView: View {
     private var suggestedPromptChipBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                ForEach(viewModel.suggestedPromptChips, id: \.self) { chip in
+                ForEach(visiblePromptChips, id: \.self) { chip in
                     suggestedPromptChip(chip)
                 }
             }

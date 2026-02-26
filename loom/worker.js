@@ -72,6 +72,7 @@ export default {
       .filter((m) => m.content.length > 0);
 
     const nonSystemMessages = normalizedMessages.filter((m) => m.role !== "system");
+    const isFollowUpPromptMode = detectFollowUpPromptMode(nonSystemMessages);
 
     if (nonSystemMessages.length === 0) {
       return json(
@@ -92,15 +93,30 @@ export default {
         : [];
     const placeholderSignals = collectPlaceholderSignals(context);
 
-    const workerPromptVersion = "grounding-cta-v3";
+    const workerPromptVersion = isFollowUpPromptMode ? "followup-prompts-v1" : "grounding-cta-v3";
 
-    const coreInstructions = [
+    const coreInstructions = isFollowUpPromptMode ? [
+      "You generate follow-up prompt chips for the Loom iOS app.",
+      "Use APP_CONTEXT_JSON and the recent chat transcript to decide whether showing follow-up prompts is high-value.",
+      "Only suggest follow-up prompts when confidence is high they will help the user make a better decision or take a better next step.",
+      "If confidence is not high, return no prompts.",
+      "Prompts must be concise, high-value, and actionable.",
+      "Avoid repeating what the assistant just said, and avoid generic prompts.",
+      "Only suggest prompts tied to concepts clearly represented in APP_CONTEXT_JSON (e.g., Fulfillment Areas, Outcomes/Objectives, Action Blocks, Little Wins, Capture, Purpose, Vacation Mode, Recently Deleted).",
+      "Do NOT suggest prompts about unsupported/ambiguous concepts unless explicitly represented (e.g., 'skills' if no skills dataset is present).",
+      "Target 1-3 prompts, each under 80 characters (hard max 120).",
+      "Return JSON ONLY in this exact shape:",
+      '{"showSuggestions":true,"prompts":["string"],"confidence":"high"}',
+      "or",
+      '{"showSuggestions":false,"prompts":[],"confidence":"low"}'
+    ].join("\n") : [
       "You are Loom, an assistant embedded inside the Loom iOS app.",
       "You MUST ground your answers in APP_CONTEXT_JSON when it is provided.",
       "Use APP_CONTEXT_METADATA and dataInventory/appGuide in APP_CONTEXT_JSON to understand what data exists before answering.",
       "If APP_CONTEXT_JSON exists, include at least 2 concrete details from it when answering planning/focus questions.",
       "Do NOT give generic productivity advice unless tied to specific APP_CONTEXT_JSON details.",
       "If APP_CONTEXT_JSON is empty/missing, explicitly say you do not have the user's app context.",
+      "If APP_CONTEXT_JSON exists but the user's requested concept is not explicitly tracked (for example 'skills' when no skills dataset is present), say you have app context but that concept is not directly tracked, then offer the closest useful alternative based on tracked data.",
       "Do not hallucinate stats, outcomes, categories, scores, action blocks, or goals not present in APP_CONTEXT_JSON.",
       "Use logic: if a field value looks like a placeholder (e.g., 'Test', 'TBD', 'N/A', 'Placeholder'), do not treat it as meaningful user intent.",
       "If a placeholder appears relevant to the question, explicitly call it out as a placeholder/low-signal entry and suggest a concrete replacement.",
@@ -213,7 +229,7 @@ export default {
           model,
           messages: groundedMessages,
           temperature,
-          max_tokens: 900,
+          max_tokens: isFollowUpPromptMode ? 350 : 900,
           response_format: { type: "json_object" },
         }),
       });
@@ -292,6 +308,34 @@ export default {
     } catch {
       parsedModelJSON = null;
       parseMode = "parse_failed";
+    }
+
+    if (isFollowUpPromptMode) {
+      const followUp = normalizeFollowUpPromptPayload(parsedModelJSON, upstreamText);
+      const out = {
+        message: JSON.stringify(followUp),
+        actions: [],
+        debug: {
+          ...buildWorkerDebug({
+            model,
+            contextBytes,
+            contextHash,
+            contextKeys,
+            contextInfo,
+            workerPromptVersion,
+            messages,
+            nonSystemMessages,
+            upstreamStatus,
+            upstreamContentType,
+            parseMode,
+          }),
+          usedContext: contextBytes > 0,
+          claimedUsedContext: null,
+          evidence: [],
+          confidence: followUp.confidence || null,
+        },
+      };
+      return json(out, 200, corsHeaders(request));
     }
 
     const normalized = normalizeAssistantJSON(parsedModelJSON, upstreamText);
@@ -413,6 +457,69 @@ function normalizeAssistantJSON(parsed, fallbackText) {
     actions: [],
     debug: { usedContext: false, evidence: [], confidence: "low" },
   };
+}
+
+function detectFollowUpPromptMode(nonSystemMessages) {
+  const latestUser = [...(nonSystemMessages || [])].reverse().find((m) => m?.role === "user");
+  const content = String(latestUser?.content || "");
+  return content.includes("Generate 0-3 high-confidence follow-up prompts for the user to ask next in Loom.");
+}
+
+function normalizeFollowUpPromptPayload(parsed, fallbackText) {
+  let raw = parsed && typeof parsed === "object" ? parsed : null;
+  if (!raw) {
+    try {
+      raw = JSON.parse(String(fallbackText || ""));
+    } catch {
+      raw = null;
+    }
+  }
+
+  const promptsSource = Array.isArray(raw?.prompts)
+    ? raw.prompts
+    : (Array.isArray(raw?.suggestions) ? raw.suggestions : []);
+
+  const prompts = promptsSource
+    .filter((x) => typeof x === "string")
+    .map((x) => x.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .map((x) => truncateAtWordBoundary(x, 120))
+    .filter((x) => isSupportedFollowUpPrompt(x))
+    .filter(Boolean)
+    .slice(0, 3);
+
+  const confidenceRaw = typeof raw?.confidence === "string" ? raw.confidence.toLowerCase().trim() : "";
+  const confidence = ["high", "medium", "low"].includes(confidenceRaw) ? confidenceRaw : (prompts.length > 0 ? "medium" : "low");
+
+  const explicitShow = typeof raw?.showSuggestions === "boolean"
+    ? raw.showSuggestions
+    : (typeof raw?.show === "boolean" ? raw.show : null);
+
+  const showSuggestions = explicitShow != null
+    ? (explicitShow && prompts.length > 0 && confidence !== "low")
+    : (prompts.length > 0 && confidence === "high");
+
+  return {
+    showSuggestions,
+    prompts: showSuggestions ? prompts : [],
+    confidence: showSuggestions ? confidence : "low",
+  };
+}
+
+function isSupportedFollowUpPrompt(prompt) {
+  const p = String(prompt || "").trim().toLowerCase();
+  if (!p) return false;
+
+  const unsupportedConcepts = [
+    " skill ",
+    "skills",
+    "certification",
+    "resume",
+    "interview prep"
+  ];
+  if (unsupportedConcepts.some((term) => p.includes(term))) return false;
+
+  return true;
 }
 
 function normalizeActions(actions, context) {
