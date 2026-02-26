@@ -10,6 +10,7 @@ struct LoomAIChatView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Query(sort: \LoomAIChatMessage.createdAt, order: .forward) private var allMessages: [LoomAIChatMessage]
     @Query private var fulfillments: [Fulfillment]
+    @Query(sort: \Outcomes.end, order: .forward) private var outcomes: [Outcomes]
     @Query private var fulfillmentFocusRows: [FulfillmentFocus]
 
     @StateObject private var viewModel = LoomAIViewModel()
@@ -208,43 +209,51 @@ struct LoomAIChatView: View {
     private func suggestedPromptChip(_ chip: String) -> some View {
         let resolvedChip = resolvedPromptChipText(for: chip)
         let matchedCategory = fulfillmentCategoryMatch(in: resolvedChip)
-        let categoryColor = matchedCategory.map { FulfillmentCategoryTheme.color(for: $0) } ?? .primary
+        let matchedOutcome = matchedCategory == nil ? outcomeTitleMatch(in: resolvedChip) : nil
+        let highlightedToken = matchedCategory ?? matchedOutcome
+        let highlightColor = matchedCategory.map { FulfillmentCategoryTheme.color(for: $0) }
+            ?? matchedOutcome.map { outcomeChipColor(for: $0) }
+            ?? .primary
 
         return HStack(spacing: 0) {
             Button {
                 sendPrompt(resolvedChip)
             } label: {
-                promptChipLabelText(chipText: resolvedChip, highlightedCategory: matchedCategory)
+                promptChipLabelText(
+                    chipText: resolvedChip,
+                    highlightedToken: highlightedToken,
+                    highlightColor: highlightColor
+                )
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.primary)
                     .padding(.leading, 12)
-                    .padding(.trailing, matchedCategory == nil ? 12 : 8)
+                    .padding(.trailing, highlightedToken == nil ? 12 : 8)
                     .padding(.vertical, 8)
             }
             .buttonStyle(.plain)
 
-            if let matchedCategory {
+            if let highlightedToken {
                 Divider()
                     .frame(height: 16)
                     .overlay(Color.primary.opacity(colorScheme == .dark ? 0.10 : 0.08))
                     .padding(.trailing, 2)
 
                 Menu {
-                    ForEach(fulfillmentCategoryNamesForChipSelection, id: \.self) { category in
+                    ForEach(replacementOptions(for: highlightedToken, in: resolvedChip), id: \.self) { option in
                         Button {
-                            chipCategoryOverrides[chip] = replacingCategory(in: chip, with: category)
+                            chipCategoryOverrides[chip] = replacingPromptToken(in: chip, currentToken: highlightedToken, with: option)
                         } label: {
-                            if category == matchedCategory {
-                                Label(category, systemImage: "checkmark")
+                            if option == highlightedToken {
+                                Label(option, systemImage: "checkmark")
                             } else {
-                                Text(category)
+                                Text(option)
                             }
                         }
                     }
                 } label: {
                     Image(systemName: "chevron.up.chevron.down")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(categoryColor)
+                        .foregroundStyle(highlightColor)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 8)
                 }
@@ -261,19 +270,18 @@ struct LoomAIChatView: View {
         )
     }
 
-    private func promptChipLabelText(chipText: String, highlightedCategory: String?) -> Text {
-        guard let highlightedCategory,
-              let range = chipText.range(of: highlightedCategory) else {
+    private func promptChipLabelText(chipText: String, highlightedToken: String?, highlightColor: Color) -> Text {
+        guard let highlightedToken,
+              let range = chipText.range(of: highlightedToken, options: [.caseInsensitive]) else {
             return Text(chipText)
         }
 
         let prefix = String(chipText[..<range.lowerBound])
         let middle = String(chipText[range])
         let suffix = String(chipText[range.upperBound...])
-        let color = FulfillmentCategoryTheme.color(for: highlightedCategory)
 
         return Text(prefix)
-        + Text(middle).bold().foregroundColor(color)
+        + Text(middle).bold().foregroundColor(highlightColor)
         + Text(suffix)
     }
 
@@ -293,16 +301,52 @@ struct LoomAIChatView: View {
             .first(where: { chipText.localizedCaseInsensitiveContains($0) })
     }
 
+    private var outcomeTitlesForChipSelection: [String] {
+        var seen = Set<String>()
+        return outcomes
+            .map(\.outcome)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .filter { seen.insert($0.lowercased()).inserted }
+            .sorted()
+    }
+
+    private func outcomeTitleMatch(in chipText: String) -> String? {
+        outcomeTitlesForChipSelection
+            .sorted { $0.count > $1.count }
+            .first(where: { chipText.localizedCaseInsensitiveContains($0) })
+    }
+
+    private func outcomeChipColor(for outcomeTitle: String) -> Color {
+        if let category = outcomes.first(where: {
+            $0.outcome.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare(outcomeTitle) == .orderedSame
+        })?.category {
+            return FulfillmentCategoryTheme.color(for: category)
+        }
+        return .blue
+    }
+
+    private func replacementOptions(for highlightedToken: String, in chipText: String) -> [String] {
+        if let matchedCategory = fulfillmentCategoryMatch(in: chipText),
+           matchedCategory.caseInsensitiveCompare(highlightedToken) == .orderedSame {
+            return fulfillmentCategoryNamesForChipSelection
+        }
+        if let matchedOutcome = outcomeTitleMatch(in: chipText),
+           matchedOutcome.caseInsensitiveCompare(highlightedToken) == .orderedSame {
+            return outcomeTitlesForChipSelection
+        }
+        return []
+    }
+
     private func resolvedPromptChipText(for originalChip: String) -> String {
         chipCategoryOverrides[originalChip] ?? originalChip
     }
 
-    private func replacingCategory(in chip: String, with newCategory: String) -> String {
-        guard let current = fulfillmentCategoryMatch(in: chip),
-              let range = chip.range(of: current, options: [.caseInsensitive]) else {
+    private func replacingPromptToken(in chip: String, currentToken: String, with newValue: String) -> String {
+        guard let range = chip.range(of: currentToken, options: [.caseInsensitive]) else {
             return chip
         }
-        return chip.replacingCharacters(in: range, with: newCategory)
+        return chip.replacingCharacters(in: range, with: newValue)
     }
 
     private var emptyState: some View {

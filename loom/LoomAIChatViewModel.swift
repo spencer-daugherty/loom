@@ -447,31 +447,43 @@ final class LoomAIViewModel: ObservableObject {
                 "What should I focus on this week?",
                 "Which fulfillment area is slipping?",
                 "What is my highest-leverage next action?"
-            ]
+            ].shuffled()
         }
     }
 
     private func makeDynamicPromptChips(from snapshot: LoomAIContextSnapshot, threadMessages: [LoomAIChatMessage]) -> [String] {
         var chips: [String] = []
 
-        if let lowestFulfillment = snapshot.fulfillmentCategories
+        let weakestFulfillments = snapshot.fulfillmentCategories
             .filter({ $0.weeklyScore != nil })
             .sorted(by: { ($0.weeklyScore ?? 999) < ($1.weeklyScore ?? 999) })
-            .first {
-            chips.append("How can I improve \(lowestFulfillment.name) this week?")
-            chips.append("Why is \(lowestFulfillment.name) slipping?")
+        let primaryFulfillment = weakestFulfillments.prefix(3).shuffled().first
+        let secondaryFulfillment = weakestFulfillments.dropFirst().prefix(4).shuffled().first
+
+        if let primaryFulfillment {
+            chips.append("How can I improve \(primaryFulfillment.name) this week?")
+            chips.append("Why is \(primaryFulfillment.name) slipping?")
+        }
+        if let secondaryFulfillment,
+           secondaryFulfillment.name.caseInsensitiveCompare(primaryFulfillment?.name ?? "") != .orderedSame {
+            chips.append("What daily Little Wins would improve \(secondaryFulfillment.name)?")
         }
 
         let now = Date()
-        if let nextOutcome = snapshot.activeOutcomes
+        let nearTermOutcomes = snapshot.activeOutcomes
             .filter({ $0.endDate >= now })
             .sorted(by: { $0.endDate < $1.endDate })
-            .first {
+        if let nextOutcome = nearTermOutcomes.prefix(4).shuffled().first {
             chips.append("What should I do next for \(nextOutcome.title)?")
+        }
+        if let alternateOutcome = nearTermOutcomes.dropFirst().prefix(5).shuffled().first {
+            chips.append("What is the highest-leverage move for \(alternateOutcome.title)?")
         }
 
         if let lowestBlock = snapshot.currentWeekActionBlocks
             .sorted(by: { $0.completionRatio < $1.completionRatio })
+            .prefix(3)
+            .shuffled()
             .first, lowestBlock.completionRatio < 0.6 {
             chips.append("How do I get unstuck on \(lowestBlock.title)?")
         }
@@ -509,7 +521,10 @@ final class LoomAIViewModel: ObservableObject {
         ])
 
         var seen = Set<String>()
-        return chips.filter { seen.insert($0).inserted }.prefix(10).map { $0 }
+        let deduped = chips.filter { seen.insert($0).inserted }
+        let priority = Array(deduped.prefix(4))
+        let remainder = Array(deduped.dropFirst(4)).shuffled()
+        return Array((priority + remainder).prefix(10))
     }
 
     func buildContextSnapshot(in context: ModelContext) throws -> LoomAIContextSnapshot {
