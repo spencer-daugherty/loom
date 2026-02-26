@@ -42,6 +42,7 @@ struct ReflectView: View {
     @Query private var allChunkSelections: [PlanChunkSelection]
     @Query(sort: \Outcomes.rank, order: .forward) private var outcomes: [Outcomes]
     @Query(sort: \Fulfillment.updatedAt, order: .forward) private var fulfillments: [Fulfillment]
+    @Query(sort: \Passion.date, order: .forward) private var passions: [Passion]
     @Query(sort: \OutcomesMeasure.measuredAt, order: .reverse) private var outcomeMeasures: [OutcomesMeasure]
     @Query(sort: \OutcomesMeasureEntry.measuredAt, order: .forward) private var outcomeMeasureEntries: [OutcomesMeasureEntry]
     @Query private var allMindsetRows: [WeeklyMindsetEntry.Fields]
@@ -52,7 +53,6 @@ struct ReflectView: View {
     @AppStorage("capture_microsoft_todo_access_token") private var microsoftTodoAccessToken: String = ""
 
     @State private var step: Int = 1
-    @State private var showInstructions: Bool = false
     @State private var showCelebration: Bool = true
 
     @State private var achievementsText: String = ""
@@ -64,12 +64,13 @@ struct ReflectView: View {
     @State private var contributionOutcomeIndex: Int = 0
     @State private var contributionTempSelection: Set<UUID> = []
     @State private var contributionSelectionsByOutcome: [UUID: Set<UUID>] = [:]
+    @State private var selectedReflectionPassionIDs: Set<UUID> = []
+    @State private var isShowingReflectionPassionsSheet: Bool = false
+    @State private var isShowingNoPassionsSaveConfirm: Bool = false
     private let fallbackPalette: [Color] = [.blue, .indigo, .green, .purple, .red, .orange]
 
     private enum JournalField: Hashable {
-        case achievements
-        case magicMoments
-        case powerQuestion
+        case journal
     }
 
     init(weekStart: Date, onFinish: @escaping () -> Void) {
@@ -418,9 +419,11 @@ struct ReflectView: View {
     }
 
     private var journalIsValid: Bool {
-        !achievementsText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-        !magicMomentsText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-        !powerQuestionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        true
+    }
+
+    private var selectedReflectionPassions: [Passion] {
+        passions.filter { selectedReflectionPassionIDs.contains($0.passion_id) }
     }
 
     var body: some View {
@@ -435,15 +438,21 @@ struct ReflectView: View {
                     .transition(.opacity)
             }
         }
-        .sheet(isPresented: $showInstructions) {
-            instructionsSheet
-                .presentationDetents([.medium])
-                .presentationDragIndicator(.visible)
-        }
         .sheet(isPresented: $showContributionPrompt) {
             contributionPromptSheet
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $isShowingReflectionPassionsSheet) {
+            reflectionPassionsSheet
+        }
+        .alert("Save without passions connected?", isPresented: $isShowingNoPassionsSaveConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Save") {
+                saveArchiveAndExit()
+            }
+        } message: {
+            Text("No passions are connected to this reflection. Do you want to save anyway?")
         }
         .overlay(alignment: .bottom) {
             if showSaveHint {
@@ -481,25 +490,6 @@ struct ReflectView: View {
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.top, 8)
 
-            Button {
-                showInstructions = true
-            } label: {
-                HStack(spacing: 8) {
-                    Spacer(minLength: 0)
-                    Image(systemName: "info.circle")
-                        .foregroundStyle(.secondary)
-                    Text("Instructions")
-                        .fontWeight(.bold)
-                        .foregroundStyle(.secondary)
-                    Text("Tap to read")
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: 0)
-                }
-                .font(.subheadline)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
             if step == 1 {
                 insightsStep
             } else {
@@ -520,7 +510,8 @@ struct ReflectView: View {
                     colors: celebrationLineColors,
                     focusXFraction: 1.03,
                     focusYFraction: focusYFraction,
-                    radarDiameter: 0
+                    radarDiameter: 0,
+                    rightSideTargetBandFraction: 0.24
                 )
                 .ignoresSafeArea()
 
@@ -536,8 +527,8 @@ struct ReflectView: View {
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.8)
                                 .frame(width: titleBlockWidth, alignment: .center)
-                            Text("COMPLETE")
-                                .font(.system(size: 50, weight: .regular))
+                            Text("Complete")
+                                .font(.system(size: 50, weight: .bold))
                                 .kerning(1.2)
                                 .foregroundStyle(titleColor)
                                 .lineLimit(1)
@@ -716,29 +707,15 @@ struct ReflectView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
 
-                    Text("Achievements")
+                    Text("Journal (Optional)")
                         .font(.headline)
                     journalTextEditor(
                         text: $achievementsText,
-                        placeholder: "What did I accomplish that I'm proud of? What progress did I make?",
-                        isHighlighted: highlightedMissingJournalFields.contains(.achievements)
+                        placeholder: "What happened? What did I learn? What felt meaningful?",
+                        isHighlighted: highlightedMissingJournalFields.contains(.journal)
                     )
 
-                    Text("Magic Moments")
-                    .font(.headline)
-                    journalTextEditor(
-                        text: $magicMomentsText,
-                        placeholder: "What did I enjoy? Who did I impact? What were some magic moments?",
-                        isHighlighted: highlightedMissingJournalFields.contains(.magicMoments)
-                    )
-
-                    Text("Power Question: What have I given?")
-                        .font(.headline)
-                    journalTextEditor(
-                        text: $powerQuestionText,
-                        placeholder: "What did I give today?",
-                        isHighlighted: highlightedMissingJournalFields.contains(.powerQuestion)
-                    )
+                    reflectionPassionsSectionCard
                 }
                 .padding(.top, 4)
             }
@@ -758,7 +735,7 @@ struct ReflectView: View {
 
                 Button {
                     if journalIsValid {
-                        saveArchiveAndExit()
+                        handleJournalSaveTapped()
                     } else {
                         showJournalValidationHint()
                     }
@@ -772,33 +749,112 @@ struct ReflectView: View {
         }
     }
 
-    private var instructionsSheet: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Instructions")
-                        .font(.title2)
-                        .fontWeight(.bold)
-                    Text("Placeholder text for reflection instructions.")
-                        .foregroundStyle(.secondary)
+    private func handleJournalSaveTapped() {
+        if selectedReflectionPassions.isEmpty {
+            isShowingNoPassionsSaveConfirm = true
+            return
+        }
+        saveArchiveAndExit()
+    }
 
-                    if let row = weekMindsetRow {
-                        Divider().padding(.vertical, 4)
-                        Text("What am I happy for or grateful about in life right now?")
-                            .font(.headline)
-                        Text(row.morningPowerQuestion)
-                            .foregroundStyle(.secondary)
-                        Text("What’s a simple phrase that inspires you?")
-                            .font(.headline)
-                            .padding(.top, 6)
-                        Text(row.incantation)
-                            .foregroundStyle(.secondary)
+    private var reflectionPassionsSectionCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Passion")
+                .font(.headline)
+
+            VStack(spacing: 0) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("What passions were involved?")
+                        .foregroundStyle(.primary)
+                    Spacer(minLength: 8)
+                    Button("Connect Passions") {
+                        isShowingReflectionPassionsSheet = true
+                    }
+                    .foregroundStyle(.blue)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+
+                if !selectedReflectionPassions.isEmpty {
+                    Divider()
+                        .padding(.leading, 14)
+
+                    VStack(spacing: 0) {
+                        ForEach(Array(selectedReflectionPassions.enumerated()), id: \.element.passion_id) { index, passion in
+                            HStack(spacing: 10) {
+                                Text("\(displayEmotionLabelReflect(for: passion.emotion)): \(passion.passion)")
+                                    .foregroundStyle(.primary)
+                                    .multilineTextAlignment(.leading)
+                                Spacer(minLength: 8)
+                                Image(systemName: "checkmark")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.blue)
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 11)
+
+                            if index < selectedReflectionPassions.count - 1 {
+                                Divider()
+                                    .padding(.leading, 14)
+                            }
+                        }
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding()
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color(.secondarySystemGroupedBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color(.separator).opacity(0.22), lineWidth: 1)
+            )
+        }
+    }
+
+    private var reflectionPassionsSheet: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Text("Select 1 or more passions that were involved")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .listRowSeparator(.hidden)
+                }
+
+                ForEach(passions, id: \.passion_id) { passion in
+                    Button {
+                        if selectedReflectionPassionIDs.contains(passion.passion_id) {
+                            selectedReflectionPassionIDs.remove(passion.passion_id)
+                        } else {
+                            selectedReflectionPassionIDs.insert(passion.passion_id)
+                        }
+                    } label: {
+                        HStack {
+                            Text("\(displayEmotionLabelReflect(for: passion.emotion)): \(passion.passion)")
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            if selectedReflectionPassionIDs.contains(passion.passion_id) {
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(.blue)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .navigationTitle("Connect Passions")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") { isShowingReflectionPassionsSheet = false }
+                }
             }
         }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
     }
 
     private var contributionPromptSheet: some View {
@@ -932,7 +988,10 @@ struct ReflectView: View {
                 .frame(minHeight: 110)
                 .padding(8)
                 .scrollContentBackground(.hidden)
-                .background(Color.clear, in: RoundedRectangle(cornerRadius: 10))
+                .background(
+                    (colorScheme == .dark ? Color(.secondarySystemBackground) : Color(.systemBackground)),
+                    in: RoundedRectangle(cornerRadius: 10)
+                )
                 .overlay(
                     RoundedRectangle(cornerRadius: 10)
                         .stroke(isHighlighted ? Color.red : Color.black.opacity(0.12), lineWidth: isHighlighted ? 2 : 1)
@@ -949,21 +1008,8 @@ struct ReflectView: View {
     }
 
     private func showJournalValidationHint() {
-        var missing: Set<JournalField> = []
-        if achievementsText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { missing.insert(.achievements) }
-        if magicMomentsText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { missing.insert(.magicMoments) }
-        if powerQuestionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { missing.insert(.powerQuestion) }
-        highlightedMissingJournalFields = missing
-
-        withAnimation(.easeInOut(duration: 0.2)) {
-            showSaveHint = true
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                showSaveHint = false
-            }
-            highlightedMissingJournalFields.removeAll()
-        }
+        highlightedMissingJournalFields = []
+        showSaveHint = false
     }
 
     private func loadingStylePulsedMetrics(at time: TimeInterval) -> [(String, Color, Double)] {
@@ -1043,10 +1089,20 @@ struct ReflectView: View {
             startedAt: startedAt,
             completedAt: completedAt,
             achievementsText: achievementsText.trimmingCharacters(in: .whitespacesAndNewlines),
-            magicMomentsText: magicMomentsText.trimmingCharacters(in: .whitespacesAndNewlines),
-            powerQuestionText: powerQuestionText.trimmingCharacters(in: .whitespacesAndNewlines)
+            magicMomentsText: "",
+            powerQuestionText: ""
         )
         modelContext.insert(archive)
+        let reflectionPassionSnapshots = passions
+            .filter { selectedReflectionPassionIDs.contains($0.passion_id) }
+            .map {
+                ReflectionPassionsStore.Snapshot(
+                    passionID: $0.passion_id,
+                    emotion: $0.emotion,
+                    passion: $0.passion
+                )
+            }
+        ReflectionPassionsStore.setSnapshots(reflectionPassionSnapshots, for: archive.id)
 
         for action in weekActions {
             let define = defineByActionID[action.id]
@@ -1137,6 +1193,16 @@ struct ReflectView: View {
 
         try? modelContext.save()
         onFinish()
+    }
+
+    private func displayEmotionLabelReflect(for raw: String) -> String {
+        switch raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "just": return "Hate"
+        case "vows": return "Vow"
+        case "thrill": return "Thrill"
+        case "love": return "Love"
+        default: return raw.capitalized
+        }
     }
 
     private func beginContributionFlowOrProceed() {
@@ -1547,6 +1613,7 @@ private struct ReflectionLoadingStyleLinesBackground: View {
     let focusXFraction: CGFloat
     let focusYFraction: CGFloat
     let radarDiameter: CGFloat
+    let rightSideTargetBandFraction: Double
 
     private let lineCount: Int = 102
     private let leftInset: CGFloat = -40
@@ -1556,6 +1623,20 @@ private struct ReflectionLoadingStyleLinesBackground: View {
     private let funnelMinScale: CGFloat = 0.44
     private let funnelCurve: CGFloat = 1.55
     private let radarCircleExtraDiameter: CGFloat = 18
+
+    init(
+        colors: [Color],
+        focusXFraction: CGFloat,
+        focusYFraction: CGFloat,
+        radarDiameter: CGFloat,
+        rightSideTargetBandFraction: Double = 0
+    ) {
+        self.colors = colors
+        self.focusXFraction = focusXFraction
+        self.focusYFraction = focusYFraction
+        self.radarDiameter = radarDiameter
+        self.rightSideTargetBandFraction = rightSideTargetBandFraction
+    }
 
     private func rand(_ seed: Int, _ a: Double, _ b: Double) -> Double {
         let seedD = Double(seed)
@@ -1592,7 +1673,8 @@ private struct ReflectionLoadingStyleLinesBackground: View {
                         let clampedFrac = bandStart + band * localFrac
                         let baseY: CGFloat = CGFloat(clampedFrac) * sz.height + verticalShift
 
-                        let endY: CGFloat = centerY
+                        let rightBand = max(0.0, min(rightSideTargetBandFraction, 1.0))
+                        let endY: CGFloat = centerY + (CGFloat(localFrac - 0.5) * sz.height * CGFloat(rightBand))
 
                         let color = colors[i % colorCount]
                         let L = endX - startX

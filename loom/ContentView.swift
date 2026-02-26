@@ -97,12 +97,12 @@ struct ContentView: View {
     }
 
     private var headerPageFadeAnimation: Animation? {
-        enableHeaderPageAnimations ? .easeInOut(duration: 0.2) : nil
+        enableHeaderPageAnimations ? .easeOut(duration: 0.12) : nil
     }
 
     private var headerPageSpringAnimation: Animation? {
         enableHeaderPageAnimations
-            ? .interactiveSpring(response: 0.34, dampingFraction: 0.72, blendDuration: 0.2)
+            ? .easeOut(duration: 0.16)
             : nil
     }
 

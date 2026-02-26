@@ -496,6 +496,14 @@ struct AccountView: View {
         List {
             Section {
                 NavigationLink {
+                    NotificationsPlaceholderView()
+                } label: {
+                    HStack {
+                        Text("Notifications")
+                    }
+                }
+
+                NavigationLink {
                     ManagePeoplePlacesToolsView()
                 } label: {
                     HStack {
@@ -3431,5 +3439,18 @@ struct DataPrinterDetailView: View {
             }
         }
         .navigationTitle("Details")
+    }
+}
+
+private struct NotificationsPlaceholderView: View {
+    var body: some View {
+        List {
+            Section {
+                Text("Notifications settings are coming soon.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .navigationTitle("Notifications")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }

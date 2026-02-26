@@ -1233,6 +1233,8 @@ struct PlanStepThreeView: View {
     @State private var showHidden: Bool = false
     @State private var isCategorizeExpanded: Bool = false
     @State private var autoGroupOutlineAngle: Double = 0
+    @State private var autoGroupIconAnimating: Bool = false
+    @State private var autoGroupIconAnimationTask: Task<Void, Never>? = nil
 
     @State private var poolItemIDs: [UUID] = []
     @State private var chunks: [ChunkContainerState] = []
@@ -1801,14 +1803,13 @@ struct PlanStepThreeView: View {
                             .resizable()
                             .scaledToFit()
                             .frame(width: 27, height: 27)
+                            .rotation3DEffect(
+                                .degrees(isAutoGrouping && autoGroupIconAnimating ? 180 : 0),
+                                axis: (x: 1, y: 0, z: 0)
+                            )
                         Text("AutoGroup")
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(autoGroupGradient)
-                        if isAutoGrouping {
-                            ProgressView()
-                                .scaleEffect(0.8)
-                                .tint(.secondary)
-                        }
                     }
                     .padding(.horizontal, 15)
                     .padding(.vertical, 9)
@@ -1830,6 +1831,9 @@ struct PlanStepThreeView: View {
                     withAnimation(.linear(duration: 8).repeatForever(autoreverses: false)) {
                         autoGroupOutlineAngle = 360
                     }
+                }
+                .onChange(of: isAutoGrouping, initial: false) { _, isLoading in
+                    setAutoGroupIconLoadingAnimation(isLoading)
                 }
             }
             .padding(.bottom, 2)
@@ -2729,10 +2733,10 @@ struct PlanStepThreeView: View {
 
         guard reviewCount >= 6 else {
             autoGroupFeedback = AutoGroupFeedback(
-                title: "Couldn’t AutoGroup Yet",
+                title: "Can't AutoGroup Yet",
                 message: reviewCount == 0
                     ? "There are no ungrouped Capture actions available right now."
-                    : "AutoGroup needs at least 6 ungrouped actions so it can form at least 2 groups with 3 actions each.",
+                    : "AutoGroup needs at least 6 actions that are not grouped.",
                 canGroupMore: false
             )
             return
@@ -2740,8 +2744,8 @@ struct PlanStepThreeView: View {
 
         guard let plans = await buildAutoGroupPlansViaLoomAI(for: candidates) else {
             autoGroupFeedback = AutoGroupFeedback(
-                title: "Low Confidence Grouping",
-                message: "LoomAI couldn’t confidently group these actions into at least 2 strong groups of 3+ actions. Try grouping manually or refine the actions first.",
+                title: "Can't AutoGroup",
+                message: "AutoGroup couldn't confidently group actions. Try grouping them manually or reword to clarify.",
                 canGroupMore: false
             )
             return
@@ -2807,9 +2811,7 @@ struct PlanStepThreeView: View {
         if groupedCount == totalPoolCount {
             message = "Grouped all \(groupedCount) available Capture actions into \(selectedPlans.count) groups."
         } else if skippedFromReviewed > 0 {
-            let remaining = max(totalPoolCount - groupedCount, 0)
-            let remainingText = remaining > 0 ? "\(remaining) remain in Capture." : ""
-            message = "Grouped \(groupedCount) high-confidence Capture actions into \(selectedPlans.count) groups and left \(skippedFromReviewed) unclear actions for manual grouping. \(remainingText)"
+            message = "Grouped \(groupedCount) actions into \(selectedPlans.count) groups. Left \(skippedFromReviewed) actions that were unclear."
         } else if groupedCount == 25 {
             let remaining = max(totalPoolCount - groupedCount, 0)
             message = "Grouped the most recent 25 Capture actions into \(selectedPlans.count) groups. \(remaining > 0 ? "\(remaining) remain." : "") Want to AutoGroup another batch?"
@@ -2823,6 +2825,29 @@ struct PlanStepThreeView: View {
             message: message,
             canGroupMore: canGroupMore && poolItems.count >= 6
         )
+    }
+
+    private func setAutoGroupIconLoadingAnimation(_ isLoading: Bool) {
+        if isLoading {
+            autoGroupIconAnimationTask?.cancel()
+            autoGroupIconAnimating = false
+            autoGroupIconAnimationTask = Task { @MainActor in
+                while !Task.isCancelled {
+                    withAnimation(.easeInOut(duration: 0.55)) {
+                        autoGroupIconAnimating.toggle()
+                    }
+                    try? await Task.sleep(for: .milliseconds(550))
+                }
+            }
+        } else {
+            autoGroupIconAnimationTask?.cancel()
+            autoGroupIconAnimationTask = nil
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                autoGroupIconAnimating = false
+            }
+        }
     }
 
     private func buildAutoGroupPlans(for items: [RollingCaptureItem]) -> [AutoGroupAssignmentPlan]? {
@@ -3408,7 +3433,7 @@ struct PlanStepThreeLabelView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .sheet(isPresented: $isShowingAddFulfillmentAreaSheet) {
             NavigationStack {
-                FulfillmentStartView(entryMode: .addSingleArea)
+                FulfillmentStartView(entryMode: .addSingleArea, showsProgressStrip: false)
             }
         }
     }
@@ -3729,19 +3754,9 @@ struct PlanStepFourView: View {
         return outcomes.filter { !takenByOtherChunks.contains($0.outcome_id) }
     }
 
-    private func selectedRoleIDs(excludingChunk chunkID: UUID?) -> Set<UUID> {
-        var result = Set<UUID>()
-        for (id, roleID) in selectedRoleIDByChunk where id != chunkID {
-            if let roleID { result.insert(roleID) }
-        }
-        return result
-    }
-
     private func availableRoles(forChunk chunk: PlannedChunk?) -> [FulfillmentRoles] {
         guard let chunk else { return [] }
-        let rolesInCategory = rolesForPlannedChunk(chunk)
-        let takenByOtherChunks = selectedRoleIDs(excludingChunk: chunk.id)
-        return rolesInCategory.filter { !takenByOtherChunks.contains($0.id) }
+        return rolesForPlannedChunk(chunk)
     }
 
     private func chunkLightFillColor(for chunk: PlannedChunk) -> Color {
@@ -3763,6 +3778,11 @@ struct PlanStepFourView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
+                    if !isStep4NextEnabled {
+                        step5TopCautionCard
+                            .transition(.opacity)
+                    }
+
                     if plannedChunksForWeek.isEmpty {
                         Text("No groups yet.")
                             .font(.subheadline)
@@ -3892,6 +3912,27 @@ struct PlanStepFourView: View {
             step4AutosaveTask?.cancel()
             persistStep4ForWeekNow()
         }
+    }
+
+    private var step5TopCautionCard: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.subheadline)
+                .foregroundStyle(Color.black.opacity(0.7))
+                .padding(.top, 1)
+            Text("Write Result and Conect Identity to Action Blocks")
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .foregroundStyle(Color.black.opacity(0.7))
+                .multilineTextAlignment(.leading)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(red: 0.98, green: 0.92, blue: 0.72))
+        )
     }
 
     private var instructionsRow: some View {
@@ -4535,6 +4576,11 @@ struct PlanStepFiveView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
+                    if !isStep5StartEnabled {
+                        step6TopCautionCard
+                            .transition(.opacity)
+                    }
+
                     if plannedChunksForWeek.isEmpty {
                         Text("No groups yet.")
                             .font(.subheadline)
@@ -4864,6 +4910,27 @@ struct PlanStepFiveView: View {
             step5AutosaveTask?.cancel()
             persistStep5ForWeekNow()
         }
+    }
+
+    private var step6TopCautionCard: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.subheadline)
+                .foregroundStyle(Color.black.opacity(0.7))
+                .padding(.top, 1)
+            Text("Assign all actions with a duration")
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .foregroundStyle(Color.black.opacity(0.7))
+                .multilineTextAlignment(.leading)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(red: 0.98, green: 0.92, blue: 0.72))
+        )
     }
 
     private var instructionsRow: some View {

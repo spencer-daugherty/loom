@@ -250,31 +250,30 @@ final class LoomAIViewModel: ObservableObject {
             let response = try await service.sendChat(messages: outgoing, context: contextSnapshot)
             let replyText = response.message.trimmingCharacters(in: .whitespacesAndNewlines)
             let finalReply = replyText.isEmpty ? "Empty response from LoomAI proxy." : replyText
-            await MainActor.run {
-                let assistant = LoomAIChatMessage(
-                    threadID: thread.id,
-                    threadKey: thread.threadKey,
-                    roleRaw: LoomAIChatRole.assistant.rawValue,
-                    content: finalReply,
-                    actionsJSON: LoomAIChatMessageActionsCodec.encode(response.actions),
-                    debugJSON: LoomAIDebugCodec.encode(response.debug)
-                )
-                context.insert(assistant)
-                if let summaryTitle = summarizedThreadTitle(from: history + [assistant]), !summaryTitle.isEmpty {
-                    thread.title = summaryTitle
-                }
-                thread.updatedAt = .now
-                try? context.save()
-                latestSuggestedActions = response.actions
-            }
-            await refreshFollowUpPromptChipsViaAI(in: context, threadMessages: history + [LoomAIChatMessage(
+            let assistantPreviewMessage = LoomAIChatMessage(
                 threadID: thread.id,
                 threadKey: thread.threadKey,
                 roleRaw: LoomAIChatRole.assistant.rawValue,
                 content: finalReply,
                 actionsJSON: LoomAIChatMessageActionsCodec.encode(response.actions),
                 debugJSON: LoomAIDebugCodec.encode(response.debug)
-            )])
+            )
+            let updatedHistory = history + [assistantPreviewMessage]
+            let apiSummaryTitle = await requestThreadTitleFromAI(
+                messages: updatedHistory,
+                contextSnapshot: contextSnapshot
+            )
+            await MainActor.run {
+                let assistant = assistantPreviewMessage
+                context.insert(assistant)
+                if let summaryTitle = apiSummaryTitle ?? summarizedThreadTitle(from: updatedHistory), !summaryTitle.isEmpty {
+                    thread.title = summaryTitle
+                }
+                thread.updatedAt = .now
+                try? context.save()
+                latestSuggestedActions = response.actions
+            }
+            await refreshFollowUpPromptChipsViaAI(in: context, threadMessages: updatedHistory)
         } catch {
             let message = (error as NSError).localizedDescription
             let serviceError = error as? LoomAIService.LoomAIServiceError
@@ -1569,6 +1568,79 @@ final class LoomAIViewModel: ObservableObject {
             title = truncateAtWordBoundary(title, maxLength: 52)
         }
         return title
+    }
+
+    private func requestThreadTitleFromAI(
+        messages: [LoomAIChatMessage],
+        contextSnapshot: LoomAIContextSnapshot
+    ) async -> String? {
+        let recent = Array(messages.suffix(10))
+        guard !recent.isEmpty else { return nil }
+
+        let transcript = recent.map { message in
+            let role = message.roleRaw.capitalized
+            let content = message.content
+                .replacingOccurrences(of: "\n", with: " ")
+                .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return "\(role): \(content)"
+        }.joined(separator: "\n")
+
+        let titleInstruction = """
+        Summarize this Loom chat into a short menu title.
+
+        Rules:
+        - Return ONLY the title text (no quotes, no JSON, no labels)
+        - 3 to 7 words preferred
+        - Max 52 characters
+        - Use the user's real topic/goal/problem, not generic wording
+        - Do not start with 'How', 'What', 'Can', 'Should', or 'Help'
+        - No ending punctuation
+
+        Chat transcript:
+        \(transcript)
+        """
+
+        do {
+            let response = try await service.sendChat(
+                messages: [.init(role: "user", content: titleInstruction)],
+                context: contextSnapshot
+            )
+            return sanitizeAPISummarizedThreadTitle(response.message)
+        } catch {
+            return nil
+        }
+    }
+
+    private func sanitizeAPISummarizedThreadTitle(_ raw: String) -> String? {
+        var title = raw
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if title.hasPrefix("\""), title.hasSuffix("\""), title.count >= 2 {
+            title.removeFirst()
+            title.removeLast()
+        }
+
+        title = title
+            .replacingOccurrences(of: "title:", with: "", options: [.caseInsensitive])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        title = cleanThreadTitleCandidate(title)
+        title = stripCommonQuestionPrefix(from: title)
+        title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        title = title.trimmingCharacters(in: CharacterSet(charactersIn: ".!?-:;\"' "))
+
+        let lower = title.lowercased()
+        let invalidPrefixes = ["how ", "what ", "can ", "should ", "help "]
+        let invalidExact: Set<String> = ["loom", "new chat", "chat summary", "summary", "conversation"]
+        if title.isEmpty || title.count < 4 || invalidExact.contains(lower) { return nil }
+        if invalidPrefixes.contains(where: { lower.hasPrefix($0) }) { return nil }
+
+        if title.count > 52 {
+            title = truncateAtWordBoundary(title, maxLength: 52)
+        }
+        return title.isEmpty ? nil : title
     }
 
     private func cleanThreadTitleCandidate(_ text: String) -> String {

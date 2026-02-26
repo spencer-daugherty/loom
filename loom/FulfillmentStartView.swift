@@ -113,9 +113,11 @@ struct FulfillmentStartView: View {
     @Query(sort: \PlanLabel.category, order: .forward) private var planLabels: [PlanLabel]
 
     private let entryMode: EntryMode
+    private let showsProgressStrip: Bool
 
-    init(entryMode: EntryMode = .onboarding) {
+    init(entryMode: EntryMode = .onboarding, showsProgressStrip: Bool = true) {
         self.entryMode = entryMode
+        self.showsProgressStrip = showsProgressStrip
     }
 
 
@@ -376,6 +378,7 @@ struct FulfillmentStartView: View {
         let uniqueCount = Set(names.map { $0.lowercased() }).count
         guard uniqueCount == 1 else { return false }
         guard !hasCreateCategoriesColorConflict else { return false }
+        guard !hasAddSingleAreaActiveColorConflict else { return false }
         return true
     }
 
@@ -391,6 +394,53 @@ struct FulfillmentStartView: View {
 
     private var hasCreateCategoriesColorConflict: Bool {
         !conflictingSelectedCategories.isEmpty
+    }
+
+    private var activeCategoryColorKeys: Set<String> {
+        let sourceRows = fulfillmentSnapshot.isEmpty ? fulfillments : fulfillmentSnapshot
+        return Set(sourceRows.compactMap { row in
+            let category = row.category.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !category.isEmpty else { return nil }
+            return categoryColorKeys[category]
+                ?? FulfillmentCategoryTheme.defaultColorKeys()[category]
+                ?? "blue"
+        })
+    }
+
+    private var hasAddSingleAreaActiveColorConflict: Bool {
+        guard isAddSingleAreaMode else { return false }
+        guard let category = selectedCategoryNames.first?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !category.isEmpty else { return false }
+        let selectedColorKey = categoryColorKeys[category]
+            ?? FulfillmentCategoryTheme.defaultColorKeys()[category]
+            ?? rotatedColorKey(for: category)
+        return activeCategoryColorKeys.contains(selectedColorKey)
+    }
+
+    private func unavailableColorKeys(for category: String) -> Set<String> {
+        let current = category.trimmingCharacters(in: .whitespacesAndNewlines)
+        var keys = Set<String>()
+
+        for otherCategory in selectedCategoryNames {
+            let other = otherCategory.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !other.isEmpty else { continue }
+            guard other.caseInsensitiveCompare(current) != .orderedSame else { continue }
+            let colorKey = categoryColorKeys[other]
+                ?? FulfillmentCategoryTheme.defaultColorKeys()[other]
+                ?? rotatedColorKey(for: other)
+            keys.insert(colorKey)
+        }
+
+        if isAddSingleAreaMode {
+            keys.formUnion(activeCategoryColorKeys)
+        }
+
+        return keys
+    }
+
+    private func availableColorOptions(for category: String) -> [FulfillmentCategoryTheme.PaletteOption] {
+        let unavailable = unavailableColorKeys(for: category)
+        return FulfillmentCategoryTheme.palette.filter { !unavailable.contains($0.key) }
     }
 
     private var availableCategoryNames: [String] {
@@ -574,7 +624,7 @@ struct FulfillmentStartView: View {
             persistDraftIfNeeded()
         }
         .overlay(alignment: .bottom) {
-            let persistentColorConflict = step == .createCategories && hasCreateCategoriesColorConflict
+            let persistentColorConflict = step == .createCategories && (hasCreateCategoriesColorConflict || hasAddSingleAreaActiveColorConflict)
             if persistentColorConflict || showValidationHint {
                 Text(persistentColorConflict ? "Each color can only be used once." : validationHintText)
                     .font(.footnote)
@@ -660,7 +710,7 @@ struct FulfillmentStartView: View {
                 .padding(.bottom, 2)
             }
 
-            if step != .intro {
+            if step != .intro && showsProgressStrip {
                 progressStrip
                     .frame(maxWidth: .infinity, alignment: .center)
             }
@@ -678,10 +728,12 @@ struct FulfillmentStartView: View {
                 .frame(maxWidth: .infinity, alignment: .center)
             }
 
-            Text(currentStepDisplayTitle)
-                .font(isCompactIntroLayout && step == .intro ? .title2 : .largeTitle)
-                .fontWeight(.bold)
-                .frame(maxWidth: .infinity, alignment: .center)
+            if !(isAddSingleAreaMode && !showsProgressStrip && step == .createCategories) {
+                Text(currentStepDisplayTitle)
+                    .font(isCompactIntroLayout && step == .intro ? .title2 : .largeTitle)
+                    .fontWeight(.bold)
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
         }
     }
 
@@ -1035,6 +1087,7 @@ struct FulfillmentStartView: View {
             FulfillmentStartColorPickerSheet(
                 category: colorPickerCategory,
                 currentColorKey: FulfillmentCategoryTheme.colorKey(for: colorPickerCategory, colorKeys: categoryColorKeys),
+                options: availableColorOptions(for: colorPickerCategory),
                 onSelect: { colorKey in
                     applyColorSelection(for: colorPickerCategory, colorKey: colorKey)
                 }
@@ -2521,6 +2574,7 @@ struct FulfillmentStartView: View {
     }
 
     private func applyColorSelection(for category: String, colorKey: String) {
+        guard availableColorOptions(for: category).contains(where: { $0.key == colorKey }) else { return }
         var map = categoryColorKeys
         let resolvedBefore = map[category] ?? FulfillmentCategoryTheme.defaultColorKeys()[category] ?? "blue"
         if let other = map.first(where: { $0.key != category && $0.value == colorKey })?.key {
@@ -3239,13 +3293,14 @@ struct FulfillmentIntroRouteLinesView: View {
 private struct FulfillmentStartColorPickerSheet: View {
     let category: String
     let currentColorKey: String
+    let options: [FulfillmentCategoryTheme.PaletteOption]
     let onSelect: (String) -> Void
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
             List {
-                ForEach(FulfillmentCategoryTheme.palette, id: \.key) { option in
+                ForEach(options, id: \.key) { option in
                     Button {
                         onSelect(option.key)
                     } label: {

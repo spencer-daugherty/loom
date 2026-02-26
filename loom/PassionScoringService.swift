@@ -346,6 +346,7 @@ struct SwiftDataPassionScoringSignalProvider: PassionScoringSignalProvider {
         let blockSignals = monthlyBlockSignals(
             window: window,
             linkedCategoryNames: linkedCategoryNames,
+            explicitReflectionArchiveIDs: ReflectionPassionsStore.archiveIDs(containingAnyPassionIDs: passionItemIDs),
             reflectionArchives: reflectionArchives,
             reflectionActions: reflectionActions
         )
@@ -433,10 +434,11 @@ struct SwiftDataPassionScoringSignalProvider: PassionScoringSignalProvider {
     private func monthlyBlockSignals(
         window: PassionMonthWindow,
         linkedCategoryNames: Set<String>,
+        explicitReflectionArchiveIDs: Set<UUID>,
         reflectionArchives: [ActionBlocksReflectionArchive],
         reflectionActions: [ActionBlocksReflectionArchiveAction]
     ) -> [PassionBlockSignal] {
-        guard !linkedCategoryNames.isEmpty else { return [] }
+        guard !linkedCategoryNames.isEmpty || !explicitReflectionArchiveIDs.isEmpty else { return [] }
         let archiveIDsInMonth = Set(
             reflectionArchives
                 .filter { $0.completedAt >= window.monthStart && $0.completedAt < window.monthEnd }
@@ -446,7 +448,10 @@ struct SwiftDataPassionScoringSignalProvider: PassionScoringSignalProvider {
 
         let relevantActions = reflectionActions.filter {
             archiveIDsInMonth.contains($0.archiveId) &&
-            linkedCategoryNames.contains(normalizedCategory($0.chunkCategory))
+            (
+                explicitReflectionArchiveIDs.contains($0.archiveId) ||
+                linkedCategoryNames.contains(normalizedCategory($0.chunkCategory))
+            )
         }
 
         let grouped = Dictionary(grouping: relevantActions) { row in

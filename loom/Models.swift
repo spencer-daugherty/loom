@@ -449,6 +449,59 @@ enum LittleWinsPassionsStore {
   }
 }
 
+enum ReflectionPassionsStore {
+  struct Snapshot: Codable, Identifiable, Hashable {
+    var id: UUID { passionID }
+    let passionID: UUID
+    let emotion: String
+    let passion: String
+  }
+
+  private static let defaultsKey = "reflection_passions_v1"
+
+  private static func loadMap() -> [String: [Snapshot]] {
+    guard let data = UserDefaults.standard.data(forKey: defaultsKey),
+          let decoded = try? JSONDecoder().decode([String: [Snapshot]].self, from: data) else {
+      return [:]
+    }
+    return decoded
+  }
+
+  private static func saveMap(_ map: [String: [Snapshot]]) {
+    guard let data = try? JSONEncoder().encode(map) else { return }
+    UserDefaults.standard.set(data, forKey: defaultsKey)
+    NotificationCenter.default.post(name: .littleWinsPassionsDidChange, object: nil)
+  }
+
+  static func snapshots(for reflectionArchiveID: UUID) -> [Snapshot] {
+    loadMap()[reflectionArchiveID.uuidString] ?? []
+  }
+
+  static func setSnapshots(_ snapshots: [Snapshot], for reflectionArchiveID: UUID) {
+    var map = loadMap()
+    let key = reflectionArchiveID.uuidString
+    if snapshots.isEmpty {
+      map.removeValue(forKey: key)
+    } else {
+      map[key] = snapshots
+    }
+    saveMap(map)
+  }
+
+  static func archiveIDs(containingAnyPassionIDs passionIDs: Set<UUID>) -> Set<UUID> {
+    guard !passionIDs.isEmpty else { return [] }
+    let map = loadMap()
+    var result = Set<UUID>()
+    for (key, snapshots) in map {
+      let snapshotIDs = Set(snapshots.map(\.passionID))
+      if !snapshotIDs.isDisjoint(with: passionIDs), let archiveID = UUID(uuidString: key) {
+        result.insert(archiveID)
+      }
+    }
+    return result
+  }
+}
+
 #if canImport(FamilyControls)
 enum LittleWinsScreenTimeBridge {
   private enum BridgeError: LocalizedError {

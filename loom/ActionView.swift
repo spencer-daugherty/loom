@@ -48,6 +48,8 @@ struct ActionView: View {
 
     @Query private var notes: [PlannedChunkActionNote]
     @Query private var attachments: [PlannedChunkActionAttachment]
+    @Query(sort: \WeeklyMindsetEntry.Fields.createdAt, order: .reverse)
+    private var weeklyMindsetEntries: [WeeklyMindsetEntry.Fields]
     @Query(sort: \RollingCaptureItem.createdAt, order: .reverse)
     private var captureItems: [RollingCaptureItem]
     @Query(sort: \RecurringCaptureRule.createdAt, order: .reverse)
@@ -746,7 +748,12 @@ struct ActionView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color(.systemBackground))
         .coordinateSpace(name: "action-scroll")
-        .sheet(isPresented: $isShowingInstructions) {
+        .sheet(
+            isPresented: Binding(
+                get: { isShowingInstructions && hasMotivationContent },
+                set: { isShowingInstructions = $0 }
+            )
+        ) {
             ActionInstructionsPopup()
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
@@ -1074,26 +1081,51 @@ struct ActionView: View {
         return manualShow || autoShow
     }
 
-    private var instructionsRow: some View {
-        Button { isShowingInstructions = true } label: {
-            HStack(alignment: .center, spacing: 10) {
-                Spacer(minLength: 0)
-                Image(systemName: "bolt.square")
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
-                Text("Motivation")
-                    .fontWeight(.bold)
-                    .foregroundStyle(.secondary)
-                    .font(.subheadline)
-                Text("Tap to read")
-                    .foregroundStyle(.secondary)
-                    .font(.subheadline)
-                Spacer(minLength: 0)
-            }
-            .frame(maxWidth: .infinity)
-            .contentShape(Rectangle())
+    private var currentWeekStartForMotivation: Date {
+        WeeklyMindsetEntry.weekStart(for: Date())
+    }
+
+    private var currentMotivationEntry: WeeklyMindsetEntry.Fields? {
+        weeklyMindsetEntries.first {
+            Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStartForMotivation)
         }
-        .buttonStyle(.plain)
+    }
+
+    private var currentMotivationGratitude: String {
+        currentMotivationEntry?.morningPowerQuestion.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    private var currentMotivationPhrase: String {
+        currentMotivationEntry?.incantation.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    private var hasMotivationContent: Bool {
+        !currentMotivationGratitude.isEmpty || !currentMotivationPhrase.isEmpty
+    }
+
+    @ViewBuilder
+    private var instructionsRow: some View {
+        if hasMotivationContent {
+            Button { isShowingInstructions = true } label: {
+                HStack(alignment: .center, spacing: 10) {
+                    Spacer(minLength: 0)
+                    Image(systemName: "bolt.square")
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                    Text("Motivation")
+                        .fontWeight(.bold)
+                        .foregroundStyle(.secondary)
+                        .font(.subheadline)
+                    Text("Tap to read")
+                        .foregroundStyle(.secondary)
+                        .font(.subheadline)
+                    Spacer(minLength: 0)
+                }
+                .frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
     }
 
     @ViewBuilder
@@ -3544,20 +3576,32 @@ private struct ActionInstructionsPopup: View {
         }
     }
 
+    private var gratitudeValue: String {
+        currentEntry?.morningPowerQuestion.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    private var inspirationValue: String {
+        currentEntry?.incantation.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    motivationRow(
-                        title: "What am I happy for or grateful about in life right now?",
-                        subtitle: nil,
-                        value: currentEntry?.morningPowerQuestion ?? ""
-                    )
-                    motivationRow(
-                        title: "What’s a simple phrase that inspires you?",
-                        subtitle: nil,
-                        value: currentEntry?.incantation ?? ""
-                    )
+                    if !gratitudeValue.isEmpty {
+                        motivationRow(
+                            title: "What am I happy for or grateful about in life right now?",
+                            subtitle: nil,
+                            value: gratitudeValue
+                        )
+                    }
+                    if !inspirationValue.isEmpty {
+                        motivationRow(
+                            title: "What’s a simple phrase that inspires you?",
+                            subtitle: nil,
+                            value: inspirationValue
+                        )
+                    }
                 }
                 .padding()
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -3578,7 +3622,7 @@ private struct ActionInstructionsPopup: View {
                     .italic()
                     .foregroundStyle(.secondary)
             }
-            Text(value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "-" : value)
+            Text(value)
                 .font(.body)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
