@@ -557,26 +557,13 @@ struct LoomAIChatView: View {
         .disabled(isApplied)
     }
 
-    @ViewBuilder
-    private func suggestedActionLeadingIcon(for action: LoomAISuggestedAction, isApplied: Bool) -> some View {
-        if isApplied {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(colorScheme == .dark ? Color.green : Color(red: 0.10, green: 0.50, blue: 0.24))
-        } else {
-            if let symbol = suggestedActionSymbolName(for: action) {
-                Image(systemName: symbol)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Color.white.opacity(0.95))
-            } else {
-                Image("LoomAI")
-                    .resizable()
-                    .renderingMode(.template)
-                    .scaledToFit()
-                    .frame(width: 16, height: 16)
-                    .foregroundStyle(Color.white.opacity(0.95))
-            }
-        }
+    private func suggestedActionLeadingIcon(for _: LoomAISuggestedAction, isApplied _: Bool) -> some View {
+        Image("LoomAI")
+            .resizable()
+            .renderingMode(.template)
+            .scaledToFit()
+            .frame(width: 16, height: 16)
+            .foregroundStyle(Color.white.opacity(0.95))
     }
 
     @ViewBuilder
