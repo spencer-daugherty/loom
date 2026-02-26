@@ -106,7 +106,7 @@ struct ActionView: View {
     @State private var pendingNewActionIDs: Set<UUID> = []
     @State private var pendingDurationDefaultActionID: UUID? = nil
     @State private var addActionChunkID: ChunkActionAddSheetID? = nil
-    @State private var rearrangeActionsSheetID: RearrangeActionsSheetID? = nil
+    @State private var rearrangeActionsSheetPayload: RearrangeActionsSheetPayload? = nil
     @State private var areAllActionBlocksCollapsed: Bool = false
     @State private var localChunkOrderIDs: [UUID] = []
     @State private var draggedChunkID: UUID? = nil
@@ -1524,13 +1524,9 @@ struct ActionView: View {
         )
 
         return tappable
-            .sheet(item: $rearrangeActionsSheetID) { sheet in
-                let sheetChunkActions = allActions.filter {
-                    $0.plannedChunkId == sheet.id &&
-                    isActiveStatus(executionStateByActionID[$0.id]?.status ?? .noAction)
-                }
+            .sheet(item: $rearrangeActionsSheetPayload) { sheet in
                 RearrangeActionsSheet(
-                    items: sheetChunkActions.map { .init(id: $0.id, text: $0.text) },
+                    items: sheet.items,
                     onSave: { reorderedIDs in
                         commitActionOrder(in: sheet.id, visibleOrderedIDs: reorderedIDs)
                     }
@@ -2046,7 +2042,15 @@ struct ActionView: View {
         let canRearrange = isEnabled && actions.count > 1
         return Button {
             guard canRearrange else { return }
-            rearrangeActionsSheetID = RearrangeActionsSheetID(id: chunk.id)
+            let ordered = actions.sorted(by: { (lhs: PlannedChunkAction, rhs: PlannedChunkAction) in
+                if lhs.sortOrder != rhs.sortOrder { return lhs.sortOrder < rhs.sortOrder }
+                if lhs.createdAt != rhs.createdAt { return lhs.createdAt > rhs.createdAt }
+                return lhs.id.uuidString < rhs.id.uuidString
+            })
+            rearrangeActionsSheetPayload = RearrangeActionsSheetPayload(
+                id: chunk.id,
+                items: ordered.map { .init(id: $0.id, text: $0.text) }
+            )
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "line.3.horizontal")
@@ -3576,8 +3580,9 @@ private struct ChunkActionAddSheetID: Identifiable, Hashable {
     let id: UUID
 }
 
-private struct RearrangeActionsSheetID: Identifiable, Hashable {
+private struct RearrangeActionsSheetPayload: Identifiable, Hashable {
     let id: UUID
+    let items: [RearrangeActionsSheet.Item]
 }
 
 private struct ActionScrollOffsetPreferenceKey: PreferenceKey {
