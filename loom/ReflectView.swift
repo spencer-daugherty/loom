@@ -67,10 +67,52 @@ struct ReflectView: View {
     @State private var selectedReflectionPassionIDs: Set<UUID> = []
     @State private var isShowingReflectionPassionsSheet: Bool = false
     @State private var isShowingNoPassionsSaveConfirm: Bool = false
-    private let fallbackPalette: [Color] = [.blue, .indigo, .green, .purple, .red, .orange]
-
+    @State private var hasScheduledCelebrationDismiss = false
+    @State private var shouldRenderHeavyInsights = false
+    @State private var shouldRenderInsightsCharts = false
+    @State private var insightsSnapshot: InsightsSnapshot?
+    @State private var celebrationAnimationStartDate: Date = .now
+    @State private var readableInsightsText: String?
+    @State private var readableInsightsLoading = false
+    @State private var readableInsightsRequestKey: String?
     private enum JournalField: Hashable {
         case journal
+    }
+
+    private struct InsightsSnapshot {
+        struct ProductiveSignalRow: Hashable {
+            let id: String
+            let label: String
+            let count: Int
+            let typeLabel: String
+        }
+        struct FulfillmentAreaRow: Hashable {
+            let title: String
+            let doneCount: Int
+            let color: Color
+            let actionBlockProjectedDelta: Double?
+        }
+        struct OutcomeRow: Hashable {
+            let id: UUID
+            let title: String
+            let category: String
+            let color: Color
+        }
+        let doneCount: Int
+        let totalActions: Int
+        let completionRatio: Double
+        let carriedCount: Int
+        let carriedRatio: Double
+        let doneEstimatedCount: Int
+        let startedAt: Date
+        let completedAt: Date
+        let completionDayCount: Int
+        let productiveSignals: [ProductiveSignalRow]
+        let productiveDayRows: [ProductiveDayRow]
+        let flowProfileRows: [(String, Int, Color)]
+        let fulfillmentAreaRows: [FulfillmentAreaRow]
+        let outcomeRows: [OutcomeRow]
+        let carriedActionTexts: [String]
     }
 
     init(weekStart: Date, onFinish: @escaping () -> Void) {
@@ -250,11 +292,12 @@ struct ReflectView: View {
     }
 
     private var leveragedCount: Int {
-        weekActions.filter {
-            if status(for: $0.id) == .leveraged { return true }
-            guard let sel = leverageByActionID[$0.id], let resourceID = sel.resourceId else { return false }
-            return resourceByID[resourceID] != nil
-        }.count
+        var leveragedIDs = Set<UUID>()
+        for row in allLeverageSelections where actionIDs.contains(row.plannedChunkActionId) {
+            guard let resourceID = row.resourceId, resourceByID[resourceID] != nil else { continue }
+            leveragedIDs.insert(row.plannedChunkActionId)
+        }
+        return leveragedIDs.count
     }
 
     private var adHocCount: Int {
@@ -322,14 +365,133 @@ struct ReflectView: View {
         return counts.max(by: { $0.value < $1.value })?.key
     }
 
+    private var productiveSignalRows: [InsightsSnapshot.ProductiveSignalRow] {
+        let doneActions = weekActions.filter { status(for: $0.id) == .done }
+        var counts: [String: (label: String, count: Int, typeLabel: String)] = [:]
+
+        for action in doneActions {
+            for placeId in placeIDsByActionID[action.id] ?? [] {
+                guard let place = placeByID[placeId]?.place, !place.isEmpty else { continue }
+                let key = "place:\(place.lowercased())"
+                let existing = counts[key] ?? (place, 0, "Place")
+                counts[key] = (existing.label, existing.count + 1, existing.typeLabel)
+            }
+
+            if let leverage = leverageByActionID[action.id],
+               let resourceID = leverage.resourceId,
+               let resource = resourceByID[resourceID]
+            {
+                let label = resource.value.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !label.isEmpty {
+                    let kindLabel = resource.kind == .person ? "Person" : (resource.kind == .tool ? "Tool" : "Resource")
+                    let key = "\(kindLabel.lowercased()):\(label.lowercased())"
+                    let existing = counts[key] ?? (label, 0, kindLabel)
+                    counts[key] = (existing.label, existing.count + 1, existing.typeLabel)
+                }
+            }
+
+            if let define = defineByActionID[action.id] {
+                let allTimesSelected = define.sensitiveMorning && define.sensitiveAfternoon && define.sensitiveEvening
+                if !allTimesSelected {
+                    if define.sensitiveMorning {
+                        let key = "time:morning"
+                        let existing = counts[key] ?? ("Morning", 0, "Time")
+                        counts[key] = (existing.label, existing.count + 1, existing.typeLabel)
+                    }
+                    if define.sensitiveAfternoon {
+                        let key = "time:afternoon"
+                        let existing = counts[key] ?? ("Afternoon", 0, "Time")
+                        counts[key] = (existing.label, existing.count + 1, existing.typeLabel)
+                    }
+                    if define.sensitiveEvening {
+                        let key = "time:evening"
+                        let existing = counts[key] ?? ("Evening", 0, "Time")
+                        counts[key] = (existing.label, existing.count + 1, existing.typeLabel)
+                    }
+                }
+            }
+        }
+
+        return counts.map { key, row in
+            InsightsSnapshot.ProductiveSignalRow(id: key, label: row.label, count: row.count, typeLabel: row.typeLabel)
+        }
+        .sorted { lhs, rhs in
+            if lhs.count == rhs.count { return lhs.label < rhs.label }
+            return lhs.count > rhs.count
+        }
+        .prefix(5)
+        .map { $0 }
+    }
+
     private var categoryBreakdown: [(String, Int)] {
-        let grouped = Dictionary(grouping: weekActions, by: \.plannedChunkId)
+        let doneActions = weekActions.filter { status(for: $0.id) == .done }
+        let grouped = Dictionary(grouping: doneActions, by: \.plannedChunkId)
         let pairs = grouped.compactMap { chunkID, actions -> (String, Int)? in
             guard let chunk = chunkByID[chunkID] else { return nil }
             return (chunk.category, actions.count)
         }
         let merged = Dictionary(grouping: pairs, by: { $0.0 }).mapValues { rows in rows.reduce(0) { $0 + $1.1 } }
         return merged.map { ($0.key, $0.value) }.sorted { $0.1 > $1.1 }
+    }
+
+    private func actionBlockOnlyProjectedDeltaByCategory() -> [String: Double] {
+        let grouped = Dictionary(grouping: weekActions) { action in
+            (chunkByID[action.plannedChunkId]?.category ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        var result: [String: Double] = [:]
+        for (category, actions) in grouped {
+            let title = category.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty else { continue }
+
+            let blocks = Dictionary(grouping: actions, by: \.plannedChunkId).map(\.value)
+
+            let blockCompletionScores = blocks.compactMap { rows -> Double? in
+                let total = rows.count
+                guard total > 0 else { return nil }
+                let statuses = rows.map { status(for: $0.id) }
+                let done = statuses.filter { $0 == .done || $0 == .notNeeded }.count
+                let actionRate = Double(done) / Double(total)
+                return FulfillmentScoringMath.clamped01(0.6 * 1.0 + 0.4 * actionRate)
+            }
+            let blockCarryovers = blocks.compactMap { rows -> Double? in
+                let total = rows.count
+                guard total > 0 else { return nil }
+                let carry = rows.map { status(for: $0.id) }.filter { $0 == .carriedToCapture }.count
+                return FulfillmentScoringMath.clamped01(Double(carry) / Double(total))
+            }
+            let strategicShare = blocks.compactMap { rows -> Double? in
+                let mustRows = rows.filter { defineByActionID[$0.id]?.isMust == true }
+                guard !mustRows.isEmpty else { return 0.5 }
+                let doneFlags = mustRows.filter {
+                    let s = status(for: $0.id)
+                    return s == .done || s == .notNeeded
+                }.count
+                return Double(doneFlags) / Double(mustRows.count)
+            }
+            let reactiveCarry = blocks.compactMap { rows -> Double? in
+                let reactiveRows = rows.filter { defineByActionID[$0.id]?.isMust != true }
+                guard !reactiveRows.isEmpty else { return nil }
+                let carry = reactiveRows.filter { status(for: $0.id) == .carriedToCapture }.count
+                return Double(carry) / Double(reactiveRows.count)
+            }
+
+            let actionBlocks = FulfillmentScoringMath.mean(blockCompletionScores) ?? 0.5
+            let carryPenalty = FulfillmentScoringMath.mean(blockCarryovers) ?? 0.0
+            let strategic = strategicShare.isEmpty ? 0.5 : (FulfillmentScoringMath.mean(strategicShare) ?? 0.5)
+            let reactivePenalty = FulfillmentScoringMath.mean(reactiveCarry) ?? 0.0
+            let strategicBalance = FulfillmentScoringMath.clamped01(0.65 * strategic + 0.35 * (1 - reactivePenalty))
+
+            // Action-Blocks-only projected contribution to the 1...5 score relative to neutral 0.5.
+            let projected = 4.0 * (
+                (0.22 * (actionBlocks - 0.5)) +
+                (0.12 * ((1.0 - carryPenalty) - 0.5)) +
+                (0.15 * (strategicBalance - 0.5))
+            )
+            let rounded = (projected * 10).rounded() / 10
+            result[title] = abs(rounded) < 0.05 ? 0 : rounded
+        }
+        return result
     }
 
     private var outcomesForWeek: [Outcomes] {
@@ -372,18 +534,19 @@ struct ReflectView: View {
         let days: [Date] = (0..<7).compactMap { cal.date(byAdding: .day, value: $0, to: firstDay) }
 
         var doneByDay: [Date: Int] = [:]
-        var mustByDay: [Date: Int] = [:]
+        var notNeededByDay: [Date: Int] = [:]
 
         for action in weekActions {
-            guard
-                let execution = executionByActionID[action.id],
-                closedStatuses.contains(execution.status)
-            else { continue }
+            guard let execution = executionByActionID[action.id] else { continue }
 
             let day = cal.startOfDay(for: execution.updatedAt)
-            doneByDay[day, default: 0] += 1
-            if defineByActionID[action.id]?.isMust == true {
-                mustByDay[day, default: 0] += 1
+            switch execution.status {
+            case .done:
+                doneByDay[day, default: 0] += 1
+            case .notNeeded:
+                notNeededByDay[day, default: 0] += 1
+            default:
+                break
             }
         }
 
@@ -393,8 +556,8 @@ struct ReflectView: View {
         return days.map { day in
             ProductiveDayRow(
                 dayLabel: formatter.string(from: day),
-                completed: doneByDay[day, default: 0],
-                mustCompleted: mustByDay[day, default: 0]
+                done: doneByDay[day, default: 0],
+                notNeeded: notNeededByDay[day, default: 0]
             )
         }
     }
@@ -407,10 +570,9 @@ struct ReflectView: View {
         [
             ("Musts", mustCount, .yellow),
             ("Carried to new capture list", carriedActions.count, .blue),
-            ("Didn't need to be done (Delete)", notNeededCount, .gray),
+            ("Didn't need to be done", notNeededCount, .gray),
             ("Leveraged", leveragedCount, .mint),
-            ("New ad hoc actions", adHocCount, .purple),
-            ("Attachments", noteCount + linkCount + fileCount, .teal),
+            ("New actions added", adHocCount, .purple),
         ]
         .sorted { lhs, rhs in
             if lhs.1 == rhs.1 { return lhs.0 < rhs.0 }
@@ -426,16 +588,206 @@ struct ReflectView: View {
         passions.filter { selectedReflectionPassionIDs.contains($0.passion_id) }
     }
 
+    private var celebrationSplashMetrics: [(String, Color, Double)] {
+        let actionBlockCategories = Array(Set(weekChunks.map(\.category))).sorted()
+        let colors = actionBlockCategories.map { FulfillmentCategoryTheme.color(for: $0) }
+        let palette = colors.isEmpty ? [Color.blue, .indigo, .green, .purple, .red, .orange] : colors
+        return palette.enumerated().map { idx, color in
+            ("Area \(idx + 1)", color, 20)
+        }
+    }
+
+    private func pulsedCelebrationMetrics(at time: TimeInterval) -> [(String, Color, Double)] {
+        celebrationSplashMetrics.enumerated().map { idx, tuple in
+            let base = tuple.2
+            let seed1 = Double((idx * 127 + 311) % 100) / 100.0
+            let seed2 = Double((idx * 73 + 97) % 100) / 100.0
+            let localAmp = 180.0 * (0.9 + seed1 * 0.8)
+            let localSpeed = 1.6 * (0.8 + seed2 * 1.2)
+            let phase1 = Double(idx) * 0.8 + seed1 * .pi * 2
+            let phase2 = Double(idx) * 1.3 + seed2 * .pi
+            let delta1 = sin(time * localSpeed + phase1) * localAmp * 0.7
+            let delta2 = sin(time * localSpeed * 0.47 + phase2) * localAmp * 0.3
+            let value = max(50, min(100, base + delta1 + delta2))
+            return (tuple.0, tuple.1, value)
+        }
+    }
+
+    private func buildInsightsSnapshot() -> InsightsSnapshot {
+        let carried = carriedActions
+        let projectedDeltas = actionBlockOnlyProjectedDeltaByCategory()
+        let doneEstimatedCount = weekActions.filter {
+            status(for: $0.id) == .done && (defineByActionID[$0.id]?.timeEstimateMinutes != nil)
+        }.count
+        return InsightsSnapshot(
+            doneCount: doneCount,
+            totalActions: totalActions,
+            completionRatio: completionRatio,
+            carriedCount: carried.count,
+            carriedRatio: totalActions > 0 ? Double(carried.count) / Double(totalActions) : 0,
+            doneEstimatedCount: doneEstimatedCount,
+            startedAt: startedAt,
+            completedAt: completedAt,
+            completionDayCount: completionDayCount,
+            productiveSignals: productiveSignalRows,
+            productiveDayRows: productiveDayRows,
+            flowProfileRows: flowProfileRows,
+            fulfillmentAreaRows: categoryBreakdown.map {
+                InsightsSnapshot.FulfillmentAreaRow(
+                    title: $0.0,
+                    doneCount: $0.1,
+                    color: FulfillmentCategoryTheme.color(for: $0.0),
+                    actionBlockProjectedDelta: projectedDeltas[$0.0]
+                )
+            },
+            outcomeRows: outcomesForWeek.map {
+                InsightsSnapshot.OutcomeRow(
+                    id: $0.outcome_id,
+                    title: $0.outcome,
+                    category: $0.category,
+                    color: FulfillmentCategoryTheme.color(for: $0.category)
+                )
+            },
+            carriedActionTexts: carried.map(\.text)
+        )
+    }
+
+    private var readableInsightsCardMessage: String {
+        if let text = readableInsightsText?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
+            return text
+        }
+        return ""
+    }
+
+    private var shouldShowReadableInsightsCard: Bool {
+        readableInsightsLoading || !(readableInsightsText?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+    }
+
+    private var readableInsightsRequestSignature: String {
+        [
+            weekStart.ISO8601Format(),
+            String(weekActions.count),
+            String(doneCount),
+            String(carriedActions.count),
+            String(notNeededCount)
+        ].joined(separator: "|")
+    }
+
+    @MainActor
+    private func requestReadableInsightsIfNeeded() async {
+        guard shouldRenderHeavyInsights else { return }
+        let signature = readableInsightsRequestSignature
+        guard readableInsightsRequestKey != signature else { return }
+        readableInsightsRequestKey = signature
+        readableInsightsLoading = true
+        readableInsightsText = nil
+
+        do {
+            let loomBuilder = LoomAIViewModel()
+            let contextSnapshot = try loomBuilder.buildContextSnapshot(in: modelContext)
+            let service = LoomAIService()
+            let prompt = reflectReadableInsightsPrompt()
+            let response = try await service.sendChat(
+                messages: [
+                    .init(role: "user", content: prompt)
+                ],
+                context: contextSnapshot
+            )
+            let text = response.message.trimmingCharacters(in: .whitespacesAndNewlines)
+            readableInsightsText = text.isEmpty ? nil : limitedReadableInsightsText(text, maxCharacters: 200)
+        } catch {
+            readableInsightsText = nil
+        }
+
+        readableInsightsLoading = false
+    }
+
+    private func reflectReadableInsightsPrompt() -> String {
+        let rows = weekActions.map { action -> String in
+            let status = status(for: action.id).rawValue
+            let define = defineByActionID[action.id]
+            let execution = executionByActionID[action.id]
+            let chunk = chunkByID[action.plannedChunkId]
+            let step4 = allStepFourStates
+                .filter { $0.plannedChunkId == action.plannedChunkId }
+                .sorted { $0.updatedAt > $1.updatedAt }
+                .first
+            let leverage = leverageByActionID[action.id].flatMap { sel -> String? in
+                guard let rid = sel.resourceId, let r = resourceByID[rid] else { return nil }
+                return "\(r.kind.rawValue): \(r.value)"
+            } ?? "none"
+            let places = (placeIDsByActionID[action.id] ?? []).compactMap { placeByID[$0]?.place }
+            let placeText = places.isEmpty ? "none" : places.joined(separator: ", ")
+            let durationText = define?.timeEstimateMinutes.map(String.init) ?? "nil"
+            let resultText = step4?.resultText.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let identityText = step4?.roleNoteText.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let completedAt = execution?.updatedAt.ISO8601Format() ?? "nil"
+            return """
+            - action: \(action.text)
+              status: \(status)
+              chunkCategory: \(chunk?.category ?? "")
+              chunkLabel: \(chunk?.label ?? "")
+              result: \(resultText)
+              identity: \(identityText)
+              isMust: \(define?.isMust == true)
+              durationMinutes: \(durationText)
+              leverage: \(leverage)
+              places: \(placeText)
+              completedAt: \(completedAt)
+            """
+        }.joined(separator: "\n")
+
+        let outcomeLines = outcomesForWeek.map { "- \($0.outcome) [\($0.category)]" }.joined(separator: "\n")
+        let summary = """
+        Create a readable insights summary for a completed Loom Action Blocks session.
+
+        Requirements:
+        - Base the insight on ALL available information in APP_CONTEXT plus the session details below.
+        - Return exactly ONE high-signal insight sentence (not a recap/summary of visible stats).
+        - Prioritize patterns, implications, or mismatches over repeating totals/counts already shown in the UI.
+        - Use practical, plain-language wording (no filler).
+        - Mention fulfillment areas or outcomes only when relevant to the actual insight.
+        - Keep the message under 200 characters and end as a complete sentence.
+        - Do not return actions/CTAs. Return only the readable insights text in the message.
+
+        Session summary:
+        weekStart: \(weekStart.ISO8601Format())
+        startedAt: \(startedAt.ISO8601Format())
+        completedAt: \(completedAt.ISO8601Format())
+        totalActions: \(totalActions)
+        doneCount: \(doneCount)
+        carriedCount: \(carriedActions.count)
+        notNeededCount: \(notNeededCount)
+        leveragedCount: \(leveragedCount)
+        adHocCount: \(adHocCount)
+        averageDurationMinutes: \(averageDurationMinutes)
+        noteCount: \(noteCount)
+        linkCount: \(linkCount)
+        fileCount: \(fileCount)
+        topSignals: \(productiveSignalRows.map { "\($0.label)=\($0.count)" }.joined(separator: ", "))
+
+        Fulfillment areas (done actions):
+        \(categoryBreakdown.map { "- \($0.0): \($0.1)" }.joined(separator: "\n"))
+
+        Outcomes connected:
+        \(outcomeLines.isEmpty ? "- none" : outcomeLines)
+
+        Actions:
+        \(rows)
+        """
+        return summary
+    }
+
     var body: some View {
         ZStack {
             Color(.systemBackground).ignoresSafeArea()
 
+            if !showCelebration {
+                mainContent
+            }
+
             if showCelebration {
                 celebrationView
-                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
-            } else {
-                mainContent
-                    .transition(.opacity)
             }
         }
         .sheet(isPresented: $showContributionPrompt) {
@@ -474,11 +826,32 @@ struct ReflectView: View {
             }
         }
         .onAppear {
+            guard !hasScheduledCelebrationDismiss else { return }
+            hasScheduledCelebrationDismiss = true
+            shouldRenderHeavyInsights = false
+            shouldRenderInsightsCharts = false
+            insightsSnapshot = nil
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.6) {
-                withAnimation(.easeInOut(duration: 0.35)) {
-                    showCelebration = false
+                showCelebration = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    insightsSnapshot = buildInsightsSnapshot()
+                    shouldRenderHeavyInsights = true
+                    Task { await requestReadableInsightsIfNeeded() }
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+                    shouldRenderInsightsCharts = true
                 }
             }
+        }
+        .onDisappear {
+            hasScheduledCelebrationDismiss = false
+            shouldRenderHeavyInsights = false
+            shouldRenderInsightsCharts = false
+            insightsSnapshot = nil
+            readableInsightsText = nil
+            readableInsightsLoading = false
+            readableInsightsRequestKey = nil
+            showCelebration = true
         }
     }
 
@@ -491,7 +864,11 @@ struct ReflectView: View {
                 .padding(.top, 8)
 
             if step == 1 {
-                insightsStep
+                if shouldRenderHeavyInsights {
+                    insightsStep
+                } else {
+                    insightsSkeletonStep
+                }
             } else {
                 journalStep
             }
@@ -501,87 +878,177 @@ struct ReflectView: View {
         .safeAreaPadding(.bottom)
     }
 
+    private var insightsSkeletonStep: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 10) {
+                    skeletonTile
+                    skeletonTile
+                }
+                HStack(spacing: 10) {
+                    skeletonTile
+                    skeletonTile
+                }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(Color.primary.opacity(0.08))
+                        .frame(width: 130, height: 14)
+                    ForEach(0..<4, id: \.self) { _ in
+                        HStack(spacing: 10) {
+                            Circle()
+                                .fill(Color.primary.opacity(0.08))
+                                .frame(width: 20, height: 20)
+                            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                .fill(Color.primary.opacity(0.08))
+                                .frame(height: 14)
+                        }
+                    }
+                }
+                .padding(10)
+                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color(.secondarySystemBackground))
+                    .frame(height: 210)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+                    )
+            }
+            .redacted(reason: .placeholder)
+            .padding(.top, 2)
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    private var skeletonTile: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .fill(Color.primary.opacity(0.08))
+                .frame(width: 88, height: 12)
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color.primary.opacity(0.08))
+                .frame(width: 92, height: 18)
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .fill(Color.primary.opacity(0.08))
+                .frame(width: 70, height: 11)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+    }
+
     private var celebrationView: some View {
         ZStack {
+            WindLinesBackground(
+                colors: celebrationSplashMetrics.map { $0.1 },
+                animationStartDate: celebrationAnimationStartDate
+            )
+            .ignoresSafeArea()
+
             GeometryReader { geo in
-                let focusYFraction: CGFloat = 0.50
+                // Align with WindLinesBackground, which renders in full-screen coordinates.
+                let animationCenterY = (geo.size.height - geo.safeAreaInsets.top + geo.safeAreaInsets.bottom) * 0.5
 
-                ReflectionLoadingStyleLinesBackground(
-                    colors: celebrationLineColors,
-                    focusXFraction: 1.03,
-                    focusYFraction: focusYFraction,
-                    radarDiameter: 0,
-                    rightSideTargetBandFraction: 0.24
-                )
-                .ignoresSafeArea()
+                ZStack {
+                    TimelineView(.animation) { context in
+                        let t = context.date.timeIntervalSinceReferenceDate
+                        let animatedMetrics = pulsedCelebrationMetrics(at: t * 0.45)
+                        let rotationDegrees = t * Double(337.5)
+                        let startupElapsed = context.date.timeIntervalSince(celebrationAnimationStartDate)
+                        let radarIntroDelay: Double = 1.0
+                        let radarGrowDuration: Double = 0.26
+                        let radarPopDuration: Double = 0.24
 
-                TimelineView(.animation) { _ in
-                    ZStack {
-                        let titleColor: Color = colorScheme == .dark ? .white : .black
-                        let titleBlockWidth: CGFloat = 272
+                        let introRaw = (startupElapsed - radarIntroDelay) / radarGrowDuration
+                        let intro = max(0.0, min(introRaw, 1.0))
+                        let easedIntro = 1.0 - pow(1.0 - intro, 3.0)
 
-                        VStack(spacing: 0) {
-                            Text("Action Blocks")
-                                .font(.system(size: 28, weight: .bold))
-                                .foregroundStyle(titleColor)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.8)
-                                .frame(width: titleBlockWidth, alignment: .center)
-                            Text("Complete")
-                                .font(.system(size: 50, weight: .bold))
-                                .kerning(1.2)
-                                .foregroundStyle(titleColor)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.6)
-                                .frame(width: titleBlockWidth, alignment: .center)
+                        let baseScale = CGFloat(0.05 + (0.95 * easedIntro))
+                        let popStart = radarIntroDelay + radarGrowDuration
+                        let popRaw = (startupElapsed - popStart) / radarPopDuration
+                        let pop = max(0.0, min(popRaw, 1.0))
+                        let popPulse = sin(pop * .pi) * 0.10
+                        let radarScale = baseScale * CGFloat(1.0 + popPulse)
+                        let radarOpacity = easedIntro
+
+                        HStack(spacing: 12) {
+                            Color.clear
+                                .frame(width: 45, height: 45)
+
+                            Image("logo")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(height: 48)
+                                .opacity(0.95)
+                                .modifier(ReflectDarkModeInvertImage())
+
+                            ZStack {
+                                FulfillmentInteractiveRadar(
+                                    metrics: animatedMetrics,
+                                    selectedIndex: .constant(0),
+                                    onManualSelect: {},
+                                    enableInteraction: false,
+                                    customDotDiameter: 10,
+                                    showOutline: false,
+                                    emphasizeSelectedSlice: false
+                                )
+                                .rotationEffect(.degrees(rotationDegrees))
+                            }
+                            .frame(width: 45, height: 45)
+                            .scaleEffect(radarScale)
+                            .opacity(radarOpacity)
                         }
-                        .padding(.vertical, 6)
-                        .padding(.horizontal, 3)
-                        .position(
-                            x: geo.size.width * 0.5,
-                            y: max(geo.safeAreaInsets.top + 62, geo.size.height * 0.16)
-                        )
-
-                        Image("logo")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(height: 44)
-                            .modifier(ReflectDarkModeInvertImage())
-                            .position(x: geo.size.width * 0.5, y: geo.size.height * 0.92)
+                        .position(x: geo.size.width / 2, y: animationCenterY)
                     }
                 }
             }
         }
-    }
-
-    private var celebrationLineColors: [Color] {
-        let active = fulfillments
-            .map { FulfillmentCategoryTheme.color(for: $0.category) }
-        return active.isEmpty ? fallbackPalette : active
+        .onAppear {
+            celebrationAnimationStartDate = .now
+        }
     }
 
     private var insightsStep: some View {
+        guard let snapshot = insightsSnapshot else {
+            return AnyView(insightsSkeletonStep)
+        }
+        return AnyView(
         VStack(spacing: 12) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
+                LazyVStack(alignment: .leading, spacing: 14) {
                     HStack(spacing: 10) {
-                        summaryTile(title: "Tasks Closed", value: "\(doneCount)/\(max(totalActions, 1))", detail: "\(Int(completionRatio * 100))% done")
-                        summaryTile(title: "Average Duration", value: formatMinutes(averageDurationMinutes), detail: "\(durations.count) estimated")
+                        summaryTile(title: "Tasks Done", value: "\(Int(snapshot.completionRatio * 100))%", detail: "\(snapshot.doneCount)/\(max(snapshot.totalActions, 1)) done")
+                        summaryTile(title: "Carried Actions", value: "\(Int(snapshot.carriedRatio * 100))%", detail: "\(snapshot.carriedCount)/\(max(snapshot.totalActions, 1)) carried")
                     }
 
                     HStack(spacing: 10) {
-                        summaryTile(title: "Started", value: shortDate(startedAt), detail: "Complete: \(shortDate(completedAt))")
-                        summaryTile(title: "Elapsed", value: "\(completionDayCount)d", detail: "from start to complete")
+                        summaryTile(title: "Started", value: shortDate(snapshot.startedAt), detail: "Completed: \(shortDate(snapshot.completedAt))")
+                        summaryTile(title: "Elapsed", value: "\(snapshot.completionDayCount)d", detail: "from start to complete")
+                    }
+
+                    if shouldShowReadableInsightsCard {
+                        ReflectReadableInsightsCallout(
+                            message: readableInsightsCardMessage,
+                            isLoading: readableInsightsLoading,
+                            fulfillmentHighlights: snapshot.fulfillmentAreaRows.map { ($0.title, $0.color) },
+                            outcomeHighlights: snapshot.outcomeRows.map { ($0.title, $0.color) }
+                        )
                     }
 
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Productive signals")
                             .font(.headline)
-
-                        signalRow(icon: "mappin.and.ellipse", title: "Place", value: topPlace ?? "No pattern yet")
-                        signalRow(icon: "person.fill", title: "Person", value: topPerson ?? "No pattern yet")
-                        signalRow(icon: "wrench.and.screwdriver.fill", title: "Tool", value: topTool ?? "No pattern yet")
-                        signalRow(icon: "clock.fill", title: "Time", value: topTimeOfDay ?? "No pattern yet")
+                        if snapshot.productiveSignals.isEmpty {
+                            Text("No pattern yet")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(snapshot.productiveSignals, id: \.id) { row in
+                                productiveSignalCountRow(row)
+                            }
+                        }
                     }
                     .padding(10)
                     .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
@@ -589,64 +1056,79 @@ struct ReflectView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Productive days")
                             .font(.headline)
-
-                        Chart(productiveDayRows) { row in
-                            BarMark(
-                                x: .value("Day", row.dayLabel),
-                                y: .value("Completed", row.completed)
-                            )
-                            .foregroundStyle(Color.accentColor.gradient)
-
-                            BarMark(
-                                x: .value("Day", row.dayLabel),
-                                y: .value("Must", row.mustCompleted)
-                            )
-                            .foregroundStyle(Color.orange.gradient)
+                        HStack(spacing: 12) {
+                            chartLegendChip(color: .blue, label: "Done")
+                            chartLegendChip(color: .gray, label: "Didn't need to be done")
                         }
-                        .frame(height: 180)
+                        .font(.caption)
+
+                        if shouldRenderInsightsCharts {
+                            Chart(snapshot.productiveDayRows) { row in
+                                BarMark(
+                                    x: .value("Day", row.dayLabel),
+                                    y: .value("Done", row.done)
+                                )
+                                .foregroundStyle(Color.blue.gradient)
+
+                                BarMark(
+                                    x: .value("Day", row.dayLabel),
+                                    y: .value("Didn't need", row.notNeeded)
+                                )
+                                .foregroundStyle(Color.gray.gradient)
+                            }
+                            .frame(height: 180)
+                        } else {
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(Color.primary.opacity(0.05))
+                                .frame(height: 180)
+                                .overlay {
+                                    ProgressView()
+                                        .tint(.secondary)
+                                }
+                        }
                     }
                     .padding(10)
                     .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
 
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Flow profile")
+                        Text("Characteristics")
                             .font(.headline)
-                        ForEach(flowProfileRows, id: \.0) { row in
+                        ForEach(snapshot.flowProfileRows, id: \.0) { row in
                             metricCapsuleRow(title: row.0, value: row.1, tint: row.2)
                         }
-
-                        Text("Notes: \(noteCount)  Links: \(linkCount)  Files: \(fileCount)")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
                     }
                     .padding(10)
                     .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
 
-                    if !categoryBreakdown.isEmpty {
+                    if !snapshot.fulfillmentAreaRows.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Categories")
+                            Text("Fulfillment Areas")
                                 .font(.headline)
-                            ForEach(categoryBreakdown, id: \.0) { row in
-                                HStack {
-                                    Text(row.0)
-                                    Spacer()
-                                    Text("\(row.1)")
-                                        .fontWeight(.bold)
-                                }
-                                .font(.subheadline)
+                            Text("Projection score impact from Action Blocks completion.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            ForEach(snapshot.fulfillmentAreaRows, id: \.self) { row in
+                                fulfillmentAreaMetricRow(
+                                    title: row.title,
+                                    value: row.doneCount,
+                                    textColor: row.color,
+                                    tint: row.color.opacity(0.22),
+                                    delta: row.actionBlockProjectedDelta
+                                )
                             }
                         }
                         .padding(10)
                         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
                     }
 
-                    if !outcomesForWeek.isEmpty {
+                    if !snapshot.outcomeRows.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Outcomes connected")
+                            Text("Outcomes Connected")
                                 .font(.headline)
-                            ForEach(outcomesForWeek, id: \.outcome_id) { outcome in
-                                Text("• \(outcome.outcome)")
-                                    .font(.subheadline)
+                            ForEach(snapshot.outcomeRows, id: \.id) { outcome in
+                                Text(outcome.title)
+                                    .font(.subheadline.weight(.bold))
+                                    .foregroundStyle(outcome.color)
                                 .fixedSize(horizontal: false, vertical: true)
                             }
                         }
@@ -655,15 +1137,15 @@ struct ReflectView: View {
                         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
                     }
 
-                    if !carriedActions.isEmpty {
+                    if !snapshot.carriedActionTexts.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Carried to new capture list")
                                 .font(.headline)
-                            Text("These will be moved back to Rolling Capture.")
+                            Text("These will be moved back to your Capture list.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
-                            ForEach(carriedActions, id: \.id) { action in
-                                Text("• \(action.text)")
+                            ForEach(snapshot.carriedActionTexts, id: \.self) { actionText in
+                                Text("• \(actionText)")
                                     .font(.subheadline)
                             }
                         }
@@ -697,6 +1179,7 @@ struct ReflectView: View {
                 .buttonStyle(.borderedProminent)
             }
         }
+        )
     }
 
     private var journalStep: some View {
@@ -968,6 +1451,29 @@ struct ReflectView: View {
         .font(.subheadline)
     }
 
+    private func productiveSignalCountRow(_ row: InsightsSnapshot.ProductiveSignalRow) -> some View {
+        HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(row.label)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text(row.typeLabel)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            HStack(spacing: 8) {
+                Text("\(row.count)")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 3)
+                    .background(Color(.systemGray5), in: Capsule())
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
     private func metricCapsuleRow(title: String, value: Int, tint: Color) -> some View {
         HStack {
             Text(title)
@@ -979,6 +1485,69 @@ struct ReflectView: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 3)
                 .background(tint.opacity(0.2), in: Capsule())
+        }
+    }
+
+    private func metricCapsuleRowColoredTitle(title: String, value: Int, textColor: Color, tint: Color) -> some View {
+        HStack {
+            Text(title)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(textColor)
+            Spacer()
+            Text("\(value)")
+                .font(.subheadline)
+                .fontWeight(.bold)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 3)
+                .background(tint, in: Capsule())
+        }
+    }
+
+    private func fulfillmentAreaMetricRow(title: String, value: Int, textColor: Color, tint: Color, delta: Double?) -> some View {
+        HStack {
+            if let delta {
+                HStack(spacing: 4) {
+                    Text(fulfillmentDeltaGlyph(delta))
+                    Text(fulfillmentDeltaText(delta))
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(fulfillmentDeltaColor(delta))
+            }
+            Text(title)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(textColor)
+            Spacer()
+            Text("\(value)")
+                .font(.subheadline)
+                .fontWeight(.bold)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 3)
+                .background(tint, in: Capsule())
+        }
+    }
+
+    private func fulfillmentDeltaText(_ delta: Double) -> String {
+        if abs(delta) < 0.05 { return "0.0" }
+        return String(format: "%@%.1f", delta > 0 ? "+" : "", delta)
+    }
+
+    private func fulfillmentDeltaGlyph(_ delta: Double) -> String {
+        if abs(delta) < 0.05 { return "→" }
+        return delta > 0 ? "↑" : "↓"
+    }
+
+    private func fulfillmentDeltaColor(_ delta: Double) -> Color {
+        if abs(delta) < 0.05 { return .secondary }
+        return delta > 0 ? .green : .red
+    }
+
+    private func chartLegendChip(color: Color, label: String) -> some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(color)
+                .frame(width: 8, height: 8)
+            Text(label)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -1058,7 +1627,7 @@ struct ReflectView: View {
 
     private func shortDate(_ date: Date) -> String {
         let fmt = DateFormatter()
-        fmt.dateStyle = .medium
+        fmt.dateFormat = "EEE, MMM d"
         return fmt.string(from: date)
     }
 
@@ -1599,25 +2168,168 @@ struct ReflectView: View {
     private func normalized(_ text: String) -> String {
         text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
+
+    private func limitedReadableInsightsText(_ text: String, maxCharacters: Int) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > maxCharacters else { return trimmed }
+        let cutoffIndex = trimmed.index(trimmed.startIndex, offsetBy: maxCharacters)
+        let prefix = String(trimmed[..<cutoffIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Prefer a complete sentence within the limit.
+        if let sentenceEnd = prefix.lastIndex(where: { ".!?".contains($0) }) {
+            let sentence = String(prefix[...sentenceEnd]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !sentence.isEmpty {
+                return sentence
+            }
+        }
+
+        // Otherwise trim at natural punctuation/word boundary and close the sentence.
+        if let naturalBreak = prefix.lastIndex(where: { ",;:".contains($0) }) {
+            let base = String(prefix[..<naturalBreak]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !base.isEmpty { return base + "." }
+        }
+        if let lastSpace = prefix.lastIndex(of: " "), lastSpace > prefix.startIndex {
+            let base = String(prefix[..<lastSpace]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !base.isEmpty { return base + "." }
+        }
+        return prefix.trimmingCharacters(in: .whitespacesAndNewlines) + "."
+    }
 }
 
 private struct ProductiveDayRow: Identifiable {
     let id = UUID()
     let dayLabel: String
-    let completed: Int
-    let mustCompleted: Int
+    let done: Int
+    let notNeeded: Int
 }
 
-private struct ReflectionLoadingStyleLinesBackground: View {
+private struct ReflectReadableInsightsCallout: View {
+    let message: String
+    let isLoading: Bool
+    let fulfillmentHighlights: [(name: String, color: Color)]
+    let outcomeHighlights: [(name: String, color: Color)]
+    @State private var outlineAngle: Double = 0
+
+    private var outlineGradient: AngularGradient {
+        AngularGradient(
+            colors: [
+                Color(red: 0.22, green: 0.47, blue: 1.0),
+                Color(red: 0.15, green: 0.83, blue: 0.95),
+                Color(red: 0.62, green: 0.40, blue: 0.95),
+                Color(red: 0.80, green: 0.38, blue: 0.78),
+                Color(red: 0.98, green: 0.36, blue: 0.58),
+                Color(red: 0.75, green: 0.42, blue: 0.74),
+                Color(red: 0.22, green: 0.47, blue: 1.0)
+            ],
+            center: .center,
+            angle: .degrees(outlineAngle)
+        )
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Image("LoomAI")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 28, height: 28)
+
+            if isLoading {
+                ReflectLoomTypingDotsIndicator()
+                    .frame(height: 20)
+            } else {
+                Text(styledMessage)
+                    .font(.subheadline)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(outlineGradient.opacity(0.95), lineWidth: 2)
+        )
+        .onAppear {
+            guard outlineAngle == 0 else { return }
+            withAnimation(.linear(duration: 7).repeatForever(autoreverses: false)) {
+                outlineAngle = 360
+            }
+        }
+    }
+
+    private var styledMessage: AttributedString {
+        var attributed = AttributedString(message)
+        let source = message
+
+        func applyHighlights(_ items: [(name: String, color: Color)]) {
+            for item in items
+                .map({ ($0.name.trimmingCharacters(in: .whitespacesAndNewlines), $0.color) })
+                .filter({ !$0.0.isEmpty })
+                .sorted(by: { $0.0.count > $1.0.count }) {
+                var searchRange = source.startIndex..<source.endIndex
+                while let found = source.range(
+                    of: item.0,
+                    options: [.caseInsensitive, .diacriticInsensitive],
+                    range: searchRange
+                ) {
+                    if let attrRange = Range(found, in: attributed) {
+                        attributed[attrRange].font = .subheadline.bold()
+                        attributed[attrRange].foregroundColor = item.1
+                    }
+                    searchRange = found.upperBound..<source.endIndex
+                }
+            }
+        }
+
+        // Outcomes first so more specific titles win if they overlap area names.
+        applyHighlights(outcomeHighlights)
+        applyHighlights(fulfillmentHighlights)
+        return attributed
+    }
+}
+
+private struct ReflectLoomTypingDotsIndicator: View {
+    @State private var activeIndex: Int = 0
+
+    private let colors: [Color] = [
+        Color(red: 0.22, green: 0.47, blue: 1.0),
+        Color(red: 0.15, green: 0.83, blue: 0.95),
+        Color(red: 0.62, green: 0.40, blue: 0.95)
+    ]
+
+    var body: some View {
+        HStack(spacing: 5) {
+            ForEach(Array(colors.enumerated()), id: \.offset) { idx, color in
+                Circle()
+                    .fill(color.opacity(activeIndex == idx ? 1 : 0.35))
+                    .frame(width: 6, height: 6)
+                    .scaleEffect(activeIndex == idx ? 1.15 : 0.9)
+                    .animation(.easeInOut(duration: 0.2), value: activeIndex)
+            }
+        }
+        .onAppear {
+            guard activeIndex == 0 else { return }
+            animate()
+        }
+    }
+
+    private func animate() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+            activeIndex = (activeIndex + 1) % colors.count
+            animate()
+        }
+    }
+}
+
+struct ReflectionLoadingStyleLinesBackground: View {
     let colors: [Color]
     let focusXFraction: CGFloat
     let focusYFraction: CGFloat
     let radarDiameter: CGFloat
     let rightSideTargetBandFraction: Double
 
-    private let lineCount: Int = 102
+    private let lineCount: Int = 25
     private let leftInset: CGFloat = -40
-    private let verticalBandFraction: Double = 0.57
+    private let verticalBandFraction: Double = 0.342
     private let verticalShift: CGFloat = 0
 
     private let funnelMinScale: CGFloat = 0.44
@@ -1650,18 +2362,57 @@ private struct ReflectionLoadingStyleLinesBackground: View {
             GeometryReader { geo in
                 let size = geo.size
                 let focusX = size.width * focusXFraction
-                let startX = leftInset
-                let circleRadius = (radarDiameter + radarCircleExtraDiameter) / 2
-                let endX = max(startX + 40, min(size.width + 24, focusX - circleRadius + 24))
+                let centerPoint = CGPoint(x: focusX, y: size.height * focusYFraction)
 
                 Canvas { ctx, sz in
                     let t = context.date.timeIntervalSinceReferenceDate
                     let colorCount = max(1, colors.count)
-                    let centerY: CGFloat = sz.height * focusYFraction
+                    let centerX: CGFloat = centerPoint.x
+                    let centerY: CGFloat = centerPoint.y
+                    let perimeterInset: CGFloat = 44
+                    let perimeterRect = CGRect(
+                        x: -perimeterInset,
+                        y: -perimeterInset,
+                        width: sz.width + (perimeterInset * 2),
+                        height: sz.height + (perimeterInset * 2)
+                    )
+                    let perimeterLength = max(1, (perimeterRect.width + perimeterRect.height) * 2)
 
                     func smoothstep(_ a: CGFloat, _ b: CGFloat, _ x: CGFloat) -> CGFloat {
                         let tt = min(max((x - a) / (b - a), 0), 1)
                         return tt * tt * (3 - 2 * tt)
+                    }
+
+                    func pointOnPerimeter(_ u: Double) -> CGPoint {
+                        let frac = ((u.truncatingRemainder(dividingBy: 1)) + 1).truncatingRemainder(dividingBy: 1)
+                        let d = CGFloat(frac) * perimeterLength
+                        let top = perimeterRect.width
+                        let right = perimeterRect.height
+                        let bottom = perimeterRect.width
+                        let left = perimeterRect.height
+
+                        switch d {
+                        case 0..<top:
+                            return CGPoint(x: perimeterRect.minX + d, y: perimeterRect.minY)
+                        case top..<(top + right):
+                            return CGPoint(x: perimeterRect.maxX, y: perimeterRect.minY + (d - top))
+                        case (top + right)..<(top + right + bottom):
+                            return CGPoint(x: perimeterRect.maxX - (d - top - right), y: perimeterRect.maxY)
+                        default:
+                            let rem = min(left, d - top - right - bottom)
+                            return CGPoint(x: perimeterRect.minX, y: perimeterRect.maxY - rem)
+                        }
+                    }
+
+                    func applyDepthPerspective(to point: CGPoint, progress s: CGFloat) -> CGPoint {
+                        // Start of each line feels closer (slightly expanded from center),
+                        // end of each line feels farther (slightly compressed toward center).
+                        let depthT = smoothstep(0.0, 1.0, s)
+                        let scale = 1.10 - (depthT * 0.24) // ~1.10 at perimeter -> ~0.86 near center
+                        return CGPoint(
+                            x: centerX + (point.x - centerX) * scale,
+                            y: centerY + (point.y - centerY) * scale
+                        )
                     }
 
                     for i in 0..<lineCount {
@@ -1670,15 +2421,34 @@ private struct ReflectionLoadingStyleLinesBackground: View {
                         let localFracBase = (Double(i) + 0.5) / Double(lineCount)
                         let jitter = rand(i * 19 + 7, -0.03, 0.03)
                         let localFrac = min(max(localFracBase + jitter, 0.0), 1.0)
-                        let clampedFrac = bandStart + band * localFrac
-                        let baseY: CGFloat = CGFloat(clampedFrac) * sz.height + verticalShift
+                        _ = bandStart + band * localFrac
 
-                        let rightBand = max(0.0, min(rightSideTargetBandFraction, 1.0))
-                        let endY: CGFloat = centerY + (CGFloat(localFrac - 0.5) * sz.height * CGFloat(rightBand))
+                        let startPerimeterFrac = localFracBase + rand(i * 41 + 21, -0.08, 0.08)
+                        let startPoint = pointOnPerimeter(startPerimeterFrac)
+
+                        let centerBand = max(0.0, min(rightSideTargetBandFraction, 1.0))
+                        let centerRingRadius = min(
+                            min(sz.width, sz.height) * 0.49,
+                            max(
+                                8,
+                                (min(sz.width, sz.height) * CGFloat(centerBand) * 0.52) * 12.0
+                            )
+                        ) * 0.3
+                        let endAngle = atan2(
+                            Double(startPoint.y - centerY),
+                            Double(startPoint.x - centerX)
+                        )
+                        let endPoint = CGPoint(
+                            x: centerX + cos(endAngle) * centerRingRadius,
+                            y: centerY + sin(endAngle) * centerRingRadius
+                        )
 
                         let color = colors[i % colorCount]
-                        let L = endX - startX
-                        if L <= 1 { continue }
+                        let dx = endPoint.x - startPoint.x
+                        let dy = endPoint.y - startPoint.y
+                        let distance = max(1, sqrt((dx * dx) + (dy * dy)))
+                        let nx = -dy / distance
+                        let ny = dx / distance
 
                         let speed = rand(i * 13 + 1, 0.18, 0.36)
                         let phase = rand(i * 17 + 3, 0.0, 1.0)
@@ -1695,11 +2465,10 @@ private struct ReflectionLoadingStyleLinesBackground: View {
                         }
 
                         var path = Path()
-                        let samples = 96
+                        let samples = 64
                         for j in 0...samples {
                             let twoPi = 2.0 * Double.pi
                             let s = Double(j) / Double(samples)
-                            let x = startX + CGFloat(s) * L
 
                             let diff = (s - posFrac) / sigma
                             let envelope = exp(-pow(diff, 2) * 2)
@@ -1709,21 +2478,32 @@ private struct ReflectionLoadingStyleLinesBackground: View {
                             let swell = sin(swellArg) * (amp * 0.6)
                             let wiggle = (pulse + swell) * sin(Double.pi * s) * 0.62
 
-                            let baseLineY = baseY + (endY - baseY) * CGFloat(s)
-                            var y = baseLineY + CGFloat(wiggle)
+                            let baseLineX = startPoint.x + dx * CGFloat(s)
+                            let baseLineY = startPoint.y + dy * CGFloat(s)
+                            var x = baseLineX + nx * CGFloat(wiggle)
+                            var y = baseLineY + ny * CGFloat(wiggle)
 
                             let rawBendT = smoothstep(0.05, 0.82, CGFloat(s))
                             let bendT = pow(rawBendT, 0.55)
+                            let steerX = x + (centerX - x) * (bendT * 0.22)
                             let steerY = y + (centerY - y) * (bendT * 0.45)
                             let pinchT = smoothstep(0.84, 1.0, CGFloat(s))
                             let pinchCurve = pow(pinchT, funnelCurve)
                             let attractT = smoothstep(0.78, 1.0, CGFloat(s))
-                            let attractorY = centerY + (endY - centerY) * attractT
+                            let attractorX = centerX + (endPoint.x - centerX) * attractT
+                            let attractorY = centerY + (endPoint.y - centerY) * attractT
                             let lateScale = (1.0 - pinchCurve) + pinchCurve * funnelMinScale
+                            x = attractorX + (steerX - attractorX) * lateScale
                             y = attractorY + (steerY - attractorY) * lateScale
-                            if j == 0 { y = baseY }
+                            if j == 0 {
+                                x = startPoint.x
+                                y = startPoint.y
+                            }
 
-                            let point = CGPoint(x: x, y: y)
+                            let point = applyDepthPerspective(
+                                to: CGPoint(x: x, y: y),
+                                progress: CGFloat(s)
+                            )
                             if j == 0 { path.move(to: point) } else { path.addLine(to: point) }
                         }
 
@@ -1736,19 +2516,18 @@ private struct ReflectionLoadingStyleLinesBackground: View {
                             .init(color: color.opacity(baseOpacity * 0.03), location: 0.92),
                             .init(color: color.opacity(0.0), location: 1.0),
                         ])
-
                         ctx.stroke(
                             path,
                             with: .linearGradient(
                                 tailGradient,
-                                startPoint: CGPoint(x: startX, y: baseY),
-                                endPoint: CGPoint(x: endX, y: endY)
+                                startPoint: startPoint,
+                                endPoint: endPoint
                             ),
-                            lineWidth: 10
+                            lineWidth: 300
                         )
 
                         let tailFactorAtGlow = pow(max(0, 1.0 - smoothstepD(Double(tailStartFrac), 1.0, posFrac)), 2.8)
-                        let glowPeak = 0.45 * tailFactorAtGlow
+                        let glowPeak = 0.08 * tailFactorAtGlow
                         let glowHalfWidth = sigma * 0.8
                         let startStop = max(0.0, posFrac - glowHalfWidth)
                         let endStop = min(1.0, posFrac + glowHalfWidth)
@@ -1757,19 +2536,16 @@ private struct ReflectionLoadingStyleLinesBackground: View {
                             .init(color: color.opacity(glowPeak), location: posFrac),
                             .init(color: color.opacity(0.0), location: endStop),
                         ])
-                        let gradStart = CGPoint(x: startX, y: baseY)
-                        let gradEnd = CGPoint(x: endX, y: endY)
-                        let clipRect = CGRect(x: startX, y: 0, width: L, height: sz.height)
+                        let gradStart = startPoint
+                        let gradEnd = endPoint
 
                         ctx.drawLayer { layer in
-                            layer.clip(to: Path(clipRect))
-                            layer.addFilter(.blur(radius: 7))
-                            layer.stroke(path, with: .linearGradient(gradient, startPoint: gradStart, endPoint: gradEnd), lineWidth: 12)
+                            layer.addFilter(.blur(radius: 5))
+                            layer.stroke(path, with: .linearGradient(gradient, startPoint: gradStart, endPoint: gradEnd), lineWidth: 360)
                         }
                         ctx.drawLayer { layer in
-                            layer.clip(to: Path(clipRect))
-                            layer.addFilter(.blur(radius: 2))
-                            layer.stroke(path, with: .linearGradient(gradient, startPoint: gradStart, endPoint: gradEnd), lineWidth: 6)
+                            layer.addFilter(.blur(radius: 1.5))
+                            layer.stroke(path, with: .linearGradient(gradient, startPoint: gradStart, endPoint: gradEnd), lineWidth: 180)
                         }
                     }
                 }

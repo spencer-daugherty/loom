@@ -74,6 +74,7 @@ export default {
     const nonSystemMessages = normalizedMessages.filter((m) => m.role !== "system");
     const isFollowUpPromptMode = detectFollowUpPromptMode(nonSystemMessages);
     const isAutoGroupMode = detectAutoGroupMode(nonSystemMessages);
+    const isReflectReadableInsightsMode = detectReflectReadableInsightsMode(nonSystemMessages);
 
     if (nonSystemMessages.length === 0) {
       return json(
@@ -96,7 +97,9 @@ export default {
 
     const workerPromptVersion = isAutoGroupMode
       ? "autogroup-v1"
-      : (isFollowUpPromptMode ? "followup-prompts-v1" : "grounding-cta-v3");
+      : (isFollowUpPromptMode
+        ? "followup-prompts-v1"
+        : (isReflectReadableInsightsMode ? "reflect-readable-insights-v1" : "grounding-cta-v3"));
 
     const coreInstructions = isAutoGroupMode ? [
       "You generate AutoGroup plans for Loom Plan Step 3 (Group).",
@@ -137,6 +140,22 @@ export default {
       '{"showSuggestions":true,"prompts":["string"],"confidence":"high"}',
       "or",
       '{"showSuggestions":false,"prompts":[],"confidence":"low"}'
+    ].join("\n") : isReflectReadableInsightsMode ? [
+      "You generate a readable insights summary for a completed Loom Action Blocks session.",
+      "Use APP_CONTEXT_JSON and the provided session details to write grounded insights about what happened and what it suggests.",
+      "This is analysis-only mode. Do NOT return CTAs or suggested actions.",
+      "Do NOT end with a question.",
+      "If APP_CONTEXT_JSON exists, use concrete details from it and from the provided session details.",
+      "Treat low-signal placeholders (e.g., Test, TBD, N/A, Placeholder) as placeholders; call them out instead of treating them as meaningful.",
+      "Focus on patterns supported by evidence: completed vs carried actions, leverage, fulfillment areas, outcomes, places/people/tools, action characteristics.",
+      "Write plain-language readable insights, concise and specific.",
+      "Return exactly ONE sentence under 200 characters.",
+      "The sentence must be a real insight (pattern/implication/mismatch), not a recap of obvious totals already shown in the UI.",
+      "Avoid filler phrases like 'During this session' or 'a total of'.",
+      "Prefer naming the most important fulfillment area/outcome/pattern if supported by evidence.",
+      "Do not invent values that are not present.",
+      "Return JSON ONLY in this exact shape:",
+      '{"message":"string","actions":[],"debug":{"usedContext":true,"evidence":["path.or.field.used"],"confidence":"high|medium|low"}}'
     ].join("\n") : [
       "You are Loom, an assistant embedded inside the Loom iOS app.",
       "You MUST ground your answers in APP_CONTEXT_JSON when it is provided.",
@@ -269,7 +288,7 @@ export default {
           model,
           messages: groundedMessages,
           temperature,
-          max_tokens: isAutoGroupMode ? 700 : (isFollowUpPromptMode ? 350 : 900),
+          max_tokens: isAutoGroupMode ? 700 : (isFollowUpPromptMode ? 350 : (isReflectReadableInsightsMode ? 650 : 900)),
           response_format: { type: "json_object" },
         }),
       });
@@ -401,6 +420,47 @@ export default {
           claimedUsedContext: null,
           evidence: [],
           confidence: followUp.confidence || null,
+        },
+      };
+      return json(out, 200, corsHeaders(request));
+    }
+
+    if (isReflectReadableInsightsMode) {
+      const normalized = normalizeReadableInsightsPayload(parsedModelJSON, upstreamText);
+      const modelDebug =
+        normalized.debug && typeof normalized.debug === "object" ? normalized.debug : {};
+      const modelEvidence = Array.isArray(modelDebug.evidence)
+        ? modelDebug.evidence.filter((x) => typeof x === "string").slice(0, 20)
+        : [];
+      const claimedUsedContext =
+        typeof modelDebug.usedContext === "boolean" ? modelDebug.usedContext : null;
+      const confidence = typeof modelDebug.confidence === "string" ? modelDebug.confidence : null;
+      const finalUsedContext =
+        typeof claimedUsedContext === "boolean"
+          ? claimedUsedContext
+          : contextBytes > 0 && modelEvidence.length > 0;
+
+      const out = {
+        message: normalized.message,
+        actions: [],
+        debug: {
+          ...buildWorkerDebug({
+            model,
+            contextBytes,
+            contextHash,
+            contextKeys,
+            contextInfo,
+            workerPromptVersion,
+            messages,
+            nonSystemMessages,
+            upstreamStatus,
+            upstreamContentType,
+            parseMode,
+          }),
+          usedContext: finalUsedContext,
+          claimedUsedContext,
+          evidence: modelEvidence,
+          confidence,
         },
       };
       return json(out, 200, corsHeaders(request));
@@ -539,6 +599,12 @@ function detectAutoGroupMode(nonSystemMessages) {
   return content.includes("You are helping with Loom Plan Step 3 (Group).");
 }
 
+function detectReflectReadableInsightsMode(nonSystemMessages) {
+  const latestUser = [...(nonSystemMessages || [])].reverse().find((m) => m?.role === "user");
+  const content = String(latestUser?.content || "");
+  return content.includes("Create a readable insights summary for a completed Loom Action Blocks session.");
+}
+
 function normalizeFollowUpPromptPayload(parsed, fallbackText) {
   let raw = parsed && typeof parsed === "object" ? parsed : null;
   if (!raw) {
@@ -662,6 +728,38 @@ function normalizeAutoGroupPayload(parsed, fallbackText) {
     confidence: promotedConfidence,
     reason,
     groups: dedupedGroups,
+  };
+}
+
+function normalizeReadableInsightsPayload(parsed, fallbackText) {
+  let raw = parsed && typeof parsed === "object" ? parsed : null;
+  if (!raw) {
+    try {
+      raw = JSON.parse(String(fallbackText || ""));
+    } catch {
+      raw = null;
+    }
+  }
+
+  let message = "";
+  if (typeof raw?.message === "string") {
+    message = raw.message;
+  } else if (typeof raw?.reply === "string") {
+    message = raw.reply;
+  } else if (typeof raw?.insights === "string") {
+    message = raw.insights;
+  } else if (typeof fallbackText === "string") {
+    message = fallbackText;
+  }
+
+  message = String(message || "").replace(/\s+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  message = truncateAtWordBoundary(message, 1400);
+
+  const debug = raw?.debug && typeof raw.debug === "object" ? raw.debug : null;
+
+  return {
+    message: message || "Loom could not generate readable insights for this session.",
+    debug,
   };
 }
 
