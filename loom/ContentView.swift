@@ -75,6 +75,9 @@ struct ContentView: View {
     @State private var isPresentingVacationModeFromBanner = false
     @State private var dismissVacationModeBanner = false
     @State private var enableHeaderPageAnimations = false
+    @State private var showLoomAIChatMenu = false
+    @State private var loomAIHeaderMenuButtonFrame: CGRect = .zero
+    @State private var headerFrameInRootSpace: CGRect = .zero
 
     private enum PlayDestination: String, Identifiable, Hashable {
         case action
@@ -287,7 +290,7 @@ struct ContentView: View {
                     }
                     .tag(HomeSwipePage.home.rawValue)
 
-                    placeholderMiddlePage(title: "Sharing features coming soon")
+                    LoomAIChatView(isActivePage: homePageIndex == HomeSwipePage.littleWins.rawValue)
                         .tag(HomeSwipePage.littleWins.rawValue)
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
@@ -304,7 +307,9 @@ struct ContentView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             contentViewPopupOverlay
+            loomAIChatMenuFloatingOverlay(in: proxy)
         }
+        .coordinateSpace(name: "ContentViewRootSpace")
         .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
     }
 
@@ -397,6 +402,50 @@ struct ContentView: View {
             .transition(.scale(scale: 0.9).combined(with: .opacity))
             .zIndex(1)
             .animation(.spring(response: 0.3, dampingFraction: 0.85), value: pressedCategoryTitle)
+        }
+    }
+
+    @ViewBuilder
+    private func loomAIChatMenuFloatingOverlay(in proxy: GeometryProxy) -> some View {
+        if homePageIndex == HomeSwipePage.littleWins.rawValue && showLoomAIChatMenu {
+            let popupWidth = min(proxy.size.width - 24, 240.0)
+            let x = min(
+                max(12, loomAIHeaderMenuButtonFrame.minX - 2),
+                max(12, proxy.size.width - popupWidth - 12)
+            )
+            let headerBottomY = headerFrameInRootSpace == .zero ? 56 : headerFrameInRootSpace.maxY
+            let y = max(
+                headerBottomY + 12,
+                loomAIHeaderMenuButtonFrame == .zero ? 64 : loomAIHeaderMenuButtonFrame.maxY + 14
+            )
+
+            ZStack(alignment: .topLeading) {
+                VStack(spacing: 0) {
+                    Color.clear
+                        .frame(height: max(0, y - 4))
+                        .allowsHitTesting(false)
+
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                showLoomAIChatMenu = false
+                            }
+                        }
+                }
+
+                loomAIChatMenuPopup
+                    .padding(.leading, x)
+                    .padding(.top, y)
+                    .transition(
+                        .asymmetric(
+                            insertion: .opacity.combined(with: .move(edge: .top)),
+                            removal: .opacity
+                        )
+                    )
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
+            .zIndex(20)
         }
     }
 
@@ -608,6 +657,10 @@ struct ContentView: View {
     private var reflectionArchives: [ActionBlocksReflectionArchive]
     @Query(sort: \FulfillmentCategoryScoreSnapshot.weekStartDate, order: .reverse)
     private var fulfillmentCategoryScoreSnapshots: [FulfillmentCategoryScoreSnapshot]
+    @Query(sort: \LoomAIChatThread.updatedAt, order: .reverse)
+    private var loomAIChatThreads: [LoomAIChatThread]
+    @Query(sort: \LoomAIChatMessage.createdAt, order: .forward)
+    private var loomAIChatMessages: [LoomAIChatMessage]
 
     // MARK: - Helpers to simplify complex expressions
     private func categoryTextColor(for category: String) -> Color {
@@ -1548,19 +1601,47 @@ struct ContentView: View {
         return VStack(spacing: 4) {
             ZStack {
                 HStack {
-                    Text(Date()
-                        .formatted(
-                            useShortWeekdayHeaderDate
-                            ? .dateTime.weekday(.abbreviated).month(.abbreviated).day()
-                            : .dateTime.weekday(.wide).month(.abbreviated).day()
-                        ))
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                        .allowsTightening(true)
-                        .frame(maxWidth: leftDateMaxWidth, alignment: .leading)
-                        .opacity(homePageIndex == HomeSwipePage.social.rawValue ? 0 : 1)
+                    ZStack(alignment: .topLeading) {
+                        Text(Date()
+                            .formatted(
+                                useShortWeekdayHeaderDate
+                                ? .dateTime.weekday(.abbreviated).month(.abbreviated).day()
+                                : .dateTime.weekday(.wide).month(.abbreviated).day()
+                            ))
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .allowsTightening(true)
+                            .opacity(homePageIndex == HomeSwipePage.social.rawValue ? 0 : (homePageIndex == HomeSwipePage.littleWins.rawValue ? 0 : 1))
+                            .offset(x: homePageIndex == HomeSwipePage.littleWins.rawValue ? -8 : 0)
+
+                        if homePageIndex == HomeSwipePage.littleWins.rawValue {
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    showLoomAIChatMenu.toggle()
+                                }
+                            } label: {
+                                loomAIHeaderMenuGlyph(isOpen: showLoomAIChatMenu)
+                                    .frame(width: 28, height: 22, alignment: .leading)
+                                    .padding(6)
+                            }
+                            .buttonStyle(.plain)
+                            .contentShape(Rectangle())
+                            .background(
+                                GeometryReader { proxy in
+                                    Color.clear
+                                        .preference(
+                                            key: LoomAIHeaderMenuButtonFramePreferenceKey.self,
+                                            value: proxy.frame(in: .named("ContentViewRootSpace"))
+                                        )
+                                }
+                            )
+                            .transition(.opacity.combined(with: .move(edge: .leading)))
+                        }
+                    }
+                    .zIndex(showLoomAIChatMenu ? 4 : 0)
+                    .frame(maxWidth: leftDateMaxWidth, alignment: .leading)
 
                     Spacer()
 
@@ -1606,41 +1687,69 @@ struct ContentView: View {
                         }
                         .animation(headerPageSpringAnimation, value: homePageIndex)
                     }
+                    .allowsHitTesting(false)
                 }
 
-                Image("logo")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(height: 40)
-                    .modifier(DarkModeInvertImage())
-                    .overlay(alignment: .leading) {
-                        if shouldShowLittleWinsLogoDot {
-                            Circle()
-                                .fill(Color(.systemGray3))
-                                .frame(width: 8, height: 8)
-                                .offset(x: -14 + (littleWinsLogoDotBounceOn ? -3 : 0), y: 1)
-                                .animation(
-                                    .interactiveSpring(response: 0.24, dampingFraction: 0.72, blendDuration: 0.12),
-                                    value: littleWinsLogoDotBounceOn
-                                )
-                        }
+                Button {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        homePageIndex = HomeSwipePage.home.rawValue
+                        showLoomAIChatMenu = false
                     }
-                    .background(
-                        GeometryReader { proxy in
-                            Color.clear
-                                .preference(key: HeaderLogoWidthPreferenceKey.self, value: proxy.size.width)
+                } label: {
+                    Image("logo")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(height: 40)
+                        .modifier(DarkModeInvertImage())
+                        .overlay(alignment: .leading) {
+                            if shouldShowLittleWinsLogoDot {
+                                Circle()
+                                    .fill(Color(.systemGray3))
+                                    .frame(width: 8, height: 8)
+                                    .offset(x: -14 + (littleWinsLogoDotBounceOn ? -3 : 0), y: 1)
+                                    .animation(
+                                        .interactiveSpring(response: 0.24, dampingFraction: 0.72, blendDuration: 0.12),
+                                        value: littleWinsLogoDotBounceOn
+                                    )
+                            }
                         }
-                    )
+                        .background(
+                            GeometryReader { proxy in
+                                Color.clear
+                                    .preference(key: HeaderLogoWidthPreferenceKey.self, value: proxy.size.width)
+                            }
+                        )
+                }
+                .buttonStyle(.plain)
             }
 
             pagePositionIndicator
                 .padding(.top, 2)
                 .padding(.horizontal, 24)
         }
+        .background(
+            GeometryReader { proxy in
+                Color.clear
+                    .preference(
+                        key: ContentHeaderFramePreferenceKey.self,
+                        value: proxy.frame(in: .named("ContentViewRootSpace"))
+                    )
+            }
+        )
         .onPreferenceChange(HeaderLogoWidthPreferenceKey.self) { width in
             guard width > 0 else { return }
             if abs(width - measuredHeaderLogoWidth) > 0.5 {
                 measuredHeaderLogoWidth = width
+            }
+        }
+        .onPreferenceChange(LoomAIHeaderMenuButtonFramePreferenceKey.self) { frame in
+            if frame != .zero {
+                loomAIHeaderMenuButtonFrame = frame
+            }
+        }
+        .onPreferenceChange(ContentHeaderFramePreferenceKey.self) { frame in
+            if frame != .zero {
+                headerFrameInRootSpace = frame
             }
         }
         .onAppear {
@@ -1648,6 +1757,11 @@ struct ContentView: View {
                 DispatchQueue.main.async {
                     enableHeaderPageAnimations = true
                 }
+            }
+        }
+        .onChange(of: homePageIndex) { _, newValue in
+            if newValue != HomeSwipePage.littleWins.rawValue {
+                showLoomAIChatMenu = false
             }
         }
     }
@@ -1683,6 +1797,200 @@ struct ContentView: View {
         }
         .frame(height: 4)
         .animation(headerPageSpringAnimation, value: homePageIndex)
+    }
+
+    private var loomAICurrentThreadKey: String {
+        LoomAIChatThreadSelectionStore.currentThreadKey()
+    }
+
+    private var loomAIThreadsForMenu: [LoomAIChatThread] {
+        let nonEmptyThreadKeys = Set(
+            loomAIChatMessages
+                .filter { !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                .map(\.threadKey)
+        )
+        return loomAIChatThreads
+            .filter { nonEmptyThreadKeys.contains($0.threadKey) }
+            .sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    @ViewBuilder
+    private func loomAIHeaderMenuGlyph(isOpen: Bool) -> some View {
+        ZStack {
+            Capsule()
+                .fill(Color.secondary)
+                .frame(width: isOpen ? 20 : 18, height: 2.2)
+                .rotationEffect(.degrees(isOpen ? 45 : 0))
+                .offset(y: isOpen ? 0 : -4)
+
+            Capsule()
+                .fill(Color.secondary)
+                .frame(width: isOpen ? 20 : 12, height: 2.2)
+                .rotationEffect(.degrees(isOpen ? -45 : 0))
+                .offset(y: isOpen ? 0 : 4)
+        }
+        .animation(.easeInOut(duration: 0.2), value: isOpen)
+        .contentShape(Rectangle())
+    }
+
+    private var loomAIChatMenuPopup: some View {
+        let popupWidth = min(UIScreen.main.bounds.width - 24, 240.0)
+        let threads = loomAIThreadsForMenu
+        let maxListHeight = min(CGFloat(320), CGFloat(threads.count) * 54 + (threads.isEmpty ? 0 : 8))
+
+        return VStack(alignment: .leading, spacing: 10) {
+            Button {
+                createNewLoomAIChatThread()
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showLoomAIChatMenu = false
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.subheadline)
+                    Text("New Chat")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.blue,
+                                    Color.blue.opacity(0.82)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                )
+            }
+            .buttonStyle(.plain)
+
+            if !threads.isEmpty {
+                List {
+                    ForEach(threads, id: \.id) { thread in
+                        Button {
+                            LoomAIChatThreadSelectionStore.setCurrentThreadKey(thread.threadKey)
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                showLoomAIChatMenu = false
+                            }
+                        } label: {
+                            loomAIChatMenuThreadRow(thread)
+                        }
+                        .buttonStyle(.plain)
+                        .listRowInsets(EdgeInsets(top: 3, leading: 0, bottom: 3, trailing: 0))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button(role: .destructive) {
+                                deleteLoomAIChatThread(thread)
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                            .tint(.red)
+                        }
+                    }
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .background(Color.clear)
+                .frame(height: maxListHeight)
+            }
+        }
+        .padding(12)
+        .frame(width: popupWidth, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(Color(.systemBackground).opacity(0.72))
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.12), radius: 16, x: 0, y: 8)
+    }
+
+    @ViewBuilder
+    private func loomAIChatMenuThreadRow(_ thread: LoomAIChatThread) -> some View {
+        let isSelected = thread.threadKey == loomAICurrentThreadKey
+        let displayTitle = thread.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "New Chat" : thread.title
+
+        HStack(spacing: 10) {
+            Circle()
+                .fill(isSelected ? Color.blue : Color.secondary.opacity(0.28))
+                .frame(width: 7, height: 7)
+
+            Text(displayTitle)
+                .font(.subheadline.weight(isSelected ? .semibold : .regular))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+
+            Spacer(minLength: 0)
+
+            if isSelected {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.blue)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(isSelected ? Color.blue.opacity(0.10) : Color(.secondarySystemBackground).opacity(0.65))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(isSelected ? Color.blue.opacity(0.18) : Color.clear, lineWidth: 1)
+        )
+        .contentShape(Rectangle())
+    }
+
+    private func createNewLoomAIChatThread() {
+        let thread = LoomAIChatThread(
+            threadKey: UUID().uuidString,
+            title: "New Chat",
+            createdAt: .now,
+            updatedAt: .now
+        )
+        modelContext.insert(thread)
+        try? modelContext.save()
+        LoomAIChatThreadSelectionStore.setCurrentThreadKey(thread.threadKey)
+    }
+
+    private func deleteLoomAIChatThread(_ thread: LoomAIChatThread) {
+        let threadMessages = loomAIChatMessages.filter { $0.threadKey == thread.threadKey }
+        for message in threadMessages {
+            modelContext.delete(message)
+        }
+        if let persisted = loomAIChatThreads.first(where: { $0.id == thread.id }) {
+            modelContext.delete(persisted)
+        }
+        try? modelContext.save()
+
+        if loomAICurrentThreadKey == thread.threadKey {
+            let remaining = loomAIChatThreads
+                .filter { $0.id != thread.id }
+                .sorted { $0.updatedAt > $1.updatedAt }
+            if let next = remaining.first {
+                LoomAIChatThreadSelectionStore.setCurrentThreadKey(next.threadKey)
+            } else {
+                let fallback = LoomAIChatThread(threadKey: "default", title: "Loom")
+                modelContext.insert(fallback)
+                try? modelContext.save()
+                LoomAIChatThreadSelectionStore.setCurrentThreadKey("default")
+            }
+        }
     }
 
     @ViewBuilder
@@ -3829,6 +4137,24 @@ private struct HeaderLogoWidthPreferenceKey: PreferenceKey {
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         let next = nextValue()
         if next > 0 { value = next }
+    }
+}
+
+private struct LoomAIHeaderMenuButtonFramePreferenceKey: PreferenceKey {
+    static var defaultValue: CGRect = .zero
+
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        let next = nextValue()
+        if next != .zero { value = next }
+    }
+}
+
+private struct ContentHeaderFramePreferenceKey: PreferenceKey {
+    static var defaultValue: CGRect = .zero
+
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        let next = nextValue()
+        if next != .zero { value = next }
     }
 }
 
