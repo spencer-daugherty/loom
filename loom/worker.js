@@ -110,7 +110,15 @@ export default {
       "- If confidence is low or next step is unclear, return zero actions.",
       "- Prefer actions that directly help the user act inside Loom.",
       "- When a fulfillment area appears to need more daily execution (e.g., slipping score, weak execution patterns), consider suggesting a practical Little Win.",
+      "- Target 2-3 high-quality Little Wins per Fulfillment Area (not 0, and not more than 3).",
+      "- You may return multiple Little Win suggestions for the same category ONLY if confidence is high that each is distinct and high value.",
+      "- Review existing Little Wins in the target category for quality and specificity. If one is weak/generic/placeholder or clearly improvable, suggest revising/replacing it.",
       "- If you return one or more actions, do NOT end the message with a question (the buttons are the CTA). End with a clear recommendation statement instead.",
+      "- Before suggesting createLittleWin, check APP_CONTEXT_JSON fulfillmentCategories[].littleWins for that category and avoid repeating an existing Little Win.",
+      "- If a candidate Little Win already exists, propose a different practical repeatable Little Win (if confidence remains high) or return no action.",
+      "- Respect the Loom UI constraint: each Fulfillment Area can have at most 3 Little Wins.",
+      "- If a category already has 3 Little Wins and improvement is still needed, suggest a replaceLittleWin action instead of createLittleWin.",
+      "- For replaceLittleWin, identify the weakest/lowest-signal current Little Win (especially placeholders like 'Test') and propose a stronger replacement.",
       "",
       "Supported action types (app-compatible):",
       "1) createAction",
@@ -119,19 +127,29 @@ export default {
       '   payload: { "title": "string", "category": "string" }',
       "3) createLittleWin",
       '   payload: { "categoryID": "uuid-string (preferred if available)", "categoryName": "string fallback", "activity": "practical repeatable little win text (daily/most days)" }',
+      "4) replaceLittleWin",
+      '   payload: { "categoryID": "uuid-string (preferred if available)", "categoryName": "string fallback", "replaceActivity": "existing little win to replace", "activity": "new practical repeatable little win text (daily/most days)" }',
+      "   (Use replaceLittleWin for both true replacements and revisions of an existing Little Win.)",
       "",
       "For createLittleWin:",
       "- Recommend BOTH the category and the Little Win activity.",
       "- The activity should be small, practical, and executable (e.g., 5-20 minutes, specific trigger/time/context if possible).",
       "- The activity should be repeatable (daily or most days), not a one-off weekly task.",
       "- Avoid wording like 'this week' inside the Little Win text itself.",
+      "- Keep Little Win text card-friendly: target ~50 characters when possible, and never exceed 150 characters.",
       "- Prefer categories with low weekly score or weak recent execution signals when evidence supports it.",
+      "For replaceLittleWin:",
+      "- Use when the category already has 3 Little Wins.",
+      "- Prefer replacing placeholders/generic entries first (e.g., Test/TBD).",
+      "- If no clearly weak Little Win exists, choose the least specific one and say why in the message.",
+      "- Keep the replacement activity text card-friendly: target ~50 characters, max 150 characters.",
       "",
       "Return JSON ONLY in this exact shape:",
       "{",
       '  "message": "string",',
       '  "actions": [',
       '    { "id": "string", "title": "string", "type": "createLittleWin", "payload": { "categoryID": "uuid?", "categoryName": "string", "activity": "string" } }',
+      '    // or: { "id": "string", "title": "string", "type": "replaceLittleWin", "payload": { "categoryID": "uuid?", "categoryName": "string", "replaceActivity": "string", "activity": "string" } }',
       "  ],",
       '  "debug": {',
       '    "usedContext": true,',
@@ -401,6 +419,8 @@ function normalizeActions(actions, context) {
   if (!Array.isArray(actions)) return [];
 
   const categoryLookup = buildFulfillmentCategoryLookup(context);
+  const pendingCreatesByCategoryID = new Map();
+  const seenLittleWinSuggestions = new Set();
 
   return actions
     .filter((a) => a && typeof a === "object")
@@ -412,7 +432,9 @@ function normalizeActions(actions, context) {
       const payload =
         a.payload && typeof a.payload === "object" && !Array.isArray(a.payload) ? { ...a.payload } : {};
 
-      if (type === "createLittleWin") {
+      const normalizedType = type === "reviseLittleWin" ? "replaceLittleWin" : type;
+
+      if (normalizedType === "createLittleWin") {
         if (typeof payload.activity !== "string" || !payload.activity.trim()) {
           payload.activity =
             title.replace(/^Add Little Win:\s*/i, "").trim() || "Small daily practice";
@@ -439,6 +461,35 @@ function normalizeActions(actions, context) {
         const resolvedCategoryName =
           typeof payload.categoryName === "string" ? payload.categoryName.trim() : "";
         const activity = typeof payload.activity === "string" ? payload.activity.trim() : "";
+        const resolvedCategory = resolveCategoryRef({ categoryID: payload.categoryID, categoryName: resolvedCategoryName }, categoryLookup);
+        const categoryKey = resolvedCategory.id || (resolvedCategory.name || resolvedCategoryName).toLowerCase();
+        const dedupeKey = `${categoryKey}|${normalizeComparableText(activity)}`;
+        if (!categoryKey || seenLittleWinSuggestions.has(dedupeKey)) {
+          return null;
+        }
+        if (isDuplicateLittleWinSuggestion({ categoryID: resolvedCategory.id, categoryName: resolvedCategory.name, activity }, categoryLookup)) {
+          return null;
+        }
+        const pendingCreates = pendingCreatesByCategoryID.get(categoryKey) || 0;
+        const effectiveCount = resolvedCategory.count + pendingCreates;
+        if (effectiveCount >= 3) {
+          const replaceActivity = chooseReplaceableLittleWin(resolvedCategory, categoryLookup);
+          if (!replaceActivity) return null;
+          seenLittleWinSuggestions.add(dedupeKey);
+          return {
+            id,
+            title: buildReplaceLittleWinTitle(resolvedCategory.name || resolvedCategoryName, replaceActivity, activity),
+            type: "replaceLittleWin",
+            payload: {
+              ...(resolvedCategory.id ? { categoryID: String(resolvedCategory.id) } : {}),
+              ...((resolvedCategory.name || resolvedCategoryName) ? { categoryName: resolvedCategory.name || resolvedCategoryName } : {}),
+              replaceActivity,
+              activity,
+            },
+          };
+        }
+        pendingCreatesByCategoryID.set(categoryKey, pendingCreates + 1);
+        seenLittleWinSuggestions.add(dedupeKey);
 
         return {
           id,
@@ -447,6 +498,60 @@ function normalizeActions(actions, context) {
           payload: {
             ...(payload.categoryID ? { categoryID: String(payload.categoryID) } : {}),
             ...(resolvedCategoryName ? { categoryName: resolvedCategoryName } : {}),
+            activity,
+          },
+        };
+      }
+
+      if (normalizedType === "replaceLittleWin") {
+        if (typeof payload.activity !== "string" || !payload.activity.trim()) {
+          payload.activity = title.replace(/^Replace Little Win:\s*/i, "").trim() || "";
+        }
+        payload.activity = normalizeLittleWinActivityText(payload.activity);
+        if (!payload.activity || looksLikePlaceholderValue(payload.activity)) {
+          return null;
+        }
+
+        const categoryID = typeof payload.categoryID === "string" ? payload.categoryID.trim() : "";
+        const categoryName =
+          typeof payload.categoryName === "string" ? payload.categoryName.trim() : "";
+        if (categoryID && categoryLookup.byID.has(categoryID)) {
+          payload.categoryName = payload.categoryName || categoryLookup.byID.get(categoryID);
+        } else if (categoryName) {
+          const matched = categoryLookup.byNameLower.get(categoryName.toLowerCase());
+          if (matched) {
+            payload.categoryID = payload.categoryID || matched.id;
+            payload.categoryName = payload.categoryName || matched.name;
+          }
+        }
+
+        const resolvedCategoryName =
+          typeof payload.categoryName === "string" ? payload.categoryName.trim() : "";
+        const resolvedCategory = resolveCategoryRef({ categoryID: payload.categoryID, categoryName: resolvedCategoryName }, categoryLookup);
+        let replaceActivity = typeof payload.replaceActivity === "string" ? payload.replaceActivity.trim() : "";
+        if (!replaceActivity) {
+          replaceActivity = chooseReplaceableLittleWin(resolvedCategory, categoryLookup) || "";
+        }
+        if (!replaceActivity) return null;
+
+        const activity = typeof payload.activity === "string" ? payload.activity.trim() : "";
+        const categoryKey = resolvedCategory.id || (resolvedCategory.name || resolvedCategoryName).toLowerCase();
+        const dedupeKey = `${categoryKey}|${normalizeComparableText(activity)}`;
+        if (!categoryKey || seenLittleWinSuggestions.has(dedupeKey)) return null;
+        if (normalizeComparableText(replaceActivity) === normalizeComparableText(activity)) return null;
+        if (isDuplicateLittleWinSuggestion({ categoryID: resolvedCategory.id, categoryName: resolvedCategory.name || resolvedCategoryName, activity }, categoryLookup)) {
+          return null;
+        }
+        seenLittleWinSuggestions.add(dedupeKey);
+
+        return {
+          id,
+          title: title || buildReplaceLittleWinTitle(resolvedCategory.name || resolvedCategoryName, replaceActivity, activity),
+          type: "replaceLittleWin",
+          payload: {
+            ...(resolvedCategory.id ? { categoryID: String(resolvedCategory.id) } : {}),
+            ...((resolvedCategory.name || resolvedCategoryName) ? { categoryName: resolvedCategory.name || resolvedCategoryName } : {}),
+            replaceActivity,
             activity,
           },
         };
@@ -486,25 +591,39 @@ function buildLittleWinTitle(categoryName, activity) {
   return "Add Little Win";
 }
 
+function buildReplaceLittleWinTitle(categoryName, replaceActivity, activity) {
+  const base = categoryName ? `Replace Little Win in ${categoryName}` : "Replace Little Win";
+  if (activity) return `${base}: ${activity}`;
+  if (replaceActivity) return `${base} (${replaceActivity})`;
+  return base;
+}
+
 function buildFulfillmentCategoryLookup(context) {
   const byID = new Map();
   const byNameLower = new Map();
+  const littleWinsByCategoryID = new Map();
+  const littleWinsByCategoryNameLower = new Map();
 
   try {
     const cats = Array.isArray(context?.fulfillmentCategories) ? context.fulfillmentCategories : [];
     for (const c of cats) {
       const id = typeof c?.id === "string" ? c.id.trim() : "";
       const name = typeof c?.name === "string" ? c.name.trim() : "";
+      const littleWins = Array.isArray(c?.littleWins)
+        ? c.littleWins.filter((x) => typeof x === "string").map((x) => x.trim()).filter(Boolean)
+        : [];
       if (id && name) {
         byID.set(id, name);
         byNameLower.set(name.toLowerCase(), { id, name });
+        littleWinsByCategoryID.set(id, littleWins);
+        littleWinsByCategoryNameLower.set(name.toLowerCase(), littleWins);
       }
     }
   } catch {
     // ignore
   }
 
-  return { byID, byNameLower };
+  return { byID, byNameLower, littleWinsByCategoryID, littleWinsByCategoryNameLower };
 }
 
 function buildWorkerDebug({
@@ -539,6 +658,76 @@ function buildWorkerDebug({
     upstreamStatus: upstreamStatus ?? null,
     upstreamContentType: upstreamContentType ?? null,
   };
+}
+
+function isDuplicateLittleWinSuggestion(candidate, categoryLookup) {
+  const activity = normalizeComparableText(candidate?.activity);
+  if (!activity) return false;
+
+  const categoryID = typeof candidate?.categoryID === "string" ? candidate.categoryID.trim() : "";
+  const categoryName = typeof candidate?.categoryName === "string" ? candidate.categoryName.trim() : "";
+
+  let existing = [];
+  if (categoryID && categoryLookup?.littleWinsByCategoryID?.has(categoryID)) {
+    existing = categoryLookup.littleWinsByCategoryID.get(categoryID) || [];
+  } else if (categoryName && categoryLookup?.littleWinsByCategoryNameLower?.has(categoryName.toLowerCase())) {
+    existing = categoryLookup.littleWinsByCategoryNameLower.get(categoryName.toLowerCase()) || [];
+  }
+
+  if (!Array.isArray(existing) || existing.length === 0) return false;
+  return existing.some((item) => normalizeComparableText(item) === activity);
+}
+
+function resolveCategoryRef(candidate, categoryLookup) {
+  const categoryID = typeof candidate?.categoryID === "string" ? candidate.categoryID.trim() : "";
+  const categoryName = typeof candidate?.categoryName === "string" ? candidate.categoryName.trim() : "";
+
+  if (categoryID && categoryLookup?.byID?.has(categoryID)) {
+    const name = categoryLookup.byID.get(categoryID) || categoryName || "";
+    const littleWins = categoryLookup.littleWinsByCategoryID?.get(categoryID) || [];
+    return { id: categoryID, name, littleWins, count: littleWins.length };
+  }
+  if (categoryName && categoryLookup?.byNameLower?.has(categoryName.toLowerCase())) {
+    const match = categoryLookup.byNameLower.get(categoryName.toLowerCase());
+    const littleWins = categoryLookup.littleWinsByCategoryID?.get(match.id) || categoryLookup.littleWinsByCategoryNameLower?.get(categoryName.toLowerCase()) || [];
+    return { id: match.id, name: match.name, littleWins, count: littleWins.length };
+  }
+  return { id: categoryID || "", name: categoryName || "", littleWins: [], count: 0 };
+}
+
+function chooseReplaceableLittleWin(resolvedCategory, categoryLookup) {
+  const littleWins = Array.isArray(resolvedCategory?.littleWins) ? resolvedCategory.littleWins : [];
+  if (littleWins.length === 0) return "";
+
+  const placeholder = littleWins.find((x) => looksLikePlaceholderValue(x));
+  if (placeholder) return placeholder;
+
+  const genericTerms = ["exercise", "workout", "health", "call", "family", "friends", "relationship", "read", "journal"];
+  const ranked = littleWins
+    .map((text) => {
+      const normalized = normalizeComparableText(text);
+      const tokens = normalized.split(" ").filter(Boolean);
+      const genericScore = genericTerms.some((term) => normalized === term || normalized.includes(`${term} `) || normalized.includes(` ${term}`)) ? 1 : 0;
+      const specificityScore = tokens.length;
+      return { text, genericScore, specificityScore, rawLen: String(text).trim().length };
+    })
+    .sort((a, b) => {
+      if (a.genericScore !== b.genericScore) return b.genericScore - a.genericScore;
+      if (a.specificityScore !== b.specificityScore) return a.specificityScore - b.specificityScore;
+      return a.rawLen - b.rawLen;
+    });
+
+  return ranked[0]?.text || "";
+}
+
+function normalizeComparableText(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\b(this week|weekly)\b/g, " ")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function finalizeAssistantMessage(message, actions) {
@@ -589,9 +778,19 @@ function normalizeLittleWinActivityText(value) {
     .trim();
 
   s = s.replace(/^[,.;:\-\s]+|[,.;:\-\s]+$/g, "").trim();
+  s = truncateAtWordBoundary(s, 150);
 
   if (!s) return "";
   return s;
+}
+
+function truncateAtWordBoundary(value, maxLen) {
+  const s = String(value || "").trim();
+  if (!s || s.length <= maxLen) return s;
+  const rough = s.slice(0, maxLen);
+  const lastSpace = rough.lastIndexOf(" ");
+  if (lastSpace > 12) return rough.slice(0, lastSpace).trim();
+  return rough.trim();
 }
 
 function looksLikePlaceholderValue(value) {

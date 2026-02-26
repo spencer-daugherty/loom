@@ -443,16 +443,37 @@ struct LoomAIChatView: View {
 
     @ViewBuilder
     private func suggestedActionPrimaryText(for action: LoomAISuggestedAction, isApplied: Bool) -> some View {
-        if action.type == "createLittleWin" {
-            let activity = (action.payload["activity"] ?? action.payload["text"] ?? "")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let category = (action.payload["categoryName"] ?? "")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let topLineBase = category.isEmpty ? "Add Little Win:" : "Add Little Win to \(category):"
-            let topLine = isApplied
-                ? topLineBase.replacingOccurrences(of: "Add ", with: "Added ", options: [.anchored])
-                : topLineBase
+        if action.type == "createLittleWin" || action.type == "replaceLittleWin" {
+            suggestedLittleWinPrimaryText(action: action, isApplied: isApplied)
+        } else {
+            Text(suggestedActionButtonLabel(for: action, isApplied: isApplied))
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(suggestedActionPrimaryColor(isApplied: isApplied))
+                .multilineTextAlignment(.leading)
+        }
+    }
 
+    private func suggestedLittleWinPrimaryText(action: LoomAISuggestedAction, isApplied: Bool) -> some View {
+        let activity = (action.payload["activity"] ?? action.payload["text"] ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let category = (action.payload["categoryName"] ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let isReplace = action.type == "replaceLittleWin"
+        let topLineBase: String = {
+            if isReplace {
+                return category.isEmpty ? "Replace Little Win:" : "Replace Little Win in \(category):"
+            } else {
+                return category.isEmpty ? "Add Little Win:" : "Add Little Win to \(category):"
+            }
+        }()
+        let topLine = isApplied
+            ? topLineBase.replacingOccurrences(of: "Add ", with: "Added ", options: [.anchored])
+                .replacingOccurrences(of: "Replace ", with: "Replaced ", options: [.anchored])
+            : topLineBase
+        let replaced = (action.payload["replaceActivity"] ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return VStack(alignment: .leading, spacing: 3) {
             Text(topLine)
                 .font(.subheadline.italic())
                 .foregroundStyle(suggestedActionPrimaryColor(isApplied: isApplied).opacity(isApplied ? 0.88 : 0.95))
@@ -464,11 +485,13 @@ struct LoomAIChatView: View {
                     .foregroundStyle(suggestedActionPrimaryColor(isApplied: isApplied))
                     .multilineTextAlignment(.leading)
             }
-        } else {
-            Text(suggestedActionButtonLabel(for: action, isApplied: isApplied))
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(suggestedActionPrimaryColor(isApplied: isApplied))
-                .multilineTextAlignment(.leading)
+
+            if isReplace, !replaced.isEmpty {
+                Text("\(isApplied ? "Replaced" : "Replacing"): \(replaced)")
+                    .font(.caption)
+                    .foregroundStyle(suggestedActionSecondaryColor(isApplied: isApplied))
+                    .multilineTextAlignment(.leading)
+            }
         }
     }
 
@@ -493,7 +516,7 @@ struct LoomAIChatView: View {
     }
 
     private func isSuggestedActionPersistentlyApplied(_ action: LoomAISuggestedAction) -> Bool {
-        guard action.type == "createLittleWin" else { return false }
+        guard action.type == "createLittleWin" || action.type == "replaceLittleWin" else { return false }
 
         let activity = (action.payload["activity"] ?? action.payload["text"] ?? action.title)
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -514,10 +537,23 @@ struct LoomAIChatView: View {
 
         guard let targetCategoryID else { return false }
         let normalizedActivity = normalizedSuggestedLittleWinText(activity)
-        return fulfillmentFocusRows.contains {
+        let hasNew = fulfillmentFocusRows.contains {
             $0.category_id == targetCategoryID &&
             normalizedSuggestedLittleWinText($0.activity) == normalizedActivity
         }
+        guard hasNew else { return false }
+
+        if action.type == "replaceLittleWin",
+           let replaced = action.payload["replaceActivity"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !replaced.isEmpty {
+            let normalizedReplaced = normalizedSuggestedLittleWinText(replaced)
+            let oldStillExists = fulfillmentFocusRows.contains {
+                $0.category_id == targetCategoryID &&
+                normalizedSuggestedLittleWinText($0.activity) == normalizedReplaced
+            }
+            return !oldStillExists
+        }
+        return true
     }
 
     private func normalizedSuggestedLittleWinText(_ text: String) -> String {
@@ -531,6 +567,8 @@ struct LoomAIChatView: View {
         switch action.type {
         case "createLittleWin":
             return nil
+        case "replaceLittleWin":
+            return "Replaces the existing Little Win shown below."
         case "createAction":
             return "Adds this to Capture."
         case "createOutcome":

@@ -208,10 +208,19 @@ final class LoomAIViewModel: ObservableObject {
             Prefer concise, actionable answers.
             If you are confident (the context clearly supports a practical next step), return 1-3 CTA actions the app can render as buttons.
             Prefer CTAs that directly modify Loom data when appropriate (for example a Little Win in a fulfillment area that is slipping).
+            Target 2-3 high-quality Little Wins per Fulfillment Area.
+            You may suggest multiple Little Wins for the same category only when confidence is high that each is distinct and high-value.
+            Review any existing Little Wins in the relevant category and use logic: if one is weak, generic, placeholder, or clearly improvable, suggest revising/replacing it.
             When suggesting a Little Win, return an action of type "createLittleWin" with payload keys:
             - "categoryID" (preferred UUID string if known)
             - "categoryName" (fallback category title)
             - "activity" (the suggested Little Win text)
+            Respect Loom rules: each Fulfillment Area can only have up to 3 Little Wins.
+            If the target category already has 3 and a better Little Win is warranted, return "replaceLittleWin" with:
+            - "categoryID" / "categoryName"
+            - "replaceActivity" (existing Little Win text to replace)
+            - "activity" (new Little Win text)
+            Keep Little Win text card-friendly: target ~50 characters and never exceed 150 characters.
             Example action:
             {"id":"lw-1","title":"Add Little Win: 10-minute walk","type":"createLittleWin","payload":{"categoryName":"Health & Energy","activity":"10-minute walk after lunch"}}
             If confidence is low or the best next step is unclear, return no actions.
@@ -240,6 +249,9 @@ final class LoomAIViewModel: ObservableObject {
                     debugJSON: LoomAIDebugCodec.encode(response.debug)
                 )
                 context.insert(assistant)
+                if let summaryTitle = summarizedThreadTitle(from: history + [assistant]), !summaryTitle.isEmpty {
+                    thread.title = summaryTitle
+                }
                 thread.updatedAt = .now
                 try? context.save()
                 latestSuggestedActions = response.actions
@@ -304,7 +316,7 @@ final class LoomAIViewModel: ObservableObject {
             errorMessage = nil
             return true
         case "createLittleWin":
-            let activity = (action.payload["activity"] ?? action.payload["text"] ?? action.title)
+            let activity = clampedLittleWinActivityText(action.payload["activity"] ?? action.payload["text"] ?? action.title)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !activity.isEmpty else {
                 errorMessage = "Little Win suggestion is missing an activity."
@@ -349,6 +361,63 @@ final class LoomAIViewModel: ObservableObject {
                 rank: nextRank
             )
             context.insert(littleWin)
+            targetCategory.updatedAt = .now
+            try? context.save()
+            errorMessage = nil
+            return true
+        case "replaceLittleWin":
+            let replacementActivity = clampedLittleWinActivityText(action.payload["activity"] ?? action.payload["text"] ?? action.title)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let replaceActivity = (action.payload["replaceActivity"] ?? action.payload["oldActivity"] ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            guard !replacementActivity.isEmpty else {
+                errorMessage = "Replacement Little Win is missing the new activity."
+                return false
+            }
+            guard !replaceActivity.isEmpty else {
+                errorMessage = "Replacement Little Win is missing which existing Little Win to replace."
+                return false
+            }
+
+            let categories = (try? context.fetch(FetchDescriptor<Fulfillment>())) ?? []
+            let targetCategory: Fulfillment?
+            if let categoryIDString = action.payload["categoryID"],
+               let categoryID = UUID(uuidString: categoryIDString) {
+                targetCategory = categories.first(where: { $0.category_id == categoryID })
+            } else if let categoryName = action.payload["categoryName"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      !categoryName.isEmpty {
+                targetCategory = categories.first {
+                    $0.category.caseInsensitiveCompare(categoryName) == .orderedSame
+                }
+            } else {
+                targetCategory = nil
+            }
+            guard let targetCategory else {
+                errorMessage = "Couldn’t find the fulfillment area for this Little Win replacement."
+                return false
+            }
+
+            let existingFocusRows = ((try? context.fetch(FetchDescriptor<FulfillmentFocus>())) ?? [])
+                .filter { $0.category_id == targetCategory.category_id }
+            let normalizedReplacement = Self.normalizedSuggestedLittleWinText(replacementActivity)
+            if existingFocusRows.contains(where: {
+                Self.normalizedSuggestedLittleWinText($0.activity) == normalizedReplacement
+            }) {
+                errorMessage = "That replacement Little Win already exists in \(targetCategory.category)."
+                return false
+            }
+
+            let normalizedTargetToReplace = Self.normalizedSuggestedLittleWinText(replaceActivity)
+            guard let rowToReplace = existingFocusRows.first(where: {
+                Self.normalizedSuggestedLittleWinText($0.activity) == normalizedTargetToReplace
+            }) else {
+                errorMessage = "Couldn’t find the existing Little Win to replace in \(targetCategory.category)."
+                return false
+            }
+
+            rowToReplace.activity = replacementActivity
+            rowToReplace.updatedAt = .now
             targetCategory.updatedAt = .now
             try? context.save()
             errorMessage = nil
@@ -1039,6 +1108,84 @@ final class LoomAIViewModel: ObservableObject {
 
     private func roundToTenths(_ value: Double) -> Double {
         (value * 10).rounded() / 10
+    }
+
+    private func summarizedThreadTitle(from messages: [LoomAIChatMessage]) -> String? {
+        let userCandidates = messages
+            .filter { $0.roleRaw == LoomAIChatRole.user.rawValue }
+            .map(\.content)
+            .map(cleanThreadTitleCandidate)
+            .filter { !$0.isEmpty }
+        let assistantCandidates = messages
+            .filter { $0.roleRaw == LoomAIChatRole.assistant.rawValue }
+            .map(\.content)
+            .map(cleanThreadTitleCandidate)
+            .filter { !$0.isEmpty }
+
+        guard var title = userCandidates.last ?? assistantCandidates.last ?? userCandidates.first ?? assistantCandidates.first,
+              !title.isEmpty else { return nil }
+
+        title = stripCommonQuestionPrefix(from: title)
+        title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return nil }
+
+        if title.count > 52 {
+            title = truncateAtWordBoundary(title, maxLength: 52)
+        }
+        return title
+    }
+
+    private func cleanThreadTitleCandidate(_ text: String) -> String {
+        var s = text
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        s = s.replacingOccurrences(of: "**", with: "")
+        s = s.replacingOccurrences(of: "__", with: "")
+
+        if let sentenceEnd = s.firstIndex(where: { ".!?".contains($0) }) {
+            let firstSentence = String(s[..<sentenceEnd]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if firstSentence.count >= 6 {
+                s = firstSentence
+            }
+        }
+        return s
+    }
+
+    private func stripCommonQuestionPrefix(from text: String) -> String {
+        let prefixes = [
+            "what should i do next for ",
+            "how can i improve ",
+            "what should i focus on this week for ",
+            "what should i focus on this week",
+            "which fulfillment area is slipping",
+            "can you help me with ",
+            "help me with "
+        ]
+        let lower = text.lowercased()
+        for prefix in prefixes where lower.hasPrefix(prefix) {
+            let index = text.index(text.startIndex, offsetBy: prefix.count)
+            let trimmed = String(text[index...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { return trimmed }
+        }
+        return text
+    }
+
+    private func truncateAtWordBoundary(_ text: String, maxLength: Int) -> String {
+        guard text.count > maxLength else { return text }
+        let prefix = String(text.prefix(maxLength))
+        if let space = prefix.lastIndex(of: " "), space > prefix.startIndex {
+            return String(prefix[..<space]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return prefix.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func clampedLittleWinActivityText(_ text: String) -> String {
+        let normalized = text
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return truncateAtWordBoundary(normalized, maxLength: 150)
     }
 
     private static func normalizedSuggestedLittleWinText(_ text: String) -> String {
