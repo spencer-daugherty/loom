@@ -37,6 +37,7 @@ final class LoomAIChatMessage {
     var content: String
     var createdAt: Date
     var actionsJSON: String?
+    var debugJSON: String?
 
     init(
         id: UUID = .init(),
@@ -45,7 +46,8 @@ final class LoomAIChatMessage {
         roleRaw: String,
         content: String,
         createdAt: Date = .now,
-        actionsJSON: String? = nil
+        actionsJSON: String? = nil,
+        debugJSON: String? = nil
     ) {
         self.id = id
         self.threadID = threadID
@@ -54,6 +56,7 @@ final class LoomAIChatMessage {
         self.content = content
         self.createdAt = createdAt
         self.actionsJSON = actionsJSON
+        self.debugJSON = debugJSON
     }
 }
 
@@ -77,6 +80,16 @@ struct LoomAISuggestedAction: Codable, Identifiable, Hashable {
     }
 }
 
+typealias LoomAIAction = LoomAISuggestedAction
+
+struct LoomAIDebug: Codable, Hashable {
+    var model: String?
+    var usedContext: Bool?
+    var contextBytes: Int?
+    var contextHash: String?
+    var contextKeys: [String]?
+}
+
 enum LoomAIChatMessageActionsCodec {
     static func encode(_ actions: [LoomAISuggestedAction]) -> String? {
         guard !actions.isEmpty else { return nil }
@@ -88,6 +101,20 @@ enum LoomAIChatMessageActionsCodec {
     static func decode(_ json: String?) -> [LoomAISuggestedAction] {
         guard let json, let data = json.data(using: .utf8) else { return [] }
         return (try? JSONDecoder().decode([LoomAISuggestedAction].self, from: data)) ?? []
+    }
+}
+
+enum LoomAIDebugCodec {
+    static func encode(_ debug: LoomAIDebug?) -> String? {
+        guard let debug else { return nil }
+        let encoder = JSONEncoder()
+        guard let data = try? encoder.encode(debug) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func decode(_ json: String?) -> LoomAIDebug? {
+        guard let json, let data = json.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(LoomAIDebug.self, from: data)
     }
 }
 

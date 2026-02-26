@@ -26,9 +26,33 @@ struct LoomAIService {
         var client: ClientInfo
     }
 
-    struct ChatResponse: Codable {
-        var reply: String
-        var actions: [LoomAISuggestedAction]
+    struct LoomAIResponse: Decodable {
+        let message: String
+        let actions: [LoomAIAction]
+        let debug: LoomAIDebug?
+
+        private enum CodingKeys: String, CodingKey {
+            case message
+            case reply
+            case actions
+            case debug
+        }
+
+        init(message: String, actions: [LoomAIAction] = [], debug: LoomAIDebug? = nil) {
+            self.message = message
+            self.actions = actions
+            self.debug = debug
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            let message = (try? container.decode(String.self, forKey: .message))
+                ?? (try? container.decode(String.self, forKey: .reply))
+                ?? ""
+            self.message = message
+            self.actions = (try? container.decode([LoomAIAction].self, forKey: .actions)) ?? []
+            self.debug = try? container.decode(LoomAIDebug.self, forKey: .debug)
+        }
     }
 
     struct LoomAIServiceError: LocalizedError {
@@ -49,6 +73,7 @@ struct LoomAIService {
     private struct LoomAIEnvelope: Decodable {
         var message: String
         var actions: [LoomAISuggestedAction]?
+        var debug: LoomAIDebug?
     }
 
     private struct RawResponse: Decodable {
@@ -58,6 +83,7 @@ struct LoomAIService {
         var choices: [Choice]?
         var error: ErrorContainer?
         var actions: [RawAction]?
+        var debug: LoomAIDebug?
 
         struct Choice: Decodable {
             var message: ChoiceMessage?
@@ -198,7 +224,7 @@ struct LoomAIService {
         }
     }
 
-    func sendChat(messages: [TransportMessage], context: LoomAIContextSnapshot) async throws -> ChatResponse {
+    func sendChat(messages: [TransportMessage], context: LoomAIContextSnapshot) async throws -> LoomAIResponse {
         if useMockLoomAIResponse {
             let mock = """
             {"message":"Mock LoomAI reply is working.","actions":[{"id":"mock-create","title":"Create test action","type":"createAction","payload":{"text":"Test action from LoomAI mock"}}]}
@@ -231,7 +257,7 @@ struct LoomAIService {
         return try await post(path: "/chat", bodyData: bodyData)
     }
 
-    private func post(path: String, bodyData: Data) async throws -> ChatResponse {
+    private func post(path: String, bodyData: Data) async throws -> LoomAIResponse {
         let url = path.isEmpty ? baseURL : baseURL.appendingPathComponent(String(path.dropFirst()))
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -262,7 +288,7 @@ struct LoomAIService {
         contentType: String?,
         url: URL,
         elapsed: CFAbsoluteTime
-    ) throws -> ChatResponse {
+    ) throws -> LoomAIResponse {
         let rawBody = String(data: data, encoding: .utf8) ?? "<non-UTF8 \(data.count) bytes>"
         log("Response \(statusCode) from \(url.absoluteString) in \(String(format: "%.2f", elapsed * 1000))ms")
         log("Content-Type: \(contentType ?? "<none>")")
@@ -292,34 +318,34 @@ struct LoomAIService {
                 let text = normalized.message.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !text.isEmpty {
                     log("Parsed assistant text (normalized): \(text)")
-                    return ChatResponse(reply: text, actions: normalized.actions ?? [])
+                    return LoomAIResponse(message: text, actions: normalized.actions ?? [], debug: normalized.debug)
                 }
             }
 
-            if let direct = try? decoder.decode(ChatResponse.self, from: data) {
-                let text = direct.reply.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let direct = try? decoder.decode(LoomAIResponse.self, from: data) {
+                let text = direct.message.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !text.isEmpty {
-                    log("Parsed assistant text (legacy reply): \(text)")
-                    return ChatResponse(reply: text, actions: direct.actions)
+                    log("Parsed assistant text (direct LoomAIResponse): \(text)")
+                    return LoomAIResponse(message: text, actions: direct.actions, debug: direct.debug)
                 }
             }
 
             if let openAIChat = try? decoder.decode(OpenAIChatCompletionsFallback.self, from: data),
                let text = openAIChat.assistantText {
                 log("Parsed assistant text (OpenAI Chat Completions): \(text)")
-                return ChatResponse(reply: text, actions: [])
+                return LoomAIResponse(message: text, actions: [], debug: nil)
             }
 
             if let openAIResponses = try? decoder.decode(OpenAIResponsesAPIFallback.self, from: data),
                let text = openAIResponses.assistantText {
                 log("Parsed assistant text (OpenAI Responses API): \(text)")
-                return ChatResponse(reply: text, actions: [])
+                return LoomAIResponse(message: text, actions: [], debug: nil)
             }
 
             let raw = try decoder.decode(RawResponse.self, from: data)
             if let apiError = raw.errorMessage, !apiError.isEmpty {
                 log("Parsed API error: \(apiError)")
-                return ChatResponse(reply: apiError, actions: [])
+                return LoomAIResponse(message: apiError, actions: [], debug: raw.debug)
             }
             guard let reply = raw.assistantText, !reply.isEmpty else {
                 throw LoomAIServiceError(
@@ -339,9 +365,14 @@ struct LoomAIService {
                 )
             }
             log("Parsed assistant text: \(reply)")
-            return ChatResponse(reply: reply, actions: actions)
+            return LoomAIResponse(message: reply, actions: actions, debug: raw.debug)
         } catch let decodeError as LoomAIServiceError {
             log("Parse guardrail error: \(decodeError.message)")
+            #if DEBUG
+            print("[LoomAI] Decode failure status: \(statusCode)")
+            print("[LoomAI] Decode failure content-type: \(contentType ?? "<none>")")
+            print("[LoomAI] Decode failure body (first 2000): \(String(rawBody.prefix(2000)))")
+            #endif
             throw decodeError
         } catch {
             debugLogDecodeFailure(
@@ -368,6 +399,8 @@ struct LoomAIService {
             activeOutcomes: [],
             currentWeekActionBlocks: [],
             recentActivity: .init(quickCompletesLast7Days: 0, littleWinsCompletionsLast7Days: 0, carryoversLast7Days: 0),
+            dataInventory: [],
+            appGuide: [],
             notes: ["Manual LoomAIService test"]
         )
         do {
@@ -375,7 +408,7 @@ struct LoomAIService {
                 messages: [.init(role: "user", content: "Say hello in one sentence.")],
                 context: minimal
             )
-            log("Manual test parsed reply: \(reply.reply)")
+            log("Manual test parsed reply: \(reply.message)")
         } catch {
             log("Manual test failed: \(error.localizedDescription)")
         }

@@ -9,6 +9,8 @@ struct LoomAIChatView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var colorScheme
     @Query(sort: \LoomAIChatMessage.createdAt, order: .forward) private var allMessages: [LoomAIChatMessage]
+    @Query private var fulfillments: [Fulfillment]
+    @Query private var fulfillmentFocusRows: [FulfillmentFocus]
 
     @StateObject private var viewModel = LoomAIViewModel()
     @State private var showActionExecutionAlert = false
@@ -16,6 +18,7 @@ struct LoomAIChatView: View {
     @State private var keyboardHeight: CGFloat = 0
     @State private var showDebugErrorDetails = false
     @State private var activeThreadKey = LoomAIChatThreadSelectionStore.currentThreadKey()
+    @State private var appliedSuggestedActionIDs: Set<String> = []
     @FocusState private var isInputFocused: Bool
     private let keyboardTopGap: CGFloat = 12
 
@@ -66,10 +69,12 @@ struct LoomAIChatView: View {
                 }
                 .onChange(of: messages.last?.id) { _, newID in
                     guard newID != nil else { return }
+                    appliedSuggestedActionIDs = []
                     withAnimation(.easeOut(duration: 0.2)) {
                         proxy.scrollTo(bottomScrollAnchorID, anchor: .bottom)
                     }
                     viewModel.refreshLatestActions(from: messages)
+                    viewModel.refreshSuggestedPromptChips(in: modelContext, threadMessages: messages)
                 }
                 .onChange(of: viewModel.isSending) { _, _ in
                     withAnimation(.easeOut(duration: 0.2)) {
@@ -78,6 +83,7 @@ struct LoomAIChatView: View {
                 }
                 .onAppear {
                     viewModel.refreshLatestActions(from: messages)
+                    viewModel.refreshSuggestedPromptChips(in: modelContext, threadMessages: messages)
                     _ = try? viewModel.ensureThread(in: modelContext, threadKey: activeThreadKey)
                     DispatchQueue.main.async {
                         proxy.scrollTo(bottomScrollAnchorID, anchor: .bottom)
@@ -128,15 +134,20 @@ struct LoomAIChatView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color(.systemGroupedBackground))
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            composer
-                .padding(.horizontal, 12)
-                .padding(.top, 8)
-                .padding(.bottom, max(8, keyboardHeight > 0 ? keyboardHeight + keyboardTopGap : 8))
-                .background(
-                    Rectangle()
-                        .fill(Color(.systemGroupedBackground))
-                        .ignoresSafeArea(edges: .bottom)
-                )
+            VStack(spacing: 8) {
+                if !viewModel.suggestedPromptChips.isEmpty {
+                    suggestedPromptChipBar
+                }
+                composer
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+            .padding(.bottom, max(8, keyboardHeight > 0 ? keyboardHeight + keyboardTopGap : 8))
+            .background(
+                Rectangle()
+                    .fill(Color(.systemGroupedBackground))
+                    .ignoresSafeArea(edges: .bottom)
+            )
         }
         .alert("Loom", isPresented: $showActionExecutionAlert) {
             Button("OK", role: .cancel) { }
@@ -176,7 +187,36 @@ struct LoomAIChatView: View {
             guard newKey != activeThreadKey else { return }
             activeThreadKey = newKey
             viewModel.refreshLatestActions(from: messages)
+            viewModel.refreshSuggestedPromptChips(in: modelContext, threadMessages: messages)
             _ = try? viewModel.ensureThread(in: modelContext, threadKey: newKey)
+        }
+    }
+
+    private var suggestedPromptChipBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(viewModel.suggestedPromptChips, id: \.self) { chip in
+                    Button {
+                        sendPrompt(chip)
+                    } label: {
+                        Text(chip)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(
+                                Capsule(style: .continuous)
+                                    .fill(colorScheme == .dark ? Color(.secondarySystemBackground) : Color(.systemBackground))
+                            )
+                            .overlay(
+                                Capsule(style: .continuous)
+                                    .stroke(Color.primary.opacity(colorScheme == .dark ? 0.10 : 0.08), lineWidth: 1)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 2)
         }
     }
 
@@ -210,34 +250,117 @@ struct LoomAIChatView: View {
         let isUser = message.roleRaw == LoomAIChatRole.user.rawValue
         return HStack {
             if isUser { Spacer(minLength: 30) }
-            Text(message.content)
-                .font(.subheadline)
-                .foregroundStyle(isUser ? .white : .primary)
-                .textSelection(.enabled)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .background(
-                    RoundedRectangle(cornerRadius: 14)
-                        .fill(
-                            isUser
-                            ? Color.accentColor
-                            : (colorScheme == .dark ? Color(.secondarySystemBackground) : Color(.systemGray5))
-                        )
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .stroke(
-                            isUser
-                            ? Color.clear
-                            : Color.primary.opacity(colorScheme == .dark ? 0.08 : 0.10),
-                            lineWidth: 1
-                        )
-                )
-                .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
-                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 4) {
+                messageBubbleText(message.content, isUser: isUser)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14)
+                            .fill(
+                                isUser
+                                ? Color.accentColor
+                                : (colorScheme == .dark ? Color(.secondarySystemBackground) : Color(.systemGray5))
+                            )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(
+                                isUser
+                                ? Color.clear
+                                : Color.primary.opacity(colorScheme == .dark ? 0.08 : 0.10),
+                                lineWidth: 1
+                            )
+                    )
+                    .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                #if DEBUG
+                if !isUser, let debug = LoomAIDebugCodec.decode(message.debugJSON) {
+                    Text(groundingDebugLine(debug))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 4)
+                }
+                #endif
+            }
             if !isUser { Spacer(minLength: 30) }
         }
     }
+
+    @ViewBuilder
+    private func messageBubbleText(_ content: String, isUser: Bool) -> some View {
+        if isUser {
+            Text(content)
+                .font(.subheadline)
+                .foregroundStyle(.white)
+                .textSelection(.enabled)
+        } else {
+            Text(formattedAssistantAttributedString(content))
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+                .textSelection(.enabled)
+        }
+    }
+
+    private func formattedAssistantAttributedString(_ content: String) -> AttributedString {
+        var attributed: AttributedString
+        if let parsed = try? AttributedString(
+            markdown: content,
+            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        ) {
+            attributed = parsed
+        } else {
+            attributed = AttributedString(content)
+        }
+
+        styleFulfillmentAreaNames(in: &attributed)
+        boldScoreNumbers(in: &attributed)
+        return attributed
+    }
+
+    private func styleFulfillmentAreaNames(in attributed: inout AttributedString) {
+        let areaNames = [
+            "Career & Business",
+            "Leadership & Impact",
+            "Wealth & Lifestyle",
+            "Mind & Meaning",
+            "Love & Relationships",
+            "Health & Vitality",
+            "Health & Energy"
+        ]
+
+        for name in areaNames {
+            var searchStart = attributed.startIndex
+            while searchStart < attributed.endIndex,
+                  let range = attributed[searchStart...].range(of: name) {
+                attributed[range].font = .subheadline.bold()
+                attributed[range].foregroundColor = FulfillmentCategoryTheme.color(for: name)
+                searchStart = range.upperBound
+            }
+        }
+    }
+
+    private func boldScoreNumbers(in attributed: inout AttributedString) {
+        let source = String(attributed.characters)
+        guard let regex = try? NSRegularExpression(pattern: #"(?<!\d)\d+(?:\.\d+)?(?!\d)"#) else { return }
+        let nsRange = NSRange(source.startIndex..<source.endIndex, in: source)
+        let matches = regex.matches(in: source, options: [], range: nsRange)
+
+        for match in matches.reversed() {
+            guard let stringRange = Range(match.range, in: source),
+                  let attrRange = Range(stringRange, in: attributed) else { continue }
+            attributed[attrRange].font = .subheadline.bold()
+        }
+    }
+
+    #if DEBUG
+    private func groundingDebugLine(_ debug: LoomAIDebug) -> String {
+        let grounded = debug.usedContext.map { $0 ? "true" : "false" } ?? "unknown"
+        let ctxBytes = debug.contextBytes.map(String.init) ?? "unknown"
+        let model = (debug.model?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? debug.model! : "unknown"
+        return "grounded: \(grounded) | ctxBytes: \(ctxBytes) | model: \(model)"
+    }
+    #endif
 
     @ViewBuilder
     private func suggestedActionsView(actions: [LoomAISuggestedAction]) -> some View {
@@ -247,20 +370,202 @@ struct LoomAIChatView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
 
-                FlexibleButtonWrap(items: actions) { action in
-                    Button(action.title) {
-                        viewModel.executeSuggestedAction(action, in: modelContext)
-                        if let error = viewModel.errorMessage, !error.isEmpty {
-                            actionExecutionAlertText = error
-                            showActionExecutionAlert = true
-                        }
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(actions) { action in
+                        suggestedActionButton(action)
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
                 }
             }
             .padding(.top, 2)
         }
+    }
+
+    private func suggestedActionButton(_ action: LoomAISuggestedAction) -> some View {
+        let isApplied = appliedSuggestedActionIDs.contains(action.id) || isSuggestedActionPersistentlyApplied(action)
+        return Button {
+            guard !isApplied else { return }
+            let didApply = viewModel.executeSuggestedAction(action, in: modelContext)
+            if let error = viewModel.errorMessage, !error.isEmpty {
+                actionExecutionAlertText = error
+                showActionExecutionAlert = true
+            } else if didApply {
+                appliedSuggestedActionIDs.insert(action.id)
+            }
+        } label: {
+            HStack(alignment: .top, spacing: 10) {
+                suggestedActionLeadingIcon(for: action, isApplied: isApplied)
+                    .padding(.top, 1)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    suggestedActionPrimaryText(for: action, isApplied: isApplied)
+
+                    if let subtitle = suggestedActionSubtitle(for: action), !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(suggestedActionSecondaryColor(isApplied: isApplied))
+                            .multilineTextAlignment(.leading)
+                    }
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(suggestedActionBackgroundFill(isApplied: isApplied))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(suggestedActionBorderColor(isApplied: isApplied), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(isApplied)
+    }
+
+    @ViewBuilder
+    private func suggestedActionLeadingIcon(for action: LoomAISuggestedAction, isApplied: Bool) -> some View {
+        if isApplied {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(colorScheme == .dark ? Color.green : Color(red: 0.10, green: 0.50, blue: 0.24))
+        } else {
+            Image("LoomAI")
+                .resizable()
+                .renderingMode(.template)
+                .scaledToFit()
+                .frame(width: 16, height: 16)
+                .foregroundStyle(Color.white.opacity(0.95))
+        }
+    }
+
+    @ViewBuilder
+    private func suggestedActionPrimaryText(for action: LoomAISuggestedAction, isApplied: Bool) -> some View {
+        if action.type == "createLittleWin" {
+            let activity = (action.payload["activity"] ?? action.payload["text"] ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let category = (action.payload["categoryName"] ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let topLineBase = category.isEmpty ? "Add Little Win:" : "Add Little Win to \(category):"
+            let topLine = isApplied
+                ? topLineBase.replacingOccurrences(of: "Add ", with: "Added ", options: [.anchored])
+                : topLineBase
+
+            Text(topLine)
+                .font(.subheadline.italic())
+                .foregroundStyle(suggestedActionPrimaryColor(isApplied: isApplied).opacity(isApplied ? 0.88 : 0.95))
+                .multilineTextAlignment(.leading)
+
+            if !activity.isEmpty {
+                Text(activity)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(suggestedActionPrimaryColor(isApplied: isApplied))
+                    .multilineTextAlignment(.leading)
+            }
+        } else {
+            Text(suggestedActionButtonLabel(for: action, isApplied: isApplied))
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(suggestedActionPrimaryColor(isApplied: isApplied))
+                .multilineTextAlignment(.leading)
+        }
+    }
+
+    private func suggestedActionButtonLabel(for action: LoomAISuggestedAction, isApplied: Bool) -> String {
+        let base: String
+        if action.type == "createLittleWin" {
+            let activity = (action.payload["activity"] ?? action.payload["text"] ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let category = (action.payload["categoryName"] ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !activity.isEmpty, !category.isEmpty {
+                base = "Add Little Win to \(category): \(activity)"
+            } else if !activity.isEmpty {
+                base = "Add Little Win: \(activity)"
+            } else {
+                base = action.title
+            }
+        } else {
+            base = action.title
+        }
+        return isApplied ? "Added: \(base)" : base
+    }
+
+    private func isSuggestedActionPersistentlyApplied(_ action: LoomAISuggestedAction) -> Bool {
+        guard action.type == "createLittleWin" else { return false }
+
+        let activity = (action.payload["activity"] ?? action.payload["text"] ?? action.title)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !activity.isEmpty else { return false }
+
+        let targetCategoryID: UUID? = {
+            if let raw = action.payload["categoryID"], let uuid = UUID(uuidString: raw) {
+                return uuid
+            }
+            if let categoryName = action.payload["categoryName"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !categoryName.isEmpty {
+                return fulfillments.first(where: {
+                    $0.category.caseInsensitiveCompare(categoryName) == .orderedSame
+                })?.category_id
+            }
+            return nil
+        }()
+
+        guard let targetCategoryID else { return false }
+        let normalizedActivity = normalizedSuggestedLittleWinText(activity)
+        return fulfillmentFocusRows.contains {
+            $0.category_id == targetCategoryID &&
+            normalizedSuggestedLittleWinText($0.activity) == normalizedActivity
+        }
+    }
+
+    private func normalizedSuggestedLittleWinText(_ text: String) -> String {
+        text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+    }
+
+    private func suggestedActionSubtitle(for action: LoomAISuggestedAction) -> String? {
+        switch action.type {
+        case "createLittleWin":
+            return nil
+        case "createAction":
+            return "Adds this to Capture."
+        case "createOutcome":
+            return "Creates a new Outcome."
+        default:
+            return nil
+        }
+    }
+
+    private func suggestedActionPrimaryColor(isApplied: Bool) -> Color {
+        guard isApplied else { return .white }
+        return colorScheme == .dark ? Color.white.opacity(0.92) : Color.black.opacity(0.82)
+    }
+
+    private func suggestedActionSecondaryColor(isApplied: Bool) -> Color {
+        guard isApplied else { return Color.white.opacity(0.86) }
+        return colorScheme == .dark ? Color.white.opacity(0.74) : Color.black.opacity(0.62)
+    }
+
+    private func suggestedActionBackgroundFill(isApplied: Bool) -> AnyShapeStyle {
+        if isApplied {
+            if colorScheme == .dark {
+                return AnyShapeStyle(LoomAISharedGradient.actionFill.opacity(0.34))
+            } else {
+                return AnyShapeStyle(Color(red: 0.90, green: 0.97, blue: 0.92))
+            }
+        }
+        return AnyShapeStyle(LoomAISharedGradient.actionFill.opacity(0.92))
+    }
+
+    private func suggestedActionBorderColor(isApplied: Bool) -> Color {
+        if isApplied {
+            return colorScheme == .dark ? Color.white.opacity(0.18) : Color.green.opacity(0.30)
+        }
+        return Color.white.opacity(0.24)
     }
 
     private var composer: some View {
@@ -316,6 +621,13 @@ struct LoomAIChatView: View {
 
     private func dismissKeyboard() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+
+    private func sendPrompt(_ prompt: String) {
+        let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !viewModel.isSending else { return }
+        viewModel.draft = trimmed
+        Task { await viewModel.sendCurrentMessage(in: modelContext, threadKey: activeThreadKey) }
     }
 
     private func createNewChatFromPullDown() {
@@ -396,15 +708,7 @@ private struct LoomAIAnimatedOutlineBorder: View {
 
     private var outlineGradient: AngularGradient {
         AngularGradient(
-            colors: [
-                Color(red: 0.22, green: 0.47, blue: 1.0),
-                Color(red: 0.15, green: 0.83, blue: 0.95),
-                Color(red: 0.62, green: 0.40, blue: 0.95),
-                Color(red: 0.80, green: 0.38, blue: 0.78),
-                Color(red: 0.98, green: 0.36, blue: 0.58),
-                Color(red: 0.75, green: 0.42, blue: 0.74),
-                Color(red: 0.22, green: 0.47, blue: 1.0)
-            ],
+            colors: LoomAISharedGradient.colors,
             center: .center,
             angle: .degrees(outlineAngle)
         )
@@ -420,6 +724,28 @@ private struct LoomAIAnimatedOutlineBorder: View {
                 }
             }
     }
+}
+
+private enum LoomAISharedGradient {
+    static let colors: [Color] = [
+        Color(red: 0.22, green: 0.47, blue: 1.0),
+        Color(red: 0.15, green: 0.83, blue: 0.95),
+        Color(red: 0.62, green: 0.40, blue: 0.95),
+        Color(red: 0.80, green: 0.38, blue: 0.78),
+        Color(red: 0.98, green: 0.36, blue: 0.58),
+        Color(red: 0.75, green: 0.42, blue: 0.74),
+        Color(red: 0.22, green: 0.47, blue: 1.0)
+    ]
+
+    static let actionFill = LinearGradient(
+        colors: [
+            colors[0],
+            colors[2],
+            colors[4]
+        ],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
 }
 
 private struct FlexibleButtonWrap<Item: Identifiable, Content: View>: View {
