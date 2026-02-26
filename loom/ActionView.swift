@@ -106,6 +106,7 @@ struct ActionView: View {
     @State private var pendingNewActionIDs: Set<UUID> = []
     @State private var pendingDurationDefaultActionID: UUID? = nil
     @State private var addActionChunkID: ChunkActionAddSheetID? = nil
+    @State private var rearrangeActionsSheetID: RearrangeActionsSheetID? = nil
     @State private var areAllActionBlocksCollapsed: Bool = false
     @State private var localChunkOrderIDs: [UUID] = []
     @State private var draggedChunkID: UUID? = nil
@@ -1478,260 +1479,394 @@ struct ActionView: View {
             return ordered.count == filtered.count ? ordered : filtered
         }()
 
-        return VStack(alignment: .leading, spacing: 10) {
+        let cardBody = AnyView(
+            chunkCardBody(
+            chunk: chunk,
+            allForChunk: allForChunk,
+            filtered: filtered,
+            displayedFiltered: displayedFiltered,
+            defineByAction: defineByAction,
+            executionByAction: executionByAction,
+            resourcesByAction: resourcesByAction,
+            placesByAction: placesByAction,
+            notesByAction: notesByAction,
+            attachmentsByAction: attachmentsByAction,
+            accent: accent,
+            roleName: roleName,
+            outcomesForChunk: outcomesForChunk,
+            step4: step4,
+            showNoApplicableActionsPlaceholder: showNoApplicableActionsPlaceholder,
+            isCollapsed: isCollapsed,
+            showCompletedInactiveHeader: showCompletedInactiveHeader,
+            canShowFooterControls: canShowFooterControls,
+            canReorderDisplayedActions: canReorderDisplayedActions
+            )
+        )
+
+        let padded = AnyView(
+            cardBody
+                .padding(12)
+                .background(fill, in: RoundedRectangle(cornerRadius: 14))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(colorScheme == .dark ? Color.white.opacity(0.18) : Color.black.opacity(0.12), lineWidth: 1)
+                )
+                .contentShape(Rectangle())
+        )
+
+        let tappable = AnyView(
+            padded
+                .onTapGesture {
+                    if areAllActionBlocksCollapsed {
+                        expandAllActionBlocksAndScrollToTop(anchor: "chunk-\(chunk.id.uuidString)")
+                    }
+                }
+        )
+
+        return tappable
+            .sheet(item: $rearrangeActionsSheetID) { sheet in
+                let sheetChunkActions = allActions.filter {
+                    $0.plannedChunkId == sheet.id &&
+                    isActiveStatus(executionStateByActionID[$0.id]?.status ?? .noAction)
+                }
+                RearrangeActionsSheet(
+                    items: sheetChunkActions.map { .init(id: $0.id, text: $0.text) },
+                    onSave: { reorderedIDs in
+                        commitActionOrder(in: sheet.id, visibleOrderedIDs: reorderedIDs)
+                    }
+                )
+            }
+    }
+
+    @ViewBuilder
+    private func chunkCardBody(
+        chunk: PlannedChunk,
+        allForChunk: [PlannedChunkAction],
+        filtered: [PlannedChunkAction],
+        displayedFiltered: [PlannedChunkAction],
+        defineByAction: [UUID: PlannedChunkActionDefineState],
+        executionByAction: [UUID: PlannedChunkActionExecutionState],
+        resourcesByAction: [UUID: UUID],
+        placesByAction: [UUID: Set<UUID>],
+        notesByAction: [UUID: PlannedChunkActionNote],
+        attachmentsByAction: [UUID: [PlannedChunkActionAttachment]],
+        accent: Color,
+        roleName: String,
+        outcomesForChunk: [Outcomes],
+        step4: PlannedChunkStepFourState?,
+        showNoApplicableActionsPlaceholder: Bool,
+        isCollapsed: Bool,
+        showCompletedInactiveHeader: Bool,
+        canShowFooterControls: Bool,
+        canReorderDisplayedActions: Bool
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
             if showNoApplicableActionsPlaceholder {
-                Text("Block has no applicable actions")
-                    .font(.subheadline)
-                    .italic()
-                    .foregroundStyle(Color.black.opacity(0.6))
-                    .padding(.vertical, 6)
-                    .padding(.horizontal, 10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                noApplicableActionsPlaceholder()
+            } else if isCollapsed {
+                collapsedChunkContent(
+                    resultText: step4?.resultText ?? "",
+                    roleNoteText: step4?.roleNoteText ?? "",
+                    actions: allForChunk,
+                    defineByAction: defineByAction,
+                    executionByAction: executionByAction
+                )
             } else {
-                if isCollapsed {
-                    HStack(alignment: .center, spacing: 10) {
-                        VStack(alignment: .leading, spacing: 10) {
-                            compactSummaryRow(label: "RESULT", text: step4?.resultText ?? "")
+                expandedChunkContent(
+                    chunk: chunk,
+                    allForChunk: allForChunk,
+                    filtered: filtered,
+                    displayedFiltered: displayedFiltered,
+                    defineByAction: defineByAction,
+                    executionByAction: executionByAction,
+                    resourcesByAction: resourcesByAction,
+                    placesByAction: placesByAction,
+                    notesByAction: notesByAction,
+                    attachmentsByAction: attachmentsByAction,
+                    accent: accent,
+                    roleName: roleName,
+                    outcomesForChunk: outcomesForChunk,
+                    showCompletedInactiveHeader: showCompletedInactiveHeader,
+                    canShowFooterControls: canShowFooterControls,
+                    canReorderDisplayedActions: canReorderDisplayedActions
+                )
+            }
+        }
+    }
 
-                            Divider().opacity(0.4)
+    private func noApplicableActionsPlaceholder() -> some View {
+        Text("Block has no applicable actions")
+            .font(.subheadline)
+            .italic()
+            .foregroundStyle(Color.black.opacity(0.6))
+            .padding(.vertical, 6)
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
 
-                            compactSummaryRow(label: "PURPOSE", text: step4?.roleNoteText ?? "")
+    private func collapsedChunkContent(
+        resultText: String,
+        roleNoteText: String,
+        actions: [PlannedChunkAction],
+        defineByAction: [UUID: PlannedChunkActionDefineState],
+        executionByAction: [UUID: PlannedChunkActionExecutionState]
+    ) -> some View {
+        HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 10) {
+                compactSummaryRow(label: "RESULT", text: resultText)
 
-                            Divider().opacity(0.4)
+                Divider().opacity(0.4)
 
-                            compactActionsSummary(
-                                actions: allForChunk,
-                                executionByAction: executionByAction
-                            )
+                compactSummaryRow(label: "PURPOSE", text: roleNoteText)
 
-                            Divider().opacity(0.35)
+                Divider().opacity(0.4)
 
-                            collapsedFooterRow(
-                                actions: allForChunk,
-                                executionByAction: executionByAction,
-                                defineByAction: defineByAction
-                            )
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                compactActionsSummary(
+                    actions: actions,
+                    executionByAction: executionByAction
+                )
 
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.gray)
+                Divider().opacity(0.35)
+
+                collapsedFooterRow(
+                    actions: actions,
+                    executionByAction: executionByAction,
+                    defineByAction: defineByAction
+                )
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.gray)
+        }
+    }
+
+    @ViewBuilder
+    private func expandedChunkContent(
+        chunk: PlannedChunk,
+        allForChunk: [PlannedChunkAction],
+        filtered: [PlannedChunkAction],
+        displayedFiltered: [PlannedChunkAction],
+        defineByAction: [UUID: PlannedChunkActionDefineState],
+        executionByAction: [UUID: PlannedChunkActionExecutionState],
+        resourcesByAction: [UUID: UUID],
+        placesByAction: [UUID: Set<UUID>],
+        notesByAction: [UUID: PlannedChunkActionNote],
+        attachmentsByAction: [UUID: [PlannedChunkActionAttachment]],
+        accent: Color,
+        roleName: String,
+        outcomesForChunk: [Outcomes],
+        showCompletedInactiveHeader: Bool,
+        canShowFooterControls: Bool,
+        canReorderDisplayedActions: Bool
+    ) -> some View {
+        let activeActionsForRearrange = allForChunk.filter {
+            isActiveStatus(executionByAction[$0.id]?.status ?? .noAction)
+        }
+
+        if showCompletedInactiveHeader {
+            HStack(spacing: 6) {
+                Image(systemName: "star")
+                    .font(.caption)
+                Text("Block Completed")
+                    .font(.system(size: 16))
+                    .italic()
+                Image(systemName: "star")
+                    .font(.caption)
+            }
+            .foregroundStyle(Color.black.opacity(0.58))
+            .frame(maxWidth: .infinity, alignment: .center)
+        }
+
+        if canShowFooterControls {
+            HStack(alignment: .center, spacing: 8) {
+                addActionButton(for: chunk)
+                collapseButton()
+                rearrangeActionsButton(for: chunk, actions: activeActionsForRearrange, isEnabled: !isAnyFilterApplied)
+                Spacer(minLength: 0)
+            }
+        }
+
+        resultSection(resultText: weekStepFourStatesByChunkID[chunk.id]?.resultText ?? "")
+
+        if !roleName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            smallPill(icon: "trophy", text: roleName)
+        }
+
+        if !outcomesForChunk.isEmpty {
+            ForEach(outcomesForChunk, id: \.outcome_id) { outcome in
+                outcomePill(outcome)
+            }
+        }
+
+        Divider().opacity(0.4)
+
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("ACTIONS")
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .foregroundStyle(.black)
+                Spacer()
+                Text("How can I best acheive it now?")
+                    .font(.footnote)
+                    .italic()
+                    .foregroundStyle(Color.black.opacity(0.58))
+            }
+
+            if showCompletedInactiveHeader {
+                HStack(alignment: .center, spacing: 8) {
+                    Text("All Actions are Inactive")
+                        .font(.footnote)
+                        .foregroundStyle(colorScheme == .dark ? Color.white : Color.black.opacity(0.72))
+                    Spacer(minLength: 8)
+                    Button("Show Inactive") {
+                        inactiveOnly = true
                     }
-                } else {
-                    if showCompletedInactiveHeader {
-                        HStack(spacing: 6) {
-                            Image(systemName: "star")
-                                .font(.caption)
-                            Text("Block Completed")
-                                .font(.system(size: 16))
-                                .italic()
-                            Image(systemName: "star")
-                                .font(.caption)
-                        }
-                        .foregroundStyle(Color.black.opacity(0.58))
-                        .frame(maxWidth: .infinity, alignment: .center)
-                    }
+                    .buttonStyle(.plain)
+                    .font(.footnote)
+                    .foregroundStyle(.blue)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color(.secondarySystemBackground))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Color.black.opacity(0.12), lineWidth: 1)
+                )
+            }
 
-                    resultSection(resultText: step4?.resultText ?? "")
+            LazyVStack(spacing: 8) {
+                ForEach(displayedFiltered) { action in
+                    let defineState = defineByAction[action.id]
+                    let status = executionByAction[action.id]?.status ?? .noAction
+                    let selectedResource = resourcesByAction[action.id].flatMap { resourceByID[$0] }
+                    let hasLeverage = selectedResource != nil
+                    let leverageIconName = {
+                        guard let selectedResource else { return "person" }
+                        return selectedResource.kind == .tool ? "wrench.and.screwdriver.fill" : "person.fill"
+                    }()
+                    let placeIDs = placesByAction[action.id] ?? []
+                    let hasSensitivity = hasAnySensitivity(
+                        actionId: action.id,
+                        defineState: defineState,
+                        placeIDs: placeIDs
+                    )
+                    let hasAttachments = hasAnyAttachments(
+                        note: notesByAction[action.id],
+                        attachments: attachmentsByAction[action.id] ?? []
+                    )
 
-                    if !roleName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        smallPill(icon: "trophy", text: roleName)
-                    }
-
-                    if !outcomesForChunk.isEmpty {
-                        ForEach(outcomesForChunk, id: \.outcome_id) { outcome in
-                            outcomePill(outcome)
-                        }
-                    }
-
-                    Divider().opacity(0.4)
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text("ACTIONS")
-                                .font(.caption)
-                                .fontWeight(.bold)
-                                .foregroundStyle(.black)
-                            Spacer()
-                            Text("How can I best acheive it now?")
-                                .font(.footnote)
-                                .italic()
-                                .foregroundStyle(Color.black.opacity(0.58))
-                        }
-
-                        if showCompletedInactiveHeader {
-                            HStack(alignment: .center, spacing: 8) {
-                                Text("All Actions are Inactive")
-                                    .font(.footnote)
-                                    .foregroundStyle(colorScheme == .dark ? Color.white : Color.black.opacity(0.72))
-                                Spacer(minLength: 8)
-                                Button("Show Inactive") {
-                                    inactiveOnly = true
-                                }
-                                .buttonStyle(.plain)
-                                .font(.footnote)
-                                .foregroundStyle(.blue)
-                            }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 8)
-                            .background(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .fill(Color(.secondarySystemBackground))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .stroke(Color.black.opacity(0.12), lineWidth: 1)
-                            )
-                        }
-
-                        LazyVStack(spacing: 8) {
-                            ForEach(displayedFiltered) { action in
-                                let defineState = defineByAction[action.id]
-                                let status = executionByAction[action.id]?.status ?? .noAction
-                                let selectedResource = resourcesByAction[action.id].flatMap { resourceByID[$0] }
-                                let hasLeverage = selectedResource != nil
-                                let leverageIconName = {
-                                    guard let selectedResource else { return "person" }
-                                    return selectedResource.kind == .tool ? "wrench.and.screwdriver.fill" : "person.fill"
-                                }()
-                                let placeIDs = placesByAction[action.id] ?? []
-                                let hasSensitivity = hasAnySensitivity(
-                                    actionId: action.id,
-                                    defineState: defineState,
-                                    placeIDs: placeIDs
-                                )
-                                let hasAttachments = hasAnyAttachments(
-                                    note: notesByAction[action.id],
-                                    attachments: attachmentsByAction[action.id] ?? []
-                                )
-
-                                if canReorderDisplayedActions {
-                                    actionRow(
-                                        action: action,
-                                        accent: accent,
-                                        defineState: defineState,
-                                        status: status,
-                                        hasLeverage: hasLeverage,
-                                        leverageIconName: leverageIconName,
-                                        hasSensitivity: hasSensitivity,
-                                        hasAttachments: hasAttachments,
-                                        highlightStatusBox: highlightedStatusActionIDs.contains(action.id),
-                                        showsReorderHandle: true
-                                    )
-                                    .id(action.id)
-                                    .onDrag {
-                                        let startingOrder = displayedFiltered.map(\.id)
-                                        draggedActionChunkID = chunk.id
-                                        localActionOrderIDs = startingOrder
-                                        draggedActionID = action.id
-                                        return NSItemProvider(object: action.id.uuidString as NSString)
-                                    }
-                                    .onDrop(
-                                        of: [.text],
-                                        delegate: AnimatedActionRowDropDelegate(
-                                            targetID: action.id,
-                                            draggedID: $draggedActionID,
-                                            draggedChunkID: $draggedActionChunkID,
-                                            localActionOrderIDs: $localActionOrderIDs,
-                                            enabled: true,
-                                            onCommit: { reorderedIDs in
-                                                commitActionOrder(in: chunk.id, visibleOrderedIDs: reorderedIDs)
-                                            }
-                                        )
-                                    )
-                                } else {
-                                    actionRow(
-                                        action: action,
-                                        accent: accent,
-                                        defineState: defineState,
-                                        status: status,
-                                        hasLeverage: hasLeverage,
-                                        leverageIconName: leverageIconName,
-                                        hasSensitivity: hasSensitivity,
-                                        hasAttachments: hasAttachments,
-                                        highlightStatusBox: highlightedStatusActionIDs.contains(action.id),
-                                        showsReorderHandle: false
-                                    )
-                                    .id(action.id)
-                                }
-                            }
+                    if canReorderDisplayedActions {
+                        actionRow(
+                            action: action,
+                            accent: accent,
+                            defineState: defineState,
+                            status: status,
+                            hasLeverage: hasLeverage,
+                            leverageIconName: leverageIconName,
+                            hasSensitivity: hasSensitivity,
+                            hasAttachments: hasAttachments,
+                            highlightStatusBox: highlightedStatusActionIDs.contains(action.id),
+                            showsReorderHandle: true
+                        )
+                        .id(action.id)
+                        .onDrag {
+                            let startingOrder = displayedFiltered.map(\.id)
+                            draggedActionChunkID = chunk.id
+                            localActionOrderIDs = startingOrder
+                            draggedActionID = action.id
+                            return NSItemProvider(object: action.id.uuidString as NSString)
                         }
                         .onDrop(
                             of: [.text],
-                            delegate: ResetActionRowDragStateDropDelegate(
-                                ownerChunkID: chunk.id,
+                            delegate: AnimatedActionRowDropDelegate(
+                                targetID: action.id,
                                 draggedID: $draggedActionID,
                                 draggedChunkID: $draggedActionChunkID,
                                 localActionOrderIDs: $localActionOrderIDs,
+                                enabled: true,
                                 onCommit: { reorderedIDs in
                                     commitActionOrder(in: chunk.id, visibleOrderedIDs: reorderedIDs)
                                 }
                             )
                         )
-
-                        let isFilterApplied = isAnyFilterApplied
-                        let useFilterTotalsLabel = isFilterApplied && !isOnlyInactiveOnlyFilterApplied
-                        let totalSource = isFilterApplied ? filtered : allForChunk
-                        let activeActions = totalSource.filter { isActiveStatus(executionByAction[$0.id]?.status ?? .noAction) }
-                        let totalMinutes = activeActions.reduce(0) { partial, action in
-                            partial + (defineByAction[action.id]?.timeEstimateMinutes ?? 0)
-                        }
-                        let totalMustMinutes = activeActions.reduce(0) { partial, action in
-                            let st = defineByAction[action.id]
-                            guard isMust(for: action.id, defineByAction: defineByAction) else { return partial }
-                            return partial + (st?.timeEstimateMinutes ?? 0)
-                        }
-
-                        Divider().opacity(0.35)
-                        HStack(alignment: .bottom) {
-                            if canShowFooterControls {
-                                addActionButton(for: chunk)
-                                collapseButton()
-                            }
-
-                            Spacer(minLength: 8)
-
-                            if !activeActions.isEmpty {
-                                VStack(alignment: .trailing, spacing: 4) {
-                                    (
-                                        Text(useFilterTotalsLabel ? "Filter Total Time: " : "Total Time: ")
-                                            .font(.footnote)
-                                        + Text(formatMinutes(totalMinutes))
-                                            .font(.footnote)
-                                            .fontWeight(.bold)
-                                    )
-                                    .italic(useFilterTotalsLabel)
-                                    .foregroundStyle(Color.black.opacity(0.58))
-
-                                    (
-                                        Text(useFilterTotalsLabel ? "Filter Total Must Time: " : "Total Must Time: ")
-                                            .font(.footnote)
-                                        + Text(formatMinutes(totalMustMinutes))
-                                            .font(.footnote)
-                                            .fontWeight(.bold)
-                                    )
-                                    .italic(useFilterTotalsLabel)
-                                    .foregroundStyle(Color.black.opacity(0.58))
-                                }
-                                .frame(maxWidth: .infinity, alignment: .trailing)
-                                .multilineTextAlignment(.trailing)
-                            }
-                        }
+                    } else {
+                        actionRow(
+                            action: action,
+                            accent: accent,
+                            defineState: defineState,
+                            status: status,
+                            hasLeverage: hasLeverage,
+                            leverageIconName: leverageIconName,
+                            hasSensitivity: hasSensitivity,
+                            hasAttachments: hasAttachments,
+                            highlightStatusBox: highlightedStatusActionIDs.contains(action.id),
+                            showsReorderHandle: false
+                        )
+                        .id(action.id)
                     }
                 }
             }
-        }
-        .padding(12)
-        .background(fill, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(colorScheme == .dark ? Color.white.opacity(0.18) : Color.black.opacity(0.12), lineWidth: 1)
-        )
-        .contentShape(Rectangle())
-        .onTapGesture {
-            if areAllActionBlocksCollapsed {
-                expandAllActionBlocksAndScrollToTop(anchor: "chunk-\(chunk.id.uuidString)")
+            .onDrop(
+                of: [.text],
+                delegate: ResetActionRowDragStateDropDelegate(
+                    ownerChunkID: chunk.id,
+                    draggedID: $draggedActionID,
+                    draggedChunkID: $draggedActionChunkID,
+                    localActionOrderIDs: $localActionOrderIDs,
+                    onCommit: { reorderedIDs in
+                        commitActionOrder(in: chunk.id, visibleOrderedIDs: reorderedIDs)
+                    }
+                )
+            )
+
+            let isFilterApplied = isAnyFilterApplied
+            let useFilterTotalsLabel = isFilterApplied && !isOnlyInactiveOnlyFilterApplied
+            let totalSource = isFilterApplied ? filtered : allForChunk
+            let activeActions = totalSource.filter { isActiveStatus(executionByAction[$0.id]?.status ?? .noAction) }
+            let totalMinutes = activeActions.reduce(0) { partial, action in
+                partial + (defineByAction[action.id]?.timeEstimateMinutes ?? 0)
+            }
+            let totalMustMinutes = activeActions.reduce(0) { partial, action in
+                let st = defineByAction[action.id]
+                guard isMust(for: action.id, defineByAction: defineByAction) else { return partial }
+                return partial + (st?.timeEstimateMinutes ?? 0)
+            }
+
+            Divider().opacity(0.35)
+            HStack(alignment: .bottom) {
+                Spacer(minLength: 8)
+
+                if !activeActions.isEmpty {
+                    VStack(alignment: .trailing, spacing: 4) {
+                        (
+                            Text(useFilterTotalsLabel ? "Filter Total Time: " : "Total Time: ")
+                                .font(.footnote)
+                            + Text(formatMinutes(totalMinutes))
+                                .font(.footnote)
+                                .fontWeight(.bold)
+                        )
+                        .italic(useFilterTotalsLabel)
+                        .foregroundStyle(Color.black.opacity(0.58))
+
+                        (
+                            Text(useFilterTotalsLabel ? "Filter Total Must Time: " : "Total Must Time: ")
+                                .font(.footnote)
+                            + Text(formatMinutes(totalMustMinutes))
+                                .font(.footnote)
+                                .fontWeight(.bold)
+                        )
+                        .italic(useFilterTotalsLabel)
+                        .foregroundStyle(Color.black.opacity(0.58))
+                    }
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .multilineTextAlignment(.trailing)
+                }
             }
         }
     }
@@ -1905,6 +2040,34 @@ struct ActionView: View {
             )
         }
         .buttonStyle(.plain)
+    }
+
+    private func rearrangeActionsButton(for chunk: PlannedChunk, actions: [PlannedChunkAction], isEnabled: Bool) -> some View {
+        let canRearrange = isEnabled && actions.count > 1
+        return Button {
+            guard canRearrange else { return }
+            rearrangeActionsSheetID = RearrangeActionsSheetID(id: chunk.id)
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "line.3.horizontal")
+                    .font(.caption2.weight(.semibold))
+                Text("Rearrange Actions")
+                    .font(.caption2.weight(.semibold))
+            }
+            .foregroundStyle(canRearrange ? (colorScheme == .dark ? Color.white.opacity(0.68) : .black) : .secondary)
+            .padding(.vertical, 5)
+            .padding(.horizontal, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(.secondarySystemBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.black.opacity(0.15), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(!canRearrange)
     }
 
     private func tapToExpandLabel() -> some View {
@@ -3413,6 +3576,10 @@ private struct ChunkActionAddSheetID: Identifiable, Hashable {
     let id: UUID
 }
 
+private struct RearrangeActionsSheetID: Identifiable, Hashable {
+    let id: UUID
+}
+
 private struct ActionScrollOffsetPreferenceKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
@@ -4722,6 +4889,51 @@ private struct ActionSwipeRow: View {
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled)
+    }
+}
+
+private struct RearrangeActionsSheet: View {
+    struct Item: Identifiable, Hashable {
+        let id: UUID
+        var text: String
+    }
+
+    let items: [Item]
+    let onSave: ([UUID]) -> Void
+
+    @State private var localItems: [Item]
+    @State private var originalIDs: [UUID]
+    @State private var editMode: EditMode = .active
+
+    init(items: [Item], onSave: @escaping ([UUID]) -> Void) {
+        self.items = items
+        self.onSave = onSave
+        _localItems = State(initialValue: items)
+        _originalIDs = State(initialValue: items.map(\.id))
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(localItems) { item in
+                    Text(item.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Untitled Action" : item.text)
+                        .foregroundStyle(.primary)
+                }
+                .onMove(perform: move)
+            }
+            .navigationTitle("Rearrange Actions")
+            .navigationBarTitleDisplayMode(.inline)
+            .environment(\.editMode, $editMode)
+            .onDisappear {
+                let updated = localItems.map(\.id)
+                guard updated != originalIDs else { return }
+                onSave(updated)
+            }
+        }
+    }
+
+    private func move(from source: IndexSet, to destination: Int) {
+        localItems.move(fromOffsets: source, toOffset: destination)
     }
 }
 
