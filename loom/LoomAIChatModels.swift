@@ -3,6 +3,7 @@ import SwiftData
 
 extension Notification.Name {
     static let loomAIChatThreadSelectionDidChange = Notification.Name("loomAIChatThreadSelectionDidChange")
+    static let loomAIOpenAddFulfillmentAreaPrefill = Notification.Name("loomAIOpenAddFulfillmentAreaPrefill")
 }
 
 @Model
@@ -131,5 +132,37 @@ enum LoomAIChatThreadSelectionStore {
         let finalKey = normalized.isEmpty ? "default" : normalized
         UserDefaults.standard.set(finalKey, forKey: currentThreadKeyDefaultsKey)
         NotificationCenter.default.post(name: .loomAIChatThreadSelectionDidChange, object: nil)
+    }
+}
+
+struct LoomAIFulfillmentAreaPrefill: Codable {
+    var categoryName: String
+    var mission: String?
+    var identities: [String]
+    var littleWins: [String]
+    var connectedPassions: [String]
+}
+
+enum LoomAIFulfillmentAreaPrefillStore {
+    private static let key = "loomAI.fulfillmentAreaPrefill.v1"
+
+    static func save(_ prefill: LoomAIFulfillmentAreaPrefill) {
+        guard let data = try? JSONEncoder().encode(prefill) else { return }
+        UserDefaults.standard.set(data, forKey: key)
+    }
+
+    static func load() -> LoomAIFulfillmentAreaPrefill? {
+        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
+        return try? JSONDecoder().decode(LoomAIFulfillmentAreaPrefill.self, from: data)
+    }
+
+    static func take() -> LoomAIFulfillmentAreaPrefill? {
+        let value = load()
+        clear()
+        return value
+    }
+
+    static func clear() {
+        UserDefaults.standard.removeObject(forKey: key)
     }
 }

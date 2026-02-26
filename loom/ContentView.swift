@@ -73,6 +73,7 @@ struct ContentView: View {
     @State private var playSheetDestination: PlayDestination? = nil
     @State private var navigateToFulfillmentFromOnboarding = false
     @State private var isPresentingVacationModeFromBanner = false
+    @State private var isPresentingLoomAIFulfillmentAreaPrefill = false
     @State private var dismissVacationModeBanner = false
     @State private var enableHeaderPageAnimations = false
     @State private var showLoomAIChatMenu = false
@@ -478,6 +479,11 @@ struct ContentView: View {
                     VacationModeView()
                 }
             }
+            .sheet(isPresented: $isPresentingLoomAIFulfillmentAreaPrefill) {
+                NavigationStack {
+                    FulfillmentStartView(entryMode: .addSingleArea)
+                }
+            }
     }
 
     private var contentViewLifecycleLayer: some View {
@@ -501,6 +507,9 @@ struct ContentView: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                     navigateToFulfillmentFromOnboarding = true
                 }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .loomAIOpenAddFulfillmentAreaPrefill)) { _ in
+                isPresentingLoomAIFulfillmentAreaPrefill = true
             }
             .onReceive(NotificationCenter.default.publisher(for: .vacationModeDidChange)) { _ in
                 dismissVacationModeBanner = false

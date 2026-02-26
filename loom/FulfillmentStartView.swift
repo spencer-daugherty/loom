@@ -526,6 +526,7 @@ struct FulfillmentStartView: View {
                 usesDraftPersistence = false
                 step = .createCategories
                 loadFromPersistentData()
+                applyLoomAIPrefillIfAvailable()
             } else if !restoreDraftIfAvailable() {
                 loadFromPersistentData()
             }
@@ -2075,6 +2076,112 @@ struct FulfillmentStartView: View {
         roleIndex = min(roleIndex, max(roleCategoryIDs.count - 1, 0))
         deepIndex = min(deepIndex, max(deepCategoryIDs.count - 1, 0))
         passionIndex = min(passionIndex, max(roleCategoryIDs.count - 1, 0))
+    }
+
+    private func applyLoomAIPrefillIfAvailable() {
+        guard isAddSingleAreaMode, let prefill = LoomAIFulfillmentAreaPrefillStore.take() else { return }
+
+        let categoryName = prefill.categoryName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !categoryName.isEmpty else { return }
+
+        if !customCategoryNames.contains(where: { $0.caseInsensitiveCompare(categoryName) == .orderedSame }) &&
+            !fulfillmentStartSelectableDefaultCategories.contains(where: { $0.caseInsensitiveCompare(categoryName) == .orderedSame }) {
+            customCategoryNames.append(categoryName)
+        }
+        toggleCategorySelection(categoryName, forceSelected: true)
+        assignDefaultColorIfNeeded(for: categoryName)
+
+        refreshFulfillmentSnapshot()
+        applyCategorySelectionToLiveDataIfNeeded()
+        refreshFulfillmentSnapshot()
+
+        guard let record = (fulfillmentSnapshot.isEmpty ? fulfillments : fulfillmentSnapshot).first(where: {
+            $0.category.caseInsensitiveCompare(categoryName) == .orderedSame
+        }) else {
+            return
+        }
+
+        if let mission = prefill.mission?.trimmingCharacters(in: .whitespacesAndNewlines), !mission.isEmpty {
+            purposeDrafts[record.category_id] = mission
+            if let idx = fulfillmentSnapshot.firstIndex(where: { $0.category_id == record.category_id }) {
+                fulfillmentSnapshot[idx].category_purpose = mission
+            }
+        }
+
+        if !prefill.identities.isEmpty {
+            var existingRoleTexts = Set(draftRoles
+                .filter { $0.categoryID == record.category_id }
+                .map { $0.role.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() })
+            var nextRank = (draftRoles.filter { $0.categoryID == record.category_id }.map(\.rank).max() ?? -1) + 1
+            for identity in prefill.identities.map({ $0.trimmingCharacters(in: .whitespacesAndNewlines) }).filter({ !$0.isEmpty }) {
+                let key = identity.lowercased()
+                guard !existingRoleTexts.contains(key) else { continue }
+                draftRoles.append(.init(id: UUID(), categoryID: record.category_id, updatedAt: .now, role: identity, rank: nextRank))
+                existingRoleTexts.insert(key)
+                nextRank += 1
+            }
+        }
+
+        if !prefill.littleWins.isEmpty {
+            var existingFocusTexts = Set(draftFoci
+                .filter { $0.categoryID == record.category_id }
+                .map { $0.activity.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() })
+            var nextRank = (draftFoci.filter { $0.categoryID == record.category_id }.map(\.rank).max() ?? -1) + 1
+            for littleWin in prefill.littleWins.map({ $0.trimmingCharacters(in: .whitespacesAndNewlines) }).filter({ !$0.isEmpty }).prefix(3) {
+                let key = littleWin.lowercased()
+                guard !existingFocusTexts.contains(key) else { continue }
+                draftFoci.append(.init(id: UUID(), categoryID: record.category_id, updatedAt: .now, activity: littleWin, rank: nextRank))
+                existingFocusTexts.insert(key)
+                nextRank += 1
+            }
+        }
+
+        if !prefill.connectedPassions.isEmpty {
+            var passionsByKey = Dictionary(uniqueKeysWithValues: passions.map {
+                ("\(displayEmotionLabel(for: $0.emotion).lowercased())|\($0.passion.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())", $0)
+            })
+            let existingJoinPassionIDs = Set(draftPassionJoins.filter { $0.categoryID == record.category_id }.map(\.passionID))
+            for raw in prefill.connectedPassions {
+                let parsed = parsePrefillPassion(raw)
+                guard let parsed else { continue }
+                let key = "\(parsed.emotion.lowercased())|\(parsed.title.lowercased())"
+                let passion: Passion
+                if let existing = passionsByKey[key] {
+                    passion = existing
+                } else {
+                    let created = Passion(date: .now, emotion: parsed.emotion.lowercased(), passion: parsed.title)
+                    modelContext.insert(created)
+                    passionsByKey[key] = created
+                    passion = created
+                }
+                if !existingJoinPassionIDs.contains(passion.passion_id) &&
+                    !draftPassionJoins.contains(where: { $0.categoryID == record.category_id && $0.passionID == passion.passion_id }) {
+                    draftPassionJoins.append(.init(id: UUID(), passionID: passion.passion_id, categoryID: record.category_id))
+                }
+            }
+        }
+
+        if let idx = orderedFulfillments.firstIndex(where: { $0.category_id == record.category_id }) {
+            visionIndex = idx
+            purposeIndex = idx
+        }
+        if let idx = roleCategoryIDs.firstIndex(of: record.category_id) {
+            roleIndex = idx
+            passionIndex = idx
+        }
+        step = .visionSweep
+    }
+
+    private func parsePrefillPassion(_ raw: String) -> (emotion: String, title: String)? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let emotions = ["love", "thrill", "vows", "hate"]
+        if let colon = trimmed.firstIndex(of: ":") {
+            let left = trimmed[..<colon].trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let right = trimmed[trimmed.index(after: colon)...].trimmingCharacters(in: .whitespacesAndNewlines)
+            if emotions.contains(left), !right.isEmpty { return (left, right) }
+        }
+        return ("love", trimmed)
     }
 
     private func addCategory() {

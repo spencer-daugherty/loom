@@ -102,8 +102,12 @@ export default {
       "If confidence is not high, return no prompts.",
       "Prompts must be concise, high-value, and actionable.",
       "Avoid repeating what the assistant just said, and avoid generic prompts.",
+      "Prefer prompts that help the user improve or edit data inside Loom (not generic external lifestyle advice).",
+      "Prefer prompts that could plausibly lead to a Loom CTA action (add/replace/revise/clarify/connect/plan).",
+      "Use APP_CONTEXT_JSON dataInventory and appGuide to understand the app's editable areas before proposing prompts.",
       "Only suggest prompts tied to concepts clearly represented in APP_CONTEXT_JSON (e.g., Fulfillment Areas, Outcomes/Objectives, Action Blocks, Little Wins, Capture, Purpose, Vacation Mode, Recently Deleted).",
       "Do NOT suggest prompts about unsupported/ambiguous concepts unless explicitly represented (e.g., 'skills' if no skills dataset is present).",
+      "Do NOT suggest external domain-specific advice prompts (e.g., meal prep plans, supplement stacks, recipes) unless the app context explicitly tracks that concept as structured data.",
       "Target 1-3 prompts, each under 80 characters (hard max 120).",
       "Return JSON ONLY in this exact shape:",
       '{"showSuggestions":true,"prompts":["string"],"confidence":"high"}',
@@ -129,6 +133,8 @@ export default {
       "- Target 2-3 high-quality Little Wins per Fulfillment Area (not 0, and not more than 3).",
       "- You may return multiple Little Win suggestions for the same category ONLY if confidence is high that each is distinct and high value.",
       "- Review existing Little Wins in the target category for quality and specificity. If one is weak/generic/placeholder or clearly improvable, suggest revising/replacing it.",
+      "- You may also suggest high-confidence improvements to Fulfillment Missions, Fulfillment Identities, Purpose Vision, and Passions when the context strongly supports a better version.",
+      "- Only suggest adding a new Fulfillment Area when many actions/outcomes clearly do not fit current active areas and confidence is high.",
       "- If you return one or more actions, do NOT end the message with a question (the buttons are the CTA). End with a clear recommendation statement instead.",
       "- Before suggesting createLittleWin, check APP_CONTEXT_JSON fulfillmentCategories[].littleWins for that category and avoid repeating an existing Little Win.",
       "- If a candidate Little Win already exists, propose a different practical repeatable Little Win (if confidence remains high) or return no action.",
@@ -146,6 +152,16 @@ export default {
       "4) replaceLittleWin",
       '   payload: { "categoryID": "uuid-string (preferred if available)", "categoryName": "string fallback", "replaceActivity": "existing little win to replace", "activity": "new practical repeatable little win text (daily/most days)" }',
       "   (Use replaceLittleWin for both true replacements and revisions of an existing Little Win.)",
+      "5) replaceFulfillmentMission",
+      '   payload: { "categoryID": "uuid-string?", "categoryName": "string", "mission": "string" }',
+      "6) addFulfillmentIdentity / replaceFulfillmentIdentity",
+      '   payload: { "categoryID": "uuid-string?", "categoryName": "string", "identity": "string", "replaceIdentity": "string?" }',
+      "7) replacePurposeVision",
+      '   payload: { "vision": "string" }',
+      "8) addPassion",
+      '   payload: { "emotion": "love|thrill|vows|hate", "passion": "string", "categoryID": "uuid-string?", "categoryName": "string?" }',
+      "9) launchAddFulfillmentAreaPrefill",
+      '   payload: { "categoryName": "string", "mission": "string?", "identities": "A|B", "littleWins": "A|B", "connectedPassions": "Love: ...|Thrill: ..." }',
       "",
       "For createLittleWin:",
       "- Recommend BOTH the category and the Little Win activity.",
@@ -515,9 +531,64 @@ function isSupportedFollowUpPrompt(prompt) {
     "skills",
     "certification",
     "resume",
-    "interview prep"
+    "interview prep",
+    "meal prep",
+    "recipes",
+    "supplement",
+    "macros",
+    "calories",
+    "protein target"
   ];
   if (unsupportedConcepts.some((term) => p.includes(term))) return false;
+
+  const trackedConceptHints = [
+    "purpose",
+    "vision",
+    "passion",
+    "fulfillment",
+    "mission",
+    "identity",
+    "little win",
+    "outcome",
+    "objective",
+    "action block",
+    "action",
+    "capture",
+    "vacation",
+    "recently deleted",
+    "weekly plan",
+    "carryover"
+  ];
+
+  const actionOrDecisionHints = [
+    "improve",
+    "replace",
+    "revise",
+    "add",
+    "connect",
+    "focus",
+    "review",
+    "fix",
+    "unstuck",
+    "next",
+    "prioritize",
+    "plan",
+    "clarify",
+    "align"
+  ];
+
+  const mentionsTrackedConcept = trackedConceptHints.some((term) => p.includes(term));
+  const hasActionOrDecisionIntent = actionOrDecisionHints.some((term) => p.includes(term));
+
+  // Allow common outcome phrasing even if it doesn't explicitly say "outcome".
+  const startsWithHighValueQuestion =
+    p.startsWith("what should i do next for ") ||
+    p.startsWith("what is the highest-leverage move for ") ||
+    p.startsWith("how can i improve ") ||
+    p.startsWith("why is ");
+
+  if (!(mentionsTrackedConcept || startsWithHighValueQuestion)) return false;
+  if (!(hasActionOrDecisionIntent || startsWithHighValueQuestion)) return false;
 
   return true;
 }
@@ -661,6 +732,29 @@ function normalizeActions(actions, context) {
             replaceActivity,
             activity,
           },
+        };
+      }
+
+      if (
+        normalizedType === "replaceFulfillmentMission" ||
+        normalizedType === "addFulfillmentIdentity" ||
+        normalizedType === "replaceFulfillmentIdentity" ||
+        normalizedType === "replacePurposeVision" ||
+        normalizedType === "addPassion" ||
+        normalizedType === "launchAddFulfillmentAreaPrefill"
+      ) {
+        const cleanedPayload = {};
+        for (const [k, v] of Object.entries(payload || {})) {
+          if (typeof v === "string") {
+            const trimmed = v.trim();
+            if (trimmed) cleanedPayload[k] = truncateAtWordBoundary(trimmed, 400);
+          }
+        }
+        return {
+          id,
+          title: title || normalizedType,
+          type: normalizedType,
+          payload: cleanedPayload,
         };
       }
 

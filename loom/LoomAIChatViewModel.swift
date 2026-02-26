@@ -210,6 +210,8 @@ final class LoomAIViewModel: ObservableObject {
             Prefer concise, actionable answers.
             If you are confident (the context clearly supports a practical next step), return 1-3 CTA actions the app can render as buttons.
             Prefer CTAs that directly modify Loom data when appropriate (for example a Little Win in a fulfillment area that is slipping).
+            You may also suggest high-confidence improvements to Fulfillment Missions, Fulfillment Identities, Purpose Vision, and Passions.
+            Only suggest adding a new Fulfillment Area when many actions/outcomes clearly do not fit existing active areas.
             Target 2-3 high-quality Little Wins per Fulfillment Area.
             You may suggest multiple Little Wins for the same category only when confidence is high that each is distinct and high-value.
             Review any existing Little Wins in the relevant category and use logic: if one is weak, generic, placeholder, or clearly improvable, suggest revising/replacing it.
@@ -222,6 +224,13 @@ final class LoomAIViewModel: ObservableObject {
             - "categoryID" / "categoryName"
             - "replaceActivity" (existing Little Win text to replace)
             - "activity" (new Little Win text)
+            Other supported actions:
+            - "replaceFulfillmentMission" {categoryID/categoryName, mission}
+            - "addFulfillmentIdentity" {categoryID/categoryName, identity}
+            - "replaceFulfillmentIdentity" {categoryID/categoryName, replaceIdentity, identity}
+            - "replacePurposeVision" {vision}
+            - "addPassion" {emotion: love|thrill|vows|hate, passion, optional categoryID/categoryName}
+            - "launchAddFulfillmentAreaPrefill" {categoryName, mission, identities, littleWins, connectedPassions}
             Keep Little Win text card-friendly: target ~50 characters and never exceed 150 characters.
             Example action:
             {"id":"lw-1","title":"Add Little Win: 10-minute walk","type":"createLittleWin","payload":{"categoryName":"Health & Energy","activity":"10-minute walk after lunch"}}
@@ -324,6 +333,141 @@ final class LoomAIViewModel: ObservableObject {
             let item = RollingCaptureItem(text: title, isGhost: false)
             context.insert(item)
             try? context.save()
+            errorMessage = nil
+            return true
+        case "replaceFulfillmentMission":
+            let mission = (action.payload["mission"] ?? action.payload["text"] ?? action.payload["purpose"] ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !mission.isEmpty else {
+                errorMessage = "Mission suggestion is missing the new mission text."
+                return false
+            }
+            guard let category = resolveFulfillmentCategory(for: action, in: context) else {
+                errorMessage = "Couldn’t find the fulfillment area for this mission update."
+                return false
+            }
+            category.category_purpose = mission
+            category.updatedAt = .now
+            try? context.save()
+            errorMessage = nil
+            return true
+        case "addFulfillmentIdentity":
+            let identity = (action.payload["identity"] ?? action.payload["role"] ?? action.payload["text"] ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !identity.isEmpty else {
+                errorMessage = "Identity suggestion is missing the identity text."
+                return false
+            }
+            guard let category = resolveFulfillmentCategory(for: action, in: context) else {
+                errorMessage = "Couldn’t find the fulfillment area for this identity suggestion."
+                return false
+            }
+            let categoryRoles = ((try? context.fetch(FetchDescriptor<FulfillmentRoles>())) ?? [])
+                .filter { $0.category_id == category.category_id }
+            if categoryRoles.contains(where: { $0.role.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare(identity) == .orderedSame }) {
+                errorMessage = "That identity already exists in \(category.category)."
+                return false
+            }
+            let nextRank = ((categoryRoles.map(\.rank).max()) ?? -1) + 1
+            context.insert(FulfillmentRoles(category_id: category.category_id, updatedAt: .now, role: identity, rank: nextRank))
+            category.updatedAt = .now
+            try? context.save()
+            errorMessage = nil
+            return true
+        case "replaceFulfillmentIdentity":
+            let newIdentity = (action.payload["identity"] ?? action.payload["role"] ?? action.payload["text"] ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let replaceIdentity = (action.payload["replaceIdentity"] ?? action.payload["oldIdentity"] ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !newIdentity.isEmpty, !replaceIdentity.isEmpty else {
+                errorMessage = "Identity replacement requires both the current identity and the new identity."
+                return false
+            }
+            guard let category = resolveFulfillmentCategory(for: action, in: context) else {
+                errorMessage = "Couldn’t find the fulfillment area for this identity replacement."
+                return false
+            }
+            let categoryRoles = ((try? context.fetch(FetchDescriptor<FulfillmentRoles>())) ?? [])
+                .filter { $0.category_id == category.category_id }
+            if categoryRoles.contains(where: { $0.role.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare(newIdentity) == .orderedSame }) {
+                errorMessage = "That identity already exists in \(category.category)."
+                return false
+            }
+            guard let roleRow = categoryRoles.first(where: { $0.role.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare(replaceIdentity) == .orderedSame }) else {
+                errorMessage = "Couldn’t find the identity to replace in \(category.category)."
+                return false
+            }
+            roleRow.role = newIdentity
+            roleRow.updatedAt = .now
+            category.updatedAt = .now
+            try? context.save()
+            errorMessage = nil
+            return true
+        case "replacePurposeVision":
+            let vision = (action.payload["vision"] ?? action.payload["text"] ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !vision.isEmpty else {
+                errorMessage = "Purpose Vision suggestion is missing the new vision text."
+                return false
+            }
+            let drivingRows = (try? context.fetch(FetchDescriptor<DrivingForce>())) ?? []
+            let row = drivingRows.first ?? {
+                let created = DrivingForce(ultimateVision: vision, ultimatePurpose: "", updatedAt: .now)
+                context.insert(created)
+                return created
+            }()
+            row.ultimateVision = vision
+            row.updatedAt = .now
+            try? context.save()
+            errorMessage = nil
+            return true
+        case "addPassion":
+            let passionText = (action.payload["passion"] ?? action.payload["title"] ?? action.payload["text"] ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let rawEmotion = (action.payload["emotion"] ?? "love")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            let emotion = ["love", "thrill", "vows", "hate"].contains(rawEmotion) ? rawEmotion : "love"
+            guard !passionText.isEmpty else {
+                errorMessage = "Passion suggestion is missing the passion text."
+                return false
+            }
+            let allPassions = (try? context.fetch(FetchDescriptor<Passion>())) ?? []
+            if allPassions.contains(where: {
+                $0.emotion.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare(emotion) == .orderedSame &&
+                $0.passion.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare(passionText) == .orderedSame
+            }) {
+                errorMessage = "That passion already exists."
+                return false
+            }
+            let newPassion = Passion(date: .now, emotion: emotion, passion: passionText)
+            context.insert(newPassion)
+            if let category = resolveFulfillmentCategory(for: action, in: context) {
+                let joins = (try? context.fetch(FetchDescriptor<PassionFulfillmentJoin>())) ?? []
+                let alreadyLinked = joins.contains { $0.category_id == category.category_id && $0.passion_id == newPassion.passion_id }
+                if !alreadyLinked {
+                    context.insert(PassionFulfillmentJoin(passion_id: newPassion.passion_id, category_id: category.category_id))
+                }
+            }
+            try? context.save()
+            errorMessage = nil
+            return true
+        case "launchAddFulfillmentAreaPrefill":
+            let categoryName = (action.payload["categoryName"] ?? action.payload["category"] ?? action.payload["title"] ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !categoryName.isEmpty else {
+                errorMessage = "Add Fulfillment Area suggestion is missing a category name."
+                return false
+            }
+            let prefill = LoomAIFulfillmentAreaPrefill(
+                categoryName: categoryName,
+                mission: normalizedOptionalPrefillText(action.payload["mission"] ?? action.payload["purpose"]),
+                identities: parseDelimitedPrefillList(action.payload["identities"] ?? action.payload["identityList"] ?? action.payload["roles"]),
+                littleWins: parseDelimitedPrefillList(action.payload["littleWins"] ?? action.payload["focuses"] ?? action.payload["littleWinList"]),
+                connectedPassions: parseDelimitedPrefillList(action.payload["connectedPassions"] ?? action.payload["passions"])
+            )
+            LoomAIFulfillmentAreaPrefillStore.save(prefill)
+            NotificationCenter.default.post(name: .loomAIOpenAddFulfillmentAreaPrefill, object: nil)
             errorMessage = nil
             return true
         case "createLittleWin":
@@ -537,6 +681,11 @@ final class LoomAIViewModel: ObservableObject {
             - If no strong follow-ups exist, set showSuggestions=false and prompts=[]
             - Prompts should be concise, high-value, and actionable
             - Prefer prompts that advance decision quality or execution
+            - Prefer prompts that help the user improve/edit something inside Loom (not generic lifestyle advice)
+            - Favor prompts that could lead to a clear Loom CTA (add/replace/revise) when confidence is high
+            - Use APP_CONTEXT dataInventory/appGuide to navigate what Loom tracks before suggesting prompts
+            - Only suggest prompts tied to tracked Loom areas such as Purpose, Vision, Passions, Fulfillment Areas, Missions, Identities, Little Wins, Outcomes, Capture, Action Blocks, Vacation Mode, or Recently Deleted
+            - If a concept is not explicitly tracked in APP_CONTEXT, do not suggest it as a follow-up chip
             - Avoid repeating prompts already implied by the last assistant response
             - Each prompt should be short (target under 80 chars)
 
@@ -571,30 +720,139 @@ final class LoomAIViewModel: ObservableObject {
 
     private func makeDynamicPromptChips(from snapshot: LoomAIContextSnapshot, threadMessages: [LoomAIChatMessage]) -> [String] {
         var chips: [String] = []
+        let now = Date()
 
-        let weakestFulfillments = snapshot.fulfillmentCategories
-            .filter({ $0.weeklyScore != nil })
-            .sorted(by: { ($0.weeklyScore ?? 999) < ($1.weeklyScore ?? 999) })
-        let primaryFulfillment = weakestFulfillments.prefix(3).shuffled().first
-        let secondaryFulfillment = weakestFulfillments.dropFirst().prefix(4).shuffled().first
-
-        if let primaryFulfillment {
-            chips.append("How can I improve \(primaryFulfillment.name) this week?")
-            chips.append("Why is \(primaryFulfillment.name) slipping?")
+        func normalized(_ text: String) -> String {
+            text.trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
         }
-        if let secondaryFulfillment,
-           secondaryFulfillment.name.caseInsensitiveCompare(primaryFulfillment?.name ?? "") != .orderedSame {
+
+        func isLowSignal(_ text: String) -> Bool {
+            let value = normalized(text).lowercased()
+            guard !value.isEmpty else { return true }
+            let lowSignalValues: Set<String> = [
+                "test", "tbd", "todo", "n/a", "na", "none", "placeholder", "sample", "example"
+            ]
+            if lowSignalValues.contains(value) { return true }
+            if value.count <= 3 { return true }
+            return false
+        }
+
+        func pickOne<T>(_ values: [T]) -> T? {
+            values.shuffled().first
+        }
+
+        func chipLabelForActionBlock(_ block: LoomAIContextSnapshot.ActionBlockSummary) -> String {
+            let blockTitle = normalized(block.title)
+            if !blockTitle.isEmpty, !isLowSignal(blockTitle) {
+                return blockTitle
+            }
+
+            let category = normalized(block.category)
+            if !category.isEmpty, !isLowSignal(category) {
+                return "\(category) action block"
+            }
+
+            let actionTitle = block.actions
+                .map(normalized)
+                .first(where: { !$0.isEmpty && !isLowSignal($0) })
+            if let actionTitle {
+                return actionTitle
+            }
+
+            if let outcome = snapshot.activeOutcomes
+                .map(\.title)
+                .map(normalized)
+                .first(where: { !$0.isEmpty && !isLowSignal($0) }) {
+                return outcome
+            }
+
+            return "this action block"
+        }
+
+        let fulfillments = snapshot.fulfillmentCategories
+        let scoredFulfillments = fulfillments
+            .filter { $0.weeklyScore != nil }
+            .sorted { ($0.weeklyScore ?? 999) < ($1.weeklyScore ?? 999) }
+        let weakestFulfillment = pickOne(Array(scoredFulfillments.prefix(3)))
+        let secondaryFulfillment = pickOne(Array(scoredFulfillments.dropFirst().prefix(4)))
+
+        let missionCandidates = fulfillments.filter { category in
+            let mission = normalized(category.mission)
+            return mission.isEmpty || isLowSignal(mission) || mission.count < 24
+        }
+        let identityCandidates = fulfillments.filter { category in
+            let identities = category.identity.map(normalized).filter { !$0.isEmpty }
+            return identities.isEmpty || identities.contains(where: isLowSignal)
+        }
+        let lowLittleWinQualityCandidates = fulfillments.filter { category in
+            let wins = category.littleWins.map(normalized).filter { !$0.isEmpty }
+            if wins.isEmpty { return true }
+            if wins.count < 2 { return true }
+            return wins.contains(where: isLowSignal)
+        }
+        let maxedLittleWinCandidates = fulfillments.filter { category in
+            let wins = category.littleWins.map(normalized).filter { !$0.isEmpty }
+            return wins.count >= 3
+        }
+        let passionGapCandidates = fulfillments.filter { category in
+            category.connectedPassions.isEmpty
+        }
+
+        if let weakestFulfillment {
+            chips.append("How can I improve \(weakestFulfillment.name) this week?")
+            chips.append("Why is \(weakestFulfillment.name) slipping?")
+        }
+
+        if let littleWinCategory = pickOne(
+            Array(lowLittleWinQualityCandidates.sorted {
+                (($0.weeklyScore ?? 999) < ($1.weeklyScore ?? 999))
+            }.prefix(4))
+        ) {
+            if littleWinCategory.littleWins.filter({ !normalized($0).isEmpty }).count >= 3 {
+                chips.append("Which \(littleWinCategory.name) Little Win should I replace?")
+            } else {
+                chips.append("What daily Little Wins would improve \(littleWinCategory.name)?")
+            }
+        } else if let secondaryFulfillment,
+                  secondaryFulfillment.name.caseInsensitiveCompare(weakestFulfillment?.name ?? "") != .orderedSame {
             chips.append("What daily Little Wins would improve \(secondaryFulfillment.name)?")
         }
 
-        let now = Date()
+        if let category = pickOne(Array(missionCandidates.prefix(4))) {
+            if normalized(category.mission).isEmpty || isLowSignal(category.mission) {
+                chips.append("Help me write a better Mission for \(category.name)")
+            } else {
+                chips.append("How could I improve the Mission for \(category.name)?")
+            }
+        } else if let weak = weakestFulfillment {
+            chips.append("How could I improve the Mission for \(weak.name)?")
+        }
+
+        if let category = pickOne(Array(identityCandidates.sorted {
+            (($0.weeklyScore ?? 999) < ($1.weeklyScore ?? 999))
+        }.prefix(4))) {
+            let existing = category.identity.map(normalized).filter { !$0.isEmpty }
+            if existing.isEmpty {
+                chips.append("What Identity should I add for \(category.name)?")
+            } else {
+                chips.append("Which Identity in \(category.name) should I improve?")
+            }
+        }
+
+        if let category = pickOne(Array(maxedLittleWinCandidates.sorted {
+            (($0.weeklyScore ?? 999) < ($1.weeklyScore ?? 999))
+        }.prefix(4))) {
+            chips.append("Should I replace a weak Little Win in \(category.name)?")
+        }
+
         let nearTermOutcomes = snapshot.activeOutcomes
-            .filter({ $0.endDate >= now })
-            .sorted(by: { $0.endDate < $1.endDate })
-        if let nextOutcome = nearTermOutcomes.prefix(4).shuffled().first {
+            .filter { $0.endDate >= now }
+            .sorted { $0.endDate < $1.endDate }
+        if let nextOutcome = pickOne(Array(nearTermOutcomes.prefix(4))) {
             chips.append("What should I do next for \(nextOutcome.title)?")
         }
-        if let alternateOutcome = nearTermOutcomes.dropFirst().prefix(5).shuffled().first {
+        if let alternateOutcome = pickOne(Array(nearTermOutcomes.dropFirst().prefix(5))) {
             chips.append("What is the highest-leverage move for \(alternateOutcome.title)?")
         }
 
@@ -603,19 +861,51 @@ final class LoomAIViewModel: ObservableObject {
             .prefix(3)
             .shuffled()
             .first, lowestBlock.completionRatio < 0.6 {
-            chips.append("How do I get unstuck on \(lowestBlock.title)?")
+            chips.append("How do I get unstuck on \(chipLabelForActionBlock(lowestBlock))?")
         }
 
         if snapshot.recentActivity.carryoversLast7Days > 0 {
             chips.append("What patterns are causing my carryovers?")
         }
 
-        if snapshot.drivingForce == nil ||
-            ((snapshot.drivingForce?.vision.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) &&
-             (snapshot.drivingForce?.purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)) {
+        let purposeVisionMissingOrWeak =
+            snapshot.drivingForce == nil ||
+            (snapshot.drivingForce?.vision.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) ||
+            isLowSignal(snapshot.drivingForce?.vision ?? "")
+
+        let purposePurposeMissingOrWeak =
+            snapshot.drivingForce == nil ||
+            (snapshot.drivingForce?.purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) ||
+            isLowSignal(snapshot.drivingForce?.purpose ?? "")
+
+        if purposeVisionMissingOrWeak && purposePurposeMissingOrWeak {
             chips.append("Help me clarify my Purpose and Vision")
+        } else if purposeVisionMissingOrWeak {
+            chips.append("How could I improve my Purpose Vision?")
         } else {
             chips.append("How do my actions align with my Purpose this week?")
+        }
+
+        if let drivingForce = snapshot.drivingForce {
+            let hasFewPassions = drivingForce.passions.count < 4
+            if hasFewPassions {
+                chips.append("What passions should I add based on my current data?")
+            } else if let category = pickOne(Array(passionGapCandidates.prefix(4))) {
+                chips.append("What passions should I connect to \(category.name)?")
+            } else {
+                chips.append("What Love/Thrill/Vows/Hate passions should I add next?")
+            }
+        }
+
+        if let inventory = snapshot.dataInventory.first(where: { $0.id == "action_blocks_actions_detail" }),
+           (inventory.currentCount ?? 0) > 15 {
+            chips.append("Do my actions fit my current Fulfillment Areas?")
+            chips.append("Should I add another Fulfillment Area based on my actions?")
+        }
+
+        if let inventory = snapshot.dataInventory.first(where: { $0.id == "capture" }),
+           (inventory.currentCount ?? 0) > 12 {
+            chips.append("What in Capture should I turn into real execution next?")
         }
 
         if let inventory = snapshot.dataInventory.first(where: { $0.id == "recently_deleted" }),
@@ -640,8 +930,21 @@ final class LoomAIViewModel: ObservableObject {
 
         var seen = Set<String>()
         let deduped = chips.filter { seen.insert($0).inserted }
-        let priority = Array(deduped.prefix(4))
-        let remainder = Array(deduped.dropFirst(4)).shuffled()
+
+        let priorityPrefixes = [
+            "How can I improve ",
+            "What daily Little Wins would improve ",
+            "What should I do next for ",
+            "Help me write a better Mission for ",
+            "What Identity should I add for ",
+            "How could I improve my Purpose Vision?"
+        ]
+        let priority = deduped.filter { chip in
+            priorityPrefixes.contains(where: { chip.hasPrefix($0) })
+        }
+        let remainder = deduped.filter { chip in
+            !priority.contains(chip)
+        }.shuffled()
         return Array((priority + remainder).prefix(10))
     }
 
@@ -1319,6 +1622,33 @@ final class LoomAIViewModel: ObservableObject {
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return truncateAtWordBoundary(normalized, maxLength: 150)
+    }
+
+    private func resolveFulfillmentCategory(for action: LoomAISuggestedAction, in context: ModelContext) -> Fulfillment? {
+        let categories = (try? context.fetch(FetchDescriptor<Fulfillment>())) ?? []
+        if let categoryIDString = action.payload["categoryID"],
+           let categoryID = UUID(uuidString: categoryIDString) {
+            if let match = categories.first(where: { $0.category_id == categoryID }) { return match }
+        }
+        if let categoryName = action.payload["categoryName"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !categoryName.isEmpty {
+            return categories.first { $0.category.caseInsensitiveCompare(categoryName) == .orderedSame }
+        }
+        return nil
+    }
+
+    private func parseDelimitedPrefillList(_ raw: String?) -> [String] {
+        guard let raw else { return [] }
+        return raw
+            .components(separatedBy: CharacterSet(charactersIn: "|\n,"))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private func normalizedOptionalPrefillText(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private static func normalizedSuggestedLittleWinText(_ text: String) -> String {

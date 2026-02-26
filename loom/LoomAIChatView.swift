@@ -363,13 +363,9 @@ struct LoomAIChatView: View {
                     .resizable()
                     .scaledToFit()
                     .frame(width: 22, height: 22)
-                Text("Ask Loom about your Purpose, Fulfillment, Outcomes, or weekly plan.")
+                Text("Ask Loom to analyze and improve your Purpose, Passions, Fulfillment Areas, Little Wins, Outcomes, Actions, Capture List, Action Blocks, and more.")
                     .font(.subheadline.weight(.semibold))
             }
-            Text("Examples: “What should I focus on this week?”, “Which fulfillment area is slipping?”, “Turn these capture actions into groups.”")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(12)
         .background(
@@ -568,12 +564,18 @@ struct LoomAIChatView: View {
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(colorScheme == .dark ? Color.green : Color(red: 0.10, green: 0.50, blue: 0.24))
         } else {
-            Image("LoomAI")
-                .resizable()
-                .renderingMode(.template)
-                .scaledToFit()
-                .frame(width: 16, height: 16)
-                .foregroundStyle(Color.white.opacity(0.95))
+            if let symbol = suggestedActionSymbolName(for: action) {
+                Image(systemName: symbol)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Color.white.opacity(0.95))
+            } else {
+                Image("LoomAI")
+                    .resizable()
+                    .renderingMode(.template)
+                    .scaledToFit()
+                    .frame(width: 16, height: 16)
+                    .foregroundStyle(Color.white.opacity(0.95))
+            }
         }
     }
 
@@ -581,12 +583,112 @@ struct LoomAIChatView: View {
     private func suggestedActionPrimaryText(for action: LoomAISuggestedAction, isApplied: Bool) -> some View {
         if action.type == "createLittleWin" || action.type == "replaceLittleWin" {
             suggestedLittleWinPrimaryText(action: action, isApplied: isApplied)
+        } else if action.type == "replaceFulfillmentMission" {
+            suggestedSimpleTwoLineAction(
+                topLine: isApplied ? "Updated Mission:" : "Update Mission:",
+                detail: action.payload["mission"] ?? action.payload["text"] ?? action.payload["purpose"] ?? action.title,
+                isApplied: isApplied
+            )
+        } else if action.type == "addFulfillmentIdentity" || action.type == "replaceFulfillmentIdentity" {
+            suggestedIdentityPrimaryText(action: action, isApplied: isApplied)
+        } else if action.type == "replacePurposeVision" {
+            suggestedSimpleTwoLineAction(
+                topLine: isApplied ? "Updated Purpose Vision:" : "Update Purpose Vision:",
+                detail: action.payload["vision"] ?? action.payload["text"] ?? action.title,
+                isApplied: isApplied
+            )
+        } else if action.type == "addPassion" {
+            suggestedPassionPrimaryText(action: action, isApplied: isApplied)
+        } else if action.type == "launchAddFulfillmentAreaPrefill" {
+            suggestedAddFulfillmentAreaPrimaryText(action: action, isApplied: isApplied)
         } else {
             Text(suggestedActionButtonLabel(for: action, isApplied: isApplied))
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(suggestedActionPrimaryColor(isApplied: isApplied))
                 .multilineTextAlignment(.leading)
         }
+    }
+
+    private func suggestedSimpleTwoLineAction(topLine: String, detail: String, isApplied: Bool) -> some View {
+        let cleaned = detail.trimmingCharacters(in: .whitespacesAndNewlines)
+        return VStack(alignment: .leading, spacing: 3) {
+            Text(topLine)
+                .font(.subheadline.italic())
+                .foregroundStyle(suggestedActionPrimaryColor(isApplied: isApplied).opacity(isApplied ? 0.88 : 0.95))
+                .multilineTextAlignment(.leading)
+            if !cleaned.isEmpty {
+                Text(cleaned)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(suggestedActionPrimaryColor(isApplied: isApplied))
+                    .multilineTextAlignment(.leading)
+            }
+        }
+    }
+
+    private func suggestedIdentityPrimaryText(action: LoomAISuggestedAction, isApplied: Bool) -> some View {
+        let category = (action.payload["categoryName"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let identity = (action.payload["identity"] ?? action.payload["role"] ?? action.payload["text"] ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let replaceIdentity = (action.payload["replaceIdentity"] ?? action.payload["oldIdentity"] ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let isReplace = action.type == "replaceFulfillmentIdentity"
+        let top = isReplace
+            ? (category.isEmpty ? "Replace Identity:" : "Replace Identity in \(category):")
+            : (category.isEmpty ? "Add Identity:" : "Add Identity to \(category):")
+        let appliedTop = top.replacingOccurrences(of: "Add ", with: "Added ", options: [.anchored])
+            .replacingOccurrences(of: "Replace ", with: "Replaced ", options: [.anchored])
+
+        return VStack(alignment: .leading, spacing: 3) {
+            Text(isApplied ? appliedTop : top)
+                .font(.subheadline.italic())
+                .foregroundStyle(suggestedActionPrimaryColor(isApplied: isApplied).opacity(isApplied ? 0.88 : 0.95))
+            if !identity.isEmpty {
+                Text(identity)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(suggestedActionPrimaryColor(isApplied: isApplied))
+            }
+            if isReplace, !replaceIdentity.isEmpty {
+                Text("\(isApplied ? "Replaced" : "Replacing"): \(replaceIdentity)")
+                    .font(.caption)
+                    .foregroundStyle(suggestedActionSecondaryColor(isApplied: isApplied))
+            }
+        }
+        .multilineTextAlignment(.leading)
+    }
+
+    private func suggestedPassionPrimaryText(action: LoomAISuggestedAction, isApplied: Bool) -> some View {
+        let emotion = (action.payload["emotion"] ?? "love").trimmingCharacters(in: .whitespacesAndNewlines)
+        let passion = (action.payload["passion"] ?? action.payload["title"] ?? action.payload["text"] ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let top = isApplied ? "Added Passion (\(emotion.capitalized)):" : "Add Passion (\(emotion.capitalized)):"
+        return VStack(alignment: .leading, spacing: 3) {
+            Text(top)
+                .font(.subheadline.italic())
+                .foregroundStyle(suggestedActionPrimaryColor(isApplied: isApplied).opacity(isApplied ? 0.88 : 0.95))
+            if !passion.isEmpty {
+                Text(passion)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(suggestedActionPrimaryColor(isApplied: isApplied))
+            }
+        }
+        .multilineTextAlignment(.leading)
+    }
+
+    private func suggestedAddFulfillmentAreaPrimaryText(action: LoomAISuggestedAction, isApplied: Bool) -> some View {
+        let category = (action.payload["categoryName"] ?? action.payload["category"] ?? action.payload["title"] ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let top = isApplied ? "Opened Add Fulfillment Area:" : "Open Add Fulfillment Area:"
+        return VStack(alignment: .leading, spacing: 3) {
+            Text(top)
+                .font(.subheadline.italic())
+                .foregroundStyle(suggestedActionPrimaryColor(isApplied: isApplied).opacity(isApplied ? 0.88 : 0.95))
+            if !category.isEmpty {
+                Text(category)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(suggestedActionPrimaryColor(isApplied: isApplied))
+            }
+        }
+        .multilineTextAlignment(.leading)
     }
 
     private func suggestedLittleWinPrimaryText(action: LoomAISuggestedAction, isApplied: Bool) -> some View {
@@ -705,10 +807,54 @@ struct LoomAIChatView: View {
             return nil
         case "replaceLittleWin":
             return "Replaces the existing Little Win shown below."
+        case "replaceFulfillmentMission":
+            return missionActionSubtitle(action)
+        case "addFulfillmentIdentity":
+            return categoryOnlySubtitle(action, fallback: "Adds a new identity role.")
+        case "replaceFulfillmentIdentity":
+            return categoryOnlySubtitle(action, fallback: "Replaces an identity role in this area.")
+        case "replacePurposeVision":
+            return "Updates your Purpose Vision."
+        case "addPassion":
+            return categoryOnlySubtitle(action, fallback: "Adds a passion in the selected emotion bucket.")
+        case "launchAddFulfillmentAreaPrefill":
+            return "Opens the Add Fulfillment Area flow with Loom's suggested prefill."
         case "createAction":
             return "Adds this to Capture."
         case "createOutcome":
             return "Creates a new Outcome."
+        default:
+            return nil
+        }
+    }
+
+    private func missionActionSubtitle(_ action: LoomAISuggestedAction) -> String? {
+        categoryOnlySubtitle(action, fallback: "Replaces the mission for this Fulfillment Area.")
+    }
+
+    private func categoryOnlySubtitle(_ action: LoomAISuggestedAction, fallback: String) -> String {
+        let category = (action.payload["categoryName"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return category.isEmpty ? fallback : "Area: \(category)"
+    }
+
+    private func suggestedActionSymbolName(for action: LoomAISuggestedAction) -> String? {
+        switch action.type {
+        case "createLittleWin", "replaceLittleWin":
+            return "sparkles"
+        case "replaceFulfillmentMission":
+            return "flag.fill"
+        case "addFulfillmentIdentity", "replaceFulfillmentIdentity":
+            return "person.crop.circle.badge.plus"
+        case "replacePurposeVision":
+            return "eye.fill"
+        case "addPassion":
+            return "heart.text.square.fill"
+        case "launchAddFulfillmentAreaPrefill":
+            return "square.and.pencil"
+        case "createAction":
+            return "plus.circle.fill"
+        case "createOutcome":
+            return "target"
         default:
             return nil
         }
