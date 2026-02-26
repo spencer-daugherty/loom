@@ -1503,15 +1503,15 @@ struct ActionView: View {
 
                     resultSection(resultText: step4?.resultText ?? "")
 
+                    if !roleName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        smallPill(icon: "trophy", text: roleName)
+                    }
+
                     if !outcomesForChunk.isEmpty {
                         ForEach(outcomesForChunk, id: \.outcome_id) { outcome in
                             outcomePill(outcome)
                         }
                     }
-
-                    Divider().opacity(0.4)
-
-                    purposeSection(roleName: roleName, purposeText: step4?.roleNoteText ?? "")
 
                     Divider().opacity(0.4)
 
@@ -1712,7 +1712,7 @@ struct ActionView: View {
                     .fontWeight(.bold)
                     .foregroundStyle(.black)
                 Spacer()
-                Text("What do I want?")
+                Text("What do I want? Why do I want it?")
                     .font(.footnote)
                     .italic()
                     .foregroundStyle(Color.black.opacity(0.58))
@@ -1721,30 +1721,6 @@ struct ActionView: View {
             Text(resultText.isEmpty ? "-" : resultText)
                 .font(.subheadline)
                 .foregroundColor(resultText.isEmpty ? .secondary : .black)
-        }
-    }
-
-    private func purposeSection(roleName: String, purposeText: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("PURPOSE")
-                    .font(.caption)
-                    .fontWeight(.bold)
-                    .foregroundStyle(.black)
-                Spacer()
-                Text("Why do I want it?")
-                    .font(.footnote)
-                    .italic()
-                    .foregroundStyle(Color.black.opacity(0.58))
-            }
-
-            if !roleName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                smallPill(icon: "trophy", text: roleName)
-            }
-
-            Text(purposeText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "-" : purposeText)
-                .font(.subheadline)
-                .foregroundColor(purposeText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .secondary : .black)
         }
     }
 

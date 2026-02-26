@@ -3698,22 +3698,14 @@ struct PlanStepFourView: View {
         return plannedChunksForWeek.allSatisfy { chunk in
             let id = chunk.id
             let resultOK = !(resultTextByChunk[id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            let roleNoteOK = !(roleTextByChunk[id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             let roleOK = (selectedRoleIDByChunk[id] ?? nil) != nil
-            return resultOK && roleNoteOK && roleOK
+            return resultOK && roleOK
         }
     }
 
     private var step4MissingResultChunkIDs: Set<UUID> {
         Set(plannedChunksForWeek.compactMap { chunk in
             let isMissing = (resultTextByChunk[chunk.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            return isMissing ? chunk.id : nil
-        })
-    }
-
-    private var step4MissingPurposeChunkIDs: Set<UUID> {
-        Set(plannedChunksForWeek.compactMap { chunk in
-            let isMissing = (roleTextByChunk[chunk.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             return isMissing ? chunk.id : nil
         })
     }
@@ -3832,8 +3824,6 @@ struct PlanStepFourView: View {
                         .font(.footnote)
                     Text("• Identity")
                         .font(.footnote)
-                    Text("• Mission")
-                        .font(.footnote)
                 }
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: true, vertical: false)
@@ -3940,11 +3930,6 @@ struct PlanStepFourView: View {
             }
         )
 
-        let purposeBinding = Binding<String>(
-            get: { purposeTextByChunk[chunkID] ?? "" },
-            set: { purposeTextByChunk[chunkID] = $0 }
-        )
-
         let roleNoteBinding = Binding<String>(
             get: { roleTextByChunk[chunkID] ?? "" },
             set: {
@@ -3969,17 +3954,6 @@ struct PlanStepFourView: View {
             }
         )
 
-        let fulfillmentPurposeText = fulfillmentForCategoryName(chunk.category)?.category_purpose ?? ""
-        let canPasteCategoryPurpose = !fulfillmentPurposeText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-
-        let selectedOutcomeIDs = selectedOutcomeIDsByChunk[chunkID] ?? []
-        let singleOutcome: Outcomes? = {
-            guard selectedOutcomeIDs.count == 1, let onlyID = selectedOutcomeIDs.first else { return nil }
-            return outcomes.first(where: { $0.outcome_id == onlyID })
-        }()
-        let outcomeReasonText = singleOutcome?.reasons ?? ""
-        let canPasteOutcomeReason = !outcomeReasonText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-
         ChunkCardView(
             chunk: chunk,
             actions: actions,
@@ -3989,25 +3963,11 @@ struct PlanStepFourView: View {
             targetIconName: targetIconName,
             fill: fill,
             resultText: resultBinding,
-            purposeText: purposeBinding,
             roleNoteText: roleNoteBinding,
             selectedOutcomeIDs: selectedOutcomeIDsBinding,
             selectedRoleID: selectedRoleIDBinding,
             highlightMissingResult: shouldHighlightStep4Validation && step4MissingResultChunkIDs.contains(chunkID),
-            highlightMissingPurpose: shouldHighlightStep4Validation && step4MissingPurposeChunkIDs.contains(chunkID),
             highlightMissingRoleSelection: shouldHighlightStep4Validation && step4MissingRoleChunkIDs.contains(chunkID),
-            pasteFromCategoryTitle: chunk.category,
-            canPasteCategoryPurpose: canPasteCategoryPurpose,
-            onPasteCategoryPurpose: {
-                roleTextByChunk[chunkID] = fulfillmentPurposeText
-                scheduleStep4Autosave()
-            },
-            shouldShowOutcomeReasonPaste: (singleOutcome != nil),
-            canPasteOutcomeReason: canPasteOutcomeReason,
-            onPasteOutcomeReason: {
-                roleTextByChunk[chunkID] = outcomeReasonText
-                scheduleStep4Autosave()
-            },
             onOpenOutcomes: { outcomeSheetChunkID = SheetChunkID(id: chunkID) },
             onOpenRoles: { roleSheetChunkID = SheetChunkID(id: chunkID) },
             onRemoveOutcome: { outcomeID in
@@ -4032,22 +3992,12 @@ struct PlanStepFourView: View {
         let fill: Color
 
         @Binding var resultText: String
-        @Binding var purposeText: String
         @Binding var roleNoteText: String
         @Binding var selectedOutcomeIDs: [UUID]
         @Binding var selectedRoleID: UUID?
 
         let highlightMissingResult: Bool
-        let highlightMissingPurpose: Bool
         let highlightMissingRoleSelection: Bool
-
-        let pasteFromCategoryTitle: String
-        let canPasteCategoryPurpose: Bool
-        let onPasteCategoryPurpose: () -> Void
-
-        let shouldShowOutcomeReasonPaste: Bool
-        let canPasteOutcomeReason: Bool
-        let onPasteOutcomeReason: () -> Void
 
         let onOpenOutcomes: () -> Void
         let onOpenRoles: () -> Void
@@ -4064,32 +4014,14 @@ struct PlanStepFourView: View {
 
                 resultSection
 
+                roleConnectRow
+
                 outcomesConnectRow
 
                 let selectedOutcomes = resolvedSelectedOutcomes
                 if !selectedOutcomes.isEmpty {
                     selectedOutcomesList(selectedOutcomes)
                 }
-
-                Divider().opacity(0.4)
-
-                purposeSection
-
-                roleConnectRow
-
-                TextField("Earn more income FASTER for a better future!", text: $roleNoteText)
-                    .textFieldStyle(.roundedBorder)
-                    .submitLabel(.done)
-                    .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(
-                                highlightMissingPurpose ? Color.red.opacity(0.75) : Color.clear,
-                                lineWidth: highlightMissingPurpose ? 1.5 : 0
-                            )
-                    )
-
-                pasteFromRow
 
                 Divider().opacity(0.4)
 
@@ -4132,7 +4064,7 @@ struct PlanStepFourView: View {
                         .fontWeight(.bold)
                         .foregroundStyle(forcedDarkTextColor)
                     Spacer()
-                    Text("What do I want?")
+                    Text("What do I want? Why do I want it?")
                         .font(.subheadline)
                         .italic()
                         .foregroundStyle(forcedDarkTextColor)
@@ -4216,54 +4148,6 @@ struct PlanStepFourView: View {
                             )
                     )
                 }
-            }
-        }
-
-        private var purposeSection: some View {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("MISSION")
-                    .font(.caption)
-                    .fontWeight(.bold)
-                    .foregroundStyle(forcedDarkTextColor)
-                Spacer()
-                Text("Why do I want it?")
-                    .font(.subheadline)
-                    .italic()
-                    .foregroundStyle(forcedDarkTextColor)
-            }
-        }
-
-        private var pasteFromRow: some View {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text("paste from:")
-                    .font(.caption2)
-                    .foregroundStyle(Color(.systemGray))
-
-                Button {
-                    onPasteCategoryPurpose()
-                } label: {
-                    Text("\(pasteFromCategoryTitle) Mission")
-                        .font(.caption2)
-                        .underline()
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(canPasteCategoryPurpose ? .blue : .secondary.opacity(0.6))
-                .disabled(!canPasteCategoryPurpose)
-
-                if shouldShowOutcomeReasonPaste {
-                    Button {
-                        onPasteOutcomeReason()
-                    } label: {
-                        Text("Outcome Reason")
-                            .font(.caption2)
-                            .underline()
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(canPasteOutcomeReason ? .blue : .secondary.opacity(0.6))
-                    .disabled(!canPasteOutcomeReason)
-                }
-
-                Spacer(minLength: 0)
             }
         }
 
@@ -5010,8 +4894,6 @@ struct PlanStepFiveView: View {
 
         let step4 = stepFourStatesForWeekByChunkID[chunk.id]
         let resultText = step4?.resultText ?? ""
-        let purposeText = step4?.roleNoteText ?? ""
-
         let roleName: String = {
             guard let rid = step4?.connectedRoleId else { return "" }
             return roles.first(where: { $0.id == rid })?.role ?? ""
@@ -5035,7 +4917,6 @@ struct PlanStepFiveView: View {
             resultText: resultText,
             selectedOutcomes: outcomesForChunk,
             roleName: roleName,
-            purposeText: purposeText,
             actions: actions,
             localActions: Binding(
                 get: { localActionsByChunkId[chunk.id] ?? actions },
@@ -5133,8 +5014,6 @@ struct PlanStepFiveView: View {
         let selectedOutcomes: [Outcomes]
 
         let roleName: String
-        let purposeText: String
-
         let actions: [PlannedChunkAction]
 
         @Binding var localActions: [PlannedChunkAction]
@@ -5172,27 +5051,12 @@ struct PlanStepFiveView: View {
             VStack(alignment: .leading, spacing: 12) {
                 resultSection
 
-                if !selectedOutcomes.isEmpty {
-                    selectedOutcomesPillsSmall(selectedOutcomes)
-                }
-
-                Divider().opacity(0.4)
-
-                purposeSection
-
                 if !roleName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     rolePillSmall(roleName)
                 }
 
-                if !purposeText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text(purposeText)
-                        .font(.subheadline)
-                        .foregroundStyle(forcedDarkTextColor)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    Text("—")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                if !selectedOutcomes.isEmpty {
+                    selectedOutcomesPillsSmall(selectedOutcomes)
                 }
 
                 Divider().opacity(0.4)
@@ -5228,7 +5092,7 @@ struct PlanStepFiveView: View {
                         .fontWeight(.bold)
                         .foregroundStyle(forcedDarkTextColor)
                     Spacer()
-                    Text("What do I want?")
+                    Text("What do I want? Why do I want it?")
                         .font(.subheadline)
                         .italic()
                         .foregroundStyle(forcedDarkTextColor)
@@ -5246,20 +5110,6 @@ struct PlanStepFiveView: View {
                 ForEach(selectedOutcomes, id: \.outcome_id) { outcome in
                     pillSmall(iconSystemName: targetIconName, text: outcome.outcome)
                 }
-            }
-        }
-
-        private var purposeSection: some View {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("PURPOSE")
-                    .font(.caption)
-                    .fontWeight(.bold)
-                    .foregroundStyle(forcedDarkTextColor)
-                Spacer()
-                Text("Why do I want it?")
-                    .font(.subheadline)
-                    .italic()
-                    .foregroundStyle(forcedDarkTextColor)
             }
         }
 
@@ -6948,7 +6798,7 @@ private struct StepFourInstructionsPopup: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     Group {
-                        (Text("Result: ").fontWeight(.bold) + Text("What do I want?").italic().underline())
+                        (Text("Result: ").fontWeight(.bold) + Text("What do I want? Why do I want it?").italic().underline())
                             .font(.body)
 
                         Text("What’s the most important result or outcome you want to have happen today? What are you really committed to achieving?")
