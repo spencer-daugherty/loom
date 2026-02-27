@@ -144,7 +144,7 @@ struct ContentView: View {
         ),
         ContentQuickstartStep(
             title: "Fulfillment",
-            summary: "Personalize the key areas of your life so growth feels balanced and meaningful.",
+            summary: "Personalize the 3-7 key areas of your life so growth feels balanced and meaningful.",
             lookAtPrompt: "Look at the Fulfillment section on this screen.",
             target: .fulfillment
         ),
@@ -3948,7 +3948,7 @@ struct ContentView: View {
             let height = geo.size.height
             let titleColor = FulfillmentCategoryTheme.color(for: "Health & Energy")
             let cardColor = FulfillmentCategoryTheme.lightColor(for: "Health & Energy")
-            let radarSideCount = max(3, min(7, fulfillmentMetrics.count))
+            let radarSideCount = 4
             let fixedPrimaryText = Color.black.opacity(0.82)
 
             VStack(spacing: 0) {
@@ -3965,8 +3965,24 @@ struct ContentView: View {
                     VStack {
                         Spacer(minLength: 0)
                         VStack(alignment: .leading, spacing: 12) {
-                            quickstartLittleWinsDemoItemRow("Move body for 30 minutes", titleColor: titleColor, textColor: fixedPrimaryText)
-                            quickstartLittleWinsDemoItemRow("Eat a high-protein lunch", titleColor: titleColor, textColor: fixedPrimaryText)
+                            quickstartLittleWinsDemoItemRow(
+                                "Sleep 7.5 hours",
+                                titleColor: titleColor,
+                                textColor: fixedPrimaryText,
+                                indicator: .completed
+                            )
+                            quickstartLittleWinsDemoItemRow(
+                                "10,000 steps",
+                                titleColor: titleColor,
+                                textColor: fixedPrimaryText,
+                                indicator: .integrated(progress: 0.60)
+                            )
+                            quickstartLittleWinsDemoItemRow(
+                                "Follow diet",
+                                titleColor: titleColor,
+                                textColor: fixedPrimaryText,
+                                indicator: .empty
+                            )
                         }
                         Spacer(minLength: 0)
                     }
@@ -4005,19 +4021,75 @@ struct ContentView: View {
         }
     }
 
-    private func quickstartLittleWinsDemoItemRow(_ title: String, titleColor: Color, textColor: Color) -> some View {
-        HStack(alignment: .top, spacing: 10) {
+    private enum QuickstartLittleWinsIndicator {
+        case empty
+        case integrated(progress: CGFloat)
+        case completed
+    }
+
+    @ViewBuilder
+    private func quickstartLittleWinsDemoIndicator(
+        indicator: QuickstartLittleWinsIndicator,
+        titleColor: Color,
+        secondaryColor: Color
+    ) -> some View {
+        switch indicator {
+        case .empty:
+            Image(systemName: "circle")
+                .font(.system(size: 26, weight: .regular))
+                .foregroundStyle(secondaryColor)
+                .padding(.top, 6)
+                .frame(width: 30, alignment: .center)
+        case .completed:
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 26, weight: .regular))
                 .foregroundStyle(titleColor)
                 .padding(.top, 6)
                 .frame(width: 30, alignment: .center)
+        case .integrated(let progress):
+            ZStack {
+                Circle()
+                    .stroke(secondaryColor, lineWidth: 2)
+                    .frame(width: 22, height: 22)
+                Circle()
+                    .trim(from: 0, to: max(0, min(1, progress)))
+                    .stroke(titleColor, style: StrokeStyle(lineWidth: 2.4, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .frame(width: 22, height: 22)
+                Image(systemName: "link")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(secondaryColor)
+            }
+            .padding(.top, 8)
+            .frame(width: 30, alignment: .center)
+        }
+    }
+
+    private func quickstartLittleWinsDemoItemRow(
+        _ title: String,
+        titleColor: Color,
+        textColor: Color,
+        indicator: QuickstartLittleWinsIndicator
+    ) -> some View {
+        let isCompleted: Bool = {
+            if case .completed = indicator { return true }
+            return false
+        }()
+
+        return HStack(alignment: .top, spacing: 10) {
+            quickstartLittleWinsDemoIndicator(
+                indicator: indicator,
+                titleColor: titleColor,
+                secondaryColor: textColor.opacity(0.52)
+            )
 
             Text(title)
                 .font(.system(size: 36, weight: .semibold, design: .default))
                 .foregroundStyle(textColor)
                 .multilineTextAlignment(.leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .strikethrough(isCompleted, color: textColor.opacity(0.75))
+                .opacity(isCompleted ? 0.72 : 1.0)
                 .lineLimit(2)
                 .minimumScaleFactor(0.55)
                 .allowsTightening(true)
@@ -4026,7 +4098,7 @@ struct ContentView: View {
     }
 
     private var quickstartLoomAIDemoView: some View {
-        VStack(spacing: 10) {
+        return VStack(spacing: 10) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     quickstartLoomAIIntroCard
@@ -4085,11 +4157,10 @@ struct ContentView: View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
                 (
-                    Text("To enhance your ")
-                    + Text("Love & Relationships")
+                    Text("Love & Relationships")
                         .bold()
                         .foregroundColor(.red)
-                    + Text(" fulfillment area, consider adding more specific daily Little Wins. Here are two suggestions:")
+                    + Text(" come from consistency, not big moments. Focus on small actions that build trust, connection, and emotional safety over time.")
                 )
                 .font(.subheadline)
                 .foregroundStyle(.primary)
@@ -4117,11 +4188,11 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Suggestions")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(Color.gray.opacity(0.7))
+                .foregroundStyle(.white)
 
             VStack(alignment: .leading, spacing: 8) {
-                quickstartLoomAISuggestionCard(text: "Text or call a loved one")
-                quickstartLoomAISuggestionCard(text: "Plan a social outing or get together")
+                quickstartLoomAISuggestionCard(text: "Reach out to one friend or loved one")
+                quickstartLoomAISuggestionCard(text: "Be fully present in one conversation without distractions")
             }
         }
         .padding(.top, 2)
@@ -4307,8 +4378,9 @@ struct ContentView: View {
     private var quickstartFulfillmentDemoCard: some View {
         let demoMetrics: [(String, Color, Double)] = [
             ("Career & Business", FulfillmentCategoryTheme.color(for: "Career & Business"), 78),
-            ("Health & Vitality", FulfillmentCategoryTheme.color(for: "Health & Vitality"), 64),
-            ("Love & Relationships", FulfillmentCategoryTheme.color(for: "Love & Relationships"), 86)
+            ("Health & Energy", FulfillmentCategoryTheme.color(for: "Health & Energy"), 64),
+            ("Love & Relationships", FulfillmentCategoryTheme.color(for: "Love & Relationships"), 40),
+            ("Wealth & Finance", .green, 35)
         ]
 
         return SectionCard(
@@ -4333,10 +4405,6 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(demoMetrics, id: \.0) { metric in
                         HStack(spacing: 6) {
-                            Text("•")
-                                .foregroundStyle(metric.1)
-                                .font(.caption.weight(.bold))
-                                .frame(width: 12)
                             Text(metric.0)
                                 .foregroundColor(metric.1)
                                 .fontWeight(.bold)
@@ -4344,12 +4412,56 @@ struct ContentView: View {
                         }
                     }
                 }
+                .padding(.leading, 10)
             }
         }
     }
 
     private var quickstartObjectivesDemoCard: some View {
-        SectionCard(
+        struct DemoObjectiveRow {
+            let daysText: String
+            let title: String
+            let areaLabel: String
+            let areaColor: Color
+            let progress: Double?
+        }
+
+        let demoRows: [DemoObjectiveRow] = [
+            DemoObjectiveRow(
+                daysText: "271d",
+                title: "Save for a home down payment",
+                areaLabel: "Wealth & Finance",
+                areaColor: .green,
+                progress: 0.30
+            ),
+            DemoObjectiveRow(
+                daysText: "163d",
+                title: "Earn a promotion or raise",
+                areaLabel: "Career & Business",
+                areaColor: FulfillmentCategoryTheme.color(for: "Career & Business"),
+                progress: nil
+            ),
+            DemoObjectiveRow(
+                daysText: "64d",
+                title: "Lose 10lbs for summer",
+                areaLabel: "Health & Energy",
+                areaColor: FulfillmentCategoryTheme.color(for: "Health & Energy"),
+                progress: 0.20
+            ),
+            DemoObjectiveRow(
+                daysText: "315d",
+                title: "Build a close, trusted circle of 5-7 friends",
+                areaLabel: "Love & Relationship",
+                areaColor: FulfillmentCategoryTheme.color(for: "Love & Relationships"),
+                progress: nil
+            )
+        ]
+
+        func demoAreaChipColor(_ row: DemoObjectiveRow) -> Color {
+            row.areaColor.opacity(0.28)
+        }
+
+        return SectionCard(
             iconName: "scope",
             title: "Objectives",
             headerHint: "what you want",
@@ -4358,29 +4470,43 @@ struct ContentView: View {
         ) {
             HStack(alignment: .top, spacing: 2) {
                 VStack(alignment: .leading, spacing: 8) {
-                    let demoRows: [(String, String, String)] = [
-                        ("12d", "Launch weekly planning cadence", "Career & Business"),
-                        ("31d", "Improve energy baseline", "Health & Vitality")
-                    ]
                     ForEach(Array(demoRows.enumerated()), id: \.offset) { idx, row in
                         HStack(alignment: .center, spacing: 8) {
                             ZStack {
                                 RoundedRectangle(cornerRadius: 4)
-                                    .fill(categoryBackgroundColor(for: row.2))
+                                    .fill(demoAreaChipColor(row))
                                     .frame(width: 40, height: 20)
 
-                                Text(row.0)
+                                Text(row.daysText)
                                     .font(.caption)
                                     .foregroundColor(.primary)
                                     .bold()
                             }
 
-                            Text(row.1)
+                            Text(row.title)
                                 .font(.body)
-                                .foregroundColor(categoryTextColor(for: row.2))
-                                .lineLimit(1)
-                            Spacer(minLength: 0)
+                                .foregroundColor(row.areaColor)
+                                .lineLimit(2)
+                                .minimumScaleFactor(0.9)
+
+                            if let progress = row.progress {
+                                Spacer(minLength: 0)
+                                ZStack {
+                                    Circle()
+                                        .stroke(Color(UIColor.systemGray3), lineWidth: 1.5)
+                                        .frame(width: 16, height: 16)
+
+                                    Circle()
+                                        .trim(from: 0, to: max(0, min(1, progress)))
+                                        .stroke(Color.primary, lineWidth: 1.5)
+                                        .frame(width: 16, height: 16)
+                                        .rotationEffect(.degrees(-90))
+                                }
+                            } else {
+                                Spacer(minLength: 0)
+                            }
                         }
+
                         if idx < (demoRows.count - 1) {
                             Divider()
                         }
