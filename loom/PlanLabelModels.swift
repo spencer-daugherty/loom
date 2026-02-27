@@ -1,6 +1,11 @@
 import Foundation
 import SwiftData
 
+enum PlanOtherLabel {
+    static let id = UUID(uuidString: "00000000-0000-0000-0000-0000000000AA")!
+    static let title = "Other"
+}
+
 /// A seeded/default (or future user-defined) label that can be selected in Plan Step 3.
 ///
 /// Note:
@@ -102,6 +107,32 @@ final class PlanChunkSelection {
         let m = comps.month ?? 0
         let d = comps.day ?? 0
         return String(format: "%04d-%02d-%02d", y, m, d)
+    }
+}
+
+@Model
+final class ActionBlocksReflectionOtherContribution {
+    @Attribute(.unique) var id: UUID
+    var archiveId: UUID
+    var weekStart: Date
+    var plannedChunkId: UUID
+    var categoryId: UUID
+    var category: String
+
+    init(
+        id: UUID = .init(),
+        archiveId: UUID,
+        weekStart: Date,
+        plannedChunkId: UUID,
+        categoryId: UUID,
+        category: String
+    ) {
+        self.id = id
+        self.archiveId = archiveId
+        self.weekStart = weekStart
+        self.plannedChunkId = plannedChunkId
+        self.categoryId = categoryId
+        self.category = category
     }
 }
 

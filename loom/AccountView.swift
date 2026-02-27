@@ -776,6 +776,7 @@ struct AccountView: View {
         deleteAllRows(ActionBlocksReflectionArchiveAction.self)
         deleteAllRows(ActionBlocksReflectionArchiveOutcome.self)
         deleteAllRows(ActionBlocksReflectionOutcomeContribution.self)
+        deleteAllRows(ActionBlocksReflectionOtherContribution.self)
         deleteAllRows(PlanLabel.self)
         deleteAllRows(PlanChunkSelection.self)
         deleteAllRows(PlannedChunk.self)
@@ -1237,6 +1238,7 @@ struct RecentlyDeletedView: View {
         "OutcomesMeasureArchive",
         "OutcomesMeasureEntry",
         "ActionBlocksReflectionOutcomeContribution",
+        "ActionBlocksReflectionOtherContribution",
         "PlannedChunk",
         "PlanChunkSelection",
         "OutcomeAnalyticsEvent",
@@ -3415,6 +3417,7 @@ private struct DemoPlanViewContainer: View {
             ActionBlocksReflectionArchive.self,
             ActionBlocksReflectionArchiveAction.self,
             ActionBlocksReflectionArchiveOutcome.self,
+            ActionBlocksReflectionOtherContribution.self,
             PlanLabel.self,
             PlanChunkSelection.self,
             PlannedChunk.self,

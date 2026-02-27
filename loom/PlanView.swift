@@ -2467,7 +2467,7 @@ struct PlanStepThreeView: View {
 
         isHydratingFromStorage = true
         defer { isHydratingFromStorage = false }
-        let validLabelIDs = Set(selectableLabels.map(\.id))
+        let validLabelIDs = Set(selectableLabels.map(\.id)).union([PlanOtherLabel.id])
 
         let persistedChunks = plannedChunks
             .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) }
@@ -2529,6 +2529,11 @@ struct PlanStepThreeView: View {
                 chunks[sel.chunkIndex].selectionLabel = sel.label
                 chunks[sel.chunkIndex].selectionCategoryId = sel.categoryId
                 chunks[sel.chunkIndex].selectionCategory = sel.category
+            } else if sel.label?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == PlanOtherLabel.title.lowercased() {
+                chunks[sel.chunkIndex].selectionLabelId = PlanOtherLabel.id
+                chunks[sel.chunkIndex].selectionLabel = PlanOtherLabel.title
+                chunks[sel.chunkIndex].selectionCategoryId = nil
+                chunks[sel.chunkIndex].selectionCategory = nil
             } else {
                 chunks[sel.chunkIndex].selectionLabelId = nil
                 chunks[sel.chunkIndex].selectionLabel = nil
@@ -2556,6 +2561,14 @@ struct PlanStepThreeView: View {
                 chunks[pc.chunkIndex].selectionLabel = pc.label
                 chunks[pc.chunkIndex].selectionCategoryId = pc.categoryId
                 chunks[pc.chunkIndex].selectionCategory = pc.category
+            } else if
+                chunks[pc.chunkIndex].selectionLabelId == nil,
+                pc.label.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == PlanOtherLabel.title.lowercased()
+            {
+                chunks[pc.chunkIndex].selectionLabelId = PlanOtherLabel.id
+                chunks[pc.chunkIndex].selectionLabel = PlanOtherLabel.title
+                chunks[pc.chunkIndex].selectionCategoryId = nil
+                chunks[pc.chunkIndex].selectionCategory = nil
             }
 
             let orderedActions = persistedActions
@@ -3479,11 +3492,21 @@ struct PlanStepThreeLabelView: View {
         for chunk in plannedChunksForWeek {
             if let sel = selectionsByChunkIndex[chunk.chunkIndex]?.labelId {
                 map[chunk.chunkIndex] = sel
+            } else if normalizedSelectionLabel(selectionsByChunkIndex[chunk.chunkIndex]?.label) == normalizedSelectionLabel(PlanOtherLabel.title) {
+                map[chunk.chunkIndex] = PlanOtherLabel.id
+            } else if chunk.labelId == PlanOtherLabel.id || normalizedSelectionLabel(chunk.label) == normalizedSelectionLabel(PlanOtherLabel.title) {
+                map[chunk.chunkIndex] = PlanOtherLabel.id
             } else if selectableLabels.contains(where: { $0.id == chunk.labelId }) {
                 map[chunk.chunkIndex] = chunk.labelId
             }
         }
         return map
+    }
+
+    private var otherSelectedChunkIndex: Int? {
+        selectionsByChunkIndex
+            .first { $0.value.labelId == PlanOtherLabel.id || normalizedSelectionLabel($0.value.label) == normalizedSelectionLabel(PlanOtherLabel.title) }?
+            .key
     }
 
     private var isNextEnabled: Bool {
@@ -3657,12 +3680,23 @@ struct PlanStepThreeLabelView: View {
                             applySelection(label.id, to: chunk)
                         }
                     }
+                    if canSelectOther(forChunkIndex: chunkIndex) {
+                        Button(PlanOtherLabel.title) {
+                            applySelection(PlanOtherLabel.id, to: chunk)
+                        }
+                    }
                     Divider()
                     Button("Add Fulfillment Area") {
                         isShowingAddFulfillmentAreaSheet = true
                     }
                 } label: {
-                    let selectedColor = selectedName.map { FulfillmentCategoryTheme.color(for: $0) } ?? .blue
+                    let selectedColor: Color = {
+                        guard let selectedName else { return .blue }
+                        if normalizedSelectionLabel(selectedName) == normalizedSelectionLabel(PlanOtherLabel.title) {
+                            return .secondary
+                        }
+                        return FulfillmentCategoryTheme.color(for: selectedName)
+                    }()
                     HStack(spacing: 4) {
                         Text(selectedName ?? "Select…")
                             .fontWeight(selectedName == nil ? .regular : .semibold)
@@ -3725,14 +3759,26 @@ struct PlanStepThreeLabelView: View {
     }
 
     private func selectedLabelName(forChunkIndex chunkIndex: Int) -> String? {
-        guard let selectedID = selectedLabelIDsByChunkIndex[chunkIndex] else { return nil }
-        return selectableLabels.first(where: { $0.id == selectedID })?.label
+        if let selectedID = selectedLabelIDsByChunkIndex[chunkIndex] {
+            if selectedID == PlanOtherLabel.id {
+                return PlanOtherLabel.title
+            }
+            if let selected = selectableLabels.first(where: { $0.id == selectedID }) {
+                return selected.label
+            }
+        }
+        if let sel = selectionsByChunkIndex[chunkIndex],
+           normalizedSelectionLabel(sel.label) == normalizedSelectionLabel(PlanOtherLabel.title) {
+            return PlanOtherLabel.title
+        }
+        return nil
     }
 
     private func applySelection(_ labelID: UUID?, to chunk: PlannedChunk) {
         let weekStart = currentWeekStart
         let dayKey = dayKey(from: weekStart)
         let chunkIndex = chunk.chunkIndex
+        let isOtherSelection = labelID == PlanOtherLabel.id
 
         let existingSelection = allChunkSelections.first {
             Calendar.current.isDate($0.weekStart, inSameDayAs: weekStart) && $0.chunkIndex == chunkIndex
@@ -3745,7 +3791,16 @@ struct PlanStepThreeLabelView: View {
             let nextWeekChunkKey = "\(dayKey)|\(chunkIndex)"
             if selection.weekChunkKey != nextWeekChunkKey { selection.weekChunkKey = nextWeekChunkKey }
 
-            if let labelID, let selected = selectableLabels.first(where: { $0.id == labelID }) {
+            if isOtherSelection {
+                selection.labelId = PlanOtherLabel.id
+                selection.label = PlanOtherLabel.title
+                selection.categoryId = nil
+                selection.category = nil
+                chunk.labelId = PlanOtherLabel.id
+                chunk.label = PlanOtherLabel.title
+                chunk.categoryId = UUID()
+                chunk.category = ""
+            } else if let labelID, let selected = selectableLabels.first(where: { $0.id == labelID }) {
                 selection.labelId = selected.id
                 selection.label = selected.label
                 selection.categoryId = selected.categoryId
@@ -3766,7 +3821,23 @@ struct PlanStepThreeLabelView: View {
             }
             chunk.updatedAt = .now
         } else {
-            if let labelID, let selected = selectableLabels.first(where: { $0.id == labelID }) {
+            if isOtherSelection {
+                let selection = PlanChunkSelection(
+                    weekStart: weekStart,
+                    chunkIndex: chunkIndex,
+                    labelId: PlanOtherLabel.id,
+                    label: PlanOtherLabel.title,
+                    categoryId: nil,
+                    category: nil,
+                    updatedAt: .now
+                )
+                modelContext.insert(selection)
+
+                chunk.labelId = PlanOtherLabel.id
+                chunk.label = PlanOtherLabel.title
+                chunk.categoryId = UUID()
+                chunk.category = ""
+            } else if let labelID, let selected = selectableLabels.first(where: { $0.id == labelID }) {
                 let selection = PlanChunkSelection(
                     weekStart: weekStart,
                     chunkIndex: chunkIndex,
@@ -3792,6 +3863,15 @@ struct PlanStepThreeLabelView: View {
         }
 
         try? modelContext.save()
+    }
+
+    private func canSelectOther(forChunkIndex chunkIndex: Int) -> Bool {
+        guard let selectedChunk = otherSelectedChunkIndex else { return true }
+        return selectedChunk == chunkIndex
+    }
+
+    private func normalizedSelectionLabel(_ value: String?) -> String {
+        value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
     }
 
     private func dayKey(from date: Date) -> String {
@@ -3913,7 +3993,7 @@ struct PlanStepFourView: View {
         return plannedChunksForWeek.allSatisfy { chunk in
             let id = chunk.id
             let resultOK = !(resultTextByChunk[id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            let roleOK = (selectedRoleIDByChunk[id] ?? nil) != nil
+            let roleOK = isOtherChunk(chunk) || (selectedRoleIDByChunk[id] ?? nil) != nil
             return resultOK && roleOK
         }
     }
@@ -3927,8 +4007,18 @@ struct PlanStepFourView: View {
 
     private var step4MissingRoleChunkIDs: Set<UUID> {
         Set(plannedChunksForWeek.compactMap { chunk in
-            (selectedRoleIDByChunk[chunk.id] ?? nil) == nil ? chunk.id : nil
+            if isOtherChunk(chunk) { return nil }
+            return (selectedRoleIDByChunk[chunk.id] ?? nil) == nil ? chunk.id : nil
         })
+    }
+
+    private var hasAnyIdentityRequiredChunks: Bool {
+        plannedChunksForWeek.contains { !isOtherChunk($0) }
+    }
+
+    private func isOtherChunk(_ chunk: PlannedChunk) -> Bool {
+        chunk.labelId == PlanOtherLabel.id ||
+        chunk.label.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == PlanOtherLabel.title.lowercased()
     }
 
     private func selectedOutcomeIDs(excludingChunk chunkID: UUID?) -> Set<UUID> {
@@ -3950,7 +4040,12 @@ struct PlanStepFourView: View {
     }
 
     private func chunkLightFillColor(for chunk: PlannedChunk) -> Color {
-        FulfillmentCategoryColors.lightColor(for: chunk.category)
+        let isOtherChunk = chunk.labelId == PlanOtherLabel.id ||
+            chunk.label.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == PlanOtherLabel.title.lowercased()
+        if isOtherChunk {
+            return Color(.systemGray5)
+        }
+        return FulfillmentCategoryColors.lightColor(for: chunk.category)
     }
 
     var body: some View {
@@ -4032,8 +4127,10 @@ struct PlanStepFourView: View {
                         .fontWeight(.bold)
                     Text("• Result")
                         .font(.footnote)
-                    Text("• Identity")
-                        .font(.footnote)
+                    if hasAnyIdentityRequiredChunks {
+                        Text("• Identity")
+                            .font(.footnote)
+                    }
                 }
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: true, vertical: false)
@@ -4110,7 +4207,7 @@ struct PlanStepFourView: View {
                 .font(.subheadline)
                 .foregroundStyle(Color.black.opacity(0.7))
                 .padding(.top, 1)
-            Text("Write Result and Conect Identity to Action Blocks")
+            Text(hasAnyIdentityRequiredChunks ? "Write Result and Conect Identity to Action Blocks" : "Write Result to Action Blocks")
                 .font(.subheadline)
                 .fontWeight(.semibold)
                 .foregroundStyle(Color.black.opacity(0.7))
@@ -4190,6 +4287,7 @@ struct PlanStepFourView: View {
             actions: actions,
             outcomes: outcomes,
             roles: roles,
+            requiresIdentity: !isOtherChunk(chunk),
             colorScheme: colorScheme,
             targetIconName: targetIconName,
             fill: fill,
@@ -4218,6 +4316,7 @@ struct PlanStepFourView: View {
         let actions: [PlannedChunkAction]
         let outcomes: [Outcomes]
         let roles: [FulfillmentRoles]
+        let requiresIdentity: Bool
         let colorScheme: ColorScheme
         let targetIconName: String
         let fill: Color
@@ -4245,7 +4344,9 @@ struct PlanStepFourView: View {
 
                 resultSection
 
-                roleConnectRow
+                if requiresIdentity {
+                    roleConnectRow
+                }
 
                 outcomesConnectRow
 
@@ -4281,7 +4382,7 @@ struct PlanStepFourView: View {
                 Text(chunk.label)
                     .font(.subheadline)
                     .fontWeight(.bold)
-                    .foregroundStyle(FulfillmentCategoryTheme.color(for: chunk.category))
+                    .foregroundStyle(Color.black)
                     .frame(maxWidth: .infinity, alignment: .trailing)
                     .lineLimit(1)
             }
@@ -4301,7 +4402,7 @@ struct PlanStepFourView: View {
                         .foregroundStyle(forcedDarkTextColor)
                 }
 
-                TextField("Stand out as a rising star and get a raise!", text: $resultText)
+                TextField("Enter result all actions contribute to...", text: $resultText)
                     .textFieldStyle(.roundedBorder)
                     .submitLabel(.done)
                     .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
@@ -5157,8 +5258,12 @@ struct PlanStepFiveView: View {
     }
 
     private func defineChunkCard(_ chunk: PlannedChunk) -> some View {
-        let fill = FulfillmentCategoryColors.lightColor(for: chunk.category)
-        let accent = FulfillmentCategoryColors.accentColor(for: chunk.category)
+        let isOtherChunk = chunk.labelId == PlanOtherLabel.id ||
+            chunk.label.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == PlanOtherLabel.title.lowercased()
+        let fill: Color = isOtherChunk
+            ? Color(.systemGray5)
+            : FulfillmentCategoryColors.lightColor(for: chunk.category)
+        let accent: Color = .black
 
         let step4 = stepFourStatesForWeekByChunkID[chunk.id]
         let resultText = step4?.resultText ?? ""

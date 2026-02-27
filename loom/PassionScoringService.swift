@@ -311,6 +311,7 @@ struct SwiftDataPassionScoringSignalProvider: PassionScoringSignalProvider {
 
         let reflectionArchives = try modelContext.fetch(FetchDescriptor<ActionBlocksReflectionArchive>())
         let reflectionActions = try modelContext.fetch(FetchDescriptor<ActionBlocksReflectionArchiveAction>())
+        let reflectionOtherContributions = try modelContext.fetch(FetchDescriptor<ActionBlocksReflectionOtherContribution>())
 
         let outcomes = try modelContext.fetch(FetchDescriptor<Outcomes>())
         let outcomeMeasures = try modelContext.fetch(FetchDescriptor<OutcomesMeasure>())
@@ -348,7 +349,8 @@ struct SwiftDataPassionScoringSignalProvider: PassionScoringSignalProvider {
             linkedCategoryNames: linkedCategoryNames,
             explicitReflectionArchiveIDs: ReflectionPassionsStore.archiveIDs(containingAnyPassionIDs: passionItemIDs),
             reflectionArchives: reflectionArchives,
-            reflectionActions: reflectionActions
+            reflectionActions: reflectionActions,
+            reflectionOtherContributions: reflectionOtherContributions
         )
 
         let littleWinsCompletedCount = littleWinsCompletions.filter { row in
@@ -436,7 +438,8 @@ struct SwiftDataPassionScoringSignalProvider: PassionScoringSignalProvider {
         linkedCategoryNames: Set<String>,
         explicitReflectionArchiveIDs: Set<UUID>,
         reflectionArchives: [ActionBlocksReflectionArchive],
-        reflectionActions: [ActionBlocksReflectionArchiveAction]
+        reflectionActions: [ActionBlocksReflectionArchiveAction],
+        reflectionOtherContributions: [ActionBlocksReflectionOtherContribution]
     ) -> [PassionBlockSignal] {
         guard !linkedCategoryNames.isEmpty || !explicitReflectionArchiveIDs.isEmpty else { return [] }
         let archiveIDsInMonth = Set(
@@ -446,7 +449,8 @@ struct SwiftDataPassionScoringSignalProvider: PassionScoringSignalProvider {
         )
         guard !archiveIDsInMonth.isEmpty else { return [] }
 
-        let relevantActions = reflectionActions.filter {
+        let actionsInMonth = reflectionActions.filter { archiveIDsInMonth.contains($0.archiveId) }
+        let relevantActions = actionsInMonth.filter {
             archiveIDsInMonth.contains($0.archiveId) &&
             (
                 explicitReflectionArchiveIDs.contains($0.archiveId) ||
@@ -454,8 +458,23 @@ struct SwiftDataPassionScoringSignalProvider: PassionScoringSignalProvider {
             )
         }
 
-        let grouped = Dictionary(grouping: relevantActions) { row in
+        var grouped = Dictionary(grouping: relevantActions) { row in
             "\(row.archiveId.uuidString)|\(row.plannedChunkId.uuidString)"
+        }
+        let allActionsByArchiveChunk = Dictionary(grouping: actionsInMonth) { row in
+            "\(row.archiveId.uuidString)|\(row.plannedChunkId.uuidString)"
+        }
+        let otherContributionArchiveChunkKeys = Set(
+            reflectionOtherContributions.compactMap { row -> String? in
+                guard archiveIDsInMonth.contains(row.archiveId) else { return nil }
+                guard linkedCategoryNames.contains(normalizedCategory(row.category)) else { return nil }
+                return "\(row.archiveId.uuidString)|\(row.plannedChunkId.uuidString)"
+            }
+        )
+        for key in otherContributionArchiveChunkKeys where grouped[key] == nil {
+            if let rows = allActionsByArchiveChunk[key], !rows.isEmpty {
+                grouped[key] = rows
+            }
         }
 
         return grouped.values.compactMap { rows in

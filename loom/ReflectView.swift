@@ -66,6 +66,11 @@ struct ReflectView: View {
     @State private var contributionSelectionsByOutcome: [UUID: Set<UUID>] = [:]
     @State private var contributionOutcomeQueue: [Outcomes] = []
     @State private var contributionDoneActionsByOutcomeID: [UUID: [PlannedChunkAction]] = [:]
+    @State private var showOtherContributionPrompt: Bool = false
+    @State private var otherContributionChunkQueue: [PlannedChunk] = []
+    @State private var otherContributionChunkIndex: Int = 0
+    @State private var otherContributionTempSelection: Set<UUID> = []
+    @State private var otherContributionSelectionsByChunkID: [UUID: Set<UUID>] = [:]
     @State private var selectedReflectionPassionIDs: Set<UUID> = []
     @State private var isShowingReflectionPassionsSheet: Bool = false
     @State private var isShowingNoPassionsSaveConfirm: Bool = false
@@ -523,6 +528,17 @@ struct ReflectView: View {
         return ids.isSubset(of: contributionTempSelection)
     }
 
+    private var currentOtherContributionChunk: PlannedChunk? {
+        guard otherContributionChunkIndex >= 0, otherContributionChunkIndex < otherContributionChunkQueue.count else { return nil }
+        return otherContributionChunkQueue[otherContributionChunkIndex]
+    }
+
+    private var currentOtherContributionFulfillmentRows: [Fulfillment] {
+        fulfillments.sorted { lhs, rhs in
+            lhs.category.localizedCaseInsensitiveCompare(rhs.category) == .orderedAscending
+        }
+    }
+
     private var productiveDayRows: [ProductiveDayRow] {
         let cal = Calendar.current
         let firstDay = cal.startOfDay(for: weekStart)
@@ -788,6 +804,11 @@ struct ReflectView: View {
         .sheet(isPresented: $showContributionPrompt) {
             contributionPromptSheet
                 .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showOtherContributionPrompt) {
+            otherContributionPromptSheet
+                .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $isShowingReflectionPassionsSheet) {
@@ -1423,6 +1444,110 @@ struct ReflectView: View {
         }
     }
 
+    private var otherContributionPromptSheet: some View {
+        NavigationStack {
+            VStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 10) {
+                    if otherContributionChunkQueue.count > 1 {
+                        ProgressView(value: Double(otherContributionChunkIndex + 1), total: Double(otherContributionChunkQueue.count))
+                            .tint(.accentColor)
+                        Text("\(otherContributionChunkIndex + 1) of \(otherContributionChunkQueue.count)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Text("Did this \"Other\" block contribute to any Fulfillment Areas?")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Text("Select one or more areas, or choose none.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 10) {
+                        if let chunk = currentOtherContributionChunk {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Other Block")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                let actionTexts = weekActions
+                                    .filter { $0.plannedChunkId == chunk.id }
+                                    .map(\.text)
+                                if actionTexts.isEmpty {
+                                    Text("No actions in this block.")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    ForEach(actionTexts, id: \.self) { text in
+                                        Text("• \(text)")
+                                            .font(.subheadline)
+                                            .foregroundStyle(.primary)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                    }
+                                }
+                            }
+                            .padding(10)
+                            .background(Color(.systemGray5), in: RoundedRectangle(cornerRadius: 10))
+                        }
+
+                        ForEach(currentOtherContributionFulfillmentRows, id: \.category_id) { area in
+                            Button {
+                                if otherContributionTempSelection.contains(area.category_id) {
+                                    otherContributionTempSelection.remove(area.category_id)
+                                } else {
+                                    otherContributionTempSelection.insert(area.category_id)
+                                }
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: otherContributionTempSelection.contains(area.category_id) ? "checkmark.circle.fill" : "circle")
+                                        .foregroundStyle(otherContributionTempSelection.contains(area.category_id) ? Color.accentColor : Color(.systemGray3))
+                                    Text(area.category)
+                                        .foregroundStyle(.primary)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(10)
+                                .background(Color(.systemGray5), in: RoundedRectangle(cornerRadius: 10))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+
+                HStack(spacing: 12) {
+                    Button {
+                        otherContributionTempSelection.removeAll()
+                        saveCurrentOtherContributionSelection()
+                        advanceOtherContributionFlow()
+                    } label: {
+                        Text("None")
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .foregroundStyle(colorScheme == .dark ? Color(.secondaryLabel) : .black)
+                    }
+                    .background(
+                        RoundedRectangle(cornerRadius: 8).fill(Color(.systemGray5))
+                    )
+
+                    Button {
+                        saveCurrentOtherContributionSelection()
+                        advanceOtherContributionFlow()
+                    } label: {
+                        Text(otherContributionChunkIndex + 1 < otherContributionChunkQueue.count ? "Next" : "Continue")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+            .padding()
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .navigationTitle("Other Contribution")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+
     private func summaryTile(title: String, value: String, detail: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
@@ -1753,6 +1878,22 @@ struct ReflectView: View {
             }
         }
 
+        let fulfillmentByCategoryID = Dictionary(uniqueKeysWithValues: fulfillments.map { ($0.category_id, $0) })
+        for (chunkID, categoryIDs) in otherContributionSelectionsByChunkID {
+            for categoryID in categoryIDs {
+                guard let fulfillment = fulfillmentByCategoryID[categoryID] else { continue }
+                modelContext.insert(
+                    ActionBlocksReflectionOtherContribution(
+                        archiveId: archive.id,
+                        weekStart: weekStart,
+                        plannedChunkId: chunkID,
+                        categoryId: categoryID,
+                        category: fulfillment.category
+                    )
+                )
+            }
+        }
+
         persistCarriedActionProfiles()
         applyIntegratedCaptureFinalStatuses()
         recaptureCarriedActions()
@@ -1784,7 +1925,7 @@ struct ReflectView: View {
 
         let queue = contributionOutcomeQueue
         guard !queue.isEmpty else {
-            step = 2
+            beginOtherContributionFlowOrProceed()
             return
         }
         contributionOutcomeIndex = 0
@@ -1805,6 +1946,46 @@ struct ReflectView: View {
             contributionTempSelection = contributionSelectionsByOutcome[nextId] ?? []
         } else {
             showContributionPrompt = false
+            beginOtherContributionFlowOrProceed()
+        }
+    }
+
+    private func beginOtherContributionFlowOrProceed() {
+        let queue = otherLabeledChunksForContribution
+        guard !queue.isEmpty else {
+            step = 2
+            return
+        }
+        otherContributionChunkQueue = queue
+        otherContributionChunkIndex = 0
+        let firstChunkID = queue[0].id
+        otherContributionTempSelection = otherContributionSelectionsByChunkID[firstChunkID] ?? []
+        showOtherContributionPrompt = true
+    }
+
+    private var otherLabeledChunksForContribution: [PlannedChunk] {
+        let selections = Dictionary(grouping: allChunkSelections, by: \.chunkIndex)
+            .compactMapValues { rows in rows.max(by: { $0.updatedAt < $1.updatedAt }) }
+        return weekChunks.filter { chunk in
+            guard let selection = selections[chunk.chunkIndex] else { return false }
+            return selection.labelId == PlanOtherLabel.id ||
+                selection.label?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == PlanOtherLabel.title.lowercased()
+        }
+        .sorted { $0.chunkIndex < $1.chunkIndex }
+    }
+
+    private func saveCurrentOtherContributionSelection() {
+        guard let chunk = currentOtherContributionChunk else { return }
+        otherContributionSelectionsByChunkID[chunk.id] = otherContributionTempSelection
+    }
+
+    private func advanceOtherContributionFlow() {
+        if otherContributionChunkIndex + 1 < otherContributionChunkQueue.count {
+            otherContributionChunkIndex += 1
+            let nextChunkID = otherContributionChunkQueue[otherContributionChunkIndex].id
+            otherContributionTempSelection = otherContributionSelectionsByChunkID[nextChunkID] ?? []
+        } else {
+            showOtherContributionPrompt = false
             step = 2
         }
     }

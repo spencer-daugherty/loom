@@ -84,6 +84,7 @@ struct loomApp: App {
                 ActionBlocksReflectionArchiveAction.self,
                 ActionBlocksReflectionArchiveOutcome.self,
                 ActionBlocksReflectionOutcomeContribution.self,
+                ActionBlocksReflectionOtherContribution.self,
                 PlanLabel.self,
                 PlanChunkSelection.self,
                 PlannedChunk.self,

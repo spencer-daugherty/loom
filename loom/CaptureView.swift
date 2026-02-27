@@ -190,6 +190,12 @@ private struct PersistentCaptureComposerField: UIViewRepresentable {
         field.tintColor = .systemBlue
         field.backgroundColor = .clear
         field.contentVerticalAlignment = .center
+        field.textAlignment = .left
+        field.clipsToBounds = true
+        field.adjustsFontSizeToFitWidth = false
+        field.minimumFontSize = 0
+        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        field.setContentHuggingPriority(.defaultLow, for: .horizontal)
         field.autocapitalizationType = .sentences
         field.autocorrectionType = .yes
         field.borderStyle = .none
