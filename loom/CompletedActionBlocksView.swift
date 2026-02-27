@@ -8,7 +8,7 @@ private enum CompletedSearchScope: String, CaseIterable, Identifiable {
     case actionItems = "Action Items"
     case person = "Person"
     case place = "Place"
-    case purpose = "Purpose"
+    case identity = "Connect Identity"
     case result = "Result"
     var id: String { rawValue }
 }
@@ -45,20 +45,23 @@ struct CompletedActionBlocksListView: View {
                 .filter { ($0.leverageKindRaw ?? "").lowercased() == "person" }
                 .compactMap(\.leverageValue).joined(separator: " ").lowercased()
             let placeText = sessionActions.map(\.placeNamesCSV).joined(separator: " ").lowercased()
-            let purposeText = sessionActions.map(\.chunkLabel).joined(separator: " ").lowercased()
+            let identityText = sessionActions
+                .compactMap(\.purposeText)
+                .joined(separator: " ")
+                .lowercased()
             let resultText = sessionOutcomes.map(\.outcomeText).joined(separator: " ").lowercased()
 
             switch searchScope {
             case .all:
-                return [actionText, personText, placeText, purposeText, resultText].joined(separator: " ").contains(q)
+                return [actionText, personText, placeText, identityText, resultText].joined(separator: " ").contains(q)
             case .actionItems:
                 return actionText.contains(q)
             case .person:
                 return personText.contains(q)
             case .place:
                 return placeText.contains(q)
-            case .purpose:
-                return purposeText.contains(q)
+            case .identity:
+                return identityText.contains(q)
             case .result:
                 return resultText.contains(q)
             }
@@ -76,6 +79,11 @@ struct CompletedActionBlocksListView: View {
                     .listRowSeparator(.hidden)
             } else {
                 ForEach(filteredSessions) { session in
+                    let sessionActions = actionsBySession[session.id] ?? []
+                    let totalActions = sessionActions.count
+                    let doneActions = sessionActions.filter { (ActionExecutionStatus(rawValue: $0.statusRaw) ?? .noAction) == .done }.count
+                    let mustActions = sessionActions.filter(\.isMust).count
+                    let linkedOutcomes = (outcomesBySession[session.id] ?? []).count
                     NavigationLink {
                         CompletedActionBlocksDetailView(session: session)
                     } label: {
@@ -85,6 +93,13 @@ struct CompletedActionBlocksListView: View {
                             Text("Ended: \(session.completedAt.formatted(date: .abbreviated, time: .omitted))")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
+                            HStack(spacing: 8) {
+                                sessionSummaryBadge("\(totalActions)", title: "Actions")
+                                sessionSummaryBadge("\(doneActions)", title: "Done")
+                                sessionSummaryBadge("\(mustActions)", title: "Must")
+                                sessionSummaryBadge("\(linkedOutcomes)", title: "Outcomes")
+                            }
+                            .padding(.top, 2)
                         }
                         .padding(.vertical, 8)
                     }
@@ -149,6 +164,19 @@ struct CompletedActionBlocksListView: View {
             Text("Are you sure you want to delete this item? It will be available for 30 days in Account Manager.")
         }
     }
+
+    private func sessionSummaryBadge(_ value: String, title: String) -> some View {
+        HStack(spacing: 4) {
+            Text(value)
+                .font(.caption.weight(.semibold))
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Color(.secondarySystemBackground), in: Capsule())
+    }
 }
 
 private enum CompletedTab: String, CaseIterable, Identifiable {
@@ -208,6 +236,15 @@ struct CompletedActionBlocksDetailView: View {
     private var weekMindset: WeeklyMindsetEntry.Fields? {
         allMindsetRows.first { Calendar.current.isDate($0.weekStart, inSameDayAs: session.weekStart) }
     }
+    private var motivationGratitude: String {
+        weekMindset?.morningPowerQuestion.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+    private var motivationPhrase: String {
+        weekMindset?.incantation.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+    private var hasMotivationContent: Bool {
+        !motivationGratitude.isEmpty || !motivationPhrase.isEmpty
+    }
 
     var body: some View {
         VStack(spacing: 10) {
@@ -215,18 +252,20 @@ struct CompletedActionBlocksDetailView: View {
                 .font(.largeTitle)
                 .fontWeight(.bold)
 
-            Button {
-                showMotivation = true
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "bolt.square")
-                    Text("Motivation").fontWeight(.bold)
-                    Text("Tap to read")
+            if hasMotivationContent {
+                Button {
+                    showMotivation = true
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "bolt.square")
+                        Text("Motivation").fontWeight(.bold)
+                        Text("Tap to read")
+                    }
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
                 }
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
 
             Picker("", selection: $tab) {
                 ForEach(CompletedTab.allCases) { t in
@@ -250,15 +289,20 @@ struct CompletedActionBlocksDetailView: View {
         .safeAreaPadding(.top)
         .navigationTitle("Completed Action Blocks")
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(isPresented: $showMotivation) {
+        .sheet(
+            isPresented: Binding(
+                get: { showMotivation && hasMotivationContent },
+                set: { showMotivation = $0 }
+            )
+        ) {
             NavigationStack {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Motivation").font(.title2).fontWeight(.bold)
                         Text("What am I happy for or grateful about in life right now?").font(.headline)
-                        Text(weekMindset?.morningPowerQuestion ?? "—").foregroundStyle(.secondary)
+                        Text(motivationGratitude).foregroundStyle(.secondary)
                         Text("What’s a simple phrase that inspires you?").font(.headline)
-                        Text(weekMindset?.incantation ?? "—").foregroundStyle(.secondary)
+                        Text(motivationPhrase).foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding()
@@ -298,14 +342,13 @@ struct CompletedActionBlocksDetailView: View {
                         .compactMap { $0.purposeText?.trimmingCharacters(in: .whitespacesAndNewlines) }
                         .first(where: { !$0.isEmpty })
                     VStack(alignment: .leading, spacing: 10) {
-                        smallPill(icon: "tag.fill", text: "Category of Improvement: \(first?.chunkCategory ?? "")")
-                        smallPill(icon: "tray.full.fill", text: "Actions Related To: \(first?.chunkLabel ?? "")")
+                        smallPill(icon: "tag.fill", text: "Fulfillment Area: \(first?.chunkCategory ?? "")")
 
                         if let chunkResult, !chunkResult.isEmpty {
                             smallPill(icon: "target", text: "Result: \(chunkResult)")
                         }
                         if let chunkPurpose, !chunkPurpose.isEmpty {
-                            smallPill(icon: "text.alignleft", text: "Purpose: \(chunkPurpose)")
+                            smallPill(icon: "person.crop.circle", text: "Connect Identity: \(chunkPurpose)")
                         }
 
                         if let outs = outcomeByChunk[chunkId], !outs.isEmpty {

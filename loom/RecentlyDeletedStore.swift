@@ -830,6 +830,13 @@ enum RecentlyDeletedStore {
         if let m = model as? Outcomes { return m.outcome }
         if let m = model as? RollingCaptureItem { return m.text }
         if let m = model as? CompletedOutcomeArchive { return m.outcome }
+        if let m = model as? DrivingForce {
+            let vision = m.ultimateVision.trimmingCharacters(in: .whitespacesAndNewlines)
+            let purpose = m.ultimatePurpose.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !vision.isEmpty { return vision }
+            if !purpose.isEmpty { return purpose }
+            return "Purpose"
+        }
         if let m = model as? ActionBlocksReflectionArchive {
             return "Action Blocks • \(shortDate(m.startedAt)) - \(shortDate(m.completedAt))"
         }
@@ -846,9 +853,29 @@ enum RecentlyDeletedStore {
         if let m = model as? ReplacedFulfillmentCategoryArchive {
             return m.category
         }
+        if let m = model as? Passion { return m.passion }
+        if let m = model as? PassionArchive { return m.passionSnapshot }
+        if let m = model as? Fulfillment { return m.category }
+        if let m = model as? FulfillmentArchive { return m.category }
+        if let m = model as? FulfillmentRoles { return m.role }
+        if let m = model as? FulfillmentRolesArchive { return m.role }
+        if let m = model as? FulfillmentFocus { return m.activity }
+        if let m = model as? FulfillmentFocusArchive { return m.activity }
+        if let m = model as? FulfillmentResources { return m.resource }
+        if let m = model as? FulfillmentResourcesArchive { return m.resource }
+        if let m = model as? PlannedChunk { return m.label }
+        if let m = model as? PlannedChunkAction { return m.text }
+        if let m = model as? LeverageResource { return m.value }
+        if let m = model as? SensitivityPlaceCatalogItem { return m.place }
+        if let m = model as? PlannedChunkActionNote { return m.noteText }
+        if let m = model as? PlannedChunkActionAttachment {
+            if let fileName = m.fileName?.trimmingCharacters(in: .whitespacesAndNewlines), !fileName.isEmpty { return fileName }
+            if let url = m.urlString?.trimmingCharacters(in: .whitespacesAndNewlines), !url.isEmpty { return url }
+            return "Attachment"
+        }
 
         let mirror = Mirror(reflecting: model)
-        for key in ["text", "outcome", "role", "activity", "resource", "category"] {
+        for key in ["text", "outcome", "role", "activity", "resource", "category", "passion", "passionSnapshot", "value", "place", "noteText", "ultimateVision", "ultimatePurpose"] {
             if let value = mirror.children.first(where: { $0.label == key })?.value as? String,
                !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 return value
@@ -870,6 +897,9 @@ enum RecentlyDeletedStore {
         if model is ActionBlocksReflectionArchive {
             return "Completed Action Blocks"
         }
+        if model is DrivingForce {
+            return "Purpose"
+        }
         if model is DrivingForceArchive {
             return "Purpose"
         }
@@ -878,6 +908,39 @@ enum RecentlyDeletedStore {
         }
         if model is ReplacedFulfillmentCategoryArchive {
             return "Previous Category"
+        }
+        if model is Passion || model is PassionArchive {
+            return "Passion"
+        }
+        if model is Fulfillment || model is FulfillmentArchive {
+            return "Fulfillment Area"
+        }
+        if model is FulfillmentRoles || model is FulfillmentRolesArchive {
+            return "Identity"
+        }
+        if model is FulfillmentFocus || model is FulfillmentFocusArchive {
+            return "Little Win"
+        }
+        if model is FulfillmentResources || model is FulfillmentResourcesArchive {
+            return "Resource"
+        }
+        if model is PlannedChunk {
+            return "Plan Block"
+        }
+        if model is PlannedChunkAction {
+            return "Action"
+        }
+        if model is PlannedChunkActionNote {
+            return "Action Note"
+        }
+        if model is PlannedChunkActionAttachment {
+            return "Action Attachment"
+        }
+        if model is LeverageResource {
+            return "Leverage Resource"
+        }
+        if model is SensitivityPlaceCatalogItem {
+            return "Place"
         }
         return String(describing: type(of: model))
     }

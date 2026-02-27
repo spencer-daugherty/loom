@@ -1030,7 +1030,8 @@ struct ActionView: View {
                     else { return }
                     if let captureId = selection.captureItemID,
                        let capture = captureItems.first(where: { $0.id == captureId }) {
-                        RecentlyDeletedStore.trash(capture, in: modelContext)
+                        // Moving from Capture into an Action Block is a transfer, not a user delete.
+                        modelContext.delete(capture)
                     }
                     insertAction(
                         to: chunk,

@@ -1223,35 +1223,74 @@ struct RecentlyDeletedView: View {
     @State private var pendingRecoveryItem: RecentlyDeletedItem?
     @State private var missingCategoryName: String = ""
     @State private var selectedRecoveryCategory: String = ""
+    private static let hiddenEntityTypes: Set<String> = [
+        "OutcomesMeasure",
+        "OutcomesMeasureArchive",
+        "OutcomesMeasureEntry",
+        "ActionBlocksReflectionOutcomeContribution",
+        "PlannedChunk",
+        "PlanChunkSelection",
+        "OutcomeAnalyticsEvent",
+        "PassionFulfillmentJoin",
+        "PassionFulfillmentJoinArchive",
+        "PlannedChunkStepFourState",
+        "PlannedChunkOutcomeLink",
+        "ActivePlanState",
+        "LittleWinsDailyCompletion",
+        "QuickCompletedCaptureItem",
+        "RecurringCaptureDispatch",
+        "RecentlyDeletedItem",
+        "PlannedChunkActionDefineState",
+        "PlannedChunkActionExecutionState",
+        "PlannedChunkActionLeverageSelection",
+        "PlannedChunkActionSensitivityPlaceLink",
+        "PlannedChunkActionLeverageItem",
+        "PlannedChunkActionSensitivityPlace",
+        "ActionBlocksReflectionArchiveAction",
+        "ActionBlocksReflectionArchiveOutcome",
+        "CompletedOutcomeContributionArchive",
+        "CompletedOutcomePassionLinkArchive",
+        "CompletedOutcomeMeasurePointArchive"
+    ]
+
     private func entityTypeMatches(_ item: RecentlyDeletedItem, _ typeName: String) -> Bool {
         item.entityType == typeName || item.entityType.hasSuffix(".\(typeName)")
     }
-    private var visibleItems: [RecentlyDeletedItem] {
-        items.filter {
-            !entityTypeMatches($0, "OutcomesMeasure") &&
-            !entityTypeMatches($0, "OutcomesMeasureEntry") &&
-            !entityTypeMatches($0, "ActionBlocksReflectionOutcomeContribution") &&
-            !entityTypeMatches($0, "PlannedChunk") &&
-            !entityTypeMatches($0, "PlanChunkSelection") &&
-            !entityTypeMatches($0, "OutcomeAnalyticsEvent") &&
-            !entityTypeMatches($0, "PassionFulfillmentJoin")
+
+    private func baseEntityType(for item: RecentlyDeletedItem) -> String {
+        item.entityType.split(separator: ".").last.map(String.init) ?? item.entityType
+    }
+
+    private func parsedPayloadObject(for item: RecentlyDeletedItem) -> [String: Any]? {
+        guard let payload = item.payloadJSON,
+              let data = payload.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
         }
+        return object
     }
-    private var availableCategories: [String] {
-        let names = fulfillments
-            .map(\.category)
-            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        return Array(Set(names)).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+
+    private func isTechnicalFallback(_ value: String, baseType: String) -> Bool {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return true }
+        if trimmed == baseType { return true }
+        if trimmed == itemizedTypeName(baseType) { return true }
+        return false
     }
-    private func displayTitle(for item: RecentlyDeletedItem) -> String {
+
+    private func itemizedTypeName(_ baseType: String) -> String {
+        baseType
+            .replacingOccurrences(of: "([a-z])([A-Z])", with: "$1 $2", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func resolvedUserTitle(for item: RecentlyDeletedItem) -> String {
+        let baseType = baseEntityType(for: item)
+
         if entityTypeMatches(item, "DrivingForceArchive") {
             let raw = item.titleText.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !raw.isEmpty, raw != "DrivingForceArchive" {
-                return raw
-            }
-            if let payload = item.payloadJSON,
-               let data = payload.data(using: .utf8),
-               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            if !isTechnicalFallback(raw, baseType: baseType) { return raw }
+            if let object = parsedPayloadObject(for: item) {
                 let vision = ((object["visionSnapshot"] as? String) ?? (object["vision_snapshot"] as? String) ?? "")
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 let purpose = ((object["purposeSnapshot"] as? String) ?? (object["purpose_snapshot"] as? String) ?? "")
@@ -1261,37 +1300,101 @@ struct RecentlyDeletedView: View {
             }
             return "Purpose"
         }
-        return item.titleText
+
+        if entityTypeMatches(item, "PlannedChunkActionNote"),
+           let object = parsedPayloadObject(for: item) {
+            let note = ((object["noteText"] as? String) ?? (object["note_text"] as? String) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !note.isEmpty { return note }
+        }
+
+        if entityTypeMatches(item, "PlannedChunkActionAttachment"),
+           let object = parsedPayloadObject(for: item) {
+            let fileName = ((object["fileName"] as? String) ?? (object["file_name"] as? String) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !fileName.isEmpty { return fileName }
+            let url = ((object["urlString"] as? String) ?? (object["url_string"] as? String) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !url.isEmpty { return url }
+        }
+
+        let raw = item.titleText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !isTechnicalFallback(raw, baseType: baseType) {
+            return raw
+        }
+        return ""
+    }
+
+    private func isUserVisible(_ item: RecentlyDeletedItem) -> Bool {
+        let baseType = baseEntityType(for: item)
+        if Self.hiddenEntityTypes.contains(baseType) { return false }
+        return !resolvedUserTitle(for: item).isEmpty
+    }
+
+    private var visibleItems: [RecentlyDeletedItem] {
+        items.filter(isUserVisible)
+    }
+    private var availableCategories: [String] {
+        let names = fulfillments
+            .map(\.category)
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        return Array(Set(names)).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+    private func displayTitle(for item: RecentlyDeletedItem) -> String {
+        let title = resolvedUserTitle(for: item)
+        return title.isEmpty ? "Deleted item" : title
     }
     private func displaySubtitle(for item: RecentlyDeletedItem) -> String {
         if entityTypeMatches(item, "DrivingForceArchive") {
             return "Purpose"
         }
-        return item.subtitleText
+        let baseType = baseEntityType(for: item)
+        let raw = item.subtitleText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if isTechnicalFallback(raw, baseType: baseType) {
+            return ""
+        }
+        return raw
     }
     private func normalizeLegacyRecentlyDeletedRows() {
         var changed = false
-        for item in items where entityTypeMatches(item, "DrivingForceArchive") {
-            if item.subtitleText != "Purpose" {
-                item.subtitleText = "Purpose"
-                changed = true
-            }
-            let trimmed = item.titleText.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed == "DrivingForceArchive" || trimmed.isEmpty {
-                if let payload = item.payloadJSON,
-                   let data = payload.data(using: .utf8),
-                   let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                    let vision = (object["visionSnapshot"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                    let purpose = (object["purposeSnapshot"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                    let newTitle = !vision.isEmpty ? vision : (!purpose.isEmpty ? purpose : "Purpose")
-                    if item.titleText != newTitle {
-                        item.titleText = newTitle
-                        changed = true
-                    }
-                } else if item.titleText != "Purpose" {
-                    item.titleText = "Purpose"
+        for item in items {
+            if entityTypeMatches(item, "DrivingForceArchive") {
+                if item.subtitleText != "Purpose" {
+                    item.subtitleText = "Purpose"
                     changed = true
                 }
+                let trimmed = item.titleText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed == "DrivingForceArchive" || trimmed.isEmpty {
+                    if let object = parsedPayloadObject(for: item) {
+                        let vision = (object["visionSnapshot"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                        let purpose = (object["purposeSnapshot"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                        let newTitle = !vision.isEmpty ? vision : (!purpose.isEmpty ? purpose : "Purpose")
+                        if item.titleText != newTitle {
+                            item.titleText = newTitle
+                            changed = true
+                        }
+                    } else if item.titleText != "Purpose" {
+                        item.titleText = "Purpose"
+                        changed = true
+                    }
+                }
+                continue
+            }
+
+            let baseType = baseEntityType(for: item)
+            let title = item.titleText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if isTechnicalFallback(title, baseType: baseType) {
+                let improvedTitle = resolvedUserTitle(for: item)
+                if !improvedTitle.isEmpty, item.titleText != improvedTitle {
+                    item.titleText = improvedTitle
+                    changed = true
+                }
+            }
+
+            let subtitle = item.subtitleText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if isTechnicalFallback(subtitle, baseType: baseType), !item.subtitleText.isEmpty {
+                item.subtitleText = ""
+                changed = true
             }
         }
         if changed {
@@ -1307,8 +1410,8 @@ struct RecentlyDeletedView: View {
                         Text("Items remain here for 30 days, then are permanently deleted.")
                             .font(.footnote)
                             .foregroundStyle(.red)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.92)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: 0)
                     }
                     Text("Swipe right to recover and left to delete permanently.")
@@ -1326,9 +1429,15 @@ struct RecentlyDeletedView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(displayTitle(for: item))
                                 .font(.body)
-                            Text(displaySubtitle(for: item))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .lineLimit(3)
+                                .fixedSize(horizontal: false, vertical: true)
+                            if !displaySubtitle(for: item).isEmpty {
+                                Text(displaySubtitle(for: item))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
                             HStack {
                                 Text("Deleted \(item.deletedAt, format: .dateTime.month().day().year().hour().minute())")
                                     .font(.caption2)

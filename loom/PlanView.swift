@@ -6342,7 +6342,8 @@ struct PlanStepFiveView: View {
                         item.isGhost = true
                         item.unhideDate = nil
                     } else {
-                        RecentlyDeletedStore.trash(item, in: modelContext)
+                        // Moving from Capture into Action Blocks should not surface in Recently Deleted.
+                        modelContext.delete(item)
                     }
                 }
             }
