@@ -110,6 +110,21 @@ struct LoomAIContextSnapshot: Codable {
 
 @MainActor
 final class LoomAIViewModel: ObservableObject {
+    private struct DailyAPICostLedger: Codable {
+        var dayKey: String
+        var spentUSD: Double
+    }
+
+    private enum DailyBudgetConfig {
+        static let maxUSD: Double = 0.10
+        static let estimatedCharsPerToken: Double = 4.0
+        static let assumedInputUSDPer1KTokens: Double = 0.0015
+        static let assumedOutputUSDPer1KTokens: Double = 0.0060
+        static let expectedOutputTokensPerCall: Double = 420
+        static let safetyMultiplier: Double = 1.15
+        static let defaultsKey = "loomAI.chatDailyAPICost.v1"
+    }
+
     struct DebugFailureDetail {
         var statusCode: Int?
         var contentType: String?
@@ -186,11 +201,6 @@ final class LoomAIViewModel: ObservableObject {
                 content: trimmed
             )
             await MainActor.run {
-                let suggestedTitle = String(trimmed.prefix(40))
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                if !suggestedTitle.isEmpty && (thread.title == "New Chat" || (thread.threadKey == defaultThreadKey && thread.title == "Loom")) {
-                    thread.title = suggestedTitle
-                }
                 context.insert(userMessage)
                 thread.updatedAt = .now
                 try? context.save()
@@ -247,6 +257,12 @@ final class LoomAIViewModel: ObservableObject {
             print("[LoomAI] LoomAI contextBytes=\(requestDebug.contextBytes) keys=\(requestDebug.contextKeys) messageCount=\(requestDebug.messageCount)")
             #endif
 
+            guard reserveDailyBudgetForChatCall(messages: outgoing, context: contextSnapshot) else {
+                errorMessage = "LoomAI daily limit reached."
+                isSending = false
+                return
+            }
+
             let response = try await service.sendChat(messages: outgoing, context: contextSnapshot)
             let replyText = response.message.trimmingCharacters(in: .whitespacesAndNewlines)
             let finalReply = replyText.isEmpty ? "Empty response from LoomAI proxy." : replyText
@@ -266,7 +282,7 @@ final class LoomAIViewModel: ObservableObject {
             await MainActor.run {
                 let assistant = assistantPreviewMessage
                 context.insert(assistant)
-                if let summaryTitle = apiSummaryTitle ?? summarizedThreadTitle(from: updatedHistory), !summaryTitle.isEmpty {
+                if let summaryTitle = apiSummaryTitle, !summaryTitle.isEmpty {
                     thread.title = summaryTitle
                 }
                 thread.updatedAt = .now
@@ -694,6 +710,14 @@ final class LoomAIViewModel: ObservableObject {
             Recent chat:
             \(transcriptLines.joined(separator: "\n"))
             """
+
+            guard reserveDailyBudgetForChatCall(
+                messages: [.init(role: "user", content: generatorInstruction)],
+                context: snapshot
+            ) else {
+                followUpPromptChips = []
+                return
+            }
 
             let response = try await service.sendChat(
                 messages: [.init(role: "user", content: generatorInstruction)],
@@ -1545,29 +1569,65 @@ final class LoomAIViewModel: ObservableObject {
         (value * 10).rounded() / 10
     }
 
-    private func summarizedThreadTitle(from messages: [LoomAIChatMessage]) -> String? {
-        let userCandidates = messages
-            .filter { $0.roleRaw == LoomAIChatRole.user.rawValue }
-            .map(\.content)
-            .map(cleanThreadTitleCandidate)
-            .filter { !$0.isEmpty }
-        let assistantCandidates = messages
-            .filter { $0.roleRaw == LoomAIChatRole.assistant.rawValue }
-            .map(\.content)
-            .map(cleanThreadTitleCandidate)
-            .filter { !$0.isEmpty }
+    private func reserveDailyBudgetForChatCall(
+        messages: [LoomAIService.TransportMessage],
+        context: LoomAIContextSnapshot,
+        now: Date = Date()
+    ) -> Bool {
+        let estimatedCost = estimatedChatCallCostUSD(messages: messages, context: context)
+        var ledger = dailyCostLedger(for: now)
+        guard ledger.spentUSD + estimatedCost <= DailyBudgetConfig.maxUSD else { return false }
+        ledger.spentUSD += estimatedCost
+        saveDailyCostLedger(ledger)
+        return true
+    }
 
-        guard var title = userCandidates.last ?? assistantCandidates.last ?? userCandidates.first ?? assistantCandidates.first,
-              !title.isEmpty else { return nil }
+    private func remainingDailyBudgetUSD(now: Date = Date()) -> Double {
+        max(0, DailyBudgetConfig.maxUSD - dailyCostLedger(for: now).spentUSD)
+    }
 
-        title = stripCommonQuestionPrefix(from: title)
-        title = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !title.isEmpty else { return nil }
-
-        if title.count > 52 {
-            title = truncateAtWordBoundary(title, maxLength: 52)
+    private func estimatedChatCallCostUSD(
+        messages: [LoomAIService.TransportMessage],
+        context: LoomAIContextSnapshot
+    ) -> Double {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let contextBytes = (try? encoder.encode(context).count) ?? 0
+        let messageChars = messages.reduce(0) { total, item in
+            total + item.role.count + item.content.count
         }
-        return title
+        let estimatedInputTokens = Double(contextBytes + messageChars) / DailyBudgetConfig.estimatedCharsPerToken
+        let inputCost = (estimatedInputTokens / 1000.0) * DailyBudgetConfig.assumedInputUSDPer1KTokens
+        let outputCost = (DailyBudgetConfig.expectedOutputTokensPerCall / 1000.0) * DailyBudgetConfig.assumedOutputUSDPer1KTokens
+        return (inputCost + outputCost) * DailyBudgetConfig.safetyMultiplier
+    }
+
+    private func dailyCostLedger(for now: Date = Date()) -> DailyAPICostLedger {
+        let dayKey = Self.dayKeyFormatter.string(from: now)
+        guard let data = UserDefaults.standard.data(forKey: DailyBudgetConfig.defaultsKey),
+              let decoded = try? JSONDecoder().decode(DailyAPICostLedger.self, from: data),
+              decoded.dayKey == dayKey else {
+            return DailyAPICostLedger(dayKey: dayKey, spentUSD: 0)
+        }
+        return decoded
+    }
+
+    private func saveDailyCostLedger(_ ledger: DailyAPICostLedger) {
+        guard let data = try? JSONEncoder().encode(ledger) else { return }
+        UserDefaults.standard.set(data, forKey: DailyBudgetConfig.defaultsKey)
+    }
+
+    private static let dayKeyFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
+    private func formatUSD(_ value: Double) -> String {
+        String(format: "%.2f", max(0, value))
     }
 
     private func requestThreadTitleFromAI(
@@ -1602,6 +1662,13 @@ final class LoomAIViewModel: ObservableObject {
         """
 
         do {
+            guard reserveDailyBudgetForChatCall(
+                messages: [.init(role: "user", content: titleInstruction)],
+                context: contextSnapshot
+            ) else {
+                return nil
+            }
+
             let response = try await service.sendChat(
                 messages: [.init(role: "user", content: titleInstruction)],
                 context: contextSnapshot
@@ -1618,6 +1685,10 @@ final class LoomAIViewModel: ObservableObject {
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
+        if let extracted = extractThreadTitleFromJSONLikeString(title) {
+            title = extracted
+        }
+
         if title.hasPrefix("\""), title.hasSuffix("\""), title.count >= 2 {
             title.removeFirst()
             title.removeLast()
@@ -1632,6 +1703,12 @@ final class LoomAIViewModel: ObservableObject {
         title = title.trimmingCharacters(in: CharacterSet(charactersIn: ".!?-:;\"' "))
 
         let lower = title.lowercased()
+        if lower.contains("chatcmpl") || lower.contains("\"id\"") || lower.contains("\"choices\"") || lower.contains("\"object\"") {
+            return nil
+        }
+        if title.contains("{") || title.contains("}") || title.contains("[") || title.contains("]") || title.contains("`") {
+            return nil
+        }
         let invalidPrefixes = ["how ", "what ", "can ", "should ", "help "]
         let invalidExact: Set<String> = ["loom", "new chat", "chat summary", "summary", "conversation"]
         if title.isEmpty || title.count < 4 || invalidExact.contains(lower) { return nil }
@@ -1641,6 +1718,23 @@ final class LoomAIViewModel: ObservableObject {
             title = truncateAtWordBoundary(title, maxLength: 52)
         }
         return title.isEmpty ? nil : title
+    }
+
+    private func extractThreadTitleFromJSONLikeString(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let data = trimmed.data(using: .utf8) else { return nil }
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+
+        if let title = json["title"] as? String, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return title
+        }
+        if let message = json["message"] as? String, !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return message
+        }
+        if let reply = json["reply"] as? String, !reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return reply
+        }
+        return nil
     }
 
     private func cleanThreadTitleCandidate(_ text: String) -> String {

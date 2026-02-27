@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UserNotifications
 
 fileprivate let loomAIInsightsRefreshToggleDefaultsKey = "loom.enableLoomAIInsightsRefresh"
 
@@ -3463,15 +3464,163 @@ struct DataPrinterDetailView: View {
 }
 
 private struct NotificationsPlaceholderView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.openURL) private var openURL
+    @State private var settings: LoomNotificationSettings = LoomNotificationSettingsStore.load()
+    @State private var authorizationStatus: UNAuthorizationStatus = .notDetermined
+    @State private var syncTask: Task<Void, Never>? = nil
+
     var body: some View {
-        List {
-            Section {
-                Text("Notifications settings are coming soon.")
-                    .foregroundStyle(.secondary)
+        Form {
+            Section("Permission") {
+                HStack {
+                    Text("Status")
+                    Spacer()
+                    Text(authorizationStatusLabel)
+                        .foregroundStyle(.secondary)
+                }
+
+                if authorizationStatus == .notDetermined {
+                    Button("Allow Notifications") {
+                        Task {
+                            _ = await LoomNotificationScheduler.requestAuthorization()
+                            await refreshAuthorizationStatus()
+                            scheduleResync(immediate: true)
+                        }
+                    }
+                } else if authorizationStatus == .denied {
+                    Button("Open Settings") {
+                        guard let url = URL(string: "app-settings:") else { return }
+                        openURL(url)
+                    }
+                }
+            }
+
+            Section("All") {
+                Toggle(
+                    "All Notifications",
+                    isOn: Binding(
+                        get: { settings.allNotificationsEnabled },
+                        set: { isOn in
+                            settings.allNotificationsEnabled = isOn
+                            persistAndResync()
+                        }
+                    )
+                )
+            }
+
+            Section("Insights") {
+                toggleRow("Purpose Insights", keyPath: \.purposeInsights)
+                toggleRow("Fulfillment Insights", keyPath: \.fulfillmentInsights)
+            }
+
+            Section("Outcomes") {
+                toggleRow("Outcomes Starting", keyPath: \.outcomesStarting)
+                toggleRow("Outcome Ending Soon", keyPath: \.outcomeEndingSoon)
+                if settings.outcomeEndingSoon {
+                    Picker(
+                        "Days Before End",
+                        selection: Binding(
+                            get: { settings.outcomeEndingSoonDays },
+                            set: { newValue in
+                                settings.outcomeEndingSoonDays = newValue
+                                persistAndResync()
+                            }
+                        )
+                    ) {
+                        ForEach(1...30, id: \.self) { day in
+                            Text("\(day) day\(day == 1 ? "" : "s")").tag(day)
+                        }
+                    }
+                }
+                toggleRow("Outcome End Date", keyPath: \.outcomeEndDate)
+            }
+
+            Section("Capture & Actions") {
+                toggleRow("Action Captured", keyPath: \.actionCaptured)
+                toggleRow("Capture Action Attention", keyPath: \.captureActionAttention)
+                toggleRow("Action Due", keyPath: \.actionDue)
+                toggleRow("Action Block Aging", keyPath: \.actionBlockAging)
+                toggleRow("Little Wins", keyPath: \.littleWins)
+            }
+
+            Section("Vacation Mode") {
+                toggleRow("Vacation Mode Attention", keyPath: \.vacationModeAttention)
+                toggleRow("Vacation Mode Starting", keyPath: \.vacationModeStarting)
             }
         }
         .navigationTitle("Notifications")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            settings = LoomNotificationSettingsStore.load()
+            Task {
+                await refreshAuthorizationStatus()
+                scheduleResync(immediate: true)
+            }
+        }
+        .onDisappear {
+            syncTask?.cancel()
+            syncTask = nil
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            Task {
+                await refreshAuthorizationStatus()
+                scheduleResync(immediate: false)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func toggleRow(
+        _ title: String,
+        keyPath: WritableKeyPath<LoomNotificationSettings, Bool>
+    ) -> some View {
+        Toggle(
+            title,
+            isOn: Binding(
+                get: { settings[keyPath: keyPath] },
+                set: { isOn in
+                    settings[keyPath: keyPath] = isOn
+                    persistAndResync()
+                }
+            )
+        )
+    }
+
+    private var authorizationStatusLabel: String {
+        switch authorizationStatus {
+        case .authorized: return "Allowed"
+        case .provisional: return "Provisional"
+        case .ephemeral: return "Ephemeral"
+        case .denied: return "Denied"
+        case .notDetermined: return "Not requested"
+        @unknown default: return "Unknown"
+        }
+    }
+
+    private func persistAndResync() {
+        settings = settings.normalized
+        LoomNotificationSettingsStore.save(settings)
+        scheduleResync(immediate: false)
+    }
+
+    private func scheduleResync(immediate: Bool) {
+        syncTask?.cancel()
+        syncTask = Task { @MainActor in
+            if !immediate {
+                try? await Task.sleep(nanoseconds: 450_000_000)
+            }
+            await LoomNotificationScheduler.reschedule(using: modelContext)
+        }
+    }
+
+    private func refreshAuthorizationStatus() async {
+        let status = await LoomNotificationScheduler.authorizationStatus()
+        await MainActor.run {
+            authorizationStatus = status
+        }
     }
 }
 

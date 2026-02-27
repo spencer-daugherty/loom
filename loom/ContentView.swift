@@ -79,6 +79,7 @@ struct ContentView: View {
     @State private var showLoomAIChatMenu = false
     @State private var loomAIHeaderMenuButtonFrame: CGRect = .zero
     @State private var headerFrameInRootSpace: CGRect = .zero
+    @State private var notificationResyncTask: Task<Void, Never>? = nil
 
     private enum PlayDestination: String, Identifiable, Hashable {
         case action
@@ -548,6 +549,7 @@ struct ContentView: View {
             .onChange(of: scenePhase) { _, phase in
                 guard phase == .active else { return }
                 refreshFulfillmentCategoryScoresForCurrentWeek()
+                scheduleNotificationResync(immediate: true)
             }
             .onChange(of: fulfillments.map(\.updatedAt)) { _, _ in
                 refreshFulfillmentCategoryScoresForCurrentWeek()
@@ -564,7 +566,26 @@ struct ContentView: View {
     }
 
     private var contentViewRefreshObservers: some View {
-        contentViewPrimaryRefreshObservers
+        contentViewRefreshNotificationObservers(contentViewPrimaryRefreshObservers)
+    }
+
+    private func contentViewRefreshNotificationObservers<V: View>(_ view: V) -> some View {
+        contentViewRefreshDataObservers(
+            view
+            .onAppear {
+                scheduleNotificationResync(immediate: true)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .vacationModeDidChange)) { _ in
+                scheduleNotificationResync(immediate: false)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .littleWinsScheduleDidChange)) { _ in
+                scheduleNotificationResync(immediate: false)
+            }
+        )
+    }
+
+    private func contentViewRefreshDataObservers<V: View>(_ view: V) -> some View {
+        view
             .onChange(of: passions.map(\.passion_id)) { _, _ in
                 refreshFulfillmentCategoryScoresForCurrentWeek()
             }
@@ -579,6 +600,9 @@ struct ContentView: View {
             }
             .onChange(of: outcomes.map(\.updatedAt)) { _, _ in
                 refreshFulfillmentCategoryScoresForCurrentWeek()
+            }
+            .onChange(of: notificationResyncFingerprint) { _, _ in
+                scheduleNotificationResync(immediate: false)
             }
     }
 
@@ -637,6 +661,16 @@ struct ContentView: View {
         _ = try? modelContext.fetch(descriptor)
     }
 
+    private func scheduleNotificationResync(immediate: Bool = false) {
+        notificationResyncTask?.cancel()
+        notificationResyncTask = Task { @MainActor in
+            if !immediate {
+                try? await Task.sleep(nanoseconds: 650_000_000)
+            }
+            await LoomNotificationScheduler.reschedule(using: modelContext)
+        }
+    }
+
     @Query(sort: \DrivingForce.updatedAt, order: .reverse)
     private var drivingForces: [DrivingForce]
     
@@ -662,6 +696,14 @@ struct ContentView: View {
     @Query private var resources: [FulfillmentResources]
     @Query(sort: \LittleWinsDailyCompletion.completedAt, order: .reverse)
     private var littleWinsDailyCompletions: [LittleWinsDailyCompletion]
+    @Query(sort: \RollingCaptureItem.createdAt, order: .reverse)
+    private var notificationCaptureItems: [RollingCaptureItem]
+    @Query(sort: \RecurringCaptureRule.createdAt, order: .reverse)
+    private var notificationRecurringRules: [RecurringCaptureRule]
+    @Query(sort: \RecurringCaptureDispatch.sentAt, order: .reverse)
+    private var notificationRecurringDispatches: [RecurringCaptureDispatch]
+    @Query(sort: \PlannedChunkAction.createdAt, order: .reverse)
+    private var notificationPlannedActions: [PlannedChunkAction]
     @Query(sort: \ActionBlocksReflectionArchive.completedAt, order: .reverse)
     private var reflectionArchives: [ActionBlocksReflectionArchive]
     @Query(sort: \FulfillmentCategoryScoreSnapshot.weekStartDate, order: .reverse)
@@ -674,6 +716,55 @@ struct ContentView: View {
     // MARK: - Helpers to simplify complex expressions
     private func categoryTextColor(for category: String) -> Color {
         FulfillmentCategoryTheme.color(for: category)
+    }
+
+    private var notificationOutcomesFingerprint: [String] {
+        outcomes.map {
+            "\($0.outcome_id.uuidString)|\($0.start.timeIntervalSince1970)|\($0.end.timeIntervalSince1970)"
+        }
+    }
+
+    private var notificationCaptureFingerprint: [String] {
+        notificationCaptureItems.map {
+            "\($0.id.uuidString)|\($0.isGhost)|\($0.dueDate?.timeIntervalSince1970 ?? 0)|\($0.dueDateAttentionDays ?? -1)|\($0.unhideDate?.timeIntervalSince1970 ?? 0)|\($0.unhiddenAt?.timeIntervalSince1970 ?? 0)"
+        }
+    }
+
+    private var notificationRecurringRulesFingerprint: [String] {
+        notificationRecurringRules.map {
+            "\($0.id.uuidString)|\($0.isActive)|\($0.captureDaysBeforeDueDate)|\($0.nextRunAt.timeIntervalSince1970)|\($0.endDate?.timeIntervalSince1970 ?? 0)"
+        }
+    }
+
+    private var notificationRecurringDispatchFingerprint: [String] {
+        notificationRecurringDispatches.map {
+            "\($0.id.uuidString)|\($0.captureItemID.uuidString)|\($0.ruleID.uuidString)|\($0.sentAt.timeIntervalSince1970)"
+        }
+    }
+
+    private var notificationActionAgingFingerprint: [String] {
+        notificationPlannedActions.map {
+            "\($0.id.uuidString)|\($0.weekStart.timeIntervalSince1970)|\($0.createdAt.timeIntervalSince1970)"
+        }
+    }
+
+    private var notificationLittleWinsFingerprint: [String] {
+        let fociPart = foci.map { "\($0.id.uuidString)|\($0.updatedAt.timeIntervalSince1970)" }
+        let completionPart = littleWinsDailyCompletions.map {
+            "\($0.id.uuidString)|\($0.focusId.uuidString)|\($0.day.timeIntervalSince1970)"
+        }
+        return fociPart + completionPart
+    }
+
+    private var notificationResyncFingerprint: Int {
+        var hasher = Hasher()
+        for value in notificationOutcomesFingerprint { hasher.combine(value) }
+        for value in notificationCaptureFingerprint { hasher.combine(value) }
+        for value in notificationRecurringRulesFingerprint { hasher.combine(value) }
+        for value in notificationRecurringDispatchFingerprint { hasher.combine(value) }
+        for value in notificationActionAgingFingerprint { hasher.combine(value) }
+        for value in notificationLittleWinsFingerprint { hasher.combine(value) }
+        return hasher.finalize()
     }
 
     private func categoryBaseUIColor(for category: String) -> UIColor {
@@ -2157,11 +2248,11 @@ struct ContentView: View {
         let todayHasCompletedCard = !completedCards.isEmpty
         let streakShowsTodayComplete = allActiveCardsCompleted && todayHasCompletedCard
         let completedCardStreakCount = littleWinsCompletedCardStreakCount()
-        let todayMiniStackTopOverflow = littleWinsMiniStackTopOverflow(forCardCount: completedCards.count)
+        let calendarOverlayTopOverflow = littleWinsCalendarOverlayTopOverflow(completedTodayCards: completedCards)
         let calendarBadgeRowHeight: CGFloat = 36
-        let calendarBadgeVisualLift = todayMiniStackTopOverflow + calendarBadgeRowHeight + 34
+        let calendarBadgeVisualLift = calendarOverlayTopOverflow + calendarBadgeRowHeight + 34
         let calendarBadgeHitAreaTopPadding = calendarBadgeRowHeight + 8
-        let calendarRowHeight: CGFloat = 84 + todayMiniStackTopOverflow
+        let calendarRowHeight: CGFloat = 84 + calendarOverlayTopOverflow
         // Reserve only the actual laid-out calendar band height (row + paddings/spacers),
         // so the deck can use remaining space before hiding back cards.
         let calendarBandReserve: CGFloat = calendarRowHeight + 14
@@ -2374,6 +2465,19 @@ struct ContentView: View {
         let miniStackLiftPerCard = min(6, max(4, miniCardHeight * 0.14))
         let visibleStackCount = min(7, max(0, cardCount))
         return CGFloat(max(0, visibleStackCount - 1)) * miniStackLiftPerCard
+    }
+
+    private func littleWinsCalendarOverlayTopOverflow(completedTodayCards: [LittleWinsCardData]) -> CGFloat {
+        let calendar = Calendar.current
+        return lastSevenDatesEndingToday().reduce(CGFloat.zero) { currentMax, date in
+            let cardCount: Int
+            if calendar.isDateInToday(date) {
+                cardCount = completedTodayCards.count
+            } else {
+                cardCount = littleWinsCompletedCards(on: date).count
+            }
+            return max(currentMax, littleWinsMiniStackTopOverflow(forCardCount: cardCount))
+        }
     }
 
     private func littleWinsDeckView(

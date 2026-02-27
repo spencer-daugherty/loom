@@ -101,7 +101,34 @@ enum LoomAIChatMessageActionsCodec {
 
     static func decode(_ json: String?) -> [LoomAISuggestedAction] {
         guard let json, let data = json.data(using: .utf8) else { return [] }
-        return (try? JSONDecoder().decode([LoomAISuggestedAction].self, from: data)) ?? []
+        let decoded = (try? JSONDecoder().decode([LoomAISuggestedAction].self, from: data)) ?? []
+        return deduplicated(decoded)
+    }
+
+    private static func deduplicated(_ actions: [LoomAISuggestedAction]) -> [LoomAISuggestedAction] {
+        var seen = Set<String>()
+        var unique: [LoomAISuggestedAction] = []
+        unique.reserveCapacity(actions.count)
+
+        for action in actions {
+            let key = deduplicationKey(for: action)
+            if seen.insert(key).inserted {
+                unique.append(action)
+            }
+        }
+        return unique
+    }
+
+    private static func deduplicationKey(for action: LoomAISuggestedAction) -> String {
+        let normalizedType = action.type.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let normalizedTitle = action.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let normalizedPayload = action.payload
+            .map { key, value in
+                "\(key.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())=\(value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())"
+            }
+            .sorted()
+            .joined(separator: "&")
+        return "\(normalizedType)|\(normalizedTitle)|\(normalizedPayload)"
     }
 }
 

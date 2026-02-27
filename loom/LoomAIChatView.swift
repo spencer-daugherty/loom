@@ -572,7 +572,7 @@ struct LoomAIChatView: View {
             suggestedLittleWinPrimaryText(action: action, isApplied: isApplied)
         } else if action.type == "replaceFulfillmentMission" {
             suggestedSimpleTwoLineAction(
-                topLine: isApplied ? "Updated Mission:" : "Update Mission:",
+                topLine: missionTopLine(for: action, isApplied: isApplied),
                 detail: action.payload["mission"] ?? action.payload["text"] ?? action.payload["purpose"] ?? action.title,
                 isApplied: isApplied
             )
@@ -793,13 +793,13 @@ struct LoomAIChatView: View {
         case "createLittleWin":
             return nil
         case "replaceLittleWin":
-            return "Replaces the existing Little Win shown below."
+            return nil
         case "replaceFulfillmentMission":
             return missionActionSubtitle(action)
         case "addFulfillmentIdentity":
             return categoryOnlySubtitle(action, fallback: "Adds a new identity role.")
         case "replaceFulfillmentIdentity":
-            return categoryOnlySubtitle(action, fallback: "Replaces an identity role in this area.")
+            return categoryOnlySubtitle(action, fallback: "")
         case "replacePurposeVision":
             return "Updates your Purpose Vision."
         case "addPassion":
@@ -816,12 +816,17 @@ struct LoomAIChatView: View {
     }
 
     private func missionActionSubtitle(_ action: LoomAISuggestedAction) -> String? {
-        categoryOnlySubtitle(action, fallback: "Replaces the mission for this Fulfillment Area.")
+        categoryOnlySubtitle(action, fallback: "")
+    }
+
+    private func missionTopLine(for action: LoomAISuggestedAction, isApplied: Bool) -> String {
+        let category = (action.payload["categoryName"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let prefix = isApplied ? "Updated" : "Update"
+        return category.isEmpty ? "\(prefix) Mission:" : "\(prefix) \(category) Mission:"
     }
 
     private func categoryOnlySubtitle(_ action: LoomAISuggestedAction, fallback: String) -> String {
-        let category = (action.payload["categoryName"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return category.isEmpty ? fallback : "Area: \(category)"
+        fallback
     }
 
     private func suggestedActionSymbolName(for action: LoomAISuggestedAction) -> String? {

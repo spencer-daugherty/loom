@@ -18,6 +18,12 @@ private struct ActionViewSourceDueDateOverrideRecord: Codable {
     let dueDateUnix: TimeInterval
 }
 
+private struct ActionDuePresentation {
+    let text: String?
+    let color: Color
+    let hasDueDate: Bool
+}
+
 struct ActionView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
@@ -119,6 +125,7 @@ struct ActionView: View {
     @State private var dismissActionViewAfterReflect: Bool = false
     @State private var deferredPersistor = ActionDeferredPersistor()
     @State private var carriedProfileAppliedActionIDs: Set<UUID> = []
+    @State private var dueSnapshotsCache: [String: PlannedActionDueSnapshot] = [:]
     private let weekStart: Date
 
     init() {
@@ -183,30 +190,45 @@ struct ActionView: View {
         allChunks
     }
 
+    private var weekActionsByID: [UUID: PlannedChunkAction] {
+        Dictionary(uniqueKeysWithValues: weekActions.map { ($0.id, $0) })
+    }
+
+    private var weekActionsByChunkID: [UUID: [PlannedChunkAction]] {
+        Dictionary(grouping: weekActions, by: \.plannedChunkId)
+    }
+
+    private var activeActionIDs: Set<UUID> {
+        let executionByAction = executionStateByActionID
+        return Set(
+            weekActions.compactMap { action in
+                let status = executionByAction[action.id]?.status ?? .noAction
+                return isActiveStatus(status) ? action.id : nil
+            }
+        )
+    }
+
+    private var activeChunkIDs: Set<UUID> {
+        Set(weekActions.compactMap { activeActionIDs.contains($0.id) ? $0.plannedChunkId : nil })
+    }
+
     private var orderedWeekChunksForDisplay: [PlannedChunk] {
         let sortedByIndex = weekChunks.sorted { $0.chunkIndex < $1.chunkIndex }
+        let chunkOrderSet = Set(localChunkOrderIDs)
         let baseOrder: [PlannedChunk] = {
             guard !localChunkOrderIDs.isEmpty else { return sortedByIndex }
             let byID = Dictionary(uniqueKeysWithValues: sortedByIndex.map { ($0.id, $0) })
             let ordered = localChunkOrderIDs.compactMap { byID[$0] }
             if ordered.count == sortedByIndex.count { return ordered }
             let missing = sortedByIndex.filter { chunk in
-                !localChunkOrderIDs.contains(chunk.id)
+                !chunkOrderSet.contains(chunk.id)
             }
             return ordered + missing
         }()
 
-        let activeBlocks = baseOrder.filter { chunkHasAnyActiveActions($0.id) }
-        let completedBlocks = baseOrder.filter { !chunkHasAnyActiveActions($0.id) }
+        let activeBlocks = baseOrder.filter { activeChunkIDs.contains($0.id) }
+        let completedBlocks = baseOrder.filter { !activeChunkIDs.contains($0.id) }
         return activeBlocks + completedBlocks
-    }
-
-    private func chunkHasAnyActiveActions(_ chunkID: UUID) -> Bool {
-        weekActions.contains { action in
-            guard action.plannedChunkId == chunkID else { return false }
-            let status = executionStateByActionID[action.id]?.status ?? .noAction
-            return isActiveStatus(status)
-        }
     }
 
     private var weekActions: [PlannedChunkAction] {
@@ -341,7 +363,8 @@ struct ActionView: View {
     }
 
     private var availableDurations: [Int] {
-        let mins = Set(weekActions.compactMap { defineStateByActionID[$0.id]?.timeEstimateMinutes })
+        let defineByAction = defineStateByActionID
+        let mins = Set(weekActions.compactMap { defineByAction[$0.id]?.timeEstimateMinutes })
         return mins.sorted()
     }
 
@@ -360,7 +383,8 @@ struct ActionView: View {
     }
 
     private var inProgressCount: Int {
-        weekActions.filter { status(for: $0.id) == .inProgress }.count
+        let executionByAction = executionStateByActionID
+        return weekActions.filter { (executionByAction[$0.id]?.status ?? .noAction) == .inProgress }.count
     }
 
     private var blocksAgeDays: Int? {
@@ -371,15 +395,17 @@ struct ActionView: View {
     }
     private var canCompleteActions: Bool {
         guard !weekActions.isEmpty else { return false }
+        let executionByAction = executionStateByActionID
         return weekActions.allSatisfy { action in
-            let s = status(for: action.id)
+            let s = executionByAction[action.id]?.status ?? .noAction
             return s == .done || s == .carriedToCapture || s == .notNeeded
         }
     }
 
     private var hasUncompletedActions: Bool {
-        weekActions.contains { action in
-            let s = status(for: action.id)
+        let executionByAction = executionStateByActionID
+        return weekActions.contains { action in
+            let s = executionByAction[action.id]?.status ?? .noAction
             return s == .noAction || s == .leveraged || s == .inProgress
         }
     }
@@ -450,9 +476,10 @@ struct ActionView: View {
 
     private var contextualTimeOfDayOptions: [TimeOfDayChoice] {
         let base = filteredActionsForVisibility(excluding: [.timeOfDay])
+        let defineByAction = defineStateByActionID
         var options = Set<TimeOfDayChoice>()
         for action in base {
-            let st = defineStateByActionID[action.id]
+            let st = defineByAction[action.id]
             let hasMorning = st?.sensitiveMorning ?? true
             let hasAfternoon = st?.sensitiveAfternoon ?? true
             let hasEvening = st?.sensitiveEvening ?? true
@@ -471,17 +498,20 @@ struct ActionView: View {
 
     private var contextualDurations: [Int] {
         let base = filteredActionsForVisibility(excluding: [.duration])
-        var values = Set(base.compactMap { defineStateByActionID[$0.id]?.timeEstimateMinutes })
+        let defineByAction = defineStateByActionID
+        var values = Set(base.compactMap { defineByAction[$0.id]?.timeEstimateMinutes })
         values.formUnion(selectedDurations)
         return values.sorted()
     }
 
     private var contextualAttachmentKinds: [ActionAttachmentFilterKind] {
         let base = filteredActionsForVisibility(excluding: [.attachments])
+        let notesByAction = notesByActionID
+        let attachmentsByAction = attachmentsByActionID
         var kinds = Set<ActionAttachmentFilterKind>()
         for action in base {
-            let note = notesByActionID[action.id]?.noteText ?? ""
-            let atts = attachmentsByActionID[action.id] ?? []
+            let note = notesByAction[action.id]?.noteText ?? ""
+            let atts = attachmentsByAction[action.id] ?? []
             if !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { kinds.insert(.note) }
             if atts.contains(where: { $0.kind == .link }) { kinds.insert(.link) }
             if atts.contains(where: { $0.kind == .file }) { kinds.insert(.file) }
@@ -537,8 +567,9 @@ struct ActionView: View {
         let attachmentsByAction = attachmentsByActionID
         let resourcesByAction = selectedResourceByActionID
         let placesByAction = placeIDsByActionID
+        let duePresentationByActionID = buildDuePresentationByActionID()
         let resourcesCatalogByID = resourceByID
-        let allByChunk = Dictionary(grouping: weekActions, by: \.plannedChunkId)
+        let allByChunk = weekActionsByChunkID
         let rolesByID = Dictionary(uniqueKeysWithValues: roles.map { ($0.id, $0.role) })
         let outcomesByID = Dictionary(uniqueKeysWithValues: outcomes.map { ($0.outcome_id, $0) })
         let filteredByChunk = buildFilteredActionsByChunk(
@@ -584,6 +615,7 @@ struct ActionView: View {
                                     placesByAction: placesByAction,
                                     notesByAction: notesByAction,
                                     attachmentsByAction: attachmentsByAction,
+                                    duePresentationByActionID: duePresentationByActionID,
                                     rolesByID: rolesByID,
                                     outcomesByID: outcomesByID
                                 )
@@ -1004,6 +1036,7 @@ struct ActionView: View {
         }
         .onAppear {
             dismissActionBlocksCautionCard = false
+            dueSnapshotsCache = loadActionDueSnapshots(for: currentWeekStart)
             ensureStateRowsExistForWeek()
             applyCarriedProfilesToWeekActionsIfNeeded()
             cleanupAllBlankActions()
@@ -1235,17 +1268,20 @@ struct ActionView: View {
 
     private var inactiveOnlyCandidateCount: Int {
         let base = filteredActionsForVisibility(excluding: [.activeOnly])
-        return base.filter { isInactiveStatus(status(for: $0.id)) }.count
+        let executionByAction = executionStateByActionID
+        return base.filter { isInactiveStatus(executionByAction[$0.id]?.status ?? .noAction) }.count
     }
 
     private var leveragedOnlyCandidateCount: Int {
         let base = filteredActionsForVisibility(excluding: [.leveragedOnly])
-        return base.filter { status(for: $0.id) == .leveraged }.count
+        let executionByAction = executionStateByActionID
+        return base.filter { (executionByAction[$0.id]?.status ?? .noAction) == .leveraged }.count
     }
 
     private var inProgressOnlyCandidateCount: Int {
         let base = filteredActionsForVisibility(excluding: [.inProgressOnly])
-        return base.filter { status(for: $0.id) == .inProgress }.count
+        let executionByAction = executionStateByActionID
+        return base.filter { (executionByAction[$0.id]?.status ?? .noAction) == .inProgress }.count
     }
 
     private var mustsOnlyCandidateCount: Int {
@@ -1449,6 +1485,7 @@ struct ActionView: View {
         placesByAction: [UUID: Set<UUID>],
         notesByAction: [UUID: PlannedChunkActionNote],
         attachmentsByAction: [UUID: [PlannedChunkActionAttachment]],
+        duePresentationByActionID: [UUID: ActionDuePresentation],
         rolesByID: [UUID: String],
         outcomesByID: [UUID: Outcomes]
     ) -> some View {
@@ -1479,8 +1516,7 @@ struct ActionView: View {
             return ordered.count == filtered.count ? ordered : filtered
         }()
 
-        let cardBody = AnyView(
-            chunkCardBody(
+        let cardBody = chunkCardBody(
             chunk: chunk,
             allForChunk: allForChunk,
             filtered: filtered,
@@ -1491,6 +1527,7 @@ struct ActionView: View {
             placesByAction: placesByAction,
             notesByAction: notesByAction,
             attachmentsByAction: attachmentsByAction,
+            duePresentationByActionID: duePresentationByActionID,
             accent: accent,
             roleName: roleName,
             outcomesForChunk: outcomesForChunk,
@@ -1501,29 +1538,20 @@ struct ActionView: View {
             canShowFooterControls: canShowFooterControls,
             canReorderDisplayedActions: canReorderDisplayedActions
             )
-        )
-
-        let padded = AnyView(
-            cardBody
-                .padding(12)
-                .background(fill, in: RoundedRectangle(cornerRadius: 14))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .stroke(colorScheme == .dark ? Color.white.opacity(0.18) : Color.black.opacity(0.12), lineWidth: 1)
-                )
-                .contentShape(Rectangle())
-        )
-
-        let tappable = AnyView(
-            padded
-                .onTapGesture {
-                    if areAllActionBlocksCollapsed {
-                        expandAllActionBlocksAndScrollToTop(anchor: "chunk-\(chunk.id.uuidString)")
-                    }
+        
+        return cardBody
+            .padding(12)
+            .background(fill, in: RoundedRectangle(cornerRadius: 14))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(colorScheme == .dark ? Color.white.opacity(0.18) : Color.black.opacity(0.12), lineWidth: 1)
+            )
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if areAllActionBlocksCollapsed {
+                    expandAllActionBlocksAndScrollToTop(anchor: "chunk-\(chunk.id.uuidString)")
                 }
-        )
-
-        return tappable
+            }
             .sheet(item: $rearrangeActionsSheetPayload) { sheet in
                 RearrangeActionsSheet(
                     items: sheet.items,
@@ -1546,6 +1574,7 @@ struct ActionView: View {
         placesByAction: [UUID: Set<UUID>],
         notesByAction: [UUID: PlannedChunkActionNote],
         attachmentsByAction: [UUID: [PlannedChunkActionAttachment]],
+        duePresentationByActionID: [UUID: ActionDuePresentation],
         accent: Color,
         roleName: String,
         outcomesForChunk: [Outcomes],
@@ -1579,6 +1608,7 @@ struct ActionView: View {
                     placesByAction: placesByAction,
                     notesByAction: notesByAction,
                     attachmentsByAction: attachmentsByAction,
+                    duePresentationByActionID: duePresentationByActionID,
                     accent: accent,
                     roleName: roleName,
                     outcomesForChunk: outcomesForChunk,
@@ -1650,6 +1680,7 @@ struct ActionView: View {
         placesByAction: [UUID: Set<UUID>],
         notesByAction: [UUID: PlannedChunkActionNote],
         attachmentsByAction: [UUID: [PlannedChunkActionAttachment]],
+        duePresentationByActionID: [UUID: ActionDuePresentation],
         accent: Color,
         roleName: String,
         outcomesForChunk: [Outcomes],
@@ -1748,9 +1779,9 @@ struct ActionView: View {
                     }()
                     let placeIDs = placesByAction[action.id] ?? []
                     let hasSensitivity = hasAnySensitivity(
-                        actionId: action.id,
                         defineState: defineState,
-                        placeIDs: placeIDs
+                        placeIDs: placeIDs,
+                        hasDueDate: duePresentationByActionID[action.id]?.hasDueDate ?? false
                     )
                     let hasAttachments = hasAnyAttachments(
                         note: notesByAction[action.id],
@@ -1761,6 +1792,7 @@ struct ActionView: View {
                         actionRow(
                             action: action,
                             accent: accent,
+                            duePresentation: duePresentationByActionID[action.id],
                             defineState: defineState,
                             status: status,
                             hasLeverage: hasLeverage,
@@ -1795,6 +1827,7 @@ struct ActionView: View {
                         actionRow(
                             action: action,
                             accent: accent,
+                            duePresentation: duePresentationByActionID[action.id],
                             defineState: defineState,
                             status: status,
                             hasLeverage: hasLeverage,
@@ -1937,6 +1970,7 @@ struct ActionView: View {
     private func actionRow(
         action: PlannedChunkAction,
         accent: Color,
+        duePresentation: ActionDuePresentation?,
         defineState: PlannedChunkActionDefineState?,
         status: ActionExecutionStatus,
         hasLeverage: Bool,
@@ -1949,8 +1983,8 @@ struct ActionView: View {
         ActionSwipeRow(
             actionId: action.id,
             text: action.text,
-            dueStatusText: dueDateStatusTextForAction(action.id),
-            dueStatusColor: dueDateStatusColorForAction(action.id),
+            dueStatusText: duePresentation?.text,
+            dueStatusColor: duePresentation?.color ?? .secondary,
             status: status,
             accent: accent,
             colorScheme: colorScheme,
@@ -2161,6 +2195,7 @@ struct ActionView: View {
         let appendedMissing = orderedIDs + canonical.filter { !orderedIDs.contains($0) }
         let finalIDs = Array(appendedMissing.prefix(canonical.count))
         let byID = Dictionary(uniqueKeysWithValues: weekChunks.map { ($0.id, $0) })
+        let actionsByChunk = weekActionsByChunkID
 
         var changed = false
         for (newIndex, id) in finalIDs.enumerated() {
@@ -2170,7 +2205,7 @@ struct ActionView: View {
                 chunk.updatedAt = .now
                 changed = true
             }
-            for action in weekActions where action.plannedChunkId == chunk.id {
+            for action in actionsByChunk[chunk.id] ?? [] {
                 if action.chunkIndex != newIndex {
                     action.chunkIndex = newIndex
                     changed = true
@@ -2372,18 +2407,48 @@ struct ActionView: View {
             .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
     }
 
+    private var captureItemByNormalizedActionText: [String: RollingCaptureItem] {
+        var result: [String: RollingCaptureItem] = [:]
+        for item in captureItems {
+            let key = normalizedActionText(item.text)
+            if result[key] == nil {
+                result[key] = item
+            }
+        }
+        return result
+    }
+
+    private static let sharedDateFormatterCurrentYear: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        formatter.setLocalizedDateFormatFromTemplate("E MMM d")
+        return formatter
+    }()
+
+    private static let sharedDateFormatterWithYear: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        formatter.setLocalizedDateFormatFromTemplate("E MMM d, yyyy")
+        return formatter
+    }()
+
+    private static let dayKeyFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar.current
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
     private func formatDueDate(_ date: Date) -> String {
         let cal = Calendar.current
         let currentYear = cal.component(.year, from: Date())
         let year = cal.component(.year, from: date)
-        let formatter = DateFormatter()
-        formatter.locale = Locale.current
         if year == currentYear {
-            formatter.setLocalizedDateFormatFromTemplate("E MMM d")
+            return Self.sharedDateFormatterCurrentYear.string(from: date)
         } else {
-            formatter.setLocalizedDateFormatFromTemplate("E MMM d, yyyy")
+            return Self.sharedDateFormatterWithYear.string(from: date)
         }
-        return formatter.string(from: date)
     }
 
     private func dueDate(for captureItem: RollingCaptureItem) -> Date? {
@@ -2413,10 +2478,6 @@ struct ActionView: View {
         return .secondary
     }
 
-    private var dueSnapshotsByActionText: [String: PlannedActionDueSnapshot] {
-        loadActionDueSnapshots(for: currentWeekStart)
-    }
-
     private func loadActionDueSnapshots(for weekStart: Date) -> [String: PlannedActionDueSnapshot] {
         let key = actionDueSnapshotStorageKey(for: weekStart)
         guard let data = UserDefaults.standard.data(forKey: key),
@@ -2426,16 +2487,24 @@ struct ActionView: View {
         return decoded
     }
 
+    private func persistActionDueSnapshots(_ snapshots: [String: PlannedActionDueSnapshot], weekStart: Date) {
+        let key = actionDueSnapshotStorageKey(for: weekStart)
+        if snapshots.isEmpty {
+            UserDefaults.standard.removeObject(forKey: key)
+            dueSnapshotsCache = [:]
+            return
+        }
+        guard let data = try? JSONEncoder().encode(snapshots) else { return }
+        UserDefaults.standard.set(data, forKey: key)
+        dueSnapshotsCache = snapshots
+    }
+
     private func actionDueSnapshotStorageKey(for weekStart: Date) -> String {
         "planned_action_due_snapshots_\(dayKey(for: weekStart))"
     }
 
     private func dayKey(for date: Date) -> String {
-        let comps = Calendar.current.dateComponents([.year, .month, .day], from: date)
-        let y = comps.year ?? 0
-        let m = comps.month ?? 0
-        let d = comps.day ?? 0
-        return String(format: "%04d-%02d-%02d", y, m, d)
+        Self.dayKeyFormatter.string(from: date)
     }
 
     private func dueDateStatusText(for dueDate: Date, attentionDays: Int) -> String? {
@@ -2468,44 +2537,91 @@ struct ActionView: View {
     }
 
     private func captureItemForPlannedActionID(_ actionId: UUID) -> RollingCaptureItem? {
-        guard let action = weekActions.first(where: { $0.id == actionId }) else { return nil }
+        guard let action = weekActionsByID[actionId] else { return nil }
         let actionText = normalizedActionText(action.text)
-        return captureItems.first { normalizedActionText($0.text) == actionText }
+        return captureItemByNormalizedActionText[actionText]
     }
 
-    private func dueDateStatusTextForAction(_ actionId: UUID) -> String? {
-        if let item = captureItemForPlannedActionID(actionId) {
-            return dueDateStatusText(for: item)
-        }
-        guard let action = weekActions.first(where: { $0.id == actionId }) else { return nil }
-        let key = normalizedActionText(action.text)
-        guard let snapshot = dueSnapshotsByActionText[key] else { return nil }
-        return dueDateStatusText(for: snapshot.dueDate, attentionDays: snapshot.attentionDays)
-    }
+    private func buildDuePresentationByActionID() -> [UUID: ActionDuePresentation] {
+        let snapshots = dueSnapshotsCache.isEmpty ? loadActionDueSnapshots(for: currentWeekStart) : dueSnapshotsCache
+        let captureByText = captureItemByNormalizedActionText
+        let dispatchByItemID = recurringDispatchByItemID
+        let ruleByID = recurringRuleByID
+        let calendar = Calendar.current
+        let defaultAttention = min(max(dueDateAttentionDays, 7), 30)
+        var result: [UUID: ActionDuePresentation] = [:]
+        result.reserveCapacity(weekActions.count)
 
-    private func dueDateStatusColorForAction(_ actionId: UUID) -> Color {
-        if let item = captureItemForPlannedActionID(actionId) {
-            return dueDateStatusColor(for: item)
+        for action in weekActions {
+            let key = normalizedActionText(action.text)
+            if let item = captureByText[key] {
+                let resolvedDue: Date? = {
+                    if let explicit = item.dueDate {
+                        return calendar.startOfDay(for: explicit)
+                    }
+                    guard let dispatch = dispatchByItemID[item.id],
+                          let rule = ruleByID[dispatch.ruleID] else {
+                        return nil
+                    }
+                    let leadDays = max(7, rule.captureDaysBeforeDueDate)
+                    let due = calendar.date(byAdding: .day, value: leadDays, to: dispatch.sentAt) ?? dispatch.sentAt
+                    return calendar.startOfDay(for: due)
+                }()
+                let attention = min(max(item.dueDateAttentionDays ?? defaultAttention, 7), 30)
+                result[action.id] = ActionDuePresentation(
+                    text: resolvedDue.flatMap { dueDateStatusText(for: $0, attentionDays: attention) },
+                    color: resolvedDue.map { dueDateStatusColor(for: $0) } ?? .secondary,
+                    hasDueDate: resolvedDue != nil
+                )
+                continue
+            }
+
+            if let snapshot = snapshots[key] {
+                result[action.id] = ActionDuePresentation(
+                    text: dueDateStatusText(for: snapshot.dueDate, attentionDays: snapshot.attentionDays),
+                    color: dueDateStatusColor(for: snapshot.dueDate),
+                    hasDueDate: true
+                )
+            } else {
+                result[action.id] = ActionDuePresentation(text: nil, color: .secondary, hasDueDate: false)
+            }
         }
-        guard let action = weekActions.first(where: { $0.id == actionId }) else { return .secondary }
-        let key = normalizedActionText(action.text)
-        guard let snapshot = dueSnapshotsByActionText[key] else { return .secondary }
-        return dueDateStatusColor(for: snapshot.dueDate)
+
+        return result
     }
 
     private func dueDateEditorState(forActionId actionId: UUID) -> DueDateEditorState? {
-        guard let item = captureItemForPlannedActionID(actionId) else { return nil }
         let cal = Calendar.current
         let today = cal.startOfDay(for: Date())
+
+        if let item = captureItemForPlannedActionID(actionId) {
+            let resolvedDue = cal.startOfDay(
+                for: item.dueDate
+                    ?? dueDate(for: item)
+                    ?? cal.date(byAdding: .day, value: 7, to: today)
+                    ?? today
+            )
+            let attention = min(max(item.dueDateAttentionDays ?? dueDateAttentionDays, 7), 30)
+            return DueDateEditorState(
+                hasDueDate: item.dueDate != nil,
+                dueDate: resolvedDue,
+                attentionDays: attention,
+                minimumDate: today
+            )
+        }
+
+        guard let action = weekActionsByID[actionId] else { return nil }
+        let snapshots = dueSnapshotsCache.isEmpty ? loadActionDueSnapshots(for: currentWeekStart) : dueSnapshotsCache
+        let key = normalizedActionText(action.text)
+        let existing = snapshots[key]
         let resolvedDue = cal.startOfDay(
-            for: item.dueDate
-                ?? dueDate(for: item)
+            for: existing?.dueDate
                 ?? cal.date(byAdding: .day, value: 7, to: today)
                 ?? today
         )
-        let attention = min(max(item.dueDateAttentionDays ?? dueDateAttentionDays, 7), 30)
+        let attention = min(max(existing?.attentionDays ?? dueDateAttentionDays, 7), 30)
         return DueDateEditorState(
-            hasDueDate: item.dueDate != nil,
+            hasDueDate: existing != nil,
             dueDate: resolvedDue,
             attentionDays: attention,
             minimumDate: today
@@ -2513,14 +2629,28 @@ struct ActionView: View {
     }
 
     private func updateDueDateEditor(forActionId actionId: UUID, with updated: DueDateEditorState) {
-        guard let item = captureItemForPlannedActionID(actionId) else { return }
         let normalizedDue = Calendar.current.startOfDay(for: updated.dueDate)
         let resolvedDue = updated.hasDueDate ? normalizedDue : nil
-        item.dueDate = resolvedDue
-        item.dueDateAttentionDays = min(max(updated.attentionDays, 7), 30)
-        persistSourceDueDateOverrideIfNeeded(for: item, dueDate: resolvedDue)
-        applyAppleReminderDueDateUpdateIfNeeded(for: item, dueDate: resolvedDue)
-        scheduleAutosave()
+        let normalizedAttention = min(max(updated.attentionDays, 7), 30)
+
+        if let item = captureItemForPlannedActionID(actionId) {
+            item.dueDate = resolvedDue
+            item.dueDateAttentionDays = normalizedAttention
+            persistSourceDueDateOverrideIfNeeded(for: item, dueDate: resolvedDue)
+            applyAppleReminderDueDateUpdateIfNeeded(for: item, dueDate: resolvedDue)
+            scheduleAutosave()
+            return
+        }
+
+        guard let action = weekActionsByID[actionId] else { return }
+        var snapshots = dueSnapshotsCache.isEmpty ? loadActionDueSnapshots(for: currentWeekStart) : dueSnapshotsCache
+        let key = normalizedActionText(action.text)
+        if let resolvedDue {
+            snapshots[key] = PlannedActionDueSnapshot(dueDate: resolvedDue, attentionDays: normalizedAttention)
+        } else {
+            snapshots.removeValue(forKey: key)
+        }
+        persistActionDueSnapshots(snapshots, weekStart: currentWeekStart)
     }
 
     private func sourceOverrideKey(sourceType: String, sourceID: String) -> String {
@@ -2644,8 +2774,9 @@ struct ActionView: View {
     }
 
     private func markAllUncompletedAsRecapture() {
+        let executionByAction = executionStateByActionID
         for action in weekActions {
-            let current = status(for: action.id)
+            let current = executionByAction[action.id]?.status ?? .noAction
             if current == .noAction || current == .leveraged || current == .inProgress {
                 setStatus(for: action.id, to: .carriedToCapture)
             }
@@ -2662,6 +2793,22 @@ struct ActionView: View {
         resourceCatalogByID: [UUID: LeverageResource]
     ) -> [UUID: [PlannedChunkAction]] {
         var result: [UUID: [PlannedChunkAction]] = [:]
+        var statusRankByActionID: [UUID: Int] = [:]
+        statusRankByActionID.reserveCapacity(weekActions.count)
+        for action in weekActions {
+            let status = executionByAction[action.id]?.status ?? .noAction
+            let rank: Int
+            switch status {
+            case .inProgress:
+                rank = 0
+            case .done, .carriedToCapture, .notNeeded:
+                rank = 2
+            default:
+                rank = 1
+            }
+            statusRankByActionID[action.id] = rank
+        }
+
         for action in weekActions {
             if actionMatchesFilters(
                 action,
@@ -2684,28 +2831,8 @@ struct ActionView: View {
         //   pinned statuses the action naturally returns to its previous list position.
         for chunkId in result.keys {
             result[chunkId]?.sort { lhs, rhs in
-                let lhsStatus = executionByAction[lhs.id]?.status ?? .noAction
-                let rhsStatus = executionByAction[rhs.id]?.status ?? .noAction
-
-                let lhsRank: Int
-                switch lhsStatus {
-                case .inProgress:
-                    lhsRank = 0
-                case .done, .carriedToCapture, .notNeeded:
-                    lhsRank = 2
-                default:
-                    lhsRank = 1
-                }
-
-                let rhsRank: Int
-                switch rhsStatus {
-                case .inProgress:
-                    rhsRank = 0
-                case .done, .carriedToCapture, .notNeeded:
-                    rhsRank = 2
-                default:
-                    rhsRank = 1
-                }
+                let lhsRank = statusRankByActionID[lhs.id] ?? 1
+                let rhsRank = statusRankByActionID[rhs.id] ?? 1
 
                 if lhsRank != rhsRank {
                     return lhsRank < rhsRank
@@ -2960,13 +3087,12 @@ struct ActionView: View {
     }
 
     private func hasAnySensitivity(
-        actionId: UUID,
         defineState st: PlannedChunkActionDefineState?,
-        placeIDs: Set<UUID>
+        placeIDs: Set<UUID>,
+        hasDueDate: Bool
     ) -> Bool {
         let hasTimePrefs = !(st?.sensitiveMorning ?? true) || !(st?.sensitiveAfternoon ?? true) || !(st?.sensitiveEvening ?? true)
         let hasPlaces = !placeIDs.isEmpty
-        let hasDueDate = dueDateEditorState(forActionId: actionId)?.hasDueDate ?? false
         return hasTimePrefs || hasPlaces || hasDueDate
     }
 
@@ -3060,8 +3186,13 @@ struct ActionView: View {
 
     private func ensureStateRowsExistForWeek() {
         var insertedAny = false
+        let defineIDs = Set(defineStates.map(\.plannedChunkActionId))
+        let executionIDs = Set(executionStates.map(\.plannedChunkActionId))
+        let leverageIDs = Set(leverageSelections.map(\.plannedChunkActionId))
+        let noteIDs = Set(notes.map(\.plannedChunkActionId))
+
         for action in weekActions {
-            if !defineStates.contains(where: { $0.plannedChunkActionId == action.id }) {
+            if !defineIDs.contains(action.id) {
                 modelContext.insert(PlannedChunkActionDefineState(
                     weekStart: currentWeekStart,
                     plannedChunkActionId: action.id,
@@ -3075,7 +3206,7 @@ struct ActionView: View {
                 ))
                 insertedAny = true
             }
-            if !executionStates.contains(where: { $0.plannedChunkActionId == action.id }) {
+            if !executionIDs.contains(action.id) {
                 modelContext.insert(PlannedChunkActionExecutionState(
                     weekStart: currentWeekStart,
                     plannedChunkActionId: action.id,
@@ -3084,7 +3215,7 @@ struct ActionView: View {
                 ))
                 insertedAny = true
             }
-            if !leverageSelections.contains(where: { $0.plannedChunkActionId == action.id }) {
+            if !leverageIDs.contains(action.id) {
                 modelContext.insert(PlannedChunkActionLeverageSelection(
                     weekStart: currentWeekStart,
                     plannedChunkActionId: action.id,
@@ -3093,7 +3224,7 @@ struct ActionView: View {
                 ))
                 insertedAny = true
             }
-            if !notes.contains(where: { $0.plannedChunkActionId == action.id }) {
+            if !noteIDs.contains(action.id) {
                 modelContext.insert(PlannedChunkActionNote(
                     weekStart: currentWeekStart,
                     plannedChunkActionId: action.id,
@@ -3110,6 +3241,10 @@ struct ActionView: View {
 
     private func applyCarriedProfilesToWeekActionsIfNeeded() {
         var didMutate = false
+        var leverageByKindValue = Dictionary(uniqueKeysWithValues: leverageCatalog.map { ($0.kindValueKey, $0) })
+        var placesByNormalizedKey = Dictionary(uniqueKeysWithValues: placesCatalog.map { ($0.normalizedKey, $0) })
+        let placeLinksByActionID = Dictionary(grouping: placeLinks, by: \.plannedChunkActionId)
+        let attachmentsByActionID = Dictionary(grouping: attachments, by: \.plannedChunkActionId)
 
         for action in weekActions {
             guard !carriedProfileAppliedActionIDs.contains(action.id) else { continue }
@@ -3130,12 +3265,13 @@ struct ActionView: View {
                !value.isEmpty {
                 let key = "\(kind.rawValue.lowercased())|\(value.lowercased())"
                 let resource: LeverageResource
-                if let existing = leverageCatalog.first(where: { $0.kindValueKey == key }) {
+                if let existing = leverageByKindValue[key] {
                     resource = existing
                 } else {
                     let created = LeverageResource(kindRaw: kind.rawValue, value: value)
                     modelContext.insert(created)
                     resource = created
+                    leverageByKindValue[key] = created
                 }
                 upsertLeverageSelection(forActionId: action.id) { sel in
                     sel.resourceId = resource.id
@@ -3153,15 +3289,16 @@ struct ActionView: View {
                 .filter { !$0.isEmpty }
             let targetPlaceIDs: Set<UUID> = Set(trimmedPlaces.map { placeName in
                 let normalized = placeName.lowercased()
-                if let existing = placesCatalog.first(where: { $0.normalizedKey == normalized }) {
+                if let existing = placesByNormalizedKey[normalized] {
                     return existing.id
                 }
                 let created = SensitivityPlaceCatalogItem(place: placeName)
                 modelContext.insert(created)
+                placesByNormalizedKey[normalized] = created
                 return created.id
             })
 
-            let existingLinks = placeLinks.filter { $0.plannedChunkActionId == action.id }
+            let existingLinks = placeLinksByActionID[action.id] ?? []
             let existingIDs = Set(existingLinks.map(\.placeId))
             for link in existingLinks where !targetPlaceIDs.contains(link.placeId) {
                 RecentlyDeletedStore.trash(link, in: modelContext)
@@ -3180,7 +3317,7 @@ struct ActionView: View {
                 n.updatedAt = .now
             }
 
-            let existingAttachments = attachments.filter { $0.plannedChunkActionId == action.id }
+            let existingAttachments = attachmentsByActionID[action.id] ?? []
             for attachment in existingAttachments {
                 RecentlyDeletedStore.trash(attachment, in: modelContext)
             }
@@ -3283,7 +3420,13 @@ struct ActionView: View {
         }
     }
     private func showCompleteActionsHint() {
-        let active = Set(weekActions.filter { isActiveStatus(status(for: $0.id)) }.map(\.id))
+        let executionByAction = executionStateByActionID
+        let active = Set(
+            weekActions.compactMap { action in
+                let status = executionByAction[action.id]?.status ?? .noAction
+                return isActiveStatus(status) ? action.id : nil
+            }
+        )
         highlightedStatusActionIDs = active
         withAnimation(.easeInOut(duration: 0.18)) {
             showCompleteHint = true
@@ -3299,11 +3442,14 @@ struct ActionView: View {
     private func deleteActionAndLinkedData(_ actionId: UUID) {
         if let st = defineStateByActionID[actionId] { RecentlyDeletedStore.trash(st, in: modelContext) }
         if let st = executionStateByActionID[actionId] { RecentlyDeletedStore.trash(st, in: modelContext) }
-        if let sel = leverageSelections.first(where: { $0.plannedChunkActionId == actionId }) { RecentlyDeletedStore.trash(sel, in: modelContext) }
+        let leverageSelectionByActionID = Dictionary(grouping: leverageSelections, by: \.plannedChunkActionId)
+            .compactMapValues { $0.max(by: { $0.updatedAt < $1.updatedAt }) }
+        if let sel = leverageSelectionByActionID[actionId] { RecentlyDeletedStore.trash(sel, in: modelContext) }
         if let note = notesByActionID[actionId] { RecentlyDeletedStore.trash(note, in: modelContext) }
-        for link in placeLinks where link.plannedChunkActionId == actionId { RecentlyDeletedStore.trash(link, in: modelContext) }
-        for a in attachments where a.plannedChunkActionId == actionId { RecentlyDeletedStore.trash(a, in: modelContext) }
-        if let action = weekActions.first(where: { $0.id == actionId }) {
+        let placeLinksByActionID = Dictionary(grouping: placeLinks, by: \.plannedChunkActionId)
+        for link in placeLinksByActionID[actionId] ?? [] { RecentlyDeletedStore.trash(link, in: modelContext) }
+        for a in attachmentsByActionID[actionId] ?? [] { RecentlyDeletedStore.trash(a, in: modelContext) }
+        if let action = weekActionsByID[actionId] {
             RecentlyDeletedStore.trash(action, in: modelContext)
         }
         pendingNewActionIDs.remove(actionId)
@@ -3327,8 +3473,9 @@ struct ActionView: View {
     private func cleanupPendingBlankActions() {
         guard !pendingNewActionIDs.isEmpty else { return }
         let pending = pendingNewActionIDs
+        let actionsByID = weekActionsByID
         for id in pending {
-            guard let action = weekActions.first(where: { $0.id == id }) else {
+            guard let action = actionsByID[id] else {
                 pendingNewActionIDs.remove(id)
                 continue
             }
