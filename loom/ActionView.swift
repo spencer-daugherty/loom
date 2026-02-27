@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
+import os
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -22,6 +23,66 @@ private struct ActionDuePresentation {
     let text: String?
     let color: Color
     let hasDueDate: Bool
+}
+
+private struct ActionFilterContext {
+    let fullyFilteredActions: [PlannedChunkAction]
+    let contextualPlaceItems: [SensitivityPlaceCatalogItem]
+    let contextualPersonResources: [LeverageResource]
+    let contextualToolResources: [LeverageResource]
+    let contextualTimeOfDayOptions: [TimeOfDayChoice]
+    let contextualDurations: [Int]
+    let contextualAttachmentKinds: [ActionAttachmentFilterKind]
+    let orderedVisibleFilterChips: [FilterChipKind]
+    let hasPlaceFilterButton: Bool
+    let hasPersonFilterButton: Bool
+    let hasToolFilterButton: Bool
+    let hasTimeOfDayFilterButton: Bool
+    let hasDurationFilterButton: Bool
+    let hasAttachmentsFilterButton: Bool
+}
+
+private struct ActionAttachmentPresence {
+    let hasNote: Bool
+    let hasLink: Bool
+    let hasFile: Bool
+}
+
+private struct ActionRowRenderContext: Identifiable {
+    let action: PlannedChunkAction
+    let defineState: PlannedChunkActionDefineState?
+    let status: ActionExecutionStatus
+    let duePresentation: ActionDuePresentation?
+    let hasLeverage: Bool
+    let leverageIconName: String
+    let hasSensitivity: Bool
+    let hasAttachments: Bool
+    let highlightStatusBox: Bool
+
+    var id: UUID { action.id }
+}
+
+private struct ActionChunkTotals {
+    let useFilterTotalsLabel: Bool
+    let hasActiveActions: Bool
+    let totalMinutes: Int
+    let totalMustMinutes: Int
+}
+
+private struct ActionLookupData {
+    let defineByAction: [UUID: PlannedChunkActionDefineState]
+    let executionByAction: [UUID: PlannedChunkActionExecutionState]
+    let notesByAction: [UUID: PlannedChunkActionNote]
+    let attachmentsByAction: [UUID: [PlannedChunkActionAttachment]]
+    let resourcesByAction: [UUID: UUID]
+    let placesByAction: [UUID: Set<UUID>]
+    let resourcesCatalogByID: [UUID: LeverageResource]
+}
+
+private final class ActionViewRuntimeState {
+    var lastScrollY: CGFloat = 0
+    var lastScrollTimestamp: TimeInterval = Date().timeIntervalSinceReferenceDate
+    var autosaveTask: Task<Void, Never>? = nil
 }
 
 struct ActionView: View {
@@ -97,11 +158,9 @@ struct ActionView: View {
     @State private var leverageDueDatePromptActionID: UUID? = nil
     @State private var pendingLeveragedStatusActionID: UUID? = nil
     @State private var showCheckmarkLimitAlert: Bool = false
-    @State private var autosaveTask: Task<Void, Never>? = nil
+    @State private var runtimeState = ActionViewRuntimeState()
     @State private var isHeaderCollapsed: Bool = false
     @State private var dismissActionBlocksCautionCard: Bool = false
-    @State private var lastScrollY: CGFloat = 0
-    @State private var lastScrollTimestamp: TimeInterval = Date().timeIntervalSinceReferenceDate
     @State private var isKeyboardVisible: Bool = false
     @State private var keyboardHeight: CGFloat = 0
     @State private var focusedActionID: UUID? = nil
@@ -127,6 +186,7 @@ struct ActionView: View {
     @State private var carriedProfileAppliedActionIDs: Set<UUID> = []
     @State private var dueSnapshotsCache: [String: PlannedActionDueSnapshot] = [:]
     private let weekStart: Date
+    private static let signposter = OSSignposter(subsystem: "loom", category: "ActionView")
 
     init() {
         let ws = WeeklyMindsetEntry.weekStart(for: Date())
@@ -198,21 +258,16 @@ struct ActionView: View {
         Dictionary(grouping: weekActions, by: \.plannedChunkId)
     }
 
-    private var activeActionIDs: Set<UUID> {
-        let executionByAction = executionStateByActionID
-        return Set(
+    private func orderedWeekChunksForDisplay(
+        executionByAction: [UUID: PlannedChunkActionExecutionState]
+    ) -> [PlannedChunk] {
+        let activeActionIDs = Set(
             weekActions.compactMap { action in
                 let status = executionByAction[action.id]?.status ?? .noAction
                 return isActiveStatus(status) ? action.id : nil
             }
         )
-    }
-
-    private var activeChunkIDs: Set<UUID> {
-        Set(weekActions.compactMap { activeActionIDs.contains($0.id) ? $0.plannedChunkId : nil })
-    }
-
-    private var orderedWeekChunksForDisplay: [PlannedChunk] {
+        let activeChunkIDs = Set(weekActions.compactMap { activeActionIDs.contains($0.id) ? $0.plannedChunkId : nil })
         let sortedByIndex = weekChunks.sorted { $0.chunkIndex < $1.chunkIndex }
         let chunkOrderSet = Set(localChunkOrderIDs)
         let baseOrder: [PlannedChunk] = {
@@ -409,181 +464,324 @@ struct ActionView: View {
             return s == .noAction || s == .leveraged || s == .inProgress
         }
     }
-    private var showInactiveOnlyFilterButton: Bool { inactiveOnly || inactiveOnlyCandidateCount > 0 }
-    private var showLeveragedOnlyFilterButton: Bool { leveragedOnly || leveragedOnlyCandidateCount > 0 }
-    private var showInProgressOnlyFilterButton: Bool { inProgressOnly || inProgressOnlyCandidateCount > 0 }
-    private var hasMustsFilterButton: Bool { onlyMusts || mustsOnlyCandidateCount > 0 }
-
     private enum FilterFacet: Hashable {
         case place, person, tool, timeOfDay, musts, duration, attachments
         case activeOnly, leveragedOnly, inProgressOnly
     }
 
-    private func filteredActionsForVisibility(excluding excluded: Set<FilterFacet>) -> [PlannedChunkAction] {
-        let defineByAction = defineStateByActionID
-        let executionByAction = executionStateByActionID
-        let resourcesByAction = selectedResourceByActionID
-        let placesByAction = placeIDsByActionID
-        let notesByAction = notesByActionID
-        let attachmentsByAction = attachmentsByActionID
-        let resourcesCatalogByID = resourceByID
+    private func signposted<T>(_ name: StaticString, _ work: () -> T) -> T {
+        let state = Self.signposter.beginInterval(name)
+        let result = work()
+        Self.signposter.endInterval(name, state)
+        return result
+    }
 
-        return weekActions.filter {
-            actionMatchesFilters(
-                $0,
-                defineByAction: defineByAction,
-                executionByAction: executionByAction,
-                resourcesByAction: resourcesByAction,
-                placesByAction: placesByAction,
-                notesByAction: notesByAction,
-                attachmentsByAction: attachmentsByAction,
-                resourceCatalogByID: resourcesCatalogByID,
-                excludedFacets: excluded
-            )
+    private func withBodySignpost<Content: View>(
+        @ViewBuilder _ content: () -> Content
+    ) -> some View {
+        let state = Self.signposter.beginInterval("body_eval")
+        let view = content()
+        Self.signposter.endInterval("body_eval", state)
+        return view
+    }
+
+    private func buildFilterContext(
+        defineByAction: [UUID: PlannedChunkActionDefineState],
+        executionByAction: [UUID: PlannedChunkActionExecutionState],
+        resourcesByAction: [UUID: UUID],
+        placesByAction: [UUID: Set<UUID>],
+        attachmentPresenceByActionID: [UUID: ActionAttachmentPresence],
+        resourceCatalogByID: [UUID: LeverageResource]
+    ) -> ActionFilterContext {
+        var visibilityCache: [Set<FilterFacet>: [PlannedChunkAction]] = [:]
+        func filtered(excluding excluded: Set<FilterFacet>) -> [PlannedChunkAction] {
+            if let cached = visibilityCache[excluded] { return cached }
+            let rows = weekActions.filter {
+                actionMatchesFilters(
+                    $0,
+                    defineByAction: defineByAction,
+                    executionByAction: executionByAction,
+                    resourcesByAction: resourcesByAction,
+                    placesByAction: placesByAction,
+                    attachmentPresenceByActionID: attachmentPresenceByActionID,
+                    resourceCatalogByID: resourceCatalogByID,
+                    excludedFacets: excluded
+                )
+            }
+            visibilityCache[excluded] = rows
+            return rows
         }
-    }
 
-    private var currentlyVisibleActionCount: Int {
-        filteredActionsForVisibility(excluding: []).count
-    }
-
-    private var contextualPlaceItems: [SensitivityPlaceCatalogItem] {
-        let base = filteredActionsForVisibility(excluding: [.place])
-        let idsFromBase = Set(base.flatMap { Array(placeIDsByActionID[$0.id] ?? []) })
-        let ids = idsFromBase.union(selectedPlaceIDs)
-        return placesCatalog
-            .filter { ids.contains($0.id) }
+        let placeBase = filtered(excluding: [.place])
+        let placeIDs = Set(placeBase.flatMap { Array(placesByAction[$0.id] ?? []) }).union(selectedPlaceIDs)
+        let contextualPlaceItems = placesCatalog
+            .filter { placeIDs.contains($0.id) }
             .sorted { $0.place.localizedCaseInsensitiveCompare($1.place) == .orderedAscending }
-    }
 
-    private var contextualPersonResources: [LeverageResource] {
-        let base = filteredActionsForVisibility(excluding: [.person])
-        let idsFromBase = Set(base.compactMap { selectedResourceByActionID[$0.id] })
-        let ids = idsFromBase.union(selectedPersonIDs)
-        return leverageCatalog
-            .filter { $0.kind == .person && ids.contains($0.id) }
+        let personBase = filtered(excluding: [.person])
+        let personIDs = Set(personBase.compactMap { resourcesByAction[$0.id] }).union(selectedPersonIDs)
+        let contextualPersonResources = leverageCatalog
+            .filter { $0.kind == .person && personIDs.contains($0.id) }
             .sorted { $0.value.localizedCaseInsensitiveCompare($1.value) == .orderedAscending }
-    }
 
-    private var contextualToolResources: [LeverageResource] {
-        let base = filteredActionsForVisibility(excluding: [.tool])
-        let idsFromBase = Set(base.compactMap { selectedResourceByActionID[$0.id] })
-        let ids = idsFromBase.union(selectedToolIDs)
-        return leverageCatalog
-            .filter { $0.kind == .tool && ids.contains($0.id) }
+        let toolBase = filtered(excluding: [.tool])
+        let toolIDs = Set(toolBase.compactMap { resourcesByAction[$0.id] }).union(selectedToolIDs)
+        let contextualToolResources = leverageCatalog
+            .filter { $0.kind == .tool && toolIDs.contains($0.id) }
             .sorted { $0.value.localizedCaseInsensitiveCompare($1.value) == .orderedAscending }
-    }
 
-    private var contextualTimeOfDayOptions: [TimeOfDayChoice] {
-        let base = filteredActionsForVisibility(excluding: [.timeOfDay])
-        let defineByAction = defineStateByActionID
-        var options = Set<TimeOfDayChoice>()
-        for action in base {
+        let timeBase = filtered(excluding: [.timeOfDay])
+        var timeOptions = Set<TimeOfDayChoice>()
+        for action in timeBase {
             let st = defineByAction[action.id]
             let hasMorning = st?.sensitiveMorning ?? true
             let hasAfternoon = st?.sensitiveAfternoon ?? true
             let hasEvening = st?.sensitiveEvening ?? true
             let isAnytime = hasMorning && hasAfternoon && hasEvening
             if isAnytime {
-                options.insert(.any)
+                timeOptions.insert(.any)
             } else {
-                if hasMorning { options.insert(.morning) }
-                if hasAfternoon { options.insert(.afternoon) }
-                if hasEvening { options.insert(.evening) }
+                if hasMorning { timeOptions.insert(.morning) }
+                if hasAfternoon { timeOptions.insert(.afternoon) }
+                if hasEvening { timeOptions.insert(.evening) }
             }
         }
-        options.formUnion(selectedTimeOfDay)
-        return TimeOfDayChoice.allCases.filter { options.contains($0) }
-    }
+        timeOptions.formUnion(selectedTimeOfDay)
+        let contextualTimeOfDayOptions = TimeOfDayChoice.allCases.filter { timeOptions.contains($0) }
 
-    private var contextualDurations: [Int] {
-        let base = filteredActionsForVisibility(excluding: [.duration])
-        let defineByAction = defineStateByActionID
-        var values = Set(base.compactMap { defineByAction[$0.id]?.timeEstimateMinutes })
-        values.formUnion(selectedDurations)
-        return values.sorted()
-    }
+        let durationBase = filtered(excluding: [.duration])
+        var durationValues = Set(durationBase.compactMap { defineByAction[$0.id]?.timeEstimateMinutes })
+        durationValues.formUnion(selectedDurations)
+        let contextualDurations = durationValues.sorted()
 
-    private var contextualAttachmentKinds: [ActionAttachmentFilterKind] {
-        let base = filteredActionsForVisibility(excluding: [.attachments])
-        let notesByAction = notesByActionID
-        let attachmentsByAction = attachmentsByActionID
-        var kinds = Set<ActionAttachmentFilterKind>()
-        for action in base {
-            let note = notesByAction[action.id]?.noteText ?? ""
-            let atts = attachmentsByAction[action.id] ?? []
-            if !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { kinds.insert(.note) }
-            if atts.contains(where: { $0.kind == .link }) { kinds.insert(.link) }
-            if atts.contains(where: { $0.kind == .file }) { kinds.insert(.file) }
+        let attachmentBase = filtered(excluding: [.attachments])
+        var attachmentKinds = Set<ActionAttachmentFilterKind>()
+        for action in attachmentBase {
+            let presence = attachmentPresenceByActionID[action.id]
+            if presence?.hasNote == true { attachmentKinds.insert(.note) }
+            if presence?.hasLink == true { attachmentKinds.insert(.link) }
+            if presence?.hasFile == true { attachmentKinds.insert(.file) }
         }
-        kinds.formUnion(selectedAttachmentKinds)
-        return ActionAttachmentFilterKind.allCases.filter { kinds.contains($0) }
+        attachmentKinds.formUnion(selectedAttachmentKinds)
+        let contextualAttachmentKinds = ActionAttachmentFilterKind.allCases.filter { attachmentKinds.contains($0) }
+
+        let inactiveOnlyCandidateCount = filtered(excluding: [.activeOnly]).filter {
+            isInactiveStatus(executionByAction[$0.id]?.status ?? .noAction)
+        }.count
+        let leveragedOnlyCandidateCount = filtered(excluding: [.leveragedOnly]).filter {
+            (executionByAction[$0.id]?.status ?? .noAction) == .leveraged
+        }.count
+        let inProgressOnlyCandidateCount = filtered(excluding: [.inProgressOnly]).filter {
+            (executionByAction[$0.id]?.status ?? .noAction) == .inProgress
+        }.count
+        let mustsOnlyCandidateCount = filtered(excluding: [.musts]).filter {
+            isMust(for: $0.id, defineByAction: defineByAction)
+        }.count
+
+        let hasPlaceFilterButton = !selectedPlaceIDs.isEmpty || contextualPlaceItems.contains { !selectedPlaceIDs.contains($0.id) }
+        let hasPersonFilterButton = !selectedPersonIDs.isEmpty || contextualPersonResources.contains { !selectedPersonIDs.contains($0.id) }
+        let hasToolFilterButton = !selectedToolIDs.isEmpty || contextualToolResources.contains { !selectedToolIDs.contains($0.id) }
+        let hasTimeOfDayFilterButton = !selectedTimeOfDay.isEmpty || contextualTimeOfDayOptions.contains { !selectedTimeOfDay.contains($0) }
+        let hasDurationFilterButton = !selectedDurations.isEmpty || contextualDurations.contains { !selectedDurations.contains($0) }
+        let hasAttachmentsFilterButton = !selectedAttachmentKinds.isEmpty || contextualAttachmentKinds.contains { !selectedAttachmentKinds.contains($0) }
+        let showInactiveOnlyFilterButton = inactiveOnly || inactiveOnlyCandidateCount > 0
+        let showLeveragedOnlyFilterButton = leveragedOnly || leveragedOnlyCandidateCount > 0
+        let showInProgressOnlyFilterButton = inProgressOnly || inProgressOnlyCandidateCount > 0
+        let hasMustsFilterButton = onlyMusts || mustsOnlyCandidateCount > 0
+
+        func isVisible(_ chip: FilterChipKind) -> Bool {
+            switch chip {
+            case .activeOnly: return showInactiveOnlyFilterButton
+            case .musts: return hasMustsFilterButton
+            case .place: return hasPlaceFilterButton
+            case .person: return hasPersonFilterButton
+            case .duration: return hasDurationFilterButton
+            case .tool: return hasToolFilterButton
+            case .timeOfDay: return hasTimeOfDayFilterButton
+            case .leveragedOnly: return showLeveragedOnlyFilterButton
+            case .attachments: return hasAttachmentsFilterButton
+            case .inProgressOnly: return showInProgressOnlyFilterButton
+            }
+        }
+
+        let visible = defaultFilterChipOrder.filter { isVisible($0) || isFilterChipSelected($0) }
+        let selected = visible.filter { isFilterChipSelected($0) }
+        let nonSelected = visible.filter { !isFilterChipSelected($0) }
+        let fullyFilteredActions = filtered(excluding: [])
+
+        return ActionFilterContext(
+            fullyFilteredActions: fullyFilteredActions,
+            contextualPlaceItems: contextualPlaceItems,
+            contextualPersonResources: contextualPersonResources,
+            contextualToolResources: contextualToolResources,
+            contextualTimeOfDayOptions: contextualTimeOfDayOptions,
+            contextualDurations: contextualDurations,
+            contextualAttachmentKinds: contextualAttachmentKinds,
+            orderedVisibleFilterChips: selected + nonSelected,
+            hasPlaceFilterButton: hasPlaceFilterButton,
+            hasPersonFilterButton: hasPersonFilterButton,
+            hasToolFilterButton: hasToolFilterButton,
+            hasTimeOfDayFilterButton: hasTimeOfDayFilterButton,
+            hasDurationFilterButton: hasDurationFilterButton,
+            hasAttachmentsFilterButton: hasAttachmentsFilterButton
+        )
     }
 
-    private var canExpandPlaceSelection: Bool {
-        contextualPlaceItems.contains { !selectedPlaceIDs.contains($0.id) }
-    }
-    private var hasPlaceFilterButton: Bool {
-        !selectedPlaceIDs.isEmpty || canExpandPlaceSelection
-    }
+    private func buildActionLookupData() -> ActionLookupData {
+        let actionIDs = Set(weekActions.map(\.id))
 
-    private var canExpandPersonSelection: Bool {
-        contextualPersonResources.contains { !selectedPersonIDs.contains($0.id) }
-    }
-    private var hasPersonFilterButton: Bool {
-        !selectedPersonIDs.isEmpty || canExpandPersonSelection
-    }
+        let meaningfulDefineState: (PlannedChunkActionDefineState) -> Bool = { row in
+            row.isMust ||
+            row.timeEstimateMinutes != nil ||
+            !(row.sensitiveMorning && row.sensitiveAfternoon && row.sensitiveEvening)
+        }
 
-    private var canExpandToolSelection: Bool {
-        contextualToolResources.contains { !selectedToolIDs.contains($0.id) }
-    }
-    private var hasToolFilterButton: Bool {
-        !selectedToolIDs.isEmpty || canExpandToolSelection
-    }
+        var defineByAction: [UUID: PlannedChunkActionDefineState] = [:]
+        for row in defineStates where actionIDs.contains(row.plannedChunkActionId) {
+            let key = row.plannedChunkActionId
+            guard let existing = defineByAction[key] else {
+                defineByAction[key] = row
+                continue
+            }
+            let rowMeaningful = meaningfulDefineState(row)
+            let existingMeaningful = meaningfulDefineState(existing)
+            if rowMeaningful && !existingMeaningful {
+                defineByAction[key] = row
+            } else if rowMeaningful == existingMeaningful && row.updatedAt > existing.updatedAt {
+                defineByAction[key] = row
+            }
+        }
 
-    private var canExpandTimeOfDaySelection: Bool {
-        contextualTimeOfDayOptions.contains { !selectedTimeOfDay.contains($0) }
-    }
-    private var hasTimeOfDayFilterButton: Bool {
-        !selectedTimeOfDay.isEmpty || canExpandTimeOfDaySelection
-    }
-    private var canExpandDurationSelection: Bool {
-        contextualDurations.contains { !selectedDurations.contains($0) }
-    }
-    private var hasDurationFilterButton: Bool {
-        !selectedDurations.isEmpty || canExpandDurationSelection
-    }
+        var executionByAction: [UUID: PlannedChunkActionExecutionState] = [:]
+        for row in executionStates where actionIDs.contains(row.plannedChunkActionId) {
+            let key = row.plannedChunkActionId
+            if let existing = executionByAction[key] {
+                if row.updatedAt > existing.updatedAt { executionByAction[key] = row }
+            } else {
+                executionByAction[key] = row
+            }
+        }
 
-    private var canExpandAttachmentSelection: Bool {
-        contextualAttachmentKinds.contains { !selectedAttachmentKinds.contains($0) }
-    }
-    private var hasAttachmentsFilterButton: Bool {
-        !selectedAttachmentKinds.isEmpty || canExpandAttachmentSelection
-    }
-    var body: some View {
-        let defineByAction = defineStateByActionID
-        let executionByAction = executionStateByActionID
-        let notesByAction = notesByActionID
-        let attachmentsByAction = attachmentsByActionID
-        let resourcesByAction = selectedResourceByActionID
-        let placesByAction = placeIDsByActionID
-        let duePresentationByActionID = buildDuePresentationByActionID()
-        let resourcesCatalogByID = resourceByID
-        let allByChunk = weekActionsByChunkID
-        let rolesByID = Dictionary(uniqueKeysWithValues: roles.map { ($0.id, $0.role) })
-        let outcomesByID = Dictionary(uniqueKeysWithValues: outcomes.map { ($0.outcome_id, $0) })
-        let filteredByChunk = buildFilteredActionsByChunk(
-            defineByAction: defineByAction,
-            executionByAction: executionByAction,
-            resourcesByAction: resourcesByAction,
-            placesByAction: placesByAction,
-            notesByAction: notesByAction,
-            attachmentsByAction: attachmentsByAction,
-            resourceCatalogByID: resourcesCatalogByID
+        var notesByAction: [UUID: PlannedChunkActionNote] = [:]
+        for row in notes where actionIDs.contains(row.plannedChunkActionId) {
+            let key = row.plannedChunkActionId
+            let rowMeaningful = !row.noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            guard let existing = notesByAction[key] else {
+                notesByAction[key] = row
+                continue
+            }
+            let existingMeaningful = !existing.noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            if rowMeaningful && !existingMeaningful {
+                notesByAction[key] = row
+            } else if rowMeaningful == existingMeaningful && row.updatedAt > existing.updatedAt {
+                notesByAction[key] = row
+            }
+        }
+
+        let attachmentsByAction = Dictionary(
+            grouping: attachments.filter { actionIDs.contains($0.plannedChunkActionId) },
+            by: \.plannedChunkActionId
         )
 
-        VStack(spacing: 0) {
-            collapsibleHeader
+        var resourcesByAction: [UUID: UUID] = [:]
+        var seenUpdatedAtByActionID: [UUID: Date] = [:]
+        for selection in leverageSelections where actionIDs.contains(selection.plannedChunkActionId) {
+            guard let resourceID = selection.resourceId else { continue }
+            let key = selection.plannedChunkActionId
+            if let existingUpdatedAt = seenUpdatedAtByActionID[key] {
+                if selection.updatedAt > existingUpdatedAt {
+                    seenUpdatedAtByActionID[key] = selection.updatedAt
+                    resourcesByAction[key] = resourceID
+                }
+            } else {
+                seenUpdatedAtByActionID[key] = selection.updatedAt
+                resourcesByAction[key] = resourceID
+            }
+        }
+
+        let placesByAction = Dictionary(
+            grouping: placeLinks.filter { actionIDs.contains($0.plannedChunkActionId) },
+            by: \.plannedChunkActionId
+        ).mapValues { Set($0.map(\.placeId)) }
+
+        let resourcesCatalogByID = Dictionary(uniqueKeysWithValues: leverageCatalog.map { ($0.id, $0) })
+
+        return ActionLookupData(
+            defineByAction: defineByAction,
+            executionByAction: executionByAction,
+            notesByAction: notesByAction,
+            attachmentsByAction: attachmentsByAction,
+            resourcesByAction: resourcesByAction,
+            placesByAction: placesByAction,
+            resourcesCatalogByID: resourcesCatalogByID
+        )
+    }
+
+    private func buildAttachmentPresenceByActionID(
+        notesByAction: [UUID: PlannedChunkActionNote],
+        attachmentsByAction: [UUID: [PlannedChunkActionAttachment]]
+    ) -> [UUID: ActionAttachmentPresence] {
+        var result: [UUID: ActionAttachmentPresence] = [:]
+        result.reserveCapacity(weekActions.count)
+        for action in weekActions {
+            let noteText = notesByAction[action.id]?.noteText ?? ""
+            let hasNote = !noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            let actionAttachments = attachmentsByAction[action.id] ?? []
+            let hasLink = actionAttachments.contains { $0.kind == .link }
+            let hasFile = actionAttachments.contains { $0.kind == .file }
+            result[action.id] = ActionAttachmentPresence(
+                hasNote: hasNote,
+                hasLink: hasLink,
+                hasFile: hasFile
+            )
+        }
+        return result
+    }
+
+    var body: some View {
+        let lookupData = signposted("build_action_lookup_data") { buildActionLookupData() }
+        let defineByAction = lookupData.defineByAction
+        let executionByAction = lookupData.executionByAction
+        let notesByAction = lookupData.notesByAction
+        let attachmentsByAction = lookupData.attachmentsByAction
+        let attachmentPresenceByActionID = signposted("build_attachment_presence_by_action") {
+            buildAttachmentPresenceByActionID(
+                notesByAction: notesByAction,
+                attachmentsByAction: attachmentsByAction
+            )
+        }
+        let resourcesByAction = lookupData.resourcesByAction
+        let placesByAction = lookupData.placesByAction
+        let duePresentationByActionID = signposted("build_due_presentation") {
+            buildDuePresentationByActionID()
+        }
+        let resourcesCatalogByID = lookupData.resourcesCatalogByID
+        let allByChunk = signposted("compute_actions_by_chunk") { weekActionsByChunkID }
+        let filterContext = signposted("build_filter_context") {
+            buildFilterContext(
+                defineByAction: defineByAction,
+                executionByAction: executionByAction,
+                resourcesByAction: resourcesByAction,
+                placesByAction: placesByAction,
+                attachmentPresenceByActionID: attachmentPresenceByActionID,
+                resourceCatalogByID: resourcesCatalogByID
+            )
+        }
+        let rolesByID = Dictionary(uniqueKeysWithValues: roles.map { ($0.id, $0.role) })
+        let outcomesByID = Dictionary(uniqueKeysWithValues: outcomes.map { ($0.outcome_id, $0) })
+        let orderedChunksForDisplay = signposted("compute_ordered_chunks_for_display") {
+            orderedWeekChunksForDisplay(executionByAction: executionByAction)
+        }
+        let filteredByChunk = signposted("build_filtered_by_chunk") {
+            buildFilteredActionsByChunk(
+                filteredActions: filterContext.fullyFilteredActions,
+                executionByAction: executionByAction
+            )
+        }
+
+        withBodySignpost {
+            VStack(spacing: 0) {
+            collapsibleHeader(filterContext: filterContext)
 
             ScrollViewReader { proxy in
                 ScrollView {
@@ -604,7 +802,7 @@ struct ActionView: View {
                                 .frame(maxWidth: .infinity, alignment: .center)
                                 .padding(.top, 24)
                         } else {
-                            ForEach(orderedWeekChunksForDisplay) { chunk in
+                            ForEach(orderedChunksForDisplay) { chunk in
                                 chunkCard(
                                     chunk,
                                     allActions: allByChunk[chunk.id] ?? [],
@@ -612,6 +810,7 @@ struct ActionView: View {
                                     defineByAction: defineByAction,
                                     executionByAction: executionByAction,
                                     resourcesByAction: resourcesByAction,
+                                    resourceCatalogByID: resourcesCatalogByID,
                                     placesByAction: placesByAction,
                                     notesByAction: notesByAction,
                                     attachmentsByAction: attachmentsByAction,
@@ -653,41 +852,49 @@ struct ActionView: View {
                     .padding(.bottom, max(12, keyboardHeight + 8))
                 }
                 .onChange(of: focusedActionID) { _, id in
-                    guard let id else { return }
-                    DispatchQueue.main.async {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            proxy.scrollTo(id, anchor: .bottom)
+                    signposted("on_change_focused_action_id") {
+                        guard let id else { return }
+                        DispatchQueue.main.async {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                proxy.scrollTo(id, anchor: .bottom)
+                            }
                         }
                     }
                 }
                 .onChange(of: scrollTargetActionID) { _, id in
-                    guard let id else { return }
-                    DispatchQueue.main.async {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            proxy.scrollTo(id, anchor: .bottom)
-                        }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
-                            focusedActionID = id
-                            scrollTargetActionID = nil
+                    signposted("on_change_scroll_target_action_id") {
+                        guard let id else { return }
+                        DispatchQueue.main.async {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                proxy.scrollTo(id, anchor: .bottom)
+                            }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                                focusedActionID = id
+                                scrollTargetActionID = nil
+                            }
                         }
                     }
                 }
                 .onChange(of: pendingChunkScrollAnchor) { _, anchor in
-                    guard let anchor else { return }
-                    DispatchQueue.main.async {
-                        withAnimation(.easeInOut(duration: 0.22)) {
-                            proxy.scrollTo(anchor, anchor: .bottom)
+                    signposted("on_change_pending_chunk_anchor") {
+                        guard let anchor else { return }
+                        DispatchQueue.main.async {
+                            withAnimation(.easeInOut(duration: 0.22)) {
+                                proxy.scrollTo(anchor, anchor: .bottom)
+                            }
                         }
                     }
                 }
                 .onChange(of: pendingExpandChunkTopAnchor) { _, anchor in
-                    guard let anchor else { return }
-                    DispatchQueue.main.async {
-                        withAnimation(.easeInOut(duration: 0.22)) {
-                            proxy.scrollTo(anchor, anchor: .top)
-                        }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-                            pendingExpandChunkTopAnchor = nil
+                    signposted("on_change_pending_expand_anchor") {
+                        guard let anchor else { return }
+                        DispatchQueue.main.async {
+                            withAnimation(.easeInOut(duration: 0.22)) {
+                                proxy.scrollTo(anchor, anchor: .top)
+                            }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                                pendingExpandChunkTopAnchor = nil
+                            }
                         }
                     }
                 }
@@ -1044,27 +1251,33 @@ struct ActionView: View {
             syncLocalChunkOrderIfNeeded(force: true)
         }
         .onChange(of: weekChunks.map(\.id)) { _, _ in
-            deactivatePlanIfNoActionBlocks()
-            syncLocalChunkOrderIfNeeded(force: false)
+            signposted("on_change_week_chunk_ids") {
+                deactivatePlanIfNoActionBlocks()
+                syncLocalChunkOrderIfNeeded(force: false)
+            }
         }
         .onChange(of: weekActions.map(\.id)) { _, ids in
-            ensureStateRowsExistForWeek()
-            carriedProfileAppliedActionIDs = carriedProfileAppliedActionIDs.intersection(Set(ids))
-            applyCarriedProfilesToWeekActionsIfNeeded()
-            cleanupAllBlankActions()
-            deactivatePlanIfNoActionBlocks()
-            if let pending = pendingFocusActionID, ids.contains(pending) {
-                scrollTargetActionID = pending
-                pendingFocusActionID = nil
+            signposted("on_change_week_action_ids") {
+                ensureStateRowsExistForWeek()
+                carriedProfileAppliedActionIDs = carriedProfileAppliedActionIDs.intersection(Set(ids))
+                applyCarriedProfilesToWeekActionsIfNeeded()
+                cleanupAllBlankActions()
+                deactivatePlanIfNoActionBlocks()
+                if let pending = pendingFocusActionID, ids.contains(pending) {
+                    scrollTargetActionID = pending
+                    pendingFocusActionID = nil
+                }
             }
         }
         .onPreferenceChange(ActionScrollOffsetPreferenceKey.self) { y in
-            handleScrollOffsetChange(y)
+            signposted("on_change_scroll_offset") {
+                handleScrollOffsetChange(y)
+            }
         }
         .onDisappear {
             let pending = deferredPersistor.takePendingAndCancel()
             applyDeferredWrites(statuses: pending.statuses, musts: pending.musts)
-            autosaveTask?.cancel()
+            runtimeState.autosaveTask?.cancel()
             persistNow()
         }
         #if canImport(UIKit)
@@ -1082,9 +1295,10 @@ struct ActionView: View {
             cleanupAllBlankActions()
         }
         #endif
+        }
     }
 
-    private var collapsibleHeader: some View {
+    private func collapsibleHeader(filterContext: ActionFilterContext) -> some View {
         VStack(spacing: 8) {
             Text("Action Blocks")
                 .font(isHeaderCollapsed ? .title3 : .largeTitle)
@@ -1099,10 +1313,12 @@ struct ActionView: View {
                     cautionRow
                 }
                 if !areAllActionBlocksCollapsed {
-                    filterChipsRow
+                    filterChipsRow(filterContext: filterContext)
                 }
-                if !areAllActionBlocksCollapsed, let openFilter, isFilterMenuAvailable(openFilter) {
-                    filterDropdown(for: openFilter)
+                if !areAllActionBlocksCollapsed,
+                   let openFilter,
+                   isFilterMenuAvailable(openFilter, filterContext: filterContext) {
+                    filterDropdown(for: openFilter, filterContext: filterContext)
                 }
             }
         }
@@ -1213,7 +1429,7 @@ struct ActionView: View {
         )
     }
 
-    private var filterChipsRow: some View {
+    private func filterChipsRow(filterContext: ActionFilterContext) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 Button {
@@ -1229,7 +1445,7 @@ struct ActionView: View {
                 .foregroundStyle(.gray)
                 .padding(.trailing, 2)
 
-                ForEach(orderedVisibleFilterChips, id: \.self) { chip in
+                ForEach(filterContext.orderedVisibleFilterChips, id: \.self) { chip in
                     filterChipView(chip)
                 }
             }
@@ -1237,57 +1453,13 @@ struct ActionView: View {
         }
     }
 
-    private var orderedVisibleFilterChips: [FilterChipKind] {
-        let visible = defaultFilterChipOrder.filter { isFilterChipVisible($0) || isFilterChipSelected($0) }
-        let selected = visible.filter { isFilterChipSelected($0) }
-        let nonSelected = visible.filter { !isFilterChipSelected($0) }
-        return selected + nonSelected
-    }
+    private static let defaultFilterChipOrderValues: [FilterChipKind] = [
+        .activeOnly, .musts, .place, .person, .duration,
+        .tool, .timeOfDay, .leveragedOnly, .attachments, .inProgressOnly
+    ]
 
     private var defaultFilterChipOrder: [FilterChipKind] {
-        [
-            .activeOnly, .musts, .place, .person, .duration,
-            .tool, .timeOfDay, .leveragedOnly, .attachments, .inProgressOnly
-        ]
-    }
-
-    private func isFilterChipVisible(_ chip: FilterChipKind) -> Bool {
-        switch chip {
-        case .activeOnly: return showInactiveOnlyFilterButton
-        case .musts: return hasMustsFilterButton
-        case .place: return hasPlaceFilterButton
-        case .person: return hasPersonFilterButton
-        case .duration: return hasDurationFilterButton
-        case .tool: return hasToolFilterButton
-        case .timeOfDay: return hasTimeOfDayFilterButton
-        case .leveragedOnly: return showLeveragedOnlyFilterButton
-        case .attachments: return hasAttachmentsFilterButton
-        case .inProgressOnly: return showInProgressOnlyFilterButton
-        }
-    }
-
-    private var inactiveOnlyCandidateCount: Int {
-        let base = filteredActionsForVisibility(excluding: [.activeOnly])
-        let executionByAction = executionStateByActionID
-        return base.filter { isInactiveStatus(executionByAction[$0.id]?.status ?? .noAction) }.count
-    }
-
-    private var leveragedOnlyCandidateCount: Int {
-        let base = filteredActionsForVisibility(excluding: [.leveragedOnly])
-        let executionByAction = executionStateByActionID
-        return base.filter { (executionByAction[$0.id]?.status ?? .noAction) == .leveraged }.count
-    }
-
-    private var inProgressOnlyCandidateCount: Int {
-        let base = filteredActionsForVisibility(excluding: [.inProgressOnly])
-        let executionByAction = executionStateByActionID
-        return base.filter { (executionByAction[$0.id]?.status ?? .noAction) == .inProgress }.count
-    }
-
-    private var mustsOnlyCandidateCount: Int {
-        let defineByAction = defineStateByActionID
-        let base = filteredActionsForVisibility(excluding: [.musts])
-        return base.filter { isMust(for: $0.id, defineByAction: defineByAction) }.count
+        Self.defaultFilterChipOrderValues
     }
 
     private func isFilterChipSelected(_ chip: FilterChipKind) -> Bool {
@@ -1402,12 +1574,12 @@ struct ActionView: View {
     }
 
     @ViewBuilder
-    private func filterDropdown(for menu: FilterMenu) -> some View {
+    private func filterDropdown(for menu: FilterMenu, filterContext: ActionFilterContext) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             switch menu {
             case .place:
                 wrapSelectablePills(
-                    options: contextualPlaceItems,
+                    options: filterContext.contextualPlaceItems,
                     isSelected: { selectedPlaceIDs.contains($0.id) },
                     label: { $0.place },
                     onTap: { item in
@@ -1417,7 +1589,7 @@ struct ActionView: View {
                 )
             case .person:
                 wrapSelectablePills(
-                    options: contextualPersonResources,
+                    options: filterContext.contextualPersonResources,
                     isSelected: { selectedPersonIDs.contains($0.id) },
                     label: { $0.value },
                     onTap: { item in
@@ -1427,7 +1599,7 @@ struct ActionView: View {
                 )
             case .tool:
                 wrapSelectablePills(
-                    options: contextualToolResources,
+                    options: filterContext.contextualToolResources,
                     isSelected: { selectedToolIDs.contains($0.id) },
                     label: { $0.value },
                     onTap: { item in
@@ -1437,7 +1609,7 @@ struct ActionView: View {
                 )
             case .timeOfDay:
                 wrapSelectablePills(
-                    options: contextualTimeOfDayOptions,
+                    options: filterContext.contextualTimeOfDayOptions,
                     isSelected: { selectedTimeOfDay.contains($0) },
                     label: { $0.title },
                     onTap: { item in
@@ -1447,7 +1619,7 @@ struct ActionView: View {
                 )
             case .duration:
                 wrapSelectablePills(
-                    options: contextualDurations,
+                    options: filterContext.contextualDurations,
                     isSelected: { selectedDurations.contains($0) },
                     label: { "\($0)m" },
                     onTap: { value in
@@ -1457,7 +1629,7 @@ struct ActionView: View {
                 )
             case .attachments:
                 wrapSelectablePills(
-                    options: contextualAttachmentKinds,
+                    options: filterContext.contextualAttachmentKinds,
                     isSelected: { selectedAttachmentKinds.contains($0) },
                     label: { $0.title },
                     onTap: { item in
@@ -1482,6 +1654,7 @@ struct ActionView: View {
         defineByAction: [UUID: PlannedChunkActionDefineState],
         executionByAction: [UUID: PlannedChunkActionExecutionState],
         resourcesByAction: [UUID: UUID],
+        resourceCatalogByID: [UUID: LeverageResource],
         placesByAction: [UUID: Set<UUID>],
         notesByAction: [UUID: PlannedChunkActionNote],
         attachmentsByAction: [UUID: [PlannedChunkActionAttachment]],
@@ -1494,6 +1667,7 @@ struct ActionView: View {
         let fill = categoryFillColor(for: chunk.category)
         let accent = categoryAccentColor(for: chunk.category)
         let step4 = weekStepFourStatesByChunkID[chunk.id]
+        let step4ResultText = step4?.resultText ?? ""
         let roleName = step4?.connectedRoleId.flatMap { rolesByID[$0] } ?? ""
         let selectedOutcomeIDs = weekOutcomeIDsByChunkID[chunk.id] ?? []
         let outcomesForChunk = selectedOutcomeIDs.compactMap { outcomesByID[$0] }
@@ -1524,6 +1698,7 @@ struct ActionView: View {
             defineByAction: defineByAction,
             executionByAction: executionByAction,
             resourcesByAction: resourcesByAction,
+            resourceCatalogByID: resourceCatalogByID,
             placesByAction: placesByAction,
             notesByAction: notesByAction,
             attachmentsByAction: attachmentsByAction,
@@ -1531,6 +1706,7 @@ struct ActionView: View {
             accent: accent,
             roleName: roleName,
             outcomesForChunk: outcomesForChunk,
+            step4ResultText: step4ResultText,
             step4: step4,
             showNoApplicableActionsPlaceholder: showNoApplicableActionsPlaceholder,
             isCollapsed: isCollapsed,
@@ -1571,6 +1747,7 @@ struct ActionView: View {
         defineByAction: [UUID: PlannedChunkActionDefineState],
         executionByAction: [UUID: PlannedChunkActionExecutionState],
         resourcesByAction: [UUID: UUID],
+        resourceCatalogByID: [UUID: LeverageResource],
         placesByAction: [UUID: Set<UUID>],
         notesByAction: [UUID: PlannedChunkActionNote],
         attachmentsByAction: [UUID: [PlannedChunkActionAttachment]],
@@ -1578,6 +1755,7 @@ struct ActionView: View {
         accent: Color,
         roleName: String,
         outcomesForChunk: [Outcomes],
+        step4ResultText: String,
         step4: PlannedChunkStepFourState?,
         showNoApplicableActionsPlaceholder: Bool,
         isCollapsed: Bool,
@@ -1605,6 +1783,7 @@ struct ActionView: View {
                     defineByAction: defineByAction,
                     executionByAction: executionByAction,
                     resourcesByAction: resourcesByAction,
+                    resourceCatalogByID: resourceCatalogByID,
                     placesByAction: placesByAction,
                     notesByAction: notesByAction,
                     attachmentsByAction: attachmentsByAction,
@@ -1612,6 +1791,7 @@ struct ActionView: View {
                     accent: accent,
                     roleName: roleName,
                     outcomesForChunk: outcomesForChunk,
+                    step4ResultText: step4ResultText,
                     showCompletedInactiveHeader: showCompletedInactiveHeader,
                     canShowFooterControls: canShowFooterControls,
                     canReorderDisplayedActions: canReorderDisplayedActions
@@ -1677,6 +1857,7 @@ struct ActionView: View {
         defineByAction: [UUID: PlannedChunkActionDefineState],
         executionByAction: [UUID: PlannedChunkActionExecutionState],
         resourcesByAction: [UUID: UUID],
+        resourceCatalogByID: [UUID: LeverageResource],
         placesByAction: [UUID: Set<UUID>],
         notesByAction: [UUID: PlannedChunkActionNote],
         attachmentsByAction: [UUID: [PlannedChunkActionAttachment]],
@@ -1684,12 +1865,71 @@ struct ActionView: View {
         accent: Color,
         roleName: String,
         outcomesForChunk: [Outcomes],
+        step4ResultText: String,
         showCompletedInactiveHeader: Bool,
         canShowFooterControls: Bool,
         canReorderDisplayedActions: Bool
     ) -> some View {
-        let activeActionsForRearrange = allForChunk.filter {
-            isActiveStatus(executionByAction[$0.id]?.status ?? .noAction)
+        let activeActionsForRearrange = signposted("build_rearrangeable_actions") {
+            allForChunk.filter {
+                isActiveStatus(executionByAction[$0.id]?.status ?? .noAction)
+            }
+        }
+        let rowContexts = signposted("build_row_render_contexts") {
+            displayedFiltered.map { action in
+                let defineState = defineByAction[action.id]
+                let status = executionByAction[action.id]?.status ?? .noAction
+                let selectedResource = resourcesByAction[action.id].flatMap { resourceCatalogByID[$0] }
+                let hasLeverage = selectedResource != nil
+                let leverageIconName: String = {
+                    guard let selectedResource else { return "person" }
+                    return selectedResource.kind == .tool ? "wrench.and.screwdriver.fill" : "person.fill"
+                }()
+                let placeIDs = placesByAction[action.id] ?? []
+                let hasSensitivity = hasAnySensitivity(
+                    defineState: defineState,
+                    placeIDs: placeIDs,
+                    hasDueDate: duePresentationByActionID[action.id]?.hasDueDate ?? false
+                )
+                let hasAttachments = hasAnyAttachments(
+                    note: notesByAction[action.id],
+                    attachments: attachmentsByAction[action.id] ?? []
+                )
+                return ActionRowRenderContext(
+                    action: action,
+                    defineState: defineState,
+                    status: status,
+                    duePresentation: duePresentationByActionID[action.id],
+                    hasLeverage: hasLeverage,
+                    leverageIconName: leverageIconName,
+                    hasSensitivity: hasSensitivity,
+                    hasAttachments: hasAttachments,
+                    highlightStatusBox: highlightedStatusActionIDs.contains(action.id)
+                )
+            }
+        }
+        let chunkTotals = signposted("build_chunk_totals") {
+            let isFilterApplied = isAnyFilterApplied
+            let useFilterTotalsLabel = isFilterApplied && !isOnlyInactiveOnlyFilterApplied
+            let totalSource = isFilterApplied ? filtered : allForChunk
+            var totalMinutes = 0
+            var totalMustMinutes = 0
+            var hasActiveActions = false
+            for action in totalSource {
+                guard isActiveStatus(executionByAction[action.id]?.status ?? .noAction) else { continue }
+                hasActiveActions = true
+                let minutes = defineByAction[action.id]?.timeEstimateMinutes ?? 0
+                totalMinutes += minutes
+                if isMust(for: action.id, defineByAction: defineByAction) {
+                    totalMustMinutes += minutes
+                }
+            }
+            return ActionChunkTotals(
+                useFilterTotalsLabel: useFilterTotalsLabel,
+                hasActiveActions: hasActiveActions,
+                totalMinutes: totalMinutes,
+                totalMustMinutes: totalMustMinutes
+            )
         }
 
         if showCompletedInactiveHeader {
@@ -1715,7 +1955,7 @@ struct ActionView: View {
             }
         }
 
-        resultSection(resultText: weekStepFourStatesByChunkID[chunk.id]?.resultText ?? "")
+        resultSection(resultText: step4ResultText)
 
         if !roleName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             smallPill(icon: "trophy", text: roleName)
@@ -1768,52 +2008,33 @@ struct ActionView: View {
             }
 
             LazyVStack(spacing: 8) {
-                ForEach(displayedFiltered) { action in
-                    let defineState = defineByAction[action.id]
-                    let status = executionByAction[action.id]?.status ?? .noAction
-                    let selectedResource = resourcesByAction[action.id].flatMap { resourceByID[$0] }
-                    let hasLeverage = selectedResource != nil
-                    let leverageIconName = {
-                        guard let selectedResource else { return "person" }
-                        return selectedResource.kind == .tool ? "wrench.and.screwdriver.fill" : "person.fill"
-                    }()
-                    let placeIDs = placesByAction[action.id] ?? []
-                    let hasSensitivity = hasAnySensitivity(
-                        defineState: defineState,
-                        placeIDs: placeIDs,
-                        hasDueDate: duePresentationByActionID[action.id]?.hasDueDate ?? false
-                    )
-                    let hasAttachments = hasAnyAttachments(
-                        note: notesByAction[action.id],
-                        attachments: attachmentsByAction[action.id] ?? []
-                    )
-
+                ForEach(rowContexts) { row in
                     if canReorderDisplayedActions {
                         actionRow(
-                            action: action,
+                            action: row.action,
                             accent: accent,
-                            duePresentation: duePresentationByActionID[action.id],
-                            defineState: defineState,
-                            status: status,
-                            hasLeverage: hasLeverage,
-                            leverageIconName: leverageIconName,
-                            hasSensitivity: hasSensitivity,
-                            hasAttachments: hasAttachments,
-                            highlightStatusBox: highlightedStatusActionIDs.contains(action.id),
+                            duePresentation: row.duePresentation,
+                            defineState: row.defineState,
+                            status: row.status,
+                            hasLeverage: row.hasLeverage,
+                            leverageIconName: row.leverageIconName,
+                            hasSensitivity: row.hasSensitivity,
+                            hasAttachments: row.hasAttachments,
+                            highlightStatusBox: row.highlightStatusBox,
                             showsReorderHandle: true
                         )
-                        .id(action.id)
+                        .id(row.id)
                         .onDrag {
                             let startingOrder = displayedFiltered.map(\.id)
                             draggedActionChunkID = chunk.id
                             localActionOrderIDs = startingOrder
-                            draggedActionID = action.id
-                            return NSItemProvider(object: action.id.uuidString as NSString)
+                            draggedActionID = row.id
+                            return NSItemProvider(object: row.id.uuidString as NSString)
                         }
                         .onDrop(
                             of: [.text],
                             delegate: AnimatedActionRowDropDelegate(
-                                targetID: action.id,
+                                targetID: row.id,
                                 draggedID: $draggedActionID,
                                 draggedChunkID: $draggedActionChunkID,
                                 localActionOrderIDs: $localActionOrderIDs,
@@ -1825,19 +2046,19 @@ struct ActionView: View {
                         )
                     } else {
                         actionRow(
-                            action: action,
+                            action: row.action,
                             accent: accent,
-                            duePresentation: duePresentationByActionID[action.id],
-                            defineState: defineState,
-                            status: status,
-                            hasLeverage: hasLeverage,
-                            leverageIconName: leverageIconName,
-                            hasSensitivity: hasSensitivity,
-                            hasAttachments: hasAttachments,
-                            highlightStatusBox: highlightedStatusActionIDs.contains(action.id),
+                            duePresentation: row.duePresentation,
+                            defineState: row.defineState,
+                            status: row.status,
+                            hasLeverage: row.hasLeverage,
+                            leverageIconName: row.leverageIconName,
+                            hasSensitivity: row.hasSensitivity,
+                            hasAttachments: row.hasAttachments,
+                            highlightStatusBox: row.highlightStatusBox,
                             showsReorderHandle: false
                         )
-                        .id(action.id)
+                        .id(row.id)
                     }
                 }
             }
@@ -1854,43 +2075,30 @@ struct ActionView: View {
                 )
             )
 
-            let isFilterApplied = isAnyFilterApplied
-            let useFilterTotalsLabel = isFilterApplied && !isOnlyInactiveOnlyFilterApplied
-            let totalSource = isFilterApplied ? filtered : allForChunk
-            let activeActions = totalSource.filter { isActiveStatus(executionByAction[$0.id]?.status ?? .noAction) }
-            let totalMinutes = activeActions.reduce(0) { partial, action in
-                partial + (defineByAction[action.id]?.timeEstimateMinutes ?? 0)
-            }
-            let totalMustMinutes = activeActions.reduce(0) { partial, action in
-                let st = defineByAction[action.id]
-                guard isMust(for: action.id, defineByAction: defineByAction) else { return partial }
-                return partial + (st?.timeEstimateMinutes ?? 0)
-            }
-
             Divider().opacity(0.35)
             HStack(alignment: .bottom) {
                 Spacer(minLength: 8)
 
-                if !activeActions.isEmpty {
+                if chunkTotals.hasActiveActions {
                     VStack(alignment: .trailing, spacing: 4) {
                         (
-                            Text(useFilterTotalsLabel ? "Filter Total Time: " : "Total Time: ")
+                            Text(chunkTotals.useFilterTotalsLabel ? "Filter Total Time: " : "Total Time: ")
                                 .font(.footnote)
-                            + Text(formatMinutes(totalMinutes))
+                            + Text(formatMinutes(chunkTotals.totalMinutes))
                                 .font(.footnote)
                                 .fontWeight(.bold)
                         )
-                        .italic(useFilterTotalsLabel)
+                        .italic(chunkTotals.useFilterTotalsLabel)
                         .foregroundStyle(Color.black.opacity(0.58))
 
                         (
-                            Text(useFilterTotalsLabel ? "Filter Total Must Time: " : "Total Must Time: ")
+                            Text(chunkTotals.useFilterTotalsLabel ? "Filter Total Must Time: " : "Total Must Time: ")
                                 .font(.footnote)
-                            + Text(formatMinutes(totalMustMinutes))
+                            + Text(formatMinutes(chunkTotals.totalMustMinutes))
                                 .font(.footnote)
                                 .fontWeight(.bold)
                         )
-                        .italic(useFilterTotalsLabel)
+                        .italic(chunkTotals.useFilterTotalsLabel)
                         .foregroundStyle(Color.black.opacity(0.58))
                     }
                     .frame(maxWidth: .infinity, alignment: .trailing)
@@ -1980,45 +2188,47 @@ struct ActionView: View {
         highlightStatusBox: Bool,
         showsReorderHandle: Bool
     ) -> some View {
-        ActionSwipeRow(
-            actionId: action.id,
-            text: action.text,
-            dueStatusText: duePresentation?.text,
-            dueStatusColor: duePresentation?.color ?? .secondary,
-            status: status,
-            accent: accent,
-            colorScheme: colorScheme,
-            isMust: isMust(for: action.id, defineState: defineState),
-            minutes: defineState?.timeEstimateMinutes,
-            hasLeverage: hasLeverage,
-            leverageIconName: leverageIconName,
-            hasSensitivity: hasSensitivity,
-            hasAttachments: hasAttachments,
-            highlightStatusBox: highlightStatusBox,
-            showsReorderHandle: showsReorderHandle,
-            focusedActionID: $focusedActionID,
-            onCommitText: { newValue in
-                handleActionTextCommit(action: action, newValue: newValue)
-            },
-            onOpenStatus: {
-                actionStatusActionID = ActionSheetID(id: action.id)
-            },
-            onToggleMust: { nextMust in
-                scheduleMustPersist(for: action.id, isMust: nextMust)
-            },
-            onOpenClock: {
-                durationActionID = ActionSheetID(id: action.id)
-            },
-            onOpenLeverage: {
-                leverageActionID = ActionSheetID(id: action.id)
-            },
-            onOpenSensitivity: {
-                sensitivityActionID = ActionSheetID(id: action.id)
-            },
-            onOpenAttachments: {
-                attachmentsActionID = ActionSheetID(id: action.id)
-            }
-        )
+        signposted("build_action_row") {
+            ActionSwipeRow(
+                actionId: action.id,
+                text: action.text,
+                dueStatusText: duePresentation?.text,
+                dueStatusColor: duePresentation?.color ?? .secondary,
+                status: status,
+                accent: accent,
+                colorScheme: colorScheme,
+                isMust: isMust(for: action.id, defineState: defineState),
+                minutes: defineState?.timeEstimateMinutes,
+                hasLeverage: hasLeverage,
+                leverageIconName: leverageIconName,
+                hasSensitivity: hasSensitivity,
+                hasAttachments: hasAttachments,
+                highlightStatusBox: highlightStatusBox,
+                showsReorderHandle: showsReorderHandle,
+                focusedActionID: $focusedActionID,
+                onCommitText: { newValue in
+                    handleActionTextCommit(action: action, newValue: newValue)
+                },
+                onOpenStatus: {
+                    actionStatusActionID = ActionSheetID(id: action.id)
+                },
+                onToggleMust: { nextMust in
+                    scheduleMustPersist(for: action.id, isMust: nextMust)
+                },
+                onOpenClock: {
+                    durationActionID = ActionSheetID(id: action.id)
+                },
+                onOpenLeverage: {
+                    leverageActionID = ActionSheetID(id: action.id)
+                },
+                onOpenSensitivity: {
+                    sensitivityActionID = ActionSheetID(id: action.id)
+                },
+                onOpenAttachments: {
+                    attachmentsActionID = ActionSheetID(id: action.id)
+                }
+            )
+        }
     }
 
     private func addActionButton(for chunk: PlannedChunk) -> some View {
@@ -2784,42 +2994,31 @@ struct ActionView: View {
     }
 
     private func buildFilteredActionsByChunk(
-        defineByAction: [UUID: PlannedChunkActionDefineState],
+        filteredActions: [PlannedChunkAction],
         executionByAction: [UUID: PlannedChunkActionExecutionState],
-        resourcesByAction: [UUID: UUID],
-        placesByAction: [UUID: Set<UUID>],
-        notesByAction: [UUID: PlannedChunkActionNote],
-        attachmentsByAction: [UUID: [PlannedChunkActionAttachment]],
-        resourceCatalogByID: [UUID: LeverageResource]
     ) -> [UUID: [PlannedChunkAction]] {
         var result: [UUID: [PlannedChunkAction]] = [:]
-        var statusRankByActionID: [UUID: Int] = [:]
-        statusRankByActionID.reserveCapacity(weekActions.count)
-        for action in weekActions {
-            let status = executionByAction[action.id]?.status ?? .noAction
-            let rank: Int
-            switch status {
-            case .inProgress:
-                rank = 0
-            case .done, .carriedToCapture, .notNeeded:
-                rank = 2
-            default:
-                rank = 1
+        let statusRankByActionID: [UUID: Int] = signposted("build_status_rank_by_filtered_action") {
+            var map: [UUID: Int] = [:]
+            map.reserveCapacity(filteredActions.count)
+            for action in filteredActions {
+                let status = executionByAction[action.id]?.status ?? .noAction
+                let rank: Int
+                switch status {
+                case .inProgress:
+                    rank = 0
+                case .done, .carriedToCapture, .notNeeded:
+                    rank = 2
+                default:
+                    rank = 1
+                }
+                map[action.id] = rank
             }
-            statusRankByActionID[action.id] = rank
+            return map
         }
 
-        for action in weekActions {
-            if actionMatchesFilters(
-                action,
-                defineByAction: defineByAction,
-                executionByAction: executionByAction,
-                resourcesByAction: resourcesByAction,
-                placesByAction: placesByAction,
-                notesByAction: notesByAction,
-                attachmentsByAction: attachmentsByAction,
-                resourceCatalogByID: resourceCatalogByID
-            ) {
+        signposted("group_prefiltered_actions_by_chunk") {
+            for action in filteredActions {
                 result[action.plannedChunkId, default: []].append(action)
             }
         }
@@ -2829,18 +3028,20 @@ struct ActionView: View {
         //   (Done, Carried to capture, Didn't need to be done)
         // - Base order remains `sortOrder`, so when status changes away from these
         //   pinned statuses the action naturally returns to its previous list position.
-        for chunkId in result.keys {
-            result[chunkId]?.sort { lhs, rhs in
-                let lhsRank = statusRankByActionID[lhs.id] ?? 1
-                let rhsRank = statusRankByActionID[rhs.id] ?? 1
+        signposted("sort_filtered_actions_by_chunk") {
+            for chunkId in result.keys {
+                result[chunkId]?.sort { lhs, rhs in
+                    let lhsRank = statusRankByActionID[lhs.id] ?? 1
+                    let rhsRank = statusRankByActionID[rhs.id] ?? 1
 
-                if lhsRank != rhsRank {
-                    return lhsRank < rhsRank
+                    if lhsRank != rhsRank {
+                        return lhsRank < rhsRank
+                    }
+                    if lhs.sortOrder != rhs.sortOrder {
+                        return lhs.sortOrder < rhs.sortOrder
+                    }
+                    return lhs.id.uuidString < rhs.id.uuidString
                 }
-                if lhs.sortOrder != rhs.sortOrder {
-                    return lhs.sortOrder < rhs.sortOrder
-                }
-                return lhs.id.uuidString < rhs.id.uuidString
             }
         }
         return result
@@ -2852,8 +3053,7 @@ struct ActionView: View {
         executionByAction: [UUID: PlannedChunkActionExecutionState],
         resourcesByAction: [UUID: UUID],
         placesByAction: [UUID: Set<UUID>],
-        notesByAction: [UUID: PlannedChunkActionNote],
-        attachmentsByAction: [UUID: [PlannedChunkActionAttachment]],
+        attachmentPresenceByActionID: [UUID: ActionAttachmentPresence],
         resourceCatalogByID: [UUID: LeverageResource],
         excludedFacets: Set<FilterFacet> = []
     ) -> Bool {
@@ -2904,11 +3104,8 @@ struct ActionView: View {
         }
 
         if !excludedFacets.contains(.attachments) && !selectedAttachmentKinds.isEmpty {
-            if !matchesAttachmentKinds(
-                note: notesByAction[action.id]?.noteText ?? "",
-                attachments: attachmentsByAction[action.id] ?? [],
-                selected: selectedAttachmentKinds
-            ) {
+            let presence = attachmentPresenceByActionID[action.id]
+            if !matchesAttachmentKinds(presence: presence, selected: selectedAttachmentKinds) {
                 return false
             }
         }
@@ -2927,19 +3124,17 @@ struct ActionView: View {
     }
 
     private func matchesAttachmentKinds(
-        note: String,
-        attachments: [PlannedChunkActionAttachment],
+        presence: ActionAttachmentPresence?,
         selected: Set<ActionAttachmentFilterKind>
     ) -> Bool {
-        let actionNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
         for kind in selected {
             switch kind {
             case .note:
-                if !actionNote.isEmpty { return true }
+                if presence?.hasNote == true { return true }
             case .link:
-                if attachments.contains(where: { $0.kind == .link }) { return true }
+                if presence?.hasLink == true { return true }
             case .file:
-                if attachments.contains(where: { $0.kind == .file }) { return true }
+                if presence?.hasFile == true { return true }
             }
         }
         return false
@@ -2973,14 +3168,18 @@ struct ActionView: View {
     }
 
     private func scheduleStatusPersist(for actionId: UUID, status newStatus: ActionExecutionStatus) {
-        deferredPersistor.enqueueStatus(for: actionId, status: newStatus, delayNanos: 220_000_000) { @MainActor statuses, musts in
-            self.applyDeferredWrites(statuses: statuses, musts: musts)
+        signposted("enqueue_status_persist") {
+            deferredPersistor.enqueueStatus(for: actionId, status: newStatus, delayNanos: 220_000_000) { @MainActor statuses, musts in
+                self.applyDeferredWrites(statuses: statuses, musts: musts)
+            }
         }
     }
 
     private func scheduleMustPersist(for actionId: UUID, isMust: Bool) {
-        deferredPersistor.enqueueMust(for: actionId, isMust: isMust, delayNanos: 220_000_000) { @MainActor statuses, musts in
-            self.applyDeferredWrites(statuses: statuses, musts: musts)
+        signposted("enqueue_must_persist") {
+            deferredPersistor.enqueueMust(for: actionId, isMust: isMust, delayNanos: 220_000_000) { @MainActor statuses, musts in
+                self.applyDeferredWrites(statuses: statuses, musts: musts)
+            }
         }
     }
 
@@ -2991,24 +3190,26 @@ struct ActionView: View {
     }
 
     private func applyDeferredWrites(statuses: [UUID: ActionExecutionStatus], musts: [UUID: Bool]) {
-        if !statuses.isEmpty {
-            for (actionId, newStatus) in statuses {
-                upsertExecutionState(forActionId: actionId) { state in
-                    state.status = newStatus
-                    state.updatedAt = .now
+        signposted("apply_deferred_writes") {
+            if !statuses.isEmpty {
+                for (actionId, newStatus) in statuses {
+                    upsertExecutionState(forActionId: actionId) { state in
+                        state.status = newStatus
+                        state.updatedAt = .now
+                    }
                 }
             }
-        }
-        if !musts.isEmpty {
-            for (actionId, isMust) in musts {
-                upsertDefineState(forActionId: actionId) { st in
-                    st.isMust = isMust
-                    st.updatedAt = .now
+            if !musts.isEmpty {
+                for (actionId, isMust) in musts {
+                    upsertDefineState(forActionId: actionId) { st in
+                        st.isMust = isMust
+                        st.updatedAt = .now
+                    }
                 }
             }
-        }
-        if !statuses.isEmpty || !musts.isEmpty {
-            scheduleAutosave()
+            if !statuses.isEmpty || !musts.isEmpty {
+                scheduleAutosave()
+            }
         }
     }
 
@@ -3364,21 +3565,21 @@ struct ActionView: View {
         openFilter = nil
     }
 
-    private func isFilterMenuAvailable(_ menu: FilterMenu) -> Bool {
+    private func isFilterMenuAvailable(_ menu: FilterMenu, filterContext: ActionFilterContext) -> Bool {
         switch menu {
-        case .place: return hasPlaceFilterButton
-        case .person: return hasPersonFilterButton
-        case .tool: return hasToolFilterButton
-        case .timeOfDay: return hasTimeOfDayFilterButton
-        case .duration: return hasDurationFilterButton
-        case .attachments: return hasAttachmentsFilterButton
+        case .place: return filterContext.hasPlaceFilterButton
+        case .person: return filterContext.hasPersonFilterButton
+        case .tool: return filterContext.hasToolFilterButton
+        case .timeOfDay: return filterContext.hasTimeOfDayFilterButton
+        case .duration: return filterContext.hasDurationFilterButton
+        case .attachments: return filterContext.hasAttachmentsFilterButton
         }
     }
 
     private func handleScrollOffsetChange(_ y: CGFloat) {
         let now = Date().timeIntervalSinceReferenceDate
-        let dy = y - lastScrollY
-        let dt = max(0.016, now - lastScrollTimestamp)
+        let dy = y - runtimeState.lastScrollY
+        let dt = max(0.016, now - runtimeState.lastScrollTimestamp)
         let velocity = dy / CGFloat(dt)
 
         // Scrolling down collapses the header quickly.
@@ -3396,8 +3597,8 @@ struct ActionView: View {
             }
         }
 
-        lastScrollY = y
-        lastScrollTimestamp = now
+        runtimeState.lastScrollY = y
+        runtimeState.lastScrollTimestamp = now
     }
 
     private func dismissKeyboardAndCommit() {
@@ -3628,10 +3829,12 @@ struct ActionView: View {
     }
 
     private func scheduleAutosave() {
-        autosaveTask?.cancel()
-        autosaveTask = Task { @MainActor in
+        runtimeState.autosaveTask?.cancel()
+        runtimeState.autosaveTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 700_000_000)
-            persistNow()
+            signposted("autosave_persist") {
+                persistNow()
+            }
         }
     }
 
@@ -3669,6 +3872,7 @@ private enum FilterChipKind: Hashable {
 }
 
 private final class ActionDeferredPersistor {
+    private static let signposter = OSSignposter(subsystem: "loom", category: "ActionDeferredPersistor")
     private var pendingStatuses: [UUID: ActionExecutionStatus] = [:]
     private var pendingMusts: [UUID: Bool] = [:]
     private var flushTask: Task<Void, Never>? = nil
@@ -3708,13 +3912,17 @@ private final class ActionDeferredPersistor {
     ) {
         flushTask?.cancel()
         flushTask = Task { [weak self] in
+            let state = Self.signposter.beginInterval("deferred_flush_wait")
             try? await Task.sleep(nanoseconds: delayNanos)
+            Self.signposter.endInterval("deferred_flush_wait", state)
             guard let self, !Task.isCancelled else { return }
             let statuses = self.pendingStatuses
             let musts = self.pendingMusts
             self.pendingStatuses.removeAll()
             self.pendingMusts.removeAll()
+            let flushState = Self.signposter.beginInterval("deferred_flush_apply")
             await flush(statuses, musts)
+            Self.signposter.endInterval("deferred_flush_apply", flushState)
         }
     }
 }
