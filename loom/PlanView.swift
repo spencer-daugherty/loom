@@ -1,6 +1,9 @@
 import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
+#if canImport(UIKit)
+import UIKit
+#endif
 #if canImport(EventKit)
 import EventKit
 #endif
@@ -31,6 +34,75 @@ private struct PlanStepProgressBar: View {
         .accessibilityLabel("Step \(current) of \(total)")
     }
 }
+
+#if canImport(UIKit)
+private struct PersistentPlanComposerField: UIViewRepresentable {
+    @Binding var text: String
+    var placeholder: String
+    var isFirstResponder: Bool
+    var returnKeyType: UIReturnKeyType = .done
+    var font: UIFont = .systemFont(ofSize: 17)
+    var onSubmit: () -> Void
+    var onBeginEditing: () -> Void
+
+    final class Coordinator: NSObject, UITextFieldDelegate {
+        var parent: PersistentPlanComposerField
+        var isSyncingFromSwiftUI = false
+        init(_ parent: PersistentPlanComposerField) { self.parent = parent }
+
+        @objc func textChanged(_ sender: UITextField) {
+            if isSyncingFromSwiftUI { return }
+            parent.text = sender.text ?? ""
+        }
+
+        func textFieldDidBeginEditing(_ textField: UITextField) {
+            parent.onBeginEditing()
+        }
+
+        func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+            parent.onSubmit()
+            return false
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeUIView(context: Context) -> UITextField {
+        let field = UITextField(frame: .zero)
+        field.placeholder = placeholder
+        field.delegate = context.coordinator
+        field.returnKeyType = returnKeyType
+        field.autocapitalizationType = .sentences
+        field.autocorrectionType = .yes
+        field.font = font
+        field.textColor = .label
+        field.tintColor = .systemBlue
+        field.backgroundColor = .clear
+        field.contentVerticalAlignment = .center
+        field.borderStyle = .none
+        field.addTarget(context.coordinator, action: #selector(Coordinator.textChanged(_:)), for: .editingChanged)
+        return field
+    }
+
+    func updateUIView(_ uiView: UITextField, context: Context) {
+        if uiView.text != text {
+            context.coordinator.isSyncingFromSwiftUI = true
+            uiView.text = text
+            context.coordinator.isSyncingFromSwiftUI = false
+        }
+        if uiView.placeholder != placeholder { uiView.placeholder = placeholder }
+        if uiView.returnKeyType != returnKeyType { uiView.returnKeyType = returnKeyType }
+        if uiView.font != font { uiView.font = font }
+        if isFirstResponder {
+            if !uiView.isFirstResponder {
+                DispatchQueue.main.async { uiView.becomeFirstResponder() }
+            }
+        } else if uiView.isFirstResponder {
+            uiView.resignFirstResponder()
+        }
+    }
+}
+#endif
 
 struct PlanStartView: View {
     @Environment(\.dismiss) private var dismiss
@@ -324,8 +396,12 @@ struct PlanView: View {
     @State private var showStep1ValidationHint: Bool = false
     @State private var shouldHighlightStep1Validation: Bool = false
     @State private var step1ValidationResetWorkItem: DispatchWorkItem?
+    @State private var isMorningFocused: Bool = false
+    @State private var isIncantationFocused: Bool = false
+#if !canImport(UIKit)
     @FocusState private var focusedField: Field?
     private enum Field: Hashable { case morning, incantation }
+#endif
     private let stepOneFreshStartCleanupKeyPrefix = "plan_step1_fresh_start_cleanup_done"
 
     private var currentWeekStart: Date {
@@ -394,13 +470,7 @@ struct PlanView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("What am I happy for or grateful about in life right now? (Optional)")
                     .font(.headline)
-                TextField("My dreams, aspirations, and goals", text: $morningPowerQuestion)
-                    .font(weeklyPlanningFieldFont)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(height: weeklyPlanningFieldHeight)
-                    .submitLabel(.next)
-                    .focused($focusedField, equals: .morning)
-                    .onSubmit { focusedField = .incantation }
+                stepOneMorningField
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)
                             .stroke(
@@ -414,16 +484,7 @@ struct PlanView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("What’s a simple phrase that inspires you? (Optional)")
                     .font(.headline)
-                TextField("Where I focus improves", text: $incantation)
-                    .font(weeklyPlanningFieldFont)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(height: weeklyPlanningFieldHeight)
-                    .submitLabel(.done)
-                    .focused($focusedField, equals: .incantation)
-                    .onSubmit {
-                        if isNextDisabled { return }
-                        saveStepOneAndAdvance()
-                    }
+                stepOneIncantationField
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)
                             .stroke(
@@ -504,7 +565,11 @@ struct PlanView: View {
             }
 
             DispatchQueue.main.async {
+                isMorningFocused = true
+                isIncantationFocused = false
+#if !canImport(UIKit)
                 focusedField = .morning
+#endif
             }
         }
         .onChange(of: morningPowerQuestion) { _, _ in
@@ -562,6 +627,81 @@ struct PlanView: View {
 
         try? modelContext.save()
         navigateToStep2 = true
+    }
+
+    @ViewBuilder
+    private var stepOneMorningField: some View {
+#if canImport(UIKit)
+        PersistentPlanComposerField(
+            text: $morningPowerQuestion,
+            placeholder: "My dreams, aspirations, and goals",
+            isFirstResponder: isMorningFocused,
+            returnKeyType: .next,
+            font: .systemFont(ofSize: 21),
+            onSubmit: {
+                isMorningFocused = false
+                isIncantationFocused = true
+            },
+            onBeginEditing: {
+                isMorningFocused = true
+                isIncantationFocused = false
+            }
+        )
+        .frame(height: weeklyPlanningFieldHeight)
+        .padding(.horizontal, 12)
+        .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color(.separator).opacity(0.45), lineWidth: 1)
+        )
+#else
+        TextField("My dreams, aspirations, and goals", text: $morningPowerQuestion)
+            .font(weeklyPlanningFieldFont)
+            .textFieldStyle(.roundedBorder)
+            .frame(height: weeklyPlanningFieldHeight)
+            .submitLabel(.next)
+            .focused($focusedField, equals: .morning)
+            .onSubmit { focusedField = .incantation }
+#endif
+    }
+
+    @ViewBuilder
+    private var stepOneIncantationField: some View {
+#if canImport(UIKit)
+        PersistentPlanComposerField(
+            text: $incantation,
+            placeholder: "Where I focus improves",
+            isFirstResponder: isIncantationFocused,
+            returnKeyType: .done,
+            font: .systemFont(ofSize: 21),
+            onSubmit: {
+                if isNextDisabled { return }
+                saveStepOneAndAdvance()
+            },
+            onBeginEditing: {
+                isMorningFocused = false
+                isIncantationFocused = true
+            }
+        )
+        .frame(height: weeklyPlanningFieldHeight)
+        .padding(.horizontal, 12)
+        .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color(.separator).opacity(0.45), lineWidth: 1)
+        )
+#else
+        TextField("Where I focus improves", text: $incantation)
+            .font(weeklyPlanningFieldFont)
+            .textFieldStyle(.roundedBorder)
+            .frame(height: weeklyPlanningFieldHeight)
+            .submitLabel(.done)
+            .focused($focusedField, equals: .incantation)
+            .onSubmit {
+                if isNextDisabled { return }
+                saveStepOneAndAdvance()
+            }
+#endif
     }
 
     private func triggerStep1ValidationFeedback() {
@@ -691,7 +831,7 @@ struct PlanStepTwoView: View {
 
     @State private var input: String = ""
     @State private var showHidden: Bool = false
-    @FocusState private var isInputFocused: Bool
+    @State private var isInputFocused: Bool = false
 
     @State private var baselineItemIDs: Set<UUID> = []
     @State private var isBrainstormExpanded: Bool = false
@@ -900,51 +1040,8 @@ struct PlanStepTwoView: View {
             .scrollContentBackground(.hidden)
             .scrollDismissesKeyboard(.never)
 
-            HStack(spacing: 12) {
-                TextField("Add an action…", text: $input)
-                    .textInputAutocapitalization(.sentences)
-                    .autocorrectionDisabled(false)
-                    .focused($isInputFocused)
-                    .submitLabel(.done)
-                    .onSubmit(addItem)
-                    .padding(12)
-                    .background(Color(.secondarySystemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10)
-                            .stroke(
-                                shouldHighlightStep2InputValidation
-                                ? Color.red.opacity(0.85)
-                                : (colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.3)),
-                                lineWidth: shouldHighlightStep2InputValidation ? 1.5 : 1
-                            )
-                    )
-                    .layoutPriority(1)
-                    .frame(maxWidth: .infinity)
-            }
-            .overlay(alignment: .top) {
-                if showStep2ValidationHint {
-                    HStack(spacing: 8) {
-                        Text(step2ValidationMessage)
-                            .font(.footnote)
-                            .fontWeight(.bold)
-                        if step2ValidationMessage == "Please enter value on keyboard" {
-                            Image(systemName: "checkmark.rectangle.fill")
-                                .foregroundStyle(.blue)
-                        }
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10)
-                            .stroke(Color.black.opacity(0.12), lineWidth: 1)
-                    )
-                    .offset(y: -58)
-                    .transition(.opacity)
-                }
-            }
-            .padding(.top, 4)
+            stepTwoComposerRow
+                .padding(.top, 4)
 
             HStack(spacing: 12) {
                 Button {
@@ -1017,6 +1114,69 @@ struct PlanStepTwoView: View {
                 }
             }
         }
+    }
+
+    private var stepTwoComposerRow: some View {
+        HStack(spacing: 12) {
+            stepTwoComposerInputField
+                .frame(height: 20)
+                .padding(12)
+                .background(Color(.secondarySystemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(
+                            shouldHighlightStep2InputValidation
+                            ? Color.red.opacity(0.85)
+                            : (colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.3)),
+                            lineWidth: shouldHighlightStep2InputValidation ? 1.5 : 1
+                        )
+                )
+                .layoutPriority(1)
+                .frame(maxWidth: .infinity)
+        }
+        .overlay(alignment: .top) {
+            if showStep2ValidationHint {
+                HStack(spacing: 8) {
+                    Text(step2ValidationMessage)
+                        .font(.footnote)
+                        .fontWeight(.bold)
+                    if step2ValidationMessage == "Please enter value on keyboard" {
+                        Image(systemName: "checkmark.rectangle.fill")
+                            .foregroundStyle(.blue)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Color.black.opacity(0.12), lineWidth: 1)
+                )
+                .offset(y: -58)
+                .transition(.opacity)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var stepTwoComposerInputField: some View {
+#if canImport(UIKit)
+        PersistentPlanComposerField(
+            text: $input,
+            placeholder: "Add an action…",
+            isFirstResponder: isInputFocused,
+            onSubmit: addItem,
+            onBeginEditing: { isInputFocused = true }
+        )
+#else
+        TextField("Add an action…", text: $input)
+            .textInputAutocapitalization(.sentences)
+            .autocorrectionDisabled(false)
+            .focused($isInputFocused)
+            .submitLabel(.done)
+            .onSubmit(addItem)
+#endif
     }
 
     private func addItem() {
@@ -2751,20 +2911,42 @@ struct PlanStepThreeView: View {
             return
         }
 
-        let emptyChunkIndices = chunks.indices.filter { chunks[$0].itemIDs.isEmpty }
         let additionalSlotsAvailable = max(0, maxChunks - chunks.count)
-        let placeableGroupCount = min(plans.count, emptyChunkIndices.count + additionalSlotsAvailable)
+        var existingLabeledChunkByLabelID: [UUID: Int] = [:]
+        for index in chunks.indices {
+            guard !chunks[index].itemIDs.isEmpty, let labelID = chunks[index].selectionLabelId else { continue }
+            if existingLabeledChunkByLabelID[labelID] == nil {
+                existingLabeledChunkByLabelID[labelID] = index
+            }
+        }
 
-        guard placeableGroupCount >= 2 else {
+        var selectedPlans: [AutoGroupAssignmentPlan] = []
+        var selectedExistingTargets: [Int?] = []
+        var requiredNewGroupCount = 0
+        let maxNewGroupCount = chunks.indices.filter { chunks[$0].itemIDs.isEmpty }.count + additionalSlotsAvailable
+
+        for plan in plans {
+            if let labelID = plan.fulfillmentLabelID, let targetChunkIndex = existingLabeledChunkByLabelID[labelID] {
+                selectedPlans.append(plan)
+                selectedExistingTargets.append(targetChunkIndex)
+                continue
+            }
+            if requiredNewGroupCount < maxNewGroupCount {
+                selectedPlans.append(plan)
+                selectedExistingTargets.append(nil)
+                requiredNewGroupCount += 1
+            }
+        }
+
+        guard selectedPlans.count >= 2 else {
             autoGroupFeedback = AutoGroupFeedback(
                 title: "Not Enough Group Slots",
-                message: "AutoGroup needs at least 2 empty group slots. Clear or add group space, then try again.",
+                message: "AutoGroup needs at least 2 available group matches/slots. Clear or add group space, then try again.",
                 canGroupMore: false
             )
             return
         }
 
-        let selectedPlans = Array(plans.prefix(placeableGroupCount))
         let itemIDsToMove = Set(selectedPlans.flatMap(\.itemIDs))
         guard itemIDsToMove.count >= 6 else {
             autoGroupFeedback = AutoGroupFeedback(
@@ -2775,12 +2957,12 @@ struct PlanStepThreeView: View {
             return
         }
 
-        while chunks.indices.filter({ chunks[$0].itemIDs.isEmpty }).count < selectedPlans.count, chunks.count < maxChunks {
+        while chunks.indices.filter({ chunks[$0].itemIDs.isEmpty }).count < requiredNewGroupCount, chunks.count < maxChunks {
             chunks.append(ChunkContainerState(isLocked: chunks.count < 2))
         }
 
-        let targetChunkIndices = Array(chunks.indices.filter { chunks[$0].itemIDs.isEmpty }.prefix(selectedPlans.count))
-        guard targetChunkIndices.count == selectedPlans.count else {
+        let targetChunkIndices = Array(chunks.indices.filter { chunks[$0].itemIDs.isEmpty }.prefix(requiredNewGroupCount))
+        guard targetChunkIndices.count == requiredNewGroupCount else {
             autoGroupFeedback = AutoGroupFeedback(
                 title: "Not Enough Group Slots",
                 message: "AutoGroup couldn’t create enough group slots (max 8 groups).",
@@ -2789,13 +2971,21 @@ struct PlanStepThreeView: View {
             return
         }
 
-        for (chunkIndex, plan) in zip(targetChunkIndices, selectedPlans) {
+        var createdTargetCursor = 0
+        for (plan, existingTargetIndex) in zip(selectedPlans, selectedExistingTargets) {
+            let chunkIndex: Int
+            if let existingTargetIndex {
+                chunkIndex = existingTargetIndex
+            } else {
+                chunkIndex = targetChunkIndices[createdTargetCursor]
+                createdTargetCursor += 1
+            }
             for itemID in plan.itemIDs {
                 moveItem(itemID, toChunkAt: chunkIndex)
             }
-            if let labelID = plan.fulfillmentLabelID {
+            if existingTargetIndex == nil, let labelID = plan.fulfillmentLabelID {
                 setChunkSelection(chunkIndex: chunkIndex, toLabelId: labelID)
-            } else {
+            } else if existingTargetIndex == nil {
                 setChunkSelection(chunkIndex: chunkIndex, toLabelId: nil)
             }
         }
@@ -2811,7 +3001,7 @@ struct PlanStepThreeView: View {
         if groupedCount == totalPoolCount {
             message = "Grouped all \(groupedCount) available Capture actions into \(selectedPlans.count) groups."
         } else if skippedFromReviewed > 0 {
-            message = "Grouped \(groupedCount) actions into \(selectedPlans.count) groups. Left \(skippedFromReviewed) actions that were unclear."
+            message = "Grouped \(groupedCount) actions into \(selectedPlans.count) groups."
         } else if groupedCount == 25 {
             let remaining = max(totalPoolCount - groupedCount, 0)
             message = "Grouped the most recent 25 Capture actions into \(selectedPlans.count) groups. \(remaining > 0 ? "\(remaining) remain." : "") Want to AutoGroup another batch?"
@@ -3916,7 +4106,7 @@ struct PlanStepFourView: View {
 
     private var step5TopCautionCard: some View {
         HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "exclamationmark.triangle.fill")
+            Image(systemName: "clock.fill")
                 .font(.subheadline)
                 .foregroundStyle(Color.black.opacity(0.7))
                 .padding(.top, 1)
@@ -4007,8 +4197,8 @@ struct PlanStepFourView: View {
             roleNoteText: roleNoteBinding,
             selectedOutcomeIDs: selectedOutcomeIDsBinding,
             selectedRoleID: selectedRoleIDBinding,
-            highlightMissingResult: shouldHighlightStep4Validation && step4MissingResultChunkIDs.contains(chunkID),
-            highlightMissingRoleSelection: shouldHighlightStep4Validation && step4MissingRoleChunkIDs.contains(chunkID),
+            highlightMissingResult: step4MissingResultChunkIDs.contains(chunkID),
+            highlightMissingRoleSelection: step4MissingRoleChunkIDs.contains(chunkID),
             onOpenOutcomes: { outcomeSheetChunkID = SheetChunkID(id: chunkID) },
             onOpenRoles: { roleSheetChunkID = SheetChunkID(id: chunkID) },
             onRemoveOutcome: { outcomeID in
@@ -4218,14 +4408,16 @@ struct PlanStepFourView: View {
                 }
                 .padding(10)
                 .background(
-                    (highlightMissingRoleSelection ? Color.red.opacity(0.25) : Color(.secondarySystemBackground)),
+                    (highlightMissingRoleSelection ? Color.red.opacity(0.14) : Color(.secondarySystemBackground)),
                     in: RoundedRectangle(cornerRadius: 10)
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 10)
                         .stroke(
-                            colorScheme == .dark ? Color.white.opacity(0.18) : Color.black.opacity(0.15),
-                            lineWidth: 1
+                            highlightMissingRoleSelection
+                            ? Color.red.opacity(0.75)
+                            : (colorScheme == .dark ? Color.white.opacity(0.18) : Color.black.opacity(0.15)),
+                            lineWidth: highlightMissingRoleSelection ? 1.5 : 1
                         )
                 )
             }
@@ -4508,9 +4700,9 @@ struct PlanStepFiveView: View {
     @State private var step5AutosaveTask: Task<Void, Never>? = nil
 
     // “Try start without durations” feedback
-    @State private var shouldHighlightMissingDurations: Bool = false
     @State private var shouldHighlightMissingOptionalIcons: Bool = false
     @State private var showMissingDurationHint: Bool = false
+    @State private var step5ValidationResetWorkItem: DispatchWorkItem?
 
     // Confirmation dialog for Start
     @State private var isShowingStartConfirmation: Bool = false
@@ -4908,7 +5100,16 @@ struct PlanStepFiveView: View {
         .onDisappear {
             // Flush any last ordering changes as you leave, so it round-trips exactly.
             step5AutosaveTask?.cancel()
+            step5ValidationResetWorkItem?.cancel()
             persistStep5ForWeekNow()
+        }
+        .onChange(of: isStep5StartEnabled) { _, isEnabled in
+            if isEnabled {
+                shouldHighlightMissingOptionalIcons = false
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    showMissingDurationHint = false
+                }
+            }
         }
     }
 
@@ -5020,7 +5221,6 @@ struct PlanStepFiveView: View {
             hasAttachments: { actionId in
                 hasAnyAttachments(actionId: actionId)
             },
-            shouldHighlightMissingDurations: shouldHighlightMissingDurations,
             shouldHighlightMissingOptionalIcons: shouldHighlightMissingOptionalIcons,
             onToggleMust: { actionId, isOn in
                 upsertDefineState(forActionId: actionId) { st in
@@ -5095,7 +5295,6 @@ struct PlanStepFiveView: View {
         let hasSensitivity: (UUID) -> Bool
         let hasAttachments: (UUID) -> Bool
 
-        let shouldHighlightMissingDurations: Bool
         let shouldHighlightMissingOptionalIcons: Bool
 
         let onToggleMust: (UUID, Bool) -> Void
@@ -5114,7 +5313,7 @@ struct PlanStepFiveView: View {
         private let targetIconName = "scope"
         private let pillScale: CGFloat = 0.75
 
-        var body: some View {
+        private var cardContent: some View {
             VStack(alignment: .leading, spacing: 12) {
                 resultSection
 
@@ -5130,6 +5329,10 @@ struct PlanStepFiveView: View {
 
                 actionsSection
             }
+        }
+
+        var body: some View {
+            cardContent
             .padding(12)
             .background(fill, in: RoundedRectangle(cornerRadius: 14))
             .overlay(
@@ -5250,7 +5453,7 @@ struct PlanStepFiveView: View {
                                 leverageSystemName: leverageIconName(action.id),
                                 hasSensitivity: hasSensitivity(action.id),
                                 hasAttachments: hasAttachments(action.id),
-                                shouldHighlightMissingDuration: shouldHighlightMissingDurations && isMissingDuration,
+                                shouldHighlightMissingDuration: isMissingDuration,
                                 shouldHighlightOptionalIcons: shouldHighlightMissingOptionalIcons && isMissingDuration,
                                 shouldHighlightReorderArrow: shouldHighlightMissingOptionalIcons && isMissingDuration,
                                 onToggleMust: { onToggleMust(action.id, !isMust) },
@@ -6089,18 +6292,20 @@ struct PlanStepFiveView: View {
     }
 
     private func triggerMissingDurationsFeedback() {
-        shouldHighlightMissingDurations = true
+        step5ValidationResetWorkItem?.cancel()
         shouldHighlightMissingOptionalIcons = true
         withAnimation(.easeInOut(duration: 0.15)) {
             showMissingDurationHint = true
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            shouldHighlightMissingDurations = false
+
+        let workItem = DispatchWorkItem {
             shouldHighlightMissingOptionalIcons = false
             withAnimation(.easeInOut(duration: 0.15)) {
                 showMissingDurationHint = false
             }
         }
+        step5ValidationResetWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8, execute: workItem)
     }
 
     @ViewBuilder

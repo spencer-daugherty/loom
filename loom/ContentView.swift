@@ -2023,7 +2023,7 @@ struct ContentView: View {
     @ViewBuilder
     private func loomAIChatMenuThreadRow(_ thread: LoomAIChatThread) -> some View {
         let isSelected = thread.threadKey == loomAICurrentThreadKey
-        let displayTitle = thread.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "New Chat" : thread.title
+        let displayTitle = loomAIThreadMenuTitle(for: thread)
 
         HStack(spacing: 10) {
             Circle()
@@ -2054,6 +2054,32 @@ struct ContentView: View {
                 .stroke(isSelected ? Color.blue.opacity(0.18) : Color.clear, lineWidth: 1)
         )
         .contentShape(Rectangle())
+    }
+
+    private func loomAIThreadMenuTitle(for thread: LoomAIChatThread) -> String {
+        if let firstPrompt = loomAIChatMessages.first(where: {
+            $0.threadKey == thread.threadKey &&
+            $0.roleRaw == LoomAIChatRole.user.rawValue &&
+            !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        })?.content {
+            return truncateLoomAIMenuTitle(firstPrompt)
+        }
+        let fallback = thread.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return fallback.isEmpty ? "New Chat" : fallback
+    }
+
+    private func truncateLoomAIMenuTitle(_ raw: String, maxLength: Int = 52) -> String {
+        let cleaned = raw
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard cleaned.count > maxLength else { return cleaned }
+        let limitIndex = cleaned.index(cleaned.startIndex, offsetBy: maxLength)
+        let prefix = String(cleaned[..<limitIndex])
+        if let lastSpace = prefix.lastIndex(of: " "), lastSpace > prefix.startIndex {
+            return String(prefix[..<lastSpace])
+        }
+        return prefix
     }
 
     private func createNewLoomAIChatThread() {

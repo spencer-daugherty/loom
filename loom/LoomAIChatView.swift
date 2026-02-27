@@ -19,18 +19,20 @@ struct LoomAIChatView: View {
     @State private var keyboardHeight: CGFloat = 0
     @State private var showDebugErrorDetails = false
     @State private var activeThreadKey = LoomAIChatThreadSelectionStore.currentThreadKey()
+    @State private var threadMessages: [LoomAIChatMessage] = []
+    @State private var latestAssistantMessageIDCache: UUID?
+    @State private var formattedAssistantByMessageID: [UUID: AttributedString] = [:]
     @State private var appliedSuggestedActionIDs: Set<String> = []
     @State private var chipCategoryOverrides: [String: String] = [:]
+    @State private var hasEnsuredThread = false
+    @State private var needsRefreshWhenActive = true
+    @State private var inputAutoFocusTask: Task<Void, Never>? = nil
     @FocusState private var isInputFocused: Bool
     private let keyboardTopGap: CGFloat = 12
 
-    private var messages: [LoomAIChatMessage] {
-        allMessages.filter { $0.threadKey == activeThreadKey }
-    }
+    private var messages: [LoomAIChatMessage] { threadMessages }
 
-    private var latestAssistantMessageID: UUID? {
-        messages.last(where: { $0.roleRaw == LoomAIChatRole.assistant.rawValue })?.id
-    }
+    private var latestAssistantMessageID: UUID? { latestAssistantMessageIDCache }
 
     private var visiblePromptChips: [String] {
         messages.isEmpty ? viewModel.suggestedPromptChips : viewModel.followUpPromptChips
@@ -77,6 +79,10 @@ struct LoomAIChatView: View {
                     guard newID != nil else { return }
                     appliedSuggestedActionIDs = []
                     chipCategoryOverrides = [:]
+                    guard isActivePage else {
+                        needsRefreshWhenActive = true
+                        return
+                    }
                     withAnimation(.easeOut(duration: 0.2)) {
                         proxy.scrollTo(bottomScrollAnchorID, anchor: .bottom)
                     }
@@ -84,18 +90,47 @@ struct LoomAIChatView: View {
                     viewModel.refreshSuggestedPromptChips(in: modelContext, threadMessages: messages)
                     Task { await viewModel.refreshFollowUpPromptChipsIfNeeded(in: modelContext, threadMessages: messages) }
                 }
+                .onChange(of: allMessages.count) { _, _ in
+                    refreshThreadMessageCache()
+                    if !isActivePage {
+                        needsRefreshWhenActive = true
+                    }
+                }
                 .onChange(of: viewModel.isSending) { _, _ in
+                    guard isActivePage else { return }
                     withAnimation(.easeOut(duration: 0.2)) {
                         proxy.scrollTo(bottomScrollAnchorID, anchor: .bottom)
                     }
                 }
                 .onAppear {
+                    refreshThreadMessageCache()
+                    if !hasEnsuredThread {
+                        _ = try? viewModel.ensureThread(in: modelContext, threadKey: activeThreadKey)
+                        hasEnsuredThread = true
+                    }
+                    guard isActivePage else {
+                        needsRefreshWhenActive = true
+                        return
+                    }
                     viewModel.refreshLatestActions(from: messages)
                     viewModel.refreshSuggestedPromptChips(in: modelContext, threadMessages: messages)
                     Task { await viewModel.refreshFollowUpPromptChipsIfNeeded(in: modelContext, threadMessages: messages) }
-                    _ = try? viewModel.ensureThread(in: modelContext, threadKey: activeThreadKey)
                     DispatchQueue.main.async {
                         proxy.scrollTo(bottomScrollAnchorID, anchor: .bottom)
+                    }
+                }
+                .onChange(of: isActivePage) { _, isActive in
+                    guard isActive else { return }
+                    if needsRefreshWhenActive {
+                        viewModel.refreshLatestActions(from: messages)
+                        viewModel.refreshSuggestedPromptChips(in: modelContext, threadMessages: messages)
+                        Task { await viewModel.refreshFollowUpPromptChipsIfNeeded(in: modelContext, threadMessages: messages) }
+                        needsRefreshWhenActive = false
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            proxy.scrollTo(bottomScrollAnchorID, anchor: .bottom)
+                        }
                     }
                 }
             }
@@ -165,28 +200,30 @@ struct LoomAIChatView: View {
         }
         .onAppear {
             guard isActivePage else { return }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                isInputFocused = true
-            }
+            scheduleAutoFocusInput()
         }
         .onChange(of: isActivePage) { _, isActive in
-            if isActive {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    isInputFocused = true
-                }
-            } else {
+            if !isActive {
+                inputAutoFocusTask?.cancel()
+                inputAutoFocusTask = nil
                 isInputFocused = false
                 dismissKeyboard()
+            } else {
+                scheduleAutoFocusInput()
             }
         }
         .onDisappear {
+            inputAutoFocusTask?.cancel()
+            inputAutoFocusTask = nil
             isInputFocused = false
             dismissKeyboard()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
+            guard isActivePage else { return }
             updateKeyboardHeight(note)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            guard isActivePage else { return }
             withAnimation(.easeOut(duration: 0.2)) {
                 keyboardHeight = 0
             }
@@ -195,10 +232,28 @@ struct LoomAIChatView: View {
             let newKey = LoomAIChatThreadSelectionStore.currentThreadKey()
             guard newKey != activeThreadKey else { return }
             activeThreadKey = newKey
-            viewModel.refreshLatestActions(from: messages)
-            viewModel.refreshSuggestedPromptChips(in: modelContext, threadMessages: messages)
-            Task { await viewModel.refreshFollowUpPromptChipsIfNeeded(in: modelContext, threadMessages: messages) }
+            refreshThreadMessageCache()
+            if isActivePage {
+                viewModel.refreshLatestActions(from: messages)
+                viewModel.refreshSuggestedPromptChips(in: modelContext, threadMessages: messages)
+                Task { await viewModel.refreshFollowUpPromptChipsIfNeeded(in: modelContext, threadMessages: messages) }
+            } else {
+                needsRefreshWhenActive = true
+            }
             _ = try? viewModel.ensureThread(in: modelContext, threadKey: newKey)
+        }
+    }
+
+    private func refreshThreadMessageCache() {
+        let filtered = allMessages.filter { $0.threadKey == activeThreadKey }
+        threadMessages = filtered
+        latestAssistantMessageIDCache = filtered.last(where: { $0.roleRaw == LoomAIChatRole.assistant.rawValue })?.id
+        let validIDs = Set(filtered.map(\.id))
+        formattedAssistantByMessageID = formattedAssistantByMessageID.filter { validIDs.contains($0.key) }
+        for message in filtered where message.roleRaw == LoomAIChatRole.assistant.rawValue {
+            if formattedAssistantByMessageID[message.id] == nil {
+                formattedAssistantByMessageID[message.id] = formattedAssistantAttributedString(message.content)
+            }
         }
     }
 
@@ -383,7 +438,7 @@ struct LoomAIChatView: View {
         return HStack {
             if isUser { Spacer(minLength: 30) }
             VStack(alignment: .leading, spacing: 4) {
-                messageBubbleText(message.content, isUser: isUser)
+                messageBubbleText(message, isUser: isUser)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 10)
                     .background(
@@ -420,18 +475,25 @@ struct LoomAIChatView: View {
     }
 
     @ViewBuilder
-    private func messageBubbleText(_ content: String, isUser: Bool) -> some View {
+    private func messageBubbleText(_ message: LoomAIChatMessage, isUser: Bool) -> some View {
         if isUser {
-            Text(content)
+            Text(message.content)
                 .font(.subheadline)
                 .foregroundStyle(.white)
                 .textSelection(.enabled)
         } else {
-            Text(formattedAssistantAttributedString(content))
+            Text(formattedAssistantText(for: message))
                 .font(.subheadline)
                 .foregroundStyle(.primary)
                 .textSelection(.enabled)
         }
+    }
+
+    private func formattedAssistantText(for message: LoomAIChatMessage) -> AttributedString {
+        if let cached = formattedAssistantByMessageID[message.id] {
+            return cached
+        }
+        return formattedAssistantAttributedString(message.content)
     }
 
     private func formattedAssistantAttributedString(_ content: String) -> AttributedString {
@@ -933,6 +995,19 @@ struct LoomAIChatView: View {
 
     private func dismissKeyboard() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+
+    private func scheduleAutoFocusInput() {
+        inputAutoFocusTask?.cancel()
+        inputAutoFocusTask = Task { @MainActor in
+            guard isActivePage else { return }
+            isInputFocused = true
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            guard !Task.isCancelled, isActivePage else { return }
+            if !isInputFocused {
+                isInputFocused = true
+            }
+        }
     }
 
     private func sendPrompt(_ prompt: String) {

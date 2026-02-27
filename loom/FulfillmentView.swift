@@ -3462,19 +3462,6 @@ struct LittleWinEditorSheetView: View {
                                 }
                                 integrationSetupTarget = .init(source: .appleHealth)
                             }
-
-                            littleWinIntegrationSourceRow(
-                                title: "Screen Time",
-                                icon: "hourglass",
-                                selected: draftIntegrationConfig?.source == .screenTime,
-                                connected: (draftIntegrationConfig?.source == .screenTime) && (draftIntegrationConfig?.isConnected == true),
-                                enabled: true
-                            ) {
-                                if draftIntegrationConfig?.source != .screenTime {
-                                    draftIntegrationConfig = LittleWinsIntegrationConfig.default(for: .screenTime)
-                                }
-                                integrationSetupTarget = .init(source: .screenTime)
-                            }
                         }
                         .padding(.vertical, 2)
                     }
@@ -3736,6 +3723,8 @@ private struct LittleWinIntegrationSetupSheet: View {
     @State private var isRefreshingHealthProgress = false
     @State private var healthStatusMessage: String? = nil
     @State private var isShowingScreenTimePicker = false
+    @State private var selectedMetric: LittleWinsIntegrationConfig.Metric? = nil
+    @State private var selectedTargetValue: Double? = nil
 #if canImport(FamilyControls)
     @State private var screenTimeSelection = FamilyActivitySelection()
 #endif
@@ -3820,50 +3809,122 @@ private struct LittleWinIntegrationSetupSheet: View {
                 }
 
                 Section("Automation Goal") {
-                    HStack {
-                        Text("Metric")
-                        Spacer()
-                        Menu {
-                            ForEach(metricOptions, id: \.rawValue) { metric in
-                                Button(metric.title) {
-                                    config.metric = metric
-                                    config.targetValue = metric.defaultTarget
-                                    if usesAppleHealth, config.isConnected {
-                                        refreshAppleHealthProgress()
+                    if usesAppleHealth {
+                        HStack {
+                            Text("Metric")
+                            Spacer()
+                            Picker(
+                                "Metric",
+                                selection: Binding(
+                                    get: { selectedMetric },
+                                    set: { newMetric in
+                                        selectedMetric = newMetric
+                                        if let metric = newMetric {
+                                            config.metric = metric
+                                            if usesAppleHealth, config.isConnected {
+                                                refreshAppleHealthProgress()
+                                            }
+                                        }
+                                        selectedTargetValue = nil
                                     }
+                                )
+                            ) {
+                                Text("Select...").tag(Optional<LittleWinsIntegrationConfig.Metric>.none)
+                                ForEach(metricOptions, id: \.rawValue) { metric in
+                                    Text(metric.title).tag(Optional(metric))
                                 }
                             }
-                        } label: {
-                            HStack(spacing: 4) {
-                                Text(config.metric.title)
-                                Image(systemName: "chevron.up.chevron.down")
-                            }
-                            .foregroundStyle(.blue)
+                            .labelsHidden()
+                            .pickerStyle(.menu)
+                            .tint(.blue)
                         }
-                    }
 
-                    HStack {
-                        Text("Target")
-                        Spacer()
-                        TextField("", value: $config.targetValue, format: .number.precision(.fractionLength(config.metric == .sleepHours ? 1 : 0)))
-                            .keyboardType(.decimalPad)
-                            .multilineTextAlignment(.trailing)
-                            .frame(width: 90)
-                        Text(config.metric.unitLabel)
-                            .foregroundStyle(.secondary)
-                    }
+                        if let metric = selectedMetric {
+                            HStack {
+                                Text("Target")
+                                Spacer()
+                                Picker(
+                                    "Target",
+                                    selection: Binding(
+                                        get: { selectedTargetValue },
+                                        set: { newTarget in
+                                            selectedTargetValue = newTarget
+                                            if let value = newTarget {
+                                                config.targetValue = value
+                                            }
+                                        }
+                                    )
+                                ) {
+                                    Text("Select...").tag(Optional<Double>.none)
+                                    ForEach(targetOptions(for: metric), id: \.self) { value in
+                                        Text(targetOptionLabel(value, metric: metric)).tag(Optional(value))
+                                    }
+                                }
+                                .labelsHidden()
+                                .pickerStyle(.menu)
+                                .tint(.blue)
+                            }
 
-                    if config.isConnected {
+                            if config.isConnected {
+                                HStack {
+                                    Text("Current Progress")
+                                    Spacer()
+                                    TextField("", value: $config.progressValue, format: .number.precision(.fractionLength(metric == .sleepHours ? 1 : 0)))
+                                        .keyboardType(.decimalPad)
+                                        .multilineTextAlignment(.trailing)
+                                        .frame(width: 90)
+                                        .disabled(true)
+                                    Text(metric.unitLabel)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    } else {
                         HStack {
-                            Text("Current Progress")
+                            Text("Metric")
                             Spacer()
-                            TextField("", value: $config.progressValue, format: .number.precision(.fractionLength(config.metric == .sleepHours ? 1 : 0)))
+                            Picker(
+                                "Metric",
+                                selection: Binding(
+                                    get: { config.metric },
+                                    set: { metric in
+                                        config.metric = metric
+                                        config.targetValue = metric.defaultTarget
+                                    }
+                                )
+                            ) {
+                                ForEach(metricOptions, id: \.rawValue) { metric in
+                                    Text(metric.title).tag(metric)
+                                }
+                            }
+                            .labelsHidden()
+                            .pickerStyle(.menu)
+                            .tint(.blue)
+                        }
+
+                        HStack {
+                            Text("Target")
+                            Spacer()
+                            TextField("", value: $config.targetValue, format: .number.precision(.fractionLength(config.metric == .sleepHours ? 1 : 0)))
                                 .keyboardType(.decimalPad)
                                 .multilineTextAlignment(.trailing)
                                 .frame(width: 90)
-                                .disabled(usesAppleHealth)
                             Text(config.metric.unitLabel)
                                 .foregroundStyle(.secondary)
+                        }
+
+                        if config.isConnected {
+                            HStack {
+                                Text("Current Progress")
+                                Spacer()
+                                TextField("", value: $config.progressValue, format: .number.precision(.fractionLength(config.metric == .sleepHours ? 1 : 0)))
+                                    .keyboardType(.decimalPad)
+                                    .multilineTextAlignment(.trailing)
+                                    .frame(width: 90)
+                                    .disabled(usesAppleHealth)
+                                Text(config.metric.unitLabel)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
                 }
@@ -3883,6 +3944,12 @@ private struct LittleWinIntegrationSetupSheet: View {
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+        .onAppear {
+            if usesAppleHealth {
+                selectedMetric = nil
+                selectedTargetValue = nil
+            }
+        }
 #if canImport(FamilyControls)
         .sheet(isPresented: $isShowingScreenTimePicker) {
             NavigationStack {
@@ -3905,6 +3972,31 @@ private struct LittleWinIntegrationSetupSheet: View {
             .presentationDetents([.large])
         }
 #endif
+    }
+
+    private func targetOptions(for metric: LittleWinsIntegrationConfig.Metric) -> [Double] {
+        switch metric {
+        case .steps:
+            return [3_000, 5_000, 7_500, 10_000, 12_500, 15_000]
+        case .workoutMinutes:
+            return [10, 20, 30, 45, 60, 90]
+        case .sleepHours:
+            return [5.0, 6.0, 6.5, 7.0, 7.5, 8.0, 9.0]
+        case .socialMediaMinutes:
+            return [15, 30, 45, 60, 90, 120]
+        case .totalScreenTimeMinutes:
+            return [30, 60, 90, 120, 180, 240]
+        }
+    }
+
+    private func targetOptionLabel(_ value: Double, metric: LittleWinsIntegrationConfig.Metric) -> String {
+        if metric == .sleepHours {
+            if value == floor(value) {
+                return "\(Int(value)) \(metric.unitLabel)"
+            }
+            return String(format: "%.1f %@", value, metric.unitLabel)
+        }
+        return "\(Int(value)) \(metric.unitLabel)"
     }
 
     private func connectSource() {
@@ -3958,7 +4050,9 @@ private struct LittleWinIntegrationSetupSheet: View {
                     config.isConnected = true
                     config.updatedAtUnix = Date().timeIntervalSince1970
                     healthStatusMessage = nil
-                    refreshAppleHealthProgress()
+                    if selectedMetric != nil {
+                        refreshAppleHealthProgress()
+                    }
                 case .failure(let error):
                     config.isConnected = false
                     healthStatusMessage = error.localizedDescription

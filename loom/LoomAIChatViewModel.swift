@@ -116,7 +116,7 @@ final class LoomAIViewModel: ObservableObject {
     }
 
     private enum DailyBudgetConfig {
-        static let maxUSD: Double = 0.10
+        static let maxUSD: Double = 0.20
         static let estimatedCharsPerToken: Double = 4.0
         static let assumedInputUSDPer1KTokens: Double = 0.0015
         static let assumedOutputUSDPer1KTokens: Double = 0.0060

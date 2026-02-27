@@ -513,6 +513,16 @@ struct ReflectView: View {
         return contributionDoneActionsByOutcomeID[outcome.outcome_id] ?? []
     }
 
+    private var currentContributionActionIDs: Set<UUID> {
+        Set(currentContributionDoneActions.map(\.id))
+    }
+
+    private var areAllCurrentContributionActionsSelected: Bool {
+        let ids = currentContributionActionIDs
+        guard !ids.isEmpty else { return false }
+        return ids.isSubset(of: contributionTempSelection)
+    }
+
     private var productiveDayRows: [ProductiveDayRow] {
         let cal = Calendar.current
         let firstDay = cal.startOfDay(for: weekStart)
@@ -1267,7 +1277,7 @@ struct ReflectView: View {
             }
             .background(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color(.secondarySystemGroupedBackground))
+                    .fill(colorScheme == .dark ? Color(.secondarySystemGroupedBackground) : Color(.systemGray6))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -1345,6 +1355,18 @@ struct ReflectView: View {
                             contributionOutcomeCard(outcome)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(10)
+                        }
+
+                        if !currentContributionDoneActions.isEmpty {
+                            HStack {
+                                Button(areAllCurrentContributionActionsSelected ? "Unselect All" : "Select All") {
+                                    toggleSelectAllCurrentContributionActions()
+                                }
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.blue)
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.horizontal, 10)
                         }
 
                         ForEach(currentContributionDoneActions, id: \.id) { action in
@@ -1539,7 +1561,7 @@ struct ReflectView: View {
                 .padding(8)
                 .scrollContentBackground(.hidden)
                 .background(
-                    (colorScheme == .dark ? Color(.secondarySystemBackground) : Color(.systemBackground)),
+                    (colorScheme == .dark ? Color(.secondarySystemBackground) : Color(.systemGray6)),
                     in: RoundedRectangle(cornerRadius: 10)
                 )
                 .overlay(
@@ -1815,6 +1837,16 @@ struct ReflectView: View {
         }
 
         return (queue, map)
+    }
+
+    private func toggleSelectAllCurrentContributionActions() {
+        let ids = currentContributionActionIDs
+        guard !ids.isEmpty else { return }
+        if areAllCurrentContributionActionsSelected {
+            contributionTempSelection.subtract(ids)
+        } else {
+            contributionTempSelection.formUnion(ids)
+        }
     }
 
     private func categoryColor(for category: String) -> Color {

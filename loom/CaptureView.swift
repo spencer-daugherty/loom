@@ -103,6 +103,11 @@ private struct MicrosoftTokenResponse: Decodable {
     }
 }
 
+private struct AppleReminderFolderOption: Identifiable, Hashable {
+    let id: String
+    let title: String
+}
+
 private struct AutoFocusRecurringTextField: UIViewRepresentable {
     @Binding var text: String
     var placeholder: String
@@ -146,6 +151,69 @@ private struct AutoFocusRecurringTextField: UIViewRepresentable {
     }
 }
 
+private struct PersistentCaptureComposerField: UIViewRepresentable {
+    @Binding var text: String
+    var placeholder: String
+    var returnKeyType: UIReturnKeyType
+    var isFirstResponder: Bool
+    var onSubmit: () -> Void
+    var onBeginEditing: () -> Void
+
+    final class Coordinator: NSObject, UITextFieldDelegate {
+        var parent: PersistentCaptureComposerField
+        init(_ parent: PersistentCaptureComposerField) { self.parent = parent }
+
+        @objc func textChanged(_ sender: UITextField) {
+            parent.text = sender.text ?? ""
+        }
+
+        func textFieldDidBeginEditing(_ textField: UITextField) {
+            parent.onBeginEditing()
+        }
+
+        func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+            parent.onSubmit()
+            return false
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeUIView(context: Context) -> UITextField {
+        let field = UITextField(frame: .zero)
+        field.placeholder = placeholder
+        field.delegate = context.coordinator
+        field.returnKeyType = returnKeyType
+        field.font = UIFont.preferredFont(forTextStyle: .body)
+        field.adjustsFontForContentSizeCategory = true
+        field.textColor = .label
+        field.tintColor = .systemBlue
+        field.backgroundColor = .clear
+        field.contentVerticalAlignment = .center
+        field.autocapitalizationType = .sentences
+        field.autocorrectionType = .yes
+        field.borderStyle = .none
+        field.addTarget(context.coordinator, action: #selector(Coordinator.textChanged(_:)), for: .editingChanged)
+        return field
+    }
+
+    func updateUIView(_ uiView: UITextField, context: Context) {
+        if uiView.text != text { uiView.text = text }
+        if uiView.placeholder != placeholder { uiView.placeholder = placeholder }
+        if uiView.returnKeyType != returnKeyType {
+            uiView.returnKeyType = returnKeyType
+            uiView.reloadInputViews()
+        }
+        if isFirstResponder {
+            if !uiView.isFirstResponder {
+                DispatchQueue.main.async { uiView.becomeFirstResponder() }
+            }
+        } else if uiView.isFirstResponder {
+            uiView.resignFirstResponder()
+        }
+    }
+}
+
 struct CaptureView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var colorScheme
@@ -170,6 +238,7 @@ struct CaptureView: View {
     @State private var input: String = ""
     @State private var isGhostOn: Bool = false
     @FocusState private var focusedField: FocusField?
+    @State private var isComposerFocused: Bool = false
 
     @State private var selectedUnhideDate: Date? = nil
     @State private var isDatePickerPresented: Bool = false
@@ -225,6 +294,11 @@ struct CaptureView: View {
     private var appleRemindersLastSyncUnix: Double = 0
     @AppStorage("capture_apple_reminders_initial_import_done")
     private var appleRemindersInitialImportDone: Bool = false
+    @AppStorage("capture_apple_reminders_sync_all_folders")
+    private var appleRemindersSyncAllFolders: Bool = true
+    @AppStorage("capture_apple_reminders_selected_folder_ids_json")
+    private var appleRemindersSelectedFolderIDsJSON: String = "[]"
+    @State private var appleReminderFolderOptions: [AppleReminderFolderOption] = []
     @AppStorage("capture_google_tasks_connected")
     private var googleTasksConnected: Bool = false
     @AppStorage("capture_google_tasks_last_sync_unix")
@@ -519,23 +593,16 @@ struct CaptureView: View {
                             Button("Return") {
                                 isSearchMode = false
                                 input = ""
-                                if focusedField == .newInput {
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                                        focusedField = nil
-                                    }
-                                }
+                                isComposerFocused = true
                             }
                             .foregroundStyle(.blue)
                         } else {
                             Button {
-                                // Force keyboard to rebuild so submit label immediately switches to `.search`.
-                                if focusedField == .newInput {
-                                    focusedField = nil
-                                }
+                                isComposerFocused = false
                                 isSearchMode = true
                                 input = ""
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                                    focusedField = .newInput
+                                    isComposerFocused = true
                                 }
                             } label: {
                                 Image(systemName: "magnifyingglass")
@@ -563,7 +630,7 @@ struct CaptureView: View {
                         }
 
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            focusedField = .newInput
+                            isComposerFocused = true
                         }
                     }
                 .onChange(of: scenePhase) { _, newPhase in
@@ -590,11 +657,8 @@ struct CaptureView: View {
                     dedupeCaptureItemsIfNeeded()
                 }
                 .onChange(of: focusedField) { _, newValue in
-                    if newValue == nil {
-                        if isDatePickerPresented || showFullTextEditorSheet || showRecurringSettingsSheet { return }
-                        DispatchQueue.main.async {
-                            focusedField = .newInput
-                        }
+                    if case .item = newValue {
+                        isComposerFocused = false
                     }
                 }
                 .onChange(of: isGhostOn) { _, newValue in
@@ -602,10 +666,10 @@ struct CaptureView: View {
                 }
                 .onChange(of: isDatePickerPresented) { _, newValue in
                     if newValue {
-                        focusedField = nil
+                        isComposerFocused = false
                     } else {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                            focusedField = .newInput
+                            isComposerFocused = true
                         }
                     }
                 }
@@ -729,7 +793,8 @@ struct CaptureView: View {
                         .focused($focusedField, equals: .item(item.id))
                         .submitLabel(.done)
                         .onSubmit {
-                            focusedField = .newInput
+                            focusedField = nil
+                            isComposerFocused = true
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -1200,16 +1265,22 @@ struct CaptureView: View {
                 let textWidth = max(140, usable - controlsWidth - (isSearchMode ? 0 : spacing))
 
                 HStack(spacing: spacing) {
-                    TextField(isSearchMode ? "Search for an action..." : "Add an action…", text: $input)
-                        .textInputAutocapitalization(.sentences)
-                        .autocorrectionDisabled(false)
-                        .focused($focusedField, equals: .newInput)
-                        .submitLabel(isSearchMode ? .search : .done)
-                        .onSubmit {
+                    PersistentCaptureComposerField(
+                        text: $input,
+                        placeholder: isSearchMode ? "Search for an action..." : "Add an action…",
+                        returnKeyType: isSearchMode ? .search : .done,
+                        isFirstResponder: isComposerFocused,
+                        onSubmit: {
                             if !isSearchMode {
                                 addItem()
                             }
+                        },
+                        onBeginEditing: {
+                            focusedField = nil
+                            isComposerFocused = true
                         }
+                    )
+                        .frame(height: 20)
                         .padding(textPadding)
                         .background(Color(.secondarySystemBackground))
                         .clipShape(RoundedRectangle(cornerRadius: 10))
@@ -1568,12 +1639,6 @@ struct CaptureView: View {
                 dataSourceRow(title: "Apple Reminders", icon: "list.bullet", enabled: true) {
                     showAppleRemindersSheet = true
                 }
-                dataSourceRow(title: "Microsoft To Do", icon: "checkmark", enabled: true) {
-                    showMicrosoftTodoSheet = true
-                }
-                dataSourceRow(title: "Google Tasks", icon: "checkmark.circle", enabled: true) {
-                    showGoogleTasksSheet = true
-                }
             }
             .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
             .listRowSeparator(.hidden)
@@ -1660,6 +1725,46 @@ struct CaptureView: View {
                     }
                     .disabled(isSyncingAppleReminders || !appleRemindersConnected)
                 }
+
+                Section("Folders") {
+                    Toggle(
+                        "Sync All Folders",
+                        isOn: Binding(
+                            get: { appleRemindersSyncAllFolders },
+                            set: { isOn in
+                                appleRemindersSyncAllFolders = isOn
+                                if isOn {
+                                    appleRemindersSelectedFolderIDsJSON = "[]"
+                                }
+                            }
+                        )
+                    )
+
+                    if !appleRemindersSyncAllFolders {
+                        if appleReminderFolderOptions.isEmpty {
+                            Text("No reminder folders available.")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(appleReminderFolderOptions) { folder in
+                                Toggle(
+                                    folder.title,
+                                    isOn: Binding(
+                                        get: { selectedAppleReminderFolderIDs().contains(folder.id) },
+                                        set: { isSelected in
+                                            var selected = selectedAppleReminderFolderIDs()
+                                            if isSelected {
+                                                selected.insert(folder.id)
+                                            } else {
+                                                selected.remove(folder.id)
+                                            }
+                                            setSelectedAppleReminderFolderIDs(selected)
+                                        }
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
             }
             .navigationTitle("Apple Reminders")
             .navigationBarTitleDisplayMode(.inline)
@@ -1673,6 +1778,9 @@ struct CaptureView: View {
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+        .onAppear {
+            refreshAppleReminderFolderOptions()
+        }
     }
 
     private func googleTasksConnectSheet() -> some View {
@@ -2616,7 +2724,7 @@ struct CaptureView: View {
         datePickerTempDate = earliestUnhideDate
 
         input = ""
-        focusedField = .newInput
+        isComposerFocused = true
     }
 
     private func deleteItems(at offsets: IndexSet) {
@@ -2909,6 +3017,53 @@ struct CaptureView: View {
         saveSourceDueDateOverrides(map)
     }
 
+    private func selectedAppleReminderFolderIDs() -> Set<String> {
+        guard let data = appleRemindersSelectedFolderIDsJSON.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode([String].self, from: data) else {
+            return []
+        }
+        return Set(decoded)
+    }
+
+    private func setSelectedAppleReminderFolderIDs(_ ids: Set<String>) {
+        let ordered = Array(ids).sorted()
+        guard let data = try? JSONEncoder().encode(ordered),
+              let json = String(data: data, encoding: .utf8) else { return }
+        appleRemindersSelectedFolderIDsJSON = json
+    }
+
+    private func refreshAppleReminderFolderOptions() {
+        #if canImport(EventKit)
+        let store = EKEventStore()
+        let status = EKEventStore.authorizationStatus(for: .reminder)
+        let isGranted: Bool
+        if #available(iOS 17.0, *) {
+            isGranted = status == .fullAccess || status == .writeOnly
+        } else {
+            isGranted = status == .authorized
+        }
+        guard isGranted else {
+            appleReminderFolderOptions = []
+            return
+        }
+        let calendars = store.calendars(for: .reminder)
+            .map { AppleReminderFolderOption(id: $0.calendarIdentifier, title: $0.title) }
+            .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        appleReminderFolderOptions = calendars
+
+        if !appleRemindersSyncAllFolders {
+            let existing = selectedAppleReminderFolderIDs()
+            let validIDs = Set(calendars.map(\.id))
+            let filtered = existing.intersection(validIDs)
+            if filtered != existing {
+                setSelectedAppleReminderFolderIDs(filtered)
+            }
+        }
+        #else
+        appleReminderFolderOptions = []
+        #endif
+    }
+
     private func clearSourceDueDateOverride(sourceType: String, sourceID: String) {
         var map = decodedSourceDueDateOverrides()
         let key = sourceOverrideKey(sourceType: sourceType, sourceID: sourceID)
@@ -2931,7 +3086,18 @@ struct CaptureView: View {
                     return
                 }
                 self.appleRemindersConnected = true
-                let predicate = store.predicateForIncompleteReminders(withDueDateStarting: nil, ending: nil, calendars: nil)
+                self.refreshAppleReminderFolderOptions()
+                let calendars: [EKCalendar]? = {
+                    guard !self.appleRemindersSyncAllFolders else { return nil }
+                    let selectedFolderIDs = self.selectedAppleReminderFolderIDs()
+                    if selectedFolderIDs.isEmpty { return [] }
+                    return store.calendars(for: .reminder).filter { selectedFolderIDs.contains($0.calendarIdentifier) }
+                }()
+                let predicate = store.predicateForIncompleteReminders(
+                    withDueDateStarting: nil,
+                    ending: nil,
+                    calendars: calendars
+                )
                 store.fetchReminders(matching: predicate) { reminders in
                     DispatchQueue.main.async {
                         self.upsertAppleReminders(reminders ?? [])
