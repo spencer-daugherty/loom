@@ -33,9 +33,11 @@ struct loomApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .autocorrectionDisabled(false)
-                .textInputAutocapitalization(.sentences)
+            RootGateView(presentationStyle: .fullScreen) {
+                ContentView()
+                    .autocorrectionDisabled(false)
+                    .textInputAutocapitalization(.sentences)
+            }
         }
         .modelContainer(
             for: [

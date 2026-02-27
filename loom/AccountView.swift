@@ -450,6 +450,7 @@ struct AccountView: View {
     @Query private var fulfillments: [Fulfillment]
     @AppStorage(loomAIInsightsRefreshToggleDefaultsKey) private var enableLoomAIInsightsRefresh = false
     @AppStorage("enable_projects_feature") private var enableProjectsFeature = false
+    @AppStorage("onboarding_reset_on_next_launch") private var onboardingResetOnNextLaunch = false
     @AppStorage("blank_homepage_mode") private var blankHomepageMode = false
     @AppStorage("setup_homepage_mode") private var setupHomepageMode = false
     @AppStorage("has_seen_content_quickstart_v1") private var hasSeenContentQuickstart = false
@@ -592,6 +593,7 @@ struct AccountView: View {
 
                 Toggle("Enable LoomAI Insights Refresh", isOn: $enableLoomAIInsightsRefresh)
                 Toggle("Enable Projects", isOn: $enableProjectsFeature)
+                Toggle("Onboarding", isOn: $onboardingResetOnNextLaunch)
                 Toggle("Blank Homepage", isOn: $blankHomepageMode)
                 Toggle("Setup Homepage", isOn: $setupHomepageMode)
                 Toggle("Warning Cards", isOn: $devManualWarningCardsEnabled)
