@@ -51,14 +51,399 @@ struct OnboardingSlideView: View {
         case .identity:
             IdentityVisionPlaceholderView(reduceMotion: reduceMotion)
         case .summary:
-            StrandAnimationPlaceholderView(
-                reduceMotion: reduceMotion,
-                colors: onboardingDefaultFulfillmentColors
-            )
-        case .balance, .radar:
-            RadarPlaceholderView(reduceMotion: reduceMotion)
+            LoomAIChatPlaceholderView(reduceMotion: reduceMotion)
+        case .balance:
+            FulfillmentBalancePlaceholderView(reduceMotion: reduceMotion)
+        case .radar:
+            LittleWinsDeckPlaceholderView(reduceMotion: reduceMotion)
         case .execution:
             TodayMockPlaceholderView(reduceMotion: reduceMotion)
+        }
+    }
+}
+
+struct LoomAIChatPlaceholderView: View {
+    let reduceMotion: Bool
+    @State private var visiblePrompt = false
+    @State private var visibleReply = false
+    @State private var visibleSuggestions = false
+    @State private var suggestionPairIndex = 0
+    @State private var cycleTask: Task<Void, Never>?
+
+    private let loomAISuggestionFill = LinearGradient(
+        colors: [
+            Color(red: 0.22, green: 0.47, blue: 1.0),
+            Color(red: 0.62, green: 0.40, blue: 0.95),
+            Color(red: 0.98, green: 0.36, blue: 0.58)
+        ],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Image("LoomAI")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 16, height: 16)
+                    Text("LoomAI")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                }
+
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.blue.opacity(0.95), Color.cyan.opacity(0.85)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 186, height: 34)
+                    .overlay(alignment: .leading) {
+                        HStack(spacing: 6) {
+                            Capsule().fill(Color.white.opacity(0.9)).frame(width: 58, height: 8)
+                            Capsule().fill(Color.white.opacity(0.75)).frame(width: 34, height: 8)
+                        }
+                        .padding(.leading, 10)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .opacity(visiblePrompt ? 1 : 0)
+                    .offset(y: visiblePrompt ? 0 : 6)
+
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color(.systemGray5))
+                    .frame(width: 218, height: 40)
+                    .overlay(alignment: .leading) {
+                        HStack(spacing: 6) {
+                            Capsule().fill(Color.black.opacity(0.55)).frame(width: 76, height: 8)
+                            Capsule().fill(Color.black.opacity(0.35)).frame(width: 44, height: 8)
+                        }
+                        .padding(.leading, 11)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .opacity(visibleReply ? 1 : 0)
+                    .offset(y: visibleReply ? 0 : 6)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(0..<2, id: \.self) { idx in
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(loomAISuggestionFill.opacity(0.92))
+                            .frame(width: idx == 0 ? (160 + CGFloat(suggestionPairIndex * 2)) : (182 + CGFloat(suggestionPairIndex * 2)), height: 26)
+                            .overlay(alignment: .leading) {
+                                HStack(spacing: 6) {
+                                    Circle().fill(Color.white.opacity(0.95)).frame(width: 6, height: 6)
+                                    Capsule().fill(Color.white.opacity(0.78)).frame(width: idx == 0 ? 100 : 122, height: 7)
+                                }
+                                .padding(.leading, 9)
+                            }
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .stroke(Color.white.opacity(0.24), lineWidth: 1)
+                            )
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .opacity(visibleSuggestions ? 1 : 0)
+                .offset(y: visibleSuggestions ? 0 : 6)
+
+                Spacer(minLength: 0)
+            }
+            .padding(14)
+        }
+        .onAppear {
+            visiblePrompt = reduceMotion
+            visibleReply = reduceMotion
+            visibleSuggestions = reduceMotion
+            cycleTask?.cancel()
+            cycleTask = Task { @MainActor in
+                while !Task.isCancelled {
+                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.35)) {
+                        visiblePrompt = false
+                        visibleReply = false
+                        visibleSuggestions = false
+                    }
+                    try? await Task.sleep(nanoseconds: 280_000_000)
+                    guard !Task.isCancelled else { break }
+                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.35)) {
+                        visiblePrompt = true
+                    }
+                    try? await Task.sleep(nanoseconds: 260_000_000)
+                    guard !Task.isCancelled else { break }
+                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.35)) {
+                        visibleReply = true
+                    }
+                    try? await Task.sleep(nanoseconds: 260_000_000)
+                    guard !Task.isCancelled else { break }
+                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.35)) {
+                        suggestionPairIndex = (suggestionPairIndex + 1) % 3
+                        visibleSuggestions = true
+                    }
+                    try? await Task.sleep(nanoseconds: reduceMotion ? 1_000_000_000 : 1_450_000_000)
+                }
+            }
+        }
+        .onDisappear {
+            cycleTask?.cancel()
+            cycleTask = nil
+        }
+    }
+}
+
+struct LittleWinsDeckPlaceholderView: View {
+    let reduceMotion: Bool
+    @State private var cardOrder: [Int] = [0, 1, 2]
+    @State private var checkedByCard: [Int: Set<Int>] = [0: [], 1: [], 2: []]
+    @State private var deckTask: Task<Void, Never>?
+    @State private var rowSaturationPhase: Int = 0
+
+    private let cardColors: [Color] = [.blue, .orange, .red]
+    private let actionCountsByCard: [Int] = [3, 2, 2]
+
+    private func rowSaturationOpacity(for row: Int) -> Double {
+        let rotated = (row + rowSaturationPhase) % 3
+        switch rotated {
+        case 0: return 0.82
+        case 1: return 0.58
+        default: return 0.34
+        }
+    }
+
+    private func miniLittleWinCard(
+        cardID: Int,
+        depth: Int,
+        checks: Set<Int>,
+        rows: [Int]
+    ) -> some View {
+        let yOffset = CGFloat(depth) * 7
+        let cardWidth: CGFloat = 94 - CGFloat(depth * 4)
+        let cardHeight: CGFloat = cardWidth * 1.42
+        let baseColor = cardColors[cardID]
+        let tilt = reduceMotion ? 0 : Double(depth == 0 ? 0 : (depth == 1 ? -2 : 2))
+
+        return RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .fill(baseColor)
+            .frame(width: cardWidth, height: cardHeight)
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.white.opacity(0.72))
+            }
+            .overlay {
+                ZStack(alignment: .leading) {
+                    GeometryReader { geo in
+                        let lineHeight: CGFloat = 2.6
+                        let lineSpacing: CGFloat = 1.8
+                        let lineCount = max(1, Int((geo.size.height + lineSpacing) / (lineHeight + lineSpacing)))
+
+                        VStack(spacing: lineSpacing) {
+                            ForEach(0..<lineCount, id: \.self) { idx in
+                                RoundedRectangle(cornerRadius: 2.2, style: .continuous)
+                                    .fill(baseColor.opacity(0.16))
+                                    .frame(width: geo.size.width, height: lineHeight)
+                                    .opacity(idx.isMultiple(of: 3) ? 0.95 : 0.78)
+                            }
+                        }
+                    }
+                    .opacity(0.72)
+
+                    VStack(spacing: 4) {
+                        ForEach(rows, id: \.self) { row in
+                            let barOpacity = rowSaturationOpacity(for: row)
+                            HStack(spacing: 4) {
+                                Image(systemName: checks.contains(row) ? "checkmark.circle.fill" : "circle")
+                                    .font(.system(size: 17, weight: .semibold))
+                                    .foregroundStyle(baseColor)
+
+                                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                                    .fill(baseColor.opacity(barOpacity))
+                                    .frame(width: 38 - CGFloat(row * 6), height: 10)
+                            }
+                        }
+                    }
+                    .padding(.leading, 8)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            }
+            .overlay(alignment: .topLeading) {
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .stroke(baseColor.opacity(0.95), lineWidth: 1.2)
+                    .frame(width: 12, height: 12)
+                    .rotationEffect(.degrees(45))
+                    .padding(.top, 5)
+                    .padding(.leading, 5)
+            }
+            .overlay(alignment: .bottomTrailing) {
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .stroke(baseColor.opacity(0.95), lineWidth: 1.2)
+                    .frame(width: 12, height: 12)
+                    .rotationEffect(.degrees(45))
+                    .padding(.bottom, 5)
+                    .padding(.trailing, 5)
+            }
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(baseColor.opacity(0.36), lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .offset(y: yOffset)
+            .rotationEffect(.degrees(tilt))
+            .shadow(color: .black.opacity(0.08), radius: 3, x: 0, y: 2)
+            .zIndex(Double(10 - depth))
+    }
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+
+            ZStack {
+                ForEach(Array(cardOrder.enumerated()), id: \.element) { depth, cardID in
+                    let checks = checkedByCard[cardID] ?? []
+                    let rows = Array(0..<actionCountsByCard[cardID])
+
+                    miniLittleWinCard(
+                        cardID: cardID,
+                        depth: depth,
+                        checks: checks,
+                        rows: rows
+                    )
+                }
+            }
+        }
+        .onAppear {
+            checkedByCard = [0: [], 1: [], 2: []]
+            guard !reduceMotion else { return }
+
+            deckTask?.cancel()
+            deckTask = Task { @MainActor in
+                while !Task.isCancelled {
+                    let topCard = cardOrder.first ?? 0
+                    let actionCount = actionCountsByCard[topCard]
+                    checkedByCard[topCard] = []
+                    try? await Task.sleep(nanoseconds: 120_000_000)
+                    for row in 0..<actionCount {
+                        guard !Task.isCancelled else { break }
+                        _ = withAnimation(.spring(response: 0.3, dampingFraction: 0.86)) {
+                            checkedByCard[topCard, default: []].insert(row)
+                        }
+                        rowSaturationPhase = (rowSaturationPhase + 1) % 3
+                        try? await Task.sleep(nanoseconds: 220_000_000)
+                    }
+                    try? await Task.sleep(nanoseconds: 380_000_000)
+                    guard !Task.isCancelled else { break }
+
+                    withAnimation(.easeInOut(duration: 0.45)) {
+                        let moved = cardOrder.removeFirst()
+                        cardOrder.append(moved)
+                    }
+                    let nextTop = cardOrder.first ?? 0
+                    checkedByCard[nextTop] = []
+                    try? await Task.sleep(nanoseconds: 420_000_000)
+                }
+            }
+        }
+        .onDisappear {
+            deckTask?.cancel()
+            deckTask = nil
+        }
+    }
+}
+
+struct FulfillmentBalancePlaceholderView: View {
+    let reduceMotion: Bool
+    @State private var pulse = 0.985
+    @State private var rotatingMetrics: [(String, Color, Double)] = []
+    @State private var currentCount: Int = 3
+    @State private var countDirection: Int = 1
+    @State private var cycleTask: Task<Void, Never>?
+
+    private let categoryPool: [String] = [
+        "Career & Business",
+        "Health & Energy",
+        "Love & Relationships",
+        "Wealth & Finance",
+        "Fun & Recreation",
+        "Spiritual & Emotional",
+        "Family & Friends",
+        "Learning & Growth",
+        "Creativity & Expression",
+        "Environment & Home"
+    ]
+
+    private var colorPool: [Color] {
+        Array(FulfillmentCategoryTheme.palette.prefix(7).map(\.color))
+    }
+
+    private func randomMetrics(count: Int) -> [(String, Color, Double)] {
+        let sectionNames = Array(categoryPool.shuffled().prefix(count))
+        let palette = Array(colorPool.prefix(7))
+        let eligibleColors: [Color] = {
+            if count >= 7 {
+                return palette
+            }
+            return Array(palette.prefix(6))
+        }()
+        let colors = Array(eligibleColors.shuffled().prefix(count))
+        return (0..<count).map { idx in
+            let value = Double(Int.random(in: 28...84))
+            return (sectionNames[idx], colors[idx], value)
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+
+            FulfillmentInteractiveRadar(
+                metrics: rotatingMetrics,
+                selectedIndex: .constant(0),
+                onManualSelect: {},
+                enableInteraction: false,
+                showOutline: true,
+                emphasizeSelectedSlice: false
+            )
+            .frame(width: 176, height: 176)
+            .scaleEffect(reduceMotion ? 1 : pulse)
+        }
+        .onAppear {
+            if rotatingMetrics.isEmpty {
+                rotatingMetrics = randomMetrics(count: currentCount)
+            }
+
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true)) {
+                pulse = 1.02
+            }
+
+            cycleTask?.cancel()
+            cycleTask = Task { @MainActor in
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 1_150_000_000)
+                    guard !Task.isCancelled else { break }
+
+                    if currentCount >= 7 {
+                        countDirection = -1
+                    } else if currentCount <= 3 {
+                        countDirection = 1
+                    }
+                    currentCount += countDirection
+
+                    withAnimation(.spring(response: 0.52, dampingFraction: 0.85)) {
+                        rotatingMetrics = randomMetrics(count: currentCount)
+                    }
+                }
+            }
+        }
+        .onDisappear {
+            cycleTask?.cancel()
+            cycleTask = nil
         }
     }
 }
@@ -379,6 +764,25 @@ struct RadarPlaceholderView: View {
 struct TodayMockPlaceholderView: View {
     let reduceMotion: Bool
     @State private var reveal = false
+    @State private var iconIndex: Int = 0
+    @State private var itemOrder: [Int] = [0, 1, 2]
+    @State private var rotateTask: Task<Void, Never>?
+
+    private let rotatingSortIcons: [String] = [
+        "star.square",
+        "clock",
+        "person",
+        "wrench.and.screwdriver",
+        "mappin.and.ellipse",
+        "paperclip",
+        "ellipsis.calendar"
+    ]
+
+    private let rowColors: [Color] = [
+        .blue,
+        .orange,
+        .red
+    ]
 
     var body: some View {
         ZStack {
@@ -387,22 +791,30 @@ struct TodayMockPlaceholderView: View {
 
             VStack(spacing: 10) {
                 HStack {
-                    Circle().fill(Color.accentColor).frame(width: 9, height: 9)
-                    Text("Today")
+                    Circle()
+                        .fill(rowColors[itemOrder.first ?? 0])
+                        .frame(width: 9, height: 9)
+                    Text("Week")
                         .font(.headline)
+                    Image(systemName: rotatingSortIcons[iconIndex % rotatingSortIcons.count])
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
                     Spacer()
                 }
 
-                ForEach(0..<3, id: \.self) { idx in
+                ForEach(itemOrder, id: \.self) { item in
                     RoundedRectangle(cornerRadius: 10)
-                        .fill(Color.accentColor.opacity(0.12 + (Double(idx) * 0.08)))
+                        .fill(rowColors[item].opacity(0.18))
                         .frame(height: 34)
                         .overlay(alignment: .leading) {
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(Color.accentColor.opacity(0.32))
-                                .frame(width: reveal ? CGFloat(85 + idx * 35) : 36, height: 10)
-                                .padding(.leading, 10)
-                                .animation(reduceMotion ? nil : .easeInOut(duration: 0.8), value: reveal)
+                            HStack(spacing: 10) {
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(rowColors[item].opacity(0.78))
+                                    .frame(width: reveal ? CGFloat(85 + item * 35) : 36, height: 10)
+                                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.8), value: reveal)
+                            }
+                            .padding(.leading, 10)
+                            .padding(.trailing, 8)
                         }
                 }
 
@@ -410,7 +822,27 @@ struct TodayMockPlaceholderView: View {
             }
             .padding(18)
         }
-        .onAppear { reveal = true }
+        .onAppear {
+            reveal = true
+            guard !reduceMotion else { return }
+
+            rotateTask?.cancel()
+            rotateTask = Task { @MainActor in
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 1_050_000_000)
+                    guard !Task.isCancelled else { break }
+
+                    withAnimation(.easeInOut(duration: 0.35)) {
+                        iconIndex = (iconIndex + 1) % rotatingSortIcons.count
+                            itemOrder.shuffle()
+                    }
+                }
+            }
+        }
+        .onDisappear {
+            rotateTask?.cancel()
+            rotateTask = nil
+        }
     }
 }
 

@@ -23,25 +23,25 @@ enum OnboardingCopy {
         .init(
             id: 3,
             headline: "Balance what matters most.",
-            body: "Personalize your key fulfillment areas so your time, energy, and focus move with intention.",
+            body: "Personalize 3-7 fulfillment areas so your time, energy, and focus move with intention.",
             visualKind: .balance
         ),
         .init(
             id: 4,
-            headline: "Turn intention into execution.",
-            body: "Loom transforms goals and messy tasks into small actions you repeat—so progress becomes automatic.",
+            headline: "Turn plans into action.",
+            body: "Make real progress effortless by focusing on what matters now to create the life you want.",
             visualKind: .execution
         ),
         .init(
             id: 5,
-            headline: "See stress before it stacks up.",
-            body: "Your radar updates as you execute—so you catch neglect early and stay fulfilled, not overwhelmed.",
+            headline: "Create daily momentum.",
+            body: "Little Wins make instant gratification and delayed acheivement work together.",
             visualKind: .radar
         ),
         .init(
             id: 6,
-            headline: "One direction. Less stress. More life.",
-            body: "Loom manages the weave—so you spend less time organizing and more time living with purpose.",
+            headline: "Your next best move.",
+            body: "LoomAI understands your goals and guides your plans.",
             visualKind: .summary
         )
     ]
