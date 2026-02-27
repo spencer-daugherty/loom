@@ -5,6 +5,24 @@ import SwiftData
 import UIKit
 #endif
 
+private enum ContentQuickstartTarget: String, Hashable {
+    case purpose
+    case fulfillment
+    case objectives
+    case capture
+    case actionBlocks
+}
+
+private struct ContentQuickstartFramePreferenceKey: PreferenceKey {
+    static var defaultValue: [ContentQuickstartTarget: [CGRect]] = [:]
+    static func reduce(value: inout [ContentQuickstartTarget: [CGRect]], nextValue: () -> [ContentQuickstartTarget: [CGRect]]) {
+        let next = nextValue()
+        for (target, rects) in next {
+            value[target, default: []].append(contentsOf: rects)
+        }
+    }
+}
+
 private struct DarkModeInvertImage: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
 
@@ -25,6 +43,8 @@ struct ContentView: View {
     @AppStorage("blank_homepage_mode") private var blankHomepageMode = false
     @AppStorage("setup_homepage_mode") private var setupHomepageMode = false
     @AppStorage("has_completed_plan_flow_once") private var hasCompletedPlanFlowOnce = false
+    @AppStorage("has_seen_content_quickstart_v1") private var hasSeenContentQuickstart = false
+    @AppStorage("force_show_content_quickstart_once") private var forceShowContentQuickstartOnce = false
     @State private var isPresentingCaptureView = false
     @State private var pressedEmotion: String? = nil
     @State private var pressedOutcome: Outcomes? = nil
@@ -80,6 +100,8 @@ struct ContentView: View {
     @State private var loomAIHeaderMenuButtonFrame: CGRect = .zero
     @State private var headerFrameInRootSpace: CGRect = .zero
     @State private var notificationResyncTask: Task<Void, Never>? = nil
+    @State private var contentQuickstartStepIndex: Int = 0
+    @State private var contentQuickstartFrames: [ContentQuickstartTarget: CGRect] = [:]
 
     private enum PlayDestination: String, Identifiable, Hashable {
         case action
@@ -96,6 +118,46 @@ struct ContentView: View {
         case home = 1
         case littleWins = 2
     }
+
+    private struct ContentQuickstartStep {
+        let title: String
+        let summary: String
+        let lookAtPrompt: String
+        let target: ContentQuickstartTarget
+    }
+
+    private let contentQuickstartSteps: [ContentQuickstartStep] = [
+        ContentQuickstartStep(
+            title: "Purpose",
+            summary: "Define your Vision and Mission so your week stays aligned with what matters most.",
+            lookAtPrompt: "Look at the Purpose card on this screen.",
+            target: .purpose
+        ),
+        ContentQuickstartStep(
+            title: "Fulfillment",
+            summary: "Set areas, identities, and little wins to keep daily progress balanced across life.",
+            lookAtPrompt: "Look at the Fulfillment section on this screen.",
+            target: .fulfillment
+        ),
+        ContentQuickstartStep(
+            title: "Objectives",
+            summary: "Track outcomes with timeframes and measurable progress so goals stay concrete.",
+            lookAtPrompt: "Look at the Objectives area on this screen.",
+            target: .objectives
+        ),
+        ContentQuickstartStep(
+            title: "Capture",
+            summary: "Capture actions quickly so nothing important is lost before planning.",
+            lookAtPrompt: "Look at the Capture button at the bottom.",
+            target: .capture
+        ),
+        ContentQuickstartStep(
+            title: "Action Blocks",
+            summary: "Execute grouped actions with focus, then reflect and carry forward what still matters.",
+            lookAtPrompt: "Look at the Action Blocks (Play/Plan) area on this screen.",
+            target: .actionBlocks
+        )
+    ]
 
     private var headerPageFadeAnimation: Animation? {
         enableHeaderPageAnimations ? .easeOut(duration: 0.12) : nil
@@ -155,6 +217,14 @@ struct ContentView: View {
         !dismissVacationModeBanner
     }
 
+    private var shouldShowContentQuickstart: Bool {
+        (!hasSeenContentQuickstart || forceShowContentQuickstartOnce) && !showSplash
+    }
+
+    private var isLikelyExistingInstall: Bool {
+        hasCompletedPlanFlowOnce || !drivingForces.isEmpty || !fulfillments.isEmpty || !outcomes.isEmpty || !passions.isEmpty
+    }
+
     private var isDrivingForceEmptyState: Bool {
         shouldShowBlankHomepageAppearance || !hasDrivingForceData
     }
@@ -172,11 +242,11 @@ struct ContentView: View {
     }
 
     private var shouldShowDrivingOnboardingPulse: Bool {
-        areOnboardingPromptsVisible
+        areOnboardingPromptsVisible && !shouldShowContentQuickstart
     }
 
     private var shouldShowFulfillmentOnboardingPulse: Bool {
-        !isDrivingForceEmptyState && isFulfillmentEmptyState
+        !isDrivingForceEmptyState && isFulfillmentEmptyState && !shouldShowContentQuickstart
     }
 
     private var shouldShowAnyOnboardingBounce: Bool {
@@ -184,7 +254,7 @@ struct ContentView: View {
     }
 
     private var shouldShowPlanButtonOnboardingBounce: Bool {
-        !isDrivingForceEmptyState && !isFulfillmentEmptyState && !isActiveActionFlow
+        !isDrivingForceEmptyState && !isFulfillmentEmptyState && !isActiveActionFlow && !shouldShowContentQuickstart
     }
 
     private var canOpenPlanOrActionFlow: Bool {
@@ -304,15 +374,110 @@ struct ContentView: View {
                         measuredCardHeights = updated
                     }
                 }
+                .onPreferenceChange(ContentQuickstartFramePreferenceKey.self) { frames in
+                    var resolved: [ContentQuickstartTarget: CGRect] = [:]
+                    let screenBounds = UIScreen.main.bounds
+                    for (target, candidates) in frames {
+                        let valid = candidates.filter { rect in
+                            rect.width > 1 &&
+                            rect.height > 1 &&
+                            rect.intersects(screenBounds)
+                        }
+                        let expectedHeight = quickstartExpectedHeight(for: target)
+                        let picked = valid.min { lhs, rhs in
+                            abs(lhs.height - expectedHeight) < abs(rhs.height - expectedHeight)
+                        } ?? valid.min { lhs, rhs in
+                            (lhs.width * lhs.height) < (rhs.width * rhs.height)
+                        } ?? candidates.last
+                        if let picked {
+                            resolved[target] = picked
+                        }
+                    }
+                    if resolved != contentQuickstartFrames {
+                        contentQuickstartFrames = resolved
+                    }
+                }
                 .environment(\.contentCardDensity, cardDensity)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             contentViewPopupOverlay
             loomAIChatMenuFloatingOverlay(in: proxy)
+            if shouldShowContentQuickstart {
+                contentQuickstartOverlay
+            }
         }
         .coordinateSpace(name: "ContentViewRootSpace")
         .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
+    }
+
+    private var contentQuickstartOverlay: some View {
+        let boundedIndex = min(max(0, contentQuickstartStepIndex), max(0, contentQuickstartSteps.count - 1))
+        let step = contentQuickstartSteps[boundedIndex]
+        let isLast = boundedIndex == contentQuickstartSteps.count - 1
+        return GeometryReader { proxy in
+            let overlayBounds = CGRect(origin: .zero, size: proxy.size)
+            let fallbackRect = CGRect(x: 24, y: 180, width: max(160, proxy.size.width - 48), height: 80)
+            let rawTargetRect = contentQuickstartFrames[step.target] ?? fallbackRect
+            let targetRect = quickstartNormalizedRect(for: step.target, rawRect: rawTargetRect, in: overlayBounds)
+            let spotlightRect = targetRect.insetBy(dx: -8, dy: -8)
+
+            ZStack {
+                Color.black.opacity(0.58)
+                .ignoresSafeArea()
+
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(Color.white.opacity(0.95), lineWidth: 2)
+                    .frame(width: spotlightRect.width, height: spotlightRect.height)
+                    .position(x: spotlightRect.midX, y: spotlightRect.midY)
+                    .allowsHitTesting(false)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Quick Tour \(boundedIndex + 1)/\(contentQuickstartSteps.count)")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Spacer(minLength: 0)
+                        Text(step.title)
+                            .font(.subheadline.weight(.bold))
+                    }
+                    Text(step.summary)
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(step.lookAtPrompt)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    HStack(spacing: 10) {
+                        Button("Back") { contentQuickstartStepIndex = max(0, contentQuickstartStepIndex - 1) }
+                            .buttonStyle(.bordered)
+                            .disabled(boundedIndex == 0)
+                        Spacer(minLength: 0)
+                        Button(isLast ? "Done" : "Next") {
+                            if isLast {
+                                hasSeenContentQuickstart = true
+                                forceShowContentQuickstartOnce = false
+                            } else {
+                                contentQuickstartStepIndex = min(contentQuickstartStepIndex + 1, contentQuickstartSteps.count - 1)
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                }
+                .padding(14)
+                .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(Color.black.opacity(0.1), lineWidth: 1)
+                )
+                .padding(.horizontal, 20)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .padding(.bottom, 26)
+            }
+        }
+        .zIndex(100)
     }
 
     @ViewBuilder
@@ -494,9 +659,21 @@ struct ContentView: View {
                     playSheetDestination = .action
                 }
             }
+            .onChange(of: shouldShowContentQuickstart) { _, show in
+                if show {
+                    contentQuickstartStepIndex = 0
+                    homePageIndex = HomeSwipePage.home.rawValue
+                }
+            }
             .onAppear {
                 beginStartupPreparationIfNeeded()
                 refreshFulfillmentCategoryScoresForCurrentWeek()
+                if !hasSeenContentQuickstart && isLikelyExistingInstall && !forceShowContentQuickstartOnce {
+                    hasSeenContentQuickstart = true
+                }
+                if shouldShowContentQuickstart {
+                    homePageIndex = HomeSwipePage.home.rawValue
+                }
                 if shouldShowAnyOnboardingBounce {
                     bounceDrivingCardOnce()
                 }
@@ -2165,9 +2342,15 @@ struct ContentView: View {
 
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: cardSpacing) {
-                        measuredCard("driving") { drivingForceSection }
-                        measuredCard("fulfillment") { fulfillmentSection }
-                        measuredCard("objectives") { objectivesSection }
+                        measuredCard("driving") {
+                            drivingForceSection
+                        }
+                        measuredCard("fulfillment") {
+                            fulfillmentSection
+                        }
+                        measuredCard("objectives") {
+                            objectivesSection
+                        }
                     }
                     .padding(.horizontal)
                     .padding(.vertical, outerVerticalPadding)
@@ -3456,6 +3639,7 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.plain)
+                .background(contentQuickstartTargetFrame(.capture))
 
                 Group {
                     if setupHomepageMode {
@@ -3529,6 +3713,7 @@ struct ContentView: View {
                         : .default,
                     value: drivingCardBounceOn
                 )
+                .background(contentQuickstartTargetFrame(.actionBlocks))
             }
             .padding(.horizontal)
             .padding(.top, 6)
@@ -3553,6 +3738,54 @@ struct ContentView: View {
         }
         .frame(maxWidth: .infinity)
         .background(Color.clear)
+    }
+
+    private func contentQuickstartTargetFrame(_ target: ContentQuickstartTarget) -> some View {
+        GeometryReader { proxy in
+            Color.clear.preference(
+                key: ContentQuickstartFramePreferenceKey.self,
+                value: [target: [proxy.frame(in: .named("ContentViewRootSpace"))]]
+            )
+        }
+    }
+
+    private func quickstartExpectedHeight(for target: ContentQuickstartTarget) -> CGFloat {
+        switch target {
+        case .purpose, .fulfillment, .objectives:
+            return 190
+        case .capture:
+            return 60
+        case .actionBlocks:
+            return 60
+        }
+    }
+
+    private func quickstartNormalizedRect(for target: ContentQuickstartTarget, rawRect: CGRect, in bounds: CGRect) -> CGRect {
+        let globalYCorrection: CGFloat = -60
+        var rect = rawRect.intersection(bounds)
+        if rect.isNull || rect.width < 1 || rect.height < 1 {
+            return CGRect(x: 24, y: 180, width: max(160, bounds.width - 48), height: 80)
+        }
+
+        switch target {
+        case .purpose, .fulfillment, .objectives:
+            rect = rect.insetBy(dx: 10, dy: 8)
+            rect.size.height = min(rect.height, 240)
+        case .capture:
+            rect = rect.insetBy(dx: 10, dy: 6)
+            rect.size.height = min(rect.height, 76)
+            rect.size.width = min(rect.size.width, 300)
+            rect.origin.x = max(bounds.minX + 12, min(rect.midX - (rect.size.width / 2), bounds.maxX - rect.size.width - 12))
+        case .actionBlocks:
+            let side: CGFloat = 78
+            rect = CGRect(x: rect.midX - side / 2, y: rect.midY - side / 2, width: side, height: side)
+            rect.origin.x = max(bounds.minX + 12, min(rect.origin.x, bounds.maxX - rect.width - 12))
+            rect.origin.y = max(bounds.minY + 12, min(rect.origin.y, bounds.maxY - rect.height - 12))
+        }
+
+        rect = rect.offsetBy(dx: 0, dy: globalYCorrection)
+        rect.origin.y = max(bounds.minY + 8, min(rect.origin.y, bounds.maxY - rect.height - 8))
+        return rect.intersection(bounds)
     }
 
     private func triggerPlayBlockedFeedback() {
@@ -3799,6 +4032,7 @@ struct ContentView: View {
             RoundedRectangle(cornerRadius: 16)
                 .stroke(highlightDrivingRequirement ? Color.red.opacity(0.9) : Color.clear, lineWidth: 2)
         )
+        .background(contentQuickstartTargetFrame(.purpose))
     }
 
     private var fulfillmentSection: some View {
@@ -3944,6 +4178,7 @@ struct ContentView: View {
             RoundedRectangle(cornerRadius: 16)
                 .stroke(highlightFulfillmentRequirement ? Color.red.opacity(0.9) : Color.clear, lineWidth: 2)
         )
+        .background(contentQuickstartTargetFrame(.fulfillment))
     }
 
     private var objectivesSection: some View {
@@ -4172,6 +4407,7 @@ struct ContentView: View {
                     }
             }
         }
+        .background(contentQuickstartTargetFrame(.objectives))
     }
 
     private func bounceDrivingCardOnce() {

@@ -452,6 +452,8 @@ struct AccountView: View {
     @AppStorage("enable_projects_feature") private var enableProjectsFeature = false
     @AppStorage("blank_homepage_mode") private var blankHomepageMode = false
     @AppStorage("setup_homepage_mode") private var setupHomepageMode = false
+    @AppStorage("has_seen_content_quickstart_v1") private var hasSeenContentQuickstart = false
+    @AppStorage("force_show_content_quickstart_once") private var forceShowContentQuickstartOnce = false
     @AppStorage("dev_manual_warning_cards_enabled") private var devManualWarningCardsEnabled = false
     @AppStorage("dev_outcome_warning_target_passed") private var devOutcomeWarningTargetPassed = false
     @AppStorage("dev_outcome_warning_goal_achieved") private var devOutcomeWarningGoalAchieved = false
@@ -708,8 +710,13 @@ struct AccountView: View {
             .presentationDragIndicator(.visible)
         }
         .onChange(of: blankHomepageMode) { _, isOn in
-            if isOn, setupHomepageMode {
-                setupHomepageMode = false
+            if isOn {
+                if setupHomepageMode {
+                    setupHomepageMode = false
+                }
+                // Manual trigger: when Blank Homepage is enabled, force the Content quickstart flow.
+                hasSeenContentQuickstart = false
+                forceShowContentQuickstartOnce = true
             }
         }
         .onChange(of: setupHomepageMode) { _, isOn in
