@@ -73,6 +73,8 @@ struct LoomNotificationSettings: Codable, Equatable {
 
 enum LoomNotificationSettingsStore {
     private static let defaultsKey = "loom.notification.settings.v1"
+    private static let masterEnabledKey = "loom.notification.master.enabled"
+    private static let allModeEnabledKey = "loom.notification.all_mode.enabled"
 
     static func load() -> LoomNotificationSettings {
         guard
@@ -89,6 +91,22 @@ enum LoomNotificationSettingsStore {
         if let data = try? JSONEncoder().encode(normalized) {
             UserDefaults.standard.set(data, forKey: defaultsKey)
         }
+    }
+
+    static func isMasterEnabled() -> Bool {
+        UserDefaults.standard.object(forKey: masterEnabledKey) as? Bool ?? false
+    }
+
+    static func setMasterEnabled(_ enabled: Bool) {
+        UserDefaults.standard.set(enabled, forKey: masterEnabledKey)
+    }
+
+    static func isAllModeEnabled() -> Bool {
+        UserDefaults.standard.object(forKey: allModeEnabledKey) as? Bool ?? true
+    }
+
+    static func setAllModeEnabled(_ enabled: Bool) {
+        UserDefaults.standard.set(enabled, forKey: allModeEnabledKey)
     }
 }
 
@@ -120,6 +138,8 @@ enum LoomNotificationScheduler {
         if !loomIDs.isEmpty {
             center.removePendingNotificationRequests(withIdentifiers: loomIDs)
         }
+
+        guard LoomNotificationSettingsStore.isMasterEnabled() else { return }
 
         let authStatus = await notificationSettings(center: center).authorizationStatus
         guard authStatus == .authorized || authStatus == .provisional || authStatus == .ephemeral else { return }

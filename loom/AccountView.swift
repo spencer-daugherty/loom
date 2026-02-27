@@ -3466,94 +3466,92 @@ struct DataPrinterDetailView: View {
 private struct NotificationsPlaceholderView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.openURL) private var openURL
     @State private var settings: LoomNotificationSettings = LoomNotificationSettingsStore.load()
     @State private var authorizationStatus: UNAuthorizationStatus = .notDetermined
     @State private var syncTask: Task<Void, Never>? = nil
+    @AppStorage("loom.notification.master.enabled") private var allowNotifications: Bool = false
+    @AppStorage("loom.notification.all_mode.enabled") private var allNotificationsModeEnabled: Bool = true
 
     var body: some View {
         Form {
-            Section("Permission") {
-                HStack {
-                    Text("Status")
-                    Spacer()
-                    Text(authorizationStatusLabel)
-                        .foregroundStyle(.secondary)
-                }
-
-                if authorizationStatus == .notDetermined {
-                    Button("Allow Notifications") {
-                        Task {
-                            _ = await LoomNotificationScheduler.requestAuthorization()
-                            await refreshAuthorizationStatus()
-                            scheduleResync(immediate: true)
-                        }
-                    }
-                } else if authorizationStatus == .denied {
-                    Button("Open Settings") {
-                        guard let url = URL(string: "app-settings:") else { return }
-                        openURL(url)
-                    }
-                }
-            }
-
-            Section("All") {
+            Section {
                 Toggle(
-                    "All Notifications",
+                    "Allow Notifications",
                     isOn: Binding(
-                        get: { settings.allNotificationsEnabled },
+                        get: { allowNotifications },
                         set: { isOn in
-                            settings.allNotificationsEnabled = isOn
-                            persistAndResync()
+                            handleAllowNotificationsToggle(isOn)
                         }
                     )
                 )
             }
 
-            Section("Insights") {
-                toggleRow("Purpose Insights", keyPath: \.purposeInsights)
-                toggleRow("Fulfillment Insights", keyPath: \.fulfillmentInsights)
-            }
-
-            Section("Outcomes") {
-                toggleRow("Outcomes Starting", keyPath: \.outcomesStarting)
-                toggleRow("Outcome Ending Soon", keyPath: \.outcomeEndingSoon)
-                if settings.outcomeEndingSoon {
-                    Picker(
-                        "Days Before End",
-                        selection: Binding(
-                            get: { settings.outcomeEndingSoonDays },
-                            set: { newValue in
-                                settings.outcomeEndingSoonDays = newValue
+            if allowNotifications {
+                Section {
+                    Toggle(
+                        "All Notifications",
+                        isOn: Binding(
+                            get: { allNotificationsModeEnabled },
+                            set: { isOn in
+                                allNotificationsModeEnabled = isOn
+                                if isOn {
+                                    settings.allNotificationsEnabled = true
+                                }
                                 persistAndResync()
                             }
                         )
-                    ) {
-                        ForEach(1...30, id: \.self) { day in
-                            Text("\(day) day\(day == 1 ? "" : "s")").tag(day)
+                    )
+                }
+
+                if !allNotificationsModeEnabled {
+                    Section("Insights") {
+                        toggleRow("Purpose Insights", keyPath: \.purposeInsights)
+                        toggleRow("Fulfillment Insights", keyPath: \.fulfillmentInsights)
+                    }
+
+                    Section("Outcomes") {
+                        toggleRow("Outcomes Starting", keyPath: \.outcomesStarting)
+                        toggleRow("Outcome Ending Soon", keyPath: \.outcomeEndingSoon)
+                        if settings.outcomeEndingSoon {
+                            Picker(
+                                "Days Before End",
+                                selection: Binding(
+                                    get: { settings.outcomeEndingSoonDays },
+                                    set: { newValue in
+                                        settings.outcomeEndingSoonDays = newValue
+                                        persistAndResync()
+                                    }
+                                )
+                            ) {
+                                ForEach(1...30, id: \.self) { day in
+                                    Text("\(day) day\(day == 1 ? "" : "s")").tag(day)
+                                }
+                            }
                         }
+                        toggleRow("Outcome End Date", keyPath: \.outcomeEndDate)
+                    }
+
+                    Section("Capture & Actions") {
+                        toggleRow("Action Captured", keyPath: \.actionCaptured)
+                        toggleRow("Capture Action Attention", keyPath: \.captureActionAttention)
+                        toggleRow("Action Due", keyPath: \.actionDue)
+                        toggleRow("Action Block Aging", keyPath: \.actionBlockAging)
+                        toggleRow("Little Wins", keyPath: \.littleWins)
+                    }
+
+                    Section("Vacation Mode") {
+                        toggleRow("Vacation Mode Attention", keyPath: \.vacationModeAttention)
+                        toggleRow("Vacation Mode Starting", keyPath: \.vacationModeStarting)
                     }
                 }
-                toggleRow("Outcome End Date", keyPath: \.outcomeEndDate)
-            }
-
-            Section("Capture & Actions") {
-                toggleRow("Action Captured", keyPath: \.actionCaptured)
-                toggleRow("Capture Action Attention", keyPath: \.captureActionAttention)
-                toggleRow("Action Due", keyPath: \.actionDue)
-                toggleRow("Action Block Aging", keyPath: \.actionBlockAging)
-                toggleRow("Little Wins", keyPath: \.littleWins)
-            }
-
-            Section("Vacation Mode") {
-                toggleRow("Vacation Mode Attention", keyPath: \.vacationModeAttention)
-                toggleRow("Vacation Mode Starting", keyPath: \.vacationModeStarting)
             }
         }
         .navigationTitle("Notifications")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             settings = LoomNotificationSettingsStore.load()
+            allowNotifications = LoomNotificationSettingsStore.isMasterEnabled()
+            allNotificationsModeEnabled = LoomNotificationSettingsStore.isAllModeEnabled()
             Task {
                 await refreshAuthorizationStatus()
                 scheduleResync(immediate: true)
@@ -3567,6 +3565,9 @@ private struct NotificationsPlaceholderView: View {
             guard phase == .active else { return }
             Task {
                 await refreshAuthorizationStatus()
+                if allowNotifications && !isAuthorizationGranted(authorizationStatus) {
+                    allowNotifications = false
+                }
                 scheduleResync(immediate: false)
             }
         }
@@ -3589,20 +3590,14 @@ private struct NotificationsPlaceholderView: View {
         )
     }
 
-    private var authorizationStatusLabel: String {
-        switch authorizationStatus {
-        case .authorized: return "Allowed"
-        case .provisional: return "Provisional"
-        case .ephemeral: return "Ephemeral"
-        case .denied: return "Denied"
-        case .notDetermined: return "Not requested"
-        @unknown default: return "Unknown"
-        }
-    }
-
     private func persistAndResync() {
         settings = settings.normalized
+        if allNotificationsModeEnabled {
+            settings.allNotificationsEnabled = true
+        }
         LoomNotificationSettingsStore.save(settings)
+        LoomNotificationSettingsStore.setMasterEnabled(allowNotifications)
+        LoomNotificationSettingsStore.setAllModeEnabled(allNotificationsModeEnabled)
         scheduleResync(immediate: false)
     }
 
@@ -3621,6 +3616,42 @@ private struct NotificationsPlaceholderView: View {
         await MainActor.run {
             authorizationStatus = status
         }
+    }
+
+    private func isAuthorizationGranted(_ status: UNAuthorizationStatus) -> Bool {
+        status == .authorized || status == .provisional || status == .ephemeral
+    }
+
+    private func handleAllowNotificationsToggle(_ isOn: Bool) {
+        if isOn {
+            Task {
+                let granted = await ensureAuthorizationForToggle()
+                await MainActor.run {
+                    allowNotifications = granted
+                    persistAndResync()
+                }
+            }
+        } else {
+            allowNotifications = false
+            persistAndResync()
+        }
+    }
+
+    private func ensureAuthorizationForToggle() async -> Bool {
+        let currentStatus = await LoomNotificationScheduler.authorizationStatus()
+        await MainActor.run { authorizationStatus = currentStatus }
+
+        if isAuthorizationGranted(currentStatus) {
+            return true
+        }
+        guard currentStatus == .notDetermined else {
+            return false
+        }
+
+        _ = await LoomNotificationScheduler.requestAuthorization()
+        let refreshedStatus = await LoomNotificationScheduler.authorizationStatus()
+        await MainActor.run { authorizationStatus = refreshedStatus }
+        return isAuthorizationGranted(refreshedStatus)
     }
 }
 
