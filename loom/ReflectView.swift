@@ -64,6 +64,8 @@ struct ReflectView: View {
     @State private var contributionOutcomeIndex: Int = 0
     @State private var contributionTempSelection: Set<UUID> = []
     @State private var contributionSelectionsByOutcome: [UUID: Set<UUID>] = [:]
+    @State private var contributionOutcomeQueue: [Outcomes] = []
+    @State private var contributionDoneActionsByOutcomeID: [UUID: [PlannedChunkAction]] = [:]
     @State private var selectedReflectionPassionIDs: Set<UUID> = []
     @State private var isShowingReflectionPassionsSheet: Bool = false
     @State private var isShowingNoPassionsSaveConfirm: Bool = false
@@ -499,24 +501,7 @@ struct ReflectView: View {
         return outcomes.filter { ids.contains($0.outcome_id) }
     }
 
-    private var outcomesForContributionFlow: [Outcomes] {
-        outcomesForWeek.filter { outcome in
-            !(doneActionsByOutcomeId[outcome.outcome_id] ?? []).isEmpty
-        }
-    }
-
-    private var doneActionsByOutcomeId: [UUID: [PlannedChunkAction]] {
-        let linksByOutcome = Dictionary(grouping: weekOutcomeLinks, by: \.outcomeId)
-        var map: [UUID: [PlannedChunkAction]] = [:]
-        for (outcomeId, links) in linksByOutcome {
-            let chunkIds = Set(links.map(\.plannedChunkId))
-            let done = weekActions.filter {
-                chunkIds.contains($0.plannedChunkId) && status(for: $0.id) == .done
-            }
-            map[outcomeId] = done
-        }
-        return map
-    }
+    private var outcomesForContributionFlow: [Outcomes] { contributionOutcomeQueue }
 
     private var currentContributionOutcome: Outcomes? {
         guard contributionOutcomeIndex >= 0, contributionOutcomeIndex < outcomesForContributionFlow.count else { return nil }
@@ -525,7 +510,7 @@ struct ReflectView: View {
 
     private var currentContributionDoneActions: [PlannedChunkAction] {
         guard let outcome = currentContributionOutcome else { return [] }
-        return doneActionsByOutcomeId[outcome.outcome_id] ?? []
+        return contributionDoneActionsByOutcomeID[outcome.outcome_id] ?? []
     }
 
     private var productiveDayRows: [ProductiveDayRow] {
@@ -1037,21 +1022,17 @@ struct ReflectView: View {
                         )
                     }
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Productive signals")
-                            .font(.headline)
-                        if snapshot.productiveSignals.isEmpty {
-                            Text("No pattern yet")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        } else {
+                    if snapshot.productiveSignals.count >= 2 {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Productive signals")
+                                .font(.headline)
                             ForEach(snapshot.productiveSignals, id: \.id) { row in
                                 productiveSignalCountRow(row)
                             }
                         }
+                        .padding(10)
+                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
                     }
-                    .padding(10)
-                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
 
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Productive days")
@@ -1775,7 +1756,11 @@ struct ReflectView: View {
     }
 
     private func beginContributionFlowOrProceed() {
-        let queue = outcomesForContributionFlow
+        let contributionData = buildContributionFlowData()
+        contributionDoneActionsByOutcomeID = contributionData.doneActionsByOutcomeID
+        contributionOutcomeQueue = contributionData.queue
+
+        let queue = contributionOutcomeQueue
         guard !queue.isEmpty else {
             step = 2
             return
@@ -1800,6 +1785,36 @@ struct ReflectView: View {
             showContributionPrompt = false
             step = 2
         }
+    }
+
+    private func buildContributionFlowData() -> (queue: [Outcomes], doneActionsByOutcomeID: [UUID: [PlannedChunkAction]]) {
+        let executionByID = executionByActionID
+        let doneActions = weekActions.filter { executionByID[$0.id]?.status == .done }
+        let doneActionsByChunkID = Dictionary(grouping: doneActions, by: \.plannedChunkId)
+        let linksByOutcome = Dictionary(grouping: weekOutcomeLinks, by: \.outcomeId)
+
+        var queue: [Outcomes] = []
+        var map: [UUID: [PlannedChunkAction]] = [:]
+
+        for outcome in outcomesForWeek {
+            let links = linksByOutcome[outcome.outcome_id] ?? []
+            var seenActionIDs: Set<UUID> = []
+            var actions: [PlannedChunkAction] = []
+            for link in links {
+                for action in doneActionsByChunkID[link.plannedChunkId] ?? [] {
+                    if seenActionIDs.insert(action.id).inserted {
+                        actions.append(action)
+                    }
+                }
+            }
+
+            if !actions.isEmpty {
+                queue.append(outcome)
+                map[outcome.outcome_id] = actions
+            }
+        }
+
+        return (queue, map)
     }
 
     private func categoryColor(for category: String) -> Color {

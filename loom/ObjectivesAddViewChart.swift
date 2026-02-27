@@ -1,6 +1,382 @@
 import SwiftUI
 import Charts
 import SwiftData
+#if canImport(HealthKit)
+import HealthKit
+#endif
+
+private enum OutcomeMeasureEntrySourceStore {
+    private static let defaultsKey = "outcome_measure_entry_sources_v1"
+
+    private static func loadMap() -> [String: String] {
+        guard let data = UserDefaults.standard.data(forKey: defaultsKey),
+              let decoded = try? JSONDecoder().decode([String: String].self, from: data) else {
+            return [:]
+        }
+        return decoded
+    }
+
+    private static func saveMap(_ map: [String: String]) {
+        guard let data = try? JSONEncoder().encode(map) else { return }
+        UserDefaults.standard.set(data, forKey: defaultsKey)
+    }
+
+    static func source(for measureEntryID: UUID) -> String? {
+        loadMap()[measureEntryID.uuidString]
+    }
+
+    static func setSource(_ source: String?, for measureEntryID: UUID) {
+        var map = loadMap()
+        let key = measureEntryID.uuidString
+        if let source, !source.isEmpty {
+            map[key] = source
+        } else {
+            map.removeValue(forKey: key)
+        }
+        saveMap(map)
+    }
+
+    static func removeSource(for measureEntryID: UUID) {
+        setSource(nil, for: measureEntryID)
+    }
+}
+
+private enum OutcomeHealthIntegrationStore {
+    struct Snapshot: Codable {
+        var isEnabled: Bool
+        var metricIdentifierRaw: String?
+    }
+
+    private static let defaultsKey = "outcome_health_integration_v1"
+
+    private static func loadMap() -> [String: Snapshot] {
+        guard let data = UserDefaults.standard.data(forKey: defaultsKey),
+              let decoded = try? JSONDecoder().decode([String: Snapshot].self, from: data) else {
+            return [:]
+        }
+        return decoded
+    }
+
+    private static func saveMap(_ map: [String: Snapshot]) {
+        guard let data = try? JSONEncoder().encode(map) else { return }
+        UserDefaults.standard.set(data, forKey: defaultsKey)
+    }
+
+    static func snapshot(for outcomeID: UUID) -> Snapshot {
+        loadMap()[outcomeID.uuidString] ?? Snapshot(isEnabled: false, metricIdentifierRaw: nil)
+    }
+
+    static func setSnapshot(_ snapshot: Snapshot, for outcomeID: UUID) {
+        var map = loadMap()
+        let key = outcomeID.uuidString
+        map[key] = snapshot
+        saveMap(map)
+    }
+}
+
+#if canImport(HealthKit)
+private enum OutcomeHealthKitBridge {
+    struct MetricOption: Identifiable, Hashable {
+        let identifierRaw: String
+        let displayName: String
+        var id: String { identifierRaw }
+    }
+
+    struct DailyValue: Hashable {
+        let day: Date
+        let value: Double
+    }
+
+    private static let store = HKHealthStore()
+
+    private enum BridgeError: LocalizedError {
+        case unavailable
+        case invalidIdentifier
+
+        var errorDescription: String? {
+            switch self {
+            case .unavailable:
+                return "Apple Health is not available on this device."
+            case .invalidIdentifier:
+                return "Selected Apple Health metric is unavailable."
+            }
+        }
+    }
+
+    private static let quantityIdentifiers: [HKQuantityTypeIdentifier] = [
+        .activeEnergyBurned,
+        .appleExerciseTime,
+        .appleStandTime,
+        .basalEnergyBurned,
+        .bloodAlcoholContent,
+        .bloodGlucose,
+        .bloodPressureDiastolic,
+        .bloodPressureSystolic,
+        .bodyFatPercentage,
+        .bodyMass,
+        .bodyMassIndex,
+        .bodyTemperature,
+        .dietaryCaffeine,
+        .dietaryCalcium,
+        .dietaryCarbohydrates,
+        .dietaryCholesterol,
+        .dietaryCopper,
+        .dietaryEnergyConsumed,
+        .dietaryFatMonounsaturated,
+        .dietaryFatPolyunsaturated,
+        .dietaryFatSaturated,
+        .dietaryFatTotal,
+        .dietaryFiber,
+        .dietaryIron,
+        .dietaryPotassium,
+        .dietaryProtein,
+        .dietarySodium,
+        .dietarySugar,
+        .dietaryVitaminA,
+        .dietaryVitaminC,
+        .dietaryVitaminD,
+        .dietaryVitaminK,
+        .dietaryWater,
+        .distanceCycling,
+        .distanceSwimming,
+        .distanceWalkingRunning,
+        .flightsClimbed,
+        .heartRate,
+        .heartRateVariabilitySDNN,
+        .height,
+        .leanBodyMass,
+        .numberOfTimesFallen,
+        .oxygenSaturation,
+        .peakExpiratoryFlowRate,
+        .respiratoryRate,
+        .restingHeartRate,
+        .stepCount,
+        .vo2Max,
+        .walkingHeartRateAverage,
+        .walkingSpeed,
+        .walkingStepLength
+    ]
+
+    static func availableMetricOptions() -> [MetricOption] {
+        let prioritizedIDs = [
+            HKQuantityTypeIdentifier.stepCount.rawValue,
+            HKQuantityTypeIdentifier.vo2Max.rawValue
+        ]
+
+        return quantityIdentifiers
+            .map { identifier in
+                return MetricOption(
+                    identifierRaw: identifier.rawValue,
+                    displayName: displayName(for: identifier)
+                )
+            }
+            .sorted { lhs, rhs in
+                let lhsRank = prioritizedIDs.firstIndex(of: lhs.identifierRaw) ?? Int.max
+                let rhsRank = prioritizedIDs.firstIndex(of: rhs.identifierRaw) ?? Int.max
+                if lhsRank != rhsRank {
+                    return lhsRank < rhsRank
+                }
+                return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
+            }
+    }
+
+    private static func displayName(for identifier: HKQuantityTypeIdentifier) -> String {
+        var raw = identifier.rawValue
+        let prefix = "HKQuantityTypeIdentifier"
+        if raw.hasPrefix(prefix) {
+            raw.removeFirst(prefix.count)
+        }
+        while raw.first == "." || raw.first == "_" {
+            raw.removeFirst()
+        }
+        if raw.isEmpty {
+            raw = identifier.rawValue
+        }
+        var spaced = ""
+        spaced.reserveCapacity(raw.count + 8)
+        for char in raw {
+            if char.isUppercase, !spaced.isEmpty {
+                spaced.append(" ")
+            }
+            spaced.append(char)
+        }
+        var label = spaced.capitalized
+        label = label.replacingOccurrences(of: "S D N N", with: "")
+        label = label.replacingOccurrences(of: "V O2", with: "VO2")
+        label = label.replacingOccurrences(of: "  ", with: " ")
+        return label.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func requestAuthorization(
+        for identifierRaw: String,
+        completion: @escaping (Result<Void, Error>) -> Void
+    ) {
+        guard HKHealthStore.isHealthDataAvailable() else {
+            completion(.failure(BridgeError.unavailable))
+            return
+        }
+        guard let type = quantityType(from: identifierRaw) else {
+            completion(.failure(BridgeError.invalidIdentifier))
+            return
+        }
+        store.requestAuthorization(toShare: nil, read: [type]) { success, error in
+            if let error {
+                completion(.failure(error))
+            } else if success {
+                completion(.success(()))
+            } else {
+                completion(.failure(BridgeError.unavailable))
+            }
+        }
+    }
+
+    static func readLatestPerDay(
+        identifierRaw: String,
+        start: Date,
+        end: Date,
+        completion: @escaping (Result<[DailyValue], Error>) -> Void
+    ) {
+        guard let type = quantityType(from: identifierRaw) else {
+            completion(.failure(BridgeError.invalidIdentifier))
+            return
+        }
+
+        let calendar = Calendar.current
+        let startDay = calendar.startOfDay(for: start)
+        let endDay = calendar.startOfDay(for: end)
+        guard startDay <= endDay else {
+            completion(.success([]))
+            return
+        }
+
+        store.preferredUnits(for: [type]) { preferredUnits, unitError in
+            if let unitError {
+                completion(.failure(unitError))
+                return
+            }
+            let unit = preferredUnits[type] ?? defaultUnit(for: identifierRaw)
+            var rows: [DailyValue] = []
+            var day = startDay
+            let group = DispatchGroup()
+            let lock = NSLock()
+            var capturedError: Error?
+
+            while day <= endDay {
+                let currentDay = day
+                let nextDay = calendar.date(byAdding: .day, value: 1, to: currentDay) ?? currentDay.addingTimeInterval(86_400)
+                let predicate = HKQuery.predicateForSamples(withStart: currentDay, end: nextDay, options: .strictStartDate)
+                let sort = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
+
+                group.enter()
+                let query = HKSampleQuery(
+                    sampleType: type,
+                    predicate: predicate,
+                    limit: 1,
+                    sortDescriptors: [sort]
+                ) { _, samples, error in
+                    defer { group.leave() }
+                    if let error {
+                        lock.lock()
+                        capturedError = error
+                        lock.unlock()
+                        return
+                    }
+                    guard let sample = (samples as? [HKQuantitySample])?.first else { return }
+                    let value = sample.quantity.doubleValue(for: unit)
+                    lock.lock()
+                    rows.append(DailyValue(day: currentDay, value: value))
+                    lock.unlock()
+                }
+                store.execute(query)
+                day = nextDay
+            }
+
+            group.notify(queue: .main) {
+                if let capturedError {
+                    completion(.failure(capturedError))
+                } else {
+                    completion(.success(rows.sorted { $0.day < $1.day }))
+                }
+            }
+        }
+    }
+
+    private static func quantityType(from raw: String) -> HKQuantityType? {
+        HKQuantityType.quantityType(forIdentifier: HKQuantityTypeIdentifier(rawValue: raw))
+    }
+
+    private static func defaultUnit(for identifierRaw: String) -> HKUnit {
+        switch identifierRaw {
+        case HKQuantityTypeIdentifier.stepCount.rawValue,
+             HKQuantityTypeIdentifier.flightsClimbed.rawValue,
+             HKQuantityTypeIdentifier.appleExerciseTime.rawValue,
+             HKQuantityTypeIdentifier.appleStandTime.rawValue,
+             HKQuantityTypeIdentifier.numberOfTimesFallen.rawValue:
+            return .count()
+        case HKQuantityTypeIdentifier.activeEnergyBurned.rawValue,
+             HKQuantityTypeIdentifier.basalEnergyBurned.rawValue,
+             HKQuantityTypeIdentifier.dietaryEnergyConsumed.rawValue:
+            return .kilocalorie()
+        case HKQuantityTypeIdentifier.heartRate.rawValue,
+             HKQuantityTypeIdentifier.restingHeartRate.rawValue,
+             HKQuantityTypeIdentifier.walkingHeartRateAverage.rawValue:
+            return HKUnit.count().unitDivided(by: .minute())
+        case HKQuantityTypeIdentifier.distanceWalkingRunning.rawValue,
+             HKQuantityTypeIdentifier.distanceCycling.rawValue,
+             HKQuantityTypeIdentifier.distanceSwimming.rawValue,
+             HKQuantityTypeIdentifier.height.rawValue,
+             HKQuantityTypeIdentifier.walkingStepLength.rawValue:
+            return .meter()
+        case HKQuantityTypeIdentifier.bodyMass.rawValue,
+             HKQuantityTypeIdentifier.leanBodyMass.rawValue:
+            return .gramUnit(with: .kilo)
+        case HKQuantityTypeIdentifier.vo2Max.rawValue:
+            return HKUnit(from: "ml/kg*min")
+        case HKQuantityTypeIdentifier.bodyFatPercentage.rawValue,
+             HKQuantityTypeIdentifier.oxygenSaturation.rawValue:
+            return .percent()
+        default:
+            return .count()
+        }
+    }
+}
+#else
+private enum OutcomeHealthKitBridge {
+    struct MetricOption: Identifiable, Hashable {
+        let identifierRaw: String
+        let displayName: String
+        var id: String { identifierRaw }
+    }
+
+    struct DailyValue: Hashable {
+        let day: Date
+        let value: Double
+    }
+
+    private enum BridgeError: LocalizedError {
+        case unavailable
+        var errorDescription: String? { "Apple Health is not available on this device." }
+    }
+
+    static func availableMetricOptions() -> [MetricOption] { [] }
+
+    static func requestAuthorization(
+        for identifierRaw: String,
+        completion: @escaping (Result<Void, Error>) -> Void
+    ) {
+        completion(.failure(BridgeError.unavailable))
+    }
+
+    static func readLatestPerDay(
+        identifierRaw: String,
+        start: Date,
+        end: Date,
+        completion: @escaping (Result<[DailyValue], Error>) -> Void
+    ) {
+        completion(.failure(BridgeError.unavailable))
+    }
+}
+#endif
 
 private func sanitizeDecimalInput(_ input: String, maxFractionDigits: Int = 4) -> String {
     var out = ""
@@ -105,9 +481,11 @@ struct ObjectivesAddViewChart: View {
     }
 
     private var chartRows: [OutcomesMeasureEntry] {
-        if !entries.isEmpty { return entries }
+        if !entries.isEmpty {
+            return dailyLatestRowsWithinOutcomeWindow(entries)
+        }
         guard let legacy = legacyMeasures.first else { return [] }
-        return [
+        return dailyLatestRowsWithinOutcomeWindow([
             OutcomesMeasureEntry(
                 outcome_id: legacy.outcome_id,
                 measure: legacy.measure,
@@ -118,7 +496,7 @@ struct ObjectivesAddViewChart: View {
                 unit: legacy.unit,
                 decimalPlaces: legacy.decimalPlaces
             )
-        ]
+        ])
     }
 
     private var visibleRows: [OutcomesMeasureEntry] {
@@ -262,7 +640,7 @@ struct ObjectivesAddViewChart: View {
 
                 if shouldShowTodayMarker {
                     RuleMark(x: .value("Today", Calendar.current.startOfDay(for: .now)))
-                        .foregroundStyle(.black.opacity(0.75))
+                        .foregroundStyle(.gray.opacity(0.85))
                         .lineStyle(.init(lineWidth: 2))
                 }
 
@@ -424,17 +802,45 @@ struct ObjectivesAddViewChart: View {
         }
     }
 
+    private func dailyLatestRowsWithinOutcomeWindow(_ rows: [OutcomesMeasureEntry]) -> [OutcomesMeasureEntry] {
+        guard let outcome = outcomes.first else {
+            return rows.sorted { $0.measuredAt < $1.measuredAt }
+        }
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: outcome.start)
+        let end = calendar.startOfDay(for: outcome.end)
+
+        var latestByDay: [Date: OutcomesMeasureEntry] = [:]
+        for row in rows {
+            let day = calendar.startOfDay(for: row.measuredAt)
+            guard day >= start, day <= end else { continue }
+            if let existing = latestByDay[day] {
+                if row.createdAt > existing.createdAt {
+                    latestByDay[day] = row
+                }
+            } else {
+                latestByDay[day] = row
+            }
+        }
+        return latestByDay.values.sorted { $0.measuredAt < $1.measuredAt }
+    }
+
     private func fullDateRange() -> ClosedRange<Date> {
         let calendar = Calendar.current
+        if let outcome = outcomes.first {
+            let start = calendar.startOfDay(for: outcome.start)
+            let end = calendar.startOfDay(for: outcome.end)
+            if start <= end {
+                return start...end
+            }
+        }
         let allDatesFromEntries = chartRows.map { calendar.startOfDay(for: $0.measuredAt) }
         let startMarker = outcomes.first.map { calendar.startOfDay(for: $0.start) }
         let endMarker = outcomes.first.map { calendar.startOfDay(for: $0.end) }
         let allDates = allDatesFromEntries + [startMarker, endMarker].compactMap { $0 }
         let minDate = allDates.min() ?? calendar.startOfDay(for: .now)
         let maxDate = allDates.max() ?? calendar.startOfDay(for: .now)
-        let paddedStart = calendar.date(byAdding: .day, value: -30, to: minDate) ?? minDate
-        let paddedEnd = calendar.date(byAdding: .day, value: 30, to: maxDate) ?? maxDate
-        return paddedStart...paddedEnd
+        return minDate...maxDate
     }
 
     private var shouldShowTodayMarker: Bool {
@@ -1007,16 +1413,28 @@ struct OutcomesAllDataView: View {
     private func recordedRowLabel(_ row: RecordedRow) -> some View {
         switch row.kind {
         case .measure(let measureRow):
+            let isAppleHealth = OutcomeMeasureEntrySourceStore.source(for: measureRow.id) == "apple_health"
             HStack(spacing: 10) {
-                Image("logo_appicon_any")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 34, height: 34)
-                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .stroke(Color.gray.opacity(0.45), lineWidth: 0.6)
-                    )
+                if isAppleHealth {
+                    Image(systemName: "heart")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .frame(width: 34, height: 34)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .stroke(Color.primary.opacity(0.9), lineWidth: 1)
+                        )
+                } else {
+                    Image("logo_appicon_any")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 34, height: 34)
+                        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .stroke(Color.gray.opacity(0.45), lineWidth: 0.6)
+                        )
+                }
                 Text(formatted(measureRow.measure))
                     .font(.body)
                     .foregroundStyle(.primary)
@@ -1073,6 +1491,7 @@ struct OutcomesAllDataView: View {
                 )
             )
             RecentlyDeletedStore.trash(persisted, in: modelContext)
+            OutcomeMeasureEntrySourceStore.removeSource(for: persisted.id)
             let remainingEntries = entries.filter { $0.id != row.id }
             syncSnapshot(with: remainingEntries)
         } else if let legacy = legacyMeasures.first(where: { $0.outcome_id == outcomeID }) {
@@ -1222,10 +1641,11 @@ private struct RecordedDataDetailsView: View {
         Form {
             switch row.kind {
             case .measure(let measureRow):
+                let isAppleHealth = OutcomeMeasureEntrySourceStore.source(for: measureRow.id) == "apple_health"
                 detailRow("Value", formatted(measureRow.measure))
                 detailRow("Date", fullDate(measureRow.measuredAt))
-                detailRow("Source", "Loom")
-                detailRow("Was User Entered", "Yes")
+                detailRow("Source", isAppleHealth ? "Apple Health" : "Loom")
+                detailRow("Was User Entered", isAppleHealth ? "No" : "Yes")
             case .goalChange(let event):
                 let oldGoal = event.oldGoal ?? 0
                 let newGoal = event.newGoal ?? 0
@@ -1305,26 +1725,271 @@ private struct RecordedDataDetailsView: View {
 }
 
 struct DataSourcesPlaceholderView: View {
+    @Environment(\.modelContext) private var modelContext
+
+    let outcomeID: UUID
+    let formatRaw: String
+    let unitRaw: String
+    let decimalPlaces: Int
+
+    @Query private var entries: [OutcomesMeasureEntry]
+    @Query private var snapshots: [OutcomesMeasure]
+    @Query private var outcomes: [Outcomes]
+
+    @State private var isAppleHealthEnabled = false
+    @State private var selectedMetricIdentifierRaw: String = ""
+    @State private var metricOptions: [OutcomeHealthKitBridge.MetricOption] = []
+    @State private var isSyncing = false
+    @State private var syncMessage: String?
+    @State private var didHydrate = false
+
+    init(outcomeID: UUID, formatRaw: String, unitRaw: String, decimalPlaces: Int) {
+        self.outcomeID = outcomeID
+        self.formatRaw = formatRaw
+        self.unitRaw = unitRaw
+        self.decimalPlaces = decimalPlaces
+        let entriesPredicate = #Predicate<OutcomesMeasureEntry> { $0.outcome_id == outcomeID }
+        _entries = Query(filter: entriesPredicate, sort: [SortDescriptor(\OutcomesMeasureEntry.measuredAt, order: .reverse)])
+        let snapshotsPredicate = #Predicate<OutcomesMeasure> { $0.outcome_id == outcomeID }
+        _snapshots = Query(filter: snapshotsPredicate, sort: [SortDescriptor(\OutcomesMeasure.measuredAt, order: .reverse)])
+        let outcomePredicate = #Predicate<Outcomes> { $0.outcome_id == outcomeID }
+        _outcomes = Query(filter: outcomePredicate)
+    }
+
     var body: some View {
         List {
-            Section {
-                VStack(spacing: 8) {
-                    Text("Not Available Yet")
-                        .font(.headline)
-                        .fontWeight(.bold)
-                    Text("Data source integrations and access controls will be added here.")
+            Section("Apple Health") {
+                HStack(spacing: 10) {
+                    Image(systemName: "heart")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .frame(width: 24, height: 24)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 7)
+                                .stroke(Color.primary.opacity(0.9), lineWidth: 1)
+                        )
+                    Text("Apple Health")
+                    Spacer()
+                    Toggle("", isOn: $isAppleHealthEnabled)
+                        .labelsHidden()
+                }
+
+                if isAppleHealthEnabled {
+                    Picker("Metric", selection: $selectedMetricIdentifierRaw) {
+                        Text("Select...").tag("")
+                        ForEach(metricOptions) { option in
+                            Text(option.displayName).tag(option.identifierRaw)
+                        }
+                    }
+                    .pickerStyle(.navigationLink)
+
+                    Button(isSyncing ? "Syncing..." : "Sync Now") {
+                        syncFromAppleHealth()
+                    }
+                    .disabled(isSyncing || selectedMetricIdentifierRaw.isEmpty)
+                    .foregroundStyle(.blue)
+                }
+            }
+
+            if let syncMessage, !syncMessage.isEmpty {
+                Section {
+                    Text(syncMessage)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 20)
                 }
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.vertical, 20)
             }
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Data Sources & Access")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.visible, for: .navigationBar)
+        .onAppear {
+            guard !didHydrate else { return }
+            didHydrate = true
+            metricOptions = OutcomeHealthKitBridge.availableMetricOptions()
+            hydrateStoredConfiguration()
+        }
+        .onChange(of: isAppleHealthEnabled) { _, _ in
+            persistConfiguration()
+        }
+        .onChange(of: selectedMetricIdentifierRaw) { _, _ in
+            persistConfiguration()
+        }
+        .onDisappear {
+            if isAppleHealthEnabled && selectedMetricIdentifierRaw.isEmpty {
+                isAppleHealthEnabled = false
+                persistConfiguration()
+            }
+        }
+    }
+
+    private func hydrateStoredConfiguration() {
+        let snapshot = OutcomeHealthIntegrationStore.snapshot(for: outcomeID)
+        isAppleHealthEnabled = snapshot.isEnabled
+        let stored = snapshot.metricIdentifierRaw ?? ""
+        if metricOptions.contains(where: { $0.identifierRaw == stored }) {
+            selectedMetricIdentifierRaw = stored
+        } else {
+            selectedMetricIdentifierRaw = ""
+        }
+    }
+
+    private func persistConfiguration() {
+        OutcomeHealthIntegrationStore.setSnapshot(
+            .init(
+                isEnabled: isAppleHealthEnabled,
+                metricIdentifierRaw: selectedMetricIdentifierRaw.isEmpty ? nil : selectedMetricIdentifierRaw
+            ),
+            for: outcomeID
+        )
+    }
+
+    private func syncFromAppleHealth() {
+        guard isAppleHealthEnabled else { return }
+        guard let range = outcomeDateRange else {
+            syncMessage = "Outcome dates are unavailable."
+            return
+        }
+        guard !selectedMetricIdentifierRaw.isEmpty else {
+            syncMessage = "Select a metric first."
+            return
+        }
+
+        isSyncing = true
+        syncMessage = nil
+        OutcomeHealthKitBridge.requestAuthorization(for: selectedMetricIdentifierRaw) { authResult in
+            switch authResult {
+            case .failure(let error):
+                DispatchQueue.main.async {
+                    isSyncing = false
+                    syncMessage = error.localizedDescription
+                }
+            case .success:
+                OutcomeHealthKitBridge.readLatestPerDay(
+                    identifierRaw: selectedMetricIdentifierRaw,
+                    start: range.lowerBound,
+                    end: range.upperBound
+                ) { result in
+                    DispatchQueue.main.async {
+                        isSyncing = false
+                        switch result {
+                        case .failure(let error):
+                            syncMessage = error.localizedDescription
+                        case .success(let dailyValues):
+                            applySyncedRows(dailyValues, within: range)
+                            syncMessage = dailyValues.isEmpty
+                                ? "No Apple Health data found in the active outcome window."
+                                : "Synced \(dailyValues.count) day\(dailyValues.count == 1 ? "" : "s") from Apple Health."
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var outcomeDateRange: ClosedRange<Date>? {
+        guard let outcome = outcomes.first else { return nil }
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: outcome.start)
+        let end = min(calendar.startOfDay(for: outcome.end), calendar.startOfDay(for: .now))
+        guard start <= end else { return nil }
+        return start...end
+    }
+
+    private func applySyncedRows(_ rows: [OutcomeHealthKitBridge.DailyValue], within range: ClosedRange<Date>) {
+        let calendar = Calendar.current
+        let goalValue = currentGoalValue()
+        let syncedDays = Set(rows.map { calendar.startOfDay(for: $0.day) })
+
+        let appleHealthRowsByDay = Dictionary(grouping: entries.filter {
+            guard let source = OutcomeMeasureEntrySourceStore.source(for: $0.id) else { return false }
+            let day = calendar.startOfDay(for: $0.measuredAt)
+            return source == "apple_health" && range.contains(day)
+        }) { calendar.startOfDay(for: $0.measuredAt) }
+
+        for row in rows {
+            let day = calendar.startOfDay(for: row.day)
+            let existingRows = (appleHealthRowsByDay[day] ?? []).sorted { $0.createdAt > $1.createdAt }
+            if let keep = existingRows.first {
+                keep.measure = row.value
+                keep.measure_amt = goalValue
+                keep.measuredAt = day
+                keep.createdAt = .now
+                keep.format = formatRaw
+                keep.unit = unitRaw
+                keep.decimalPlaces = decimalPlaces
+                for extra in existingRows.dropFirst() {
+                    OutcomeMeasureEntrySourceStore.removeSource(for: extra.id)
+                    RecentlyDeletedStore.trash(extra, in: modelContext)
+                }
+            } else {
+                let inserted = OutcomesMeasureEntry(
+                    outcome_id: outcomeID,
+                    measure: row.value,
+                    measure_amt: goalValue,
+                    measuredAt: day,
+                    createdAt: .now,
+                    format: formatRaw,
+                    unit: unitRaw,
+                    decimalPlaces: decimalPlaces
+                )
+                modelContext.insert(inserted)
+                OutcomeMeasureEntrySourceStore.setSource("apple_health", for: inserted.id)
+            }
+        }
+
+        for (day, dayRows) in appleHealthRowsByDay where !syncedDays.contains(day) {
+            for stale in dayRows {
+                OutcomeMeasureEntrySourceStore.removeSource(for: stale.id)
+                RecentlyDeletedStore.trash(stale, in: modelContext)
+            }
+        }
+
+        syncLatestSnapshot()
+        try? modelContext.save()
+    }
+
+    private func currentGoalValue() -> Double {
+        if let snapshot = snapshots.first, snapshot.measure_amt != 0 {
+            return snapshot.measure_amt
+        }
+        if let latestEntry = entries.max(by: { $0.measuredAt < $1.measuredAt }) {
+            return latestEntry.measure_amt
+        }
+        return 0
+    }
+
+    private func syncLatestSnapshot() {
+        let descriptor = FetchDescriptor<OutcomesMeasureEntry>(
+            predicate: #Predicate<OutcomesMeasureEntry> { $0.outcome_id == outcomeID },
+            sortBy: [SortDescriptor(\OutcomesMeasureEntry.measuredAt, order: .reverse)]
+        )
+        let latestEntry = (try? modelContext.fetch(descriptor))?.first
+        guard let latestEntry else { return }
+
+        if let snapshot = snapshots.first {
+            snapshot.measure = latestEntry.measure
+            snapshot.measure_amt = latestEntry.measure_amt
+            snapshot.measuredAt = latestEntry.measuredAt
+            snapshot.measure_updated = .now
+            snapshot.direction = nil
+            snapshot.format = latestEntry.format ?? formatRaw
+            snapshot.unit = latestEntry.unit ?? unitRaw
+            snapshot.decimalPlaces = latestEntry.decimalPlaces ?? decimalPlaces
+        } else {
+            modelContext.insert(
+                OutcomesMeasure(
+                    outcome_id: outcomeID,
+                    measure: latestEntry.measure,
+                    measuredAt: latestEntry.measuredAt,
+                    measure_amt: latestEntry.measure_amt,
+                    measure_updated: .now,
+                    direction: nil,
+                    format: latestEntry.format ?? formatRaw,
+                    unit: latestEntry.unit ?? unitRaw,
+                    decimalPlaces: latestEntry.decimalPlaces ?? decimalPlaces
+                )
+            )
+        }
     }
 }

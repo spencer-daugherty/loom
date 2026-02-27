@@ -876,7 +876,12 @@ struct ChartActionsSection: View {
                     }
 
                     NavigationLink {
-                        DataSourcesPlaceholderView()
+                        DataSourcesPlaceholderView(
+                            outcomeID: outcomeId,
+                            formatRaw: measureFormat.rawValue,
+                            unitRaw: measureUnit,
+                            decimalPlaces: measureDecimalPlaces
+                        )
                     } label: {
                         Text("Data Sources & Access")
                     }
