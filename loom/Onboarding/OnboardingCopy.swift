@@ -4,26 +4,26 @@ enum OnboardingCopy {
     static let pages: [OnboardingPage] = [
         .init(
             id: 0,
-            headline: "Life runs on too many timelines.",
-            body: "Work, health, relationships, goals—pulling you in every direction. Loom turns the noise into one clear direction.",
+            headline: "Life gets too crazy.",
+            body: "Work, health, relationships, finance - pulling you in every direction. Loom turns the chaos into one clear path.",
             visualKind: .strands
         ),
         .init(
             id: 1,
-            headline: "Loom weaves it all into one plan.",
-            body: "Like a loom weaves countless strands into fabric, Loom weaves your life into one direction—today, tomorrow, and long-term.",
+            headline: "Loom brings it all together.",
+            body: "Like the device that weaves threads into cloth, Loom continuously refines areas in your life into one clear plan - today, tomorrow, and long-term.",
             visualKind: .weave
         ),
         .init(
             id: 2,
             headline: "Start with who you are.",
-            body: "Capture your Driving Force—what you love, what thrills you, what you vow, and what you refuse to tolerate.",
+            body: "Define your life purpose and passions - what you love, what thrills you, what you vow, and what you refuse to tolerate (hate).",
             visualKind: .identity
         ),
         .init(
             id: 3,
             headline: "Balance what matters most.",
-            body: "Choose Fulfillment Categories so your time reflects your priorities, not your stress.",
+            body: "Personalize your key fulfillment areas so your time, energy, and focus move with intention.",
             visualKind: .balance
         ),
         .init(

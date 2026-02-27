@@ -150,20 +150,63 @@ private struct DarkModeInvertImage: ViewModifier {
 struct WindLinesBackground: View {
     let colors: [Color]
     let animationStartDate: Date
+    let lineCount: Int
+    let lineWidth: CGFloat
+    let sourceBandFraction: Double
+    let logoWidth: CGFloat
+    let logoHeight: CGFloat
+    let leftInset: CGFloat
+    let startXFractionOverride: CGFloat?
+    let endXFractionOverride: CGFloat?
+    let endBandFractionOverride: CGFloat?
+    let reverseEndOrdering: Bool
+    let crossoverProgressOverride: CGFloat?
+    let reverseRevealLineIndices: Set<Int>
+    let applyFunnel: Bool
+    let fixedStartFractions: [CGFloat]?
+    let fixedEndFractions: [CGFloat]?
 
-    init(colors: [Color], animationStartDate: Date = .distantPast) {
+    init(
+        colors: [Color],
+        animationStartDate: Date = .distantPast,
+        lineCount: Int = 30,
+        lineWidth: CGFloat = 10,
+        sourceBandFraction: Double = 0.4,
+        logoWidth: CGFloat = 48,
+        logoHeight: CGFloat = 48,
+        leftInset: CGFloat = 0,
+        startXFractionOverride: CGFloat? = nil,
+        endXFractionOverride: CGFloat? = nil,
+        endBandFractionOverride: CGFloat? = nil,
+        reverseEndOrdering: Bool = false,
+        crossoverProgressOverride: CGFloat? = nil,
+        reverseRevealLineIndices: Set<Int> = [],
+        applyFunnel: Bool = true,
+        fixedStartFractions: [CGFloat]? = nil,
+        fixedEndFractions: [CGFloat]? = nil
+    ) {
         self.colors = colors.isEmpty ? fallbackFulfillmentMetrics.map { $0.1 } : colors
         self.animationStartDate = animationStartDate
+        self.lineCount = max(1, lineCount)
+        self.lineWidth = max(1, lineWidth)
+        self.sourceBandFraction = max(0.05, min(sourceBandFraction, 1.0))
+        self.logoWidth = logoWidth
+        self.logoHeight = logoHeight
+        self.leftInset = leftInset
+        self.startXFractionOverride = startXFractionOverride
+        self.endXFractionOverride = endXFractionOverride
+        self.endBandFractionOverride = endBandFractionOverride
+        self.reverseEndOrdering = reverseEndOrdering
+        self.crossoverProgressOverride = crossoverProgressOverride
+        self.reverseRevealLineIndices = reverseRevealLineIndices
+        self.applyFunnel = applyFunnel
+        self.fixedStartFractions = fixedStartFractions
+        self.fixedEndFractions = fixedEndFractions
     }
 
-    private let lineCount: Int = 30
-    private let leftInset: CGFloat = 0
-
-    private let logoWidth: CGFloat = 48
-    private let logoHeight: CGFloat = 48
     private let logoMargin: CGFloat = 10
 
-    private let verticalBandFraction: Double = 0.4
+    private var verticalBandFraction: Double { sourceBandFraction }
 
     // Tuning knobs
     private let verticalShift: CGFloat = 0
@@ -186,11 +229,9 @@ struct WindLinesBackground: View {
             GeometryReader { geo in
                 let size = geo.size
                 let centerX = size.width / 2
-                let startX = leftInset
-                let endX = max(
-                    startX + 40,
-                    centerX - logoWidth / 2 - logoMargin - rightStopInset
-                )
+                let startX = startXFractionOverride.map { size.width * $0 } ?? self.leftInset
+                let defaultEndX = centerX - logoWidth / 2 - logoMargin - rightStopInset
+                let endX = max(startX + 40, endXFractionOverride.map { size.width * $0 } ?? defaultEndX)
                 let startupElapsed = context.date.timeIntervalSince(animationStartDate)
 
                 Canvas { ctx, sz in
@@ -217,17 +258,42 @@ struct WindLinesBackground: View {
                         let clampedFrac = bandStart + band * localFrac
 
                         // Start Y (unchanged)
-                        let baseY: CGFloat = CGFloat(clampedFrac) * sz.height + verticalShift
+                        let startFracResolved: CGFloat = {
+                            if let fixedStartFractions, i < fixedStartFractions.count {
+                                return max(0, min(1, fixedStartFractions[i]))
+                            }
+                            return CGFloat(clampedFrac)
+                        }()
+                        let baseY: CGFloat = startFracResolved * sz.height + verticalShift
 
-                        // End Y: distribute around the logo midpoint so right-side lines visually center on logo middle.
-                        let centerSpread: CGFloat = logoHeight * 0.42
+                        // End Y distribution can be overridden for alternate layouts (e.g., onboarding X-shape).
+                        let centerSpread: CGFloat = {
+                            if let endBandFractionOverride {
+                                return max(8, min(1, endBandFractionOverride)) * sz.height
+                            }
+                            return logoHeight * 0.42
+                        }()
                         let topY = logoCenter - centerSpread / 2
                         let bottomY = logoCenter + centerSpread / 2
                         let span = max(1, bottomY - topY)
 
-                        let endFrac: CGFloat =
+                        let rawFrac: CGFloat =
                             lineCount <= 1 ? 0.5 : CGFloat(i) / CGFloat(lineCount - 1)
-                        let endY: CGFloat = topY + endFrac * span
+                        let startBandNormalized = max(0, min(1, CGFloat(localFrac)))
+                        let endFrac: CGFloat = {
+                            if reverseEndOrdering {
+                                // Mirror each line's own start distribution at the destination.
+                                // This keeps the crossover centered rather than skewing left/right.
+                                return 1 - startBandNormalized
+                            }
+                            return rawFrac
+                        }()
+                        let endY: CGFloat = {
+                            if let fixedEndFractions, i < fixedEndFractions.count {
+                                return max(0, min(1, fixedEndFractions[i])) * sz.height + verticalShift
+                            }
+                            return topY + endFrac * span
+                        }()
 
                         let colorIndex = colors.isEmpty ? 0 : i % colors.count
                         let color = colors.isEmpty ? .accentColor : colors[colorIndex]
@@ -241,7 +307,10 @@ struct WindLinesBackground: View {
                         let rawReveal = (startupElapsed - lineDelay) / lineRevealDuration
                         let revealProgress = max(0.0, min(rawReveal, 1.0))
                         if revealProgress <= 0.0 { continue }
-                        let revealEdgeX = startX + L * CGFloat(revealProgress)
+                        let reverseReveal = reverseRevealLineIndices.contains(i)
+                        let revealEdgeX = reverseReveal
+                            ? endX - L * CGFloat(revealProgress)
+                            : startX + L * CGFloat(revealProgress)
 
                         // Animation params
                         let speed = rand(i * 13 + 1, 0.15, 0.35)
@@ -276,8 +345,14 @@ struct WindLinesBackground: View {
                             let twoPi: Double = 2.0 * Double.pi
 
                             let localS = Double(j) / Double(samples)
-                            let s = localS * revealProgress
-                            let x = startX + CGFloat(localS) * (revealEdgeX - startX)
+                            let s = localS
+                            let x = startX + CGFloat(localS) * L
+
+                            if reverseReveal {
+                                if x < revealEdgeX { continue }
+                            } else {
+                                if x > revealEdgeX { continue }
+                            }
 
                             let diff = (s - posFrac) / sigma
                             let envelope = exp(-pow(diff, 2) * 2)
@@ -301,38 +376,48 @@ struct WindLinesBackground: View {
 
                             let edge: Double = sin(Double.pi * s)
                             let wiggleScale: Double = 0.5
-                            let wiggle: Double = (pulse + swell + chop) * edge * wiggleScale
+                            let centerIntersectionLock = reverseEndOrdering && !applyFunnel
+                            let centerNotch: Double = {
+                                guard centerIntersectionLock else { return 1.0 }
+                                let d = (s - 0.5) / 0.17
+                                // 0 at exact center, ~1 away from center
+                                return 1.0 - exp(-(d * d))
+                            }()
+                            let wiggle: Double = (pulse + swell + chop) * edge * wiggleScale * centerNotch
 
-                            let baseLineY = baseY + (endY - baseY) * CGFloat(s)
+                            let baseLineY: CGFloat = baseY + (endY - baseY) * CGFloat(s)
                             var y = baseLineY + CGFloat(wiggle)
 
-                            // ===== Funnel WITHOUT the hourglass (more aggressive curve-in + pinches late) =====
-                            let sC = CGFloat(s)
+                            // Keep crossover mode geometrically stable after intersection; otherwise apply standard funnel.
+                            if applyFunnel && crossoverProgressOverride == nil {
+                                // ===== Funnel WITHOUT the hourglass (more aggressive curve-in + pinches late) =====
+                                let sC = CGFloat(s)
 
-                            // 1) More aggressive curvature (always on): ramp harder mid-to-late
-                            let bendStart: CGFloat = 0.05
-                            let bendEnd: CGFloat = 0.82
+                                // 1) More aggressive curvature (always on): ramp harder mid-to-late
+                                let bendStart: CGFloat = 0.05
+                                let bendEnd: CGFloat = 0.82
 
-                            let rawBendT = smoothstep(bendStart, bendEnd, sC)          // 0 -> 1
-                            let bendT = pow(rawBendT, 0.55)                            // <1 = ramps faster (more aggressive)
+                                let rawBendT = smoothstep(bendStart, bendEnd, sC)          // 0 -> 1
+                                let bendT = pow(rawBendT, 0.55)                            // <1 = ramps faster (more aggressive)
 
-                            // Strength of the steering toward the logo
-                            let bendStrength: CGFloat = 0.42                           // was ~0.22
-                            let steerY = y + (logoCenter - y) * (bendT * bendStrength)
+                                // Strength of the steering toward the logo
+                                let bendStrength: CGFloat = 0.42                           // was ~0.22
+                                let steerY = y + (logoCenter - y) * (bendT * bendStrength)
 
-                            // 2) Late pinch (only near the end)
-                            let pinchStart: CGFloat = 0.84
-                            let pinchT = smoothstep(pinchStart, 1.0, sC)
-                            let pinchCurve = pow(pinchT, funnelCurve)
+                                // 2) Late pinch (only near the end)
+                                let pinchStart: CGFloat = 0.84
+                                let pinchT = smoothstep(pinchStart, 1.0, sC)
+                                let pinchCurve = pow(pinchT, funnelCurve)
 
-                            // 3) Attractor slides logoCenter -> endY near the end (half-hourglass)
-                            let attractStart: CGFloat = 0.78
-                            let attractT = smoothstep(attractStart, 1.0, sC)
-                            let attractorY = logoCenter + (endY - logoCenter) * attractT
+                                // 3) Attractor slides logoCenter -> endY near the end (half-hourglass)
+                                let attractStart: CGFloat = 0.78
+                                let attractT = smoothstep(attractStart, 1.0, sC)
+                                let attractorY = logoCenter + (endY - logoCenter) * attractT
 
-                            // Combine: steer first, then pinch around the moving attractor
-                            let lateScale = (1.0 - pinchCurve) + pinchCurve * funnelMinScale
-                            y = attractorY + (steerY - attractorY) * lateScale
+                                // Combine: steer first, then pinch around the moving attractor
+                                let lateScale = (1.0 - pinchCurve) + pinchCurve * funnelMinScale
+                                y = attractorY + (steerY - attractorY) * lateScale
+                            }
 
                             // Hard anchor at the start only
                             if j == 0 { y = baseY }
@@ -362,9 +447,9 @@ struct WindLinesBackground: View {
                             with: .linearGradient(
                                 tailGradient,
                                 startPoint: CGPoint(x: startX, y: baseY),
-                                endPoint: CGPoint(x: revealEdgeX, y: baseY + (endY - baseY) * CGFloat(revealProgress))
+                                endPoint: CGPoint(x: endX, y: endY)
                             ),
-                            lineWidth: 10
+                            lineWidth: lineWidth
                         )
 
                         // ========= Glow Fade matches Tail Fade =========
@@ -382,10 +467,12 @@ struct WindLinesBackground: View {
                         ])
 
                         let gradStart = CGPoint(x: startX, y: baseY)
-                        let gradEnd   = CGPoint(x: revealEdgeX, y: baseY + (endY - baseY) * CGFloat(revealProgress))
+                        let gradEnd   = CGPoint(x: endX, y: endY)
 
                         // Clip blur so glow doesn't "cap" and look like expansion at the end
-                        let clipRect = CGRect(x: startX, y: 0, width: max(1, revealEdgeX - startX), height: sz.height)
+                        let revealMinX = reverseReveal ? revealEdgeX : startX
+                        let revealMaxX = reverseReveal ? endX : revealEdgeX
+                        let clipRect = CGRect(x: revealMinX, y: 0, width: max(1, revealMaxX - revealMinX), height: sz.height)
 
                         ctx.drawLayer { layer in
                             layer.clip(to: Path(clipRect))
@@ -393,7 +480,7 @@ struct WindLinesBackground: View {
                             layer.stroke(
                                 path,
                                 with: .linearGradient(gradient, startPoint: gradStart, endPoint: gradEnd),
-                                lineWidth: 12
+                                lineWidth: lineWidth + 2
                             )
                         }
 
@@ -403,7 +490,7 @@ struct WindLinesBackground: View {
                             layer.stroke(
                                 path,
                                 with: .linearGradient(gradient, startPoint: gradStart, endPoint: gradEnd),
-                                lineWidth: 6
+                                lineWidth: max(1, lineWidth - 4)
                             )
                         }
                     }
