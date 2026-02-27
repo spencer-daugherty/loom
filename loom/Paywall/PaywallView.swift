@@ -2,27 +2,29 @@ import SwiftUI
 
 struct PaywallView: View {
     @EnvironmentObject private var session: UserSessionStore
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
 
     @StateObject private var purchaseManager = PurchaseManager()
     @State private var selectedPlan: SubscriptionPlan = .annual
     @State private var presentedLegalDocument: LegalDocument?
+    @State private var previewIndex: Int = 0
+    @State private var previewCycleTask: Task<Void, Never>?
 
     var body: some View {
-        ScrollView {
+        GeometryReader { geo in
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Unlock Loom Pro")
+                    Text("No Free Lunch")
                         .font(.largeTitle.weight(.bold))
-                    Text("One direction for your life—identity, fulfillment, and execution in one system.")
+                    Text("Join the project to end stress and live fulfilled.")
                         .font(.body)
                         .foregroundStyle(.secondary)
                 }
 
-                VStack(alignment: .leading, spacing: 10) {
-                    paywallBullet("Weekly Reset to stay clear and calm")
-                    paywallBullet("Fulfillment radar to protect balance")
-                    paywallBullet("Personalized guidance tied to your categories")
-                }
+                Spacer(minLength: 0)
+
+                onboardingAnimationPreviewBox
 
                 VStack(spacing: 10) {
                     planCard(for: .annual)
@@ -71,21 +73,73 @@ struct PaywallView: View {
                 .padding(.top, 4)
             }
             .padding(20)
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
         }
         .background(Color(.systemBackground).ignoresSafeArea())
         .sheet(item: $presentedLegalDocument) { document in
             LegalLinksView(document: document)
         }
+        .onAppear {
+            guard !reduceMotion else { return }
+            previewCycleTask?.cancel()
+            previewCycleTask = Task { @MainActor in
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 1_700_000_000)
+                    guard !Task.isCancelled else { break }
+                    withAnimation(.easeInOut(duration: 0.28)) {
+                        previewIndex = (previewIndex + 1) % max(1, OnboardingCopy.pages.count)
+                    }
+                }
+            }
+        }
+        .onDisappear {
+            previewCycleTask?.cancel()
+            previewCycleTask = nil
+        }
     }
 
-    private func paywallBullet(_ text: LocalizedStringKey) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(Color.accentColor)
-                .padding(.top, 1)
-            Text(text)
-                .font(.body)
+    private var onboardingAnimationPreviewBox: some View {
+        let page = OnboardingCopy.pages[previewIndex % max(1, OnboardingCopy.pages.count)]
+        return ZStack {
+            switch page.visualKind {
+            case .strands:
+                StrandAnimationPlaceholderView(
+                    reduceMotion: reduceMotion,
+                    colors: [.blue, .indigo, .green, .purple, .red, .orange]
+                )
+            case .weave:
+                LoomSplashBoxPlaceholderView(reduceMotion: reduceMotion)
+            case .identity:
+                IdentityVisionPlaceholderView(reduceMotion: reduceMotion)
+            case .balance:
+                FulfillmentBalancePlaceholderView(reduceMotion: reduceMotion)
+            case .execution:
+                TodayMockPlaceholderView(reduceMotion: reduceMotion)
+            case .radar:
+                LittleWinsDeckPlaceholderView(reduceMotion: reduceMotion)
+            case .summary:
+                LoomAIChatPlaceholderView(reduceMotion: reduceMotion)
+            }
+
+            Group {
+                if colorScheme == .dark {
+                    Image("logo")
+                        .resizable()
+                        .renderingMode(.template)
+                        .foregroundStyle(.white.opacity(0.95))
+                } else {
+                    Image("logo")
+                        .resizable()
+                }
+            }
+            .scaledToFit()
+            .frame(width: 28, height: 28)
+            .padding(.trailing, 10)
+            .padding(.bottom, 10)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
         }
+        .frame(maxWidth: .infinity)
+        .frame(height: 250)
     }
 
     private func planCard(for plan: SubscriptionPlan) -> some View {
