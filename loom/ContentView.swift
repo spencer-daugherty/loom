@@ -25,6 +25,12 @@ private struct ContentQuickstartFramePreferenceKey: PreferenceKey {
     }
 }
 
+private extension CGRect {
+    var area: CGFloat {
+        max(0, width) * max(0, height)
+    }
+}
+
 private struct DarkModeInvertImage: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
 
@@ -104,6 +110,7 @@ struct ContentView: View {
     @State private var notificationResyncTask: Task<Void, Never>? = nil
     @State private var contentQuickstartStepIndex: Int = 0
     @State private var contentQuickstartFrames: [ContentQuickstartTarget: CGRect] = [:]
+    @State private var quickstartIsPageTransitionInFlight = false
 
     private enum PlayDestination: String, Identifiable, Hashable {
         case action
@@ -131,43 +138,43 @@ struct ContentView: View {
     private let contentQuickstartSteps: [ContentQuickstartStep] = [
         ContentQuickstartStep(
             title: "Purpose",
-            summary: "Clarify your Vision and Mission so every decision is anchored to the life you want to build.",
+            summary: "Clarify who you are and the life you're building so every decision stays aligned.",
             lookAtPrompt: "Look at the Purpose card on this screen.",
             target: .purpose
         ),
         ContentQuickstartStep(
             title: "Fulfillment",
-            summary: "Shape each Fulfillment Area with a mission, identity, and little wins that turn intention into daily progress.",
+            summary: "Personalize the key areas of your life so growth feels balanced and meaningful.",
             lookAtPrompt: "Look at the Fulfillment section on this screen.",
             target: .fulfillment
         ),
         ContentQuickstartStep(
             title: "Objectives",
-            summary: "Convert priorities into measurable outcomes with clear timelines, signals, and accountability.",
+            summary: "Turn your direction to long-term goals with clear outcomes you can track and acheive.",
             lookAtPrompt: "Look at the Objectives area on this screen.",
             target: .objectives
         ),
         ContentQuickstartStep(
             title: "Capture",
-            summary: "Capture every action the moment it appears so planning stays clean and nothing slips through.",
+            summary: "Quickly store tasks, commitments, and every idea so your mind stays clear.",
             lookAtPrompt: "Look at the Capture button at the bottom.",
             target: .capture
         ),
         ContentQuickstartStep(
             title: "Action Blocks",
-            summary: "Group related actions into focused execution blocks to reduce friction and finish more meaningful work.",
+            summary: "Make real progress effortless by focusing on what matters now to create the life you want.",
             lookAtPrompt: "Look at the Action Blocks (Play/Plan) area on this screen.",
             target: .actionBlocks
         ),
         ContentQuickstartStep(
             title: "Little Wins",
-            summary: "Use daily Little Wins to keep momentum high and reinforce the identities you are building.",
+            summary: "Create daily momentum through small actions that compound over time.",
             lookAtPrompt: "Look at the Little Wins card on the left screen.",
             target: .littleWins
         ),
         ContentQuickstartStep(
             title: "LoomAI",
-            summary: "Ask LoomAI for context-aware suggestions and convert the strongest ones into action with one tap.",
+            summary: "Get personalized guidance, suggestions, and next steps based on your profile.",
             lookAtPrompt: "Look at the LoomAI chat and keyboard area on the right screen.",
             target: .loomAI
         )
@@ -200,6 +207,10 @@ struct ContentView: View {
 
     private var shouldShowBlankHomepageAppearance: Bool {
         blankHomepageMode || setupHomepageMode
+    }
+
+    private var quickstartPageTransitionAnimation: Animation {
+        .easeInOut(duration: 0.30)
     }
 
     private var vacationModeBannerText: String? {
@@ -245,6 +256,34 @@ struct ContentView: View {
             return HomeSwipePage.littleWins.rawValue
         default:
             return HomeSwipePage.home.rawValue
+        }
+    }
+
+    private func transitionQuickstartToStep(_ newStepIndex: Int) {
+        let bounded = min(max(0, newStepIndex), max(0, contentQuickstartSteps.count - 1))
+        guard bounded != contentQuickstartStepIndex else { return }
+
+        let targetPage = quickstartPage(for: bounded)
+        var stepTransaction = Transaction()
+        stepTransaction.disablesAnimations = true
+        withTransaction(stepTransaction) {
+            contentQuickstartStepIndex = bounded
+        }
+
+        if homePageIndex == targetPage {
+            return
+        }
+
+        quickstartIsPageTransitionInFlight = true
+        withAnimation(quickstartPageTransitionAnimation) {
+            homePageIndex = targetPage
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.30) {
+            guard shouldShowContentQuickstart else {
+                quickstartIsPageTransitionInFlight = false
+                return
+            }
+            quickstartIsPageTransitionInFlight = false
         }
     }
 
@@ -403,20 +442,25 @@ struct ContentView: View {
                     }
                 }
                 .onPreferenceChange(ContentQuickstartFramePreferenceKey.self) { frames in
-                    var resolved: [ContentQuickstartTarget: CGRect] = [:]
+                    var resolved = contentQuickstartFrames
                     let screenBounds = UIScreen.main.bounds
                     for (target, candidates) in frames {
                         let valid = candidates.filter { rect in
-                            rect.width > 1 &&
-                            rect.height > 1 &&
-                            rect.intersects(screenBounds)
+                            rect.width > 1 && rect.height > 1
                         }
-                        let expectedHeight = quickstartExpectedHeight(for: target)
-                        let picked = valid.min { lhs, rhs in
-                            abs(lhs.height - expectedHeight) < abs(rhs.height - expectedHeight)
-                        } ?? valid.min { lhs, rhs in
-                            (lhs.width * lhs.height) < (rhs.width * rhs.height)
-                        } ?? candidates.last
+                        let picked = valid.max { lhs, rhs in
+                            let lhsDistanceToCenter = abs(lhs.midX - screenBounds.midX)
+                            let rhsDistanceToCenter = abs(rhs.midX - screenBounds.midX)
+                            if abs(lhsDistanceToCenter - rhsDistanceToCenter) > 0.5 {
+                                return lhsDistanceToCenter > rhsDistanceToCenter
+                            }
+                            let lhsVisibleArea = lhs.intersection(screenBounds).area
+                            let rhsVisibleArea = rhs.intersection(screenBounds).area
+                            if abs(lhsVisibleArea - rhsVisibleArea) > 0.5 {
+                                return lhsVisibleArea < rhsVisibleArea
+                            }
+                            return lhs.area < rhs.area
+                        } ?? valid.last ?? candidates.last
                         if let picked {
                             resolved[target] = picked
                         }
@@ -446,31 +490,42 @@ struct ContentView: View {
         let shouldPlaceInstructionBelowTarget = boundedIndex < 2
         return GeometryReader { proxy in
             let overlayBounds = CGRect(origin: .zero, size: proxy.size)
+            let overlayFrameInGlobal = proxy.frame(in: .global)
             let fallbackRect = CGRect(x: 24, y: 180, width: max(160, proxy.size.width - 48), height: 80)
             let rawTargetRect = contentQuickstartFrames[step.target] ?? fallbackRect
-            let targetRect = quickstartNormalizedRect(for: step.target, rawRect: rawTargetRect, in: overlayBounds)
+            let targetRect = quickstartRectInOverlaySpace(rawRect: rawTargetRect, overlayFrameInGlobal: overlayFrameInGlobal, overlayBounds: overlayBounds)
             let spotlightRect = targetRect.insetBy(dx: -8, dy: -8)
             let instructionCardHorizontalPadding: CGFloat = 20
             let instructionCardWidth = max(220, overlayBounds.width - (instructionCardHorizontalPadding * 2))
             let instructionCardHeight: CGFloat = 156
+            let instructionGap: CGFloat = step.target == .actionBlocks ? 24 : 12
             let instructionCardCenterYRaw: CGFloat = {
                 switch step.target {
                 case .littleWins:
                     // Step 6: show instruction card below the highlighted Little Wins card.
-                    return spotlightRect.maxY + 12 + (instructionCardHeight / 2)
+                    return spotlightRect.maxY + instructionGap + (instructionCardHeight / 2)
                 case .loomAI:
                     // Step 7: show instruction card below the highlighted LoomAI chat content.
-                    return spotlightRect.maxY + 12 + (instructionCardHeight / 2)
+                    return spotlightRect.maxY + instructionGap + (instructionCardHeight / 2)
                 default:
                     return shouldPlaceInstructionBelowTarget
-                        ? (spotlightRect.maxY + 12 + (instructionCardHeight / 2))
-                        : (spotlightRect.minY - 12 - (instructionCardHeight / 2))
+                        ? (spotlightRect.maxY + instructionGap + (instructionCardHeight / 2))
+                        : (spotlightRect.minY - instructionGap - (instructionCardHeight / 2))
                 }
             }()
             let instructionCardCenterY = min(
                 max((instructionCardHeight / 2) + 8, instructionCardCenterYRaw),
                 overlayBounds.height - (instructionCardHeight / 2) - 8
             )
+            // Keep home footer steps centered; let cross-page steps travel with the highlighted target.
+            let instructionCardCenterX: CGFloat = {
+                switch step.target {
+                case .capture, .actionBlocks:
+                    return overlayBounds.midX
+                default:
+                    return targetRect.midX
+                }
+            }()
 
             ZStack {
                 Color.black.opacity(0.58)
@@ -478,61 +533,71 @@ struct ContentView: View {
 
                 quickstartDemoOverlay(for: step.target, rect: targetRect)
                     .allowsHitTesting(false)
+                    .transaction { transaction in
+                        transaction.animation = nil
+                    }
 
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
                         Text("Quick Tour \(boundedIndex + 1)/\(contentQuickstartSteps.count)")
                             .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Color.white.opacity(0.82))
                         Spacer(minLength: 0)
                         Text(step.title)
                             .font(.subheadline.weight(.bold))
+                            .foregroundStyle(.white)
                     }
                     Text(step.summary)
-                        .font(.subheadline)
-                        .foregroundStyle(.primary)
+                        .font(.body)
+                        .foregroundStyle(.white)
                         .fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 10) {
+                        let secondaryButtonWidth: CGFloat = 84
+                        let primaryButtonWidth: CGFloat = 84
                         if boundedIndex == 0 {
                             Color.clear
-                                .frame(width: 72, height: 34)
+                                .frame(width: secondaryButtonWidth, height: 40)
                         } else {
                             Button("Back") {
-                                var transaction = Transaction()
-                                transaction.disablesAnimations = true
-                                withTransaction(transaction) {
-                                    contentQuickstartStepIndex = max(0, contentQuickstartStepIndex - 1)
-                                }
+                                transitionQuickstartToStep(contentQuickstartStepIndex - 1)
                             }
-                            .buttonStyle(.bordered)
-                            .frame(width: 72)
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.large)
+                            .tint(Color(white: 0.40))
+                            .foregroundStyle(.white)
+                            .frame(width: secondaryButtonWidth)
+                            .disabled(quickstartIsPageTransitionInFlight)
                         }
                         Spacer(minLength: 0)
                         Button(isLast ? "Done" : "Next") {
-                            var transaction = Transaction()
-                            transaction.disablesAnimations = true
-                            withTransaction(transaction) {
-                                if isLast {
-                                    hasSeenContentQuickstart = true
-                                    forceShowContentQuickstartOnce = false
+                            if isLast {
+                                hasSeenContentQuickstart = true
+                                forceShowContentQuickstartOnce = false
+                                withAnimation(quickstartPageTransitionAnimation) {
                                     homePageIndex = HomeSwipePage.home.rawValue
-                                } else {
-                                    contentQuickstartStepIndex = min(contentQuickstartStepIndex + 1, contentQuickstartSteps.count - 1)
                                 }
+                            } else {
+                                transitionQuickstartToStep(contentQuickstartStepIndex + 1)
                             }
                         }
                         .buttonStyle(.borderedProminent)
-                        .frame(width: 76)
+                        .controlSize(.large)
+                        .frame(width: primaryButtonWidth)
+                        .disabled(quickstartIsPageTransitionInFlight)
+                    }
+                    .transaction { transaction in
+                        transaction.animation = nil
                     }
                 }
                 .padding(14)
-                .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(Color.black.opacity(0.1), lineWidth: 1)
+                        .stroke(Color.white.opacity(0.35), lineWidth: 1)
                 )
+                .shadow(color: Color.black.opacity(0.20), radius: 20, x: 0, y: 10)
                 .frame(width: instructionCardWidth, height: instructionCardHeight, alignment: .topLeading)
-                .position(x: overlayBounds.midX, y: instructionCardCenterY)
+                .position(x: instructionCardCenterX, y: instructionCardCenterY)
                 .transaction { transaction in
                     transaction.animation = nil
                 }
@@ -731,11 +796,10 @@ struct ContentView: View {
             }
             .onChange(of: contentQuickstartStepIndex) { _, newValue in
                 guard shouldShowContentQuickstart else { return }
+                guard !quickstartIsPageTransitionInFlight else { return }
                 let targetPage = quickstartPage(for: newValue)
                 if homePageIndex != targetPage {
-                    var transaction = Transaction()
-                    transaction.disablesAnimations = true
-                    withTransaction(transaction) {
+                    withAnimation(quickstartPageTransitionAnimation) {
                         homePageIndex = targetPage
                     }
                 }
@@ -3824,86 +3888,57 @@ struct ContentView: View {
         GeometryReader { proxy in
             Color.clear.preference(
                 key: ContentQuickstartFramePreferenceKey.self,
-                value: [target: [proxy.frame(in: .named("ContentViewRootSpace"))]]
+                value: [target: [proxy.frame(in: .global)]]
             )
         }
     }
 
-    private func quickstartExpectedHeight(for target: ContentQuickstartTarget) -> CGFloat {
-        switch target {
-        case .purpose, .fulfillment, .objectives:
-            return 190
-        case .capture:
-            return 60
-        case .actionBlocks:
-            return 60
-        case .littleWins:
-            return 420
-        case .loomAI:
-            return 420
+    private func quickstartRectInOverlaySpace(
+        rawRect: CGRect,
+        overlayFrameInGlobal: CGRect,
+        overlayBounds: CGRect
+    ) -> CGRect {
+        let localRect = rawRect.offsetBy(dx: -overlayFrameInGlobal.minX, dy: -overlayFrameInGlobal.minY)
+        if localRect.width < 1 || localRect.height < 1 {
+            return CGRect(x: 24, y: 180, width: max(160, overlayBounds.width - 48), height: 80)
         }
-    }
-
-    private func quickstartNormalizedRect(for target: ContentQuickstartTarget, rawRect: CGRect, in bounds: CGRect) -> CGRect {
-        let globalYCorrection: CGFloat = -62
-        var rect = rawRect.intersection(bounds)
-        if rect.isNull || rect.width < 1 || rect.height < 1 {
-            return CGRect(x: 24, y: 180, width: max(160, bounds.width - 48), height: 80)
-        }
-
-        switch target {
-        case .purpose, .fulfillment, .objectives:
-            break
-        case .capture:
-            break
-        case .actionBlocks:
-            break
-        case .littleWins:
-            break
-        case .loomAI:
-            break
-        }
-
-        rect = rect.offsetBy(dx: 0, dy: globalYCorrection)
-        rect.origin.y = max(bounds.minY + 8, min(rect.origin.y, bounds.maxY - rect.height - 8))
-        return rect.intersection(bounds)
+        return localRect
     }
 
     @ViewBuilder
     private func quickstartDemoOverlay(for target: ContentQuickstartTarget, rect: CGRect) -> some View {
-        let yOffset: CGFloat = 1
         switch target {
         case .purpose:
             quickstartPurposeDemoCard
                 .frame(width: rect.width, height: rect.height)
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .position(x: rect.midX, y: rect.midY + yOffset)
+                .position(x: rect.midX, y: rect.midY)
         case .fulfillment:
             quickstartFulfillmentDemoCard
                 .frame(width: rect.width, height: rect.height)
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .position(x: rect.midX, y: rect.midY + yOffset)
+                .position(x: rect.midX, y: rect.midY)
         case .objectives:
             quickstartObjectivesDemoCard
                 .frame(width: rect.width, height: rect.height)
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .position(x: rect.midX, y: rect.midY + yOffset)
+                .position(x: rect.midX, y: rect.midY)
         case .capture:
             quickstartCaptureDemoButton
                 .frame(width: rect.width, height: rect.height)
-                .position(x: rect.midX, y: rect.midY + yOffset + 25)
+                .position(x: rect.midX, y: rect.midY)
         case .actionBlocks:
             quickstartActionBlocksDemoButton
                 .frame(width: rect.width, height: rect.height)
-                .position(x: rect.midX, y: rect.midY + yOffset + 26)
+                .position(x: rect.midX, y: rect.midY)
         case .littleWins:
             quickstartLittleWinsDemoCard
                 .frame(width: rect.width, height: rect.height)
-                .position(x: rect.midX, y: rect.midY + yOffset)
+                .position(x: rect.midX, y: rect.midY)
         case .loomAI:
             quickstartLoomAIDemoView
                 .frame(width: rect.width, height: rect.height)
-                .position(x: rect.midX, y: rect.midY + yOffset)
+                .position(x: rect.midX, y: rect.midY)
         }
     }
 
