@@ -11,6 +11,8 @@ private enum ContentQuickstartTarget: String, Hashable {
     case objectives
     case capture
     case actionBlocks
+    case littleWins
+    case loomAI
 }
 
 private struct ContentQuickstartFramePreferenceKey: PreferenceKey {
@@ -129,33 +131,45 @@ struct ContentView: View {
     private let contentQuickstartSteps: [ContentQuickstartStep] = [
         ContentQuickstartStep(
             title: "Purpose",
-            summary: "Define your Vision and Mission so your week stays aligned with what matters most.",
+            summary: "Clarify your Vision and Mission so every decision is anchored to the life you want to build.",
             lookAtPrompt: "Look at the Purpose card on this screen.",
             target: .purpose
         ),
         ContentQuickstartStep(
             title: "Fulfillment",
-            summary: "Set areas, identities, and little wins to keep daily progress balanced across life.",
+            summary: "Shape each Fulfillment Area with a mission, identity, and little wins that turn intention into daily progress.",
             lookAtPrompt: "Look at the Fulfillment section on this screen.",
             target: .fulfillment
         ),
         ContentQuickstartStep(
             title: "Objectives",
-            summary: "Track outcomes with timeframes and measurable progress so goals stay concrete.",
+            summary: "Convert priorities into measurable outcomes with clear timelines, signals, and accountability.",
             lookAtPrompt: "Look at the Objectives area on this screen.",
             target: .objectives
         ),
         ContentQuickstartStep(
             title: "Capture",
-            summary: "Capture actions quickly so nothing important is lost before planning.",
+            summary: "Capture every action the moment it appears so planning stays clean and nothing slips through.",
             lookAtPrompt: "Look at the Capture button at the bottom.",
             target: .capture
         ),
         ContentQuickstartStep(
             title: "Action Blocks",
-            summary: "Execute grouped actions with focus, then reflect and carry forward what still matters.",
+            summary: "Group related actions into focused execution blocks to reduce friction and finish more meaningful work.",
             lookAtPrompt: "Look at the Action Blocks (Play/Plan) area on this screen.",
             target: .actionBlocks
+        ),
+        ContentQuickstartStep(
+            title: "Little Wins",
+            summary: "Use daily Little Wins to keep momentum high and reinforce the identities you are building.",
+            lookAtPrompt: "Look at the Little Wins card on the left screen.",
+            target: .littleWins
+        ),
+        ContentQuickstartStep(
+            title: "LoomAI",
+            summary: "Ask LoomAI for context-aware suggestions and convert the strongest ones into action with one tap.",
+            lookAtPrompt: "Look at the LoomAI chat and keyboard area on the right screen.",
+            target: .loomAI
         )
     ]
 
@@ -219,6 +233,19 @@ struct ContentView: View {
 
     private var shouldShowContentQuickstart: Bool {
         (!hasSeenContentQuickstart || forceShowContentQuickstartOnce) && !showSplash
+    }
+
+    private func quickstartPage(for stepIndex: Int) -> Int {
+        let bounded = min(max(0, stepIndex), max(0, contentQuickstartSteps.count - 1))
+        let target = contentQuickstartSteps[bounded].target
+        switch target {
+        case .littleWins:
+            return HomeSwipePage.social.rawValue
+        case .loomAI:
+            return HomeSwipePage.littleWins.rawValue
+        default:
+            return HomeSwipePage.home.rawValue
+        }
     }
 
     private var isLikelyExistingInstall: Bool {
@@ -362,7 +389,8 @@ struct ContentView: View {
                     }
                     .tag(HomeSwipePage.home.rawValue)
 
-                    LoomAIChatView(isActivePage: homePageIndex == HomeSwipePage.littleWins.rawValue)
+                    LoomAIChatView(isActivePage: homePageIndex == HomeSwipePage.littleWins.rawValue && !shouldShowContentQuickstart)
+                        .background(contentQuickstartTargetFrame(.loomAI))
                         .tag(HomeSwipePage.littleWins.rawValue)
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
@@ -415,21 +443,40 @@ struct ContentView: View {
         let boundedIndex = min(max(0, contentQuickstartStepIndex), max(0, contentQuickstartSteps.count - 1))
         let step = contentQuickstartSteps[boundedIndex]
         let isLast = boundedIndex == contentQuickstartSteps.count - 1
+        let shouldPlaceInstructionBelowTarget = boundedIndex < 2
         return GeometryReader { proxy in
             let overlayBounds = CGRect(origin: .zero, size: proxy.size)
             let fallbackRect = CGRect(x: 24, y: 180, width: max(160, proxy.size.width - 48), height: 80)
             let rawTargetRect = contentQuickstartFrames[step.target] ?? fallbackRect
             let targetRect = quickstartNormalizedRect(for: step.target, rawRect: rawTargetRect, in: overlayBounds)
             let spotlightRect = targetRect.insetBy(dx: -8, dy: -8)
+            let instructionCardHorizontalPadding: CGFloat = 20
+            let instructionCardWidth = max(220, overlayBounds.width - (instructionCardHorizontalPadding * 2))
+            let instructionCardHeight: CGFloat = 156
+            let instructionCardCenterYRaw: CGFloat = {
+                switch step.target {
+                case .littleWins:
+                    // Step 6: show instruction card below the highlighted Little Wins card.
+                    return spotlightRect.maxY + 12 + (instructionCardHeight / 2)
+                case .loomAI:
+                    // Step 7: show instruction card below the highlighted LoomAI chat content.
+                    return spotlightRect.maxY + 12 + (instructionCardHeight / 2)
+                default:
+                    return shouldPlaceInstructionBelowTarget
+                        ? (spotlightRect.maxY + 12 + (instructionCardHeight / 2))
+                        : (spotlightRect.minY - 12 - (instructionCardHeight / 2))
+                }
+            }()
+            let instructionCardCenterY = min(
+                max((instructionCardHeight / 2) + 8, instructionCardCenterYRaw),
+                overlayBounds.height - (instructionCardHeight / 2) - 8
+            )
 
             ZStack {
                 Color.black.opacity(0.58)
                 .ignoresSafeArea()
 
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(Color.white.opacity(0.95), lineWidth: 2)
-                    .frame(width: spotlightRect.width, height: spotlightRect.height)
-                    .position(x: spotlightRect.midX, y: spotlightRect.midY)
+                quickstartDemoOverlay(for: step.target, rect: targetRect)
                     .allowsHitTesting(false)
 
                 VStack(alignment: .leading, spacing: 8) {
@@ -445,25 +492,37 @@ struct ContentView: View {
                         .font(.subheadline)
                         .foregroundStyle(.primary)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text(step.lookAtPrompt)
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
                     HStack(spacing: 10) {
-                        Button("Back") { contentQuickstartStepIndex = max(0, contentQuickstartStepIndex - 1) }
+                        if boundedIndex == 0 {
+                            Color.clear
+                                .frame(width: 72, height: 34)
+                        } else {
+                            Button("Back") {
+                                var transaction = Transaction()
+                                transaction.disablesAnimations = true
+                                withTransaction(transaction) {
+                                    contentQuickstartStepIndex = max(0, contentQuickstartStepIndex - 1)
+                                }
+                            }
                             .buttonStyle(.bordered)
-                            .disabled(boundedIndex == 0)
+                            .frame(width: 72)
+                        }
                         Spacer(minLength: 0)
                         Button(isLast ? "Done" : "Next") {
-                            if isLast {
-                                hasSeenContentQuickstart = true
-                                forceShowContentQuickstartOnce = false
-                            } else {
-                                contentQuickstartStepIndex = min(contentQuickstartStepIndex + 1, contentQuickstartSteps.count - 1)
+                            var transaction = Transaction()
+                            transaction.disablesAnimations = true
+                            withTransaction(transaction) {
+                                if isLast {
+                                    hasSeenContentQuickstart = true
+                                    forceShowContentQuickstartOnce = false
+                                    homePageIndex = HomeSwipePage.home.rawValue
+                                } else {
+                                    contentQuickstartStepIndex = min(contentQuickstartStepIndex + 1, contentQuickstartSteps.count - 1)
+                                }
                             }
                         }
                         .buttonStyle(.borderedProminent)
+                        .frame(width: 76)
                     }
                 }
                 .padding(14)
@@ -472,11 +531,16 @@ struct ContentView: View {
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
                         .stroke(Color.black.opacity(0.1), lineWidth: 1)
                 )
-                .padding(.horizontal, 20)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                .padding(.bottom, 26)
+                .frame(width: instructionCardWidth, height: instructionCardHeight, alignment: .topLeading)
+                .position(x: overlayBounds.midX, y: instructionCardCenterY)
+                .transaction { transaction in
+                    transaction.animation = nil
+                }
             }
+            .animation(nil, value: contentQuickstartStepIndex)
+            .animation(nil, value: isLast)
         }
+        .animation(nil, value: contentQuickstartStepIndex)
         .zIndex(100)
     }
 
@@ -662,7 +726,18 @@ struct ContentView: View {
             .onChange(of: shouldShowContentQuickstart) { _, show in
                 if show {
                     contentQuickstartStepIndex = 0
-                    homePageIndex = HomeSwipePage.home.rawValue
+                    homePageIndex = quickstartPage(for: 0)
+                }
+            }
+            .onChange(of: contentQuickstartStepIndex) { _, newValue in
+                guard shouldShowContentQuickstart else { return }
+                let targetPage = quickstartPage(for: newValue)
+                if homePageIndex != targetPage {
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) {
+                        homePageIndex = targetPage
+                    }
                 }
             }
             .onAppear {
@@ -672,7 +747,7 @@ struct ContentView: View {
                     hasSeenContentQuickstart = true
                 }
                 if shouldShowContentQuickstart {
-                    homePageIndex = HomeSwipePage.home.rawValue
+                    homePageIndex = quickstartPage(for: contentQuickstartStepIndex)
                 }
                 if shouldShowAnyOnboardingBounce {
                     bounceDrivingCardOnce()
@@ -2741,6 +2816,7 @@ struct ContentView: View {
                         height: cardHeight,
                         isSetupPlaceholder: showsSetupPlaceholder
                     )
+                    .background(contentQuickstartTargetFrame(.littleWins))
                 } else {
                     ForEach(Array(visibleCards.enumerated()), id: \.element.id) { index, card in
                         let depth = CGFloat(index)
@@ -2761,6 +2837,11 @@ struct ContentView: View {
                         .zIndex(Double(visibleCards.count - index))
                         .allowsHitTesting(isTop)
                         .matchedGeometryEffect(id: "lw-card-\(card.id.uuidString)", in: littleWinsCompletionNamespace)
+                        .background {
+                            if isTop {
+                                contentQuickstartTargetFrame(.littleWins)
+                            }
+                        }
                     }
                 }
             }
@@ -3610,32 +3691,7 @@ struct ContentView: View {
         VStack(spacing: 6) {
             HStack(spacing: 16) {
                 Button(action: { isPresentingCaptureView = true }) {
-                    ZStack(alignment: .leading) {
-                        Capsule()
-                            .fill(colorScheme == .dark ? Color(.secondarySystemBackground) : Color(.systemBackground))
-                            .overlay(
-                                Capsule().stroke(colorScheme == .dark ? Color.clear : Color(.separator).opacity(0.6), lineWidth: 1)
-                            )
-                            .shadow(color: Color.primary.opacity(colorScheme == .dark ? 0.2 : 0.08), radius: 8, x: 0, y: 2)
-                            .overlay(
-                                HStack {
-                                    Image(systemName: "plus.viewfinder")
-                                        .foregroundColor(.accentColor)
-                                        .padding(.leading, 16)
-                                        .scaleEffect(1.6)
-                                    Text("Capture Action")
-                                        .foregroundColor(.primary)
-                                        .padding(.leading, 12)
-                                    Spacer()
-                                    Text("how you act")
-                                        .font(.caption2)
-                                        .italic()
-                                        .foregroundStyle(.secondary)
-                                        .padding(.trailing, 14)
-                                }
-                            )
-                            .frame(height: 60)
-                    }
+                    captureActionButtonVisual
                     .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.plain)
@@ -3646,37 +3702,21 @@ struct ContentView: View {
                         NavigationLink {
                             PlanStartView()
                         } label: {
-                            Image(systemName: "play.fill")
-                                .font(.title)
-                                .foregroundColor(Color(.systemBackground))
-                                .frame(width: 60, height: 60)
-                                .background(Color.accentColor)
-                                .clipShape(Circle())
+                            actionBlocksPlayButtonVisual
                         }
                         .buttonStyle(.plain)
                     } else if !canOpenPlanOrActionFlow {
                         Button(action: {
                             triggerPlayBlockedFeedback()
                         }) {
-                            Image(systemName: "play.fill")
-                                .font(.title)
-                                .foregroundColor(Color(.systemBackground))
-                                .frame(width: 60, height: 60)
-                                .background(Color(.systemGray3))
-                                .opacity(0.62)
-                                .clipShape(Circle())
+                            actionBlocksPlayButtonVisual
                         }
                         .buttonStyle(.plain)
                     } else if isActiveActionFlow {
                         Button(action: {
                             playSheetDestination = .action
                         }) {
-                            Image(systemName: "forward.fill")
-                                .font(.title)
-                                .foregroundColor(Color(.systemBackground))
-                                .frame(width: 60, height: 60)
-                                .background(Color.accentColor)
-                                .clipShape(Circle())
+                            actionBlocksPlayButtonVisual
                         }
                         .buttonStyle(.plain)
                     } else {
@@ -3687,12 +3727,7 @@ struct ContentView: View {
                                 PlanStartView()
                             }
                         } label: {
-                            Image(systemName: "play.fill")
-                                .font(.title)
-                                .foregroundColor(Color(.systemBackground))
-                                .frame(width: 60, height: 60)
-                                .background(Color.accentColor)
-                                .clipShape(Circle())
+                            actionBlocksPlayButtonVisual
                         }
                         .buttonStyle(.plain)
                     }
@@ -3740,6 +3775,51 @@ struct ContentView: View {
         .background(Color.clear)
     }
 
+    private var captureActionButtonVisual: some View {
+        ZStack(alignment: .leading) {
+            Capsule()
+                .fill(colorScheme == .dark ? Color(.secondarySystemBackground) : Color(.systemBackground))
+                .overlay(
+                    Capsule().stroke(colorScheme == .dark ? Color.clear : Color(.separator).opacity(0.6), lineWidth: 1)
+                )
+                .shadow(color: Color.primary.opacity(colorScheme == .dark ? 0.2 : 0.08), radius: 8, x: 0, y: 2)
+                .overlay(
+                    HStack {
+                        Image(systemName: "plus.viewfinder")
+                            .foregroundColor(.accentColor)
+                            .padding(.leading, 16)
+                            .scaleEffect(1.6)
+                        Text("Capture Action")
+                            .foregroundColor(.primary)
+                            .padding(.leading, 12)
+                        Spacer()
+                        Text("how you act")
+                            .font(.caption2)
+                            .italic()
+                            .foregroundStyle(.secondary)
+                            .padding(.trailing, 14)
+                    }
+                )
+                .frame(height: 60)
+        }
+    }
+
+    private var actionBlocksPlayButtonVisual: some View {
+        let isBlocked = !setupHomepageMode && !canOpenPlanOrActionFlow
+        let isForward = isActiveActionFlow
+        let symbolName = isForward ? "forward.fill" : "play.fill"
+        let backgroundColor: Color = isBlocked ? Color(.systemGray3) : Color.accentColor
+        let opacity: CGFloat = isBlocked ? 0.62 : 1.0
+
+        return Image(systemName: symbolName)
+            .font(.title)
+            .foregroundColor(Color(.systemBackground))
+            .frame(width: 60, height: 60)
+            .background(backgroundColor)
+            .opacity(opacity)
+            .clipShape(Circle())
+    }
+
     private func contentQuickstartTargetFrame(_ target: ContentQuickstartTarget) -> some View {
         GeometryReader { proxy in
             Color.clear.preference(
@@ -3757,11 +3837,15 @@ struct ContentView: View {
             return 60
         case .actionBlocks:
             return 60
+        case .littleWins:
+            return 420
+        case .loomAI:
+            return 420
         }
     }
 
     private func quickstartNormalizedRect(for target: ContentQuickstartTarget, rawRect: CGRect, in bounds: CGRect) -> CGRect {
-        let globalYCorrection: CGFloat = -60
+        let globalYCorrection: CGFloat = -62
         var rect = rawRect.intersection(bounds)
         if rect.isNull || rect.width < 1 || rect.height < 1 {
             return CGRect(x: 24, y: 180, width: max(160, bounds.width - 48), height: 80)
@@ -3769,23 +3853,567 @@ struct ContentView: View {
 
         switch target {
         case .purpose, .fulfillment, .objectives:
-            rect = rect.insetBy(dx: 10, dy: 8)
-            rect.size.height = min(rect.height, 240)
+            break
         case .capture:
-            rect = rect.insetBy(dx: 10, dy: 6)
-            rect.size.height = min(rect.height, 76)
-            rect.size.width = min(rect.size.width, 300)
-            rect.origin.x = max(bounds.minX + 12, min(rect.midX - (rect.size.width / 2), bounds.maxX - rect.size.width - 12))
+            break
         case .actionBlocks:
-            let side: CGFloat = 78
-            rect = CGRect(x: rect.midX - side / 2, y: rect.midY - side / 2, width: side, height: side)
-            rect.origin.x = max(bounds.minX + 12, min(rect.origin.x, bounds.maxX - rect.width - 12))
-            rect.origin.y = max(bounds.minY + 12, min(rect.origin.y, bounds.maxY - rect.height - 12))
+            break
+        case .littleWins:
+            break
+        case .loomAI:
+            break
         }
 
         rect = rect.offsetBy(dx: 0, dy: globalYCorrection)
         rect.origin.y = max(bounds.minY + 8, min(rect.origin.y, bounds.maxY - rect.height - 8))
         return rect.intersection(bounds)
+    }
+
+    @ViewBuilder
+    private func quickstartDemoOverlay(for target: ContentQuickstartTarget, rect: CGRect) -> some View {
+        let yOffset: CGFloat = 1
+        switch target {
+        case .purpose:
+            quickstartPurposeDemoCard
+                .frame(width: rect.width, height: rect.height)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .position(x: rect.midX, y: rect.midY + yOffset)
+        case .fulfillment:
+            quickstartFulfillmentDemoCard
+                .frame(width: rect.width, height: rect.height)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .position(x: rect.midX, y: rect.midY + yOffset)
+        case .objectives:
+            quickstartObjectivesDemoCard
+                .frame(width: rect.width, height: rect.height)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .position(x: rect.midX, y: rect.midY + yOffset)
+        case .capture:
+            quickstartCaptureDemoButton
+                .frame(width: rect.width, height: rect.height)
+                .position(x: rect.midX, y: rect.midY + yOffset + 25)
+        case .actionBlocks:
+            quickstartActionBlocksDemoButton
+                .frame(width: rect.width, height: rect.height)
+                .position(x: rect.midX, y: rect.midY + yOffset + 26)
+        case .littleWins:
+            quickstartLittleWinsDemoCard
+                .frame(width: rect.width, height: rect.height)
+                .position(x: rect.midX, y: rect.midY + yOffset)
+        case .loomAI:
+            quickstartLoomAIDemoView
+                .frame(width: rect.width, height: rect.height)
+                .position(x: rect.midX, y: rect.midY + yOffset)
+        }
+    }
+
+    private var quickstartLittleWinsDemoCard: some View {
+        GeometryReader { geo in
+            let width = geo.size.width
+            let height = geo.size.height
+            let titleColor = FulfillmentCategoryTheme.color(for: "Health & Energy")
+            let cardColor = FulfillmentCategoryTheme.lightColor(for: "Health & Energy")
+            let radarSideCount = max(3, min(7, fulfillmentMetrics.count))
+            let fixedPrimaryText = Color.black.opacity(0.82)
+
+            VStack(spacing: 0) {
+                Text("Health & Energy")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(titleColor)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .padding(.horizontal, 18)
+                    .padding(.top, 10)
+                    .padding(.bottom, 18)
+
+                GeometryReader { middleGeo in
+                    VStack {
+                        Spacer(minLength: 0)
+                        VStack(alignment: .leading, spacing: 12) {
+                            quickstartLittleWinsDemoItemRow("Move body for 30 minutes", titleColor: titleColor, textColor: fixedPrimaryText)
+                            quickstartLittleWinsDemoItemRow("Eat a high-protein lunch", titleColor: titleColor, textColor: fixedPrimaryText)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 38)
+                    .padding(.vertical, 14)
+                    .frame(maxWidth: .infinity, minHeight: middleGeo.size.height, alignment: .center)
+                    .clipped()
+                }
+
+                Spacer(minLength: 0)
+
+                HStack {
+                    Spacer()
+                    Text("Little Wins")
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(fixedPrimaryText)
+                    Spacer()
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 10)
+                .padding(.bottom, 14)
+            }
+            .frame(width: width, height: height, alignment: .top)
+            .background {
+                littleWinsCardBackground(
+                    cardColor: cardColor,
+                    titleColor: titleColor,
+                    patternText: "Health & Energy",
+                    width: width,
+                    height: height,
+                    radarSideCount: radarSideCount
+                )
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .shadow(color: Color.black.opacity(0.10), radius: 10, x: 0, y: 6)
+        }
+    }
+
+    private func quickstartLittleWinsDemoItemRow(_ title: String, titleColor: Color, textColor: Color) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 26, weight: .regular))
+                .foregroundStyle(titleColor)
+                .padding(.top, 6)
+                .frame(width: 30, alignment: .center)
+
+            Text(title)
+                .font(.system(size: 36, weight: .semibold, design: .default))
+                .foregroundStyle(textColor)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .lineLimit(2)
+                .minimumScaleFactor(0.55)
+                .allowsTightening(true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var quickstartLoomAIDemoView: some View {
+        VStack(spacing: 10) {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    quickstartLoomAIIntroCard
+                    quickstartLoomAIUserBubble
+                    quickstartLoomAIAssistantBubble
+                    quickstartLoomAISuggestions
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+                .padding(.bottom, 4)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private var quickstartLoomAIIntroCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image("LoomAI")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 22, height: 22)
+                Text("Ask Loom to analyze and improve your Purpose, Passions, Fulfillment Areas, Little Wins, Outcomes, Actions, Capture List, Action Blocks, and more.")
+                    .font(.subheadline.weight(.semibold))
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(colorScheme == .dark ? Color(.secondarySystemBackground) : Color(.systemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.primary.opacity(colorScheme == .dark ? 0.12 : 0.08), lineWidth: 1)
+        )
+    }
+
+    private var quickstartLoomAIUserBubble: some View {
+        HStack {
+            Spacer(minLength: 30)
+            Text("What daily Little Wins would improve Love & Relationships?")
+                .font(.subheadline)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(Color.accentColor)
+                )
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var quickstartLoomAIAssistantBubble: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                (
+                    Text("To enhance your ")
+                    + Text("Love & Relationships")
+                        .bold()
+                        .foregroundColor(.red)
+                    + Text(" fulfillment area, consider adding more specific daily Little Wins. Here are two suggestions:")
+                )
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(colorScheme == .dark ? Color(.secondarySystemBackground) : Color(.systemGray5))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(
+                            Color.primary.opacity(colorScheme == .dark ? 0.08 : 0.10),
+                            lineWidth: 1
+                        )
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 30)
+        }
+    }
+
+    private var quickstartLoomAISuggestions: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Suggestions")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color.gray.opacity(0.7))
+
+            VStack(alignment: .leading, spacing: 8) {
+                quickstartLoomAISuggestionCard(text: "Text or call a loved one")
+                quickstartLoomAISuggestionCard(text: "Plan a social outing or get together")
+            }
+        }
+        .padding(.top, 2)
+    }
+
+    private func quickstartLoomAISuggestionCard(text: String) -> some View {
+        Button { } label: {
+            HStack(alignment: .top, spacing: 10) {
+                Image("LoomAI")
+                    .resizable()
+                    .renderingMode(.template)
+                    .scaledToFit()
+                    .frame(width: 16, height: 16)
+                    .foregroundStyle(Color.white.opacity(0.95))
+                    .padding(.top, 1)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Add Little Win to Love & Relationships:")
+                        .font(.subheadline.italic())
+                        .foregroundStyle(Color.white.opacity(0.95))
+                        .multilineTextAlignment(.leading)
+
+                    Text(text)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.white)
+                        .multilineTextAlignment(.leading)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(ContentQuickstartLoomAISharedGradient.actionFill.opacity(0.92))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.white.opacity(0.24), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .allowsHitTesting(false)
+    }
+
+    private var quickstartLoomAIComposer: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            Text("Ask Loom…")
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .padding(12)
+                .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color(.secondarySystemBackground))
+                )
+                .overlay(
+                    ContentQuickstartLoomAIAnimatedOutlineBorder(cornerRadius: 12)
+                )
+
+            ZStack {
+                Circle()
+                    .fill(Color.blue)
+                Image(systemName: "arrow.up")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+            .frame(width: 48, height: 48)
+        }
+    }
+
+    private struct ContentQuickstartLoomAIAnimatedOutlineBorder: View {
+        let cornerRadius: CGFloat
+        @State private var outlineAngle: Double = 0
+
+        private var outlineGradient: AngularGradient {
+            AngularGradient(
+                colors: ContentQuickstartLoomAISharedGradient.colors,
+                center: .center,
+                angle: .degrees(outlineAngle)
+            )
+        }
+
+        var body: some View {
+            RoundedRectangle(cornerRadius: cornerRadius)
+                .stroke(outlineGradient.opacity(0.95), lineWidth: 2)
+                .onAppear {
+                    guard outlineAngle == 0 else { return }
+                    withAnimation(.linear(duration: 7).repeatForever(autoreverses: false)) {
+                        outlineAngle = 360
+                    }
+                }
+        }
+    }
+
+    private enum ContentQuickstartLoomAISharedGradient {
+        static let colors: [Color] = [
+            Color(red: 0.22, green: 0.47, blue: 1.0),
+            Color(red: 0.15, green: 0.83, blue: 0.95),
+            Color(red: 0.62, green: 0.40, blue: 0.95),
+            Color(red: 0.80, green: 0.38, blue: 0.78),
+            Color(red: 0.98, green: 0.36, blue: 0.58),
+            Color(red: 0.75, green: 0.42, blue: 0.74),
+            Color(red: 0.22, green: 0.47, blue: 1.0)
+        ]
+
+        static let actionFill = LinearGradient(
+            colors: [
+                colors[0],
+                colors[2],
+                colors[4]
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
+    private var quickstartPurposeDemoCard: some View {
+        SectionCard(
+            iconName: "infinity",
+            title: "Purpose",
+            headerHint: "who you are",
+            backgroundColor: Color(.secondarySystemBackground),
+            fillsAvailableHeight: true
+        ) {
+            VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("VISION")
+                        .font(.caption)
+                        .fontWeight(.bold)
+                        .foregroundColor(.gray)
+                    Text("I live a life of purpose, growth, and freedom. I build meaningful work that creates value for others while giving me time, financial independence, and the ability to choose how I live. I am healthy, energized, and surrounded by strong relationships, and I continue to learn, lead, and make a positive impact.")
+                        .font(.body)
+                        .foregroundColor(.primary)
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+                HStack(spacing: 16) {
+                    ForEach([("heart.fill", "love", 4), ("lock.fill", "vows", 3), ("bolt.fill", "thrill", 2), ("shield.fill", "hate", 4)], id: \.1) { iconName, label, value in
+                        ZStack {
+                            let gap: Double = 4
+                            let halfGap = gap / 2
+                            let radius: CGFloat = 25
+                            let center = CGPoint(x: radius, y: radius)
+                            let quadrantAngles: [(start: Double, end: Double)] = [
+                                (-90, 0), (0, 90), (90, 180), (180, 270)
+                            ]
+                            ZStack {
+                                ForEach(0..<4, id: \.self) { index in
+                                    let angles = quadrantAngles[index]
+                                    Path { path in
+                                        path.addArc(center: center,
+                                                    radius: radius,
+                                                    startAngle: .degrees(angles.start + halfGap),
+                                                    endAngle: .degrees(angles.end - halfGap),
+                                                    clockwise: false)
+                                    }
+                                    .stroke((index + 1) <= value ? Color.primary : Color(.tertiaryLabel), lineWidth: 2)
+                                }
+                            }
+                            .frame(width: radius * 2, height: radius * 2)
+
+                            VStack(spacing: 2) {
+                                Image(systemName: iconName)
+                                    .font(.caption)
+                                    .foregroundColor(.primary)
+                                Text(label)
+                                    .font(.caption2)
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.primary)
+                            }
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.bottom, 2)
+            }
+        }
+    }
+
+    private var quickstartFulfillmentDemoCard: some View {
+        let demoMetrics: [(String, Color, Double)] = [
+            ("Career & Business", FulfillmentCategoryTheme.color(for: "Career & Business"), 78),
+            ("Health & Vitality", FulfillmentCategoryTheme.color(for: "Health & Vitality"), 64),
+            ("Love & Relationships", FulfillmentCategoryTheme.color(for: "Love & Relationships"), 86)
+        ]
+
+        return SectionCard(
+            iconName: "trophy",
+            title: "Fulfillment",
+            headerHint: "why you live",
+            backgroundColor: Color(.secondarySystemBackground),
+            fillsAvailableHeight: true
+        ) {
+            HStack(alignment: .center, spacing: 10) {
+                FulfillmentInteractiveRadar(
+                    metrics: demoMetrics,
+                    selectedIndex: .constant(0),
+                    onManualSelect: {},
+                    enableInteraction: false,
+                    useOriginalDotStyle: true,
+                    emphasizeSelectedSlice: false
+                )
+                .frame(width: 132, height: 132)
+                .padding(.top, 20)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(demoMetrics, id: \.0) { metric in
+                        HStack(spacing: 6) {
+                            Text("•")
+                                .foregroundStyle(metric.1)
+                                .font(.caption.weight(.bold))
+                                .frame(width: 12)
+                            Text(metric.0)
+                                .foregroundColor(metric.1)
+                                .fontWeight(.bold)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var quickstartObjectivesDemoCard: some View {
+        SectionCard(
+            iconName: "scope",
+            title: "Objectives",
+            headerHint: "what you want",
+            backgroundColor: Color(.secondarySystemBackground),
+            fillsAvailableHeight: true
+        ) {
+            HStack(alignment: .top, spacing: 2) {
+                VStack(alignment: .leading, spacing: 8) {
+                    let demoRows: [(String, String, String)] = [
+                        ("12d", "Launch weekly planning cadence", "Career & Business"),
+                        ("31d", "Improve energy baseline", "Health & Vitality")
+                    ]
+                    ForEach(Array(demoRows.enumerated()), id: \.offset) { idx, row in
+                        HStack(alignment: .center, spacing: 8) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(categoryBackgroundColor(for: row.2))
+                                    .frame(width: 40, height: 20)
+
+                                Text(row.0)
+                                    .font(.caption)
+                                    .foregroundColor(.primary)
+                                    .bold()
+                            }
+
+                            Text(row.1)
+                                .font(.body)
+                                .foregroundColor(categoryTextColor(for: row.2))
+                                .lineLimit(1)
+                            Spacer(minLength: 0)
+                        }
+                        if idx < (demoRows.count - 1) {
+                            Divider()
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                if enableProjectsFeature {
+                    VStack(spacing: 8) {
+                        ZStack {
+                            Image(systemName: "doc.fill")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(height: 65)
+                                .foregroundColor(Color.gray.opacity(0.2))
+
+                            Text("+ Add Project")
+                                .font(.caption2)
+                                .bold()
+                                .foregroundColor(.primary)
+                                .multilineTextAlignment(.center)
+                                .lineLimit(2)
+                                .truncationMode(.tail)
+                                .frame(width: 50)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .offset(y: 10)
+                        }
+
+                        ZStack {
+                            Image(systemName: "doc.fill")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(height: 65)
+                                .foregroundColor(Color.gray.opacity(0.2))
+
+                            Text("+ Add Project")
+                                .font(.caption2)
+                                .bold()
+                                .foregroundColor(.primary)
+                                .multilineTextAlignment(.center)
+                                .lineLimit(2)
+                                .truncationMode(.tail)
+                                .frame(width: 50)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .offset(y: 10)
+                        }
+                    }
+                    .frame(width: 60, alignment: .trailing)
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 132, alignment: .topLeading)
+            .padding(.vertical, 12)
+            .overlay(
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundColor(Color(.lightGray))
+                    .offset(y: 1),
+                alignment: .bottom
+            )
+        }
+    }
+
+    private var quickstartCaptureDemoButton: some View {
+        captureActionButtonVisual
+    }
+
+    private var quickstartActionBlocksDemoButton: some View {
+        actionBlocksPlayButtonVisual
     }
 
     private func triggerPlayBlockedFeedback() {
@@ -4438,6 +5066,7 @@ struct SectionCard<Content: View>: View {
     let title: String
     let headerHint: String?
     let backgroundColor: Color
+    let fillsAvailableHeight: Bool
     let content: () -> Content
     @Environment(\.contentCardDensity) private var cardDensity
 
@@ -4446,12 +5075,14 @@ struct SectionCard<Content: View>: View {
         title: String,
         headerHint: String? = nil,
         backgroundColor: Color = Color(.secondarySystemBackground),
+        fillsAvailableHeight: Bool = false,
         @ViewBuilder content: @escaping () -> Content
     ) {
         self.iconName = iconName
         self.title = title
         self.headerHint = headerHint
         self.backgroundColor = backgroundColor
+        self.fillsAvailableHeight = fillsAvailableHeight
         self.content = content
     }
 
@@ -4487,7 +5118,12 @@ struct SectionCard<Content: View>: View {
             content()
                 .padding(.horizontal)
                 .padding(.bottom, 12 * d)
+
+            if fillsAvailableHeight {
+                Spacer(minLength: 0)
+            }
         }
+        .frame(maxWidth: .infinity, maxHeight: fillsAvailableHeight ? .infinity : nil, alignment: .topLeading)
         .background(backgroundColor)
         .cornerRadius(16 * d)
         .shadow(color: Color.primary.opacity(0.08), radius: 6, x: 0, y: 3)
