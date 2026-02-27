@@ -74,6 +74,10 @@ export default {
     const nonSystemMessages = normalizedMessages.filter((m) => m.role !== "system");
     const isFollowUpPromptMode = detectFollowUpPromptMode(nonSystemMessages);
     const isAutoGroupMode = detectAutoGroupMode(nonSystemMessages);
+    const isAutoWriteVisionMode = detectAutoWriteVisionMode(nonSystemMessages);
+    const isAutoWriteMissionMode = detectAutoWriteMissionMode(nonSystemMessages);
+    const isAutoWriteIdentityMode = detectAutoWriteIdentityMode(nonSystemMessages);
+    const isAutoWriteLittleWinMode = detectAutoWriteLittleWinMode(nonSystemMessages);
     const isReflectReadableInsightsMode = detectReflectReadableInsightsMode(nonSystemMessages);
     const isFulfillmentReadableInsightMode = detectFulfillmentReadableInsightMode(nonSystemMessages);
     const isPurposeReadableInsightMode = detectPurposeReadableInsightMode(nonSystemMessages);
@@ -99,13 +103,21 @@ export default {
 
     const workerPromptVersion = isAutoGroupMode
       ? "autogroup-v1"
-      : (isFollowUpPromptMode
+      : (isAutoWriteVisionMode
+        ? "autowrite-vision-v1"
+      : (isAutoWriteLittleWinMode
+        ? "autowrite-littlewin-v1"
+      : (isAutoWriteIdentityMode
+        ? "autowrite-identity-v1"
+      : (isAutoWriteMissionMode
+        ? "autowrite-mission-v1"
+        : (isFollowUpPromptMode
         ? "followup-prompts-v1"
         : (isReflectReadableInsightsMode
           ? "reflect-readable-insights-v1"
           : (isFulfillmentReadableInsightMode
             ? "fulfillment-readable-insights-v1"
-            : (isPurposeReadableInsightMode ? "purpose-readable-insights-v1" : "grounding-cta-v3"))));
+            : (isPurposeReadableInsightMode ? "purpose-readable-insights-v1" : "grounding-cta-v3"))))))));
 
     const coreInstructions = isAutoGroupMode ? [
       "You generate AutoGroup plans for Loom Plan Step 3 (Group).",
@@ -128,6 +140,70 @@ export default {
       '{"confidence":"high","reason":"short string","groups":[{"name":"string","fulfillmentArea":"string","actionIDs":["uuid"]}]}',
       "or",
       '{"confidence":"low","reason":"short string","groups":[]}'
+    ].join("\n") : isAutoWriteVisionMode ? [
+      "You generate AutoWrite vision suggestions for Loom Purpose Vision.",
+      "Use APP_CONTEXT_JSON and the provided current vision.",
+      "Vision guidance to follow:",
+      "- If there were no limits, what life would you create?",
+      "- This is not a goal; it's long-term direction.",
+      "- Keep wording clear, practical, and specific.",
+      'Example of a strong vision: "I live a life of purpose, growth, and freedom. I build meaningful work that creates value for others while giving me time, financial independence, and the ability to choose how I live. I am healthy, energized, and surrounded by strong relationships, and I continue to learn, lead, and make a positive impact."',
+      "Return JSON ONLY in this exact shape:",
+      '{"suggestions":["string"],"confidence":"high|medium|low"}',
+      "Rules:",
+      "- Return 1-2 suggestions.",
+      "- Each suggestion must be <=150 characters.",
+      "- No numbering, no bullets, no markdown.",
+      "- Suggestions must be relevant to Purpose Vision context.",
+      "- Do not output anything outside the JSON object."
+    ].join("\n") : isAutoWriteLittleWinMode ? [
+      "You generate AutoWrite little win suggestions for Loom Fulfillment Little Wins.",
+      "Use APP_CONTEXT_JSON and the provided Fulfillment Area name.",
+      "If mission and identities are provided, align suggestions to them.",
+      "Little Win guidance to follow:",
+      "- Small actions create momentum.",
+      "- Suggest easy, repeatable, practical little wins for this area.",
+      "Return JSON ONLY in this exact shape:",
+      '{"suggestions":[{"activity":"string","replaceActivity":"string optional"}],"confidence":"high|medium|low"}',
+      "Rules:",
+      "- Return 1-2 suggestions.",
+      "- activity must be <=120 characters.",
+      "- If 3 current little wins already exist, include replaceActivity for each suggestion.",
+      "- replaceActivity must name the weakest current little win to replace.",
+      "- No numbering, no bullets, no markdown.",
+      "- Suggestions must be relevant to the provided Fulfillment Area.",
+      "- Do not output anything outside the JSON object."
+    ].join("\n") : isAutoWriteIdentityMode ? [
+      "You generate AutoWrite identity suggestions for Loom Fulfillment Set Identity.",
+      "Use APP_CONTEXT_JSON and the provided Fulfillment Area name.",
+      "Identity guidance to follow:",
+      "- Roles define identity and guide how decisions/actions happen before results.",
+      "- Keep identities clear, empowering, and specific to the area.",
+      "Return JSON ONLY in this exact shape:",
+      '{"suggestions":[{"identity":"string","replaceIdentity":"string optional"}],"confidence":"high|medium|low"}',
+      "Rules:",
+      "- Return 1-2 suggestions.",
+      "- identity must be <=120 characters.",
+      "- If 3 current identities already exist, include replaceIdentity for each suggestion.",
+      "- replaceIdentity must name the weakest current identity to replace.",
+      "- No numbering, no bullets, no markdown.",
+      "- Suggestions must be relevant to the provided Fulfillment Area.",
+      "- Do not output anything outside the JSON object."
+    ].join("\n") : isAutoWriteMissionMode ? [
+      "You generate AutoWrite mission suggestions for Loom Fulfillment Define Mission.",
+      "Use APP_CONTEXT_JSON and the provided Fulfillment Area name.",
+      "Mission guidance to follow:",
+      "- Mission is your deeper reason; it helps consistency when motivation fades.",
+      "- Focus on why the area matters and how life improves when this area gets stronger.",
+      "- Keep wording clear, practical, and specific.",
+      "Return JSON ONLY in this exact shape:",
+      '{"suggestions":["string"],"confidence":"high|medium|low"}',
+      "Rules:",
+      "- Return 1-2 suggestions.",
+      "- Each suggestion must be <=120 characters.",
+      "- No numbering, no bullets, no markdown.",
+      "- Suggestions must be relevant to the provided Fulfillment Area.",
+      "- Do not output anything outside the JSON object."
     ].join("\n") : isFollowUpPromptMode ? [
       "You generate follow-up prompt chips for the Loom iOS app.",
       "Use APP_CONTEXT_JSON and the recent chat transcript to decide whether showing follow-up prompts is high-value.",
@@ -351,7 +427,7 @@ export default {
           model,
           messages: groundedMessages,
           temperature,
-          max_tokens: isAutoGroupMode ? 700 : (isFollowUpPromptMode ? 350 : (isReflectReadableInsightsMode ? 650 : (isFulfillmentReadableInsightMode ? 450 : (isPurposeReadableInsightMode ? 450 : 900)))),
+          max_tokens: isAutoGroupMode ? 700 : (isAutoWriteVisionMode ? 220 : (isAutoWriteLittleWinMode ? 260 : (isAutoWriteIdentityMode ? 260 : (isAutoWriteMissionMode ? 220 : (isFollowUpPromptMode ? 350 : (isReflectReadableInsightsMode ? 650 : (isFulfillmentReadableInsightMode ? 450 : (isPurposeReadableInsightMode ? 450 : 900)))))))),
           response_format: { type: "json_object" },
         }),
       });
@@ -455,6 +531,118 @@ export default {
           claimedUsedContext: null,
           evidence: [],
           confidence: autoGroup.confidence || null,
+        },
+      };
+      return json(out, 200, corsHeaders(request));
+    }
+
+    if (isAutoWriteMissionMode) {
+      const autoWrite = normalizeAutoWriteMissionPayload(parsedModelJSON, upstreamText);
+      const out = {
+        message: JSON.stringify(autoWrite),
+        actions: [],
+        debug: {
+          ...buildWorkerDebug({
+            model,
+            contextBytes,
+            contextHash,
+            contextKeys,
+            contextInfo,
+            workerPromptVersion,
+            messages,
+            nonSystemMessages,
+            upstreamStatus,
+            upstreamContentType,
+            parseMode,
+          }),
+          usedContext: contextBytes > 0,
+          claimedUsedContext: null,
+          evidence: [],
+          confidence: autoWrite.confidence || null,
+        },
+      };
+      return json(out, 200, corsHeaders(request));
+    }
+
+    if (isAutoWriteIdentityMode) {
+      const autoWrite = normalizeAutoWriteIdentityPayload(parsedModelJSON, upstreamText);
+      const out = {
+        message: JSON.stringify(autoWrite),
+        actions: [],
+        debug: {
+          ...buildWorkerDebug({
+            model,
+            contextBytes,
+            contextHash,
+            contextKeys,
+            contextInfo,
+            workerPromptVersion,
+            messages,
+            nonSystemMessages,
+            upstreamStatus,
+            upstreamContentType,
+            parseMode,
+          }),
+          usedContext: contextBytes > 0,
+          claimedUsedContext: null,
+          evidence: [],
+          confidence: autoWrite.confidence || null,
+        },
+      };
+      return json(out, 200, corsHeaders(request));
+    }
+
+    if (isAutoWriteVisionMode) {
+      const autoWrite = normalizeAutoWriteVisionPayload(parsedModelJSON, upstreamText);
+      const out = {
+        message: JSON.stringify(autoWrite),
+        actions: [],
+        debug: {
+          ...buildWorkerDebug({
+            model,
+            contextBytes,
+            contextHash,
+            contextKeys,
+            contextInfo,
+            workerPromptVersion,
+            messages,
+            nonSystemMessages,
+            upstreamStatus,
+            upstreamContentType,
+            parseMode,
+          }),
+          usedContext: contextBytes > 0,
+          claimedUsedContext: null,
+          evidence: [],
+          confidence: autoWrite.confidence || null,
+        },
+      };
+      return json(out, 200, corsHeaders(request));
+    }
+
+    if (isAutoWriteLittleWinMode) {
+      const autoWrite = normalizeAutoWriteLittleWinPayload(parsedModelJSON, upstreamText);
+      const out = {
+        message: JSON.stringify(autoWrite),
+        actions: [],
+        debug: {
+          ...buildWorkerDebug({
+            model,
+            contextBytes,
+            contextHash,
+            contextKeys,
+            contextInfo,
+            workerPromptVersion,
+            messages,
+            nonSystemMessages,
+            upstreamStatus,
+            upstreamContentType,
+            parseMode,
+          }),
+          usedContext: contextBytes > 0,
+          claimedUsedContext: null,
+          evidence: [],
+          confidence: autoWrite.confidence || null,
         },
       };
       return json(out, 200, corsHeaders(request));
@@ -744,6 +932,30 @@ function detectAutoGroupMode(nonSystemMessages) {
   return content.includes("You are helping with Loom Plan Step 3 (Group).");
 }
 
+function detectAutoWriteMissionMode(nonSystemMessages) {
+  const latestUser = [...(nonSystemMessages || [])].reverse().find((m) => m?.role === "user");
+  const content = String(latestUser?.content || "");
+  return content.includes("You are helping with Loom Fulfillment Define Mission (AutoWrite).");
+}
+
+function detectAutoWriteIdentityMode(nonSystemMessages) {
+  const latestUser = [...(nonSystemMessages || [])].reverse().find((m) => m?.role === "user");
+  const content = String(latestUser?.content || "");
+  return content.includes("You are helping with Loom Fulfillment Set Identity (AutoWrite).");
+}
+
+function detectAutoWriteVisionMode(nonSystemMessages) {
+  const latestUser = [...(nonSystemMessages || [])].reverse().find((m) => m?.role === "user");
+  const content = String(latestUser?.content || "");
+  return content.includes("You are helping with Loom Purpose Vision (AutoWrite).");
+}
+
+function detectAutoWriteLittleWinMode(nonSystemMessages) {
+  const latestUser = [...(nonSystemMessages || [])].reverse().find((m) => m?.role === "user");
+  const content = String(latestUser?.content || "");
+  return content.includes("You are helping with Loom Fulfillment Little Wins (AutoWrite).");
+}
+
 function detectReflectReadableInsightsMode(nonSystemMessages) {
   const latestUser = [...(nonSystemMessages || [])].reverse().find((m) => m?.role === "user");
   const content = String(latestUser?.content || "");
@@ -885,6 +1097,188 @@ function normalizeAutoGroupPayload(parsed, fallbackText) {
     confidence: promotedConfidence,
     reason,
     groups: dedupedGroups,
+  };
+}
+
+function normalizeAutoWriteMissionPayload(parsed, fallbackText) {
+  let raw = parsed && typeof parsed === "object" ? parsed : null;
+  if (!raw) {
+    try {
+      raw = JSON.parse(String(fallbackText || ""));
+    } catch {
+      raw = null;
+    }
+  }
+
+  const suggestionsSource = Array.isArray(raw?.suggestions)
+    ? raw.suggestions
+    : (Array.isArray(raw?.missions) ? raw.missions : []);
+
+  const suggestions = suggestionsSource
+    .filter((x) => typeof x === "string")
+    .map((x) => x.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .map((x) => truncateAtWordBoundary(x, 120))
+    .slice(0, 2);
+
+  const confidenceRaw = typeof raw?.confidence === "string" ? raw.confidence.toLowerCase().trim() : "";
+  const confidence = ["high", "medium", "low"].includes(confidenceRaw)
+    ? confidenceRaw
+    : (suggestions.length > 0 ? "medium" : "low");
+
+  if (suggestions.length === 0) {
+    return {
+      suggestions: [],
+      confidence: "low",
+    };
+  }
+
+  return {
+    suggestions,
+    confidence,
+  };
+}
+
+function normalizeAutoWriteVisionPayload(parsed, fallbackText) {
+  let raw = parsed && typeof parsed === "object" ? parsed : null;
+  if (!raw) {
+    try {
+      raw = JSON.parse(String(fallbackText || ""));
+    } catch {
+      raw = null;
+    }
+  }
+
+  const suggestionsSource = Array.isArray(raw?.suggestions)
+    ? raw.suggestions
+    : (Array.isArray(raw?.visions) ? raw.visions : []);
+
+  const suggestions = suggestionsSource
+    .filter((x) => typeof x === "string")
+    .map((x) => x.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .map((x) => truncateAtWordBoundary(x, 150))
+    .slice(0, 2);
+
+  const confidenceRaw = typeof raw?.confidence === "string" ? raw.confidence.toLowerCase().trim() : "";
+  const confidence = ["high", "medium", "low"].includes(confidenceRaw)
+    ? confidenceRaw
+    : (suggestions.length > 0 ? "medium" : "low");
+
+  if (suggestions.length === 0) {
+    return {
+      suggestions: [],
+      confidence: "low",
+    };
+  }
+
+  return {
+    suggestions,
+    confidence,
+  };
+}
+
+function normalizeAutoWriteIdentityPayload(parsed, fallbackText) {
+  let raw = parsed && typeof parsed === "object" ? parsed : null;
+  if (!raw) {
+    try {
+      raw = JSON.parse(String(fallbackText || ""));
+    } catch {
+      raw = null;
+    }
+  }
+
+  const source = Array.isArray(raw?.suggestions)
+    ? raw.suggestions
+    : (Array.isArray(raw?.identities) ? raw.identities : []);
+
+  const suggestions = source
+    .map((item) => {
+      if (typeof item === "string") {
+        const identity = truncateAtWordBoundary(item.replace(/\s+/g, " ").trim(), 120);
+        return identity ? { identity, replaceIdentity: null } : null;
+      }
+      if (!item || typeof item !== "object") return null;
+      const identityRaw = (item.identity || item.role || item.text || "");
+      const replaceRaw = (item.replaceIdentity || item.replace || item.weakestIdentity || "");
+      const identity = truncateAtWordBoundary(String(identityRaw).replace(/\s+/g, " ").trim(), 120);
+      const replaceIdentity = truncateAtWordBoundary(String(replaceRaw).replace(/\s+/g, " ").trim(), 120);
+      if (!identity) return null;
+      return {
+        identity,
+        replaceIdentity: replaceIdentity || null,
+      };
+    })
+    .filter(Boolean)
+    .slice(0, 2);
+
+  const confidenceRaw = typeof raw?.confidence === "string" ? raw.confidence.toLowerCase().trim() : "";
+  const confidence = ["high", "medium", "low"].includes(confidenceRaw)
+    ? confidenceRaw
+    : (suggestions.length > 0 ? "medium" : "low");
+
+  if (suggestions.length === 0) {
+    return {
+      suggestions: [],
+      confidence: "low",
+    };
+  }
+
+  return {
+    suggestions,
+    confidence,
+  };
+}
+
+function normalizeAutoWriteLittleWinPayload(parsed, fallbackText) {
+  let raw = parsed && typeof parsed === "object" ? parsed : null;
+  if (!raw) {
+    try {
+      raw = JSON.parse(String(fallbackText || ""));
+    } catch {
+      raw = null;
+    }
+  }
+
+  const source = Array.isArray(raw?.suggestions)
+    ? raw.suggestions
+    : (Array.isArray(raw?.littleWins) ? raw.littleWins : []);
+
+  const suggestions = source
+    .map((item) => {
+      if (typeof item === "string") {
+        const activity = truncateAtWordBoundary(item.replace(/\s+/g, " ").trim(), 120);
+        return activity ? { activity, replaceActivity: null } : null;
+      }
+      if (!item || typeof item !== "object") return null;
+      const activityRaw = (item.activity || item.littleWin || item.text || "");
+      const replaceRaw = (item.replaceActivity || item.replace || item.weakestLittleWin || "");
+      const activity = truncateAtWordBoundary(String(activityRaw).replace(/\s+/g, " ").trim(), 120);
+      const replaceActivity = truncateAtWordBoundary(String(replaceRaw).replace(/\s+/g, " ").trim(), 120);
+      if (!activity) return null;
+      return {
+        activity,
+        replaceActivity: replaceActivity || null,
+      };
+    })
+    .filter(Boolean)
+    .slice(0, 2);
+
+  const confidenceRaw = typeof raw?.confidence === "string" ? raw.confidence.toLowerCase().trim() : "";
+  const confidence = ["high", "medium", "low"].includes(confidenceRaw)
+    ? confidenceRaw
+    : (suggestions.length > 0 ? "medium" : "low");
+
+  if (suggestions.length === 0) {
+    return {
+      suggestions: [],
+      confidence: "low",
+    };
+  }
+
+  return {
+    suggestions,
+    confidence,
   };
 }
 

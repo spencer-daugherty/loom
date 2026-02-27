@@ -26,6 +26,12 @@ struct PurposeStartView: View {
     ]
     @State private var showNeedIdeasVision = false
     @State private var showNeedIdeasPassions = false
+    @State private var autoWriteVisionSuggestions: [String] = []
+    @State private var appliedAutoWriteVisionSuggestions: Set<String> = []
+    @State private var isAutoWritingVision = false
+    @State private var autoWriteOutlineAngle: Double = 0
+    @State private var autoWriteIconAnimating: Bool = false
+    @State private var autoWriteIconAnimationTask: Task<Void, Never>? = nil
     @State private var validationHintText: String = ""
     @State private var showValidationHint = false
     @State private var hintWorkItem: DispatchWorkItem?
@@ -182,6 +188,10 @@ struct PurposeStartView: View {
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(step != .intro)
         .onAppear(perform: loadFromPersistentData)
+        .onDisappear {
+            autoWriteIconAnimationTask?.cancel()
+            autoWriteIconAnimationTask = nil
+        }
         .overlay(alignment: .bottom) {
             if showValidationHint {
                 Text(validationHintText)
@@ -356,6 +366,12 @@ struct PurposeStartView: View {
                 .frame(maxWidth: .infinity)
             }
         }
+        .overlay(alignment: .topTrailing) {
+            if step == .vision {
+                visionAutoWriteControls
+                    .offset(x: 0, y: -58)
+            }
+        }
     }
 
     private var stepTitle: String {
@@ -427,6 +443,25 @@ struct PurposeStartView: View {
 
     private var visionStep: some View {
         VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.subheadline)
+                    .foregroundStyle(Color.black.opacity(0.7))
+                    .padding(.top, 1)
+                Text("Start fast and simple. You can improve over time.")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(Color.black.opacity(0.7))
+                    .multilineTextAlignment(.leading)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color(red: 0.98, green: 0.92, blue: 0.72))
+            )
+
             Text("If there were no limits, what life would you create?")
                 .font(.headline)
 
@@ -438,6 +473,46 @@ struct PurposeStartView: View {
             .focused($focusedField, equals: .vision)
 
             VStack(alignment: .leading, spacing: 6) {
+                if !autoWriteVisionSuggestions.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(autoWriteVisionSuggestions, id: \.self) { suggestion in
+                            let isApplied = appliedAutoWriteVisionSuggestions.contains(suggestion)
+                            Button {
+                                visionText = suggestion
+                                appliedAutoWriteVisionSuggestions.insert(suggestion)
+                            } label: {
+                                HStack(alignment: .top, spacing: 10) {
+                                    Image("LoomAI")
+                                        .resizable()
+                                        .renderingMode(.template)
+                                        .scaledToFit()
+                                        .frame(width: 16, height: 16)
+                                        .foregroundStyle(autoWriteSuggestionPrimaryColor(isApplied: isApplied).opacity(isApplied ? 0.92 : 0.95))
+                                        .padding(.top, 1)
+                                    Text(suggestion)
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(autoWriteSuggestionPrimaryColor(isApplied: isApplied))
+                                        .multilineTextAlignment(.leading)
+                                    Spacer(minLength: 0)
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 10)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .fill(autoWriteSuggestionBackgroundFill(isApplied: isApplied))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .stroke(autoWriteSuggestionBorderColor(isApplied: isApplied), lineWidth: 1)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(isApplied)
+                        }
+                    }
+                }
+
                 Button {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         showNeedIdeasVision.toggle()
@@ -962,6 +1037,200 @@ struct PurposeStartView: View {
         invalidPassionKeys = []
         withAnimation(.easeInOut(duration: 0.15)) {
             showValidationHint = false
+        }
+    }
+
+    private var autoWriteGradient: AngularGradient {
+        AngularGradient(
+            colors: [
+                Color(red: 0.22, green: 0.47, blue: 1.0),
+                Color(red: 0.15, green: 0.83, blue: 0.95),
+                Color(red: 0.62, green: 0.40, blue: 0.95),
+                Color(red: 0.80, green: 0.38, blue: 0.78),
+                Color(red: 0.98, green: 0.36, blue: 0.58),
+                Color(red: 0.75, green: 0.42, blue: 0.74),
+                Color(red: 0.22, green: 0.47, blue: 1.0)
+            ],
+            center: .center,
+            angle: .degrees(autoWriteOutlineAngle)
+        )
+    }
+
+    private var autoWriteSuggestionCardFill: LinearGradient {
+        LinearGradient(
+            colors: [
+                Color(red: 0.22, green: 0.47, blue: 1.0),
+                Color(red: 0.62, green: 0.40, blue: 0.95),
+                Color(red: 0.98, green: 0.36, blue: 0.58)
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
+    private func autoWriteSuggestionPrimaryColor(isApplied: Bool) -> Color {
+        guard isApplied else { return .white }
+        return colorScheme == .dark ? Color.white.opacity(0.92) : Color.black.opacity(0.82)
+    }
+
+    private func autoWriteSuggestionBackgroundFill(isApplied: Bool) -> AnyShapeStyle {
+        if isApplied {
+            if colorScheme == .dark {
+                return AnyShapeStyle(autoWriteSuggestionCardFill.opacity(0.34))
+            } else {
+                return AnyShapeStyle(Color(red: 0.90, green: 0.97, blue: 0.92))
+            }
+        }
+        return AnyShapeStyle(autoWriteSuggestionCardFill.opacity(0.92))
+    }
+
+    private func autoWriteSuggestionBorderColor(isApplied: Bool) -> Color {
+        if isApplied {
+            return colorScheme == .dark ? Color.white.opacity(0.18) : Color.green.opacity(0.30)
+        }
+        return Color.white.opacity(0.24)
+    }
+
+    private var visionAutoWriteControls: some View {
+        let isLoading = isAutoWritingVision
+        return VStack(alignment: .trailing, spacing: 8) {
+            Button {
+                guard !isLoading else { return }
+                Task { await requestAutoWriteVisionSuggestions() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image("LoomAI")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 27, height: 27)
+                        .rotation3DEffect(
+                            .degrees(isLoading && autoWriteIconAnimating ? 180 : 0),
+                            axis: (x: 1, y: 0, z: 0)
+                        )
+                    Text("AutoWrite")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(autoWriteGradient)
+                }
+                .padding(.horizontal, 15)
+                .padding(.vertical, 9)
+                .background(
+                    Capsule()
+                        .fill(Color(.systemGroupedBackground))
+                )
+                .overlay(
+                    Capsule()
+                        .stroke(autoWriteGradient, lineWidth: 2.25)
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(isLoading)
+            .opacity(isLoading ? 0.7 : 1)
+            .onAppear {
+                guard autoWriteOutlineAngle == 0 else { return }
+                withAnimation(.linear(duration: 8).repeatForever(autoreverses: false)) {
+                    autoWriteOutlineAngle = 360
+                }
+            }
+            .onChange(of: isLoading, initial: false) { _, newValue in
+                setAutoWriteLoadingAnimation(newValue)
+            }
+        }
+    }
+
+    private struct PurposeVisionAutoWriteResponse: Decodable {
+        let suggestions: [String]?
+        let confidence: String?
+    }
+
+    private func requestAutoWriteVisionSuggestions() async {
+        isAutoWritingVision = true
+        defer { isAutoWritingVision = false }
+
+        do {
+            let contextSnapshot = try LoomAIViewModel().buildContextSnapshot(in: context)
+            let instruction = """
+            You are helping with Loom Purpose Vision (AutoWrite).
+            Current Vision: \(visionTrimmed.isEmpty ? "<empty>" : visionTrimmed)
+
+            Need ideas guidance to follow:
+            - If there were no limits, what life would you create?
+            - This is not a goal. It's long-term direction.
+            - Keep wording clear, practical, and specific.
+            - Example of a strong vision:
+            "I live a life of purpose, growth, and freedom. I build meaningful work that creates value for others while giving me time, financial independence, and the ability to choose how I live. I am healthy, energized, and surrounded by strong relationships, and I continue to learn, lead, and make a positive impact."
+
+            Return JSON only:
+            {"suggestions":["string"],"confidence":"high|medium|low"}
+
+            Rules:
+            - Return 1-2 suggestions.
+            - each suggestion must be <=150 characters
+            - no numbering, no bullets
+            """
+
+            let response = try await LoomAIService().sendChat(
+                messages: [.init(role: "user", content: instruction)],
+                context: contextSnapshot
+            )
+            let suggestions = decodeAutoWriteVisionSuggestions(from: response.message)
+            guard !suggestions.isEmpty else { return }
+            autoWriteVisionSuggestions = Array(suggestions.prefix(2))
+            appliedAutoWriteVisionSuggestions = []
+        } catch {
+            return
+        }
+    }
+
+    private func decodeAutoWriteVisionSuggestions(from raw: String) -> [String] {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let data = trimmed.data(using: .utf8),
+           let parsed = try? JSONDecoder().decode(PurposeVisionAutoWriteResponse.self, from: data) {
+            return Array((parsed.suggestions ?? [])
+                .map { $0.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .map { truncateSuggestion($0, maxLength: 150) }
+                .prefix(2))
+        }
+
+        return Array(trimmed
+            .components(separatedBy: "\n")
+            .map { $0.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .map { $0.replacingOccurrences(of: #"^\d+[\.\)]\s*"#, with: "", options: .regularExpression) }
+            .map { $0.replacingOccurrences(of: #"^[-•]\s*"#, with: "", options: .regularExpression) }
+            .filter { !$0.isEmpty }
+            .map { truncateSuggestion($0, maxLength: 150) }
+            .prefix(2))
+    }
+
+    private func truncateSuggestion(_ text: String, maxLength: Int) -> String {
+        guard text.count > maxLength else { return text }
+        let prefix = String(text.prefix(maxLength))
+        if let space = prefix.lastIndex(of: " "), space > prefix.startIndex {
+            return String(prefix[..<space]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return prefix.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func setAutoWriteLoadingAnimation(_ isLoading: Bool) {
+        if isLoading {
+            autoWriteIconAnimationTask?.cancel()
+            autoWriteIconAnimating = false
+            autoWriteIconAnimationTask = Task { @MainActor in
+                while !Task.isCancelled {
+                    withAnimation(.easeInOut(duration: 0.55)) {
+                        autoWriteIconAnimating.toggle()
+                    }
+                    try? await Task.sleep(for: .milliseconds(550))
+                }
+            }
+        } else {
+            autoWriteIconAnimationTask?.cancel()
+            autoWriteIconAnimationTask = nil
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                autoWriteIconAnimating = false
+            }
         }
     }
 }

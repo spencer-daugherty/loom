@@ -573,7 +573,7 @@ struct CaptureView: View {
                     }
                 }
                 .background(Color.clear)
-                .navigationTitle("Rolling Capture")
+                .navigationTitle("Capture")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .navigationBarLeading) {
