@@ -687,6 +687,12 @@ struct CaptureView: View {
         .sheet(isPresented: $showRecurringSettingsSheet) {
             recurringSettingsSheet()
         }
+        .onChange(of: showFullTextEditorSheet) { _, isShowing in
+            if isShowing {
+                focusedField = nil
+                isComposerFocused = false
+            }
+        }
     }
 
     private func captureList(proxy: ScrollViewProxy) -> some View {
@@ -945,11 +951,19 @@ struct CaptureView: View {
                 || (editingItemHasDueDate && editingItemAttentionDays != editingItemOriginalAttentionDays)
             NavigationStack {
                 List {
-                    TextEditor(text: $editingItemText)
+                    TextField("Action", text: $editingItemText, axis: .vertical)
                         .focused($isFullTextEditorFocused)
                         .textInputAutocapitalization(.sentences)
                         .autocorrectionDisabled(false)
-                        .frame(height: 150)
+                        .foregroundStyle(.primary)
+                        .tint(.blue)
+                        .lineLimit(4, reservesSpace: true)
+                        .padding(10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(Color(.secondarySystemBackground))
+                        )
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
 
                     if editingItemIsGhost {
                         HStack {
@@ -1147,10 +1161,11 @@ struct CaptureView: View {
                     }
                 }
             }
-            .presentationDetents([.medium, .large])
+            .presentationDetents([.large])
             .presentationDragIndicator(.visible)
             .onAppear {
                 focusedField = nil
+                isComposerFocused = false
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.07) {
                     isFullTextEditorFocused = true
                 }
@@ -1275,7 +1290,7 @@ struct CaptureView: View {
                         text: $input,
                         placeholder: isSearchMode ? "Search for an action..." : "Add an action…",
                         returnKeyType: isSearchMode ? .search : .done,
-                        isFirstResponder: isComposerFocused,
+                        isFirstResponder: isComposerFocused && !showFullTextEditorSheet,
                         onSubmit: {
                             if !isSearchMode {
                                 addItem()
@@ -2785,6 +2800,7 @@ struct CaptureView: View {
         let hasDueDate = item.dueDate != nil
 
         focusedField = nil
+        isComposerFocused = false
         editingItemID = item.id
         editingItemText = item.text
         editingItemOriginalText = item.text
