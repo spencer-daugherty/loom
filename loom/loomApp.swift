@@ -5,6 +5,9 @@ import UserNotifications
 #if canImport(FirebaseCore)
 import FirebaseCore
 #endif
+#if canImport(FirebaseCrashlytics)
+import FirebaseCrashlytics
+#endif
 #if canImport(GoogleSignIn)
 import GoogleSignIn
 #endif
@@ -109,6 +112,14 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         if FirebaseApp.app() == nil {
             FirebaseApp.configure()
         }
+#endif
+#if canImport(FirebaseCrashlytics)
+        #if DEBUG
+        // TODO: Set this from a remote/consent policy if you need runtime control during betas.
+        Crashlytics.crashlytics().setCrashlyticsCollectionEnabled(false)
+        #else
+        Crashlytics.crashlytics().setCrashlyticsCollectionEnabled(true)
+        #endif
 #endif
         UNUserNotificationCenter.current().delegate = self
         return true

@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		1DD77E242F52752C00F08917 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 1DD77E232F52752C00F08917 /* FirebaseAuth */; };
+		1EE9C9A22F60000100F08917 /* FirebaseCrashlytics in Frameworks */ = {isa = PBXBuildFile; productRef = 1EE9C9A12F60000100F08917 /* FirebaseCrashlytics */; };
 		1DD77E262F52752C00F08917 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1DD77E252F52752C00F08917 /* FirebaseCore */; };
 		1DD77E292F5275A600F08917 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 1DD77E282F5275A600F08917 /* GoogleSignIn */; };
 		1DD77E2B2F5275A600F08917 /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 1DD77E2A2F5275A600F08917 /* GoogleSignInSwift */; };
@@ -72,6 +73,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1EE9C9A22F60000100F08917 /* FirebaseCrashlytics in Frameworks */,
 				1DD77E262F52752C00F08917 /* FirebaseCore in Frameworks */,
 				1DD77E242F52752C00F08917 /* FirebaseAuth in Frameworks */,
 				1DD77E292F5275A600F08917 /* GoogleSignIn in Frameworks */,
@@ -126,6 +128,7 @@
 				1D8E61C22DC0526000167931 /* Sources */,
 				1D8E61C32DC0526000167931 /* Frameworks */,
 				1D8E61C42DC0526000167931 /* Resources */,
+				1EE9C9A32F60000100F08917 /* Upload Crashlytics Symbols */,
 			);
 			buildRules = (
 			);
@@ -137,6 +140,7 @@
 			name = loom;
 			packageProductDependencies = (
 				1DD77E232F52752C00F08917 /* FirebaseAuth */,
+				1EE9C9A12F60000100F08917 /* FirebaseCrashlytics */,
 				1DD77E252F52752C00F08917 /* FirebaseCore */,
 				1DD77E282F5275A600F08917 /* GoogleSignIn */,
 				1DD77E2A2F5275A600F08917 /* GoogleSignInSwift */,
@@ -262,6 +266,32 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		1EE9C9A32F60000100F08917 /* Upload Crashlytics Symbols */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}",
+				"${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}/Contents/Info.plist",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/GoogleService-Info.plist",
+				"$(TARGET_BUILD_DIR)/$(EXECUTABLE_PATH)",
+				"${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}/Contents/Resources/DWARF/${TARGET_NAME}",
+			);
+			name = "Upload Crashlytics Symbols";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# TODO: If you add user privacy controls, gate this script behind your release policy.\nif [ \"${CONFIGURATION}\" = \"Debug\" ]; then\n  exit 0\nfi\n\"${BUILD_DIR%/Build/*}/SourcePackages/checkouts/firebase-ios-sdk/Crashlytics/run\" -gsp \"${PROJECT_DIR}/loom/GoogleService-Info.plist\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		1D8E61C22DC0526000167931 /* Sources */ = {
@@ -427,6 +457,10 @@
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ObjC",
+				);
 				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -484,6 +518,10 @@
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ObjC",
+				);
 				SDKROOT = iphoneos;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				VALIDATE_PRODUCT = YES;
@@ -632,6 +670,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 1DD77E222F52752C00F08917 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseCore;
+		};
+		1EE9C9A12F60000100F08917 /* FirebaseCrashlytics */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1DD77E222F52752C00F08917 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCrashlytics;
 		};
 		1DD77E282F5275A600F08917 /* GoogleSignIn */ = {
 			isa = XCSwiftPackageProductDependency;
