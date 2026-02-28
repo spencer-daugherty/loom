@@ -9,7 +9,7 @@ enum SubscriptionPlan: String, CaseIterable, Identifiable {
     var title: LocalizedStringKey {
         switch self {
         case .annual:
-            return "Annual"
+            return "Annual - Founders Club (First 1,000)"
         case .monthly:
             return "Monthly"
         }
@@ -28,6 +28,15 @@ enum SubscriptionPlan: String, CaseIterable, Identifiable {
         switch self {
         case .annual:
             return "7-day free trial"
+        case .monthly:
+            return nil
+        }
+    }
+
+    var trialDetailText: LocalizedStringKey? {
+        switch self {
+        case .annual:
+            return "Locked annual pricing for life"
         case .monthly:
             return nil
         }

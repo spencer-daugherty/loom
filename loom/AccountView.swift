@@ -1,6 +1,12 @@
 import SwiftUI
 import SwiftData
 import UserNotifications
+#if canImport(FirebaseAuth)
+import FirebaseAuth
+#endif
+#if canImport(GoogleSignIn)
+import GoogleSignIn
+#endif
 
 fileprivate let loomAIInsightsRefreshToggleDefaultsKey = "loom.enableLoomAIInsightsRefresh"
 
@@ -1326,25 +1332,35 @@ struct VacationModeView: View {
 }
 
 struct AccountDetailsView: View {
+    @EnvironmentObject private var session: UserSessionStore
     @AppStorage("account_name") private var accountName = ""
     @AppStorage("account_email") private var accountEmail = ""
     @AppStorage("account_phone") private var accountPhone = ""
     @AppStorage(UserSessionStore.Keys.appleUserID) private var appleUserID = ""
+    @AppStorage(UserSessionStore.Keys.googleUserID) private var googleUserID = ""
+    @AppStorage(UserSessionStore.Keys.authProvider) private var authProvider = ""
     @AppStorage(UserSessionStore.Keys.hasAccount) private var hasAccount = false
     @AppStorage(UserSessionStore.Keys.isSubscribed) private var isSubscribed = false
     @AppStorage("loom.subscription_plan") private var subscriptionPlanRaw = SubscriptionPlan.annual.rawValue
     @State private var showSubscriptionSheet = false
+    @State private var accountError: String? = nil
 
     var body: some View {
         List {
             Section("Account") {
+                settingsRow(title: "Provider", value: accountProviderLabel, showsChevron: false)
+
                 inlineEditableRow(
                     title: "Name",
                     placeholder: "Enter your name",
                     text: $accountName,
                     keyboardType: .default,
                     capitalization: .words,
-                    disableAutocorrection: false
+                    disableAutocorrection: false,
+                    submitLabel: .done,
+                    onSubmit: {
+                        Task { await saveDisplayNameToAuthIfNeeded() }
+                    }
                 )
 
                 inlineEditableRow(
@@ -1353,7 +1369,11 @@ struct AccountDetailsView: View {
                     text: $accountEmail,
                     keyboardType: .emailAddress,
                     capitalization: .never,
-                    disableAutocorrection: true
+                    disableAutocorrection: true,
+                    submitLabel: .done,
+                    onSubmit: {
+                        Task { await saveEmailToAuthIfNeeded() }
+                    }
                 )
 
                 inlineEditableRow(
@@ -1362,7 +1382,9 @@ struct AccountDetailsView: View {
                     text: $accountPhone,
                     keyboardType: .phonePad,
                     capitalization: .never,
-                    disableAutocorrection: true
+                    disableAutocorrection: true,
+                    submitLabel: .done,
+                    onSubmit: nil
                 )
 
                 Button {
@@ -1373,11 +1395,17 @@ struct AccountDetailsView: View {
                 .buttonStyle(.plain)
             }
 
+            if let accountError, !accountError.isEmpty {
+                Section {
+                    Text(accountError)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                }
+            }
+
             Section {
                 Button(role: .destructive) {
-                    appleUserID = ""
-                    hasAccount = false
-                    isSubscribed = false
+                    signOut()
                 } label: {
                     Text("Sign Out")
                         .frame(maxWidth: .infinity, alignment: .center)
@@ -1386,6 +1414,9 @@ struct AccountDetailsView: View {
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Account")
+        .onAppear {
+            hydrateAccountFieldsFromAuthUserIfAvailable()
+        }
         .sheet(isPresented: $showSubscriptionSheet) {
             NavigationStack {
                 AccountSubscriptionView(
@@ -1419,13 +1450,28 @@ struct AccountDetailsView: View {
         return "$99 Annual"
     }
 
-    private func displayValue(_ value: String) -> String {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? "Not set" : trimmed
+    private var accountProviderLabel: String {
+        if !authProvider.isEmpty {
+            return authProvider.capitalized
+        }
+        if !googleUserID.isEmpty {
+            return "Google"
+        }
+        if !appleUserID.isEmpty {
+            return "Apple"
+        }
+#if canImport(FirebaseAuth)
+        if let user = Auth.auth().currentUser {
+            let providers = Set(user.providerData.map(\.providerID))
+            if providers.contains("google.com") { return "Google" }
+            if providers.contains("apple.com") { return "Apple" }
+        }
+#endif
+        return "Email"
     }
 
     @ViewBuilder
-    private func settingsRow(title: String, value: String) -> some View {
+    private func settingsRow(title: String, value: String, showsChevron: Bool = true) -> some View {
         HStack {
             Text(title)
             Spacer(minLength: 8)
@@ -1433,9 +1479,11 @@ struct AccountDetailsView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.tail)
-            Image(systemName: "chevron.right")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.secondary)
+            if showsChevron {
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -1446,7 +1494,9 @@ struct AccountDetailsView: View {
         text: Binding<String>,
         keyboardType: UIKeyboardType,
         capitalization: TextInputAutocapitalization,
-        disableAutocorrection: Bool
+        disableAutocorrection: Bool,
+        submitLabel: SubmitLabel,
+        onSubmit: (() -> Void)?
     ) -> some View {
         HStack(spacing: 10) {
             Text(title)
@@ -1455,13 +1505,116 @@ struct AccountDetailsView: View {
                 .keyboardType(keyboardType)
                 .textInputAutocapitalization(capitalization)
                 .autocorrectionDisabled(disableAutocorrection)
+                .submitLabel(submitLabel)
+                .onSubmit {
+                    onSubmit?()
+                }
                 .multilineTextAlignment(.trailing)
                 .foregroundStyle(.secondary)
         }
     }
+
+    @MainActor
+    private func signOut() {
+#if canImport(FirebaseAuth)
+        do {
+            try Auth.auth().signOut()
+        } catch {
+            accountError = "Unable to sign out right now. Please try again."
+            return
+        }
+#endif
+#if canImport(GoogleSignIn)
+        GIDSignIn.sharedInstance.signOut()
+#endif
+        appleUserID = ""
+        googleUserID = ""
+        authProvider = ""
+        hasAccount = false
+        isSubscribed = false
+        accountName = ""
+        accountEmail = ""
+        accountPhone = ""
+        accountError = nil
+        session.clearAccountSession()
+    }
+
+    @MainActor
+    private func hydrateAccountFieldsFromAuthUserIfAvailable() {
+#if canImport(FirebaseAuth)
+        guard let user = Auth.auth().currentUser else { return }
+        if let displayName = user.displayName?.trimmingCharacters(in: .whitespacesAndNewlines), !displayName.isEmpty {
+            accountName = displayName
+        }
+        if let email = user.email?.trimmingCharacters(in: .whitespacesAndNewlines), !email.isEmpty {
+            accountEmail = email
+        }
+        // Keep the last successful sign-in provider when available.
+        let normalizedProvider = authProvider.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalizedProvider == "apple" {
+            if appleUserID.isEmpty {
+                appleUserID = user.uid
+            }
+            return
+        }
+        if normalizedProvider == "google" {
+            if googleUserID.isEmpty {
+                googleUserID = user.uid
+            }
+            return
+        }
+
+        let providers = Set(user.providerData.map(\.providerID))
+        if providers.contains("apple.com") {
+            authProvider = "apple"
+            if appleUserID.isEmpty {
+                appleUserID = user.uid
+            }
+        } else if providers.contains("google.com") {
+            authProvider = "google"
+            if googleUserID.isEmpty {
+                googleUserID = user.uid
+            }
+        }
+#endif
+    }
+
+    @MainActor
+    private func saveDisplayNameToAuthIfNeeded() async {
+        let trimmedName = accountName.trimmingCharacters(in: .whitespacesAndNewlines)
+#if canImport(FirebaseAuth)
+        guard let user = Auth.auth().currentUser else { return }
+        guard (user.displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines) != trimmedName else { return }
+        let request = user.createProfileChangeRequest()
+        request.displayName = trimmedName.isEmpty ? nil : trimmedName
+        do {
+            try await request.commitChanges()
+            accountError = nil
+        } catch {
+            accountError = "Could not update name. Please try again."
+        }
+#endif
+    }
+
+    @MainActor
+    private func saveEmailToAuthIfNeeded() async {
+        let trimmedEmail = accountEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedEmail.isEmpty else { return }
+#if canImport(FirebaseAuth)
+        guard let user = Auth.auth().currentUser else { return }
+        guard (user.email ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased() != trimmedEmail.lowercased() else { return }
+        do {
+            try await user.sendEmailVerification(beforeUpdatingEmail: trimmedEmail)
+            accountError = "Verification sent to update your email."
+        } catch {
+            accountError = "Could not start email update. You may need to sign in again."
+        }
+#endif
+    }
 }
 
 private struct AccountSubscriptionView: View {
+    @Environment(\.openURL) private var openURL
     let appName: String
     let subscriptionSummary: String
 
@@ -1490,8 +1643,10 @@ private struct AccountSubscriptionView: View {
 
             Section {
                 Button("See All Plans") {
+                    openManageSubscriptions()
                 }
                 Button(role: .destructive) {
+                    openManageSubscriptions()
                 } label: {
                     Text("Cancel Subscription")
                 }
@@ -1500,6 +1655,11 @@ private struct AccountSubscriptionView: View {
         .listStyle(.insetGrouped)
         .navigationTitle("Edit Subscription")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func openManageSubscriptions() {
+        guard let url = URL(string: "https://apps.apple.com/account/subscriptions") else { return }
+        openURL(url)
     }
 }
 

@@ -160,6 +160,11 @@ struct PaywallView: View {
                         Text(trialText)
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                        if let trialDetailText = plan.trialDetailText {
+                            Text(trialDetailText)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
 

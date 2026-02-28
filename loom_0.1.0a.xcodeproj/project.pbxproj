@@ -6,6 +6,13 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		1DD77E242F52752C00F08917 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 1DD77E232F52752C00F08917 /* FirebaseAuth */; };
+		1DD77E262F52752C00F08917 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1DD77E252F52752C00F08917 /* FirebaseCore */; };
+		1DD77E292F5275A600F08917 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 1DD77E282F5275A600F08917 /* GoogleSignIn */; };
+		1DD77E2B2F5275A600F08917 /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 1DD77E2A2F5275A600F08917 /* GoogleSignInSwift */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		1D8E61D82DC0526500167931 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -65,6 +72,10 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1DD77E262F52752C00F08917 /* FirebaseCore in Frameworks */,
+				1DD77E242F52752C00F08917 /* FirebaseAuth in Frameworks */,
+				1DD77E292F5275A600F08917 /* GoogleSignIn in Frameworks */,
+				1DD77E2B2F5275A600F08917 /* GoogleSignInSwift in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -125,6 +136,10 @@
 			);
 			name = loom;
 			packageProductDependencies = (
+				1DD77E232F52752C00F08917 /* FirebaseAuth */,
+				1DD77E252F52752C00F08917 /* FirebaseCore */,
+				1DD77E282F5275A600F08917 /* GoogleSignIn */,
+				1DD77E2A2F5275A600F08917 /* GoogleSignInSwift */,
 			);
 			productName = loom;
 			productReference = 1D8E61C62DC0526000167931 /* loom.app */;
@@ -208,6 +223,10 @@
 			);
 			mainGroup = 1D8E61BD2DC0526000167931;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				1DD77E222F52752C00F08917 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+				1DD77E272F5275A600F08917 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 1D8E61C72DC0526000167931 /* Products */;
 			projectDirPath = "";
@@ -295,9 +314,11 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = loom/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Loom;
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "Loom uses Apple Health data you choose to connect to automatically track Little Wins progress.";
+				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "Loom needs full access to your reminders to sync active tasks into Capture.";
+				INFOPLIST_KEY_NSRemindersUsageDescription = "Loom needs access to your reminders to sync active tasks into Capture.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = NO;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -326,9 +347,12 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = loom/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Loom;
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "Loom uses Apple Health data you choose to connect to automatically track Little Wins progress.";
+				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "Loom needs full access to your reminders to sync active tasks into Capture.";
+				INFOPLIST_KEY_NSRemindersUsageDescription = "Loom needs access to your reminders to sync active tasks into Capture.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = NO;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -578,6 +602,48 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		1DD77E222F52752C00F08917 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 12.10.0;
+			};
+		};
+		1DD77E272F5275A600F08917 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/google/GoogleSignIn-iOS";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 9.1.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		1DD77E232F52752C00F08917 /* FirebaseAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1DD77E222F52752C00F08917 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAuth;
+		};
+		1DD77E252F52752C00F08917 /* FirebaseCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1DD77E222F52752C00F08917 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCore;
+		};
+		1DD77E282F5275A600F08917 /* GoogleSignIn */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1DD77E272F5275A600F08917 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignIn;
+		};
+		1DD77E2A2F5275A600F08917 /* GoogleSignInSwift */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1DD77E272F5275A600F08917 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignInSwift;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 1D8E61BE2DC0526000167931 /* Project object */;
 }

@@ -2,6 +2,12 @@ import SwiftUI
 import SwiftData
 import UIKit
 import UserNotifications
+#if canImport(FirebaseCore)
+import FirebaseCore
+#endif
+#if canImport(GoogleSignIn)
+import GoogleSignIn
+#endif
 
 private enum LoomPersistence {
     static let modelTypes: [any PersistentModel.Type] = [
@@ -99,6 +105,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+#if canImport(FirebaseCore)
+        if FirebaseApp.app() == nil {
+            FirebaseApp.configure()
+        }
+#endif
         UNUserNotificationCenter.current().delegate = self
         return true
     }
@@ -130,6 +141,11 @@ struct loomApp: App {
                     .autocorrectionDisabled(false)
                     .textInputAutocapitalization(.sentences)
             }
+#if canImport(GoogleSignIn)
+            .onOpenURL { url in
+                _ = GIDSignIn.sharedInstance.handle(url)
+            }
+#endif
         }
         .modelContainer(modelContainer)
     }

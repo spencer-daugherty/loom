@@ -2,8 +2,19 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CFBundleDisplayName</key>
-	<string>Loom</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>srd.loom.google</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.googleusercontent.apps.350410633506-qldhmb35u4ko6a44nv8kvehc1jff04pr</string>
+			</array>
+		</dict>
+	</array>
 	<key>GoogleOAuthClientID</key>
 	<string></string>
 	<key>GoogleOAuthRedirectURI</key>
@@ -14,15 +25,11 @@
 	<string></string>
 	<key>MicrosoftOAuthTenantID</key>
 	<string>common</string>
-	<key>NSRemindersUsageDescription</key>
-	<string>Loom needs access to your reminders to sync active tasks into Capture.</string>
-	<key>NSRemindersFullAccessUsageDescription</key>
-	<string>Loom needs full access to your reminders to sync active tasks into Capture.</string>
-	<key>NSHealthShareUsageDescription</key>
-	<string>Loom uses Apple Health data you choose to connect to automatically track Little Wins progress.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>
 	</array>
+	<key>UILaunchScreen</key>
+	<false/>
 </dict>
 </plist>

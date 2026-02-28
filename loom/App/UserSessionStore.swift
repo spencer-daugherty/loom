@@ -17,6 +17,8 @@ final class UserSessionStore: ObservableObject {
         static let hasAccount = "hasAccount"
         static let isSubscribed = "isSubscribed"
         static let appleUserID = "apple_user_id"
+        static let googleUserID = "google_user_id"
+        static let authProvider = "auth_provider"
         static let accountName = "account_name"
         static let accountEmail = "account_email"
     }
@@ -83,11 +85,14 @@ final class UserSessionStore: ObservableObject {
         setHasAccount(false)
         setIsSubscribed(false)
         defaults.removeObject(forKey: Keys.appleUserID)
+        defaults.removeObject(forKey: Keys.googleUserID)
+        defaults.removeObject(forKey: Keys.authProvider)
     }
 
     #if canImport(AuthenticationServices)
     func completeSignInWithApple(_ credential: ASAuthorizationAppleIDCredential) {
         setAppleUserID(credential.user)
+        defaults.set("apple", forKey: Keys.authProvider)
         if let email = credential.email?.trimmingCharacters(in: .whitespacesAndNewlines), !email.isEmpty {
             defaults.set(email, forKey: Keys.accountEmail)
         }
@@ -135,6 +140,32 @@ final class UserSessionStore: ObservableObject {
         }
     }
     #endif
+
+    func completeSignInWithGoogle(
+        userID: String?,
+        email: String?,
+        fullName: String?
+    ) {
+        let trimmedUserID = userID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if trimmedUserID.isEmpty {
+            defaults.removeObject(forKey: Keys.googleUserID)
+        } else {
+            defaults.set(trimmedUserID, forKey: Keys.googleUserID)
+        }
+        defaults.set("google", forKey: Keys.authProvider)
+
+        let trimmedEmail = email?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !trimmedEmail.isEmpty {
+            defaults.set(trimmedEmail, forKey: Keys.accountEmail)
+        }
+
+        let trimmedName = fullName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !trimmedName.isEmpty {
+            defaults.set(trimmedName, forKey: Keys.accountName)
+        }
+
+        setHasAccount(true)
+    }
 
     func reloadFromDefaults() {
         hasSeenOnboarding = defaults.bool(forKey: Keys.hasSeenOnboarding)
