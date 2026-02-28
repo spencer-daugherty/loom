@@ -459,8 +459,15 @@ struct AccountView: View {
     @AppStorage("dev_outcome_warning_target_passed") private var devOutcomeWarningTargetPassed = false
     @AppStorage("dev_outcome_warning_goal_achieved") private var devOutcomeWarningGoalAchieved = false
     @AppStorage("dev_action_blocks_warning_old_blocks") private var devActionBlocksWarningOldBlocks = false
+    @AppStorage(UserSessionStore.Keys.hasSeenOnboarding) private var hasSeenOnboarding = false
+    @AppStorage(UserSessionStore.Keys.hasAccount) private var hasAccount = false
+    @AppStorage(UserSessionStore.Keys.isSubscribed) private var isSubscribed = false
     @State private var presentedDeleteScope: DeleteScope? = nil
     @State private var deleteAllConfirmationCode = ""
+    @State private var showDeveloperPasswordSheet = false
+    @State private var developerPasswordInput = ""
+    @State private var showDeveloperPasswordError = false
+    @State private var showDeveloperPage = false
 
     private func deleteWarningTitle(for scope: DeleteScope) -> String {
         switch scope {
@@ -502,6 +509,14 @@ struct AccountView: View {
     var body: some View {
         List {
             Section {
+                NavigationLink {
+                    AccountDetailsView()
+                } label: {
+                    HStack {
+                        Text("Account")
+                    }
+                }
+
                 NavigationLink {
                     NotificationsPlaceholderView()
                 } label: {
@@ -572,76 +587,49 @@ struct AccountView: View {
                         Text("Recently Deleted")
                     }
                 }
+                Button {
+                    // Replay the 7 onboarding screens, then return directly to app flow.
+                    // Keep account + subscription satisfied so gate stops at onboarding.
+                    hasAccount = true
+                    isSubscribed = true
+                    hasSeenOnboarding = false
+                    hasSeenContentQuickstart = false
+                    forceShowContentQuickstartOnce = true
+                } label: {
+                    HStack {
+                        Text("Launch Tutorial")
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
 
             Section {
-                NavigationLink {
-                    ManageRawDataView()
-                } label: {
-                    HStack {
-                        Text("Manage Raw Data")
-                    }
-                }
-
-                NavigationLink {
-                    AccountLaunchReflectionView()
-                } label: {
-                    HStack {
-                        Text("Launch Reflection")
-                    }
-                }
-
-                Toggle("Enable LoomAI Insights Refresh", isOn: $enableLoomAIInsightsRefresh)
-                Toggle("Enable Projects", isOn: $enableProjectsFeature)
-                Toggle("Onboarding", isOn: $onboardingResetOnNextLaunch)
-                Toggle("Blank Homepage", isOn: $blankHomepageMode)
-                Toggle("Setup Homepage", isOn: $setupHomepageMode)
-                Toggle("Warning Cards", isOn: $devManualWarningCardsEnabled)
-
-                if devManualWarningCardsEnabled {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Outcomes")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        Toggle("Outcome date passed", isOn: $devOutcomeWarningTargetPassed)
-                        Toggle("Outcome achieved", isOn: $devOutcomeWarningGoalAchieved)
-                    }
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Action Blocks")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        Toggle("Action Blocks are old", isOn: $devActionBlocksWarningOldBlocks)
-                    }
-                }
-
-                Button {
-                    deleteAllConfirmationCode = ""
-                    presentedDeleteScope = .littleWinsOnly
-                } label: {
-                    Text("Delete Little Wins Data")
-                        .foregroundStyle(.red)
-                }
-                Button {
-                    deleteAllConfirmationCode = ""
-                    presentedDeleteScope = .fulfillmentOnly
-                } label: {
-                    Text("Delete Fulfillment Data")
-                        .foregroundStyle(.red)
-                }
-                Button {
-                    deleteAllConfirmationCode = ""
-                    presentedDeleteScope = .allData
-                } label: {
-                    Text("Delete All Data")
-                        .foregroundStyle(.red)
-                }
-            } header: {
                 HStack {
                     Spacer()
-                    Text("Developer")
+                    Text("Version: 0.1.0-alpha | Made in USA")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                     Spacer()
                 }
+                .listRowSeparator(.hidden)
+
+                HStack {
+                    Spacer()
+                    Button {
+                        developerPasswordInput = ""
+                        showDeveloperPasswordError = false
+                        showDeveloperPasswordSheet = true
+                    } label: {
+                        Text("Developer")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                .listRowSeparator(.hidden)
             }
         }
         .listStyle(.plain)
@@ -710,6 +698,119 @@ struct AccountView: View {
             .presentationDetents([.medium, .large])
             .presentationContentInteraction(.scrolls)
             .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showDeveloperPasswordSheet) {
+            NavigationStack {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("Developer Access")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                    HStack(spacing: 8) {
+                        SecureField("Password", text: $developerPasswordInput)
+                            .font(.system(size: 20, weight: .regular))
+                            .textFieldStyle(.roundedBorder)
+                            .frame(height: 52)
+
+                        Button {
+                            if developerPasswordInput == "Loom4All" {
+                                showDeveloperPasswordError = false
+                                showDeveloperPasswordSheet = false
+                                showDeveloperPage = true
+                            } else {
+                                showDeveloperPasswordError = true
+                            }
+                        } label: {
+                            Image(systemName: "arrow.right")
+                                .font(.system(size: 20, weight: .semibold))
+                                .frame(width: 52, height: 52)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .frame(height: 52)
+                    }
+
+                    if showDeveloperPasswordError {
+                        Text("Incorrect password.")
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+                .padding()
+            }
+            .presentationDetents([.height(220)])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showDeveloperPage) {
+            NavigationStack {
+                List {
+                    Section {
+                        NavigationLink {
+                            ManageRawDataView()
+                        } label: {
+                            Text("Manage Raw Data")
+                        }
+
+                        NavigationLink {
+                            AccountLaunchReflectionView()
+                        } label: {
+                            Text("Launch Reflection")
+                        }
+                    }
+
+                    Section("Feature Flags") {
+                        Toggle("Enable LoomAI Insights Refresh", isOn: $enableLoomAIInsightsRefresh)
+                        Toggle("Enable Projects", isOn: $enableProjectsFeature)
+                        Toggle("Onboarding", isOn: $onboardingResetOnNextLaunch)
+                        Toggle("Blank Homepage", isOn: $blankHomepageMode)
+                        Toggle("Setup Homepage", isOn: $setupHomepageMode)
+                        Toggle("Warning Cards", isOn: $devManualWarningCardsEnabled)
+                    }
+
+                    if devManualWarningCardsEnabled {
+                        Section("Outcomes") {
+                            Toggle("Outcome date passed", isOn: $devOutcomeWarningTargetPassed)
+                            Toggle("Outcome achieved", isOn: $devOutcomeWarningGoalAchieved)
+                        }
+                        Section("Action Blocks") {
+                            Toggle("Action Blocks are old", isOn: $devActionBlocksWarningOldBlocks)
+                        }
+                    }
+
+                    Section("Danger Zone") {
+                        Button {
+                            deleteAllConfirmationCode = ""
+                            presentedDeleteScope = .littleWinsOnly
+                        } label: {
+                            Text("Delete Little Wins Data")
+                                .foregroundStyle(.red)
+                        }
+                        Button {
+                            deleteAllConfirmationCode = ""
+                            presentedDeleteScope = .fulfillmentOnly
+                        } label: {
+                            Text("Delete Fulfillment Data")
+                                .foregroundStyle(.red)
+                        }
+                        Button {
+                            deleteAllConfirmationCode = ""
+                            presentedDeleteScope = .allData
+                        } label: {
+                            Text("Delete All Data")
+                                .foregroundStyle(.red)
+                        }
+                    }
+                }
+                .listStyle(.plain)
+                .navigationTitle("Developer")
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("Done") {
+                            showDeveloperPage = false
+                        }
+                    }
+                }
+            }
         }
         .onChange(of: blankHomepageMode) { _, isOn in
             if isOn {
@@ -1221,6 +1322,184 @@ struct VacationModeView: View {
         case "hate": return "Hate"
         default: return emotion.capitalized
         }
+    }
+}
+
+struct AccountDetailsView: View {
+    @AppStorage("account_name") private var accountName = ""
+    @AppStorage("account_email") private var accountEmail = ""
+    @AppStorage("account_phone") private var accountPhone = ""
+    @AppStorage(UserSessionStore.Keys.appleUserID) private var appleUserID = ""
+    @AppStorage(UserSessionStore.Keys.hasAccount) private var hasAccount = false
+    @AppStorage(UserSessionStore.Keys.isSubscribed) private var isSubscribed = false
+    @AppStorage("loom.subscription_plan") private var subscriptionPlanRaw = SubscriptionPlan.annual.rawValue
+    @State private var showSubscriptionSheet = false
+
+    var body: some View {
+        List {
+            Section("Account") {
+                inlineEditableRow(
+                    title: "Name",
+                    placeholder: "Enter your name",
+                    text: $accountName,
+                    keyboardType: .default,
+                    capitalization: .words,
+                    disableAutocorrection: false
+                )
+
+                inlineEditableRow(
+                    title: "Email",
+                    placeholder: "name@example.com",
+                    text: $accountEmail,
+                    keyboardType: .emailAddress,
+                    capitalization: .never,
+                    disableAutocorrection: true
+                )
+
+                inlineEditableRow(
+                    title: "Phone",
+                    placeholder: "(555) 123-4567",
+                    text: $accountPhone,
+                    keyboardType: .phonePad,
+                    capitalization: .never,
+                    disableAutocorrection: true
+                )
+
+                Button {
+                    showSubscriptionSheet = true
+                } label: {
+                    settingsRow(title: "Subscription", value: currentSubscriptionSummary)
+                }
+                .buttonStyle(.plain)
+            }
+
+            Section {
+                Button(role: .destructive) {
+                    appleUserID = ""
+                    hasAccount = false
+                    isSubscribed = false
+                } label: {
+                    Text("Sign Out")
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .navigationTitle("Account")
+        .sheet(isPresented: $showSubscriptionSheet) {
+            NavigationStack {
+                AccountSubscriptionView(
+                    appName: appDisplayName,
+                    subscriptionSummary: currentSubscriptionSummary
+                )
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("Done") {
+                            showSubscriptionSheet = false
+                        }
+                    }
+                }
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
+    }
+
+    private var appDisplayName: String {
+        (Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
+        ?? (Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String)
+        ?? "Loom"
+    }
+
+    private var currentSubscriptionSummary: String {
+        guard isSubscribed else { return "Inactive" }
+        if subscriptionPlanRaw == SubscriptionPlan.monthly.rawValue {
+            return "$15 Monthly"
+        }
+        return "$99 Annual"
+    }
+
+    private func displayValue(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Not set" : trimmed
+    }
+
+    @ViewBuilder
+    private func settingsRow(title: String, value: String) -> some View {
+        HStack {
+            Text(title)
+            Spacer(minLength: 8)
+            Text(value)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private func inlineEditableRow(
+        title: String,
+        placeholder: String,
+        text: Binding<String>,
+        keyboardType: UIKeyboardType,
+        capitalization: TextInputAutocapitalization,
+        disableAutocorrection: Bool
+    ) -> some View {
+        HStack(spacing: 10) {
+            Text(title)
+            Spacer(minLength: 8)
+            TextField(placeholder, text: text)
+                .keyboardType(keyboardType)
+                .textInputAutocapitalization(capitalization)
+                .autocorrectionDisabled(disableAutocorrection)
+                .multilineTextAlignment(.trailing)
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+private struct AccountSubscriptionView: View {
+    let appName: String
+    let subscriptionSummary: String
+
+    var body: some View {
+        List {
+            Section {
+                HStack {
+                    Text("App")
+                    Spacer()
+                    Text(appName)
+                        .foregroundStyle(.secondary)
+                }
+                HStack {
+                    Text("Subscription")
+                    Spacer()
+                    Text(subscriptionSummary)
+                        .foregroundStyle(.secondary)
+                }
+                HStack {
+                    Text("Price")
+                    Spacer()
+                    Text(subscriptionSummary.contains("Monthly") ? "$15 / month" : "$99 / year")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section {
+                Button("See All Plans") {
+                }
+                Button(role: .destructive) {
+                } label: {
+                    Text("Cancel Subscription")
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .navigationTitle("Edit Subscription")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

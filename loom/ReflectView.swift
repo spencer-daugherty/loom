@@ -1470,11 +1470,11 @@ struct ReflectView: View {
                     VStack(alignment: .leading, spacing: 10) {
                         if let chunk = currentOtherContributionChunk {
                             VStack(alignment: .leading, spacing: 8) {
-                                Text("Other Block")
+                                Text("Other")
                                     .font(.subheadline.weight(.semibold))
                                     .foregroundStyle(.secondary)
                                 let actionTexts = weekActions
-                                    .filter { $0.plannedChunkId == chunk.id }
+                                    .filter { $0.plannedChunkId == chunk.id && status(for: $0.id) == .done }
                                     .map(\.text)
                                 if actionTexts.isEmpty {
                                     Text("No actions in this block.")
@@ -1535,7 +1535,9 @@ struct ReflectView: View {
                         saveCurrentOtherContributionSelection()
                         advanceOtherContributionFlow()
                     } label: {
-                        Text(otherContributionChunkIndex + 1 < otherContributionChunkQueue.count ? "Next" : "Continue")
+                        Text(otherContributionChunkIndex + 1 < otherContributionChunkQueue.count
+                             ? "Next"
+                             : (otherContributionTempSelection.isEmpty ? "Skip" : "Continue"))
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)

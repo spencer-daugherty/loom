@@ -1665,8 +1665,10 @@ struct ActionView: View {
     ) -> some View {
         let filtered = filteredActions
         let allForChunk = allActions
-        let fill = categoryFillColor(for: chunk.category)
-        let accent = categoryAccentColor(for: chunk.category)
+        let isOtherChunk = chunk.labelId == PlanOtherLabel.id ||
+            chunk.label.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == PlanOtherLabel.title.lowercased()
+        let fill: Color = isOtherChunk ? Color(.systemGray5) : categoryFillColor(for: chunk.category)
+        let accent: Color = isOtherChunk ? .black : categoryAccentColor(for: chunk.category)
         let step4 = weekStepFourStatesByChunkID[chunk.id]
         let step4ResultText = step4?.resultText ?? ""
         let roleName = step4?.connectedRoleId.flatMap { rolesByID[$0] } ?? ""

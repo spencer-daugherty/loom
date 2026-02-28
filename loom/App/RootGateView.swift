@@ -37,6 +37,11 @@ struct RootGateView<MainContent: View>: View {
                 syncSessionFromStorage()
                 syncGatePresentationState()
             }
+            .task {
+                #if canImport(AuthenticationServices)
+                await session.refreshAppleCredentialStateIfNeeded()
+                #endif
+            }
             .onChange(of: hasSeenOnboarding) { _, _ in
                 syncSessionFromStorage()
                 syncGatePresentationState()

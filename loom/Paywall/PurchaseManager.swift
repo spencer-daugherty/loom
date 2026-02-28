@@ -13,7 +13,7 @@ final class PurchaseManager: ObservableObject {
         isProcessing = true
         defer { isProcessing = false }
 
-        _ = plan
+        UserDefaults.standard.set(plan.rawValue, forKey: "loom.subscription_plan")
         try? await Task.sleep(for: .milliseconds(800))
         session.markSubscribed()
     }
@@ -24,6 +24,9 @@ final class PurchaseManager: ObservableObject {
         defer { isProcessing = false }
 
         try? await Task.sleep(for: .milliseconds(800))
+        if UserDefaults.standard.string(forKey: "loom.subscription_plan") == nil {
+            UserDefaults.standard.set(SubscriptionPlan.annual.rawValue, forKey: "loom.subscription_plan")
+        }
         session.markSubscribed()
     }
 }
