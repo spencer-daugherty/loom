@@ -657,7 +657,7 @@ struct LoadingSplashView: View {
         }
         .ignoresSafeArea()
         .overlay(alignment: .bottom) {
-            Text("Version: 0.1.0-alpha")
+            Text("Version: 0.1.0-alpha.1")
                 .font(.caption2)
                 .foregroundColor(.secondary)
                 .padding(.bottom, 10) // sits above the home indicator
