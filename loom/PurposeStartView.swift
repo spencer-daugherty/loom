@@ -112,7 +112,7 @@ struct PurposeStartView: View {
     }
 
     private var isScrollableStep: Bool {
-        step == .vision || step == .summary
+        step == .vision || step == .passions || step == .summary
     }
 
     private var editorSurfaceColor: Color {
@@ -554,10 +554,42 @@ struct PurposeStartView: View {
     }
 
     private var passionsStep: some View {
-        List {
+        VStack(alignment: .leading, spacing: 10) {
+            if isPassionsInvalid {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(Color.black.opacity(0.7))
+                        .padding(.top, 1)
+                    Text("Please add at least 2 items per Passion.")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Color.black.opacity(0.7))
+                        .multilineTextAlignment(.leading)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color(red: 0.98, green: 0.92, blue: 0.72))
+                )
+            }
+
             ForEach(bucketOrder, id: \.key) { bucket in
                 let shouldOutlineBucket = shouldHighlightStepValidation && invalidPassionKeys.contains(bucket.key)
-                Section {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        Text(bucket.title)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                        Spacer(minLength: 8)
+                        Text(passionPrompt(for: bucket.key))
+                            .italic()
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+
                     if addingPassionBuckets.contains(bucket.key) {
                         TextField("Add \(bucket.title)", text: bindingForBucketEntry(bucket.key))
                             .focused($focusedField, equals: .passion(bucket.key))
@@ -567,7 +599,9 @@ struct PurposeStartView: View {
                             .onSubmit {
                                 savePassionEntry(bucket.key)
                             }
-                            .listRowBackground(bucketValidationRowBackground(isInvalid: shouldOutlineBucket))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .background(bucketValidationRowBackground(isInvalid: shouldOutlineBucket))
                     } else {
                         Button("+ Add \(bucket.title)") {
                             addingPassionBuckets = [bucket.key]
@@ -575,95 +609,97 @@ struct PurposeStartView: View {
                             focusedField = .passion(bucket.key)
                         }
                         .foregroundStyle(.blue)
-                        .listRowBackground(bucketValidationRowBackground(isInvalid: shouldOutlineBucket))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(bucketValidationRowBackground(isInvalid: shouldOutlineBucket))
                     }
 
                     let values = draftPassions[bucket.key] ?? []
-                    ForEach(values, id: \.self) { value in
-                        Text(value)
-                            .listRowBackground(bucketValidationRowBackground(isInvalid: shouldOutlineBucket))
-                    }
-                    .onDelete { offsets in
-                        deletePassions(at: offsets, in: bucket.key)
-                    }
-                } header: {
-                    HStack(spacing: 8) {
-                        Text(bucket.title)
-                            .foregroundStyle(.primary)
-                        Spacer(minLength: 8)
-                        Text(passionPrompt(for: bucket.key))
-                            .italic()
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                    ForEach(Array(values.enumerated()), id: \.offset) { index, value in
+                        HStack(spacing: 10) {
+                            Text(value)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Button {
+                                deletePassions(at: IndexSet(integer: index), in: bucket.key)
+                            } label: {
+                                Image(systemName: "minus.circle.fill")
+                                    .foregroundStyle(.red)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(bucketValidationRowBackground(isInvalid: shouldOutlineBucket))
                     }
                 }
+                .padding(10)
+                .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 10))
             }
 
-            Section {
-                VStack(alignment: .leading, spacing: 6) {
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            showNeedIdeasPassions.toggle()
-                        }
-                    } label: {
-                        HStack(spacing: 6) {
-                            Text("Need ideas?")
-                            Image(systemName: showNeedIdeasPassions ? "chevron.up" : "chevron.down")
-                                .font(.caption2.weight(.semibold))
-                        }
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.blue)
+            VStack(alignment: .leading, spacing: 6) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showNeedIdeasPassions.toggle()
                     }
-                    .buttonStyle(.plain)
-
-                    if showNeedIdeasPassions {
-                        VStack(alignment: .leading, spacing: 10) {
-                            passionIdeasGroup(
-                                title: "Love",
-                                items: [
-                                    "Time with family and close relationships",
-                                    "Learning, growth, and self-improvement",
-                                    "Building and creating something meaningful"
-                                ]
-                            )
-                            passionIdeasGroup(
-                                title: "Vows (Commitments)",
-                                items: [
-                                    "Always act with integrity",
-                                    "Take full responsibility for my life",
-                                    "Keep growing and becoming better"
-                                ]
-                            )
-                            passionIdeasGroup(
-                                title: "Thrill (Excitement)",
-                                items: [
-                                    "Achieving difficult goals",
-                                    "Solving hard problems",
-                                    "Taking risks and pursuing new opportunities"
-                                ]
-                            )
-                            passionIdeasGroup(
-                                title: "Hate",
-                                items: [
-                                    "Wasted potential",
-                                    "Dishonesty and manipulation",
-                                    "Laziness and excuses"
-                                ]
-                            )
-                        }
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .padding(10)
-                        .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 10))
-                        .padding(.top, 2)
+                } label: {
+                    HStack(spacing: 6) {
+                        Text("Need ideas?")
+                        Image(systemName: showNeedIdeasPassions ? "chevron.up" : "chevron.down")
+                            .font(.caption2.weight(.semibold))
                     }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.blue)
                 }
-                .listRowBackground(Color(.systemGroupedBackground))
+                .buttonStyle(.plain)
+
+                if showNeedIdeasPassions {
+                    VStack(alignment: .leading, spacing: 10) {
+                        passionIdeasGroup(
+                            title: "Love",
+                            items: [
+                                "Time with family and close relationships",
+                                "Learning, growth, and self-improvement",
+                                "Building and creating something meaningful"
+                            ]
+                        )
+                        passionIdeasGroup(
+                            title: "Vows (Commitments)",
+                            items: [
+                                "Always act with integrity",
+                                "Take full responsibility for my life",
+                                "Keep growing and becoming better"
+                            ]
+                        )
+                        passionIdeasGroup(
+                            title: "Thrill (Excitement)",
+                            items: [
+                                "Achieving difficult goals",
+                                "Solving hard problems",
+                                "Taking risks and pursuing new opportunities"
+                            ]
+                        )
+                        passionIdeasGroup(
+                            title: "Hate",
+                            items: [
+                                "Wasted potential",
+                                "Dishonesty and manipulation",
+                                "Laziness and excuses"
+                            ]
+                        )
+                    }
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(10)
+                    .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 10))
+                    .padding(.top, 2)
+                }
             }
+            .padding(10)
+            .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 10))
         }
-        .listStyle(.insetGrouped)
-        .listRowSpacing(4)
-        .scrollContentBackground(.hidden)
+        .padding(14)
+        .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
     }
 
     private func passionIdeasGroup(title: String, items: [String]) -> some View {
@@ -944,24 +980,28 @@ struct PurposeStartView: View {
     private func saveVisionIfChanged() {
         let now = Date()
         let trimmed = visionTrimmed
+        let purposeTrimmed = purposeText.trimmingCharacters(in: .whitespacesAndNewlines)
         if let existing = currentDrivingForce {
-            guard existing.ultimateVision != trimmed else { return }
+            let resolvedPurpose = purposeTrimmed.isEmpty ? (existing.ultimatePurpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? trimmed : existing.ultimatePurpose) : purposeTrimmed
+            guard existing.ultimateVision != trimmed || existing.ultimatePurpose != resolvedPurpose else { return }
             // Same archive/write pattern as PurposeView.saveEditorChanges(.vision)
             context.insert(
                 DrivingForceArchive(
                     visionSnapshot: existing.ultimateVision,
-                    purposeSnapshot: "",
+                    purposeSnapshot: existing.ultimatePurpose,
                     updatedAt: existing.updatedAt,
                     archivedAt: now
                 )
             )
             existing.ultimateVision = trimmed
+            existing.ultimatePurpose = resolvedPurpose
             existing.updatedAt = now
         } else {
+            let resolvedPurpose = purposeTrimmed.isEmpty ? trimmed : purposeTrimmed
             context.insert(
                 DrivingForce(
                     ultimateVision: trimmed,
-                    ultimatePurpose: "",
+                    ultimatePurpose: resolvedPurpose,
                     updatedAt: now
                 )
             )

@@ -412,6 +412,12 @@ struct FulfillmentBalancePlaceholderView: View {
             .frame(width: 176, height: 176)
             .scaleEffect(reduceMotion ? 1 : pulse)
         }
+        .shadow(
+            color: Color.black.opacity(reduceMotion ? 0.08 : (pulse > 1.0 ? 0.22 : 0.10)),
+            radius: reduceMotion ? 4 : (pulse > 1.0 ? 16 : 7),
+            x: 0,
+            y: reduceMotion ? 2 : (pulse > 1.0 ? 8 : 3)
+        )
         .onAppear {
             if rotatingMetrics.isEmpty {
                 rotatingMetrics = randomMetrics(count: currentCount)
@@ -513,6 +519,12 @@ struct IdentityVisionPlaceholderView: View {
             }
             .padding(.horizontal, 20)
         }
+        .shadow(
+            color: Color.black.opacity(reduceMotion ? 0.08 : (pulse ? 0.20 : 0.10)),
+            radius: reduceMotion ? 4 : (pulse ? 14 : 6),
+            x: 0,
+            y: reduceMotion ? 2 : (pulse ? 7 : 3)
+        )
         .onAppear {
             if reduceMotion {
                 lineReveal = 1

@@ -31,9 +31,11 @@ struct FulfillmentCategoryTheme {
             "Career & Business": "blue",
             "Leadership & Impact": "indigo",
             "Wealth & Lifestyle": "green",
+            "Wealth & Finance": "green",
             "Mind & Meaning": "purple",
             "Love & Relationships": "red",
-            "Health & Vitality": "orange"
+            "Health & Vitality": "orange",
+            "Health & Energy": "orange"
         ]
     }
 

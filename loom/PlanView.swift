@@ -114,83 +114,85 @@ struct PlanStartView: View {
     private var introSubtextFont: Font { isCompactIntroLayout ? .system(size: 14) : .body }
 
     var body: some View {
-        ZStack {
-            Color(.systemGroupedBackground)
-                .ignoresSafeArea()
+        GeometryReader { geo in
+            ZStack {
+                Color(.systemGroupedBackground)
+                    .ignoresSafeArea()
 
-            VStack(alignment: .leading, spacing: 14) {
-                VStack(spacing: 1) {
-                    ZStack {
-                        PlanIntroRouteLinesView()
-                            .padding(.horizontal, -24)
-                            .allowsHitTesting(false)
-                        Image("ActionGraphic")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 420)
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    }
-                    .frame(height: 420)
-                    .padding(.bottom, 2)
+                VStack(alignment: .leading, spacing: 14) {
+                    VStack(spacing: 1) {
+                        ZStack {
+                            PlanIntroRouteLinesView()
+                                .padding(.horizontal, -24)
+                                .allowsHitTesting(false)
+                            Image("ActionGraphic")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 420)
+                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        }
+                        .frame(height: 420)
+                        .padding(.bottom, 2)
 
-                    HStack(spacing: 6) {
-                        Image(systemName: "clock.fill")
-                            .font(.caption)
-                        Text("~5 minutes")
-                            .font(.caption.weight(.bold))
-                    }
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color(.systemGray5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .frame(maxWidth: .infinity, alignment: .center)
-
-                    Text("Start Action Plan")
-                        .font(.largeTitle)
-                        .fontWeight(.bold)
+                        HStack(spacing: 6) {
+                            Image(systemName: "clock.fill")
+                                .font(.caption)
+                            Text("~5 minutes")
+                                .font(.caption.weight(.bold))
+                        }
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color(.systemGray5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                         .frame(maxWidth: .infinity, alignment: .center)
-                }
 
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("This is where you turn ideas into results.")
-                        .font(introSubtextFont)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(nil)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text("This process helps you focus on the results that matter most, not busywork.")
-                        .font(introSubtextFont)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(nil)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text("You’ll effortlessly connect your daily actions to meaningful Outcomes, Fulfillment Areas, and your Purpose.")
-                        .font(introSubtextFont)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(nil)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(14)
-                .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+                        Text("Start Action Plan")
+                            .font(.largeTitle)
+                            .fontWeight(.bold)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                    }
 
-                Spacer(minLength: 0)
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("This is where you turn ideas into results.")
+                            .font(introSubtextFont)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(nil)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("This process helps you focus on the results that matter most, not busywork.")
+                            .font(introSubtextFont)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(nil)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("You’ll effortlessly connect your daily actions to meaningful Outcomes, Fulfillment Areas, and your Purpose.")
+                            .font(introSubtextFont)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(nil)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(14)
+                    .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal)
+                .padding(.bottom, 100)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
-            .padding(.horizontal)
-            .padding(.bottom, 100)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        }
-        .overlay(alignment: .bottom) {
-            Button {
-                navigateToPlan = true
-            } label: {
-                Text("Start")
-                    .frame(maxWidth: .infinity)
-                    .contentShape(Rectangle())
+            .overlay(alignment: .bottom) {
+                Button {
+                    navigateToPlan = true
+                } label: {
+                    Text("Start")
+                        .frame(maxWidth: .infinity)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderedProminent)
+                .padding(.horizontal)
+                .padding(.top, 8)
+                .padding(.bottom, max(40, geo.safeAreaInsets.bottom + 32))
+                .background(Color(.systemGroupedBackground))
             }
-            .buttonStyle(.borderedProminent)
-            .padding(.horizontal)
-            .padding(.top, 8)
-            .padding(.bottom, 10)
-            .background(Color(.systemGroupedBackground))
         }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
