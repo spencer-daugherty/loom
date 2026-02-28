@@ -8,10 +8,11 @@
 
 /* Begin PBXBuildFile section */
 		1DD77E242F52752C00F08917 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 1DD77E232F52752C00F08917 /* FirebaseAuth */; };
-		1EE9C9A22F60000100F08917 /* FirebaseCrashlytics in Frameworks */ = {isa = PBXBuildFile; productRef = 1EE9C9A12F60000100F08917 /* FirebaseCrashlytics */; };
 		1DD77E262F52752C00F08917 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1DD77E252F52752C00F08917 /* FirebaseCore */; };
 		1DD77E292F5275A600F08917 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 1DD77E282F5275A600F08917 /* GoogleSignIn */; };
 		1DD77E2B2F5275A600F08917 /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 1DD77E2A2F5275A600F08917 /* GoogleSignInSwift */; };
+		1EE9C9B42F60000200F08917 /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = 1EE9C9B32F60000200F08917 /* FirebaseAnalytics */; };
+		1EE9C9A22F60000100F08917 /* FirebaseCrashlytics in Frameworks */ = {isa = PBXBuildFile; productRef = 1EE9C9A12F60000100F08917 /* FirebaseCrashlytics */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -73,6 +74,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1EE9C9B42F60000200F08917 /* FirebaseAnalytics in Frameworks */,
 				1EE9C9A22F60000100F08917 /* FirebaseCrashlytics in Frameworks */,
 				1DD77E262F52752C00F08917 /* FirebaseCore in Frameworks */,
 				1DD77E242F52752C00F08917 /* FirebaseAuth in Frameworks */,
@@ -139,6 +141,7 @@
 			);
 			name = loom;
 			packageProductDependencies = (
+				1EE9C9B32F60000200F08917 /* FirebaseAnalytics */,
 				1DD77E232F52752C00F08917 /* FirebaseAuth */,
 				1EE9C9A12F60000100F08917 /* FirebaseCrashlytics */,
 				1DD77E252F52752C00F08917 /* FirebaseCore */,
@@ -286,10 +289,11 @@
 			outputFileListPaths = (
 			);
 			outputPaths = (
+				"$(DERIVED_FILE_DIR)/crashlytics_upload_$(CONFIGURATION).stamp",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "# TODO: If you add user privacy controls, gate this script behind your release policy.\nif [ \"${CONFIGURATION}\" = \"Debug\" ]; then\n  exit 0\nfi\n\"${BUILD_DIR%/Build/*}/SourcePackages/checkouts/firebase-ios-sdk/Crashlytics/run\" -gsp \"${PROJECT_DIR}/loom/GoogleService-Info.plist\"\n";
+			shellScript = "# TODO: If you add user privacy controls, gate this script behind your release policy.\nOUTPUT_FILE=\"${DERIVED_FILE_DIR}/crashlytics_upload_${CONFIGURATION}.stamp\"\nif [ \"${CONFIGURATION}\" = \"Debug\" ]; then\n  /usr/bin/touch \"${OUTPUT_FILE}\"\n  exit 0\nfi\n\"${BUILD_DIR%/Build/*}/SourcePackages/checkouts/firebase-ios-sdk/Crashlytics/run\" -gsp \"${PROJECT_DIR}/loom/GoogleService-Info.plist\"\n/usr/bin/touch \"${OUTPUT_FILE}\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -671,11 +675,6 @@
 			package = 1DD77E222F52752C00F08917 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseCore;
 		};
-		1EE9C9A12F60000100F08917 /* FirebaseCrashlytics */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 1DD77E222F52752C00F08917 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
-			productName = FirebaseCrashlytics;
-		};
 		1DD77E282F5275A600F08917 /* GoogleSignIn */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 1DD77E272F5275A600F08917 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
@@ -685,6 +684,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 1DD77E272F5275A600F08917 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
 			productName = GoogleSignInSwift;
+		};
+		1EE9C9A12F60000100F08917 /* FirebaseCrashlytics */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1DD77E222F52752C00F08917 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCrashlytics;
+		};
+		1EE9C9B32F60000200F08917 /* FirebaseAnalytics */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1DD77E222F52752C00F08917 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAnalytics;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

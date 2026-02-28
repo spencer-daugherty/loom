@@ -10,6 +10,7 @@ struct PaywallView: View {
     @State private var presentedLegalDocument: LegalDocument?
     @State private var previewIndex: Int = 0
     @State private var previewCycleTask: Task<Void, Never>?
+    @State private var didLogPaywallViewed = false
 
     var body: some View {
         GeometryReader { geo in
@@ -35,7 +36,16 @@ struct PaywallView: View {
                 .padding(.top, 6)
 
                 Button {
-                    Task { await purchaseManager.purchase(plan: selectedPlan, session: session) }
+                    AnalyticsLogger.log(.purchaseStarted(plan: selectedPlan.rawValue))
+                    Task {
+                        let outcome = await purchaseManager.purchase(plan: selectedPlan, session: session)
+                        switch outcome {
+                        case .success:
+                            AnalyticsLogger.log(.purchaseCompleted(plan: selectedPlan.rawValue))
+                        case .failed(let errorType):
+                            AnalyticsLogger.log(.purchaseFailed(plan: selectedPlan.rawValue, errorType: errorType))
+                        }
+                    }
                 } label: {
                     if purchaseManager.isProcessing {
                         ProgressView()
@@ -80,6 +90,11 @@ struct PaywallView: View {
             LegalLinksView(document: document)
         }
         .onAppear {
+            if !didLogPaywallViewed {
+                didLogPaywallViewed = true
+                AnalyticsLogger.log(.paywallViewed())
+                AnalyticsLogger.log(.paywallPlanSelected(plan: selectedPlan.rawValue))
+            }
             guard !reduceMotion else { return }
             previewCycleTask?.cancel()
             previewCycleTask = Task { @MainActor in
@@ -95,6 +110,12 @@ struct PaywallView: View {
         .onDisappear {
             previewCycleTask?.cancel()
             previewCycleTask = nil
+            if !session.isSubscribed {
+                AnalyticsLogger.log(.paywallAbandoned(reason: "dismissed"))
+            }
+        }
+        .onChange(of: selectedPlan) { _, newPlan in
+            AnalyticsLogger.log(.paywallPlanSelected(plan: newPlan.rawValue))
         }
     }
 

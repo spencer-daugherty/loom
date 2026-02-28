@@ -7,6 +7,9 @@ struct OnboardingFlowView: View {
     @AppStorage("force_show_content_quickstart_once") private var forceShowContentQuickstartOnce = false
 
     @State private var currentIndex = 0
+    @State private var didLogOnboardingStarted = false
+    @State private var didLogOnboardingCompleted = false
+    @State private var onboardingStartDate: Date?
 
     private var pages: [OnboardingPage] { OnboardingCopy.pages }
     private var isLastPage: Bool { currentIndex == pages.count - 1 }
@@ -41,6 +44,22 @@ struct OnboardingFlowView: View {
             .padding(.bottom, 26)
         }
         .background(Color(.systemBackground).ignoresSafeArea())
+        .onAppear {
+            if !didLogOnboardingStarted {
+                didLogOnboardingStarted = true
+                onboardingStartDate = Date()
+                AnalyticsLogger.log(.onboardingStarted())
+                AnalyticsLogger.log(.onboardingSlideViewed(index: currentIndex))
+            }
+        }
+        .onChange(of: currentIndex) { _, newValue in
+            AnalyticsLogger.log(.onboardingSlideViewed(index: newValue))
+        }
+        .onDisappear {
+            if didLogOnboardingStarted && !didLogOnboardingCompleted && !session.hasSeenOnboarding {
+                AnalyticsLogger.log(.onboardingAbandoned(lastSlideIndex: currentIndex))
+            }
+        }
     }
 
     @ViewBuilder
@@ -78,6 +97,15 @@ struct OnboardingFlowView: View {
         if isLastPage {
             hasSeenContentQuickstart = false
             forceShowContentQuickstartOnce = true
+            let duration = max(0, Int(Date().timeIntervalSince(onboardingStartDate ?? Date())))
+            AnalyticsLogger.log(
+                .onboardingCompleted(
+                    totalSlides: pages.count,
+                    durationSeconds: duration,
+                    source: "onboarding"
+                )
+            )
+            didLogOnboardingCompleted = true
             session.markOnboardingSeen()
             return
         }

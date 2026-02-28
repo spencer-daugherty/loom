@@ -30,6 +30,8 @@ struct AccountStepView: View {
     @State private var isGoogleSignInInProgress = false
     @State private var appleSignInNonce: String?
     @State private var showMoreOptions = false
+    @State private var didLogSignupStarted = false
+    @State private var didCompleteSignup = false
 
     var body: some View {
         VStack(spacing: 22) {
@@ -207,6 +209,17 @@ struct AccountStepView: View {
             .padding(.top, 8)
             .frame(maxWidth: .infinity, alignment: .center)
         }
+        .onAppear {
+            if !didLogSignupStarted {
+                didLogSignupStarted = true
+                AnalyticsLogger.log(.signupStarted())
+            }
+        }
+        .onDisappear {
+            if didLogSignupStarted && !didCompleteSignup && !session.hasAccount {
+                AnalyticsLogger.log(.signupAbandoned(reason: "dismissed"))
+            }
+        }
     }
 
     private var googleGIcon: some View {
@@ -251,6 +264,8 @@ struct AccountStepView: View {
                     email: user.email ?? result.user.profile?.email,
                     fullName: user.displayName ?? result.user.profile?.name
                 )
+                didCompleteSignup = true
+                AnalyticsLogger.log(.signupCompleted(method: "google"))
             } catch {
                 googleSignInError = error.localizedDescription
             }
@@ -296,6 +311,8 @@ struct AccountStepView: View {
                 if let resolvedName {
                     UserDefaults.standard.set(resolvedName, forKey: UserSessionStore.Keys.accountName)
                 }
+                didCompleteSignup = true
+                AnalyticsLogger.log(.signupCompleted(method: "apple"))
             } catch {
                 appleSignInError = error.localizedDescription
             }
