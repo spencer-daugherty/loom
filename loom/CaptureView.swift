@@ -361,6 +361,7 @@ struct CaptureView: View {
     @State private var repeatDraftEndDate: Date = Date()
     @FocusState private var isFullTextEditorFocused: Bool
     @FocusState private var repeatEditorTextFocused: Bool
+    @State private var editActionKeyboardHeight: CGFloat = 0
 
     init(forceSetupWelcome: Bool = false) {
         self.forceSetupWelcome = forceSetupWelcome
@@ -559,7 +560,8 @@ struct CaptureView: View {
         if hasMetCaptureSetupRequirement {
             return "You can swipe down to dismiss when you're done adding to dos"
         }
-        return "Add \(captureSetupRemainingToDoCount) to do tasks"
+        let noun = captureSetupRemainingToDoCount == 1 ? "task" : "tasks"
+        return "Add \(captureSetupRemainingToDoCount) to do \(noun)"
     }
     private var shouldShowCaptureIntro: Bool {
         ((shouldUseCaptureSetupFlow && captureSetupDidContinue) || (!shouldUseCaptureSetupFlow && allItems.isEmpty)) && !isSearchMode
@@ -762,6 +764,32 @@ struct CaptureView: View {
         }
     }
 
+    private func editActionKeyboardDismissBottomPadding(in proxy: GeometryProxy) -> CGFloat {
+        guard editActionKeyboardHeight > 0 else { return 0 }
+        let keyboardTopGlobal = UIScreen.main.bounds.height - editActionKeyboardHeight
+        let viewBottomGlobal = proxy.frame(in: .global).maxY
+        let keyboardOverlapInView = max(0, viewBottomGlobal - keyboardTopGlobal)
+        return keyboardOverlapInView + 15
+    }
+
+    private var editActionKeyboardDismissButton: some View {
+        Button {
+            isFullTextEditorFocused = false
+            focusedField = nil
+        } label: {
+            Image(systemName: "keyboard.chevron.compact.down")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.primary.opacity(0.85))
+                .frame(width: 45, height: 45)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay(
+                    Circle()
+                        .stroke(Color.white.opacity(0.28), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
     private func captureList(proxy: ScrollViewProxy) -> some View {
         List {
             if shouldShowCaptureSetupCautionCard {
@@ -782,7 +810,7 @@ struct CaptureView: View {
                 if captureIntroShowsDeleteDemoRow {
                     captureIntroDemoSwipeRow(
                         text: "Get milk",
-                        helperHintText: "Swipe left to delete",
+                        helperHintText: "Try: Swipe left to delete",
                         helperHintBackgroundColor: .red,
                         helperHintTextColor: .white,
                         trailingActionLabel: "Delete",
@@ -805,8 +833,8 @@ struct CaptureView: View {
 
                 if captureIntroShowsQuickCompleteDemoRow {
                     captureIntroDemoSwipeRow(
-                        text: "Finish quarterly report",
-                        helperHintText: "Swipe right to Quick Complete",
+                        text: "Finish annual report",
+                        helperHintText: "Try: Swipe right to Quick Complete",
                         helperHintBackgroundColor: .green,
                         helperHintTextColor: .white,
                         trailingActionLabel: nil,
@@ -1151,7 +1179,7 @@ struct CaptureView: View {
                         }
                     }
 
-                    Section("Quick Complete") {
+                    Section("Complete") {
                         Button {
                             guard let id = editingItemID,
                                   let item = allItems.first(where: { $0.id == id }) else {
@@ -1162,8 +1190,8 @@ struct CaptureView: View {
                             quickCompleteItem(item)
                             closeEditActionSheet()
                         } label: {
-                            Label("Quick Complete", systemImage: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
+                            Text("Complete")
+                                .foregroundStyle(.blue)
                         }
                     }
                 }
@@ -1203,6 +1231,19 @@ struct CaptureView: View {
                         }
                     }
                 }
+                .overlay {
+                    GeometryReader { proxy in
+                        if editActionKeyboardHeight > 0 {
+                            HStack {
+                                Spacer()
+                                editActionKeyboardDismissButton
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                            .padding(.trailing, 16)
+                            .padding(.bottom, editActionKeyboardDismissBottomPadding(in: proxy))
+                        }
+                    }
+                }
                 .onChange(of: editingItemHasDueDate) { _, hasDueDate in
                     if !hasDueDate {
                         editingItemLeverageResourceID = nil
@@ -1210,6 +1251,16 @@ struct CaptureView: View {
                     if hasDueDate {
                         showEditLeverageDueDateError = false
                     }
+                }
+                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
+                    guard
+                        let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
+                    else { return }
+                    let screenHeight = UIScreen.main.bounds.height
+                    editActionKeyboardHeight = max(0, screenHeight - frame.minY)
+                }
+                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+                    editActionKeyboardHeight = 0
                 }
                 .overlay(alignment: .bottom) {
                     if showEditLeverageDueDateError && !editingItemHasDueDate {
@@ -1238,10 +1289,14 @@ struct CaptureView: View {
             .onAppear {
                 focusedField = nil
                 isComposerFocused = false
+                editActionKeyboardHeight = 0
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.07) {
                     isFullTextEditorFocused = true
                 }
                 showEditLeverageDueDateError = false
+            }
+            .onDisappear {
+                editActionKeyboardHeight = 0
             }
         }
         .onChange(of: showCompletedList) { _, isShowing in
@@ -1455,12 +1510,11 @@ struct CaptureView: View {
 
     private var captureSetupWelcomeScreen: some View {
         VStack(spacing: 0) {
-            ScrollView {
-                captureSetupWelcomeContent
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
-                    .padding(.bottom, 16)
-            }
+            Spacer(minLength: 0)
+            captureSetupWelcomeContent
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+            Spacer(minLength: 0)
 
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) {
@@ -1487,6 +1541,7 @@ struct CaptureView: View {
             .padding(.top, 6)
             .padding(.bottom, 24)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 
     private var captureSetupWelcomeContent: some View {
