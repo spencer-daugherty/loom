@@ -75,6 +75,7 @@ export default {
     const isFollowUpPromptMode = detectFollowUpPromptMode(nonSystemMessages);
     const isAutoGroupMode = detectAutoGroupMode(nonSystemMessages);
     const isAutoWriteVisionMode = detectAutoWriteVisionMode(nonSystemMessages);
+    const isAutoWritePassionsMode = detectAutoWritePassionsMode(nonSystemMessages);
     const isAutoWriteMissionMode = detectAutoWriteMissionMode(nonSystemMessages);
     const isAutoWriteIdentityMode = detectAutoWriteIdentityMode(nonSystemMessages);
     const isAutoWriteLittleWinMode = detectAutoWriteLittleWinMode(nonSystemMessages);
@@ -105,6 +106,8 @@ export default {
       ? "autogroup-v1"
       : (isAutoWriteVisionMode
         ? "autowrite-vision-v1"
+      : (isAutoWritePassionsMode
+        ? "autowrite-passions-v1"
       : (isAutoWriteLittleWinMode
         ? "autowrite-littlewin-v1"
       : (isAutoWriteIdentityMode
@@ -117,7 +120,7 @@ export default {
           ? "reflect-readable-insights-v1"
           : (isFulfillmentReadableInsightMode
             ? "fulfillment-readable-insights-v1"
-            : (isPurposeReadableInsightMode ? "purpose-readable-insights-v1" : "grounding-cta-v3"))))))));
+            : (isPurposeReadableInsightMode ? "purpose-readable-insights-v1" : "grounding-cta-v3")))))))));
 
     const coreInstructions = isAutoGroupMode ? [
       "You generate AutoGroup plans for Loom Plan Step 3 (Group).",
@@ -155,6 +158,30 @@ export default {
       "- Each suggestion must be <=150 characters.",
       "- No numbering, no bullets, no markdown.",
       "- Suggestions must be relevant to Purpose Vision context.",
+      "- Do not output anything outside the JSON object."
+    ].join("\n") : isAutoWritePassionsMode ? [
+      "You generate AutoWrite passion suggestions for Loom Purpose Passions.",
+      "Use APP_CONTEXT_JSON, current passion buckets, and prior suggestions.",
+      "Use guidance from Loom's Purpose instructions and Need ideas content.",
+      "Bucket guidance:",
+      "- Love: what the user loves and wants more of.",
+      "- Vows: commitments and non-negotiable principles.",
+      "- Thrill: what energizes and excites the user.",
+      "- Hate: what the user rejects and stands against.",
+      "Return JSON ONLY in this exact shape:",
+      '{"suggestions":[{"emotion":"love|vows|thrill|just","passion":"string"}],"confidence":"high|medium|low"}',
+      "Rules:",
+      "- Return 2-4 suggestions.",
+      "- Keep each passion 1-5 words. Fewer words is preferred.",
+      "- Keep wording concrete, strong, and value-driven.",
+      "- Map Hate to emotion='just'.",
+      "- Avoid repeating items already present in the user's bucket lists.",
+      "- Do not paraphrase or lightly reword existing bucket items; suggestions must be clearly distinct concepts.",
+      "- Avoid semantic overlap with current items.",
+      "- Prefer direct noun phrases; avoid verb-led phrasing like 'Rejecting ...', 'Challenging ...', 'Avoiding ...'.",
+      "- Each suggestion must make sense as a standalone passion item.",
+      "- Prefer variety across buckets when possible.",
+      "- No numbering, no bullets, no markdown.",
       "- Do not output anything outside the JSON object."
     ].join("\n") : isAutoWriteLittleWinMode ? [
       "You generate AutoWrite little win suggestions for Loom Fulfillment Little Wins.",
@@ -427,7 +454,7 @@ export default {
           model,
           messages: groundedMessages,
           temperature,
-          max_tokens: isAutoGroupMode ? 700 : (isAutoWriteVisionMode ? 220 : (isAutoWriteLittleWinMode ? 260 : (isAutoWriteIdentityMode ? 260 : (isAutoWriteMissionMode ? 220 : (isFollowUpPromptMode ? 350 : (isReflectReadableInsightsMode ? 650 : (isFulfillmentReadableInsightMode ? 450 : (isPurposeReadableInsightMode ? 450 : 900)))))))),
+          max_tokens: isAutoGroupMode ? 700 : (isAutoWriteVisionMode ? 220 : (isAutoWritePassionsMode ? 260 : (isAutoWriteLittleWinMode ? 260 : (isAutoWriteIdentityMode ? 260 : (isAutoWriteMissionMode ? 220 : (isFollowUpPromptMode ? 350 : (isReflectReadableInsightsMode ? 650 : (isFulfillmentReadableInsightMode ? 450 : (isPurposeReadableInsightMode ? 450 : 900))))))))),
           response_format: { type: "json_object" },
         }),
       });
@@ -594,6 +621,34 @@ export default {
 
     if (isAutoWriteVisionMode) {
       const autoWrite = normalizeAutoWriteVisionPayload(parsedModelJSON, upstreamText);
+      const out = {
+        message: JSON.stringify(autoWrite),
+        actions: [],
+        debug: {
+          ...buildWorkerDebug({
+            model,
+            contextBytes,
+            contextHash,
+            contextKeys,
+            contextInfo,
+            workerPromptVersion,
+            messages,
+            nonSystemMessages,
+            upstreamStatus,
+            upstreamContentType,
+            parseMode,
+          }),
+          usedContext: contextBytes > 0,
+          claimedUsedContext: null,
+          evidence: [],
+          confidence: autoWrite.confidence || null,
+        },
+      };
+      return json(out, 200, corsHeaders(request));
+    }
+
+    if (isAutoWritePassionsMode) {
+      const autoWrite = normalizeAutoWritePassionsPayload(parsedModelJSON, upstreamText);
       const out = {
         message: JSON.stringify(autoWrite),
         actions: [],
@@ -950,6 +1005,12 @@ function detectAutoWriteVisionMode(nonSystemMessages) {
   return content.includes("You are helping with Loom Purpose Vision (AutoWrite).");
 }
 
+function detectAutoWritePassionsMode(nonSystemMessages) {
+  const latestUser = [...(nonSystemMessages || [])].reverse().find((m) => m?.role === "user");
+  const content = String(latestUser?.content || "");
+  return content.includes("You are helping with Loom Purpose Passions (AutoWrite).");
+}
+
 function detectAutoWriteLittleWinMode(nonSystemMessages) {
   const latestUser = [...(nonSystemMessages || [])].reverse().find((m) => m?.role === "user");
   const content = String(latestUser?.content || "");
@@ -1174,6 +1235,85 @@ function normalizeAutoWriteVisionPayload(parsed, fallbackText) {
 
   return {
     suggestions,
+    confidence,
+  };
+}
+
+function normalizePassionEmotionKey(value) {
+  const key = String(value || "").trim().toLowerCase();
+  if (!key) return null;
+  if (key.includes("love")) return "love";
+  if (key.includes("vow") || key.includes("commit")) return "vows";
+  if (key.includes("thrill") || key.includes("excite")) return "thrill";
+  if (key.includes("hate") || key.includes("just")) return "just";
+  return null;
+}
+
+function normalizeAutoWritePassionsPayload(parsed, fallbackText) {
+  let raw = parsed && typeof parsed === "object" ? parsed : null;
+  if (!raw) {
+    try {
+      raw = JSON.parse(String(fallbackText || ""));
+    } catch {
+      raw = null;
+    }
+  }
+
+  const source = Array.isArray(raw?.suggestions)
+    ? raw.suggestions
+    : (Array.isArray(raw?.passions) ? raw.passions : []);
+
+  const suggestions = source
+    .map((item) => {
+      if (typeof item === "string") {
+        const split = item.split(":");
+        if (split.length < 2) return null;
+        const emotion = normalizePassionEmotionKey(split[0]);
+        const passion = truncateAtWordBoundary(
+          String(split.slice(1).join(":")).replace(/\s+/g, " ").trim(),
+          60
+        );
+        if (!emotion || !passion) return null;
+        const words = passion.split(/\s+/).filter(Boolean).slice(0, 5).join(" ");
+        return { emotion, passion: words };
+      }
+      if (!item || typeof item !== "object") return null;
+      const emotionRaw = item.emotion || item.bucket || item.category || "";
+      const emotion = normalizePassionEmotionKey(emotionRaw);
+      const passionRaw = item.passion || item.text || item.value || "";
+      const cleaned = String(passionRaw).replace(/\s+/g, " ").trim();
+      if (!emotion || !cleaned) return null;
+      const words = cleaned.split(/\s+/).filter(Boolean).slice(0, 5).join(" ");
+      const passion = truncateAtWordBoundary(words, 60);
+      if (!passion) return null;
+      return { emotion, passion };
+    })
+    .filter(Boolean)
+    .slice(0, 4);
+
+  const deduped = [];
+  const seen = new Set();
+  for (const item of suggestions) {
+    const key = `${item.emotion}|${String(item.passion).toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(item);
+  }
+
+  const confidenceRaw = typeof raw?.confidence === "string" ? raw.confidence.toLowerCase().trim() : "";
+  const confidence = ["high", "medium", "low"].includes(confidenceRaw)
+    ? confidenceRaw
+    : (deduped.length > 0 ? "medium" : "low");
+
+  if (deduped.length === 0) {
+    return {
+      suggestions: [],
+      confidence: "low",
+    };
+  }
+
+  return {
+    suggestions: deduped,
     confidence,
   };
 }

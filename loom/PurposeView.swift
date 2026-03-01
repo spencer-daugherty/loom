@@ -402,6 +402,9 @@ struct PurposeView: View {
     @State private var drivingForceHeaderInsightOutlineAngle: Double = 0
     @State private var readableInsightsByScoreKey: [String: String] = [:]
     @State private var readableInsightLoadingKeys: Set<String> = []
+    @State private var showDeletePassionHint = false
+    @State private var deletePassionHintText = ""
+    @State private var deletePassionHintWorkItem: DispatchWorkItem?
     @FocusState private var focusedField: Field?
     private let passionHeaderTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
 
@@ -521,6 +524,24 @@ struct PurposeView: View {
             DrivingForceTrendsView(snapshots: passionScoreSnapshots)
         }
         .alert("Delete Historic Item?", isPresented: deleteHistoricBinding, actions: deleteHistoricActions, message: deleteHistoricMessage)
+        .overlay(alignment: .bottom) {
+            if showDeletePassionHint {
+                Text(deletePassionHintText)
+                    .font(.footnote)
+                    .fontWeight(.bold)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(10)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color.black.opacity(0.12), lineWidth: 1)
+                    )
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 56)
+                    .transition(.opacity)
+            }
+        }
     }
 
     @ToolbarContentBuilder
@@ -1509,6 +1530,10 @@ struct PurposeView: View {
     }
     
     private func deletePassion(_ passion: Passion) {
+        if passionCount(for: passion.emotion) <= 2 {
+            showDeletePassionBlockedHint(for: passion.emotion)
+            return
+        }
         let archive = PassionArchive(
             date: passion.date,
             emotion: passion.emotion,
@@ -1592,6 +1617,52 @@ struct PurposeView: View {
         }
 
         try? context.save()
+    }
+
+    private func passionCount(for emotion: String) -> Int {
+        switch emotion {
+        case "love": return lovePassions.count
+        case "vows": return vowsPassions.count
+        case "thrill": return thrillPassions.count
+        case "just": return justPassions.count
+        default: return passionsForEmotion(emotion).count
+        }
+    }
+
+    private func passionsForEmotion(_ emotion: String) -> [Passion] {
+        switch emotion {
+        case "love": return lovePassions
+        case "vows": return vowsPassions
+        case "thrill": return thrillPassions
+        case "just": return justPassions
+        default: return []
+        }
+    }
+
+    private func showDeletePassionBlockedHint(for emotion: String) {
+        deletePassionHintWorkItem?.cancel()
+        let title = passionTitleForHint(emotion)
+        deletePassionHintText = "Keep at least 2 \(title) items."
+        withAnimation(.easeInOut(duration: 0.15)) {
+            showDeletePassionHint = true
+        }
+        let work = DispatchWorkItem {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                showDeletePassionHint = false
+            }
+        }
+        deletePassionHintWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8, execute: work)
+    }
+
+    private func passionTitleForHint(_ emotion: String) -> String {
+        switch emotion {
+        case "love": return "Love"
+        case "vows": return "Vow"
+        case "thrill": return "Thrill"
+        case "just": return "Hate"
+        default: return "Passion"
+        }
     }
 
     private func recoverArchive(_ archive: DrivingForceArchive, kind: HistoricKind) {
