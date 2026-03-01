@@ -332,7 +332,7 @@ struct ContentView: View {
     }
 
     private var hasCompletedCaptureSetup: Bool {
-        !notificationCaptureItems.isEmpty
+        notificationCaptureItems.count >= 6
     }
 
     private var canOpenPlanOrActionFlow: Bool {
@@ -490,6 +490,7 @@ struct ContentView: View {
         let cardSpacing: CGFloat = availableHeight < 760 ? 10 : (availableHeight > 900 ? 20 : 16)
         let outerVerticalPadding: CGFloat = availableHeight < 760 ? 4 : (availableHeight > 900 ? 14 : 8)
         let cardDensity: CGFloat = availableHeight < 760 ? 0.88 : (availableHeight > 900 ? 1.06 : 1.0)
+        let shouldHardLockToHomePage = shouldLockToFocusedHomeTarget && !shouldShowContentQuickstart
 
         return ZStack {
             Color(.systemGroupedBackground)
@@ -498,58 +499,65 @@ struct ContentView: View {
             VStack(spacing: 10) {
                 header
 
-                TabView(selection: $homePageIndex) {
-                    littleWinsMiddlePage()
-                        .tag(HomeSwipePage.social.rawValue)
-
-                    centerHomepageMiddleContent(
-                        outerVerticalPadding: outerVerticalPadding,
-                        cardSpacing: cardSpacing,
-                        cardDensity: cardDensity
-                    )
-                    .safeAreaInset(edge: .bottom, spacing: 10) {
-                        VStack(spacing: 0) {
-                            footer
-                            Color.clear.frame(height: 8)
-                        }
-                    }
-                    .tag(HomeSwipePage.home.rawValue)
-
-                    LoomAIChatView(isActivePage: homePageIndex == HomeSwipePage.littleWins.rawValue && !shouldShowContentQuickstart)
-                        .background(contentQuickstartTargetFrame(.loomAI))
-                        .tag(HomeSwipePage.littleWins.rawValue)
-                }
-                .tabViewStyle(.page(indexDisplayMode: .never))
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .onPreferenceChange(ContentQuickstartFramePreferenceKey.self) { frames in
-                    var resolved = contentQuickstartFrames
-                    let screenBounds = UIScreen.main.bounds
-                    for (target, candidates) in frames {
-                        let valid = candidates.filter { rect in
-                            rect.width > 1 && rect.height > 1
-                        }
-                        let picked = valid.max { lhs, rhs in
-                            let lhsDistanceToCenter = abs(lhs.midX - screenBounds.midX)
-                            let rhsDistanceToCenter = abs(rhs.midX - screenBounds.midX)
-                            if abs(lhsDistanceToCenter - rhsDistanceToCenter) > 0.5 {
-                                return lhsDistanceToCenter > rhsDistanceToCenter
-                            }
-                            let lhsVisibleArea = lhs.intersection(screenBounds).area
-                            let rhsVisibleArea = rhs.intersection(screenBounds).area
-                            if abs(lhsVisibleArea - rhsVisibleArea) > 0.5 {
-                                return lhsVisibleArea < rhsVisibleArea
-                            }
-                            return lhs.area < rhs.area
-                        } ?? valid.last ?? candidates.last
-                        if let picked {
-                            resolved[target] = picked
-                        }
-                    }
-                    if resolved != contentQuickstartFrames {
-                        contentQuickstartFrames = resolved
+                let homePageContent = centerHomepageMiddleContent(
+                    outerVerticalPadding: outerVerticalPadding,
+                    cardSpacing: cardSpacing,
+                    cardDensity: cardDensity
+                )
+                .safeAreaInset(edge: .bottom, spacing: 10) {
+                    VStack(spacing: 0) {
+                        footer
+                        Color.clear.frame(height: 8)
                     }
                 }
-                .environment(\.contentCardDensity, cardDensity)
+
+                if shouldHardLockToHomePage {
+                    homePageContent
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    TabView(selection: $homePageIndex) {
+                        littleWinsMiddlePage()
+                            .tag(HomeSwipePage.social.rawValue)
+
+                        homePageContent
+                            .tag(HomeSwipePage.home.rawValue)
+
+                        LoomAIChatView(isActivePage: homePageIndex == HomeSwipePage.littleWins.rawValue && !shouldShowContentQuickstart)
+                            .background(contentQuickstartTargetFrame(.loomAI))
+                            .tag(HomeSwipePage.littleWins.rawValue)
+                    }
+                    .tabViewStyle(.page(indexDisplayMode: .never))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .onPreferenceChange(ContentQuickstartFramePreferenceKey.self) { frames in
+                        var resolved = contentQuickstartFrames
+                        let screenBounds = UIScreen.main.bounds
+                        for (target, candidates) in frames {
+                            let valid = candidates.filter { rect in
+                                rect.width > 1 && rect.height > 1
+                            }
+                            let picked = valid.max { lhs, rhs in
+                                let lhsDistanceToCenter = abs(lhs.midX - screenBounds.midX)
+                                let rhsDistanceToCenter = abs(rhs.midX - screenBounds.midX)
+                                if abs(lhsDistanceToCenter - rhsDistanceToCenter) > 0.5 {
+                                    return lhsDistanceToCenter > rhsDistanceToCenter
+                                }
+                                let lhsVisibleArea = lhs.intersection(screenBounds).area
+                                let rhsVisibleArea = rhs.intersection(screenBounds).area
+                                if abs(lhsVisibleArea - rhsVisibleArea) > 0.5 {
+                                    return lhsVisibleArea < rhsVisibleArea
+                                }
+                                return lhs.area < rhs.area
+                            } ?? valid.last ?? candidates.last
+                            if let picked {
+                                resolved[target] = picked
+                            }
+                        }
+                        if resolved != contentQuickstartFrames {
+                            contentQuickstartFrames = resolved
+                        }
+                    }
+                    .environment(\.contentCardDensity, cardDensity)
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -841,7 +849,9 @@ struct ContentView: View {
     private var contentViewPresentationLayer: some View {
         contentViewNavigationLayer
             .sheet(isPresented: $isPresentingCaptureView) {
-                CaptureView()
+                CaptureView(
+                    forceSetupWelcome: activeHomeFocusTarget == .capture && shouldLockToFocusedHomeTarget
+                )
                     .presentationDragIndicator(.visible)
             }
             .sheet(isPresented: $isPresentingLittleWinsManagerSheet) {
@@ -1913,7 +1923,7 @@ struct ContentView: View {
         guard hasTodayCompletion else { return }
 
         withAnimation(.interactiveSpring(response: 0.30, dampingFraction: 0.82, blendDuration: 0.12)) {
-            littleWinsCompletedFocusIDs.remove(item.focusId)
+            _ = littleWinsCompletedFocusIDs.remove(item.focusId)
         }
         persistLittleWinToggle(focusId: item.focusId, isCompleted: true)
     }
@@ -2629,19 +2639,27 @@ struct ContentView: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: cardSpacing) {
-                    drivingForceSection
-                        .allowsHitTesting(allowsPurpose)
-                    fulfillmentSection
-                        .allowsHitTesting(allowsFulfillment)
-                    objectivesSection
-                        .allowsHitTesting(allowsObjectives)
+            GeometryReader { middleProxy in
+                let contentHeight = max(0, middleProxy.size.height - (outerVerticalPadding * 2))
+                let targetCardHeight = min(262, max(176, (contentHeight - (cardSpacing * 2)) / 3))
+
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: cardSpacing) {
+                        drivingForceSection
+                            .frame(minHeight: targetCardHeight, alignment: .top)
+                            .allowsHitTesting(allowsPurpose)
+                        fulfillmentSection
+                            .frame(minHeight: targetCardHeight, alignment: .top)
+                            .allowsHitTesting(allowsFulfillment)
+                        objectivesSection
+                            .frame(minHeight: targetCardHeight, alignment: .top)
+                            .allowsHitTesting(allowsObjectives)
+                    }
+                    .padding(.horizontal)
+                    .padding(.vertical, outerVerticalPadding)
                 }
-                .padding(.horizontal)
-                .padding(.vertical, outerVerticalPadding)
+                .scrollDisabled(isFocusedLock)
             }
-            .scrollDisabled(isFocusedLock)
         }
         .environment(\.contentCardDensity, cardDensity)
     }
@@ -4029,7 +4047,7 @@ struct ContentView: View {
                         onboardingCallCard(
                             title: callCard.title,
                             step: callCard.step,
-                            leadingButtonLabel: shouldShowCaptureBackButton ? "back" : nil,
+                            leadingButtonLabel: shouldShowCaptureBackButton ? "Back" : nil,
                             leadingButtonAction: shouldShowCaptureBackButton ? returnToObjectivesSetupStep : nil
                         )
                             .offset(y: -58)
@@ -4190,20 +4208,13 @@ struct ContentView: View {
         let calloutSecondaryText = isDark ? Color(red: 0.35, green: 0.35, blue: 0.38) : Color(.systemGray4)
         return VStack(spacing: 0) {
             VStack(spacing: 0) {
-                if let leadingButtonLabel, let leadingButtonAction {
-                    HStack(spacing: 0) {
+                HStack(spacing: 8) {
+                    if let leadingButtonLabel, let leadingButtonAction {
                         Button(leadingButtonLabel, action: leadingButtonAction)
                             .buttonStyle(.plain)
                             .font(.system(size: 13.5, weight: .semibold))
                             .foregroundStyle(.blue)
-                        Spacer(minLength: 0)
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.top, 7)
-                    .padding(.bottom, 2)
-                }
-
-                HStack(spacing: 8) {
                     Text(step)
                         .font(.system(size: 13.75, weight: .semibold))
                         .foregroundStyle(calloutSecondaryText)
@@ -4211,7 +4222,6 @@ struct ContentView: View {
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(calloutPrimaryText)
                     if let trailingButtonLabel, let trailingButtonAction {
-                        Spacer(minLength: 8)
                         Button(trailingButtonLabel, action: trailingButtonAction)
                             .buttonStyle(.plain)
                             .font(.system(size: 13.5, weight: .semibold))
@@ -4219,7 +4229,7 @@ struct ContentView: View {
                     }
                 }
                 .padding(.horizontal, 12)
-                .padding(.top, leadingButtonLabel == nil ? 7 : 2)
+                .padding(.top, 7)
                 .padding(.bottom, 7)
             }
             .background(
@@ -4230,6 +4240,7 @@ struct ContentView: View {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .stroke(isDark ? Color.black.opacity(0.10) : Color.white.opacity(0.10), lineWidth: 1)
             )
+            .fixedSize(horizontal: true, vertical: false)
 
             if let pointerTrailingInset {
                 HStack(spacing: 0) {
@@ -5266,7 +5277,9 @@ struct ContentView: View {
                                 emphasizeSelectedSlice: false
                             )
                         }
-                        .frame(width: 132, height: 132)
+                        .frame(width: 138, height: 138)
+                        .padding(.top, 6)
+                        .padding(.bottom, 2)
                         .matchedGeometryEffect(
                             id: "fulfillmentGraph",
                             in: graphNamespace,

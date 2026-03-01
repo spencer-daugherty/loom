@@ -208,6 +208,11 @@ struct ObjectivesAddView: View {
         let byID = Dictionary(uniqueKeysWithValues: currentCategoryLittleWins.map { ($0.id, $0) })
         return selectedContributingLittleWinIDs.compactMap { byID[$0] }
     }
+
+    private var hasSelectedFulfillmentArea: Bool {
+        let trimmed = selectedCategory.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmed.isEmpty && trimmed != Self.categoryPlaceholder
+    }
     
     enum MeasureFormat: String, CaseIterable, Identifiable {
         case number = "Number"
@@ -340,6 +345,27 @@ struct ObjectivesAddView: View {
     var body: some View {
         NavigationStack {
             Form {
+                if !hasSelectedFulfillmentArea {
+                    Section {
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.subheadline)
+                                .foregroundStyle(Color.black.opacity(0.7))
+                                .padding(.top, 1)
+                            Text("Note: Add Fulfillment Area at the bottom")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(Color.black.opacity(0.7))
+                                .multilineTextAlignment(.leading)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(Color(red: 0.98, green: 0.92, blue: 0.72))
+                        )
+                    }
+                }
                 ChartSection(
                     isMeasurable: isMeasurable,
                     hasOutcome: outcome != nil,
@@ -380,13 +406,15 @@ struct ObjectivesAddView: View {
                     categories: fulfillmentAreaOptions,
                     placeholder: Self.categoryPlaceholder
                 )
-                ContributingLittleWinsSection(
-                    selectedItems: selectedContributingLittleWins,
-                    onAddTap: { isShowingContributingLittleWinsSheet = true },
-                    onUnassign: { focus in
-                        selectedContributingLittleWinIDs.remove(focus.id)
-                    }
-                )
+                if hasSelectedFulfillmentArea {
+                    ContributingLittleWinsSection(
+                        selectedItems: selectedContributingLittleWins,
+                        onAddTap: { isShowingContributingLittleWinsSheet = true },
+                        onUnassign: { focus in
+                            selectedContributingLittleWinIDs.remove(focus.id)
+                        }
+                    )
+                }
                 if outcome != nil {
                     DeleteOutcomeSection(
                         isShowingDeleteOutcomeAlert: $isShowingDeleteOutcomeAlert,

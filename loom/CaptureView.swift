@@ -232,6 +232,7 @@ struct CaptureView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("setup_homepage_mode") private var setupHomepageMode = false
+    private let forceSetupWelcome: Bool
 
     @Query(sort: \RollingCaptureItem.createdAt, order: .reverse)
     private var allItems: [RollingCaptureItem]
@@ -267,6 +268,7 @@ struct CaptureView: View {
     @State private var captureIntroShowsDeleteDemoRow: Bool = true
     @State private var captureIntroShowsQuickCompleteDemoRow: Bool = true
     @State private var captureIntroShowsSettingsDemoRow: Bool = true
+    @State private var captureSetupDidContinue: Bool = false
     @State private var isSearchMode: Bool = false
     @State private var showFullTextEditorSheet: Bool = false
     @State private var editingItemID: UUID?
@@ -359,6 +361,10 @@ struct CaptureView: View {
     @State private var repeatDraftEndDate: Date = Date()
     @FocusState private var isFullTextEditorFocused: Bool
     @FocusState private var repeatEditorTextFocused: Bool
+
+    init(forceSetupWelcome: Bool = false) {
+        self.forceSetupWelcome = forceSetupWelcome
+    }
 
     private enum FocusField: Hashable {
         case newInput
@@ -471,9 +477,14 @@ struct CaptureView: View {
     }
 
     private let recurringDispatchTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
+    private let captureSetupRequiredToDoCount = 6
+
+    private var shouldUseCaptureSetupFlow: Bool {
+        forceSetupWelcome || setupHomepageMode
+    }
 
     private var displayItems: [RollingCaptureItem] {
-        if setupHomepageMode { return [] }
+        if isCaptureSetupWelcomePage { return [] }
         // After auto-unhide runs, anything due will have isGhost=false, so filtering is straightforward.
         let base: [RollingCaptureItem]
         if isSearchMode {
@@ -532,8 +543,29 @@ struct CaptureView: View {
     }
 
     private var earliestUnhideDate: Date { Calendar.current.date(byAdding: .day, value: 7, to: Date())! }
+    private var isCaptureSetupWelcomePage: Bool {
+        shouldUseCaptureSetupFlow && !captureSetupDidContinue
+    }
+    private var captureSetupRemainingToDoCount: Int {
+        max(0, captureSetupRequiredToDoCount - allItems.count)
+    }
+    private var hasMetCaptureSetupRequirement: Bool {
+        captureSetupRemainingToDoCount == 0
+    }
+    private var shouldShowCaptureSetupCautionCard: Bool {
+        shouldUseCaptureSetupFlow && captureSetupDidContinue && !isSearchMode
+    }
+    private var captureSetupCautionText: String {
+        if hasMetCaptureSetupRequirement {
+            return "You can swipe down to dismiss when you're done adding to dos"
+        }
+        return "Add \(captureSetupRemainingToDoCount) to do tasks"
+    }
     private var shouldShowCaptureIntro: Bool {
-        (setupHomepageMode || allItems.isEmpty) && !isSearchMode
+        ((shouldUseCaptureSetupFlow && captureSetupDidContinue) || (!shouldUseCaptureSetupFlow && allItems.isEmpty)) && !isSearchMode
+    }
+    private var shouldShowCaptureIntroHeaderInList: Bool {
+        !shouldUseCaptureSetupFlow && allItems.isEmpty && !isSearchMode
     }
     private var captureIntroBoxBackground: Color {
         colorScheme == .dark ? Color(.systemGroupedBackground) : Color.white
@@ -580,45 +612,31 @@ struct CaptureView: View {
         NavigationView {
             ZStack {
                 (colorScheme == .dark ? Color(.systemGroupedBackground) : Color.white).ignoresSafeArea()
-                VStack(spacing: 12) {
-                    ScrollViewReader { proxy in
-                        captureList(proxy: proxy)
+                Group {
+                    if isCaptureSetupWelcomePage {
+                        captureSetupWelcomeScreen
+                    } else {
+                        VStack(spacing: 12) {
+                            ScrollViewReader { proxy in
+                                captureList(proxy: proxy)
+                            }
+                        }
+                        .background(Color.clear)
+                        .safeAreaInset(edge: .bottom) {
+                            captureBottomInset
+                        }
                     }
                 }
-                .background(Color.clear)
-                .navigationTitle("Capture")
+                .navigationTitle(isCaptureSetupWelcomePage ? "" : "Capture")
                 .navigationBarTitleDisplayMode(.inline)
+                .navigationBarHidden(isCaptureSetupWelcomePage)
                 .toolbar {
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        Button {
-                            showRecurringSettingsSheet = true
-                        } label: {
-                            Image(systemName: "gearshape")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(.primary)
-                                .padding(8)
-                                .background(.ultraThinMaterial, in: Circle())
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        if isSearchMode {
-                            Button("Return") {
-                                isSearchMode = false
-                                input = ""
-                                isComposerFocused = true
-                            }
-                            .foregroundStyle(.blue)
-                        } else {
+                    if !isCaptureSetupWelcomePage {
+                        ToolbarItem(placement: .navigationBarLeading) {
                             Button {
-                                isComposerFocused = false
-                                isSearchMode = true
-                                input = ""
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                                    isComposerFocused = true
-                                }
+                                showRecurringSettingsSheet = true
                             } label: {
-                                Image(systemName: "magnifyingglass")
+                                Image(systemName: "gearshape")
                                     .font(.system(size: 16, weight: .semibold))
                                     .foregroundStyle(.primary)
                                     .padding(8)
@@ -626,8 +644,35 @@ struct CaptureView: View {
                             }
                             .buttonStyle(.plain)
                         }
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            if isSearchMode {
+                                Button("Return") {
+                                    isSearchMode = false
+                                    input = ""
+                                    isComposerFocused = true
+                                }
+                                .foregroundStyle(.blue)
+                            } else {
+                                Button {
+                                    isComposerFocused = false
+                                    isSearchMode = true
+                                    input = ""
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                                        isComposerFocused = true
+                                    }
+                                } label: {
+                                    Image(systemName: "magnifyingglass")
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundStyle(.primary)
+                                        .padding(8)
+                                        .background(.ultraThinMaterial, in: Circle())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
                     }
                 }
+                .toolbar(isCaptureSetupWelcomePage ? .hidden : .visible, for: .navigationBar)
                     .onAppear {
                         runAutoUnhideIfNeeded()
                         dedupeCaptureItemsIfNeeded()
@@ -642,7 +687,15 @@ struct CaptureView: View {
                             syncMicrosoftTodoIntoCapture()
                         }
 
+                        if isCaptureSetupWelcomePage {
+                            isSearchMode = false
+                            input = ""
+                            focusedField = nil
+                            isComposerFocused = false
+                        }
+                        captureSetupDidContinue = !shouldUseCaptureSetupFlow
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            guard !isCaptureSetupWelcomePage else { return }
                             isComposerFocused = true
                         }
                     }
@@ -682,12 +735,10 @@ struct CaptureView: View {
                         isComposerFocused = false
                     } else {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            guard !isCaptureSetupWelcomePage else { return }
                             isComposerFocused = true
                         }
                     }
-                }
-                .safeAreaInset(edge: .bottom) {
-                    captureBottomInset
                 }
             }
         }
@@ -700,25 +751,46 @@ struct CaptureView: View {
                 isComposerFocused = false
             }
         }
+        .onChange(of: setupHomepageMode) { _, isSetup in
+            captureSetupDidContinue = !(forceSetupWelcome || isSetup)
+            if isSetup {
+                isSearchMode = false
+                input = ""
+                isComposerFocused = false
+                focusedField = nil
+            }
+        }
     }
 
     private func captureList(proxy: ScrollViewProxy) -> some View {
         List {
-            if shouldShowCaptureIntro {
+            if shouldShowCaptureSetupCautionCard {
+                captureSetupCautionCard
+                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 2, trailing: 16))
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+            }
+
+            if shouldShowCaptureIntroHeaderInList {
                 captureIntroView
                     .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 2, trailing: 16))
                     .listRowSeparator(.hidden)
                     .transition(.opacity)
+            }
 
+            if shouldShowCaptureIntro {
                 if captureIntroShowsDeleteDemoRow {
                     captureIntroDemoSwipeRow(
-                        text: "Swipe left to delete an action",
+                        text: "Get milk",
+                        helperHintText: "Swipe left to delete",
+                        helperHintBackgroundColor: .red,
+                        helperHintTextColor: .white,
                         trailingActionLabel: "Delete",
                         trailingTint: .red,
                         leadingActionLabel: nil,
                         leadingTint: nil,
                         trailingIconName: nil,
-                        showsGearIcon: false,
+                        leadingSystemIconName: nil,
                         onLeadingCommit: nil,
                         onTrailingCommit: {
                             withAnimation(.easeInOut(duration: 0.18)) {
@@ -733,13 +805,16 @@ struct CaptureView: View {
 
                 if captureIntroShowsQuickCompleteDemoRow {
                     captureIntroDemoSwipeRow(
-                        text: "Swipe right to Quick Complete an action",
+                        text: "Finish quarterly report",
+                        helperHintText: "Swipe right to Quick Complete",
+                        helperHintBackgroundColor: .green,
+                        helperHintTextColor: .white,
                         trailingActionLabel: nil,
                         trailingTint: nil,
                         leadingActionLabel: "Quick Complete",
                         leadingTint: .green,
                         trailingIconName: nil,
-                        showsGearIcon: false,
+                        leadingSystemIconName: nil,
                         onLeadingCommit: {
                             withAnimation(.easeInOut(duration: 0.18)) {
                                 captureIntroShowsQuickCompleteDemoRow = false
@@ -755,27 +830,34 @@ struct CaptureView: View {
                 if captureIntroShowsSettingsDemoRow {
                     captureIntroDemoSwipeRow(
                         text: "Set recurring actions, set due date attentions, and integrate in settings.",
-                        trailingActionLabel: "Delete",
-                        trailingTint: .red,
-                        leadingActionLabel: "Quick Complete",
-                        leadingTint: .green,
+                        trailingActionLabel: nil,
+                        trailingTint: nil,
+                        leadingActionLabel: nil,
+                        leadingTint: nil,
                         trailingIconName: nil,
-                        showsGearIcon: true,
-                        onLeadingCommit: {
-                            withAnimation(.easeInOut(duration: 0.18)) {
-                                captureIntroShowsSettingsDemoRow = false
-                            }
-                        },
-                        onTrailingCommit: {
-                            withAnimation(.easeInOut(duration: 0.18)) {
-                                captureIntroShowsSettingsDemoRow = false
-                            }
-                        }
+                        leadingSystemIconName: "gearshape",
+                        onLeadingCommit: nil,
+                        onTrailingCommit: nil
                     )
                     .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
                 }
+
+                captureIntroDemoSwipeRow(
+                    text: "Hide and see hidden tasks that need attention later by clicking the toggle.",
+                    trailingActionLabel: nil,
+                    trailingTint: nil,
+                    leadingActionLabel: nil,
+                    leadingTint: nil,
+                    trailingIconName: nil,
+                    leadingSystemIconName: ghostClockIconName,
+                    onLeadingCommit: nil,
+                    onTrailingCommit: nil
+                )
+                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
             }
 
             ForEach(displayItems) { item in
@@ -1268,10 +1350,18 @@ struct CaptureView: View {
                 let sidePadding = min(24, max(14, totalWidth * 0.06))
                 let spacing = min(12, max(8, totalWidth * 0.025))
                 let textPadding = min(12, max(9, totalWidth * 0.028))
+                let composerHeight = 20 + (textPadding * 2)
                 let toggleWidth = min(60, max(46, totalWidth * 0.15))
                 let iconSize = min(24, max(20, totalWidth * 0.06))
                 let iconSlotWidth = iconSize + 4
-                let controlsWidth: CGFloat = isSearchMode ? 0 : (toggleWidth + iconSlotWidth + spacing)
+                let showQuickAddButton = !isSearchMode && !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                let quickAddButtonSize = composerHeight
+                let controlsWidth: CGFloat = {
+                    if isSearchMode { return 0 }
+                    let toggleAndIconWidth = toggleWidth + iconSlotWidth
+                    let quickAddWidth = showQuickAddButton ? (spacing + quickAddButtonSize) : 0
+                    return toggleAndIconWidth + quickAddWidth + spacing
+                }()
                 let usable = totalWidth - (sidePadding * 2)
                 let textWidth = max(140, usable - controlsWidth - (isSearchMode ? 0 : spacing))
 
@@ -1279,7 +1369,7 @@ struct CaptureView: View {
                     PersistentCaptureComposerField(
                         text: $input,
                         placeholder: isSearchMode ? "Search for an action..." : "Add an action…",
-                        returnKeyType: isSearchMode ? .search : .done,
+                        returnKeyType: isSearchMode ? .search : .send,
                         isFirstResponder: isComposerFocused && !showFullTextEditorSheet,
                         onSubmit: {
                             if !isSearchMode {
@@ -1320,6 +1410,19 @@ struct CaptureView: View {
                                 .foregroundStyle(isGhostOn ? .blue : .secondary)
                                 .frame(width: iconSlotWidth)
                                 .accessibilityHidden(true)
+
+                            if showQuickAddButton {
+                                Button {
+                                    addItem()
+                                } label: {
+                                    Image(systemName: "arrow.up")
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundStyle(.white)
+                                        .frame(width: quickAddButtonSize, height: quickAddButtonSize)
+                                        .background(Color.blue, in: Circle())
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
                         .frame(width: controlsWidth, alignment: .center)
                     }
@@ -1348,6 +1451,95 @@ struct CaptureView: View {
         }
         .animation(.easeInOut(duration: 0.22), value: shouldShowCaptureIntro)
         .ignoresSafeArea(edges: .bottom)
+    }
+
+    private var captureSetupWelcomeScreen: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                captureSetupWelcomeContent
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .padding(.bottom, 16)
+            }
+
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    captureSetupDidContinue = true
+                }
+                isSearchMode = false
+                input = ""
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    isComposerFocused = true
+                }
+            } label: {
+                Text("Continue")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color.blue)
+                    )
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 16)
+            .padding(.top, 6)
+            .padding(.bottom, 24)
+        }
+    }
+
+    private var captureSetupWelcomeContent: some View {
+        VStack(alignment: .center, spacing: 12) {
+            Image("CaptureGraphic")
+                .resizable()
+                .scaledToFit()
+                .frame(maxWidth: .infinity)
+                .frame(height: 184)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+            Text("Capture Everything")
+                .font(.largeTitle.weight(.bold))
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity, alignment: .center)
+
+            Text("This is where you collect everything on your mind. Tasks, ideas, commitments, etc.")
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .center)
+
+            Text("Don’t organize or filter yet. Just get it out. Clarity comes later.")
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .center)
+        }
+        .padding(12)
+        .background(captureIntroBoxBackground, in: RoundedRectangle(cornerRadius: 12))
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    private var captureSetupCautionCard: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.subheadline)
+                .foregroundStyle(Color.black.opacity(0.7))
+                .padding(.top, 1)
+            Text(captureSetupCautionText)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.black.opacity(0.7))
+                .multilineTextAlignment(.leading)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(red: 0.98, green: 0.92, blue: 0.72))
+        )
     }
 
     private var captureIntroView: some View {
@@ -1393,18 +1585,21 @@ struct CaptureView: View {
 
     private func captureIntroDemoSwipeRow(
         text: String,
+        helperHintText: String? = nil,
+        helperHintBackgroundColor: Color? = nil,
+        helperHintTextColor: Color? = nil,
         trailingActionLabel: String?,
         trailingTint: Color?,
         leadingActionLabel: String?,
         leadingTint: Color?,
         trailingIconName: String?,
-        showsGearIcon: Bool,
+        leadingSystemIconName: String?,
         onLeadingCommit: (() -> Void)?,
         onTrailingCommit: (() -> Void)?
     ) -> some View {
         HStack(spacing: 10) {
-            if showsGearIcon {
-                Image(systemName: "gearshape")
+            if let leadingSystemIconName {
+                Image(systemName: leadingSystemIconName)
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(.secondary)
             }
@@ -1412,9 +1607,22 @@ struct CaptureView: View {
                 .foregroundStyle(.primary)
                 .lineLimit(2)
             Spacer(minLength: 0)
-            Image(systemName: "ellipsis.rectangle")
-                .font(.system(size: 24, weight: .semibold))
-                .foregroundStyle(.secondary)
+            if let helperHintText, !helperHintText.isEmpty {
+                Text(helperHintText)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(helperHintTextColor ?? Color.black.opacity(0.72))
+                    .multilineTextAlignment(.trailing)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(helperHintBackgroundColor ?? Color(red: 0.98, green: 0.92, blue: 0.72))
+                    )
+            } else {
+                Image(systemName: "ellipsis.rectangle")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(8)
         .padding(.vertical, 2)
