@@ -232,6 +232,7 @@ struct CaptureView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("setup_homepage_mode") private var setupHomepageMode = false
+    @AppStorage("capture_setup_completed_once_v1") private var hasCompletedCaptureSetupOnce = false
     private let forceSetupWelcome: Bool
 
     @Query(sort: \RollingCaptureItem.createdAt, order: .reverse)
@@ -480,8 +481,12 @@ struct CaptureView: View {
     private let recurringDispatchTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
     private let captureSetupRequiredToDoCount = 6
 
+    private var hasCompletedCaptureSetupFlow: Bool {
+        hasCompletedCaptureSetupOnce || allItems.count >= captureSetupRequiredToDoCount
+    }
+
     private var shouldUseCaptureSetupFlow: Bool {
-        forceSetupWelcome || setupHomepageMode
+        (forceSetupWelcome || setupHomepageMode) && !hasCompletedCaptureSetupFlow
     }
 
     private var displayItems: [RollingCaptureItem] {
@@ -571,6 +576,12 @@ struct CaptureView: View {
     }
     private var captureIntroBoxBackground: Color {
         colorScheme == .dark ? Color(.systemGroupedBackground) : Color.white
+    }
+
+    private func markCaptureSetupCompletedIfNeeded() {
+        guard !hasCompletedCaptureSetupOnce else { return }
+        guard allItems.count >= captureSetupRequiredToDoCount else { return }
+        hasCompletedCaptureSetupOnce = true
     }
     private var ghostClockIconName: String {
         #if canImport(UIKit)
@@ -676,6 +687,7 @@ struct CaptureView: View {
                 }
                 .toolbar(isCaptureSetupWelcomePage ? .hidden : .visible, for: .navigationBar)
                     .onAppear {
+                        markCaptureSetupCompletedIfNeeded()
                         runAutoUnhideIfNeeded()
                         dedupeCaptureItemsIfNeeded()
                         runRecurringDispatchIfNeeded()
@@ -722,6 +734,7 @@ struct CaptureView: View {
                     runRecurringDispatchIfNeeded()
                 }
                 .onChange(of: allItems.map(\.id)) { _, _ in
+                    markCaptureSetupCompletedIfNeeded()
                     dedupeCaptureItemsIfNeeded()
                 }
                 .onChange(of: focusedField) { _, newValue in
@@ -754,7 +767,7 @@ struct CaptureView: View {
             }
         }
         .onChange(of: setupHomepageMode) { _, isSetup in
-            captureSetupDidContinue = !(forceSetupWelcome || isSetup)
+            captureSetupDidContinue = hasCompletedCaptureSetupFlow || !(forceSetupWelcome || isSetup)
             if isSetup {
                 isSearchMode = false
                 input = ""

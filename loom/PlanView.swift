@@ -287,139 +287,7 @@ struct PlanView: View {
     private var weeklyPlanningFieldFont: Font { .system(size: 21) } // ~15% larger than current Step 1 input text
 
     var body: some View {
-        Group {
-            if navigateToStep2 {
-                PlanFlowHostView()
-            } else {
-                VStack(alignment: .leading, spacing: 24) {
-            VStack(spacing: 1) {
-                PlanStepProgressBar(current: 1, total: 6)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                Text("Weekly Planning")
-                    .font(.largeTitle)
-                    .fontWeight(.bold)
-                    .frame(maxWidth: .infinity, alignment: .center)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("What am I happy for or grateful about in life right now? (Optional)")
-                    .font(.headline)
-                stepOneMorningField
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(
-                                shouldHighlightStep1Validation && isMorningMissing ? Color.red.opacity(0.75) : Color.clear,
-                                lineWidth: shouldHighlightStep1Validation && isMorningMissing ? 1.5 : 0
-                            )
-                    )
-            }
-            .padding(.top, 16)
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("What’s a simple phrase that inspires you? (Optional)")
-                    .font(.headline)
-                stepOneIncantationField
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(
-                                shouldHighlightStep1Validation && isIncantationMissing ? Color.red.opacity(0.75) : Color.clear,
-                                lineWidth: shouldHighlightStep1Validation && isIncantationMissing ? 1.5 : 0
-                            )
-                    )
-            }
-
-            Spacer(minLength: 0)
-
-            HStack(spacing: 12) {
-                Button {
-                    dismiss()
-                } label: {
-                    Text("Close")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .foregroundStyle(secondaryButtonTextColor)
-                }
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color(.systemGray5))
-                )
-
-                Button {
-                    if isNextDisabled {
-                        triggerStep1ValidationFeedback()
-                    } else {
-                        shouldHighlightStep1Validation = false
-                        showStep1ValidationHint = false
-                        saveStepOneAndAdvance()
-                    }
-                } label: {
-                    Text(isStep1CompletelyEmpty ? "Skip" : "Next")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(isNextDisabled ? Color(.systemGray3) : .accentColor)
-            }
-        }
-        .padding(.horizontal)
-        .overlay(alignment: .bottom) {
-            if showStep1ValidationHint {
-                Text("Please complete")
-                    .font(.footnote)
-                    .fontWeight(.bold)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .padding(10)
-                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10)
-                            .stroke(Color.black.opacity(0.12), lineWidth: 1)
-                    )
-                    .padding(.bottom, 56)
-                    .transition(.opacity)
-            }
-        }
-        .safeAreaPadding(.bottom)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .onAppear {
-            if hasCompletedReflectionForWeek {
-                if shouldRunStepOneFreshStartCleanup {
-                    clearResidualWeekPlanningRowsForFreshStart()
-                    markStepOneFreshStartCleanupDone()
-                }
-                if shouldHydrateStepOneFromExisting, let existing = existingEntryForWeek {
-                    morningPowerQuestion = existing.morningPowerQuestion
-                    incantation = existing.incantation
-                } else {
-                    morningPowerQuestion = ""
-                    incantation = ""
-                }
-            } else if let existing = existingEntryForWeek {
-                morningPowerQuestion = existing.morningPowerQuestion
-                incantation = existing.incantation
-            }
-
-            DispatchQueue.main.async {
-                isMorningFocused = true
-                isIncantationFocused = false
-#if !canImport(UIKit)
-                focusedField = .morning
-#endif
-            }
-        }
-        .onChange(of: morningPowerQuestion) { _, _ in
-            if !isNextDisabled {
-                shouldHighlightStep1Validation = false
-                showStep1ValidationHint = false
-            }
-        }
-        .onChange(of: incantation) { _, _ in
-            if !isNextDisabled {
-                shouldHighlightStep1Validation = false
-                showStep1ValidationHint = false
-            }
-        }
-            }
-        }
+        PlanFlowHostView()
         .toolbar(.hidden, for: .navigationBar)
     }
 
@@ -669,7 +537,6 @@ struct PlanStepTwoView: View {
 
     @State private var baselineItemIDs: Set<UUID> = []
     @State private var isBrainstormExpanded: Bool = false
-    @State private var isShowingNextConfirmation: Bool = false
     @State private var showStep2ValidationHint: Bool = false
     @State private var shouldHighlightStep2InputValidation: Bool = false
     @State private var step2ValidationMessage: String = "Please enter value on keyboard"
@@ -681,7 +548,6 @@ struct PlanStepTwoView: View {
     private let hiddenUntilLaterIconName = "clock.arrow.trianglehead.clockwise.rotate.90.path.dotted"
     private let minimumActiveCaptureActionsRequired = 6
     private let footerPinnedHeight: CGFloat = 68
-    private let keyboardFloatingGap: CGFloat = 15
 
     private func normalizedActionText(_ text: String) -> String {
         text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -734,18 +600,10 @@ struct PlanStepTwoView: View {
         return max(0, keyboardHeight - footerPinnedHeight + 24)
     }
 
-    private func keyboardDismissBottomPadding(in proxy: GeometryProxy) -> CGFloat {
-        guard keyboardHeight > 0 else { return 58 }
-        let keyboardTopGlobal = UIScreen.main.bounds.height - keyboardHeight
-        let viewBottomGlobal = proxy.frame(in: .global).maxY
-        let keyboardOverlapInView = max(0, viewBottomGlobal - keyboardTopGlobal)
-        return keyboardOverlapInView + keyboardFloatingGap
-    }
-
     var body: some View {
         VStack(spacing: 12) {
             VStack(spacing: 1) {
-                PlanStepProgressBar(current: 2, total: 6)
+                PlanStepProgressBar(current: 1, total: 5)
                     .frame(maxWidth: .infinity, alignment: .center)
                 Text("Capture")
                     .font(.largeTitle)
@@ -906,26 +764,11 @@ struct PlanStepTwoView: View {
                 .background(Color(.systemGroupedBackground))
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
-        .alert(
-            "Have you captured everything?",
-            isPresented: $isShowingNextConfirmation,
-            actions: {
-                Button("Next") {
-                    if let onNext { onNext() }
-                }
-                Button("Return", role: .cancel) { }
-            },
-            message: {
-                Text("Make sure you've entered all actions that need to be done soon.")
-            }
-        )
         .onAppear {
             if baselineItemIDs.isEmpty {
                 baselineItemIDs = Set(allItems.map(\.id))
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                isInputFocused = true
-            }
+            isInputFocused = false
         }
         .onChange(of: input) { _, newValue in
             if newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -954,16 +797,6 @@ struct PlanStepTwoView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
             keyboardHeight = 0
         }
-        .overlay {
-            GeometryReader { proxy in
-                if isKeyboardVisible {
-                    keyboardDismissButton
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-                        .padding(.trailing, 16)
-                        .padding(.bottom, keyboardDismissBottomPadding(in: proxy))
-                }
-            }
-        }
     }
 
     private var stepTwoFooter: some View {
@@ -987,7 +820,7 @@ struct PlanStepTwoView: View {
                 } else if !hasMinimumActiveCaptureActions {
                     triggerStep2MinimumCountFeedback()
                 } else {
-                    isShowingNextConfirmation = true
+                    if let onNext { onNext() }
                 }
             } label: {
                 Text("Next")
@@ -1017,6 +850,38 @@ struct PlanStepTwoView: View {
                 )
                 .layoutPriority(1)
                 .frame(maxWidth: .infinity)
+
+            if isKeyboardVisible {
+                Button {
+                    dismissKeyboard()
+                } label: {
+                    Image(systemName: "keyboard.chevron.compact.down")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.primary.opacity(0.85))
+                        .frame(width: 44, height: 44)
+                        .background(.ultraThinMaterial, in: Circle())
+                        .overlay(
+                            Circle()
+                                .stroke(Color.white.opacity(0.28), lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Dismiss Keyboard")
+            }
+
+            if hasDraftInput {
+                Button {
+                    addItem()
+                } label: {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 44, height: 44)
+                        .background(Color.blue, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Add Action")
+            }
         }
         .overlay(alignment: .top) {
             if showStep2ValidationHint {
@@ -1060,23 +925,6 @@ struct PlanStepTwoView: View {
             .submitLabel(.done)
             .onSubmit(addItem)
 #endif
-    }
-
-    private var keyboardDismissButton: some View {
-        Button {
-            dismissKeyboard()
-        } label: {
-            Image(systemName: "keyboard.chevron.compact.down")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.primary.opacity(0.85))
-                .frame(width: 45, height: 45)
-                .background(.ultraThinMaterial, in: Circle())
-                .overlay(
-                    Circle()
-                        .stroke(Color.white.opacity(0.28), lineWidth: 1)
-                )
-        }
-        .buttonStyle(.plain)
     }
 
     private func dismissKeyboard() {
@@ -1599,7 +1447,7 @@ struct PlanStepThreeView: View {
     var body: some View {
         VStack(spacing: 12) {
             VStack(spacing: 1) {
-                PlanStepProgressBar(current: 3, total: 6)
+                PlanStepProgressBar(current: 2, total: 5)
                     .frame(maxWidth: .infinity, alignment: .center)
                 Text("Group")
                     .font(.largeTitle)
@@ -1713,9 +1561,21 @@ struct PlanStepThreeView: View {
                 let expandedPoolReserve = min(180, estimatedPoolContentHeight)
                 let expandedBoundedGroupHeight = min(max(expandedGroupHeight, 220), availableHeight - expandedPoolReserve)
 
-                // When dragging into groups, always expand the group area. If the pool is short,
-                // use the freed space instead of leaving empty room above.
-                let shouldExpandGroupArea = isDraggingOverGroupArea
+                // Expand the group area only when the collapsed height cannot show all current
+                // group rows (including the Add Group row when present).
+                let fallbackChunkRowHeight: CGFloat = 170
+                let measuredChunkContentHeight = chunks.reduce(CGFloat.zero) { partial, chunk in
+                    partial + max(measuredStep3ChunkHeights[chunk.id] ?? 0, 0)
+                }
+                let estimatedChunkContentHeight = measuredChunkContentHeight > 0
+                    ? measuredChunkContentHeight
+                    : (CGFloat(chunks.count) * fallbackChunkRowHeight)
+                let addGroupRowHeight = chunks.count < maxChunks
+                    ? max(measuredStep3AddGroupRowHeight, 64)
+                    : 0
+                let estimatedGroupContentHeight = estimatedChunkContentHeight + addGroupRowHeight + 16
+                let collapsedGroupNeedsMoreHeight = estimatedGroupContentHeight > collapsedBoundedGroupHeight
+                let shouldExpandGroupArea = isDraggingOverGroupArea && collapsedGroupNeedsMoreHeight
                 let boundedGroupHeight = shouldExpandGroupArea ? expandedBoundedGroupHeight : collapsedBoundedGroupHeight
                 let poolHeight = max(60, availableHeight - boundedGroupHeight - 10)
 
@@ -3430,7 +3290,7 @@ struct PlanStepThreeLabelView: View {
     var body: some View {
         VStack(spacing: 12) {
             VStack(spacing: 1) {
-                PlanStepProgressBar(current: 4, total: 6)
+                PlanStepProgressBar(current: 3, total: 5)
                     .frame(maxWidth: .infinity, alignment: .center)
                 Text("Label")
                     .font(.largeTitle)
@@ -3877,6 +3737,7 @@ struct PlanStepFourView: View {
     private let targetIconName = "scope"
     private let footerPinnedHeight: CGFloat = 68
     private let keyboardFloatingGap: CGFloat = 15
+    private let otherChunkFixedFill = Color(red: 0.92, green: 0.92, blue: 0.94)
 
     private var secondaryButtonTextColor: Color {
         colorScheme == .dark ? Color(.secondaryLabel) : .black
@@ -3968,7 +3829,7 @@ struct PlanStepFourView: View {
         let isOtherChunk = chunk.labelId == PlanOtherLabel.id ||
             chunk.label.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == PlanOtherLabel.title.lowercased()
         if isOtherChunk {
-            return Color(.systemGray5)
+            return otherChunkFixedFill
         }
         return FulfillmentCategoryColors.lightColor(for: chunk.category)
     }
@@ -3976,7 +3837,7 @@ struct PlanStepFourView: View {
     var body: some View {
         VStack(spacing: 12) {
             VStack(spacing: 1) {
-                PlanStepProgressBar(current: 5, total: 6)
+                PlanStepProgressBar(current: 4, total: 5)
                     .frame(maxWidth: .infinity, alignment: .center)
                 Text("Plan")
                     .font(.largeTitle)
@@ -4832,7 +4693,7 @@ struct PlanStepFiveView: View {
     var body: some View {
         VStack(spacing: 12) {
             VStack(spacing: 1) {
-                PlanStepProgressBar(current: 6, total: 6)
+                PlanStepProgressBar(current: 5, total: 5)
                     .frame(maxWidth: .infinity, alignment: .center)
                 Text("Define")
                     .font(.largeTitle)
@@ -5235,7 +5096,7 @@ struct PlanStepFiveView: View {
         let isOtherChunk = chunk.labelId == PlanOtherLabel.id ||
             chunk.label.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == PlanOtherLabel.title.lowercased()
         let fill: Color = isOtherChunk
-            ? Color(.systemGray5)
+            ? Color(red: 0.92, green: 0.92, blue: 0.94)
             : FulfillmentCategoryColors.lightColor(for: chunk.category)
         let accent: Color = isOtherChunk ? .black : FulfillmentCategoryTheme.color(for: chunk.category)
 

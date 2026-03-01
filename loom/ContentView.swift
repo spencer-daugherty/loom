@@ -55,6 +55,7 @@ struct ContentView: View {
     @AppStorage("enable_projects_feature") private var enableProjectsFeature = false
     @AppStorage("blank_homepage_mode") private var blankHomepageMode = false
     @AppStorage("setup_homepage_mode") private var setupHomepageMode = false
+    @AppStorage("capture_setup_completed_once_v1") private var hasCompletedCaptureSetupOnce = false
     @AppStorage("has_completed_plan_flow_once") private var hasCompletedPlanFlowOnce = false
     @AppStorage("has_seen_content_quickstart_v1") private var hasSeenContentQuickstart = false
     @AppStorage("force_show_content_quickstart_once") private var forceShowContentQuickstartOnce = false
@@ -332,7 +333,7 @@ struct ContentView: View {
     }
 
     private var hasCompletedCaptureSetup: Bool {
-        notificationCaptureItems.count >= 6
+        hasCompletedCaptureSetupOnce || notificationCaptureItems.count >= 6
     }
 
     private var canOpenPlanOrActionFlow: Bool {
@@ -368,6 +369,13 @@ struct ContentView: View {
 
     private var shouldShowActionBlocksOnboardingBounce: Bool {
         activeHomeFocusTarget == .actionBlocks
+    }
+
+    private func markCaptureSetupCompletedIfNeeded() {
+        guard !hasCompletedCaptureSetupOnce else { return }
+        let hasAdvancedPastCaptureSetup = hasSkippedActionPlanSetupStep || isActiveActionFlow || hasCompletedPlanFlowOnce
+        guard notificationCaptureItems.count >= 6 || hasAdvancedPastCaptureSetup else { return }
+        hasCompletedCaptureSetupOnce = true
     }
 
     private var shouldShowAnyOnboardingBounce: Bool {
@@ -878,6 +886,9 @@ struct ContentView: View {
                     playSheetDestination = .action
                 }
             }
+            .onChange(of: notificationCaptureItems.count) { _, _ in
+                markCaptureSetupCompletedIfNeeded()
+            }
             .onChange(of: isActiveActionFlow) { _, newValue in
                 if newValue {
                     setupHomepageMode = false
@@ -902,6 +913,7 @@ struct ContentView: View {
             .onAppear {
                 beginStartupPreparationIfNeeded()
                 refreshFulfillmentCategoryScoresForCurrentWeek()
+                markCaptureSetupCompletedIfNeeded()
                 if isActiveActionFlow {
                     setupHomepageMode = false
                 }
@@ -1899,6 +1911,11 @@ struct ContentView: View {
 
     private func closeLittleWinsCalendarPreviewIfNoHistory() {
         guard let previewDate = littleWinsCalendarPreviewDate else { return }
+        let previewCompletedCards = littleWinsCompletedCards(on: previewDate)
+        guard !previewCompletedCards.isEmpty else {
+            closeLittleWinsCalendarPreview(animated: false)
+            return
+        }
         let previewCategories = littleWinsHistoricalCategories(on: previewDate)
         guard previewCategories.isEmpty else {
             if let expandedCategoryID = littleWinsCalendarPreviewExpandedCategoryID,
@@ -2207,21 +2224,14 @@ struct ContentView: View {
 
                     Group {
                         if homePageIndex == HomeSwipePage.littleWins.rawValue && littleWinsCalendarPreviewDate != nil {
-                            Button {
-                                closeLittleWinsCalendarPreview(animated: true)
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .font(.system(size: 28, weight: .semibold))
-                                    .foregroundStyle(.secondary)
-                            }
-                            .buttonStyle(.plain)
+                            Color.clear
+                                .frame(width: 32, height: 32)
                         } else {
                             NavigationLink {
                                 AccountView()
                             } label: {
                                 Image(systemName: "person.circle")
                                     .font(.system(size: 28))
-                                    .opacity(homePageIndex == HomeSwipePage.littleWins.rawValue ? 0 : 1)
                             }
                             .buttonStyle(.plain)
                             .allowsHitTesting(!shouldLockToFocusedHomeTarget)
@@ -2870,6 +2880,11 @@ struct ContentView: View {
                         categories: previewCategoriesForActiveDate,
                         containerSize: proxy.size
                     )
+                    .frame(
+                        maxWidth: .infinity,
+                        maxHeight: max(0, proxy.size.height - calendarBandReserve - 8),
+                        alignment: .top
+                    )
                     .transition(.opacity.combined(with: .scale(scale: 0.96)))
                     .zIndex(60)
                 }
@@ -3204,6 +3219,7 @@ struct ContentView: View {
             ForEach(dates, id: \.self) { date in
                 let isToday = calendar.isDateInToday(date)
                 let isHeldPreviewDate = calendar.isDate(date, inSameDayAs: littleWinsCalendarPreviewDate ?? .distantPast)
+                let isTodayPreviewOpen = isToday && isHeldPreviewDate
                 let completedCardsForDate = isToday ? completedTodayCards : littleWinsCompletedCards(on: date)
                 let historicalPreviewCategories = littleWinsHistoricalCategories(on: date)
                 let hasHistoricalPreview = !historicalPreviewCategories.isEmpty
@@ -3214,7 +3230,23 @@ struct ContentView: View {
                 let miniStackLiftPerCard = min(6, max(4, miniCardHeight * 0.14))
                 let miniStackTopOverflow = CGFloat(max(0, visibleStackCount - 1)) * miniStackLiftPerCard
                 VStack(spacing: 3) {
-                    if !completedCardsForDate.isEmpty {
+                    if isTodayPreviewOpen {
+                        Button {
+                            closeLittleWinsCalendarPreview(animated: true)
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundStyle(.primary.opacity(0.85))
+                                .frame(width: 28, height: 28)
+                                .background(.ultraThinMaterial, in: Circle())
+                                .overlay(
+                                    Circle()
+                                        .stroke(Color.white.opacity(0.28), lineWidth: 1)
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .frame(width: miniCardWidth, height: miniCardHeight, alignment: .top)
+                    } else if !completedCardsForDate.isEmpty {
                         littleWinsCompletedTodayMiniCardStack(
                             cards: completedCardsForDate,
                             cardWidth: miniCardWidth,
@@ -3266,6 +3298,10 @@ struct ContentView: View {
                     }
                 )
                 .onTapGesture {
+                    if isTodayPreviewOpen {
+                        closeLittleWinsCalendarPreview(animated: true)
+                        return
+                    }
                     guard canShowTapPreview else { return }
                     let tappedDate = calendar.startOfDay(for: date)
                     if let currentPreview = littleWinsCalendarPreviewDate,
@@ -3340,10 +3376,11 @@ struct ContentView: View {
         let calendar = Calendar.current
         let isTodayPreview = calendar.isDateInToday(date)
         let horizontalPadding: CGFloat = 14
-        let verticalPadding: CGFloat = 12
+        let topPadding: CGFloat = 2
+        let bottomPadding: CGFloat = 6
         let gridSpacing: CGFloat = 12
         let availableWidth = max(0, containerSize.width - (horizontalPadding * 2))
-        let availableHeight = max(0, containerSize.height - (verticalPadding * 2) - 64)
+        let availableHeight = max(0, containerSize.height - topPadding - bottomPadding - 64)
         let expandedCategory = categories.first { $0.id == littleWinsCalendarPreviewExpandedCategoryID }
         let completedCardCount = categories.filter(\.isCompletedCard).count
         let gridColumnsCount: Int = completedCardCount <= 4 ? 2 : 3
@@ -3380,13 +3417,6 @@ struct ContentView: View {
 
                 if let expandedCategory {
                     VStack(spacing: 8) {
-                        if isTodayPreview {
-                            Text("Tap any checked item to move it back to today’s active stack.")
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 4)
-                        }
                         littleWinsHistoricalPreviewCardView(
                             category: expandedCategory,
                             width: expandedCardWidth,
@@ -3432,6 +3462,7 @@ struct ContentView: View {
                                     height: collapsedCardHeight,
                                     isUncheckEnabled: false
                                 )
+                                .contentShape(Rectangle())
                                 .onTapGesture {
                                     withAnimation(.interactiveSpring(response: 0.30, dampingFraction: 0.84, blendDuration: 0.12)) {
                                         littleWinsCalendarPreviewExpandedCategoryID = category.id
@@ -3447,8 +3478,8 @@ struct ContentView: View {
                 }
             }
             .padding(.horizontal, horizontalPadding)
-            .padding(.top, verticalPadding)
-            .padding(.bottom, 6)
+            .padding(.top, topPadding)
+            .padding(.bottom, bottomPadding)
         }
         .simultaneousGesture(
             DragGesture(minimumDistance: 14, coordinateSpace: .local)
@@ -3482,6 +3513,7 @@ struct ContentView: View {
         )
         .scaleEffect(scale, anchor: .top)
         .frame(width: width, height: height, alignment: .top)
+        .contentShape(Rectangle())
     }
 
     private func littleWinsHistoricalPreviewCardBaseView(
@@ -3594,6 +3626,7 @@ struct ContentView: View {
                 .fill(isUncheckEnabled ? Color.white.opacity(0.35) : Color.clear)
         )
         .contentShape(Rectangle())
+        .allowsHitTesting(isUncheckEnabled)
         .onTapGesture {
             guard isUncheckEnabled else { return }
             onTap?()
