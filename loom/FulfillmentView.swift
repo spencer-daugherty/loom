@@ -4,6 +4,13 @@ import Charts
 #if canImport(FamilyControls)
 import FamilyControls
 #endif
+
+#Preview {
+    NavigationStack {
+        FulfillmentView()
+    }
+    .loomPreviewContainer()
+}
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -5319,6 +5326,7 @@ struct FulfillmentInteractiveRadar: View {
     let customDotDiameter: CGFloat?
     let showOutline: Bool
     let emphasizeSelectedSlice: Bool
+    let customDotShadowColor: Color?
     @State private var pulseIndex: Int? = nil
 
     init(
@@ -5329,7 +5337,8 @@ struct FulfillmentInteractiveRadar: View {
         useOriginalDotStyle: Bool = false,
         customDotDiameter: CGFloat? = nil,
         showOutline: Bool = true,
-        emphasizeSelectedSlice: Bool = true
+        emphasizeSelectedSlice: Bool = true,
+        customDotShadowColor: Color? = nil
     ) {
         self.metrics = metrics.isEmpty ? Self.fallbackMetrics : metrics
         self._selectedIndex = selectedIndex
@@ -5339,6 +5348,7 @@ struct FulfillmentInteractiveRadar: View {
         self.customDotDiameter = customDotDiameter
         self.showOutline = showOutline
         self.emphasizeSelectedSlice = emphasizeSelectedSlice
+        self.customDotShadowColor = customDotShadowColor
     }
 
     var body: some View {
@@ -5389,7 +5399,12 @@ struct FulfillmentInteractiveRadar: View {
                             .overlay(
                                 Circle().stroke(Color(.systemBackground), lineWidth: 2)
                             )
-                            .shadow(color: Color(.systemBackground).opacity(0.9), radius: dotShadowRadius, x: 0, y: 0)
+                            .shadow(
+                                color: (customDotShadowColor ?? Color(.systemBackground)).opacity(0.9),
+                                radius: dotShadowRadius,
+                                x: 0,
+                                y: 0
+                            )
                             .scaleEffect((useOriginalDotStyle || !emphasizeSelectedSlice) ? 1 : circleScale(for: i, selectedIndex: safeSelectedIndex))
                             .animation(.easeInOut(duration: 0.18), value: pulseIndex)
                             .animation(.easeInOut(duration: 0.18), value: selectedIndex)

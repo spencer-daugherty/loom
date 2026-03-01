@@ -12,6 +12,21 @@ import FirebaseCrashlytics
 import GoogleSignIn
 #endif
 
+private enum LoomRuntime {
+    static var isRunningForPreviews: Bool {
+        let environment = ProcessInfo.processInfo.environment
+        return environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
+            || environment["XCODE_RUNNING_FOR_PLAYGROUNDS"] == "1"
+    }
+
+    static var isPreviewSafeModeEnabled: Bool {
+        if isRunningForPreviews { return true }
+        let env = ProcessInfo.processInfo.environment
+        let flag = (env["LOOM_PREVIEW_SAFE_MODE"] ?? "").lowercased()
+        return flag == "1" || flag == "true" || flag == "yes"
+    }
+}
+
 private enum LoomPersistence {
     static let modelTypes: [any PersistentModel.Type] = [
         DrivingForce.self,
@@ -86,7 +101,20 @@ private enum LoomPersistence {
         PlannedChunkActionSensitivityPlace.self,
     ]
 
+    static func makeInMemoryContainer() -> ModelContainer {
+        let previewConfiguration = ModelConfiguration(isStoredInMemoryOnly: true)
+        do {
+            return try ModelContainer(for: Schema(modelTypes), configurations: [previewConfiguration])
+        } catch {
+            fatalError("Failed to initialize in-memory ModelContainer: \(error)")
+        }
+    }
+
     static func makeContainer() -> ModelContainer {
+        if LoomRuntime.isPreviewSafeModeEnabled {
+            return makeInMemoryContainer()
+        }
+
         do {
             // CloudKit-backed persistent store for signed-in iCloud users.
             let cloudKitConfiguration = ModelConfiguration(cloudKitDatabase: .automatic)
@@ -97,9 +125,23 @@ private enum LoomPersistence {
             do {
                 return try ModelContainer(for: Schema(modelTypes), configurations: [localConfiguration])
             } catch {
-                fatalError("Failed to initialize both CloudKit and local ModelContainer: \(error)")
+                if LoomRuntime.isPreviewSafeModeEnabled {
+                    return makeInMemoryContainer()
+                } else {
+                    fatalError("Failed to initialize both CloudKit and local ModelContainer: \(error)")
+                }
             }
         }
+    }
+}
+
+private enum LoomPreviewContainerStore {
+    static let container = LoomPersistence.makeInMemoryContainer()
+}
+
+extension View {
+    func loomPreviewContainer() -> some View {
+        modelContainer(LoomPreviewContainerStore.container)
     }
 }
 
@@ -108,6 +150,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        if LoomRuntime.isPreviewSafeModeEnabled {
+            return true
+        }
+
 #if canImport(FirebaseCore)
         if FirebaseApp.app() == nil {
             FirebaseApp.configure()
@@ -154,6 +200,7 @@ struct loomApp: App {
             }
 #if canImport(GoogleSignIn)
             .onOpenURL { url in
+                guard !LoomRuntime.isPreviewSafeModeEnabled else { return }
                 _ = GIDSignIn.sharedInstance.handle(url)
             }
 #endif

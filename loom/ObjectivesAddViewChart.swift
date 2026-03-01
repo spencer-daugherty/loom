@@ -41,6 +41,18 @@ private enum OutcomeMeasureEntrySourceStore {
     }
 }
 
+#Preview {
+    NavigationStack {
+        ObjectivesAddViewChart(
+            outcome_id: UUID(),
+            formatRaw: "number",
+            unitRaw: "",
+            decimalPlaces: 0
+        )
+    }
+    .loomPreviewContainer()
+}
+
 private enum OutcomeHealthIntegrationStore {
     struct Snapshot: Codable {
         var isEnabled: Bool

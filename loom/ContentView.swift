@@ -15,6 +15,11 @@ private enum ContentQuickstartTarget: String, Hashable {
     case loomAI
 }
 
+#Preview {
+    ContentView()
+        .loomPreviewContainer()
+}
+
 private struct ContentQuickstartFramePreferenceKey: PreferenceKey {
     static var defaultValue: [ContentQuickstartTarget: [CGRect]] = [:]
     static func reduce(value: inout [ContentQuickstartTarget: [CGRect]], nextValue: () -> [ContentQuickstartTarget: [CGRect]]) {

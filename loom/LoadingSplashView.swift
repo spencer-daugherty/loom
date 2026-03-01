@@ -130,6 +130,23 @@ struct FulfillmentRadarGraph: View {
     }
 }
 
+private struct LoadingSplashPreviewHost: View {
+    @Namespace private var namespace
+
+    var body: some View {
+        LoadingSplashView(
+            metrics: [],
+            namespace: namespace,
+            minimumDisplayDuration: 0.1
+        )
+    }
+}
+
+#Preview {
+    LoadingSplashPreviewHost()
+        .loomPreviewContainer()
+}
+
 private struct DarkModeInvertImage: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
 

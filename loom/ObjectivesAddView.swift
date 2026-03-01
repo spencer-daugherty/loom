@@ -30,6 +30,13 @@ private enum ObjectivesContributingLittleWinsStore {
     }
 }
 
+#Preview {
+    NavigationStack {
+        ObjectivesAddView()
+    }
+    .loomPreviewContainer()
+}
+
 private func sanitizeDecimalInput(_ input: String, maxFractionDigits: Int = 4) -> String {
     var out = ""
     var seenDot = false

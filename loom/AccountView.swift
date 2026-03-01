@@ -437,6 +437,13 @@ struct DataItem: Identifiable, Hashable {
     }
 }
 
+#Preview {
+    NavigationStack {
+        AccountView()
+    }
+    .loomPreviewContainer()
+}
+
 // MARK: - Filter Model
 struct ModelFilter: Identifiable, Hashable {
     let id: String
@@ -728,10 +735,12 @@ struct AccountView: View {
                         } label: {
                             Image(systemName: "arrow.right")
                                 .font(.system(size: 20, weight: .semibold))
-                                .frame(width: 52, height: 52)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .frame(height: 52)
+                        .buttonStyle(.plain)
+                        .frame(width: 52, height: 52)
+                        .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .foregroundStyle(.white)
                     }
 
                     if showDeveloperPasswordError {

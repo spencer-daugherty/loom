@@ -11,8 +11,8 @@
 		1DD77E262F52752C00F08917 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1DD77E252F52752C00F08917 /* FirebaseCore */; };
 		1DD77E292F5275A600F08917 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 1DD77E282F5275A600F08917 /* GoogleSignIn */; };
 		1DD77E2B2F5275A600F08917 /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 1DD77E2A2F5275A600F08917 /* GoogleSignInSwift */; };
-		1EE9C9B42F60000200F08917 /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = 1EE9C9B32F60000200F08917 /* FirebaseAnalytics */; };
 		1EE9C9A22F60000100F08917 /* FirebaseCrashlytics in Frameworks */ = {isa = PBXBuildFile; productRef = 1EE9C9A12F60000100F08917 /* FirebaseCrashlytics */; };
+		1EE9C9B42F60000200F08917 /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = 1EE9C9B32F60000200F08917 /* FirebaseAnalytics */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -221,7 +221,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 1D8E61C12DC0526000167931 /* Build configuration list for PBXProject "loom_0.1.0a" */;
+			buildConfigurationList = 1D8E61C12DC0526000167931 /* Build configuration list for PBXProject "Loom Life Manager" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -282,6 +282,8 @@
 				"${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}",
 				"${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}/Contents/Info.plist",
 				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/GoogleService-Info.plist",
+				"${PROJECT_DIR}/loom/GoogleService-Info.plist",
+				"${PROJECT_DIR}/GoogleService-Info.plist",
 				"$(TARGET_BUILD_DIR)/$(EXECUTABLE_PATH)",
 				"${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}/Contents/Resources/DWARF/${TARGET_NAME}",
 			);
@@ -293,7 +295,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "# TODO: If you add user privacy controls, gate this script behind your release policy.\nOUTPUT_FILE=\"${DERIVED_FILE_DIR}/crashlytics_upload_${CONFIGURATION}.stamp\"\nif [ \"${CONFIGURATION}\" = \"Debug\" ]; then\n  /usr/bin/touch \"${OUTPUT_FILE}\"\n  exit 0\nfi\n\"${BUILD_DIR%/Build/*}/SourcePackages/checkouts/firebase-ios-sdk/Crashlytics/run\" -gsp \"${PROJECT_DIR}/loom/GoogleService-Info.plist\"\n/usr/bin/touch \"${OUTPUT_FILE}\"\n";
+			shellScript = "# TODO: If you add user privacy controls, gate this script behind your release policy.\nOUTPUT_FILE=\"${DERIVED_FILE_DIR}/crashlytics_upload_${CONFIGURATION}.stamp\"\nif [ \"${CONFIGURATION}\" = \"Debug\" ]; then\n  /usr/bin/touch \"${OUTPUT_FILE}\"\n  exit 0\nfi\nGSP_PATH=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/GoogleService-Info.plist\"\nif [ ! -f \"${GSP_PATH}\" ]; then\n  if [ -f \"${PROJECT_DIR}/loom/GoogleService-Info.plist\" ]; then\n    GSP_PATH=\"${PROJECT_DIR}/loom/GoogleService-Info.plist\"\n  elif [ -f \"${PROJECT_DIR}/GoogleService-Info.plist\" ]; then\n    GSP_PATH=\"${PROJECT_DIR}/GoogleService-Info.plist\"\n  fi\nfi\nif [ ! -f \"${GSP_PATH}\" ]; then\n  echo \"warning: GoogleService-Info.plist not found; skipping Crashlytics dSYM upload\"\n  /usr/bin/touch \"${OUTPUT_FILE}\"\n  exit 0\nfi\n\"${BUILD_DIR%/Build/*}/SourcePackages/checkouts/firebase-ios-sdk/Crashlytics/run\" -gsp \"${GSP_PATH}\"\n/usr/bin/touch \"${OUTPUT_FILE}\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -348,7 +350,9 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = loom/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Loom;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Loom uses Apple Health data you choose to connect to automatically track Little Wins progress.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Loom updates Apple Health data you choose to connect to automatically track Little Wins progress.";
 				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "Loom needs full access to your reminders to sync active tasks into Capture.";
 				INFOPLIST_KEY_NSRemindersUsageDescription = "Loom needs access to your reminders to sync active tasks into Capture.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -382,7 +386,9 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = loom/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Loom;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Loom uses Apple Health data you choose to connect to automatically track Little Wins progress.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Loom updates Apple Health data you choose to connect to automatically track Little Wins progress.";
 				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "Loom needs full access to your reminders to sync active tasks into Capture.";
 				INFOPLIST_KEY_NSRemindersUsageDescription = "Loom needs access to your reminders to sync active tasks into Capture.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -607,7 +613,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		1D8E61C12DC0526000167931 /* Build configuration list for PBXProject "loom_0.1.0a" */ = {
+		1D8E61C12DC0526000167931 /* Build configuration list for PBXProject "Loom Life Manager" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				1D8E61ED2DC0526500167931 /* Debug */,

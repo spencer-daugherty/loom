@@ -62,6 +62,18 @@ struct OnboardingSlideView: View {
     }
 }
 
+#Preview {
+    OnboardingSlideView(
+        page: OnboardingPage(
+            id: 0,
+            headline: "Loom",
+            body: "Previewing onboarding slide layout.",
+            visualKind: .summary
+        )
+    )
+    .loomPreviewContainer()
+}
+
 struct LoomAIChatPlaceholderView: View {
     let reduceMotion: Bool
     @State private var visiblePrompt = false

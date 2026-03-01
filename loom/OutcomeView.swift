@@ -36,6 +36,24 @@ private enum OutcomeContributingLittleWinsStore {
     }
 }
 
+#Preview {
+    let now = Date()
+    let sampleOutcome = Outcomes(
+        category: "Career & Business",
+        outcome: "Ship SwiftUI canvas previews",
+        reasons: "Faster UI iteration",
+        start: now,
+        end: Calendar.current.date(byAdding: .day, value: 30, to: now) ?? now,
+        rank: 0,
+        format: ObjectivesAddView.MeasureFormat.number.rawValue
+    )
+
+    return NavigationStack {
+        OutcomeView(outcome: sampleOutcome, outcomeMeasure: nil)
+    }
+    .loomPreviewContainer()
+}
+
 private enum CompletedOutcomePassionsStore {
     struct Snapshot: Codable, Identifiable {
         var id: UUID { passionID }

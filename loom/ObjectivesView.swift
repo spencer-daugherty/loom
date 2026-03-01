@@ -21,6 +21,13 @@ private enum CompletedOutcomePassionsDetailStore {
     }
 }
 
+#Preview {
+    NavigationStack {
+        ObjectivesView(autoOpenAddOutcome: false)
+    }
+    .loomPreviewContainer()
+}
+
 private func displayEmotionLabelObjectives(_ raw: String) -> String {
     switch raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
     case "just": return "Hate"

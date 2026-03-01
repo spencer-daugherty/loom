@@ -13,6 +13,13 @@ private enum CompletedSearchScope: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+#Preview {
+    NavigationStack {
+        CompletedActionBlocksListView()
+    }
+    .loomPreviewContainer()
+}
+
 struct CompletedActionBlocksListView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \ActionBlocksReflectionArchive.completedAt, order: .reverse)

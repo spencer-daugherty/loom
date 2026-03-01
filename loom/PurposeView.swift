@@ -566,6 +566,7 @@ struct PurposeView: View {
                         .padding(8)
                         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
 #endif
+
                     if editorDraftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Text(placeholder)
                             .foregroundStyle(.secondary)
@@ -2879,3 +2880,10 @@ extension View {
     }
 }
 #endif
+
+#Preview {
+    NavigationStack {
+        PurposeView(autoOpenCreateVision: false)
+    }
+    .loomPreviewContainer()
+}

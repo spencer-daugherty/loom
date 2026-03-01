@@ -20,6 +20,13 @@ private struct PopoverHeightPreferenceKey: PreferenceKey {
     }
 }
 
+#Preview {
+    NavigationStack {
+        CaptureView()
+    }
+    .loomPreviewContainer()
+}
+
 private struct GoogleTaskListResponse: Decodable {
     var items: [GoogleTaskList]?
 }

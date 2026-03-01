@@ -20,6 +20,13 @@ private struct ReflectDarkModeInvertImage: ViewModifier {
     }
 }
 
+#Preview {
+    NavigationStack {
+        ReflectView(weekStart: .now) {}
+    }
+    .loomPreviewContainer()
+}
+
 struct ReflectView: View {
     let weekStart: Date
     let onFinish: () -> Void

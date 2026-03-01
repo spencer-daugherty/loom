@@ -1056,6 +1056,13 @@ struct LoomAIChatView: View {
     }
 }
 
+#Preview {
+    NavigationStack {
+        LoomAIChatView()
+    }
+    .loomPreviewContainer()
+}
+
 private struct LoomTypingDotsIndicator: View {
     @State private var activeIndex: Int = 0
 
