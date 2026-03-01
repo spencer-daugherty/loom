@@ -1068,24 +1068,29 @@ struct CaptureView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+
+                    Section("Quick Complete") {
+                        Button {
+                            guard let id = editingItemID,
+                                  let item = allItems.first(where: { $0.id == id }) else {
+                                closeEditActionSheet()
+                                return
+                            }
+                            renameItemInline(item, to: editingItemText)
+                            quickCompleteItem(item)
+                            closeEditActionSheet()
+                        } label: {
+                            Label("Quick Complete", systemImage: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                        }
+                    }
                 }
                 .navigationTitle("Edit Action")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .navigationBarLeading) {
                         Button(hasChanges ? "Cancel" : "Close") {
-                            isFullTextEditorFocused = false
-                            showFullTextEditorSheet = false
-                            editingItemID = nil
-                            editingItemText = ""
-                            editingItemOriginalText = ""
-                            editingItemIsGhost = false
-                            editingItemHasDueDate = false
-                            editingItemOriginalHasDueDate = false
-                            editingItemSourceType = nil
-                            editingItemLeverageResourceID = nil
-                            editingItemOriginalLeverageResourceID = nil
-                            showEditLeverageDueDateError = false
+                            closeEditActionSheet()
                         }
                         .foregroundColor(hasChanges ? .red : .primary)
                     }
@@ -1094,18 +1099,7 @@ struct CaptureView: View {
                             Button("Update") {
                                 guard let id = editingItemID,
                                       let item = allItems.first(where: { $0.id == id }) else {
-                                    isFullTextEditorFocused = false
-                                    showFullTextEditorSheet = false
-                                    editingItemID = nil
-                                    editingItemText = ""
-                                    editingItemOriginalText = ""
-                                    editingItemIsGhost = false
-                                    editingItemHasDueDate = false
-                                    editingItemOriginalHasDueDate = false
-                                    editingItemSourceType = nil
-                                    editingItemLeverageResourceID = nil
-                                    editingItemOriginalLeverageResourceID = nil
-                                    showEditLeverageDueDateError = false
+                                    closeEditActionSheet()
                                     return
                                 }
                                 renameItemInline(item, to: editingItemText)
@@ -1121,18 +1115,7 @@ struct CaptureView: View {
                                 }
                                 applyCaptureItemLeverageSelection(item: item)
                                 scheduleInlineEditSave()
-                                isFullTextEditorFocused = false
-                                showFullTextEditorSheet = false
-                                editingItemID = nil
-                                editingItemText = ""
-                                editingItemOriginalText = ""
-                                editingItemIsGhost = false
-                                editingItemHasDueDate = false
-                                editingItemOriginalHasDueDate = false
-                                editingItemSourceType = nil
-                                editingItemLeverageResourceID = nil
-                                editingItemOriginalLeverageResourceID = nil
-                                showEditLeverageDueDateError = false
+                                closeEditActionSheet()
                             }
                             .foregroundColor(.blue)
                         }
@@ -2938,6 +2921,21 @@ struct CaptureView: View {
         withAnimation(.easeInOut(duration: 0.15)) {
             showEditLeverageDueDateError = true
         }
+    }
+
+    private func closeEditActionSheet() {
+        isFullTextEditorFocused = false
+        showFullTextEditorSheet = false
+        editingItemID = nil
+        editingItemText = ""
+        editingItemOriginalText = ""
+        editingItemIsGhost = false
+        editingItemHasDueDate = false
+        editingItemOriginalHasDueDate = false
+        editingItemSourceType = nil
+        editingItemLeverageResourceID = nil
+        editingItemOriginalLeverageResourceID = nil
+        showEditLeverageDueDateError = false
     }
 
     private func applyCaptureItemLeverageSelection(item: RollingCaptureItem) {

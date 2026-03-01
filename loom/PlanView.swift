@@ -675,10 +675,13 @@ struct PlanStepTwoView: View {
     @State private var step2ValidationMessage: String = "Please enter value on keyboard"
     @State private var highlightedDuplicateItemID: UUID? = nil
     @State private var step2ValidationResetWorkItem: DispatchWorkItem?
+    @State private var keyboardHeight: CGFloat = 0
     @AppStorage("capture_default_due_date_attention_days")
     private var dueDateAttentionDays: Int = 7
     private let hiddenUntilLaterIconName = "clock.arrow.trianglehead.clockwise.rotate.90.path.dotted"
     private let minimumActiveCaptureActionsRequired = 6
+    private let footerPinnedHeight: CGFloat = 68
+    private let keyboardFloatingGap: CGFloat = 15
 
     private func normalizedActionText(_ text: String) -> String {
         text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -722,6 +725,21 @@ struct PlanStepTwoView: View {
 
     private var remainingActiveCaptureActionsNeeded: Int {
         max(0, minimumActiveCaptureActionsRequired - activeCaptureActionCount)
+    }
+
+    private var isKeyboardVisible: Bool { keyboardHeight > 0 }
+
+    private var keyboardScrollableBottomPadding: CGFloat {
+        guard keyboardHeight > 0 else { return 0 }
+        return max(0, keyboardHeight - footerPinnedHeight + 24)
+    }
+
+    private func keyboardDismissBottomPadding(in proxy: GeometryProxy) -> CGFloat {
+        guard keyboardHeight > 0 else { return 58 }
+        let keyboardTopGlobal = UIScreen.main.bounds.height - keyboardHeight
+        let viewBottomGlobal = proxy.frame(in: .global).maxY
+        let keyboardOverlapInView = max(0, viewBottomGlobal - keyboardTopGlobal)
+        return keyboardOverlapInView + keyboardFloatingGap
     }
 
     var body: some View {
@@ -876,41 +894,18 @@ struct PlanStepTwoView: View {
 
             stepTwoComposerRow
                 .padding(.top, 4)
-
-            HStack(spacing: 12) {
-                Button {
-                    if let onBack { onBack() } else { dismiss() }
-                } label: {
-                    Text("Back")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .foregroundStyle(colorScheme == .dark ? Color(.secondaryLabel) : .black)
-                }
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color(.systemGray5))
-                )
-
-                Button {
-                    if hasDraftInput {
-                        triggerStep2InputValidationFeedback()
-                    } else if !hasMinimumActiveCaptureActions {
-                        triggerStep2MinimumCountFeedback()
-                    } else {
-                        isShowingNextConfirmation = true
-                    }
-                } label: {
-                    Text("Next")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint((hasDraftInput || !hasMinimumActiveCaptureActions) ? Color(.systemGray3) : .accentColor)
-            }
-            .padding(.bottom, 2)
         }
         .padding(.horizontal)
-        .safeAreaPadding(.bottom)
+        .padding(.bottom, keyboardScrollableBottomPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .safeAreaInset(edge: .bottom) {
+            stepTwoFooter
+                .padding(.horizontal)
+                .padding(.top, 8)
+                .padding(.bottom, 10)
+                .background(Color(.systemGroupedBackground))
+        }
+        .ignoresSafeArea(.keyboard, edges: .bottom)
         .alert(
             "Have you captured everything?",
             isPresented: $isShowingNextConfirmation,
@@ -948,6 +943,60 @@ struct PlanStepTwoView: View {
                 }
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
+            guard
+                let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
+            else { return }
+            let screenHeight = UIScreen.main.bounds.height
+            let overlap = max(0, screenHeight - frame.minY)
+            keyboardHeight = overlap
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            keyboardHeight = 0
+        }
+        .overlay {
+            GeometryReader { proxy in
+                if isKeyboardVisible {
+                    keyboardDismissButton
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                        .padding(.trailing, 16)
+                        .padding(.bottom, keyboardDismissBottomPadding(in: proxy))
+                }
+            }
+        }
+    }
+
+    private var stepTwoFooter: some View {
+        HStack(spacing: 12) {
+            Button {
+                if let onBack { onBack() } else { dismiss() }
+            } label: {
+                Text("Back")
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .foregroundStyle(colorScheme == .dark ? Color(.secondaryLabel) : .black)
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(.systemGray5))
+            )
+
+            Button {
+                if hasDraftInput {
+                    triggerStep2InputValidationFeedback()
+                } else if !hasMinimumActiveCaptureActions {
+                    triggerStep2MinimumCountFeedback()
+                } else {
+                    isShowingNextConfirmation = true
+                }
+            } label: {
+                Text("Next")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint((hasDraftInput || !hasMinimumActiveCaptureActions) ? Color(.systemGray3) : .accentColor)
+        }
+        .padding(.bottom, 2)
     }
 
     private var stepTwoComposerRow: some View {
@@ -1011,6 +1060,30 @@ struct PlanStepTwoView: View {
             .submitLabel(.done)
             .onSubmit(addItem)
 #endif
+    }
+
+    private var keyboardDismissButton: some View {
+        Button {
+            dismissKeyboard()
+        } label: {
+            Image(systemName: "keyboard.chevron.compact.down")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.primary.opacity(0.85))
+                .frame(width: 45, height: 45)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay(
+                    Circle()
+                        .stroke(Color.white.opacity(0.28), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func dismissKeyboard() {
+        isInputFocused = false
+        #if canImport(UIKit)
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        #endif
     }
 
     private func addItem() {
@@ -3799,8 +3872,11 @@ struct PlanStepFourView: View {
     @State private var showStep4ValidationHint: Bool = false
     @State private var shouldHighlightStep4Validation: Bool = false
     @State private var step4ValidationResetWorkItem: DispatchWorkItem?
+    @State private var keyboardHeight: CGFloat = 0
 
     private let targetIconName = "scope"
+    private let footerPinnedHeight: CGFloat = 68
+    private let keyboardFloatingGap: CGFloat = 15
 
     private var secondaryButtonTextColor: Color {
         colorScheme == .dark ? Color(.secondaryLabel) : .black
@@ -3873,6 +3949,21 @@ struct PlanStepFourView: View {
         return rolesForPlannedChunk(chunk)
     }
 
+    private var isKeyboardVisible: Bool { keyboardHeight > 0 }
+
+    private var keyboardScrollableBottomPadding: CGFloat {
+        guard keyboardHeight > 0 else { return 0 }
+        return max(0, keyboardHeight - footerPinnedHeight + 24)
+    }
+
+    private func keyboardDismissBottomPadding(in proxy: GeometryProxy) -> CGFloat {
+        guard keyboardHeight > 0 else { return 58 }
+        let keyboardTopGlobal = UIScreen.main.bounds.height - keyboardHeight
+        let viewBottomGlobal = proxy.frame(in: .global).maxY
+        let keyboardOverlapInView = max(0, viewBottomGlobal - keyboardTopGlobal)
+        return keyboardOverlapInView + keyboardFloatingGap
+    }
+
     private func chunkLightFillColor(for chunk: PlannedChunk) -> Color {
         let isOtherChunk = chunk.labelId == PlanOtherLabel.id ||
             chunk.label.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == PlanOtherLabel.title.lowercased()
@@ -3914,43 +4005,8 @@ struct PlanStepFourView: View {
                         }
                     }
                 }
-                .padding(.bottom, 12)
+                .padding(.bottom, 12 + keyboardScrollableBottomPadding)
             }
-
-            HStack(spacing: 12) {
-                Button {
-                    step4AutosaveTask?.cancel()
-                    persistStep4ForWeekNow()
-                    if let onBack { onBack() } else { dismiss() }
-                } label: {
-                    Text("Back")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .foregroundStyle(secondaryButtonTextColor)
-                }
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color(.systemGray5))
-                )
-
-                Button {
-                    step4AutosaveTask?.cancel()
-                    persistStep4ForWeekNow()
-                    if isStep4NextEnabled {
-                        shouldHighlightStep4Validation = false
-                        showStep4ValidationHint = false
-                        if let onNext { onNext() }
-                    } else {
-                        triggerStep4ValidationFeedback()
-                    }
-                } label: {
-                    Text("Next")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(isStep4NextEnabled ? .accentColor : Color(.systemGray3))
-            }
-            .padding(.bottom, 2)
         }
         .padding(.horizontal)
         .overlay(alignment: .bottom) {
@@ -3978,8 +4034,15 @@ struct PlanStepFourView: View {
                 .transition(.opacity)
             }
         }
-        .safeAreaPadding(.bottom)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .safeAreaInset(edge: .bottom) {
+            stepFourFooter
+                .padding(.horizontal)
+                .padding(.top, 8)
+                .padding(.bottom, 10)
+                .background(Color(.systemGroupedBackground))
+        }
+        .ignoresSafeArea(.keyboard, edges: .bottom)
         .sheet(isPresented: $isShowingInstructions) {
             StepFourInstructionsPopup()
                 .presentationDetents([.medium, .large])
@@ -4033,6 +4096,88 @@ struct PlanStepFourView: View {
             step4AutosaveTask?.cancel()
             persistStep4ForWeekNow()
         }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
+            guard
+                let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
+            else { return }
+            let screenHeight = UIScreen.main.bounds.height
+            let overlap = max(0, screenHeight - frame.minY)
+            keyboardHeight = overlap
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            keyboardHeight = 0
+        }
+        .overlay {
+            GeometryReader { proxy in
+                if isKeyboardVisible {
+                    keyboardDismissButton
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                        .padding(.trailing, 16)
+                        .padding(.bottom, keyboardDismissBottomPadding(in: proxy))
+                }
+            }
+        }
+    }
+
+    private var stepFourFooter: some View {
+        HStack(spacing: 12) {
+            Button {
+                step4AutosaveTask?.cancel()
+                persistStep4ForWeekNow()
+                if let onBack { onBack() } else { dismiss() }
+            } label: {
+                Text("Back")
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .foregroundStyle(secondaryButtonTextColor)
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(.systemGray5))
+            )
+
+            Button {
+                step4AutosaveTask?.cancel()
+                persistStep4ForWeekNow()
+                if isStep4NextEnabled {
+                    shouldHighlightStep4Validation = false
+                    showStep4ValidationHint = false
+                    if let onNext { onNext() }
+                } else {
+                    triggerStep4ValidationFeedback()
+                }
+            } label: {
+                Text("Next")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(isStep4NextEnabled ? .accentColor : Color(.systemGray3))
+        }
+        .padding(.bottom, 2)
+    }
+
+    private var keyboardDismissButton: some View {
+        Button {
+            dismissKeyboard()
+        } label: {
+            Image(systemName: "keyboard.chevron.compact.down")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.primary.opacity(0.85))
+                .frame(width: 45, height: 45)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay(
+                    Circle()
+                        .stroke(Color.white.opacity(0.28), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func dismissKeyboard() {
+        focusedField = nil
+        #if canImport(UIKit)
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        #endif
     }
 
     private var step5TopCautionCard: some View {
@@ -4634,9 +4779,8 @@ struct PlanStepFiveView: View {
     // Debounced autosave
     @State private var step5AutosaveTask: Task<Void, Never>? = nil
 
-    // “Try start without durations” feedback
-    @State private var shouldHighlightMissingOptionalIcons: Bool = false
-    @State private var showMissingDurationHint: Bool = false
+    // “Try start without actions” feedback
+    @State private var showMissingActionsHint: Bool = false
     @State private var step5ValidationResetWorkItem: DispatchWorkItem?
 
     // Confirmation dialog for Start
@@ -4678,10 +4822,7 @@ struct PlanStepFiveView: View {
 
     private var isStep5StartEnabled: Bool {
         let actions = plannedActionsForWeek()
-        guard !actions.isEmpty else { return false }
-        return actions.allSatisfy { action in
-            (defineState(forActionId: action.id)?.timeEstimateMinutes) != nil
-        }
+        return !actions.isEmpty
     }
 
     private func normalizedActionText(_ text: String) -> String {
@@ -4703,7 +4844,7 @@ struct PlanStepFiveView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    if !isStep5StartEnabled {
+                    if plannedActionsForWeek().isEmpty {
                         step6TopCautionCard
                             .transition(.opacity)
                     }
@@ -4745,7 +4886,7 @@ struct PlanStepFiveView: View {
                     if isStep5StartEnabled {
                         isShowingStartConfirmation = true
                     } else {
-                        triggerMissingDurationsFeedback()
+                        triggerMissingActionsFeedback()
                     }
                 } label: {
                     Text("Start")
@@ -4757,10 +4898,10 @@ struct PlanStepFiveView: View {
             .padding(.bottom, 2)
         }
         .overlay(alignment: .bottom) {
-            if showMissingDurationHint {
+            if showMissingActionsHint {
                 HStack(spacing: 8) {
-                    Image(systemName: "clock.fill")
-                    Text("Please assign all actions with a duration")
+                    Image(systemName: "checklist")
+                    Text("Please add at least 1 action")
                         .fontWeight(.semibold)
                 }
                 .font(.footnote)
@@ -5040,9 +5181,8 @@ struct PlanStepFiveView: View {
         }
         .onChange(of: isStep5StartEnabled) { _, isEnabled in
             if isEnabled {
-                shouldHighlightMissingOptionalIcons = false
                 withAnimation(.easeInOut(duration: 0.15)) {
-                    showMissingDurationHint = false
+                    showMissingActionsHint = false
                 }
             }
         }
@@ -5054,7 +5194,7 @@ struct PlanStepFiveView: View {
                 .font(.subheadline)
                 .foregroundStyle(Color.black.opacity(0.7))
                 .padding(.top, 1)
-            Text("Assign all actions with a duration")
+            Text("Please add at least 1 action to start")
                 .font(.subheadline)
                 .fontWeight(.semibold)
                 .foregroundStyle(Color.black.opacity(0.7))
@@ -5097,7 +5237,7 @@ struct PlanStepFiveView: View {
         let fill: Color = isOtherChunk
             ? Color(.systemGray5)
             : FulfillmentCategoryColors.lightColor(for: chunk.category)
-        let accent: Color = .black
+        let accent: Color = isOtherChunk ? .black : FulfillmentCategoryTheme.color(for: chunk.category)
 
         let step4 = stepFourStatesForWeekByChunkID[chunk.id]
         let resultText = step4?.resultText ?? ""
@@ -5160,7 +5300,6 @@ struct PlanStepFiveView: View {
             hasAttachments: { actionId in
                 hasAnyAttachments(actionId: actionId)
             },
-            shouldHighlightMissingOptionalIcons: shouldHighlightMissingOptionalIcons,
             onToggleMust: { actionId, isOn in
                 upsertDefineState(forActionId: actionId) { st in
                     st.isMust = isOn
@@ -5233,8 +5372,6 @@ struct PlanStepFiveView: View {
         let leverageIconName: (UUID) -> String
         let hasSensitivity: (UUID) -> Bool
         let hasAttachments: (UUID) -> Bool
-
-        let shouldHighlightMissingOptionalIcons: Bool
 
         let onToggleMust: (UUID, Bool) -> Void
         let onOpenClock: (UUID) -> Void
@@ -5377,7 +5514,6 @@ struct PlanStepFiveView: View {
                             let state = defineStateForAction(action.id)
                             let isMust = state?.isMust ?? false
                             let timeMinutes = state?.timeEstimateMinutes
-                            let isMissingDuration = (timeMinutes == nil)
 
                             DefineActionRow(
                                 text: action.text,
@@ -5392,9 +5528,6 @@ struct PlanStepFiveView: View {
                                 leverageSystemName: leverageIconName(action.id),
                                 hasSensitivity: hasSensitivity(action.id),
                                 hasAttachments: hasAttachments(action.id),
-                                shouldHighlightMissingDuration: isMissingDuration,
-                                shouldHighlightOptionalIcons: shouldHighlightMissingOptionalIcons && isMissingDuration,
-                                shouldHighlightReorderArrow: shouldHighlightMissingOptionalIcons && isMissingDuration,
                                 onToggleMust: { onToggleMust(action.id, !isMust) },
                                 onTapClock: { onOpenClock(action.id) },
                                 onTapPerson: { onOpenLeverage(action.id) },
@@ -5460,10 +5593,6 @@ struct PlanStepFiveView: View {
             let hasSensitivity: Bool
             let hasAttachments: Bool
 
-            let shouldHighlightMissingDuration: Bool
-            let shouldHighlightOptionalIcons: Bool
-            let shouldHighlightReorderArrow: Bool
-
             let onToggleMust: () -> Void
             let onTapClock: () -> Void
             let onTapPerson: () -> Void
@@ -5493,35 +5622,30 @@ struct PlanStepFiveView: View {
                             iconButton(
                                 systemName: isMust ? "star.square.fill" : "star.square",
                                 isOn: isMust,
-                                shouldHighlightCaution: shouldHighlightOptionalIcons,
                                 onTap: onToggleMust
                             )
 
                             clockButton(
                                 minutes: timeMinutes,
                                 onTap: onTapClock,
-                                shouldHighlightMissingDuration: shouldHighlightMissingDuration,
                                 accent: accent
                             )
 
                             iconButton(
                                 systemName: leverageSystemName,
                                 isOn: hasLeverage,
-                                shouldHighlightCaution: shouldHighlightOptionalIcons,
                                 onTap: onTapPerson
                             )
 
                             iconButton(
                                 systemName: hasSensitivity ? "gearshape.fill" : "gearshape",
                                 isOn: hasSensitivity,
-                                shouldHighlightCaution: shouldHighlightOptionalIcons,
                                 onTap: onTapGear
                             )
 
                             iconButton(
                                 systemName: hasAttachments ? "paperclip.badge.ellipsis" : "paperclip",
                                 isOn: hasAttachments,
-                                shouldHighlightCaution: shouldHighlightOptionalIcons,
                                 onTap: onTapPaperclip
                             )
                         }
@@ -5531,7 +5655,7 @@ struct PlanStepFiveView: View {
 
                     Image(systemName: "chevron.up.chevron.down")
                         .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(shouldHighlightReorderArrow ? Color.orange.opacity(0.9) : .secondary)
+                        .foregroundStyle(.secondary)
                         .frame(width: 20, alignment: .center)
                         .padding(.vertical, 6)
                 }
@@ -5546,13 +5670,10 @@ struct PlanStepFiveView: View {
             private func iconButton(
                 systemName: String,
                 isOn: Bool,
-                shouldHighlightCaution: Bool,
                 onTap: @escaping () -> Void
             ) -> some View {
-                let cautionColor = Color.orange.opacity(0.9)
                 let iconColor: Color = {
                     if isOn { return accent }
-                    if shouldHighlightCaution { return cautionColor }
                     return Color(.systemGray)
                 }()
                 return Button {
@@ -5572,14 +5693,12 @@ struct PlanStepFiveView: View {
             private func clockButton(
                 minutes: Int?,
                 onTap: @escaping () -> Void,
-                shouldHighlightMissingDuration: Bool,
                 accent: Color
             ) -> some View {
                 let isOn = (minutes != nil)
                 let baseClockName = isOn ? "clock.fill" : "clock"
                 let clockColor: Color = {
                     if isOn { return accent }
-                    if shouldHighlightMissingDuration { return .red }
                     return Color(.systemGray)
                 }()
 
@@ -6230,17 +6349,15 @@ struct PlanStepFiveView: View {
         try? modelContext.save()
     }
 
-    private func triggerMissingDurationsFeedback() {
+    private func triggerMissingActionsFeedback() {
         step5ValidationResetWorkItem?.cancel()
-        shouldHighlightMissingOptionalIcons = true
         withAnimation(.easeInOut(duration: 0.15)) {
-            showMissingDurationHint = true
+            showMissingActionsHint = true
         }
 
         let workItem = DispatchWorkItem {
-            shouldHighlightMissingOptionalIcons = false
             withAnimation(.easeInOut(duration: 0.15)) {
-                showMissingDurationHint = false
+                showMissingActionsHint = false
             }
         }
         step5ValidationResetWorkItem = workItem

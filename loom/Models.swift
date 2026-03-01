@@ -562,6 +562,7 @@ enum LittleWinsHealthKitBridge {
     case unavailable
     case unsupportedMetric
     case typeUnavailable
+    case authorizationDenied
 
     var errorDescription: String? {
       switch self {
@@ -571,6 +572,8 @@ enum LittleWinsHealthKitBridge {
         return "This metric is not supported by Apple Health."
       case .typeUnavailable:
         return "The Apple Health data type is unavailable."
+      case .authorizationDenied:
+        return "Apple Health access was not granted."
       }
     }
   }
@@ -586,14 +589,36 @@ enum LittleWinsHealthKitBridge {
         if let error {
           completion(.failure(error))
         } else if success {
-          completion(.success(()))
+          verifyLittleWinsReadAuthorization(completion: completion)
         } else {
-          completion(.failure(BridgeError.unavailable))
+          completion(.failure(BridgeError.authorizationDenied))
         }
       }
     } catch {
       completion(.failure(error))
     }
+  }
+
+  private static func verifyLittleWinsReadAuthorization(completion: @escaping (Result<Void, Error>) -> Void) {
+    let metricsToProbe: [LittleWinsIntegrationConfig.Metric] = [.steps, .workoutMinutes, .sleepHours]
+
+    func attempt(_ index: Int, _ lastError: Error?) {
+      guard index < metricsToProbe.count else {
+        completion(.failure(lastError ?? BridgeError.authorizationDenied))
+        return
+      }
+
+      readTodayProgress(for: metricsToProbe[index]) { result in
+        switch result {
+        case .success:
+          completion(.success(()))
+        case .failure(let error):
+          attempt(index + 1, error)
+        }
+      }
+    }
+
+    attempt(0, nil)
   }
 
   static func readTodayProgress(

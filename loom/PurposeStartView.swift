@@ -37,6 +37,7 @@ struct PurposeStartView: View {
     @State private var autoWriteOutlineAngle: Double = 0
     @State private var autoWriteIconAnimating: Bool = false
     @State private var autoWriteIconAnimationTask: Task<Void, Never>? = nil
+    @State private var keyboardHeight: CGFloat = 0
     @State private var validationHintText: String = ""
     @State private var showValidationHint = false
     @State private var hintWorkItem: DispatchWorkItem?
@@ -263,6 +264,24 @@ struct PurposeStartView: View {
     private var screenWidth: CGFloat { UIScreen.main.bounds.width }
     private var isCompactIntroLayout: Bool { screenHeight <= 740 || screenWidth <= 390 }
     private var introSubtextFont: Font { isCompactIntroLayout ? .system(size: 14) : .body }
+    private let autoWritePillHeight: CGFloat = 45
+    private var isVisionKeyboardVisible: Bool { step == .vision && keyboardHeight > 0 }
+    private var isPassionsKeyboardVisible: Bool { (step == .passions || step == .purpose) && keyboardHeight > 0 }
+    private let footerPinnedHeight: CGFloat = 68
+    private let keyboardFloatingGap: CGFloat = 15
+    private var keyboardScrollableBottomPadding: CGFloat {
+        guard isScrollableStep, keyboardHeight > 0 else { return 0 }
+        // Ensure lower content can scroll fully above keyboard while footer remains fixed.
+        return max(0, keyboardHeight - footerPinnedHeight + 24)
+    }
+
+    private func autoWriteBottomPadding(in proxy: GeometryProxy) -> CGFloat {
+        guard keyboardHeight > 0 else { return 58 }
+        let keyboardTopGlobal = UIScreen.main.bounds.height - keyboardHeight
+        let viewBottomGlobal = proxy.frame(in: .global).maxY
+        let keyboardOverlapInView = max(0, viewBottomGlobal - keyboardTopGlobal)
+        return keyboardOverlapInView + keyboardFloatingGap
+    }
 
     var body: some View {
         ZStack {
@@ -287,11 +306,12 @@ struct PurposeStartView: View {
                 .padding(.bottom, 10)
                 .background(Color(.systemGroupedBackground))
         }
+        .ignoresSafeArea(.keyboard, edges: .bottom)
         .onChange(of: step) { _, newStep in
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
                 switch newStep {
                 case .vision:
-                    focusedField = .vision
+                    focusedField = nil
                 case .purpose:
                     focusedField = nil
                 case .passions:
@@ -328,6 +348,17 @@ struct PurposeStartView: View {
             autoWriteIconAnimationTask?.cancel()
             autoWriteIconAnimationTask = nil
         }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
+            guard
+                let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
+            else { return }
+            let screenHeight = UIScreen.main.bounds.height
+            let overlap = max(0, screenHeight - frame.minY)
+            keyboardHeight = overlap
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            keyboardHeight = 0
+        }
         .overlay(alignment: .bottom) {
             if showValidationHint {
                 Text(validationHintText)
@@ -346,6 +377,47 @@ struct PurposeStartView: View {
                     .transition(.opacity)
             }
         }
+        .overlay {
+            GeometryReader { proxy in
+                Group {
+                    if step == .vision {
+                        HStack(spacing: 8) {
+                            if isVisionKeyboardVisible {
+                                keyboardDismissButton
+                            }
+                            visionAutoWriteControls
+                        }
+                    } else if step == .passions || step == .purpose {
+                        HStack(spacing: 8) {
+                            if isPassionsKeyboardVisible {
+                                keyboardDismissButton
+                            }
+                            passionsAutoWriteControls
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                .padding(.trailing, 16)
+                .padding(.bottom, autoWriteBottomPadding(in: proxy))
+            }
+        }
+    }
+
+    private var keyboardDismissButton: some View {
+        Button {
+            focusedField = nil
+        } label: {
+            Image(systemName: "keyboard.chevron.compact.down")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.primary.opacity(0.85))
+                .frame(width: autoWritePillHeight, height: autoWritePillHeight)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay(
+                    Circle()
+                        .stroke(Color.white.opacity(0.28), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder
@@ -367,7 +439,7 @@ struct PurposeStartView: View {
             }
         }
         .padding(.horizontal)
-        .padding(.bottom, contentBottomPadding)
+        .padding(.bottom, contentBottomPadding + keyboardScrollableBottomPadding)
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
@@ -500,15 +572,6 @@ struct PurposeStartView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(isNextDisabled ? Color(.systemGray3) : .accentColor)
                 .frame(maxWidth: .infinity)
-            }
-        }
-        .overlay(alignment: .topTrailing) {
-            if step == .vision {
-                visionAutoWriteControls
-                    .offset(x: 0, y: -58)
-            } else if step == .passions || step == .purpose {
-                passionsAutoWriteControls
-                    .offset(x: 0, y: -58)
             }
         }
     }
@@ -703,7 +766,7 @@ struct PurposeStartView: View {
                         .font(.subheadline)
                         .foregroundStyle(Color.black.opacity(0.7))
                         .padding(.top, 1)
-                    Text("Please add at least 2 items per Passion.")
+                    Text("Please add at least 2 items per Passion. You can always edit and improve later.")
                         .font(.subheadline)
                         .fontWeight(.semibold)
                         .foregroundStyle(Color.black.opacity(0.7))
@@ -1361,6 +1424,7 @@ struct PurposeStartView: View {
                 setAutoWriteLoadingAnimation(newValue)
             }
         }
+        .frame(height: autoWritePillHeight)
     }
 
     private var passionsAutoWriteControls: some View {
@@ -1380,7 +1444,7 @@ struct PurposeStartView: View {
                                 .degrees(isLoading && autoWriteIconAnimating ? 180 : 0),
                                 axis: (x: 1, y: 0, z: 0)
                             )
-                        VStack(alignment: .leading, spacing: 1) {
+                        VStack(alignment: .leading, spacing: 0.5) {
                             Text("AutoWrite")
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(autoWriteGradient)
@@ -1388,7 +1452,7 @@ struct PurposeStartView: View {
                                 .font(.caption2.weight(.semibold))
                                 .foregroundStyle(.secondary)
                         }
-                        .padding(.top, 1)
+                        .padding(.top, 0.5)
                         Spacer(minLength: 0)
                     }
                     .padding(.leading, 12)

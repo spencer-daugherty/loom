@@ -58,6 +58,8 @@ struct ContentView: View {
     @AppStorage("has_completed_plan_flow_once") private var hasCompletedPlanFlowOnce = false
     @AppStorage("has_seen_content_quickstart_v1") private var hasSeenContentQuickstart = false
     @AppStorage("force_show_content_quickstart_once") private var forceShowContentQuickstartOnce = false
+    @AppStorage("content_home_objectives_setup_skipped_v1") private var hasSkippedObjectivesSetupStep = false
+    @AppStorage("content_home_action_setup_skipped_v1") private var hasSkippedActionPlanSetupStep = false
     @State private var isPresentingCaptureView = false
     @State private var pressedEmotion: String? = nil
     @State private var pressedOutcome: Outcomes? = nil
@@ -73,7 +75,6 @@ struct ContentView: View {
     @State private var splashMinimumElapsed: Bool = false
     @State private var splashPreparationFinished: Bool = false
     @State private var splashPreparationStarted: Bool = false
-    @State private var measuredCardHeights: [String: CGFloat] = [:]
     @State private var showPlayBlockedHint: Bool = false
     @State private var playBlockedHintKind: PlayBlockedHintKind = .drivingAndFulfillmentForObjectives
     @State private var highlightDrivingRequirement: Bool = false
@@ -87,6 +88,8 @@ struct ContentView: View {
     @State private var littleWinsCompletedFocusIDs: Set<UUID> = []
     @State private var littleWinsCompletionStateHydrated = false
     @State private var littleWinsCalendarPreviewDate: Date? = nil
+    @State private var littleWinsCalendarPreviewExpandedCategoryID: String? = nil
+    @State private var littleWinsCalendarPreviewExpandedCardDragX: CGFloat = 0
     @State private var littleWinsShowHiddenPlaceholder = false
     @State private var isPresentingLittleWinsManagerSheet = false
     @State private var littleWinsScheduleStoreRevision = 0
@@ -131,6 +134,14 @@ struct ContentView: View {
         case social = 0
         case home = 1
         case littleWins = 2
+    }
+
+    private enum HomeStartupFocusTarget {
+        case purpose
+        case fulfillment
+        case objectives
+        case capture
+        case actionBlocks
     }
 
     private struct ContentQuickstartStep {
@@ -308,29 +319,111 @@ struct ContentView: View {
         shouldShowBlankHomepageAppearance || (outcomes.isEmpty && !enableProjectsFeature)
     }
 
-    private var areOnboardingPromptsVisible: Bool {
-        isDrivingForceEmptyState && isFulfillmentEmptyState && isObjectivesEmptyState
+    private var hasCompletedPurposeSetup: Bool {
+        hasDrivingForceData
     }
 
-    private var shouldShowDrivingOnboardingPulse: Bool {
-        areOnboardingPromptsVisible && !shouldShowContentQuickstart
+    private var hasCompletedFulfillmentSetup: Bool {
+        !fulfillments.isEmpty
     }
 
-    private var shouldShowFulfillmentOnboardingPulse: Bool {
-        !isDrivingForceEmptyState && isFulfillmentEmptyState && !shouldShowContentQuickstart
+    private var hasCompletedObjectivesSetup: Bool {
+        enableProjectsFeature || !outcomes.isEmpty
     }
 
-    private var shouldShowAnyOnboardingBounce: Bool {
-        shouldShowDrivingOnboardingPulse || shouldShowFulfillmentOnboardingPulse || shouldShowPlanButtonOnboardingBounce
-    }
-
-    private var shouldShowPlanButtonOnboardingBounce: Bool {
-        !isDrivingForceEmptyState && !isFulfillmentEmptyState && !isActiveActionFlow && !shouldShowContentQuickstart
+    private var hasCompletedCaptureSetup: Bool {
+        !notificationCaptureItems.isEmpty
     }
 
     private var canOpenPlanOrActionFlow: Bool {
         if setupHomepageMode { return true }
         return !isDrivingForceEmptyState && !isFulfillmentEmptyState
+    }
+
+    private var activeHomeFocusTarget: HomeStartupFocusTarget? {
+        guard !shouldShowContentQuickstart else { return nil }
+        if !hasCompletedPurposeSetup { return .purpose }
+        if !hasCompletedFulfillmentSetup { return .fulfillment }
+        if !hasCompletedObjectivesSetup && !hasSkippedObjectivesSetupStep { return .objectives }
+        if !hasCompletedCaptureSetup { return .capture }
+        if !isActiveActionFlow && !hasSkippedActionPlanSetupStep { return .actionBlocks }
+        return nil
+    }
+
+    private var shouldShowDrivingOnboardingPulse: Bool {
+        activeHomeFocusTarget == .purpose
+    }
+
+    private var shouldShowFulfillmentOnboardingPulse: Bool {
+        activeHomeFocusTarget == .fulfillment
+    }
+
+    private var shouldShowObjectivesOnboardingPulse: Bool {
+        activeHomeFocusTarget == .objectives
+    }
+
+    private var shouldShowCaptureOnboardingPulse: Bool {
+        activeHomeFocusTarget == .capture
+    }
+
+    private var shouldShowActionBlocksOnboardingBounce: Bool {
+        activeHomeFocusTarget == .actionBlocks
+    }
+
+    private var shouldShowAnyOnboardingBounce: Bool {
+        shouldShowDrivingOnboardingPulse
+            || shouldShowFulfillmentOnboardingPulse
+            || shouldShowObjectivesOnboardingPulse
+            || shouldShowCaptureOnboardingPulse
+            || shouldShowActionBlocksOnboardingBounce
+    }
+
+    private var shouldLockToFocusedHomeTarget: Bool {
+        activeHomeFocusTarget != nil
+    }
+
+    private var onboardingCallCardContent: (title: String, step: String)? {
+        switch activeHomeFocusTarget {
+        case .purpose:
+            return ("Set Your Purpose", "1/5")
+        case .fulfillment:
+            return ("Set Fulfillment", "2/5")
+        case .objectives:
+            return ("Optional: Add a Long-Term Goal", "3/5")
+        case .capture:
+            return ("Master To Do List", "4/5")
+        case .actionBlocks:
+            return ("Start Weekly Action Plan", "5/5")
+        case .none:
+            return nil
+        }
+    }
+
+    private var shouldShowObjectivesSkipButton: Bool {
+        activeHomeFocusTarget == .objectives && !hasCompletedObjectivesSetup
+    }
+
+    private var shouldShowActionPlanLaterButton: Bool {
+        activeHomeFocusTarget == .actionBlocks && !isActiveActionFlow
+    }
+
+    private var shouldShowCaptureBackButton: Bool {
+        activeHomeFocusTarget == .capture && hasSkippedObjectivesSetupStep && !hasCompletedObjectivesSetup
+    }
+
+    private func onboardingStepOrder(_ target: HomeStartupFocusTarget) -> Int {
+        switch target {
+        case .purpose: return 1
+        case .fulfillment: return 2
+        case .objectives: return 3
+        case .capture: return 4
+        case .actionBlocks: return 5
+        }
+    }
+
+    private func hasPassedOnboardingStep(_ target: HomeStartupFocusTarget) -> Bool {
+        guard let current = activeHomeFocusTarget else { return true }
+        return onboardingStepOrder(target) < onboardingStepOrder(current)
     }
 
     private var splashMetricsFallback: [(String, Color, Double)] {
@@ -354,17 +447,6 @@ struct ContentView: View {
         return components.day ?? 0
     }
 
-    @ViewBuilder
-    private func measuredCard<Content: View>(_ key: String, @ViewBuilder content: () -> Content) -> some View {
-        content()
-            .background(
-                GeometryReader { proxy in
-                    Color.clear
-                        .preference(key: HomeCardHeightPreferenceKey.self, value: [key: proxy.size.height])
-                }
-            )
-    }
-    
     var body: some View { contentViewScreen }
 
     private var contentViewNavigationRoot: some View {
@@ -439,13 +521,6 @@ struct ContentView: View {
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .onPreferenceChange(HomeCardHeightPreferenceKey.self) { heights in
-                    var updated = measuredCardHeights
-                    updated.merge(heights) { _, new in new }
-                    if updated != measuredCardHeights {
-                        measuredCardHeights = updated
-                    }
-                }
                 .onPreferenceChange(ContentQuickstartFramePreferenceKey.self) { frames in
                     var resolved = contentQuickstartFrames
                     let screenBounds = UIScreen.main.bounds
@@ -793,6 +868,11 @@ struct ContentView: View {
                     playSheetDestination = .action
                 }
             }
+            .onChange(of: isActiveActionFlow) { _, newValue in
+                if newValue {
+                    setupHomepageMode = false
+                }
+            }
             .onChange(of: shouldShowContentQuickstart) { _, show in
                 if show {
                     contentQuickstartStepIndex = 0
@@ -812,6 +892,9 @@ struct ContentView: View {
             .onAppear {
                 beginStartupPreparationIfNeeded()
                 refreshFulfillmentCategoryScoresForCurrentWeek()
+                if isActiveActionFlow {
+                    setupHomepageMode = false
+                }
                 if !hasSeenContentQuickstart && isLikelyExistingInstall && !forceShowContentQuickstartOnce {
                     hasSeenContentQuickstart = true
                 }
@@ -1789,6 +1872,52 @@ struct ContentView: View {
         littleWinsIntegrationDetailTarget = .init(focusID: item.id)
     }
 
+    private func closeLittleWinsCalendarPreview(animated: Bool) {
+        let updates = {
+            littleWinsCalendarPreviewDate = nil
+            littleWinsCalendarPreviewExpandedCategoryID = nil
+            littleWinsCalendarPreviewExpandedCardDragX = 0
+        }
+        if animated {
+            withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82, blendDuration: 0.1)) {
+                updates()
+            }
+        } else {
+            updates()
+        }
+    }
+
+    private func closeLittleWinsCalendarPreviewIfNoHistory() {
+        guard let previewDate = littleWinsCalendarPreviewDate else { return }
+        let previewCategories = littleWinsHistoricalCategories(on: previewDate)
+        guard previewCategories.isEmpty else {
+            if let expandedCategoryID = littleWinsCalendarPreviewExpandedCategoryID,
+               !previewCategories.contains(where: { $0.id == expandedCategoryID }) {
+                littleWinsCalendarPreviewExpandedCategoryID = nil
+                littleWinsCalendarPreviewExpandedCardDragX = 0
+            }
+            return
+        }
+        closeLittleWinsCalendarPreview(animated: false)
+    }
+
+    private func uncheckLittleWinFromPreviewIfAllowed(
+        item: LittleWinsHistoricalCompletionItem,
+        previewDate: Date
+    ) {
+        let calendar = Calendar.current
+        guard calendar.isDateInToday(previewDate) else { return }
+        let hasTodayCompletion = littleWinsDailyCompletions.contains {
+            $0.focusId == item.focusId && calendar.isDate($0.day, inSameDayAs: todayStartDate)
+        }
+        guard hasTodayCompletion else { return }
+
+        withAnimation(.interactiveSpring(response: 0.30, dampingFraction: 0.82, blendDuration: 0.12)) {
+            littleWinsCompletedFocusIDs.remove(item.focusId)
+        }
+        persistLittleWinToggle(focusId: item.focusId, isCompleted: true)
+    }
+
     private func persistLittleWinToggle(focusId: UUID, isCompleted: Bool) {
         let calendar = Calendar.current
         if isCompleted {
@@ -2066,14 +2195,28 @@ struct ContentView: View {
 
                     Spacer()
 
-                    NavigationLink {
-                        AccountView()
-                    } label: {
-                        Image(systemName: "person.circle")
-                            .font(.system(size: 28))
-                            .opacity(homePageIndex == HomeSwipePage.littleWins.rawValue ? 0 : 1)
+                    Group {
+                        if homePageIndex == HomeSwipePage.littleWins.rawValue && littleWinsCalendarPreviewDate != nil {
+                            Button {
+                                closeLittleWinsCalendarPreview(animated: true)
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 28, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            NavigationLink {
+                                AccountView()
+                            } label: {
+                                Image(systemName: "person.circle")
+                                    .font(.system(size: 28))
+                                    .opacity(homePageIndex == HomeSwipePage.littleWins.rawValue ? 0 : 1)
+                            }
+                            .buttonStyle(.plain)
+                            .allowsHitTesting(!shouldLockToFocusedHomeTarget)
+                        }
                     }
-                    .buttonStyle(.plain)
                 }
                 .padding(.horizontal)
                 .padding(.top, 8)
@@ -2142,6 +2285,7 @@ struct ContentView: View {
                         )
                 }
                 .buttonStyle(.plain)
+                .allowsHitTesting(!shouldLockToFocusedHomeTarget)
             }
 
             pagePositionIndicator
@@ -2179,10 +2323,27 @@ struct ContentView: View {
                     enableHeaderPageAnimations = true
                 }
             }
+            if shouldLockToFocusedHomeTarget && !shouldShowContentQuickstart {
+                homePageIndex = HomeSwipePage.home.rawValue
+            }
+        }
+        .onChange(of: shouldLockToFocusedHomeTarget) { _, isLocked in
+            guard isLocked, !shouldShowContentQuickstart else { return }
+            if homePageIndex != HomeSwipePage.home.rawValue {
+                homePageIndex = HomeSwipePage.home.rawValue
+            }
         }
         .onChange(of: homePageIndex) { _, newValue in
             if newValue != HomeSwipePage.littleWins.rawValue {
                 showLoomAIChatMenu = false
+            }
+            if shouldLockToFocusedHomeTarget && !shouldShowContentQuickstart && newValue != HomeSwipePage.home.rawValue {
+                DispatchQueue.main.async {
+                    guard shouldLockToFocusedHomeTarget, !shouldShowContentQuickstart else { return }
+                    if homePageIndex != HomeSwipePage.home.rawValue {
+                        homePageIndex = HomeSwipePage.home.rawValue
+                    }
+                }
             }
         }
     }
@@ -2446,60 +2607,41 @@ struct ContentView: View {
         cardSpacing: CGFloat,
         cardDensity: CGFloat
     ) -> some View {
+        let isFocusedLock = shouldLockToFocusedHomeTarget
+        let allowsPurpose = !isFocusedLock
+            || activeHomeFocusTarget == .purpose
+            || hasCompletedPurposeSetup
+            || hasPassedOnboardingStep(.purpose)
+        let allowsFulfillment = !isFocusedLock
+            || activeHomeFocusTarget == .fulfillment
+            || hasCompletedFulfillmentSetup
+            || hasPassedOnboardingStep(.fulfillment)
+        let allowsObjectives = !isFocusedLock
+            || activeHomeFocusTarget == .objectives
+            || hasCompletedObjectivesSetup
+            || hasSkippedObjectivesSetupStep
+            || hasPassedOnboardingStep(.objectives)
         VStack(spacing: 10) {
             if shouldShowVacationModeBanner {
                 vacationModeCautionBanner
                     .padding(.horizontal)
+                    .allowsHitTesting(!isFocusedLock)
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
-            ViewThatFits(in: .vertical) {
-                GeometryReader { middleProxy in
-                    let middleHeight = middleProxy.size.height
-                    let drivingHeight = measuredCardHeights["driving"] ?? 170
-                    let fulfillmentHeight = measuredCardHeights["fulfillment"] ?? 170
-                    let objectivesHeight = measuredCardHeights["objectives"] ?? 170
-                    let totalCardHeight = drivingHeight + fulfillmentHeight + objectivesHeight
-                    let uniformGap = max(0, (middleHeight - totalCardHeight) / 4)
-
-                    VStack(spacing: 0) {
-                        Color.clear.frame(height: uniformGap)
-                        measuredCard("driving") {
-                            drivingForceSection
-                                .padding(.horizontal)
-                        }
-                        Color.clear.frame(height: uniformGap)
-                        measuredCard("fulfillment") {
-                            fulfillmentSection
-                                .padding(.horizontal)
-                        }
-                        Color.clear.frame(height: uniformGap)
-                        measuredCard("objectives") {
-                            objectivesSection
-                                .padding(.horizontal)
-                        }
-                        Color.clear.frame(height: uniformGap)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: cardSpacing) {
+                    drivingForceSection
+                        .allowsHitTesting(allowsPurpose)
+                    fulfillmentSection
+                        .allowsHitTesting(allowsFulfillment)
+                    objectivesSection
+                        .allowsHitTesting(allowsObjectives)
                 }
-                .padding(.vertical, max(0, outerVerticalPadding - 2))
-
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: cardSpacing) {
-                        measuredCard("driving") {
-                            drivingForceSection
-                        }
-                        measuredCard("fulfillment") {
-                            fulfillmentSection
-                        }
-                        measuredCard("objectives") {
-                            objectivesSection
-                        }
-                    }
-                    .padding(.horizontal)
-                    .padding(.vertical, outerVerticalPadding)
-                }
+                .padding(.horizontal)
+                .padding(.vertical, outerVerticalPadding)
             }
+            .scrollDisabled(isFocusedLock)
         }
         .environment(\.contentCardDensity, cardDensity)
     }
@@ -2556,6 +2698,7 @@ struct ContentView: View {
         .onChange(of: littleWinsDailyCompletions.map(\.id)) { _, _ in
             syncLittleWinsCompletionStateFromStore()
             syncIntegratedLittleWinsCompletionsFromProgress()
+            closeLittleWinsCalendarPreviewIfNoHistory()
         }
         .onChange(of: littleWinsSourceCardIDs) { _, _ in
             syncLittleWinsCardOrder()
@@ -2573,14 +2716,12 @@ struct ContentView: View {
         }
         .onChange(of: homePageIndex) { _, _ in
             if littleWinsCalendarPreviewDate != nil {
-                withAnimation(.easeOut(duration: 0.12)) {
-                    littleWinsCalendarPreviewDate = nil
-                }
+                closeLittleWinsCalendarPreview(animated: true)
             }
         }
         .sheet(item: $littleWinsIntegrationDetailTarget, content: littleWinsIntegrationDetailSheet)
         .onDisappear {
-            littleWinsCalendarPreviewDate = nil
+            closeLittleWinsCalendarPreview(animated: false)
         }
     }
 
@@ -2609,7 +2750,11 @@ struct ContentView: View {
         // Reserve only the actual laid-out calendar band height (row + paddings/spacers),
         // so the deck can use remaining space before hiding back cards.
         let calendarBandReserve: CGFloat = calendarRowHeight + 14
-        let isCalendarPreviewActive = littleWinsCalendarPreviewDate != nil
+        let previewCategoriesForActiveDate: [LittleWinsHistoricalDayCategory] = {
+            guard let previewDate = littleWinsCalendarPreviewDate else { return [] }
+            return littleWinsHistoricalCategories(on: previewDate)
+        }()
+        let isCalendarPreviewActive = littleWinsCalendarPreviewDate != nil && !previewCategoriesForActiveDate.isEmpty
 
         return Group {
             littleWinsDeckView(
@@ -2701,11 +2846,10 @@ struct ContentView: View {
         }
         .overlay {
             if let previewDate = littleWinsCalendarPreviewDate {
-                let previewCategories = littleWinsHistoricalCategories(on: previewDate)
-                if !previewCategories.isEmpty {
+                if !previewCategoriesForActiveDate.isEmpty {
                     littleWinsCalendarFullScreenPreview(
                         date: previewDate,
-                        categories: previewCategories,
+                        categories: previewCategoriesForActiveDate,
                         containerSize: proxy.size
                     )
                     .transition(.opacity.combined(with: .scale(scale: 0.96)))
@@ -3045,7 +3189,7 @@ struct ContentView: View {
                 let completedCardsForDate = isToday ? completedTodayCards : littleWinsCompletedCards(on: date)
                 let historicalPreviewCategories = littleWinsHistoricalCategories(on: date)
                 let hasHistoricalPreview = !historicalPreviewCategories.isEmpty
-                let canShowHoldPreview = !completedCardsForDate.isEmpty && hasHistoricalPreview
+                let canShowTapPreview = !completedCardsForDate.isEmpty && hasHistoricalPreview
                 let miniCardWidth: CGFloat = 28
         let miniCardHeight: CGFloat = miniCardWidth * 1.42
                 let visibleStackCount = min(7, completedCardsForDate.count)
@@ -3103,12 +3247,20 @@ struct ContentView: View {
                             .padding(.top, isToday ? -miniStackTopOverflow : 0)
                     }
                 )
-                .onLongPressGesture(minimumDuration: 0.18, maximumDistance: 36, pressing: { isPressing in
-                    guard canShowHoldPreview else { return }
-                    withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82, blendDuration: 0.1)) {
-                        littleWinsCalendarPreviewDate = isPressing ? calendar.startOfDay(for: date) : nil
+                .onTapGesture {
+                    guard canShowTapPreview else { return }
+                    let tappedDate = calendar.startOfDay(for: date)
+                    if let currentPreview = littleWinsCalendarPreviewDate,
+                       calendar.isDate(currentPreview, inSameDayAs: tappedDate) {
+                        closeLittleWinsCalendarPreview(animated: true)
+                    } else {
+                        withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82, blendDuration: 0.1)) {
+                            littleWinsCalendarPreviewDate = tappedDate
+                            littleWinsCalendarPreviewExpandedCategoryID = nil
+                            littleWinsCalendarPreviewExpandedCardDragX = 0
+                        }
                     }
-                }, perform: {})
+                }
             }
         }
         .padding(.top, 2)
@@ -3167,19 +3319,24 @@ struct ContentView: View {
         categories: [LittleWinsHistoricalDayCategory],
         containerSize: CGSize
     ) -> some View {
+        let calendar = Calendar.current
+        let isTodayPreview = calendar.isDateInToday(date)
         let horizontalPadding: CGFloat = 14
         let verticalPadding: CGFloat = 12
         let gridSpacing: CGFloat = 12
         let availableWidth = max(0, containerSize.width - (horizontalPadding * 2))
         let availableHeight = max(0, containerSize.height - (verticalPadding * 2) - 64)
+        let expandedCategory = categories.first { $0.id == littleWinsCalendarPreviewExpandedCategoryID }
         let completedCardCount = categories.filter(\.isCompletedCard).count
         let gridColumnsCount: Int = completedCardCount <= 4 ? 2 : 3
         let targetRowsCount: Int = completedCardCount <= 4 ? 2 : (completedCardCount <= 6 ? 2 : 3)
         let totalHorizontalSpacing = CGFloat(max(0, gridColumnsCount - 1)) * gridSpacing
         let totalVerticalSpacing = CGFloat(max(0, targetRowsCount - 1)) * gridSpacing
-        let cardWidth = max(100, (availableWidth - totalHorizontalSpacing) / CGFloat(gridColumnsCount))
-        let cardHeightCap = max(120, (availableHeight - totalVerticalSpacing) / CGFloat(targetRowsCount))
-        let cardHeight = min(cardWidth * 1.42, cardHeightCap)
+        let collapsedCardWidth = max(100, (availableWidth - totalHorizontalSpacing) / CGFloat(gridColumnsCount))
+        let collapsedCardHeightCap = max(120, (availableHeight - totalVerticalSpacing) / CGFloat(targetRowsCount))
+        let collapsedCardHeight = min(collapsedCardWidth * 1.42, collapsedCardHeightCap)
+        let expandedCardWidth = min(max(240, availableWidth), 420)
+        let expandedCardHeight = min(expandedCardWidth * 1.42, max(220, availableHeight - 20))
         let gridColumns = Array(
             repeating: GridItem(.flexible(), spacing: gridSpacing, alignment: .top),
             count: gridColumnsCount
@@ -3203,35 +3360,97 @@ struct ContentView: View {
                 }
                 .padding(.horizontal, 4)
 
-                ScrollView(.vertical, showsIndicators: false) {
-                    LazyVGrid(
-                        columns: gridColumns,
-                        spacing: gridSpacing
-                    ) {
-                        ForEach(categories) { category in
-                            littleWinsHistoricalPreviewCardView(
-                                category: category,
-                                width: cardWidth,
-                                height: cardHeight
-                            )
-                            .transition(.scale(scale: 0.92).combined(with: .opacity))
+                if let expandedCategory {
+                    VStack(spacing: 8) {
+                        if isTodayPreview {
+                            Text("Tap any checked item to move it back to today’s active stack.")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 4)
                         }
+                        littleWinsHistoricalPreviewCardView(
+                            category: expandedCategory,
+                            width: expandedCardWidth,
+                            height: expandedCardHeight,
+                            isUncheckEnabled: isTodayPreview
+                        ) { item in
+                            uncheckLittleWinFromPreviewIfAllowed(item: item, previewDate: date)
+                        }
+                        .offset(x: littleWinsCalendarPreviewExpandedCardDragX)
+                        .gesture(
+                            DragGesture(minimumDistance: 10, coordinateSpace: .local)
+                                .onChanged { value in
+                                    guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                                    littleWinsCalendarPreviewExpandedCardDragX = max(0, value.translation.width)
+                                }
+                                .onEnded { value in
+                                    let horizontalDominant = abs(value.translation.width) > abs(value.translation.height)
+                                    let shouldCollapseToGrid = horizontalDominant && value.translation.width > 72
+                                    withAnimation(.interactiveSpring(response: 0.30, dampingFraction: 0.82, blendDuration: 0.12)) {
+                                        littleWinsCalendarPreviewExpandedCardDragX = 0
+                                        if shouldCollapseToGrid {
+                                            littleWinsCalendarPreviewExpandedCategoryID = nil
+                                        }
+                                    }
+                                }
+                        )
+                        Text("Swipe right to return")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.bottom, 6)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                } else {
+                    ScrollView(.vertical, showsIndicators: false) {
+                        LazyVGrid(
+                            columns: gridColumns,
+                            spacing: gridSpacing
+                        ) {
+                            ForEach(categories) { category in
+                                littleWinsHistoricalPreviewCardView(
+                                    category: category,
+                                    width: collapsedCardWidth,
+                                    height: collapsedCardHeight,
+                                    isUncheckEnabled: false
+                                )
+                                .onTapGesture {
+                                    withAnimation(.interactiveSpring(response: 0.30, dampingFraction: 0.84, blendDuration: 0.12)) {
+                                        littleWinsCalendarPreviewExpandedCategoryID = category.id
+                                        littleWinsCalendarPreviewExpandedCardDragX = 0
+                                    }
+                                }
+                                .transition(.scale(scale: 0.92).combined(with: .opacity))
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.bottom, 6)
+                    }
                 }
             }
             .padding(.horizontal, horizontalPadding)
             .padding(.top, verticalPadding)
             .padding(.bottom, 6)
         }
-        .allowsHitTesting(false)
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 14, coordinateSpace: .local)
+                .onEnded { value in
+                    let horizontalDominant = abs(value.translation.width) > abs(value.translation.height)
+                    guard horizontalDominant && value.translation.width < -72 else { return }
+                    withAnimation(.interactiveSpring(response: 0.30, dampingFraction: 0.82, blendDuration: 0.12)) {
+                        homePageIndex = HomeSwipePage.home.rawValue
+                    }
+                    closeLittleWinsCalendarPreview(animated: true)
+                }
+        )
     }
 
     private func littleWinsHistoricalPreviewCardView(
         category: LittleWinsHistoricalDayCategory,
         width: CGFloat,
-        height: CGFloat
+        height: CGFloat,
+        isUncheckEnabled: Bool,
+        onItemTap: ((LittleWinsHistoricalCompletionItem) -> Void)? = nil
     ) -> some View {
         let baseWidth: CGFloat = 300
         let baseHeight: CGFloat = baseWidth * 1.42
@@ -3239,7 +3458,9 @@ struct ContentView: View {
         return littleWinsHistoricalPreviewCardBaseView(
             category: category,
             width: baseWidth,
-            height: baseHeight
+            height: baseHeight,
+            isUncheckEnabled: isUncheckEnabled,
+            onItemTap: onItemTap
         )
         .scaleEffect(scale, anchor: .top)
         .frame(width: width, height: height, alignment: .top)
@@ -3248,7 +3469,9 @@ struct ContentView: View {
     private func littleWinsHistoricalPreviewCardBaseView(
         category: LittleWinsHistoricalDayCategory,
         width: CGFloat,
-        height: CGFloat
+        height: CGFloat,
+        isUncheckEnabled: Bool,
+        onItemTap: ((LittleWinsHistoricalCompletionItem) -> Void)? = nil
     ) -> some View {
         let fixedPrimaryText = Color.black.opacity(0.82)
         let cardColor = FulfillmentCategoryTheme.lightColor(for: category.categoryTitle)
@@ -3272,12 +3495,15 @@ struct ContentView: View {
                     VStack(alignment: .leading, spacing: 10) {
                         ForEach(category.items.prefix(7)) { item in
                             littleWinsHistoricalPreviewItemRow(
-                                title: item.focusTitle,
+                                item: item,
                                 titleColor: titleColor,
                                 fixedPrimaryText: fixedPrimaryText,
                                 iconSize: 26,
-                                fontSize: 36
-                            )
+                                fontSize: 36,
+                                isUncheckEnabled: isUncheckEnabled
+                            ) {
+                                onItemTap?(item)
+                            }
                         }
                     }
 
@@ -3318,11 +3544,13 @@ struct ContentView: View {
     }
 
     private func littleWinsHistoricalPreviewItemRow(
-        title: String,
+        item: LittleWinsHistoricalCompletionItem,
         titleColor: Color,
         fixedPrimaryText: Color,
         iconSize: CGFloat,
-        fontSize: CGFloat
+        fontSize: CGFloat,
+        isUncheckEnabled: Bool,
+        onTap: (() -> Void)? = nil
     ) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "checkmark.circle.fill")
@@ -3331,7 +3559,7 @@ struct ContentView: View {
                 .padding(.top, 1)
                 .frame(width: 30, alignment: .center)
 
-            Text(title)
+            Text(item.focusTitle)
                 .font(.system(size: fontSize, weight: .semibold))
                 .foregroundStyle(fixedPrimaryText)
                 .multilineTextAlignment(.leading)
@@ -3341,6 +3569,17 @@ struct ContentView: View {
                 .allowsTightening(true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, isUncheckEnabled ? 8 : 0)
+        .padding(.vertical, isUncheckEnabled ? 2 : 0)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(isUncheckEnabled ? Color.white.opacity(0.35) : Color.clear)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard isUncheckEnabled else { return }
+            onTap?()
+        }
     }
 
     private func lastSevenDatesEndingToday() -> [Date] {
@@ -3757,17 +3996,56 @@ struct ContentView: View {
     }
 
     private var footer: some View {
-        VStack(spacing: 6) {
+        let isFocusedLock = shouldLockToFocusedHomeTarget
+        let isCaptureAllowedWhileLocked = activeHomeFocusTarget == .capture || hasPassedOnboardingStep(.capture)
+        let isActionBlocksAllowedWhileLocked = activeHomeFocusTarget == .actionBlocks || hasPassedOnboardingStep(.actionBlocks)
+        return VStack(spacing: 6) {
             HStack(spacing: 16) {
                 Button(action: { isPresentingCaptureView = true }) {
                     captureActionButtonVisual
                     .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.plain)
+                .disabled(isFocusedLock && !isCaptureAllowedWhileLocked)
+                .scaleEffect(
+                    shouldShowCaptureOnboardingPulse
+                        ? (drivingCardBounceOn ? 1.012 : 1.0)
+                        : 1.0
+                )
+                .offset(
+                    y: shouldShowCaptureOnboardingPulse
+                        ? (drivingCardBounceOn ? -3 : 0)
+                        : 0
+                )
+                .animation(
+                    shouldShowCaptureOnboardingPulse
+                        ? .easeInOut(duration: 0.20)
+                        : .default,
+                    value: drivingCardBounceOn
+                )
                 .background(contentQuickstartTargetFrame(.capture))
+                .overlay(alignment: .top) {
+                    if activeHomeFocusTarget == .capture, let callCard = onboardingCallCardContent {
+                        onboardingCallCard(
+                            title: callCard.title,
+                            step: callCard.step,
+                            leadingButtonLabel: shouldShowCaptureBackButton ? "back" : nil,
+                            leadingButtonAction: shouldShowCaptureBackButton ? returnToObjectivesSetupStep : nil
+                        )
+                            .offset(y: -58)
+                            .allowsHitTesting(shouldShowCaptureBackButton)
+                    }
+                }
 
                 Group {
-                    if setupHomepageMode {
+                    if isActiveActionFlow {
+                        Button(action: {
+                            playSheetDestination = .action
+                        }) {
+                            actionBlocksPlayButtonVisual
+                        }
+                        .buttonStyle(.plain)
+                    } else if setupHomepageMode {
                         NavigationLink {
                             PlanStartView()
                         } label: {
@@ -3777,13 +4055,6 @@ struct ContentView: View {
                     } else if !canOpenPlanOrActionFlow {
                         Button(action: {
                             triggerPlayBlockedFeedback()
-                        }) {
-                            actionBlocksPlayButtonVisual
-                        }
-                        .buttonStyle(.plain)
-                    } else if isActiveActionFlow {
-                        Button(action: {
-                            playSheetDestination = .action
                         }) {
                             actionBlocksPlayButtonVisual
                         }
@@ -3801,23 +4072,36 @@ struct ContentView: View {
                         .buttonStyle(.plain)
                     }
                 }
+                .disabled(isFocusedLock && !isActionBlocksAllowedWhileLocked)
                 .scaleEffect(
-                    shouldShowPlanButtonOnboardingBounce
+                    shouldShowActionBlocksOnboardingBounce
                         ? (drivingCardBounceOn ? 1.012 : 1.0)
                         : 1.0
                 )
                 .offset(
-                    y: shouldShowPlanButtonOnboardingBounce
+                    y: shouldShowActionBlocksOnboardingBounce
                         ? (drivingCardBounceOn ? -3 : 0)
                         : 0
                 )
                 .animation(
-                    shouldShowPlanButtonOnboardingBounce
+                    shouldShowActionBlocksOnboardingBounce
                         ? .easeInOut(duration: 0.20)
                         : .default,
                     value: drivingCardBounceOn
                 )
                 .background(contentQuickstartTargetFrame(.actionBlocks))
+                .overlay(alignment: .topTrailing) {
+                    if activeHomeFocusTarget == .actionBlocks, let callCard = onboardingCallCardContent {
+                        onboardingCallCard(
+                            title: callCard.title,
+                            step: callCard.step,
+                            trailingButtonLabel: shouldShowActionPlanLaterButton ? "later" : nil,
+                            trailingButtonAction: shouldShowActionPlanLaterButton ? skipActionPlanSetupStep : nil,
+                            pointerTrailingInset: 24
+                        )
+                        .offset(y: -58)
+                    }
+                }
             }
             .padding(.horizontal)
             .padding(.top, 6)
@@ -3858,7 +4142,7 @@ struct ContentView: View {
                             .foregroundColor(.accentColor)
                             .padding(.leading, 16)
                             .scaleEffect(1.6)
-                        Text("Capture Action")
+                        Text("Capture To Do")
                             .foregroundColor(.primary)
                             .padding(.leading, 12)
                         Spacer()
@@ -3887,6 +4171,92 @@ struct ContentView: View {
             .background(backgroundColor)
             .opacity(opacity)
             .clipShape(Circle())
+    }
+
+    private func onboardingCallCard(
+        title: String,
+        step: String,
+        leadingButtonLabel: String? = nil,
+        leadingButtonAction: (() -> Void)? = nil,
+        trailingButtonLabel: String? = nil,
+        trailingButtonAction: (() -> Void)? = nil,
+        pointerTrailingInset: CGFloat? = nil
+    ) -> some View {
+        let isDark = colorScheme == .dark
+        let calloutFill = isDark
+            ? Color(red: 0.86, green: 0.86, blue: 0.88).opacity(0.98)
+            : Color(red: 0.20, green: 0.20, blue: 0.22).opacity(0.98)
+        let calloutPrimaryText = isDark ? Color(red: 0.23, green: 0.23, blue: 0.25) : Color(.systemGray6)
+        let calloutSecondaryText = isDark ? Color(red: 0.35, green: 0.35, blue: 0.38) : Color(.systemGray4)
+        return VStack(spacing: 0) {
+            VStack(spacing: 0) {
+                if let leadingButtonLabel, let leadingButtonAction {
+                    HStack(spacing: 0) {
+                        Button(leadingButtonLabel, action: leadingButtonAction)
+                            .buttonStyle(.plain)
+                            .font(.system(size: 13.5, weight: .semibold))
+                            .foregroundStyle(.blue)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.top, 7)
+                    .padding(.bottom, 2)
+                }
+
+                HStack(spacing: 8) {
+                    Text(step)
+                        .font(.system(size: 13.75, weight: .semibold))
+                        .foregroundStyle(calloutSecondaryText)
+                    Text(title)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(calloutPrimaryText)
+                    if let trailingButtonLabel, let trailingButtonAction {
+                        Spacer(minLength: 8)
+                        Button(trailingButtonLabel, action: trailingButtonAction)
+                            .buttonStyle(.plain)
+                            .font(.system(size: 13.5, weight: .semibold))
+                            .foregroundStyle(.blue)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, leadingButtonLabel == nil ? 7 : 2)
+                .padding(.bottom, 7)
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(calloutFill)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(isDark ? Color.black.opacity(0.10) : Color.white.opacity(0.10), lineWidth: 1)
+            )
+
+            if let pointerTrailingInset {
+                HStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                        .fill(calloutFill)
+                        .frame(width: 11, height: 11)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                                .stroke(isDark ? Color.black.opacity(0.08) : Color.white.opacity(0.08), lineWidth: 1)
+                        )
+                        .rotationEffect(.degrees(45))
+                        .offset(y: -5.5)
+                        .padding(.trailing, pointerTrailingInset)
+                }
+            } else {
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(calloutFill)
+                    .frame(width: 11, height: 11)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 2, style: .continuous)
+                            .stroke(isDark ? Color.black.opacity(0.08) : Color.white.opacity(0.08), lineWidth: 1)
+                    )
+                    .rotationEffect(.degrees(45))
+                    .offset(y: -5.5)
+            }
+        }
     }
 
     private func contentQuickstartTargetFrame(_ target: ContentQuickstartTarget) -> some View {
@@ -4826,6 +5196,13 @@ struct ContentView: View {
             RoundedRectangle(cornerRadius: 16)
                 .stroke(highlightDrivingRequirement ? Color.red.opacity(0.9) : Color.clear, lineWidth: 2)
         )
+        .overlay(alignment: .top) {
+            if activeHomeFocusTarget == .purpose, let callCard = onboardingCallCardContent {
+                onboardingCallCard(title: callCard.title, step: callCard.step)
+                    .offset(y: -50)
+                    .allowsHitTesting(false)
+            }
+        }
         .background(contentQuickstartTargetFrame(.purpose))
     }
 
@@ -4972,6 +5349,13 @@ struct ContentView: View {
             RoundedRectangle(cornerRadius: 16)
                 .stroke(highlightFulfillmentRequirement ? Color.red.opacity(0.9) : Color.clear, lineWidth: 2)
         )
+        .overlay(alignment: .top) {
+            if activeHomeFocusTarget == .fulfillment, let callCard = onboardingCallCardContent {
+                onboardingCallCard(title: callCard.title, step: callCard.step)
+                    .offset(y: -50)
+                    .allowsHitTesting(false)
+            }
+        }
         .background(contentQuickstartTargetFrame(.fulfillment))
     }
 
@@ -5191,6 +5575,22 @@ struct ContentView: View {
             }
         }
         .buttonStyle(.plain)
+        .scaleEffect(
+            shouldShowObjectivesOnboardingPulse
+                ? (drivingCardBounceOn ? 1.012 : 1.0)
+                : 1.0
+        )
+        .offset(
+            y: shouldShowObjectivesOnboardingPulse
+                ? (drivingCardBounceOn ? -3 : 0)
+                : 0
+        )
+        .animation(
+            shouldShowObjectivesOnboardingPulse
+                ? .easeInOut(duration: 0.20)
+                : .default,
+            value: drivingCardBounceOn
+        )
         .frame(maxHeight: .infinity)
         .overlay {
             if !canOpenPlanOrActionFlow {
@@ -5201,7 +5601,31 @@ struct ContentView: View {
                     }
             }
         }
+        .overlay(alignment: .top) {
+            if activeHomeFocusTarget == .objectives, let callCard = onboardingCallCardContent {
+                onboardingCallCard(
+                    title: callCard.title,
+                    step: callCard.step,
+                    trailingButtonLabel: shouldShowObjectivesSkipButton ? "Skip" : nil,
+                    trailingButtonAction: shouldShowObjectivesSkipButton ? skipObjectivesSetupStep : nil
+                )
+                .offset(y: -50)
+            }
+        }
         .background(contentQuickstartTargetFrame(.objectives))
+    }
+
+    private func skipObjectivesSetupStep() {
+        hasSkippedObjectivesSetupStep = true
+    }
+
+    private func returnToObjectivesSetupStep() {
+        hasSkippedObjectivesSetupStep = false
+    }
+
+    private func skipActionPlanSetupStep() {
+        hasSkippedActionPlanSetupStep = true
+        setupHomepageMode = false
     }
 
     private func bounceDrivingCardOnce() {
@@ -5298,14 +5722,6 @@ struct SectionCard<Content: View>: View {
 
 private struct ContentCardDensityKey: EnvironmentKey {
     static let defaultValue: CGFloat = 1.0
-}
-
-private struct HomeCardHeightPreferenceKey: PreferenceKey {
-    static var defaultValue: [String: CGFloat] = [:]
-
-    static func reduce(value: inout [String: CGFloat], nextValue: () -> [String: CGFloat]) {
-        value.merge(nextValue()) { _, new in new }
-    }
 }
 
 private struct HeaderLogoWidthPreferenceKey: PreferenceKey {
@@ -5874,23 +6290,23 @@ struct ContentLittleWinsManagerSheetView: View {
                     }
                 }
 
-                Section {
-                    Button {
-                        startCreatingNew()
-                    } label: {
-                        HStack {
-                            Text("Add Little Win")
-                                .foregroundStyle(selectedCategoryID == nil ? Color.secondary : Color.accentColor)
-                            Spacer()
+                if selectedCategoryID != nil {
+                    Section {
+                        Button {
+                            startCreatingNew()
+                        } label: {
+                            HStack {
+                                Text("Add Little Win")
+                                    .foregroundStyle(Color.accentColor)
+                                Spacer()
+                            }
+                            .frame(minHeight: 44, alignment: .center)
+                            .padding(.horizontal, 14)
                         }
-                        .frame(minHeight: 44, alignment: .center)
-                        .padding(.horizontal, 14)
-                    }
-                    .buttonStyle(.plain)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
-                    .disabled(selectedCategoryID == nil || isDeleteMode || littleWinsForSelection.count >= 3)
+                        .buttonStyle(.plain)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                        .disabled(isDeleteMode || littleWinsForSelection.count >= 3)
 
-                    if selectedCategoryID != nil {
                         ForEach(littleWinsForSelection, id: \.id) { focus in
                             Button {
                                 guard !isDeleteMode else {

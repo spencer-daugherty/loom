@@ -109,7 +109,7 @@ export default {
       : (isAutoWritePassionsMode
         ? "autowrite-passions-v1"
       : (isAutoWriteLittleWinMode
-        ? "autowrite-littlewin-v1"
+        ? "autowrite-littlewin-v2"
       : (isAutoWriteIdentityMode
         ? "autowrite-identity-v1"
       : (isAutoWriteMissionMode
@@ -190,13 +190,16 @@ export default {
       "Little Win guidance to follow:",
       "- Small actions create momentum.",
       "- Suggest easy, repeatable, practical little wins for this area.",
+      '- Keep suggestions concise and specific, like: "10,000 steps", "60 min workout", "Follow diet".',
       "Return JSON ONLY in this exact shape:",
       '{"suggestions":[{"activity":"string","replaceActivity":"string optional"}],"confidence":"high|medium|low"}',
       "Rules:",
       "- Return 1-2 suggestions.",
-      "- activity must be <=120 characters.",
-      "- If 3 current little wins already exist, include replaceActivity for each suggestion.",
+      "- activity must be 1-7 words and <=80 characters.",
+      "- Include replaceActivity only when there are exactly 3 current little wins; otherwise omit replaceActivity.",
       "- replaceActivity must name the weakest current little win to replace.",
+      "- Do not repeat or lightly reword existing little wins.",
+      "- Avoid semantic overlap with Current Little Wins; suggestions should be clearly distinct.",
       "- No numbering, no bullets, no markdown.",
       "- Suggestions must be relevant to the provided Fulfillment Area.",
       "- Do not output anything outside the JSON object."
@@ -210,9 +213,12 @@ export default {
       '{"suggestions":[{"identity":"string","replaceIdentity":"string optional"}],"confidence":"high|medium|low"}',
       "Rules:",
       "- Return 1-2 suggestions.",
-      "- identity must be <=120 characters.",
+      "- identity must be 1-3 words.",
+      "- identity must be <=40 characters.",
       "- If 3 current identities already exist, include replaceIdentity for each suggestion.",
       "- replaceIdentity must name the weakest current identity to replace.",
+      "- Do not repeat or lightly reword existing identities.",
+      "- Avoid semantic overlap with Current Identities; suggestions should be clearly distinct.",
       "- No numbering, no bullets, no markdown.",
       "- Suggestions must be relevant to the provided Fulfillment Area.",
       "- Do not output anything outside the JSON object."
@@ -1335,13 +1341,13 @@ function normalizeAutoWriteIdentityPayload(parsed, fallbackText) {
   const suggestions = source
     .map((item) => {
       if (typeof item === "string") {
-        const identity = truncateAtWordBoundary(item.replace(/\s+/g, " ").trim(), 120);
+        const identity = normalizeIdentityAutoWriteText(item);
         return identity ? { identity, replaceIdentity: null } : null;
       }
       if (!item || typeof item !== "object") return null;
       const identityRaw = (item.identity || item.role || item.text || "");
       const replaceRaw = (item.replaceIdentity || item.replace || item.weakestIdentity || "");
-      const identity = truncateAtWordBoundary(String(identityRaw).replace(/\s+/g, " ").trim(), 120);
+      const identity = normalizeIdentityAutoWriteText(identityRaw);
       const replaceIdentity = truncateAtWordBoundary(String(replaceRaw).replace(/\s+/g, " ").trim(), 120);
       if (!identity) return null;
       return {
@@ -1387,13 +1393,13 @@ function normalizeAutoWriteLittleWinPayload(parsed, fallbackText) {
   const suggestions = source
     .map((item) => {
       if (typeof item === "string") {
-        const activity = truncateAtWordBoundary(item.replace(/\s+/g, " ").trim(), 120);
+        const activity = normalizeLittleWinAutoWriteText(item);
         return activity ? { activity, replaceActivity: null } : null;
       }
       if (!item || typeof item !== "object") return null;
       const activityRaw = (item.activity || item.littleWin || item.text || "");
       const replaceRaw = (item.replaceActivity || item.replace || item.weakestLittleWin || "");
-      const activity = truncateAtWordBoundary(String(activityRaw).replace(/\s+/g, " ").trim(), 120);
+      const activity = normalizeLittleWinAutoWriteText(activityRaw);
       const replaceActivity = truncateAtWordBoundary(String(replaceRaw).replace(/\s+/g, " ").trim(), 120);
       if (!activity) return null;
       return {
@@ -1947,6 +1953,20 @@ function normalizeLittleWinActivityText(value) {
 
   if (!s) return "";
   return s;
+}
+
+function normalizeIdentityAutoWriteText(value) {
+  const cleaned = String(value || "").replace(/\s+/g, " ").trim();
+  if (!cleaned) return "";
+  const words = cleaned.split(/\s+/).filter(Boolean).slice(0, 3).join(" ");
+  return truncateAtWordBoundary(words, 40);
+}
+
+function normalizeLittleWinAutoWriteText(value) {
+  const cleaned = String(value || "").replace(/\s+/g, " ").trim();
+  if (!cleaned) return "";
+  const words = cleaned.split(/\s+/).filter(Boolean).slice(0, 7).join(" ");
+  return truncateAtWordBoundary(words, 80);
 }
 
 function truncateAtWordBoundary(value, maxLen) {

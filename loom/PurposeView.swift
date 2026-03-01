@@ -405,8 +405,11 @@ struct PurposeView: View {
     @State private var showDeletePassionHint = false
     @State private var deletePassionHintText = ""
     @State private var deletePassionHintWorkItem: DispatchWorkItem?
+    @State private var keyboardHeight: CGFloat = 0
+    @State private var keyboardDismissCommitSignal: Int = 0
     @FocusState private var focusedField: Field?
     private let passionHeaderTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
+    private let keyboardFloatingGap: CGFloat = 15
 
     private enum DrivingForceEditor: String, Identifiable {
         case vision
@@ -457,6 +460,45 @@ struct PurposeView: View {
         }
         return rows
     }
+
+    private var isKeyboardVisible: Bool { keyboardHeight > 0 }
+
+    private func keyboardDismissBottomPadding(in proxy: GeometryProxy) -> CGFloat {
+        guard keyboardHeight > 0 else { return 58 }
+        let keyboardTopGlobal = UIScreen.main.bounds.height - keyboardHeight
+        let viewBottomGlobal = proxy.frame(in: .global).maxY
+        let keyboardOverlapInView = max(0, viewBottomGlobal - keyboardTopGlobal)
+        return keyboardOverlapInView + keyboardFloatingGap
+    }
+
+    private var keyboardDismissButton: some View {
+        Button {
+            commitFocusedOneLineFieldIfNeeded()
+            focusedField = nil
+            hideKeyboard()
+        } label: {
+            Image(systemName: "keyboard.chevron.compact.down")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.primary.opacity(0.85))
+                .frame(width: 45, height: 45)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay(
+                    Circle()
+                        .stroke(Color.white.opacity(0.28), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func commitFocusedOneLineFieldIfNeeded() {
+        guard case let .passion(emotion) = focusedField else { return }
+        let state = addStates[emotion] ?? AddState()
+        if state.isAdding {
+            commitPassion(text: state.newText, emotion: emotion)
+        } else {
+            keyboardDismissCommitSignal &+= 1
+        }
+    }
     
     var body: some View {
         List {
@@ -475,17 +517,6 @@ struct PurposeView: View {
         .listStyle(.insetGrouped)
         .listRowSpacing(4)
         .toolbar { topToolbar }
-        .toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                if focusedField == .vision {
-                    Spacer()
-                    Button("Done") {
-                        focusedField = nil
-                        hideKeyboard()
-                    }
-                }
-            }
-        }
         .navigationTitle("Purpose")
         .background(backgroundTapDismiss)
         .task {
@@ -519,11 +550,31 @@ struct PurposeView: View {
         .onReceive(NotificationCenter.default.publisher(for: .vacationModeDidChange)) { _ in
             refreshPassionScoresForCurrentMonthIfNeeded(force: true)
         }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
+            guard let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
+            let screenHeight = UIScreen.main.bounds.height
+            keyboardHeight = max(0, screenHeight - frame.minY)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            keyboardHeight = 0
+        }
         .sheet(isPresented: $isShowingInstructions, content: instructionsSheet)
         .navigationDestination(isPresented: $showDrivingForceTrends) {
             DrivingForceTrendsView(snapshots: passionScoreSnapshots)
         }
         .alert("Delete Historic Item?", isPresented: deleteHistoricBinding, actions: deleteHistoricActions, message: deleteHistoricMessage)
+        .overlay {
+            GeometryReader { proxy in
+                if isKeyboardVisible {
+                    HStack(spacing: 8) {
+                        keyboardDismissButton
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                    .padding(.trailing, 16)
+                    .padding(.bottom, keyboardDismissBottomPadding(in: proxy))
+                }
+            }
+        }
         .overlay(alignment: .bottom) {
             if showDeletePassionHint {
                 Text(deletePassionHintText)
@@ -1384,6 +1435,7 @@ struct PurposeView: View {
                 PassionEditor(
                     category: category,
                     addState: addStates[category.emotion] ?? AddState(),
+                    dismissCommitSignal: keyboardDismissCommitSignal,
                     onAddStateChange: { newState in
                         addStates[category.emotion] = newState
                     },
@@ -2054,7 +2106,14 @@ private struct DrivingForceTrendsView: View {
             return (snap, delta)
         }
         let result = deltas.max { abs($0.1) < abs($1.1) }
-        if let result, abs(result.1) < 0.05 { return nil }
+        guard let result else { return nil }
+        if abs(result.1) < 0.05 { return nil }
+
+        // Match Strongest's tie-handling behavior, but only blank when 3+ tie on movement magnitude.
+        let topMagnitude = abs(roundedTenth(result.1))
+        let tieCount = deltas.filter { abs(roundedTenth($0.1)) == topMagnitude }.count
+        if tieCount >= 3 { return nil }
+
         return result
     }
 
@@ -2823,6 +2882,7 @@ private struct DrivingForceEditorTextView: UIViewRepresentable {
 struct PassionEditor: View {
     let category: PassionCategory
     let addState: AddState
+    let dismissCommitSignal: Int
     let onAddStateChange: (AddState) -> Void
     @FocusState.Binding var focusedField: Field?
     let onCommit: (String) -> Void
@@ -2896,6 +2956,16 @@ struct PassionEditor: View {
             guard addState.isAdding else { return }
             if newValue != .passion(category.emotion) {
                 onAddStateChange(AddState())
+            }
+        }
+        .onChange(of: dismissCommitSignal) { _, _ in
+            guard focusedField == .passion(category.emotion) else { return }
+            if let editingPassion {
+                commitEdit(passion: editingPassion)
+                return
+            }
+            if addState.isAdding {
+                onCommit(addState.newText)
             }
         }
         .onChange(of: editingPassion?.id) { _, newValue in

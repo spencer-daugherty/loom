@@ -581,7 +581,13 @@ struct ActionView: View {
         let hasPlaceFilterButton = !selectedPlaceIDs.isEmpty || contextualPlaceItems.contains { !selectedPlaceIDs.contains($0.id) }
         let hasPersonFilterButton = !selectedPersonIDs.isEmpty || contextualPersonResources.contains { !selectedPersonIDs.contains($0.id) }
         let hasToolFilterButton = !selectedToolIDs.isEmpty || contextualToolResources.contains { !selectedToolIDs.contains($0.id) }
-        let hasTimeOfDayFilterButton = !selectedTimeOfDay.isEmpty || contextualTimeOfDayOptions.contains { !selectedTimeOfDay.contains($0) }
+        let hasOnlyAnytimeOption = !contextualTimeOfDayOptions.isEmpty && contextualTimeOfDayOptions.allSatisfy { $0 == .any }
+        let hasTimeOfDayFilterButton: Bool
+        if hasOnlyAnytimeOption && selectedTimeOfDay.isEmpty {
+            hasTimeOfDayFilterButton = false
+        } else {
+            hasTimeOfDayFilterButton = !selectedTimeOfDay.isEmpty || contextualTimeOfDayOptions.contains { !selectedTimeOfDay.contains($0) }
+        }
         let hasDurationFilterButton = !selectedDurations.isEmpty || contextualDurations.contains { !selectedDurations.contains($0) }
         let hasAttachmentsFilterButton = !selectedAttachmentKinds.isEmpty || contextualAttachmentKinds.contains { !selectedAttachmentKinds.contains($0) }
         let showInactiveOnlyFilterButton = inactiveOnly || inactiveOnlyCandidateCount > 0
@@ -1212,13 +1218,14 @@ struct ActionView: View {
         }
         .sheet(item: $actionStatusActionID) { wrapper in
             let selectedResource = selectedResourceByActionID[wrapper.id].flatMap { resourceByID[$0] }
+            let hasAnyPeopleOrTools = leverageCatalog.contains { $0.kind == .person || $0.kind == .tool }
             let leveragedStatusIconName = {
                 guard let selectedResource else { return "circle" }
                 return selectedResource.kind == .tool ? "wrench.and.screwdriver" : "person"
             }()
             ActionStatusPickerSheet(
                 current: status(for: wrapper.id),
-                includeLeveragedOption: selectedResource != nil,
+                includeLeveragedOption: hasAnyPeopleOrTools && selectedResource != nil,
                 leveragedIconName: leveragedStatusIconName,
                 onSelect: { status in
                     if status == .leveraged {

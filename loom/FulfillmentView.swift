@@ -2573,7 +2573,7 @@ struct FulfillmentView: View {
     }
 }
 
-private struct LittleWinsManagerSheetView: View {
+struct LittleWinsManagerSheetView: View {
     private struct EditorTarget: Identifiable {
         let focusID: UUID?
         let categoryID: UUID
@@ -2588,6 +2588,8 @@ private struct LittleWinsManagerSheetView: View {
 
     let categoryID: UUID
     let categoryTitle: String
+    let showsAddButton: Bool
+    let persistsChanges: Bool
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
@@ -2600,6 +2602,18 @@ private struct LittleWinsManagerSheetView: View {
 
     private let weekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 
+    init(
+        categoryID: UUID,
+        categoryTitle: String,
+        showsAddButton: Bool = true,
+        persistsChanges: Bool = true
+    ) {
+        self.categoryID = categoryID
+        self.categoryTitle = categoryTitle
+        self.showsAddButton = showsAddButton
+        self.persistsChanges = persistsChanges
+    }
+
     private var littleWins: [FulfillmentFocus] {
         foci.filter { $0.category_id == categoryID }
             .sorted { $0.rank < $1.rank }
@@ -2609,7 +2623,7 @@ private struct LittleWinsManagerSheetView: View {
         NavigationStack {
             List {
                 Section {
-                    if !isDeleteMode && littleWins.count < 3 {
+                    if showsAddButton && !isDeleteMode && littleWins.count < 3 {
                         Button {
                             startCreatingNew()
                         } label: {
@@ -2699,7 +2713,8 @@ private struct LittleWinsManagerSheetView: View {
                 categoryID: target.categoryID,
                 categoryTitle: target.categoryTitle,
                 focusID: target.focusID,
-                autoFocusTextField: target.autoFocus
+                autoFocusTextField: target.autoFocus,
+                persistsChanges: persistsChanges
             )
         }
         .overlay(alignment: .bottom) {
@@ -2774,7 +2789,9 @@ private struct LittleWinsManagerSheetView: View {
             LittleWinsPassionsStore.removePassions(for: focus.id)
             RecentlyDeletedStore.trash(focus, in: modelContext)
         }
-        try? modelContext.save()
+        if persistsChanges {
+            try? modelContext.save()
+        }
         selectedIDsForDelete.removeAll()
         isDeleteMode = false
     }
@@ -3350,6 +3367,7 @@ struct LittleWinEditorSheetView: View {
     let categoryTitle: String
     let focusID: UUID?
     let autoFocusTextField: Bool
+    var persistsChanges: Bool = true
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
@@ -3658,7 +3676,9 @@ struct LittleWinEditorSheetView: View {
             LittleWinsPassionsStore.setPassionIDs(selectedLittleWinPassionIDs, for: focus.id)
         }
 
-        try? modelContext.save()
+        if persistsChanges {
+            try? modelContext.save()
+        }
         if finalIntegrationConfig == nil, draftIntegrate {
             draftIntegrate = false
             draftIntegrationConfig = nil
@@ -3815,8 +3835,9 @@ private struct LittleWinIntegrationSetupSheet: View {
                     }
                 }
 
-                Section("Automation Goal") {
-                    if usesAppleHealth {
+                if !usesAppleHealth || config.isConnected {
+                    Section("Automation Goal") {
+                        if usesAppleHealth {
                         HStack {
                             Text("Metric")
                             Spacer()
@@ -3886,7 +3907,7 @@ private struct LittleWinIntegrationSetupSheet: View {
                                 }
                             }
                         }
-                    } else {
+                        } else {
                         HStack {
                             Text("Metric")
                             Spacer()
@@ -3932,6 +3953,7 @@ private struct LittleWinIntegrationSetupSheet: View {
                                 Text(config.metric.unitLabel)
                                     .foregroundStyle(.secondary)
                             }
+                        }
                         }
                     }
                 }
