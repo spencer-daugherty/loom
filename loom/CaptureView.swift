@@ -599,6 +599,10 @@ struct CaptureView: View {
         #endif
     }
 
+    private var isComposerAllowedFirstResponder: Bool {
+        isComposerFocused && focusedField == nil && !showFullTextEditorSheet
+    }
+
     private func normalizedActionText(_ text: String) -> String {
         text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
@@ -740,6 +744,11 @@ struct CaptureView: View {
                 .onChange(of: focusedField) { _, newValue in
                     if case .item = newValue {
                         isComposerFocused = false
+                    }
+                }
+                .onChange(of: focusedField) { oldValue, newValue in
+                    if shouldPersistInlineEditOnFocusTransition(from: oldValue, to: newValue) {
+                        persistInlineEditNow()
                     }
                 }
                 .onChange(of: isGhostOn) { _, newValue in
@@ -935,6 +944,7 @@ struct CaptureView: View {
                         .focused($focusedField, equals: .item(item.id))
                         .submitLabel(.done)
                         .onSubmit {
+                            persistInlineEditNow()
                             focusedField = nil
                             isComposerFocused = true
                         }
@@ -1129,17 +1139,19 @@ struct CaptureView: View {
                             .stroke(showEditLeverageDueDateError && !editingItemHasDueDate ? Color.red : Color.clear, lineWidth: 2)
                     }
 
-                    HStack {
-                        Text("Leverage")
-                            .foregroundStyle(editingItemHasDueDate ? .primary : .secondary)
-                        Spacer()
-                        leverageSelectorLabel
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        if !editingItemHasDueDate {
-                            triggerCaptureEditLeverageDueDateError()
-                            return
+                    if hasAnyLeverageResources {
+                        HStack {
+                            Text("Assign")
+                                .foregroundStyle(editingItemHasDueDate ? .primary : .secondary)
+                            Spacer()
+                            leverageSelectorLabel
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            if !editingItemHasDueDate {
+                                triggerCaptureEditLeverageDueDateError()
+                                return
+                            }
                         }
                     }
 
@@ -1175,9 +1187,7 @@ struct CaptureView: View {
                             }
                         }
 
-                        Text(editingItemIsGhost
-                             ? "Attention triggers countdown to display and is unhidden."
-                             : "Attention triggers countdown to display.")
+                        Text("Attention triggers countdown to display before due date and intelligently brings it into your attention.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1192,7 +1202,7 @@ struct CaptureView: View {
                         }
                     }
 
-                    Section("Complete") {
+                    Section {
                         Button {
                             guard let id = editingItemID,
                                   let item = allItems.first(where: { $0.id == id }) else {
@@ -1278,7 +1288,7 @@ struct CaptureView: View {
                 .overlay(alignment: .bottom) {
                     if showEditLeverageDueDateError && !editingItemHasDueDate {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("You must add a due date to leverage action to hold your resources accountable")
+                            Text("You must add a due date to assign this action so resources stay accountable")
                                 .font(.footnote)
                                 .fontWeight(.bold)
                             Text("If not completed in this action block, the Resource and due date will be saved to your Capture list and future Action Blocks.")
@@ -1438,7 +1448,7 @@ struct CaptureView: View {
                         text: $input,
                         placeholder: isSearchMode ? "Search for an action..." : "Add an action…",
                         returnKeyType: isSearchMode ? .search : .send,
-                        isFirstResponder: isComposerFocused && !showFullTextEditorSheet,
+                        isFirstResponder: isComposerAllowedFirstResponder,
                         onSubmit: {
                             if !isSearchMode {
                                 addItem()
@@ -3045,7 +3055,29 @@ struct CaptureView: View {
             ActionCarryProfileStore.save(for: trimmed, profile: profile)
         }
         item.text = trimmed
-        scheduleInlineEditSave()
+    }
+
+    private func isItemFocusField(_ field: FocusField?) -> Bool {
+        if case .item = field { return true }
+        return false
+    }
+
+    private func shouldPersistInlineEditOnFocusTransition(from oldValue: FocusField?, to newValue: FocusField?) -> Bool {
+        guard isItemFocusField(oldValue) else { return false }
+        switch (oldValue, newValue) {
+        case (.item(let oldID), .item(let newID)):
+            return oldID != newID
+        case (.item, _):
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func persistInlineEditNow() {
+        inlineEditSaveTask?.cancel()
+        inlineEditSaveTask = nil
+        try? modelContext.save()
     }
 
     private func openEditActionSheet(for item: RollingCaptureItem) {
@@ -3157,6 +3189,10 @@ struct CaptureView: View {
 
     private var availableToolLeverageResources: [LeverageResource] {
         leverageCatalog.filter { $0.kind == .tool }
+    }
+
+    private var hasAnyLeverageResources: Bool {
+        !availablePersonLeverageResources.isEmpty || !availableToolLeverageResources.isEmpty
     }
 
     private func resolvedLeverageResourceID(for item: RollingCaptureItem) -> UUID? {

@@ -937,7 +937,7 @@ enum RecentlyDeletedStore {
             return "Action Attachment"
         }
         if model is LeverageResource {
-            return "Leverage Resource"
+            return "Assign Resource"
         }
         if model is SensitivityPlaceCatalogItem {
             return "Place"

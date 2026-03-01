@@ -462,8 +462,8 @@ struct LoomAIChatView: View {
                     .fixedSize(horizontal: false, vertical: true)
 
                 #if DEBUG
-                if !isUser, let debug = LoomAIDebugCodec.decode(message.debugJSON) {
-                    Text(groundingDebugLine(debug))
+                if !isUser {
+                    Text(messageTimestampLine(message.createdAt))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 4)
@@ -548,11 +548,11 @@ struct LoomAIChatView: View {
     }
 
     #if DEBUG
-    private func groundingDebugLine(_ debug: LoomAIDebug) -> String {
-        let grounded = debug.usedContext.map { $0 ? "true" : "false" } ?? "unknown"
-        let ctxBytes = debug.contextBytes.map(String.init) ?? "unknown"
-        let model = (debug.model?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? debug.model! : "unknown"
-        return "grounded: \(grounded) | ctxBytes: \(ctxBytes) | model: \(model)"
+    private func messageTimestampLine(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        formatter.dateFormat = "h:mm a, MMM d, yyyy"
+        return formatter.string(from: date).uppercased()
     }
     #endif
 

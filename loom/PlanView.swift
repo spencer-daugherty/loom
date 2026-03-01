@@ -483,7 +483,7 @@ struct PlanView: View {
     }
 }
 
-// MARK: - Single modal host for steps 2–6 (prevents stacked fullScreenCover text input bugs)
+// MARK: - Single modal host for steps 2–7 (prevents stacked fullScreenCover text input bugs)
 
 private struct PlanFlowHostView: View {
     @Environment(\.dismiss) private var dismiss
@@ -500,9 +500,11 @@ private struct PlanFlowHostView: View {
             case 4:
                 PlanStepThreeLabelView(onBack: { step = 3 }, onNext: { step = 5 })
             case 5:
-                PlanStepFourView(onBack: { step = 4 }, onNext: { step = 6 })
+                PlanStepFourResultView(onBack: { step = 4 }, onNext: { step = 6 })
+            case 6:
+                PlanStepFourView(onBack: { step = 5 }, onNext: { step = 7 })
             default:
-                PlanStepFiveView(onBack: { step = 5 })
+                PlanStepFiveView(onBack: { step = 6 })
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -543,11 +545,13 @@ struct PlanStepTwoView: View {
     @State private var highlightedDuplicateItemID: UUID? = nil
     @State private var step2ValidationResetWorkItem: DispatchWorkItem?
     @State private var keyboardHeight: CGFloat = 0
+    @State private var measuredStep2FooterHeight: CGFloat = 68
     @AppStorage("capture_default_due_date_attention_days")
     private var dueDateAttentionDays: Int = 7
     private let hiddenUntilLaterIconName = "clock.arrow.trianglehead.clockwise.rotate.90.path.dotted"
     private let minimumActiveCaptureActionsRequired = 6
     private let footerPinnedHeight: CGFloat = 68
+    private let composerKeyboardGap: CGFloat = 5
 
     private func normalizedActionText(_ text: String) -> String {
         text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -595,15 +599,16 @@ struct PlanStepTwoView: View {
 
     private var isKeyboardVisible: Bool { keyboardHeight > 0 }
 
-    private var keyboardScrollableBottomPadding: CGFloat {
+    private var composerKeyboardLift: CGFloat {
         guard keyboardHeight > 0 else { return 0 }
-        return max(0, keyboardHeight - footerPinnedHeight + 24)
+        let footerHeight = max(footerPinnedHeight, measuredStep2FooterHeight)
+        return max(0, keyboardHeight - footerHeight + composerKeyboardGap)
     }
 
     var body: some View {
         VStack(spacing: 12) {
             VStack(spacing: 1) {
-                PlanStepProgressBar(current: 1, total: 5)
+                PlanStepProgressBar(current: 1, total: 6)
                     .frame(maxWidth: .infinity, alignment: .center)
                 Text("Capture")
                     .font(.largeTitle)
@@ -652,26 +657,8 @@ struct PlanStepTwoView: View {
             }
 
             if !hasMinimumActiveCaptureActions {
-                HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.subheadline)
-                        .foregroundStyle(Color.black.opacity(0.7))
-                        .padding(.top, 1)
-
-                    Text("Add \(remainingActiveCaptureActionsNeeded) more action\(remainingActiveCaptureActionsNeeded == 1 ? "" : "s") to continue.")
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(Color.black.opacity(0.7))
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(Color(red: 0.98, green: 0.92, blue: 0.72))
-                )
+                stepTwoMinimumCountCautionCard
+                    .transition(.opacity)
             }
 
             HStack(spacing: 10) {
@@ -752,16 +739,20 @@ struct PlanStepTwoView: View {
 
             stepTwoComposerRow
                 .padding(.top, 4)
+                .padding(.bottom, composerKeyboardLift)
         }
         .padding(.horizontal)
-        .padding(.bottom, keyboardScrollableBottomPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .safeAreaInset(edge: .bottom) {
             stepTwoFooter
                 .padding(.horizontal)
                 .padding(.top, 8)
                 .padding(.bottom, 10)
-                .background(Color(.systemGroupedBackground))
+                .background(
+                    GeometryReader { proxy in
+                        Color.clear.preference(key: Step2FooterHeightPreferenceKey.self, value: proxy.size.height)
+                    }
+                )
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
         .onAppear {
@@ -797,6 +788,34 @@ struct PlanStepTwoView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
             keyboardHeight = 0
         }
+        .onPreferenceChange(Step2FooterHeightPreferenceKey.self) { height in
+            if height > 0 {
+                measuredStep2FooterHeight = height
+            }
+        }
+    }
+
+    private var stepTwoMinimumCountCautionCard: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.subheadline)
+                .foregroundStyle(Color.black.opacity(0.7))
+                .padding(.top, 1)
+
+            Text("Add \(remainingActiveCaptureActionsNeeded) more action\(remainingActiveCaptureActionsNeeded == 1 ? "" : "s") to continue.")
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .foregroundStyle(Color.black.opacity(0.7))
+                .fixedSize(horizontal: false, vertical: true)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(red: 0.98, green: 0.92, blue: 0.72))
+        )
     }
 
     private var stepTwoFooter: some View {
@@ -1164,6 +1183,7 @@ struct PlanStepThreeView: View {
     @State private var shouldHighlightStep3Validation: Bool = false
     @State private var step3ValidationResetWorkItem: DispatchWorkItem?
     @State private var isDraggingOverGroupArea: Bool = false
+    @State private var selectedPoolItemIDForTapGrouping: UUID? = nil
     @State private var measuredStep3ChunkHeights: [UUID: CGFloat] = [:]
     @State private var measuredStep3AddGroupRowHeight: CGFloat = 0
     @State private var autoGroupFeedback: AutoGroupFeedback?
@@ -1447,7 +1467,7 @@ struct PlanStepThreeView: View {
     var body: some View {
         VStack(spacing: 12) {
             VStack(spacing: 1) {
-                PlanStepProgressBar(current: 2, total: 5)
+                PlanStepProgressBar(current: 2, total: 6)
                     .frame(maxWidth: .infinity, alignment: .center)
                 Text("Group")
                     .font(.largeTitle)
@@ -1553,13 +1573,16 @@ struct PlanStepThreeView: View {
 
             GeometryReader { geometry in
                 let availableHeight = max(geometry.size.height, 1)
+                let sectionSpacing: CGFloat = 10
+                let minPoolHeight: CGFloat = 60
+                let minGroupHeight: CGFloat = 220
                 let collapsedGroupHeight = availableHeight * 0.5
                 let expandedGroupHeight = availableHeight * expandedGroupAreaRatio
-                let collapsedBoundedGroupHeight = min(max(collapsedGroupHeight, 220), availableHeight - 60)
+                let collapsedBoundedGroupHeight = min(max(collapsedGroupHeight, minGroupHeight), availableHeight - minPoolHeight)
 
-                let estimatedPoolContentHeight = max(60, CGFloat(max(poolItems.count, 0)) * 60 + 12)
+                let estimatedPoolContentHeight = max(minPoolHeight, CGFloat(max(poolItems.count, 0)) * 60 + 12)
                 let expandedPoolReserve = min(180, estimatedPoolContentHeight)
-                let expandedBoundedGroupHeight = min(max(expandedGroupHeight, 220), availableHeight - expandedPoolReserve)
+                let expandedBoundedGroupHeight = min(max(expandedGroupHeight, minGroupHeight), availableHeight - expandedPoolReserve)
 
                 // Expand the group area only when the collapsed height cannot show all current
                 // group rows (including the Add Group row when present).
@@ -1575,11 +1598,25 @@ struct PlanStepThreeView: View {
                     : 0
                 let estimatedGroupContentHeight = estimatedChunkContentHeight + addGroupRowHeight + 16
                 let collapsedGroupNeedsMoreHeight = estimatedGroupContentHeight > collapsedBoundedGroupHeight
-                let shouldExpandGroupArea = isDraggingOverGroupArea && collapsedGroupNeedsMoreHeight
-                let boundedGroupHeight = shouldExpandGroupArea ? expandedBoundedGroupHeight : collapsedBoundedGroupHeight
-                let poolHeight = max(60, availableHeight - boundedGroupHeight - 10)
+                let shouldExpandGroupArea =
+                    (isDraggingOverGroupArea || selectedPoolItemIDForTapGrouping != nil) &&
+                    collapsedGroupNeedsMoreHeight
+                let preferredGroupHeight = shouldExpandGroupArea ? expandedBoundedGroupHeight : collapsedBoundedGroupHeight
+                let poolHeightForPreferredGroup = max(minPoolHeight, availableHeight - preferredGroupHeight - sectionSpacing)
 
-                VStack(spacing: 10) {
+                // If pool content fits in less space, shrink the top section and let group section use the freed space.
+                let maxPoolHeightWhenPreservingGroupMinimum = max(minPoolHeight, availableHeight - minGroupHeight - sectionSpacing)
+                let fittedPoolHeight = min(estimatedPoolContentHeight, maxPoolHeightWhenPreservingGroupMinimum)
+                let shouldFitPoolToContent = fittedPoolHeight < poolHeightForPreferredGroup
+
+                let poolHeight = shouldFitPoolToContent ? fittedPoolHeight : poolHeightForPreferredGroup
+                let maxGroupHeight = max(0, availableHeight - minPoolHeight)
+                let boundedGroupHeight = min(
+                    max(minGroupHeight, availableHeight - poolHeight - sectionSpacing),
+                    maxGroupHeight
+                )
+
+                VStack(spacing: sectionSpacing) {
                     List {
                         ForEach(poolItems) { item in
                             rowView(
@@ -1590,9 +1627,17 @@ struct PlanStepThreeView: View {
                                 dueStatusColor: dueDateStatusColor(for: item),
                                 showDueBorder: hasVisibleDueStatus(for: item),
                                 isDraggable: true,
-                                dragPayload: DragPayload(itemID: item.id)
+                                dragPayload: DragPayload(itemID: item.id),
+                                isTapSelected: selectedPoolItemIDForTapGrouping == item.id
                             )
                             .contentShape(Rectangle())
+                            .onTapGesture {
+                                if selectedPoolItemIDForTapGrouping == nil {
+                                    selectedPoolItemIDForTapGrouping = item.id
+                                } else {
+                                    selectedPoolItemIDForTapGrouping = nil
+                                }
+                            }
                             .dropDestination(for: DragPayload.self) { payloads, _ in
                                 guard let payload = payloads.first else { return false }
                                 moveItemToPool(payload.itemID)
@@ -1793,6 +1838,7 @@ struct PlanStepThreeView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear {
             hasInitializedStep3State = false
+            selectedPoolItemIDForTapGrouping = nil
 
             if chunks.isEmpty {
                 chunks = [
@@ -1823,12 +1869,14 @@ struct PlanStepThreeView: View {
             guard hasInitializedStep3State else { return }
             enforceShowHiddenIfNeeded()
             syncPoolWithVisibility()
+            clearTapSelectedPoolItemIfUnavailable()
             persistStep3Plan()
         }
         .onChange(of: allItems.map(\.isGhost)) { _, _ in
             guard hasInitializedStep3State else { return }
             enforceShowHiddenIfNeeded()
             syncPoolWithVisibility()
+            clearTapSelectedPoolItemIfUnavailable()
             persistStep3Plan()
         }
         .onChange(of: chunks) { _, _ in
@@ -1840,6 +1888,7 @@ struct PlanStepThreeView: View {
         .onDisappear {
             guard hasInitializedStep3State else { return }
             isDraggingOverGroupArea = false
+            selectedPoolItemIDForTapGrouping = nil
             persistStep3Plan(force: true)
         }
         .alert(item: $autoGroupFeedback) { feedback in
@@ -1864,7 +1913,15 @@ struct PlanStepThreeView: View {
 
     private var addChunkRow: some View {
         Button {
-            addChunkContainer()
+            if let selectedPoolItemIDForTapGrouping {
+                addChunkContainer()
+                if let newChunkIndex = chunks.indices.last {
+                    moveItem(selectedPoolItemIDForTapGrouping, toChunkAt: newChunkIndex)
+                }
+                self.selectedPoolItemIDForTapGrouping = nil
+            } else {
+                addChunkContainer()
+            }
             persistStep3Plan()
         } label: {
             HStack(spacing: 8) {
@@ -1879,13 +1936,19 @@ struct PlanStepThreeView: View {
         .buttonStyle(.plain)
         .background(
             RoundedRectangle(cornerRadius: 12)
-                .fill(Color(.secondarySystemBackground))
+                .fill(
+                    selectedPoolItemIDForTapGrouping == nil
+                    ? Color(.secondarySystemBackground)
+                    : Color(.darkGray).opacity(colorScheme == .dark ? 0.6 : 0.4)
+                )
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12)
                 .stroke(
-                    colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.25),
-                    lineWidth: 1
+                    selectedPoolItemIDForTapGrouping == nil
+                    ? (colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.25))
+                    : Color(.darkGray).opacity(colorScheme == .dark ? 0.95 : 0.75),
+                    lineWidth: selectedPoolItemIDForTapGrouping == nil ? 1 : 1.5
                 )
         )
     }
@@ -1938,17 +2001,19 @@ struct PlanStepThreeView: View {
         showsTrailingControl: Bool = true,
         useBoxChrome: Bool = true,
         showsReturnToPool: Bool = false,
-        onReturnToPool: (() -> Void)? = nil
+        onReturnToPool: (() -> Void)? = nil,
+        isTapSelected: Bool = false
     ) -> some View {
         HStack(alignment: .center, spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
                 if let dueStatusText {
                     Text(dueStatusText)
                         .font(.caption)
-                        .foregroundStyle(dueStatusColor)
+                        .foregroundStyle(isTapSelected ? Color.white.opacity(0.9) : dueStatusColor)
                 }
 
                 Text(text)
+                    .foregroundStyle(isTapSelected ? Color.white : Color.primary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1956,7 +2021,7 @@ struct PlanStepThreeView: View {
             if let hiddenStatusText {
                 Text(hiddenStatusText)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(isTapSelected ? Color.white.opacity(0.85) : .secondary)
             }
 
             if showsTrailingControl {
@@ -1972,11 +2037,11 @@ struct PlanStepThreeView: View {
                     }
                     .buttonStyle(.plain)
                 } else {
-                    Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
-                        .foregroundStyle(.secondary)
-                        .accessibilityLabel("Drag")
-                        .contentShape(Rectangle())
-                        .padding(.leading, 4)
+                        Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
+                            .foregroundStyle(isTapSelected ? Color.white.opacity(0.88) : .secondary)
+                            .accessibilityLabel("Drag")
+                            .contentShape(Rectangle())
+                            .padding(.leading, 4)
                         .if(isDraggable && dragPayload != nil, transform: { view in
                             view.draggable(dragPayload!) {
                                 HStack(alignment: .center, spacing: 8) {
@@ -1999,7 +2064,12 @@ struct PlanStepThreeView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .if(useBoxChrome, transform: { view in
             view
-                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+                .background(
+                    isTapSelected
+                    ? Color(.darkGray).opacity(colorScheme == .dark ? 0.7 : 0.5)
+                    : Color(.secondarySystemBackground),
+                    in: RoundedRectangle(cornerRadius: 8)
+                )
                 .overlay {
                     ZStack {
                         if showGhostOutline {
@@ -2020,15 +2090,26 @@ struct PlanStepThreeView: View {
     @ViewBuilder
     private func chunkContainerView(chunkIndex: Int) -> some View {
         let chunk = chunks[chunkIndex]
-        let showDeleteX = chunkIndex >= 2
-        let canDeleteThisChunk = canDeleteChunk(at: chunkIndex)
+        let showDeleteX = chunkIndex >= 2 && chunk.itemIDs.isEmpty
+        let canDeleteThisChunk = showDeleteX && canDeleteChunk(at: chunkIndex)
         let hasTooFewActions = shouldHighlightStep3Validation && step3ChunksMissingMinimumActions.contains(chunkIndex)
         let fill = chunkLightFillColor(categoryName: chunk.selectionCategory)
-        let cardOverlayColor: Color = hasTooFewActions ? Color.red.opacity(0.7) : (colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.18))
-        let cardBackgroundOverlay: Color = hasTooFewActions ? Color.red.opacity(colorScheme == .dark ? 0.15 : 0.08) : .clear
-        let cardOverlayWidth: CGFloat = hasTooFewActions ? 1.6 : 1
+        let isTapToGroupActive = selectedPoolItemIDForTapGrouping != nil
+        let cardOverlayColor: Color = hasTooFewActions
+            ? Color.red.opacity(0.7)
+            : (isTapToGroupActive ? Color(.darkGray).opacity(colorScheme == .dark ? 0.95 : 0.75) : (colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.18)))
+        let cardBackgroundOverlay: Color = hasTooFewActions
+            ? Color.red.opacity(colorScheme == .dark ? 0.15 : 0.08)
+            : (isTapToGroupActive ? Color(.darkGray).opacity(colorScheme == .dark ? 0.28 : 0.12) : .clear)
+        let cardOverlayWidth: CGFloat = hasTooFewActions ? 1.6 : (isTapToGroupActive ? 1.5 : 1)
 
         VStack(spacing: 10) {
+            if isTapToGroupActive {
+                Text("Tap here to add")
+                    .font(.subheadline.bold())
+                    .foregroundStyle(colorScheme == .dark ? Color.white.opacity(0.92) : Color(.darkGray))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
             if showDeleteX {
                 HStack {
                     Spacer(minLength: 0)
@@ -2063,6 +2144,14 @@ struct PlanStepThreeView: View {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(cardOverlayColor, lineWidth: cardOverlayWidth)
         )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard let selectedPoolItemIDForTapGrouping else { return }
+            moveItem(selectedPoolItemIDForTapGrouping, toChunkAt: chunkIndex)
+            self.selectedPoolItemIDForTapGrouping = nil
+            enforceShowHiddenIfNeeded()
+            persistStep3Plan()
+        }
         .dropDestination(
             for: DragPayload.self,
             action: { payloads, _ in
@@ -2149,11 +2238,13 @@ struct PlanStepThreeView: View {
     private func chunkItemsView(chunkIndex: Int, chunk: ChunkContainerState) -> some View {
         VStack(spacing: 0) {
             if chunk.itemIDs.isEmpty {
-                Text("Drag actions here")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .padding(.vertical, 14)
-                    .frame(maxWidth: .infinity)
+                if selectedPoolItemIDForTapGrouping == nil {
+                    Text("Drag actions here")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .padding(.vertical, 14)
+                        .frame(maxWidth: .infinity)
+                }
             } else {
                 ForEach(chunkItems(for: chunkIndex)) { item in
                     rowView(
@@ -2577,6 +2668,10 @@ struct PlanStepThreeView: View {
         if !chunks[chunkIndex].itemIDs.contains(itemID) {
             chunks[chunkIndex].itemIDs.append(itemID)
         }
+        if selectedPoolItemIDForTapGrouping == itemID {
+            selectedPoolItemIDForTapGrouping = nil
+        }
+        normalizeEmptyChunksBeyondTopTwo()
     }
 
     private func moveItemToPool(_ itemID: UUID) {
@@ -2589,6 +2684,7 @@ struct PlanStepThreeView: View {
         if !poolItemIDs.contains(itemID) {
             poolItemIDs.insert(itemID, at: 0)
         }
+        normalizeEmptyChunksBeyondTopTwo()
     }
 
     private func syncPoolWithVisibility() {
@@ -2609,11 +2705,22 @@ struct PlanStepThreeView: View {
         if poolItemIDs.isEmpty {
             poolItemIDs = initialPoolIDs.filter { !chunkedIDs.contains($0) }
         }
+
+        normalizeEmptyChunksBeyondTopTwo()
     }
 
     private func addChunkContainer() {
         guard chunks.count < maxChunks else { return }
         chunks.append(ChunkContainerState(isLocked: false))
+        normalizeEmptyChunksBeyondTopTwo()
+    }
+
+    private func clearTapSelectedPoolItemIfUnavailable() {
+        guard let selectedPoolItemIDForTapGrouping else { return }
+        guard poolItemIDs.contains(selectedPoolItemIDForTapGrouping) else {
+            self.selectedPoolItemIDForTapGrouping = nil
+            return
+        }
     }
 
     private func canDeleteChunk(at index: Int) -> Bool {
@@ -2624,6 +2731,17 @@ struct PlanStepThreeView: View {
     private func deleteChunkContainerIfAllowed(at index: Int) {
         guard canDeleteChunk(at: index) else { return }
         chunks.remove(at: index)
+        normalizeEmptyChunksBeyondTopTwo()
+    }
+
+    private func normalizeEmptyChunksBeyondTopTwo() {
+        guard chunks.count > 2 else { return }
+        let head = Array(chunks.prefix(2))
+        let tail = Array(chunks.dropFirst(2))
+        let reordered = head + tail.filter { !$0.itemIDs.isEmpty } + tail.filter { $0.itemIDs.isEmpty }
+        if reordered != chunks {
+            chunks = reordered
+        }
     }
 
     private func triggerStep3ValidationFeedback() {
@@ -3290,7 +3408,7 @@ struct PlanStepThreeLabelView: View {
     var body: some View {
         VStack(spacing: 12) {
             VStack(spacing: 1) {
-                PlanStepProgressBar(current: 3, total: 5)
+                PlanStepProgressBar(current: 3, total: 6)
                     .frame(maxWidth: .infinity, alignment: .center)
                 Text("Label")
                     .font(.largeTitle)
@@ -3423,10 +3541,12 @@ struct PlanStepThreeLabelView: View {
         let chunkIndex = chunk.chunkIndex
         let actions = actionsForChunk(chunk)
         let hasMissingLabel = shouldHighlightMissingLabels && missingLabelChunkIndices.contains(chunkIndex)
+        let selectedName = selectedLabelName(forChunkIndex: chunkIndex)
+        let isOtherSelected = normalizedSelectionLabel(selectedName) == normalizedSelectionLabel(PlanOtherLabel.title)
+        let chunkOutlineColor = colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.18)
 
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center, spacing: 6) {
-                let selectedName = selectedLabelName(forChunkIndex: chunkIndex)
                 let actionsRelatedToColor: Color = {
                     if selectedName != nil { return Color(.systemGray) } // fixed light-mode-style grey after selection
                     return colorScheme == .dark ? .white : .black
@@ -3496,6 +3616,10 @@ struct PlanStepThreeLabelView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(8)
                             .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(isOtherSelected ? chunkOutlineColor : Color.clear, lineWidth: isOtherSelected ? 1 : 0)
+                            )
                     }
                 }
             }
@@ -3509,7 +3633,7 @@ struct PlanStepThreeLabelView: View {
         .overlay(
             RoundedRectangle(cornerRadius: 12)
                 .stroke(
-                    colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.18),
+                    chunkOutlineColor,
                     lineWidth: 1
                 )
         )
@@ -3668,6 +3792,1002 @@ struct PlanStepThreeLabelView: View {
     }
 }
 
+// MARK: - Step 4 (Result)
+struct PlanStepFourResultView: View {
+    let onBack: (() -> Void)?
+    let onNext: (() -> Void)?
+
+    init(onBack: (() -> Void)? = nil, onNext: (() -> Void)? = nil) {
+        self.onBack = onBack
+        self.onNext = onNext
+    }
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.colorScheme) private var colorScheme
+
+    @Query(sort: \PlannedChunk.chunkIndex, order: .forward)
+    private var allPlannedChunks: [PlannedChunk]
+
+    @Query(sort: \PlannedChunkAction.sortOrder, order: .forward)
+    private var allPlannedActions: [PlannedChunkAction]
+
+    @Query(sort: \PlannedChunkStepFourState.updatedAt, order: .reverse)
+    private var stepFourStates: [PlannedChunkStepFourState]
+
+    @State private var resultTextByChunk: [UUID: String] = [:]
+    @State private var showValidationHint: Bool = false
+    @State private var shouldHighlightMissingResults: Bool = false
+    @State private var validationResetWorkItem: DispatchWorkItem?
+    @State private var keyboardHeight: CGFloat = 0
+    @State private var resultAutosaveTask: Task<Void, Never>? = nil
+    @State private var resultAutoWriteSuggestionsByChunk: [UUID: String] = [:]
+    @State private var appliedResultAutoWriteByChunk: [UUID: String] = [:]
+    @State private var selectedResultAutoWriteArea: String = "All"
+    @State private var isAutoWritingResult: Bool = false
+    @State private var autoWriteOutlineAngle: Double = 0
+    @State private var autoWriteIconAnimating: Bool = false
+    @State private var autoWriteIconAnimationTask: Task<Void, Never>? = nil
+    @State private var isResultInfoExpanded: Bool = false
+
+    private let footerPinnedHeight: CGFloat = 68
+    private let keyboardFloatingGap: CGFloat = 15
+    private let autoWritePillHeight: CGFloat = 45
+    private let otherChunkFixedFill = Color(red: 0.92, green: 0.92, blue: 0.94)
+    private let loomAIService = LoomAIService()
+
+    private var secondaryButtonTextColor: Color {
+        colorScheme == .dark ? Color(.secondaryLabel) : .black
+    }
+
+    private var currentWeekStart: Date {
+        WeeklyMindsetEntry.weekStart(for: Date())
+    }
+
+    private var plannedChunksForWeek: [PlannedChunk] {
+        allPlannedChunks
+            .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) }
+            .sorted { $0.chunkIndex < $1.chunkIndex }
+    }
+
+    private var plannedActionsForWeek: [PlannedChunkAction] {
+        allPlannedActions
+            .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) }
+    }
+
+    private struct PlanResultAutoWriteResponse: Decodable {
+        struct Suggestion: Decodable {
+            let fulfillmentArea: String?
+            let area: String?
+            let label: String?
+            let result: String?
+            let suggestion: String?
+            let text: String?
+        }
+        let suggestions: [Suggestion]?
+        let confidence: String?
+    }
+
+    private var resultAutoWriteAreaOptions: [String] {
+        var seen: Set<String> = []
+        var rankedAreas: [String] = []
+        for chunk in plannedChunksForWeek {
+            let label = chunk.label.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !label.isEmpty else { continue }
+            let key = normalizeAreaLabel(label)
+            guard seen.insert(key).inserted else { continue }
+            rankedAreas.append(label)
+        }
+        return ["All"] + rankedAreas.reversed()
+    }
+
+    private var selectedResultAutoWriteTargetChunks: [PlannedChunk] {
+        let areaKey = normalizeAreaLabel(selectedResultAutoWriteArea)
+        if areaKey == "all" {
+            return plannedChunksForWeek
+        }
+        return plannedChunksForWeek.filter { normalizeAreaLabel($0.label) == areaKey }
+    }
+
+    private var isNextEnabled: Bool {
+        guard !plannedChunksForWeek.isEmpty else { return false }
+        return plannedChunksForWeek.allSatisfy { chunk in
+            !(resultTextByChunk[chunk.id] ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .isEmpty
+        }
+    }
+
+    private var missingResultChunkIDs: Set<UUID> {
+        Set(plannedChunksForWeek.compactMap { chunk in
+            let isMissing = (resultTextByChunk[chunk.id] ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .isEmpty
+            return isMissing ? chunk.id : nil
+        })
+    }
+
+    private var isKeyboardVisible: Bool { keyboardHeight > 0 }
+
+    private var keyboardScrollableBottomPadding: CGFloat {
+        guard keyboardHeight > 0 else { return 0 }
+        return max(0, keyboardHeight - footerPinnedHeight + 24)
+    }
+
+    private func resultAutoWriteBottomPadding(in proxy: GeometryProxy) -> CGFloat {
+        guard keyboardHeight > 0 else { return 58 }
+        let keyboardTopGlobal = UIScreen.main.bounds.height - keyboardHeight
+        let viewBottomGlobal = proxy.frame(in: .global).maxY
+        let keyboardOverlapInView = max(0, viewBottomGlobal - keyboardTopGlobal)
+        return keyboardOverlapInView + keyboardFloatingGap
+    }
+
+    private func normalizeAreaLabel(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+
+    private func isOtherChunk(_ chunk: PlannedChunk) -> Bool {
+        chunk.labelId == PlanOtherLabel.id ||
+        normalizeAreaLabel(chunk.label) == normalizeAreaLabel(PlanOtherLabel.title)
+    }
+
+    private func chunkLightFillColor(for chunk: PlannedChunk) -> Color {
+        if isOtherChunk(chunk) {
+            return otherChunkFixedFill
+        }
+        return FulfillmentCategoryColors.lightColor(for: chunk.category)
+    }
+
+    private var autoWriteGradient: AngularGradient {
+        AngularGradient(
+            colors: [
+                Color(red: 0.22, green: 0.47, blue: 1.0),
+                Color(red: 0.15, green: 0.83, blue: 0.95),
+                Color(red: 0.62, green: 0.40, blue: 0.95),
+                Color(red: 0.80, green: 0.38, blue: 0.78),
+                Color(red: 0.98, green: 0.36, blue: 0.58),
+                Color(red: 0.75, green: 0.42, blue: 0.74),
+                Color(red: 0.22, green: 0.47, blue: 1.0)
+            ],
+            center: .center,
+            angle: .degrees(autoWriteOutlineAngle)
+        )
+    }
+
+    private var autoWriteSuggestionCardFill: LinearGradient {
+        LinearGradient(
+            colors: [
+                Color(red: 0.22, green: 0.47, blue: 1.0),
+                Color(red: 0.62, green: 0.40, blue: 0.95),
+                Color(red: 0.98, green: 0.36, blue: 0.58)
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
+    private func autoWriteSuggestionPrimaryColor(isApplied: Bool) -> Color {
+        guard isApplied else { return .white }
+        return colorScheme == .dark ? Color.white.opacity(0.92) : Color.black.opacity(0.82)
+    }
+
+    private func autoWriteSuggestionBackgroundFill(isApplied: Bool) -> AnyShapeStyle {
+        if isApplied {
+            if colorScheme == .dark {
+                return AnyShapeStyle(autoWriteSuggestionCardFill.opacity(0.34))
+            } else {
+                return AnyShapeStyle(Color(red: 0.90, green: 0.97, blue: 0.92))
+            }
+        }
+        return AnyShapeStyle(autoWriteSuggestionCardFill.opacity(0.92))
+    }
+
+    private func autoWriteSuggestionBorderColor(isApplied: Bool) -> Color {
+        if isApplied {
+            return colorScheme == .dark ? Color.white.opacity(0.18) : Color.green.opacity(0.30)
+        }
+        return Color.white.opacity(0.24)
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            VStack(spacing: 1) {
+                PlanStepProgressBar(current: 4, total: 6)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                Text("Result")
+                    .font(.largeTitle)
+                    .fontWeight(.bold)
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
+
+            resultInfoRow
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    if !isNextEnabled {
+                        resultTopCautionCard
+                            .transition(.opacity)
+                    }
+
+                    if plannedChunksForWeek.isEmpty {
+                        Text("No groups yet.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.top, 24)
+                    } else {
+                        ForEach(plannedChunksForWeek) { chunk in
+                            resultChunkCard(chunk)
+                        }
+                    }
+                }
+                .padding(.bottom, 12 + keyboardScrollableBottomPadding)
+            }
+        }
+        .padding(.horizontal)
+        .overlay(alignment: .bottom) {
+            if showValidationHint {
+                VStack(alignment: .center, spacing: 6) {
+                    Text("Complete your results")
+                        .font(.footnote)
+                        .fontWeight(.bold)
+                    Text("• Add a Result for each block")
+                        .font(.footnote)
+                }
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: true, vertical: false)
+                .padding(10)
+                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Color.black.opacity(0.12), lineWidth: 1)
+                )
+                .padding(.bottom, 56)
+                .transition(.opacity)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .safeAreaInset(edge: .bottom) {
+            resultFooter
+                .padding(.horizontal)
+                .padding(.top, 8)
+                .padding(.bottom, 10)
+        }
+        .ignoresSafeArea(.keyboard, edges: .bottom)
+        .onAppear {
+            hydrateResultsForWeek()
+        }
+        .onChange(of: plannedChunksForWeek.map(\.id)) { _, _ in
+            hydrateResultsForWeek()
+        }
+        .onChange(of: isNextEnabled) { _, enabled in
+            if enabled {
+                shouldHighlightMissingResults = false
+                showValidationHint = false
+            }
+        }
+        .onDisappear {
+            resultAutosaveTask?.cancel()
+            autoWriteIconAnimationTask?.cancel()
+            autoWriteIconAnimationTask = nil
+            persistResultsForWeekNow()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
+            guard
+                let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
+            else { return }
+            let screenHeight = UIScreen.main.bounds.height
+            let overlap = max(0, screenHeight - frame.minY)
+            keyboardHeight = overlap
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            keyboardHeight = 0
+        }
+        .overlay {
+            GeometryReader { proxy in
+                if !plannedChunksForWeek.isEmpty {
+                    HStack(spacing: 8) {
+                        if isKeyboardVisible {
+                            keyboardDismissButton
+                        }
+                        resultAutoWriteControls
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                    .padding(.trailing, 16)
+                    .padding(.bottom, resultAutoWriteBottomPadding(in: proxy))
+                }
+            }
+        }
+    }
+
+    private var resultInfoRow: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "info.circle")
+                .foregroundStyle(.secondary)
+                .padding(.top, 1)
+
+            VStack(alignment: .leading, spacing: 6) {
+                if isResultInfoExpanded {
+                    (
+                        Text("Result: ")
+                            .fontWeight(.bold)
+                        + Text("What's the most important result or outcome you want to happen this week? What are you really committed to achieving?")
+                    )
+                    .foregroundStyle(.secondary)
+                    .font(.subheadline)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                    Button("Show less") { isResultInfoExpanded = false }
+                        .font(.subheadline)
+                } else {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        (
+                            Text("Result: ")
+                                .fontWeight(.bold)
+                            + Text("What's the most important result or outcome you want to happen this week? What are you really committed to achieving?")
+                        )
+                        .foregroundStyle(.secondary)
+                        .font(.subheadline)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+
+                        Button("Show more") { isResultInfoExpanded = true }
+                            .font(.subheadline)
+                            .layoutPriority(1)
+                    }
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var resultTopCautionCard: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "clock.fill")
+                .font(.subheadline)
+                .foregroundStyle(Color.black.opacity(0.7))
+                .padding(.top, 1)
+            Text("Add a Result to each Action Block.")
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .foregroundStyle(Color.black.opacity(0.7))
+                .multilineTextAlignment(.leading)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(red: 0.98, green: 0.92, blue: 0.72))
+        )
+    }
+
+    private var resultFooter: some View {
+        HStack(spacing: 12) {
+            Button {
+                resultAutosaveTask?.cancel()
+                persistResultsForWeekNow()
+                if let onBack { onBack() } else { dismiss() }
+            } label: {
+                Text("Back")
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .foregroundStyle(secondaryButtonTextColor)
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(.systemGray5))
+            )
+
+            Button {
+                resultAutosaveTask?.cancel()
+                persistResultsForWeekNow()
+                if isNextEnabled {
+                    shouldHighlightMissingResults = false
+                    showValidationHint = false
+                    if let onNext { onNext() }
+                } else {
+                    triggerValidationFeedback()
+                }
+            } label: {
+                Text("Next")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(isNextEnabled ? .accentColor : Color(.systemGray3))
+        }
+        .padding(.bottom, 2)
+    }
+
+    @ViewBuilder
+    private func resultChunkCard(_ chunk: PlannedChunk) -> some View {
+        let chunkID = chunk.id
+        let actions = actionsForChunk(chunk)
+        let fill = chunkLightFillColor(for: chunk)
+        let resultHeaderFont = Font.system(size: 15, weight: .bold)
+        let resultQuestionFont = Font.system(size: 19)
+        let resultFieldFont = Font.system(size: 17, weight: .medium)
+        let resultFieldHeight: CGFloat = 45
+        let primaryTextColor = Color.black
+        let secondaryTextColor = Color(red: 0.38, green: 0.38, blue: 0.40)
+
+        let resultBinding = Binding<String>(
+            get: { resultTextByChunk[chunkID] ?? "" },
+            set: {
+                resultTextByChunk[chunkID] = $0
+                let normalizedDraft = normalizeResultSuggestionText($0)
+                if let appliedSuggestion = appliedResultAutoWriteByChunk[chunkID],
+                   normalizeResultSuggestionText(appliedSuggestion) != normalizedDraft {
+                    appliedResultAutoWriteByChunk.removeValue(forKey: chunkID)
+                }
+                scheduleResultAutosave()
+            }
+        )
+
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("actions related to:")
+                    .font(.caption)
+                    .foregroundStyle(secondaryTextColor)
+
+                Spacer(minLength: 0)
+
+                Text(chunk.label)
+                    .font(.subheadline)
+                    .fontWeight(.bold)
+                    .foregroundStyle(secondaryTextColor)
+                    .lineLimit(1)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("RESULT")
+                        .font(resultHeaderFont)
+                        .foregroundStyle(primaryTextColor)
+                    Spacer()
+                    Text("What do I want? Why do I want it?")
+                        .font(resultQuestionFont)
+                        .italic()
+                        .foregroundStyle(primaryTextColor)
+                }
+
+                TextField(
+                    "",
+                    text: resultBinding,
+                    prompt: Text("Enter result all actions contribute to...")
+                        .foregroundStyle(Color(red: 0.60, green: 0.60, blue: 0.60))
+                )
+                    .font(resultFieldFont)
+                    .submitLabel(.done)
+                    .foregroundStyle(primaryTextColor)
+                    .tint(primaryTextColor)
+                    .frame(height: resultFieldHeight)
+                    .padding(.horizontal, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color.white)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(
+                                shouldHighlightMissingResults && missingResultChunkIDs.contains(chunkID)
+                                ? Color.red.opacity(0.75)
+                                : Color.clear,
+                                lineWidth: shouldHighlightMissingResults && missingResultChunkIDs.contains(chunkID) ? 1.5 : 0
+                            )
+                    )
+
+                if let suggestion = resultAutoWriteSuggestionsByChunk[chunkID],
+                   !suggestion.isEmpty {
+                    let isApplied = normalizeResultSuggestionText(resultTextByChunk[chunkID] ?? "") == normalizeResultSuggestionText(suggestion)
+
+                    Button {
+                        guard !isApplied else { return }
+                        applyResultAutoWriteSuggestion(suggestion, to: chunkID)
+                    } label: {
+                        HStack(alignment: .center, spacing: 10) {
+                            Image("LoomAI")
+                                .renderingMode(.template)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 18, height: 18)
+                                .foregroundStyle(Color.white)
+                                .opacity(isApplied ? 0.92 : 1)
+
+                            Text(suggestion)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(autoWriteSuggestionPrimaryColor(isApplied: isApplied))
+                                .multilineTextAlignment(.leading)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 9)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(autoWriteSuggestionBackgroundFill(isApplied: isApplied))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(autoWriteSuggestionBorderColor(isApplied: isApplied), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isApplied)
+                    .opacity(isApplied ? 0.88 : 1)
+                }
+            }
+
+            Divider().opacity(0.4)
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("ACTIONS")
+                        .font(.caption)
+                        .fontWeight(.bold)
+                        .foregroundStyle(secondaryTextColor)
+                    Spacer()
+                    Text("How can I achieve it now?")
+                        .font(.subheadline)
+                        .italic()
+                        .foregroundStyle(secondaryTextColor)
+                }
+
+                if actions.isEmpty {
+                    Text("No actions in this block.")
+                        .font(.subheadline)
+                        .foregroundStyle(secondaryTextColor)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    ForEach(actions) { action in
+                        HStack(alignment: .top, spacing: 8) {
+                            Text("•")
+                                .foregroundStyle(secondaryTextColor)
+                            Text(action.text)
+                                .font(.body.weight(.medium))
+                                .foregroundStyle(secondaryTextColor)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(fill, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(
+                    colorScheme == .dark ? Color.white.opacity(0.18) : Color.black.opacity(0.12),
+                    lineWidth: 1
+                )
+        )
+    }
+
+    private var keyboardDismissButton: some View {
+        Button {
+            #if canImport(UIKit)
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            #endif
+        } label: {
+            Image(systemName: "keyboard.chevron.compact.down")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.primary.opacity(0.85))
+                .frame(width: 45, height: 45)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay(
+                    Circle()
+                        .stroke(Color.white.opacity(0.28), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var resultAutoWriteControls: some View {
+        let isLoading = isAutoWritingResult
+
+        return VStack(alignment: .trailing, spacing: 8) {
+            ZStack(alignment: .trailing) {
+                Button {
+                    guard !isLoading else { return }
+                    Task { await requestAutoWriteResultSuggestions() }
+                } label: {
+                    HStack(alignment: .top, spacing: 6) {
+                        Image("LoomAI")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 27, height: 27)
+                            .rotation3DEffect(
+                                .degrees(isLoading && autoWriteIconAnimating ? 180 : 0),
+                                axis: (x: 1, y: 0, z: 0)
+                            )
+                        VStack(alignment: .leading, spacing: 0.5) {
+                            Text("AutoWrite")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(autoWriteGradient)
+                            Text(selectedResultAutoWriteArea)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.top, 0.5)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.leading, 12)
+                    .padding(.trailing, 42)
+                    .padding(.vertical, 8)
+                }
+                .buttonStyle(.plain)
+                .disabled(isLoading)
+                .opacity(isLoading ? 0.7 : 1)
+
+                Menu {
+                    ForEach(resultAutoWriteAreaOptions, id: \.self) { option in
+                        Button {
+                            selectedResultAutoWriteArea = option
+                        } label: {
+                            if normalizeAreaLabel(selectedResultAutoWriteArea) == normalizeAreaLabel(option) {
+                                Label(option, systemImage: "checkmark")
+                            } else {
+                                Text(option)
+                            }
+                        }
+                    }
+                } label: {
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 27, height: 27)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .frame(width: 27, height: 27)
+                .padding(.trailing, 8)
+            }
+            .background(
+                Capsule()
+                    .fill(Color(.systemGroupedBackground))
+            )
+            .overlay(
+                Capsule()
+                    .stroke(autoWriteGradient, lineWidth: 2.25)
+            )
+            .fixedSize(horizontal: true, vertical: false)
+            .onAppear {
+                guard autoWriteOutlineAngle == 0 else { return }
+                withAnimation(.linear(duration: 8).repeatForever(autoreverses: false)) {
+                    autoWriteOutlineAngle = 360
+                }
+            }
+            .onChange(of: isLoading, initial: false) { _, newValue in
+                setResultAutoWriteLoadingAnimation(newValue)
+            }
+        }
+        .frame(height: autoWritePillHeight)
+    }
+
+    private func actionsForChunk(_ chunk: PlannedChunk) -> [PlannedChunkAction] {
+        plannedActionsForWeek
+            .filter { $0.plannedChunkId == chunk.id }
+            .sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    private func normalizeResultSuggestionText(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+    }
+
+    private func truncateWords(_ value: String, maxWords: Int, maxCharacters: Int = 120) -> String {
+        let words = value
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(separator: " ")
+            .prefix(maxWords)
+        var text = words.joined(separator: " ")
+        if text.count > maxCharacters {
+            text = String(text.prefix(maxCharacters)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return text
+    }
+
+    private func applyResultAutoWriteSuggestion(_ suggestion: String, to chunkID: UUID) {
+        let cleaned = truncateWords(suggestion, maxWords: 8)
+        guard !cleaned.isEmpty else { return }
+        resultTextByChunk[chunkID] = cleaned
+        appliedResultAutoWriteByChunk[chunkID] = cleaned
+        scheduleResultAutosave()
+    }
+
+    private func requestAutoWriteResultSuggestions() async {
+        let targetChunks = selectedResultAutoWriteTargetChunks
+        guard !targetChunks.isEmpty else { return }
+
+        let targetChunkIDs = Set(targetChunks.map(\.id))
+        isAutoWritingResult = true
+        defer { isAutoWritingResult = false }
+
+        for id in targetChunkIDs {
+            resultAutoWriteSuggestionsByChunk.removeValue(forKey: id)
+            appliedResultAutoWriteByChunk.removeValue(forKey: id)
+        }
+
+        do {
+            let contextSnapshot = try LoomAIViewModel().buildContextSnapshot(in: modelContext)
+            let groupedTargetChunks = Dictionary(grouping: targetChunks) { normalizeAreaLabel($0.label) }
+            let orderedAreaKeys = groupedTargetChunks.keys.sorted { lhs, rhs in
+                let lhsIndex = targetChunks.firstIndex { normalizeAreaLabel($0.label) == lhs } ?? .max
+                let rhsIndex = targetChunks.firstIndex { normalizeAreaLabel($0.label) == rhs } ?? .max
+                return lhsIndex < rhsIndex
+            }
+
+            let targetAreaLabels = orderedAreaKeys.compactMap { key in
+                groupedTargetChunks[key]?.first?.label.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+
+            let chunkContext = orderedAreaKeys.compactMap { areaKey -> String? in
+                guard let chunks = groupedTargetChunks[areaKey], let representativeChunk = chunks.first else { return nil }
+                let areaLabel = representativeChunk.label.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !areaLabel.isEmpty else { return nil }
+
+                let existingResults = chunks
+                    .compactMap { chunk -> String? in
+                        let text = (resultTextByChunk[chunk.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                        return text.isEmpty ? nil : text
+                    }
+                let previousSuggestions = chunks
+                    .compactMap { chunk -> String? in
+                        let text = (resultAutoWriteSuggestionsByChunk[chunk.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                        return text.isEmpty ? nil : text
+                    }
+                let actionLines = chunks
+                    .flatMap { actionsForChunk($0) }
+                    .map { action in
+                        let text = action.text
+                            .replacingOccurrences(of: "\n", with: " ")
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                        return "- \(text)"
+                    }
+
+                return """
+                Fulfillment Area: \(areaLabel)
+                Existing Result: \(existingResults.isEmpty ? "<empty>" : existingResults.joined(separator: " | "))
+                Prior suggestions to avoid repeating: \(previousSuggestions.isEmpty ? "<none>" : previousSuggestions.joined(separator: " | "))
+                Actions:
+                \(actionLines.isEmpty ? "- <none>" : actionLines.joined(separator: "\n"))
+                """
+            }
+            .joined(separator: "\n\n")
+
+            let filterInstruction: String = {
+                if normalizeAreaLabel(selectedResultAutoWriteArea) == "all" {
+                    return "Selected filter: All. Return one suggestion for every listed Fulfillment Area."
+                }
+                return "Selected filter: \(selectedResultAutoWriteArea). Return only that Fulfillment Area."
+            }()
+
+            let instruction = """
+            You are helping with Loom Plan Result (AutoWrite).
+            \(filterInstruction)
+
+            Generate one concise Result suggestion per requested Fulfillment Area.
+            The Result should describe the shared outcome that all actions in that area are moving toward.
+
+            Target Fulfillment Areas (use exact names):
+            \(targetAreaLabels.joined(separator: ", "))
+
+            Area context:
+            \(chunkContext)
+
+            Return JSON only:
+            {"suggestions":[{"fulfillmentArea":"string","result":"string"}],"confidence":"high|medium|low"}
+
+            Rules:
+            - Each result must be <=8 words.
+            - Use only as many words as needed.
+            - Do not repeat Existing Result or prior suggestions.
+            - Keep wording practical and outcome-focused.
+            - No bullets, numbering, or markdown outside JSON.
+            """
+
+            let response = try await loomAIService.sendChat(
+                messages: [.init(role: "user", content: instruction)],
+                context: contextSnapshot
+            )
+
+            let decodedSuggestions = decodeAutoWriteResultSuggestions(from: response.message)
+            guard !decodedSuggestions.isEmpty else { return }
+
+            var suggestionByArea: [String: String] = [:]
+            for item in decodedSuggestions {
+                let key = normalizeAreaLabel(item.area)
+                guard !key.isEmpty, suggestionByArea[key] == nil else { continue }
+                let suggestion = truncateWords(item.result, maxWords: 8)
+                guard !suggestion.isEmpty else { continue }
+                suggestionByArea[key] = suggestion
+            }
+
+            for areaKey in orderedAreaKeys {
+                guard let suggestion = suggestionByArea[areaKey],
+                      let chunks = groupedTargetChunks[areaKey]
+                else { continue }
+                for chunk in chunks {
+                    resultAutoWriteSuggestionsByChunk[chunk.id] = suggestion
+                }
+            }
+        } catch {
+            return
+        }
+    }
+
+    private func decodeAutoWriteResultSuggestions(from raw: String) -> [(area: String, result: String)] {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let data = trimmed.data(using: .utf8),
+           let parsed = try? JSONDecoder().decode(PlanResultAutoWriteResponse.self, from: data) {
+            return (parsed.suggestions ?? []).compactMap { item in
+                let area = (item.fulfillmentArea ?? item.area ?? item.label ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let result = truncateWords(
+                    (item.result ?? item.suggestion ?? item.text ?? "")
+                        .trimmingCharacters(in: .whitespacesAndNewlines),
+                    maxWords: 8
+                )
+                guard !area.isEmpty, !result.isEmpty else { return nil }
+                return (area: area, result: result)
+            }
+        }
+
+        let fallbackLines = trimmed
+            .components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        if normalizeAreaLabel(selectedResultAutoWriteArea) != "all",
+           let first = fallbackLines.first {
+            let fallbackResult = truncateWords(first, maxWords: 8)
+            if !fallbackResult.isEmpty {
+                return [(area: selectedResultAutoWriteArea, result: fallbackResult)]
+            }
+        }
+
+        return []
+    }
+
+    private func setResultAutoWriteLoadingAnimation(_ isLoading: Bool) {
+        autoWriteIconAnimationTask?.cancel()
+        autoWriteIconAnimationTask = nil
+
+        guard isLoading else {
+            withAnimation(.easeOut(duration: 0.15)) {
+                autoWriteIconAnimating = false
+            }
+            return
+        }
+
+        autoWriteIconAnimationTask = Task { @MainActor in
+            while !Task.isCancelled && isAutoWritingResult {
+                withAnimation(.easeInOut(duration: 0.32)) {
+                    autoWriteIconAnimating = true
+                }
+                try? await Task.sleep(nanoseconds: 320_000_000)
+                withAnimation(.easeInOut(duration: 0.32)) {
+                    autoWriteIconAnimating = false
+                }
+                try? await Task.sleep(nanoseconds: 320_000_000)
+            }
+        }
+    }
+
+    private func scheduleResultAutosave() {
+        resultAutosaveTask?.cancel()
+        resultAutosaveTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            persistResultsForWeekNow()
+        }
+    }
+
+    private func hydrateResultsForWeek() {
+        let validChunkIDs = Set(plannedChunksForWeek.map(\.id))
+        resultTextByChunk = resultTextByChunk.filter { validChunkIDs.contains($0.key) }
+        resultAutoWriteSuggestionsByChunk = resultAutoWriteSuggestionsByChunk.filter { validChunkIDs.contains($0.key) }
+        appliedResultAutoWriteByChunk = appliedResultAutoWriteByChunk.filter { validChunkIDs.contains($0.key) }
+
+        for chunk in plannedChunksForWeek where resultTextByChunk[chunk.id] == nil {
+            resultTextByChunk[chunk.id] = ""
+        }
+
+        if !resultAutoWriteAreaOptions.contains(where: {
+            normalizeAreaLabel($0) == normalizeAreaLabel(selectedResultAutoWriteArea)
+        }) {
+            selectedResultAutoWriteArea = "All"
+        }
+
+        let weekStates = stepFourStates
+            .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) }
+            .sorted { $0.updatedAt > $1.updatedAt }
+
+        for state in weekStates where validChunkIDs.contains(state.plannedChunkId) {
+            if resultTextByChunk[state.plannedChunkId]?.isEmpty ?? true {
+                resultTextByChunk[state.plannedChunkId] = state.resultText
+            }
+        }
+    }
+
+    private func persistResultsForWeekNow() {
+        let weekStart = currentWeekStart
+        let dayKeyValue = dayKey(from: weekStart)
+
+        let weekStates = stepFourStates
+            .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: weekStart) }
+            .sorted { $0.updatedAt > $1.updatedAt }
+
+        var latestByChunk: [UUID: PlannedChunkStepFourState] = [:]
+        for state in weekStates {
+            if latestByChunk[state.plannedChunkId] == nil {
+                latestByChunk[state.plannedChunkId] = state
+            } else {
+                RecentlyDeletedStore.trash(state, in: modelContext)
+            }
+        }
+
+        for chunk in plannedChunksForWeek {
+            let resultText = (resultTextByChunk[chunk.id] ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if let state = latestByChunk[chunk.id] {
+                state.weekStart = weekStart
+                state.plannedChunkId = chunk.id
+                state.resultText = resultText
+                state.updatedAt = .now
+                let desiredKey = "\(dayKeyValue)|\(chunk.id.uuidString)"
+                if state.weekPlannedChunkKey != desiredKey {
+                    state.weekPlannedChunkKey = desiredKey
+                }
+            } else {
+                modelContext.insert(
+                    PlannedChunkStepFourState(
+                        weekStart: weekStart,
+                        plannedChunkId: chunk.id,
+                        resultText: resultText,
+                        roleNoteText: "",
+                        connectedRoleId: nil,
+                        updatedAt: .now
+                    )
+                )
+            }
+        }
+
+        try? modelContext.save()
+    }
+
+    private func dayKey(from date: Date) -> String {
+        let cal = Calendar.current
+        let comps = cal.dateComponents([.year, .month, .day], from: date)
+        let y = comps.year ?? 0
+        let m = comps.month ?? 0
+        let d = comps.day ?? 0
+        return String(format: "%04d-%02d-%02d", y, m, d)
+    }
+
+    private func triggerValidationFeedback() {
+        validationResetWorkItem?.cancel()
+        shouldHighlightMissingResults = true
+        withAnimation(.easeInOut(duration: 0.15)) {
+            showValidationHint = true
+        }
+
+        let workItem = DispatchWorkItem {
+            shouldHighlightMissingResults = false
+            withAnimation(.easeInOut(duration: 0.15)) {
+                showValidationHint = false
+            }
+        }
+        validationResetWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8, execute: workItem)
+    }
+}
+
 // MARK: - Step 5 (Plan)
 struct PlanStepFourView: View {
     let onBack: (() -> Void)?
@@ -3681,8 +4801,6 @@ struct PlanStepFourView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var colorScheme
-
-    @State private var isShowingInstructions: Bool = false
 
     @Query(sort: \PlannedChunk.chunkIndex, order: .forward)
     private var allPlannedChunks: [PlannedChunk]
@@ -3718,13 +4836,6 @@ struct PlanStepFourView: View {
     @State private var resultTextByChunk: [UUID: String] = [:]
     @State private var roleTextByChunk: [UUID: String] = [:]
     @State private var purposeTextByChunk: [UUID: String] = [:]
-
-    @FocusState private var focusedField: Step4FocusField?
-    private enum Step4FocusField: Hashable {
-        case result(UUID)
-        case purpose(UUID)
-        case roleNote(UUID)
-    }
 
     private struct SheetChunkID: Identifiable, Hashable { let id: UUID }
     @State private var outcomeSheetChunkID: SheetChunkID? = nil
@@ -3763,17 +4874,9 @@ struct PlanStepFourView: View {
 
         return plannedChunksForWeek.allSatisfy { chunk in
             let id = chunk.id
-            let resultOK = !(resultTextByChunk[id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             let roleOK = isOtherChunk(chunk) || (selectedRoleIDByChunk[id] ?? nil) != nil
-            return resultOK && roleOK
+            return roleOK
         }
-    }
-
-    private var step4MissingResultChunkIDs: Set<UUID> {
-        Set(plannedChunksForWeek.compactMap { chunk in
-            let isMissing = (resultTextByChunk[chunk.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            return isMissing ? chunk.id : nil
-        })
     }
 
     private var step4MissingRoleChunkIDs: Set<UUID> {
@@ -3837,15 +4940,13 @@ struct PlanStepFourView: View {
     var body: some View {
         VStack(spacing: 12) {
             VStack(spacing: 1) {
-                PlanStepProgressBar(current: 4, total: 5)
+                PlanStepProgressBar(current: 5, total: 6)
                     .frame(maxWidth: .infinity, alignment: .center)
                 Text("Plan")
                     .font(.largeTitle)
                     .fontWeight(.bold)
                     .frame(maxWidth: .infinity, alignment: .center)
             }
-
-            instructionsRow
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
@@ -3876,8 +4977,6 @@ struct PlanStepFourView: View {
                     Text("Complete your plan")
                         .font(.footnote)
                         .fontWeight(.bold)
-                    Text("• Result")
-                        .font(.footnote)
                     if hasAnyIdentityRequiredChunks {
                         Text("• Identity")
                             .font(.footnote)
@@ -3901,14 +5000,8 @@ struct PlanStepFourView: View {
                 .padding(.horizontal)
                 .padding(.top, 8)
                 .padding(.bottom, 10)
-                .background(Color(.systemGroupedBackground))
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
-        .sheet(isPresented: $isShowingInstructions) {
-            StepFourInstructionsPopup()
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
-        }
         .sheet(item: $outcomeSheetChunkID) { wrapper in
             OutcomePickerSheet(
                 title: "Connect Outcome(s)",
@@ -4035,7 +5128,6 @@ struct PlanStepFourView: View {
     }
 
     private func dismissKeyboard() {
-        focusedField = nil
         #if canImport(UIKit)
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         #endif
@@ -4047,7 +5139,7 @@ struct PlanStepFourView: View {
                 .font(.subheadline)
                 .foregroundStyle(Color.black.opacity(0.7))
                 .padding(.top, 1)
-            Text(hasAnyIdentityRequiredChunks ? "Write Result and Conect Identity to Action Blocks" : "Write Result to Action Blocks")
+            Text(hasAnyIdentityRequiredChunks ? "Connect Identity to Action Blocks" : "Complete optional plan links")
                 .font(.subheadline)
                 .fontWeight(.semibold)
                 .foregroundStyle(Color.black.opacity(0.7))
@@ -4062,28 +5154,6 @@ struct PlanStepFourView: View {
         )
     }
 
-    private var instructionsRow: some View {
-        Button { isShowingInstructions = true } label: {
-            HStack(alignment: .center, spacing: 10) {
-                Spacer(minLength: 0)
-                Image(systemName: "info.circle")
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
-                Text("Instructions")
-                    .fontWeight(.bold)
-                    .foregroundStyle(.secondary)
-                    .font(.subheadline)
-                Text("Tap to read")
-                    .foregroundStyle(.secondary)
-                    .font(.subheadline)
-                Spacer(minLength: 0)
-            }
-            .frame(maxWidth: .infinity)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
     @ViewBuilder
     private func chunkCard(_ chunk: PlannedChunk) -> some View {
         let chunkID = chunk.id
@@ -4094,14 +5164,6 @@ struct PlanStepFourView: View {
             get: { resultTextByChunk[chunkID] ?? "" },
             set: {
                 resultTextByChunk[chunkID] = $0
-                scheduleStep4Autosave()
-            }
-        )
-
-        let roleNoteBinding = Binding<String>(
-            get: { roleTextByChunk[chunkID] ?? "" },
-            set: {
-                roleTextByChunk[chunkID] = $0
                 scheduleStep4Autosave()
             }
         )
@@ -4132,10 +5194,8 @@ struct PlanStepFourView: View {
             targetIconName: targetIconName,
             fill: fill,
             resultText: resultBinding,
-            roleNoteText: roleNoteBinding,
             selectedOutcomeIDs: selectedOutcomeIDsBinding,
             selectedRoleID: selectedRoleIDBinding,
-            highlightMissingResult: step4MissingResultChunkIDs.contains(chunkID),
             highlightMissingRoleSelection: step4MissingRoleChunkIDs.contains(chunkID),
             onOpenOutcomes: { outcomeSheetChunkID = SheetChunkID(id: chunkID) },
             onOpenRoles: { roleSheetChunkID = SheetChunkID(id: chunkID) },
@@ -4162,11 +5222,9 @@ struct PlanStepFourView: View {
         let fill: Color
 
         @Binding var resultText: String
-        @Binding var roleNoteText: String
         @Binding var selectedOutcomeIDs: [UUID]
         @Binding var selectedRoleID: UUID?
 
-        let highlightMissingResult: Bool
         let highlightMissingRoleSelection: Bool
 
         let onOpenOutcomes: () -> Void
@@ -4174,7 +5232,9 @@ struct PlanStepFourView: View {
         let onRemoveOutcome: (UUID) -> Void
         let onActionTextChanged: (PlannedChunkAction, String) -> Void
 
-        private var forcedDarkTextColor: Color { .black }
+        private var fixedSecondaryTextColor: Color {
+            Color(red: 0.38, green: 0.38, blue: 0.40)
+        }
 
         var body: some View {
             VStack(alignment: .leading, spacing: 12) {
@@ -4215,14 +5275,14 @@ struct PlanStepFourView: View {
                 Text("actions related to:")
                     .font(.caption)
                     .fontWeight(.regular)
-                    .foregroundStyle(forcedDarkTextColor)
+                    .foregroundStyle(fixedSecondaryTextColor)
 
                 Spacer(minLength: 0)
 
                 Text(chunk.label)
                     .font(.subheadline)
                     .fontWeight(.bold)
-                    .foregroundStyle(Color.black)
+                    .foregroundStyle(fixedSecondaryTextColor)
                     .frame(maxWidth: .infinity, alignment: .trailing)
                     .lineLimit(1)
             }
@@ -4234,25 +5294,18 @@ struct PlanStepFourView: View {
                     Text("RESULT")
                         .font(.caption)
                         .fontWeight(.bold)
-                        .foregroundStyle(forcedDarkTextColor)
+                        .foregroundStyle(fixedSecondaryTextColor)
                     Spacer()
                     Text("What do I want? Why do I want it?")
                         .font(.subheadline)
                         .italic()
-                        .foregroundStyle(forcedDarkTextColor)
+                        .foregroundStyle(fixedSecondaryTextColor)
                 }
 
-                TextField("Enter result all actions contribute to...", text: $resultText)
-                    .textFieldStyle(.roundedBorder)
-                    .submitLabel(.done)
-                    .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(
-                                highlightMissingResult ? Color.red.opacity(0.75) : Color.clear,
-                                lineWidth: highlightMissingResult ? 1.5 : 0
-                            )
-                    )
+                Text(resultText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "No result entered." : resultText)
+                    .font(.subheadline)
+                    .foregroundStyle(fixedSecondaryTextColor)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
 
@@ -4292,11 +5345,11 @@ struct PlanStepFourView: View {
                     HStack(spacing: 10) {
                         Image(systemName: targetIconName)
                             .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
+                            .foregroundStyle(fixedSecondaryTextColor)
 
                         Text(outcome.outcome)
                             .font(.subheadline)
-                            .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
+                            .foregroundStyle(fixedSecondaryTextColor)
                             .lineLimit(2)
                             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -4305,7 +5358,7 @@ struct PlanStepFourView: View {
                         } label: {
                             Image(systemName: "xmark.circle.fill")
                                 .font(.system(size: 18, weight: .semibold))
-                                .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
+                                .foregroundStyle(fixedSecondaryTextColor)
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Remove outcome")
@@ -4371,30 +5424,31 @@ struct PlanStepFourView: View {
                     Text("ACTIONS")
                         .font(.caption)
                         .fontWeight(.bold)
-                        .foregroundStyle(forcedDarkTextColor)
+                        .foregroundStyle(fixedSecondaryTextColor)
                     Spacer()
                     Text("How can I achieve it now?")
                         .font(.subheadline)
                         .italic()
-                        .foregroundStyle(forcedDarkTextColor)
+                        .foregroundStyle(fixedSecondaryTextColor)
                 }
 
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(actions) { action in
-                        TextField(
-                            "Action",
-                            text: Binding(
-                                get: { action.text },
-                                set: { newValue in
-                                    onActionTextChanged(action, newValue)
-                                }
-                            )
-                        )
-                        .font(.body.weight(.medium))
-                        .textFieldStyle(.roundedBorder)
-                        .submitLabel(.done)
-                        .foregroundStyle(colorScheme == .dark ? Color.primary : Color.black)
-                        .padding(.vertical, 1)
+                if actions.isEmpty {
+                    Text("No actions in this block.")
+                        .font(.subheadline)
+                        .foregroundStyle(fixedSecondaryTextColor)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(actions) { action in
+                            HStack(alignment: .top, spacing: 8) {
+                                Text("•")
+                                    .foregroundStyle(fixedSecondaryTextColor)
+                                Text(action.text)
+                                    .font(.body.weight(.medium))
+                                    .foregroundStyle(fixedSecondaryTextColor)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
                     }
                 }
             }
@@ -4693,7 +5747,7 @@ struct PlanStepFiveView: View {
     var body: some View {
         VStack(spacing: 12) {
             VStack(spacing: 1) {
-                PlanStepProgressBar(current: 5, total: 5)
+                PlanStepProgressBar(current: 6, total: 6)
                     .frame(maxWidth: .infinity, alignment: .center)
                 Text("Define")
                     .font(.largeTitle)
@@ -6367,7 +7421,7 @@ private struct LeverageSheet: View {
         NavigationStack {
             List {
                 Section {
-                    Text("Leverage action to someone or something else")
+                    Text("Assign action to someone or something else")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -6445,7 +7499,7 @@ private struct LeverageSheet: View {
                     }
                 }
             }
-            .navigationTitle("Leverage")
+            .navigationTitle("Assign")
             .navigationBarTitleDisplayMode(.inline)
             .safeAreaInset(edge: .bottom) {
                 if isNewResourceMode && isNewResourceFocused {
@@ -7089,8 +8143,8 @@ private struct StepFiveInstructionsPopup: View {
                     Divider().padding(.vertical, 2)
 
                     instructionBlock(
-                        title: "Leverage:",
-                        description: "identify any actions that you can leverage to someone or something else.",
+                        title: "Assign:",
+                        description: "identify any actions that you can assign to someone or something else.",
                         tipExpanded: $leverageExpanded,
                         tipText: "What other resources do you have available to help you get this Result (e.g., assistant, outsourcing, trades, technology)? Some of the actions in your Block can likely be completed without your direct time or brainpower. Who or what could assist you?"
                     )
@@ -7293,6 +8347,14 @@ private struct Step3ChunkRowHeightPreferenceKey: PreferenceKey {
     static var defaultValue: [UUID: CGFloat] = [:]
     static func reduce(value: inout [UUID: CGFloat], nextValue: () -> [UUID: CGFloat]) {
         value.merge(nextValue()) { _, new in new }
+    }
+}
+
+private struct Step2FooterHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        let next = nextValue()
+        if next > 0 { value = next }
     }
 }
 

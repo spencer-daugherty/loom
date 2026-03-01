@@ -621,7 +621,7 @@ final class LoomAIViewModel: ObservableObject {
             suggestedPromptChips = [
                 "What should I focus on this week?",
                 "Which fulfillment area is slipping?",
-                "What is my highest-leverage next action?"
+                "What is my highest-impact next action?"
             ].shuffled()
             followUpPromptChips = []
         }
@@ -876,7 +876,7 @@ final class LoomAIViewModel: ObservableObject {
             chips.append("What should I do next for \(nextOutcome.title)?")
         }
         if let alternateOutcome = pickOne(Array(nearTermOutcomes.dropFirst().prefix(5))) {
-            chips.append("What is the highest-leverage move for \(alternateOutcome.title)?")
+            chips.append("What is the highest-impact move for \(alternateOutcome.title)?")
         }
 
         if let lowestBlock = snapshot.currentWeekActionBlocks
@@ -1381,7 +1381,7 @@ final class LoomAIViewModel: ObservableObject {
             ),
             .init(
                 id: "capture",
-                title: "Capture (list, quick complete, recurring, reminders, leverage, due dates)",
+                title: "Capture (list, quick complete, recurring, reminders, assign, due dates)",
                 currentCount: captureItems.count,
                 historicalCount: quickCompletes.count + recurringCaptureDispatches.count,
                 keySignals: [
@@ -1423,7 +1423,7 @@ final class LoomAIViewModel: ObservableObject {
             ),
             .init(
                 id: "action_blocks_actions_detail",
-                title: "Action Block Action Attributes (musts, duration, leverage, sensitivities, attachments, notes, order)",
+                title: "Action Block Action Attributes (musts, duration, assign, sensitivities, attachments, notes, order)",
                 currentCount: plannedChunkActions.count,
                 historicalCount: reflectionActions.count,
                 keySignals: [
@@ -1482,7 +1482,7 @@ final class LoomAIViewModel: ObservableObject {
             ),
             .init(
                 id: "supporting_catalogs",
-                title: "People, Places, Tools / Leverage Catalogs",
+                title: "People, Places, Tools / Assign Catalogs",
                 currentCount: leverageResources.count + sensitivityPlaceCatalogItems.count,
                 historicalCount: nil,
                 keySignals: [
@@ -1524,13 +1524,13 @@ final class LoomAIViewModel: ObservableObject {
             .init(
                 id: "capture_system",
                 title: "Capture System",
-                summary: "Capture includes rolling actions, quick completions, recurring capture rules/dispatches, due dates, leverage metadata, and Apple Reminders sync sources.",
+                summary: "Capture includes rolling actions, quick completions, recurring capture rules/dispatches, due dates, assign metadata, and Apple Reminders sync sources.",
                 relatedSections: ["capture", "supporting_catalogs"]
             ),
             .init(
                 id: "action_blocks_workflow",
                 title: "Action Blocks Workflow",
-                summary: "Weekly planning moves from grouped chunks to step-four motivations/results/outcome links, then action metadata (musts, duration, leverage, sensitivities, notes, attachments) and execution states, followed by reflection archives/journals.",
+                summary: "Weekly planning moves from grouped chunks to step-four motivations/results/outcome links, then action metadata (musts, duration, assign, sensitivities, notes, attachments) and execution states, followed by reflection archives/journals.",
                 relatedSections: ["action_blocks_active", "action_blocks_actions_detail", "action_blocks_completed"]
             ),
             .init(

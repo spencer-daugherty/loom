@@ -573,7 +573,7 @@ enum LittleWinsHealthKitBridge {
       case .typeUnavailable:
         return "The Apple Health data type is unavailable."
       case .authorizationDenied:
-        return "Apple Health access was not granted."
+        return "Apple Health access was denied. Open Health app > Sharing > Apps > Loom and allow data access."
       }
     }
   }
@@ -601,10 +601,17 @@ enum LittleWinsHealthKitBridge {
 
   private static func verifyLittleWinsReadAuthorization(completion: @escaping (Result<Void, Error>) -> Void) {
     let metricsToProbe: [LittleWinsIntegrationConfig.Metric] = [.steps, .workoutMinutes, .sleepHours]
+    var sawAuthorizationDenied = false
 
     func attempt(_ index: Int, _ lastError: Error?) {
       guard index < metricsToProbe.count else {
-        completion(.failure(lastError ?? BridgeError.authorizationDenied))
+        if sawAuthorizationDenied {
+          completion(.failure(BridgeError.authorizationDenied))
+        } else if let lastError {
+          completion(.failure(lastError))
+        } else {
+          completion(.success(()))
+        }
         return
       }
 
@@ -613,12 +620,37 @@ enum LittleWinsHealthKitBridge {
         case .success:
           completion(.success(()))
         case .failure(let error):
+          if isAuthorizationDenied(error) {
+            sawAuthorizationDenied = true
+          }
           attempt(index + 1, error)
         }
       }
     }
 
     attempt(0, nil)
+  }
+
+  static func isAuthorizationDenied(_ error: Error) -> Bool {
+    if let bridgeError = error as? BridgeError, case .authorizationDenied = bridgeError {
+      return true
+    }
+    if containsHealthKitAuthorizationDenied(error) {
+      return true
+    }
+    return false
+  }
+
+  private static func containsHealthKitAuthorizationDenied(_ error: Error) -> Bool {
+    let nsError = error as NSError
+    if nsError.domain == HKErrorDomain,
+       nsError.code == HKError.Code.errorAuthorizationDenied.rawValue {
+      return true
+    }
+    if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? Error {
+      return containsHealthKitAuthorizationDenied(underlying)
+    }
+    return false
   }
 
   static func readTodayProgress(
@@ -776,6 +808,8 @@ enum LittleWinsHealthKitBridge {
   ) {
     completion(.failure(BridgeError.unavailable))
   }
+
+  static func isAuthorizationDenied(_ error: Error) -> Bool { false }
 }
 #endif
 

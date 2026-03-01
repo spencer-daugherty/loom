@@ -587,9 +587,9 @@ struct ReflectView: View {
     private var flowProfileRows: [(String, Int, Color)] {
         [
             ("Musts", mustCount, .yellow),
-            ("Carried to new capture list", carriedActions.count, .blue),
+            ("Recapture for later", carriedActions.count, .blue),
             ("Didn't need to be done", notNeededCount, .gray),
-            ("Leveraged", leveragedCount, .mint),
+            ("Assigned", leveragedCount, .mint),
             ("New actions added", adHocCount, .purple),
         ]
         .sorted { lhs, rhs in
@@ -1158,7 +1158,7 @@ struct ReflectView: View {
 
                     if !snapshot.carriedActionTexts.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Carried to new capture list")
+                            Text("Recapture for later")
                                 .font(.headline)
                             Text("These will be moved back to your Capture list.")
                                 .font(.footnote)

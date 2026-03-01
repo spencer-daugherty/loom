@@ -411,9 +411,9 @@ struct CompletedActionBlocksDetailView: View {
 
         let flowProfileRows: [(String, Int, Color)] = [
             ("Musts", musts, .gray.opacity(0.65)),
-            ("Carried to new capture list", carried, .gray.opacity(0.6)),
+            ("Recapture for later", carried, .gray.opacity(0.6)),
             ("Didn't need to be done (Delete)", notNeeded, .gray.opacity(0.5)),
-            ("Leveraged", leveraged, .gray.opacity(0.7)),
+            ("Assigned", leveraged, .gray.opacity(0.7)),
             ("In progress", inProgress, .gray.opacity(0.55))
         ]
 
@@ -529,7 +529,7 @@ struct CompletedActionBlocksDetailView: View {
 
                 if !carriedActions.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Carried to new capture list")
+                        Text("Recapture for later")
                             .font(.headline)
                         Text("These will be moved back to Rolling Capture.")
                             .font(.footnote)
@@ -856,7 +856,7 @@ private struct CompletedLeverageSheet: View {
         NavigationStack {
             List {
                 Section {
-                    Text("Leverage action to someone or something else")
+                    Text("Assign action to someone or something else")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -879,7 +879,7 @@ private struct CompletedLeverageSheet: View {
                     }
                 }
             }
-            .navigationTitle("Leverage")
+            .navigationTitle("Assign")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {

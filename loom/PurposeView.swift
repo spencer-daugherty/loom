@@ -113,6 +113,8 @@ fileprivate func purposeReadableInsightPrompt(for payload: PurposeReadableInsigh
     - Use (X%) for percentage-based metrics and score components.
     - If referencing Momentum or Consistency, use the displayed descriptor in parentheses (e.g., Momentum (Improving), Consistency (Stable)).
     - Use these labels verbatim when referenced: Momentum, Consistency, Structure, Outcomes, Action Blocks, Little Wins, Evidence, Carryover penalty.
+    - If this payload has only one record (recentScores has 1 value), line 1 must explain this is a baseline month where trend/mover signals are not established yet.
+    - In that one-record case, line 2 must be a starter action focused on improving score foundations (Structure, Action Blocks, Little Wins, Evidence).
     - Consider the full range of useful interpretations (choose the best fit):
       - month-over-month trend / momentum shift
       - consistency/volatility pattern
@@ -216,6 +218,46 @@ fileprivate func normalizePurposeReadableInsightMetricReferences(
     )
 }
 
+fileprivate func isPurposeSingleRecordPayload(_ payload: PurposeReadableInsightRequestPayload) -> Bool {
+    payload.recentScores.count <= 1
+}
+
+fileprivate func startupPurposeTechnicalLine(payload: PurposeReadableInsightRequestPayload) -> String {
+    let weakest = [
+        ("Action Blocks", payload.actionBlocks),
+        ("Little Wins", payload.littleWins),
+        ("Evidence", payload.evidence),
+        ("Structure", payload.structure),
+        ("Outcomes", payload.outcomes)
+    ].min(by: { $0.1 < $1.1 })?.0 ?? "Action Blocks"
+    return "Baseline month only: trend and mover signals are not established yet; score gains depend on strengthening \(weakest)."
+}
+
+fileprivate func startupPurposePracticalLine(payload: PurposeReadableInsightRequestPayload) -> String {
+    let weakest = [
+        ("Action Blocks", payload.actionBlocks),
+        ("Little Wins", payload.littleWins),
+        ("Evidence", payload.evidence),
+        ("Structure", payload.structure),
+        ("Outcomes", payload.outcomes)
+    ].min(by: { $0.1 < $1.1 })?.0 ?? "Action Blocks"
+
+    switch weakest {
+    case "Action Blocks":
+        return "Add one small Action Block tied to this passion this week."
+    case "Little Wins":
+        return "Add one repeatable Little Win tied to this passion and complete it daily."
+    case "Evidence":
+        return "Tag one completed action to this passion to build evidence."
+    case "Structure":
+        return "Refine this passion wording to make it clearer and more specific."
+    case "Outcomes":
+        return "Connect one Outcome that directly supports this passion."
+    default:
+        return "Add one Action Block and one Little Win tied to this passion."
+    }
+}
+
 fileprivate func ensurePurposeReadableInsightCTA(
     _ text: String,
     payload: PurposeReadableInsightRequestPayload
@@ -225,6 +267,12 @@ fileprivate func ensurePurposeReadableInsightCTA(
         .split(separator: "\n", omittingEmptySubsequences: true)
         .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
         .filter { !$0.isEmpty }
+
+    if isPurposeSingleRecordPayload(payload) {
+        let first = startupPurposeTechnicalLine(payload: payload)
+        let cta = normalizePurposeReadableInsightCTALine(startupPurposePracticalLine(payload: payload))
+        return first + "\n\n" + cta + (cta.hasSuffix(".") ? "" : ".")
+    }
 
     guard let first = lines.first else {
         let cta = normalizePurposeReadableInsightCTALine(defaultPurposeReadableInsightCTA(payload: payload))
@@ -407,14 +455,76 @@ struct PurposeView: View {
     @State private var deletePassionHintWorkItem: DispatchWorkItem?
     @State private var keyboardHeight: CGFloat = 0
     @State private var keyboardDismissCommitSignal: Int = 0
+    @State private var autoWriteVisionSuggestions: [String] = []
+    @State private var autoWritePassionSuggestions: [AutoWritePassionSuggestion] = []
+    @State private var isAutoWritingVision = false
+    @State private var isAutoWritingPassions = false
+    @State private var selectedPassionAutoWriteFilter: PassionAutoWriteFilter = .all
+    @State private var selectedVisionAutoWriteMode: VisionAutoWriteMode = .newVision
+    @State private var autoWriteOutlineAngle: Double = 0
+    @State private var autoWriteIconAnimating = false
+    @State private var autoWriteIconAnimationTask: Task<Void, Never>? = nil
     @FocusState private var focusedField: Field?
     private let passionHeaderTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
     private let keyboardFloatingGap: CGFloat = 15
+    private let autoWritePillHeight: CGFloat = 45
 
     private enum DrivingForceEditor: String, Identifiable {
         case vision
         case purpose
         var id: String { rawValue }
+    }
+
+    private enum VisionAutoWriteMode: String, CaseIterable, Identifiable {
+        case newVision
+        case rewordVision
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .newVision: return "New Vision"
+            case .rewordVision: return "Reword Vision"
+            }
+        }
+    }
+
+    private enum PassionAutoWriteFilter: String, CaseIterable, Identifiable {
+        case all
+        case love
+        case vows
+        case thrill
+        case just
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .all: return "All Passions"
+            case .love: return "Love"
+            case .vows: return "Vow"
+            case .thrill: return "Thrill"
+            case .just: return "Hate"
+            }
+        }
+    }
+
+    private struct AutoWritePassionSuggestion: Identifiable, Hashable {
+        let id = UUID()
+        let emotion: String
+        let passion: String
+    }
+
+    private struct PurposeVisionAutoWriteResponse: Decodable {
+        let suggestions: [String]?
+        let confidence: String?
+    }
+
+    private struct PurposePassionsAutoWriteResponse: Decodable {
+        struct Suggestion: Decodable {
+            let emotion: String?
+            let passion: String?
+            let text: String?
+            let bucket: String?
+        }
+        let suggestions: [Suggestion]?
+        let confidence: String?
     }
 
     private enum HistoricKind: String {
@@ -499,6 +609,342 @@ struct PurposeView: View {
             keyboardDismissCommitSignal &+= 1
         }
     }
+
+    private var passionAutoWriteFilterOptionsReversed: [PassionAutoWriteFilter] {
+        Array(PassionAutoWriteFilter.allCases.reversed())
+    }
+
+    private var autoWriteGradient: AngularGradient {
+        AngularGradient(
+            colors: [
+                Color(red: 0.22, green: 0.47, blue: 1.0),
+                Color(red: 0.15, green: 0.83, blue: 0.95),
+                Color(red: 0.62, green: 0.40, blue: 0.95),
+                Color(red: 0.80, green: 0.38, blue: 0.78),
+                Color(red: 0.98, green: 0.36, blue: 0.58),
+                Color(red: 0.75, green: 0.42, blue: 0.74),
+                Color(red: 0.22, green: 0.47, blue: 1.0)
+            ],
+            center: .center,
+            angle: .degrees(autoWriteOutlineAngle)
+        )
+    }
+
+    private var autoWriteSuggestionCardFill: LinearGradient {
+        LinearGradient(
+            colors: [
+                Color(red: 0.22, green: 0.47, blue: 1.0),
+                Color(red: 0.62, green: 0.40, blue: 0.95),
+                Color(red: 0.98, green: 0.36, blue: 0.58)
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
+    private func autoWriteSuggestionPrimaryColor(isApplied: Bool) -> Color {
+        guard isApplied else { return .white }
+        return colorScheme == .dark ? Color.white.opacity(0.92) : Color.black.opacity(0.82)
+    }
+
+    private func autoWriteSuggestionBackgroundFill(isApplied: Bool) -> AnyShapeStyle {
+        if isApplied {
+            if colorScheme == .dark {
+                return AnyShapeStyle(autoWriteSuggestionCardFill.opacity(0.34))
+            } else {
+                return AnyShapeStyle(Color(red: 0.90, green: 0.97, blue: 0.92))
+            }
+        }
+        return AnyShapeStyle(autoWriteSuggestionCardFill.opacity(0.92))
+    }
+
+    private func autoWriteSuggestionBorderColor(isApplied: Bool) -> Color {
+        if isApplied {
+            return colorScheme == .dark ? Color.white.opacity(0.18) : Color.green.opacity(0.30)
+        }
+        return Color.white.opacity(0.24)
+    }
+
+    @ViewBuilder
+    private var visionAutoWriteSuggestionsSection: some View {
+        let suggestions = autoWriteVisionSuggestions
+        if !suggestions.isEmpty {
+            Section {
+                VStack(spacing: 8) {
+                    ForEach(0..<suggestions.count, id: \.self) { (suggestionIndex: Int) in
+                        let suggestion = suggestions[suggestionIndex]
+                        let isApplied = normalizedVisionSuggestion(visionTextDraft) == normalizedVisionSuggestion(suggestion)
+                        Button {
+                            applyAutoWriteVisionSuggestion(suggestion)
+                        } label: {
+                            HStack(alignment: .center, spacing: 10) {
+                                Image("LoomAI")
+                                    .renderingMode(.template)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .foregroundStyle(.white)
+                                    .frame(width: 24, height: 24)
+                                    .padding(.leading, 2)
+                                Text(suggestion)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(autoWriteSuggestionPrimaryColor(isApplied: isApplied))
+                                    .multilineTextAlignment(.leading)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(autoWriteSuggestionBackgroundFill(isApplied: isApplied))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(autoWriteSuggestionBorderColor(isApplied: isApplied), lineWidth: 1)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.top, 2)
+                .padding(.bottom, 2)
+            }
+            .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
+            .listRowBackground(Color.clear)
+        }
+    }
+
+    @ViewBuilder
+    private func passionAutoWriteSuggestionsSection(for emotion: String) -> some View {
+        let suggestions = autoWritePassionSuggestions.filter { $0.emotion == emotion }
+        if !suggestions.isEmpty {
+            Section {
+                VStack(spacing: 8) {
+                    ForEach(0..<suggestions.count, id: \.self) { (suggestionIndex: Int) in
+                        let suggestion = suggestions[suggestionIndex]
+                        let isApplied = isPassionSuggestionApplied(suggestion)
+                        Button {
+                            applyAutoWritePassionSuggestion(suggestion)
+                        } label: {
+                            HStack(alignment: .center, spacing: 10) {
+                                Image("LoomAI")
+                                    .renderingMode(.template)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .foregroundStyle(.white)
+                                    .frame(width: 24, height: 24)
+                                    .padding(.leading, 2)
+                                VStack(alignment: .leading, spacing: 1.5) {
+                                    Text(bucketTitle(for: suggestion.emotion))
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(autoWriteSuggestionPrimaryColor(isApplied: isApplied).opacity(0.85))
+                                    Text(suggestion.passion)
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(autoWriteSuggestionPrimaryColor(isApplied: isApplied))
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(autoWriteSuggestionBackgroundFill(isApplied: isApplied))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(autoWriteSuggestionBorderColor(isApplied: isApplied), lineWidth: 1)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.top, 2)
+                .padding(.bottom, 2)
+            }
+            .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
+            .listRowBackground(Color.clear)
+        }
+    }
+
+    private var purposeAutoWriteBottomControls: some View {
+        HStack(alignment: .center, spacing: 12) {
+            visionAutoWriteControls
+            Spacer(minLength: 0)
+            passionsAutoWriteControls
+        }
+        .onAppear {
+            guard autoWriteOutlineAngle == 0 else { return }
+            withAnimation(.linear(duration: 8).repeatForever(autoreverses: false)) {
+                autoWriteOutlineAngle = 360
+            }
+        }
+    }
+
+    private var visionAutoWriteControls: some View {
+        let isLoading = isAutoWritingVision
+        return ZStack(alignment: .trailing) {
+            Button {
+                guard !isLoading else { return }
+                Task { await requestAutoWriteVisionSuggestions() }
+            } label: {
+                HStack(alignment: .top, spacing: 6) {
+                    Image("LoomAI")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 27, height: 27)
+                        .rotation3DEffect(
+                            .degrees(isLoading && autoWriteIconAnimating ? 180 : 0),
+                            axis: (x: 1, y: 0, z: 0)
+                        )
+                    VStack(alignment: .leading, spacing: 0.5) {
+                        Text("AutoWrite")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(autoWriteGradient)
+                        Text(selectedVisionAutoWriteMode.label)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.top, 0.5)
+                    Spacer(minLength: 0)
+                }
+                .padding(.leading, 12)
+                .padding(.trailing, 42)
+                .padding(.vertical, 8)
+            }
+            .buttonStyle(.plain)
+            .disabled(isLoading)
+            .opacity(isLoading ? 0.7 : 1)
+
+            Menu {
+                ForEach(VisionAutoWriteMode.allCases) { mode in
+                    Button {
+                        selectedVisionAutoWriteMode = mode
+                    } label: {
+                        if selectedVisionAutoWriteMode == mode {
+                            Label(mode.label, systemImage: "checkmark")
+                        } else {
+                            Text(mode.label)
+                        }
+                    }
+                }
+            } label: {
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 27, height: 27)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .frame(width: 27, height: 27)
+            .padding(.trailing, 8)
+        }
+        .background(
+            Capsule()
+                .fill(Color(.systemGroupedBackground))
+        )
+        .overlay(
+            Capsule()
+                .stroke(autoWriteGradient, lineWidth: 2.25)
+        )
+        .fixedSize(horizontal: true, vertical: false)
+        .frame(height: autoWritePillHeight)
+        .onChange(of: isLoading, initial: false) { _, newValue in
+            setAutoWriteLoadingAnimation(newValue)
+        }
+    }
+
+    private var passionsAutoWriteControls: some View {
+        let isLoading = isAutoWritingPassions
+        return ZStack(alignment: .trailing) {
+            Button {
+                guard !isLoading else { return }
+                Task { await requestAutoWritePassionSuggestions() }
+            } label: {
+                HStack(alignment: .top, spacing: 6) {
+                    Image("LoomAI")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 27, height: 27)
+                        .rotation3DEffect(
+                            .degrees(isLoading && autoWriteIconAnimating ? 180 : 0),
+                            axis: (x: 1, y: 0, z: 0)
+                        )
+                    VStack(alignment: .leading, spacing: 0.5) {
+                        Text("AutoWrite")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(autoWriteGradient)
+                        Text(selectedPassionAutoWriteFilter.label)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.top, 0.5)
+                    Spacer(minLength: 0)
+                }
+                .padding(.leading, 12)
+                .padding(.trailing, 42)
+                .padding(.vertical, 8)
+            }
+            .buttonStyle(.plain)
+            .disabled(isLoading)
+            .opacity(isLoading ? 0.7 : 1)
+
+            Menu {
+                ForEach(passionAutoWriteFilterOptionsReversed) { filter in
+                    Button {
+                        selectedPassionAutoWriteFilter = filter
+                    } label: {
+                        if selectedPassionAutoWriteFilter == filter {
+                            Label(filter.label, systemImage: "checkmark")
+                        } else {
+                            Text(filter.label)
+                        }
+                    }
+                }
+            } label: {
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 27, height: 27)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .frame(width: 27, height: 27)
+            .padding(.trailing, 8)
+        }
+        .background(
+            Capsule()
+                .fill(Color(.systemGroupedBackground))
+        )
+        .overlay(
+            Capsule()
+                .stroke(autoWriteGradient, lineWidth: 2.25)
+        )
+        .fixedSize(horizontal: true, vertical: false)
+        .frame(height: autoWritePillHeight)
+        .onChange(of: isLoading, initial: false) { _, newValue in
+            setAutoWriteLoadingAnimation(newValue)
+        }
+    }
+
+    private func setAutoWriteLoadingAnimation(_ isLoading: Bool) {
+        if isLoading {
+            autoWriteIconAnimationTask?.cancel()
+            autoWriteIconAnimating = false
+            autoWriteIconAnimationTask = Task { @MainActor in
+                while !Task.isCancelled {
+                    withAnimation(.easeInOut(duration: 0.36)) {
+                        autoWriteIconAnimating.toggle()
+                    }
+                    try? await Task.sleep(nanoseconds: 360_000_000)
+                }
+            }
+        } else {
+            autoWriteIconAnimationTask?.cancel()
+            autoWriteIconAnimationTask = nil
+            withAnimation(.easeOut(duration: 0.16)) {
+                autoWriteIconAnimating = false
+            }
+        }
+    }
     
     var body: some View {
         List {
@@ -507,6 +953,7 @@ struct PurposeView: View {
                 .listRowBackground(Color.clear)
 
             AnyView(drivingForceSections)
+            AnyView(visionAutoWriteSuggestionsSection)
             AnyView(passionsHeader)
             AnyView(passionsSections)
             if !historicRows.isEmpty {
@@ -558,6 +1005,10 @@ struct PurposeView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
             keyboardHeight = 0
         }
+        .onDisappear {
+            autoWriteIconAnimationTask?.cancel()
+            autoWriteIconAnimationTask = nil
+        }
         .sheet(isPresented: $isShowingInstructions, content: instructionsSheet)
         .navigationDestination(isPresented: $showDrivingForceTrends) {
             DrivingForceTrendsView(snapshots: passionScoreSnapshots)
@@ -593,6 +1044,15 @@ struct PurposeView: View {
                     .transition(.opacity)
             }
         }
+        .safeAreaInset(edge: .bottom) {
+            if !isKeyboardVisible {
+                purposeAutoWriteBottomControls
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .padding(.bottom, 10)
+            }
+        }
+        .ignoresSafeArea(.keyboard, edges: .bottom)
     }
 
     @ToolbarContentBuilder
@@ -1069,7 +1529,7 @@ struct PurposeView: View {
     }
 
     private func usagePoints(for emotionKey: String) -> Int {
-        if let snapScore = latestMonthlyPassionScore(for: emotionKey) {
+        if let snapScore = latestMonthlyPassionScore(for: emotionKey) ?? latestAvailablePassionSnapshot(for: emotionKey)?.score {
             return Int(PassionScoringMath.clamp(snapScore.rounded(), min: 0, max: 4))
         }
         return legacyUsagePoints(for: emotionKey)
@@ -1103,7 +1563,7 @@ struct PurposeView: View {
     }
 
     private func passionDisplayScore(for emotionKey: String) -> Double {
-        if let snapScore = latestMonthlyPassionScore(for: emotionKey) {
+        if let snapScore = latestMonthlyPassionScore(for: emotionKey) ?? latestAvailablePassionSnapshot(for: emotionKey)?.score {
             return PassionScoringMath.clamp(snapScore, min: 0, max: 4)
         }
         return Double(legacyUsagePoints(for: emotionKey))
@@ -1116,24 +1576,28 @@ struct PurposeView: View {
     private func latestMonthlyPassionSnapshot(for emotionKey: String) -> PassionScoreSnapshot? {
         guard let passionType = passionType(forEmotionKey: emotionKey) else { return nil }
         let monthStart = PassionScoringMath.monthWindow(for: .now).monthStart
-        return passionScoreSnapshots.first(where: {
-            $0.passionTypeRaw == passionType.rawValue &&
-            Calendar.current.isDate($0.monthStartDate, inSameDayAs: monthStart)
-        })
+        return latestPassionSnapshot(for: passionType, monthStart: monthStart)
     }
 
     private func previousMonthlyPassionSnapshot(for emotionKey: String) -> PassionScoreSnapshot? {
         guard let passionType = passionType(forEmotionKey: emotionKey) else { return nil }
         let currentMonthStart = PassionScoringMath.monthWindow(for: .now).monthStart
         guard let priorMonthStart = Calendar.current.date(byAdding: .month, value: -1, to: currentMonthStart) else { return nil }
-        return passionScoreSnapshots.first(where: {
-            $0.passionTypeRaw == passionType.rawValue &&
-            Calendar.current.isDate($0.monthStartDate, inSameDayAs: priorMonthStart)
-        })
+        return latestPassionSnapshot(for: passionType, monthStart: priorMonthStart)
+    }
+
+    private func latestPassionSnapshot(for passionType: PassionType, monthStart: Date) -> PassionScoreSnapshot? {
+        passionScoreSnapshots
+            .filter {
+                $0.passionTypeRaw == passionType.rawValue &&
+                Calendar.current.isDate($0.monthStartDate, inSameDayAs: monthStart)
+            }
+            .max(by: { $0.updatedAt < $1.updatedAt })
     }
 
     private var selectedHeaderPassionSnapshot: PassionScoreSnapshot? {
         latestMonthlyPassionSnapshot(for: highlightedPassionEmotionKey)
+            ?? latestAvailablePassionSnapshot(for: highlightedPassionEmotionKey)
     }
 
     private func passionMonthOverMonthDelta(for emotionKey: String) -> Double? {
@@ -1156,9 +1620,31 @@ struct PurposeView: View {
 
     private var currentMonthPassionSnapshots: [PassionScoreSnapshot] {
         let monthStart = PassionScoringMath.monthWindow(for: .now).monthStart
-        return passionScoreSnapshots.filter {
+        return passionSnapshotsForMonth(monthStart)
+    }
+
+    private func passionSnapshotsForMonth(_ monthStart: Date) -> [PassionScoreSnapshot] {
+        let monthRows = passionScoreSnapshots.filter {
             Calendar.current.isDate($0.monthStartDate, inSameDayAs: monthStart)
         }
+        let latestByPassion = Dictionary(grouping: monthRows, by: \.passionTypeRaw).compactMapValues {
+            $0.max(by: { $0.updatedAt < $1.updatedAt })
+        }
+        return Array(latestByPassion.values)
+    }
+
+    private func latestAvailablePassionSnapshot(for emotionKey: String) -> PassionScoreSnapshot? {
+        guard let passionType = passionType(forEmotionKey: emotionKey) else { return nil }
+        return passionScoreSnapshots
+            .filter { $0.passionTypeRaw == passionType.rawValue }
+            .max { lhs, rhs in
+                let lhsMonth = Calendar.current.startOfDay(for: lhs.monthStartDate)
+                let rhsMonth = Calendar.current.startOfDay(for: rhs.monthStartDate)
+                if lhsMonth == rhsMonth {
+                    return lhs.updatedAt < rhs.updatedAt
+                }
+                return lhsMonth < rhsMonth
+            }
     }
 
     private var purposeHeaderStrongestSnapshotIfUnique: PassionScoreSnapshot? {
@@ -1279,7 +1765,7 @@ struct PurposeView: View {
 
     private func purposeHeaderReadableInsightPayload(for snap: PassionScoreSnapshot) -> PurposeReadableInsightRequestPayload {
         let monthStart = Calendar.current.startOfDay(for: snap.monthStartDate)
-        let sameMonth = currentMonthPassionSnapshots
+        let sameMonth = passionSnapshotsForMonth(monthStart)
         let sortedByScore = sameMonth.sorted { lhs, rhs in
             if lhs.score == rhs.score { return lhs.passionTypeRaw < rhs.passionTypeRaw }
             return lhs.score > rhs.score
@@ -1445,6 +1931,7 @@ struct PurposeView: View {
                     },
                     onDelete: deletePassion
                 )
+                passionAutoWriteSuggestionsSection(for: category.emotion)
             }
         }
     }
@@ -1541,6 +2028,304 @@ struct PurposeView: View {
                 .focused($focusedField, equals: focus)
         }
         .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
+    }
+
+    private var visionTrimmed: String {
+        visionTextDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func requestAutoWriteVisionSuggestions() async {
+        let previousSuggestions = autoWriteVisionSuggestions
+        isAutoWritingVision = true
+        defer { isAutoWritingVision = false }
+        autoWriteVisionSuggestions = []
+
+        do {
+            let contextSnapshot = try LoomAIViewModel().buildContextSnapshot(in: context)
+            let previousSuggestionsContext = previousSuggestions.isEmpty
+                ? "No prior suggestions."
+                : "Prior suggestions to avoid repeating: \(previousSuggestions.joined(separator: " | "))"
+            let modeInstruction: String
+            switch selectedVisionAutoWriteMode {
+            case .newVision:
+                modeInstruction = "Vision mode: New Vision. Generate fresh vision suggestions from context."
+            case .rewordVision:
+                modeInstruction = "Vision mode: Reword Vision. Improve and reword the current vision while preserving its core intent and direction."
+            }
+            let instruction = """
+            You are helping with Loom Purpose Vision (AutoWrite).
+            \(modeInstruction)
+            Current Vision: \(visionTrimmed.isEmpty ? "<empty>" : visionTrimmed)
+            \(previousSuggestionsContext)
+
+            Vision guidance to follow:
+            - If there were no limits, what life would you create?
+            - This is not a goal. It's long-term direction.
+            - Keep wording clear, practical, and specific.
+            - If mode is Reword Vision and Current Vision is not empty, prioritize improving clarity/strength while keeping the same meaning.
+            - If mode is Reword Vision but Current Vision is empty, fall back to New Vision behavior.
+
+            Return JSON only:
+            {"suggestions":["string"],"confidence":"high|medium|low"}
+
+            Rules:
+            - Return 1-2 suggestions.
+            - each suggestion must be <=150 characters
+            - no numbering, no bullets
+            """
+
+            let response = try await LoomAIService().sendChat(
+                messages: [.init(role: "user", content: instruction)],
+                context: contextSnapshot
+            )
+            let suggestions = decodeAutoWriteVisionSuggestions(from: response.message)
+            guard !suggestions.isEmpty else { return }
+            let filtered = suggestions.filter { suggestion in
+                let normalized = normalizedVisionSuggestion(suggestion)
+                return !previousSuggestions.contains { normalizedVisionSuggestion($0) == normalized }
+            }
+            let nextSuggestions = Array((filtered.isEmpty ? suggestions : filtered).prefix(2))
+            guard !nextSuggestions.isEmpty else { return }
+            autoWriteVisionSuggestions = nextSuggestions
+        } catch {
+            return
+        }
+    }
+
+    private func requestAutoWritePassionSuggestions() async {
+        let previousSuggestions = autoWritePassionSuggestions
+        isAutoWritingPassions = true
+        defer { isAutoWritingPassions = false }
+        autoWritePassionSuggestions = []
+
+        do {
+            let contextSnapshot = try LoomAIViewModel().buildContextSnapshot(in: context)
+            let selectedFilterInstruction: String = {
+                if selectedPassionAutoWriteFilter == .all {
+                    return "Selected filter: All (suggest across buckets)."
+                }
+                return "Selected filter: \(selectedPassionAutoWriteFilter.label) only. Return only that bucket."
+            }()
+            let currentPassions = passionQueries
+                .map { bucket in
+                    let items = currentPassionValues(for: bucket.emotion).joined(separator: " | ")
+                    return "- \(bucketTitle(for: bucket.emotion)): \(items.isEmpty ? "<empty>" : items)"
+                }
+                .joined(separator: "\n")
+            let previousContext = previousSuggestions.isEmpty
+                ? "No prior suggestions."
+                : "Prior suggestions to avoid repeating: \(previousSuggestions.map { "\(bucketTitle(for: $0.emotion)): \($0.passion)" }.joined(separator: " | "))"
+
+            let instruction = """
+            You are helping with Loom Purpose Passions (AutoWrite).
+            \(selectedFilterInstruction)
+            Current passions by bucket:
+            \(currentPassions)
+            \(previousContext)
+
+            Use this Loom guidance from the PurposeView graduation-cap instructions sheet and Need ideas section:
+            - Love examples: Time with family and close relationships; Learning, growth, and self-improvement; Building and creating something meaningful.
+            - Vows (commitments) examples: Always act with integrity; Take full responsibility for my life; Keep growing and becoming better.
+            - Thrill examples: Achieving difficult goals; Solving hard problems; Taking risks and pursuing new opportunities.
+            - Hate examples: Wasted potential; Dishonesty and manipulation; Laziness and excuses.
+            - Passions should reflect stable values, commitments, and direction.
+
+            Return JSON only:
+            {"suggestions":[{"emotion":"love|vows|thrill|just","passion":"string"}],"confidence":"high|medium|low"}
+
+            Rules:
+            - Return 2-4 suggestions.
+            - Keep each passion to 1-5 words. Fewer words is preferred.
+            - Keep wording concrete, strong, and value-driven.
+            - Use the provided bucket context and existing items to improve quality.
+            - Never repeat, paraphrase, or lightly reword existing bucket items.
+            - Avoid semantic overlap with current items (must be clearly distinct concepts).
+            - Prefer direct noun phrases; avoid verb-led formats like "Rejecting ...", "Challenging ...", "Avoiding ...".
+            - Suggestions must make sense as standalone passion items.
+            - Prefer variety across buckets when possible.
+            - No numbering, no bullets, no markdown.
+            """
+
+            let response = try await LoomAIService().sendChat(
+                messages: [.init(role: "user", content: instruction)],
+                context: contextSnapshot
+            )
+            let suggestions = decodeAutoWritePassionSuggestions(from: response.message)
+            guard !suggestions.isEmpty else { return }
+
+            let bucketFiltered = suggestions.filter { suggestion in
+                if selectedPassionAutoWriteFilter == .all { return true }
+                return suggestion.emotion == selectedPassionAutoWriteFilter.rawValue
+            }
+            let sourceSuggestions = (bucketFiltered.isEmpty ? suggestions : bucketFiltered).filter {
+                !isPassionSuggestionTooSimilarToExisting($0)
+            }
+            guard !sourceSuggestions.isEmpty else { return }
+
+            let nextSuggestions = sourceSuggestions.filter { suggestion in
+                let normalized = normalizedVisionSuggestion(suggestion.passion)
+                let wasSuggestedBefore = previousSuggestions.contains {
+                    $0.emotion == suggestion.emotion && normalizedVisionSuggestion($0.passion) == normalized
+                }
+                return !wasSuggestedBefore
+            }
+            autoWritePassionSuggestions = Array((nextSuggestions.isEmpty ? sourceSuggestions : nextSuggestions).prefix(4))
+        } catch {
+            return
+        }
+    }
+
+    private func decodeAutoWriteVisionSuggestions(from raw: String) -> [String] {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let data = trimmed.data(using: .utf8),
+           let parsed = try? JSONDecoder().decode(PurposeVisionAutoWriteResponse.self, from: data) {
+            return Array((parsed.suggestions ?? [])
+                .map { truncateSuggestion($0, maxLength: 150) }
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .prefix(2))
+        }
+        return Array(trimmed
+            .components(separatedBy: "\n")
+            .map { truncateSuggestion($0, maxLength: 150).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .prefix(2))
+    }
+
+    private func decodeAutoWritePassionSuggestions(from raw: String) -> [AutoWritePassionSuggestion] {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let data = trimmed.data(using: .utf8),
+           let parsed = try? JSONDecoder().decode(PurposePassionsAutoWriteResponse.self, from: data) {
+            return Array((parsed.suggestions ?? [])
+                .compactMap { item in
+                    let emotionRaw = item.emotion ?? item.bucket ?? ""
+                    guard let emotion = normalizedPassionEmotionKey(emotionRaw) else { return nil }
+                    let passionRaw = item.passion ?? item.text ?? ""
+                    let passion = normalizedPassionPhrase(passionRaw)
+                    guard !passion.isEmpty else { return nil }
+                    return AutoWritePassionSuggestion(emotion: emotion, passion: passion)
+                }
+                .prefix(4))
+        }
+
+        return Array(trimmed
+            .components(separatedBy: "\n")
+            .map { $0.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .compactMap { line -> AutoWritePassionSuggestion? in
+                let parts = line.split(separator: ":", maxSplits: 1).map { String($0) }
+                guard parts.count == 2, let emotion = normalizedPassionEmotionKey(parts[0]) else { return nil }
+                let passion = normalizedPassionPhrase(parts[1])
+                guard !passion.isEmpty else { return nil }
+                return AutoWritePassionSuggestion(emotion: emotion, passion: passion)
+            }
+            .prefix(4))
+    }
+
+    private func normalizedPassionEmotionKey(_ raw: String) -> String? {
+        let key = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if key.contains("love") { return "love" }
+        if key.contains("vow") || key.contains("commit") { return "vows" }
+        if key.contains("thrill") || key.contains("excite") { return "thrill" }
+        if key.contains("hate") || key.contains("just") { return "just" }
+        return nil
+    }
+
+    private func normalizedPassionPhrase(_ text: String) -> String {
+        let cleaned = text
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"^\d+[\.\)]\s*"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"^[-•]\s*"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return "" }
+        let words = cleaned.split(whereSeparator: \.isWhitespace)
+        let limited = words.prefix(5).joined(separator: " ")
+        return truncateSuggestion(String(limited), maxLength: 60)
+    }
+
+    private func isPassionSuggestionApplied(_ suggestion: AutoWritePassionSuggestion) -> Bool {
+        let normalizedSuggestion = normalizedVisionSuggestion(suggestion.passion)
+        return currentPassionValues(for: suggestion.emotion).contains {
+            normalizedVisionSuggestion($0) == normalizedSuggestion
+        }
+    }
+
+    private func applyAutoWriteVisionSuggestion(_ suggestion: String) {
+        visionTextDraft = suggestion
+        saveVisionInline()
+    }
+
+    private func applyAutoWritePassionSuggestion(_ suggestion: AutoWritePassionSuggestion) {
+        guard !isPassionSuggestionApplied(suggestion) else { return }
+        let passion = Passion(date: .now, emotion: suggestion.emotion, passion: suggestion.passion)
+        context.insert(passion)
+        try? context.save()
+        refreshPassionScoresForCurrentMonthIfNeeded(force: true)
+    }
+
+    private func isPassionSuggestionTooSimilarToExisting(_ suggestion: AutoWritePassionSuggestion) -> Bool {
+        let existing = currentPassionValues(for: suggestion.emotion)
+        let suggestionNorm = normalizedVisionSuggestion(suggestion.passion)
+        let suggestionTokens = Set(suggestionNorm.split(separator: " ").map(String.init))
+
+        for item in existing {
+            let itemNorm = normalizedVisionSuggestion(item)
+            if itemNorm.isEmpty { continue }
+            if itemNorm == suggestionNorm { return true }
+            if suggestionNorm.contains(itemNorm) || itemNorm.contains(suggestionNorm) { return true }
+            let itemTokens = Set(itemNorm.split(separator: " ").map(String.init))
+            if !itemTokens.isEmpty {
+                let overlapCount = suggestionTokens.intersection(itemTokens).count
+                let overlapRatio = Double(overlapCount) / Double(max(1, min(suggestionTokens.count, itemTokens.count)))
+                if overlapRatio >= 0.6 { return true }
+            }
+        }
+        return false
+    }
+
+    private func currentPassionValues(for emotion: String) -> [String] {
+        let persisted: [String]
+        switch emotion {
+        case "love":
+            persisted = lovePassions.map(\.passion)
+        case "vows":
+            persisted = vowsPassions.map(\.passion)
+        case "thrill":
+            persisted = thrillPassions.map(\.passion)
+        case "just":
+            persisted = justPassions.map(\.passion)
+        default:
+            persisted = []
+        }
+        let pending = (addStates[emotion]?.newText ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if pending.isEmpty { return persisted }
+        return persisted + [pending]
+    }
+
+    private func bucketTitle(for emotion: String) -> String {
+        switch emotion {
+        case "love": return "Love"
+        case "vows": return "Vow"
+        case "thrill": return "Thrill"
+        case "just": return "Hate"
+        default: return emotion.capitalized
+        }
+    }
+
+    private func normalizedVisionSuggestion(_ text: String) -> String {
+        text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .lowercased()
+    }
+
+    private func truncateSuggestion(_ text: String, maxLength: Int) -> String {
+        guard text.count > maxLength else { return text }
+        let prefix = String(text.prefix(maxLength))
+        if let space = prefix.lastIndex(of: " "), space > prefix.startIndex {
+            return String(prefix[..<space]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return prefix
     }
 
     private func editorSheetTitle(for editor: DrivingForceEditor) -> String {
@@ -2018,12 +2803,20 @@ private struct DrivingForceTrendsView: View {
 
     private var latestMonthSnapshots: [PassionScoreSnapshot] {
         guard let latestMonthStart else { return [] }
-        return snapshots.filter { Calendar.current.isDate($0.monthStartDate, inSameDayAs: latestMonthStart) }
+        return latestSnapshotsByPassion(monthStart: latestMonthStart)
     }
 
     private var selectedMonthSnapshots: [PassionScoreSnapshot] {
         guard let selectedMonthStart else { return latestMonthSnapshots }
-        return snapshots.filter { Calendar.current.isDate($0.monthStartDate, inSameDayAs: selectedMonthStart) }
+        return latestSnapshotsByPassion(monthStart: selectedMonthStart)
+    }
+
+    private func latestSnapshotsByPassion(monthStart: Date) -> [PassionScoreSnapshot] {
+        let monthRows = snapshots.filter { Calendar.current.isDate($0.monthStartDate, inSameDayAs: monthStart) }
+        let latestByPassion = Dictionary(grouping: monthRows, by: \.passionTypeRaw).compactMapValues {
+            $0.max(by: { $0.updatedAt < $1.updatedAt })
+        }
+        return latestByPassion.values.sorted(by: passionSnapshotSort)
     }
 
     private var selectedSnapshot: PassionScoreSnapshot? {
@@ -2492,7 +3285,7 @@ private struct DrivingForceTrendsView: View {
     private func monthLabel(_ date: Date) -> String {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
-        f.setLocalizedDateFormatFromTemplate("M/yy")
+        f.setLocalizedDateFormatFromTemplate("MMM yy")
         return f.string(from: date)
     }
 

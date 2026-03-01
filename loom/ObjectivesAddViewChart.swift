@@ -4,6 +4,9 @@ import SwiftData
 #if canImport(HealthKit)
 import HealthKit
 #endif
+#if canImport(UIKit)
+import UIKit
+#endif
 
 private enum OutcomeMeasureEntrySourceStore {
     private static let defaultsKey = "outcome_measure_entry_sources_v1"
@@ -57,6 +60,7 @@ private enum OutcomeHealthIntegrationStore {
     struct Snapshot: Codable {
         var isEnabled: Bool
         var metricIdentifierRaw: String?
+        var lastSyncUnix: Double?
     }
 
     private static let defaultsKey = "outcome_health_integration_v1"
@@ -75,7 +79,7 @@ private enum OutcomeHealthIntegrationStore {
     }
 
     static func snapshot(for outcomeID: UUID) -> Snapshot {
-        loadMap()[outcomeID.uuidString] ?? Snapshot(isEnabled: false, metricIdentifierRaw: nil)
+        loadMap()[outcomeID.uuidString] ?? Snapshot(isEnabled: false, metricIdentifierRaw: nil, lastSyncUnix: nil)
     }
 
     static func setSnapshot(_ snapshot: Snapshot, for outcomeID: UUID) {
@@ -104,6 +108,7 @@ private enum OutcomeHealthKitBridge {
     private enum BridgeError: LocalizedError {
         case unavailable
         case invalidIdentifier
+        case authorizationDenied
 
         var errorDescription: String? {
             switch self {
@@ -111,6 +116,8 @@ private enum OutcomeHealthKitBridge {
                 return "Apple Health is not available on this device."
             case .invalidIdentifier:
                 return "Selected Apple Health metric is unavailable."
+            case .authorizationDenied:
+                return "Apple Health access was denied. Open Health app > Sharing > Apps > Loom and allow data access."
             }
         }
     }
@@ -172,6 +179,7 @@ private enum OutcomeHealthKitBridge {
     static func availableMetricOptions() -> [MetricOption] {
         let prioritizedIDs = [
             HKQuantityTypeIdentifier.stepCount.rawValue,
+            HKQuantityTypeIdentifier.bodyMass.rawValue,
             HKQuantityTypeIdentifier.vo2Max.rawValue
         ]
 
@@ -193,6 +201,9 @@ private enum OutcomeHealthKitBridge {
     }
 
     private static func displayName(for identifier: HKQuantityTypeIdentifier) -> String {
+        if identifier == .bodyMass {
+            return "Weight"
+        }
         var raw = identifier.rawValue
         let prefix = "HKQuantityTypeIdentifier"
         if raw.hasPrefix(prefix) {
@@ -237,9 +248,31 @@ private enum OutcomeHealthKitBridge {
             } else if success {
                 completion(.success(()))
             } else {
-                completion(.failure(BridgeError.unavailable))
+                completion(.failure(BridgeError.authorizationDenied))
             }
         }
+    }
+
+    static func isAuthorizationDenied(_ error: Error) -> Bool {
+        if let bridgeError = error as? BridgeError, case .authorizationDenied = bridgeError {
+            return true
+        }
+        if containsHealthKitAuthorizationDenied(error) {
+            return true
+        }
+        return false
+    }
+
+    private static func containsHealthKitAuthorizationDenied(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        if nsError.domain == HKErrorDomain,
+           nsError.code == HKError.Code.errorAuthorizationDenied.rawValue {
+            return true
+        }
+        if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? Error {
+            return containsHealthKitAuthorizationDenied(underlying)
+        }
+        return false
     }
 
     static func readLatestPerDay(
@@ -267,6 +300,7 @@ private enum OutcomeHealthKitBridge {
                 return
             }
             let unit = preferredUnits[type] ?? defaultUnit(for: identifierRaw)
+            let usesCumulativeSum = type.aggregationStyle == .cumulative
             var rows: [DailyValue] = []
             var day = startDay
             let group = DispatchGroup()
@@ -277,29 +311,50 @@ private enum OutcomeHealthKitBridge {
                 let currentDay = day
                 let nextDay = calendar.date(byAdding: .day, value: 1, to: currentDay) ?? currentDay.addingTimeInterval(86_400)
                 let predicate = HKQuery.predicateForSamples(withStart: currentDay, end: nextDay, options: .strictStartDate)
-                let sort = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
-
                 group.enter()
-                let query = HKSampleQuery(
-                    sampleType: type,
-                    predicate: predicate,
-                    limit: 1,
-                    sortDescriptors: [sort]
-                ) { _, samples, error in
-                    defer { group.leave() }
-                    if let error {
+                if usesCumulativeSum {
+                    let query = HKStatisticsQuery(
+                        quantityType: type,
+                        quantitySamplePredicate: predicate,
+                        options: .cumulativeSum
+                    ) { _, result, error in
+                        defer { group.leave() }
+                        if let error {
+                            lock.lock()
+                            capturedError = error
+                            lock.unlock()
+                            return
+                        }
+                        guard let quantity = result?.sumQuantity() else { return }
+                        let value = quantity.doubleValue(for: unit)
                         lock.lock()
-                        capturedError = error
+                        rows.append(DailyValue(day: currentDay, value: value))
                         lock.unlock()
-                        return
                     }
-                    guard let sample = (samples as? [HKQuantitySample])?.first else { return }
-                    let value = sample.quantity.doubleValue(for: unit)
-                    lock.lock()
-                    rows.append(DailyValue(day: currentDay, value: value))
-                    lock.unlock()
+                    store.execute(query)
+                } else {
+                    let sort = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
+                    let query = HKSampleQuery(
+                        sampleType: type,
+                        predicate: predicate,
+                        limit: 1,
+                        sortDescriptors: [sort]
+                    ) { _, samples, error in
+                        defer { group.leave() }
+                        if let error {
+                            lock.lock()
+                            capturedError = error
+                            lock.unlock()
+                            return
+                        }
+                        guard let sample = (samples as? [HKQuantitySample])?.first else { return }
+                        let value = sample.quantity.doubleValue(for: unit)
+                        lock.lock()
+                        rows.append(DailyValue(day: currentDay, value: value))
+                        lock.unlock()
+                    }
+                    store.execute(query)
                 }
-                store.execute(query)
                 day = nextDay
             }
 
@@ -387,6 +442,8 @@ private enum OutcomeHealthKitBridge {
     ) {
         completion(.failure(BridgeError.unavailable))
     }
+
+    static func isAuthorizationDenied(_ error: Error) -> Bool { false }
 }
 #endif
 
@@ -454,6 +511,7 @@ struct ObjectivesAddViewChart: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
     @Query private var entries: [OutcomesMeasureEntry]
     @Query private var legacyMeasures: [OutcomesMeasure]
     @Query private var outcomes: [Outcomes]
@@ -461,7 +519,9 @@ struct ObjectivesAddViewChart: View {
     @State private var selectedEntryID: UUID? = nil
     @State private var selectedDate: Date? = nil
     @State private var showSuccessPaths: Bool = false
+    @State private var isAutoSyncingHealthData = false
     private let allTimeRanges = ["All", "W", "M", "3M", "6M", "Y"]
+    private let healthAutoSyncTimer = Timer.publish(every: 900, on: .main, in: .common).autoconnect()
 
     private var availableTimeRanges: [String] {
         guard let outcome = outcomes.first else { return allTimeRanges }
@@ -778,6 +838,14 @@ struct ObjectivesAddViewChart: View {
             }
             .onAppear {
                 selectedEntryID = chartRows.last?.id
+                autoSyncFromOutcomeHealthIfNeeded()
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                guard newPhase == .active else { return }
+                autoSyncFromOutcomeHealthIfNeeded()
+            }
+            .onReceive(healthAutoSyncTimer) { _ in
+                autoSyncFromOutcomeHealthIfNeeded()
             }
             .frame(height: 260)
 
@@ -786,6 +854,156 @@ struct ObjectivesAddViewChart: View {
                 .tint(.blue)
                 .padding(.top, 2)
 
+        }
+    }
+
+    private func autoSyncFromOutcomeHealthIfNeeded() {
+        guard !isAutoSyncingHealthData else { return }
+        let integration = OutcomeHealthIntegrationStore.snapshot(for: outcome_id)
+        guard integration.isEnabled else { return }
+        guard let metricIdentifier = integration.metricIdentifierRaw, !metricIdentifier.isEmpty else { return }
+
+        let nowUnix = Date().timeIntervalSince1970
+        if let lastSync = integration.lastSyncUnix, (nowUnix - lastSync) < 900 {
+            return
+        }
+
+        guard let syncRange = outcomeDateRangeForHealthSync else { return }
+        isAutoSyncingHealthData = true
+
+        OutcomeHealthKitBridge.requestAuthorization(for: metricIdentifier) { authResult in
+            switch authResult {
+            case .failure:
+                DispatchQueue.main.async {
+                    isAutoSyncingHealthData = false
+                }
+            case .success:
+                OutcomeHealthKitBridge.readLatestPerDay(
+                    identifierRaw: metricIdentifier,
+                    start: syncRange.lowerBound,
+                    end: syncRange.upperBound
+                ) { result in
+                    DispatchQueue.main.async {
+                        defer { isAutoSyncingHealthData = false }
+                        guard case .success(let dailyValues) = result else { return }
+                        applyAutoSyncedHealthRows(dailyValues, within: syncRange)
+                        OutcomeHealthIntegrationStore.setSnapshot(
+                            .init(
+                                isEnabled: true,
+                                metricIdentifierRaw: metricIdentifier,
+                                lastSyncUnix: nowUnix
+                            ),
+                            for: outcome_id
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private var outcomeDateRangeForHealthSync: ClosedRange<Date>? {
+        guard let outcome = outcomes.first else { return nil }
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: outcome.start)
+        let end = min(calendar.startOfDay(for: outcome.end), calendar.startOfDay(for: .now))
+        guard start <= end else { return nil }
+        return start...end
+    }
+
+    private func applyAutoSyncedHealthRows(_ rows: [OutcomeHealthKitBridge.DailyValue], within range: ClosedRange<Date>) {
+        let calendar = Calendar.current
+        let goalValue = currentGoalValueForAutoSync()
+        let syncedDays = Set(rows.map { calendar.startOfDay(for: $0.day) })
+
+        let appleHealthRowsByDay = Dictionary(grouping: entries.filter {
+            guard let source = OutcomeMeasureEntrySourceStore.source(for: $0.id) else { return false }
+            let day = calendar.startOfDay(for: $0.measuredAt)
+            return source == "apple_health" && range.contains(day)
+        }) { calendar.startOfDay(for: $0.measuredAt) }
+
+        for row in rows {
+            let day = calendar.startOfDay(for: row.day)
+            let existingRows = (appleHealthRowsByDay[day] ?? []).sorted { $0.createdAt > $1.createdAt }
+            if let keep = existingRows.first {
+                keep.measure = row.value
+                keep.measure_amt = goalValue
+                keep.measuredAt = day
+                keep.createdAt = .now
+                keep.format = formatRaw
+                keep.unit = unitRaw
+                keep.decimalPlaces = decimalPlaces
+                for extra in existingRows.dropFirst() {
+                    OutcomeMeasureEntrySourceStore.removeSource(for: extra.id)
+                    RecentlyDeletedStore.trash(extra, in: modelContext)
+                }
+            } else {
+                let inserted = OutcomesMeasureEntry(
+                    outcome_id: outcome_id,
+                    measure: row.value,
+                    measure_amt: goalValue,
+                    measuredAt: day,
+                    createdAt: .now,
+                    format: formatRaw,
+                    unit: unitRaw,
+                    decimalPlaces: decimalPlaces
+                )
+                modelContext.insert(inserted)
+                OutcomeMeasureEntrySourceStore.setSource("apple_health", for: inserted.id)
+            }
+        }
+
+        for (day, staleRows) in appleHealthRowsByDay where !syncedDays.contains(day) {
+            for stale in staleRows {
+                OutcomeMeasureEntrySourceStore.removeSource(for: stale.id)
+                RecentlyDeletedStore.trash(stale, in: modelContext)
+            }
+        }
+
+        syncLatestSnapshotForAutoSync()
+        try? modelContext.save()
+    }
+
+    private func currentGoalValueForAutoSync() -> Double {
+        if let snapshot = legacyMeasures.first, snapshot.measure_amt != 0 {
+            return snapshot.measure_amt
+        }
+        if let latestEntry = entries.max(by: { $0.measuredAt < $1.measuredAt }) {
+            return latestEntry.measure_amt
+        }
+        return 0
+    }
+
+    private func syncLatestSnapshotForAutoSync() {
+        let descriptor = FetchDescriptor<OutcomesMeasureEntry>(
+            predicate: #Predicate<OutcomesMeasureEntry> { $0.outcome_id == outcome_id },
+            sortBy: [SortDescriptor(\OutcomesMeasureEntry.measuredAt, order: .reverse)]
+        )
+        let latestEntry = (try? modelContext.fetch(descriptor))?.first
+        guard let latestEntry else { return }
+
+        if let snapshot = legacyMeasures.first {
+            snapshot.measure = latestEntry.measure
+            snapshot.measure_amt = latestEntry.measure_amt
+            snapshot.measuredAt = latestEntry.measuredAt
+            snapshot.measure_updated = .now
+            snapshot.direction = nil
+            snapshot.format = latestEntry.format ?? formatRaw
+            snapshot.unit = latestEntry.unit ?? unitRaw
+            snapshot.decimalPlaces = latestEntry.decimalPlaces ?? decimalPlaces
+        } else {
+            modelContext.insert(
+                OutcomesMeasure(
+                    outcome_id: outcome_id,
+                    measure: latestEntry.measure,
+                    measuredAt: latestEntry.measuredAt,
+                    measure_amt: latestEntry.measure_amt,
+                    measure_updated: .now,
+                    direction: nil,
+                    format: latestEntry.format ?? formatRaw,
+                    unit: latestEntry.unit ?? unitRaw,
+                    decimalPlaces: latestEntry.decimalPlaces ?? decimalPlaces
+                )
+            )
         }
     }
 
@@ -1737,6 +1955,7 @@ private struct RecordedDataDetailsView: View {
 }
 
 struct DataSourcesPlaceholderView: View {
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
 
     let outcomeID: UUID
@@ -1754,6 +1973,12 @@ struct DataSourcesPlaceholderView: View {
     @State private var isSyncing = false
     @State private var syncMessage: String?
     @State private var didHydrate = false
+    @State private var isHydratingStoredConfiguration = false
+    @State private var showAppleHealthAccessAlert = false
+    @State private var appleHealthAccessAlertBody = ""
+    @State private var showReturnWithoutAccessOption = false
+    @State private var isCheckingAuthorizationBeforeExit = false
+    @State private var lastSyncUnix: Double = 0
 
     init(outcomeID: UUID, formatRaw: String, unitRaw: String, decimalPlaces: Int) {
         self.outcomeID = outcomeID
@@ -1795,11 +2020,23 @@ struct DataSourcesPlaceholderView: View {
                     }
                     .pickerStyle(.navigationLink)
 
-                    Button(isSyncing ? "Syncing..." : "Sync Now") {
-                        syncFromAppleHealth()
+                    HStack(spacing: 10) {
+                        Button(isSyncing ? "Syncing..." : "Sync Now") {
+                            syncFromAppleHealth()
+                        }
+                        .disabled(isSyncing || selectedMetricIdentifierRaw.isEmpty)
+                        .foregroundStyle(.blue)
+
+                        Spacer(minLength: 8)
+
+                        if let lastSyncText {
+                            Text(lastSyncText)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                        }
                     }
-                    .disabled(isSyncing || selectedMetricIdentifierRaw.isEmpty)
-                    .foregroundStyle(.blue)
                 }
             }
 
@@ -1812,19 +2049,52 @@ struct DataSourcesPlaceholderView: View {
             }
         }
         .listStyle(.insetGrouped)
-        .navigationTitle("Data Sources & Access")
+        .navigationTitle("Connect Apple Health")
         .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    attemptDismissDataSourcesView()
+                } label: {
+                    Label("Back", systemImage: "chevron.left")
+                }
+                .disabled(isCheckingAuthorizationBeforeExit)
+            }
+        }
         .toolbarBackground(.visible, for: .navigationBar)
+        .alert("Apple Health Access Needed", isPresented: $showAppleHealthAccessAlert) {
+            Button("Open Settings") { openAppSettings() }
+            if showReturnWithoutAccessOption {
+                Button("Return Without Access", role: .destructive) {
+                    showReturnWithoutAccessOption = false
+                    dismiss()
+                }
+                Button("Stay", role: .cancel) {
+                    showReturnWithoutAccessOption = false
+                }
+            } else {
+                Button("Cancel", role: .cancel) { }
+            }
+        } message: {
+            Text(appleHealthAccessAlertBody)
+        }
         .onAppear {
             guard !didHydrate else { return }
             didHydrate = true
             metricOptions = OutcomeHealthKitBridge.availableMetricOptions()
             hydrateStoredConfiguration()
         }
-        .onChange(of: isAppleHealthEnabled) { _, _ in
-            persistConfiguration()
+        .onChange(of: isAppleHealthEnabled) { _, newValue in
+            guard !isHydratingStoredConfiguration else { return }
+            if newValue {
+                requestAuthorizationForToggle()
+            } else {
+                persistConfiguration()
+            }
         }
         .onChange(of: selectedMetricIdentifierRaw) { _, _ in
+            guard !isHydratingStoredConfiguration else { return }
             persistConfiguration()
         }
         .onDisappear {
@@ -1836,8 +2106,11 @@ struct DataSourcesPlaceholderView: View {
     }
 
     private func hydrateStoredConfiguration() {
+        isHydratingStoredConfiguration = true
+        defer { isHydratingStoredConfiguration = false }
         let snapshot = OutcomeHealthIntegrationStore.snapshot(for: outcomeID)
         isAppleHealthEnabled = snapshot.isEnabled
+        lastSyncUnix = snapshot.lastSyncUnix ?? 0
         let stored = snapshot.metricIdentifierRaw ?? ""
         if metricOptions.contains(where: { $0.identifierRaw == stored }) {
             selectedMetricIdentifierRaw = stored
@@ -1846,14 +2119,72 @@ struct DataSourcesPlaceholderView: View {
         }
     }
 
-    private func persistConfiguration() {
+    private func persistConfiguration(lastSyncUnixOverride: Double? = nil) {
         OutcomeHealthIntegrationStore.setSnapshot(
             .init(
                 isEnabled: isAppleHealthEnabled,
-                metricIdentifierRaw: selectedMetricIdentifierRaw.isEmpty ? nil : selectedMetricIdentifierRaw
+                metricIdentifierRaw: selectedMetricIdentifierRaw.isEmpty ? nil : selectedMetricIdentifierRaw,
+                lastSyncUnix: lastSyncUnixOverride ?? (lastSyncUnix > 0 ? lastSyncUnix : nil)
             ),
             for: outcomeID
         )
+    }
+
+    private var lastSyncText: String? {
+        guard lastSyncUnix > 0 else { return nil }
+        return "Last sync: \(formatSyncTimestamp(Date(timeIntervalSince1970: lastSyncUnix)))"
+    }
+
+    private func formatSyncTimestamp(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+
+    private var authorizationProbeMetricIdentifier: String? {
+        if !selectedMetricIdentifierRaw.isEmpty {
+            return selectedMetricIdentifierRaw
+        }
+        return metricOptions.first?.identifierRaw
+    }
+
+    private func requestAuthorizationForToggle() {
+        guard let identifier = authorizationProbeMetricIdentifier else {
+            syncMessage = "No Apple Health metrics are available."
+            isAppleHealthEnabled = false
+            persistConfiguration()
+            return
+        }
+        OutcomeHealthKitBridge.requestAuthorization(for: identifier) { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success:
+                    syncMessage = nil
+                    persistConfiguration()
+                case .failure(let error):
+                    isAppleHealthEnabled = false
+                    syncMessage = error.localizedDescription
+                    persistConfiguration()
+                    if OutcomeHealthKitBridge.isAuthorizationDenied(error) {
+                        presentAppleHealthAccessAlert(message: error.localizedDescription)
+                    }
+                }
+            }
+        }
+    }
+
+    private func presentAppleHealthAccessAlert(message: String, allowReturnWithoutAccess: Bool = false) {
+        appleHealthAccessAlertBody = message
+        showReturnWithoutAccessOption = allowReturnWithoutAccess
+        showAppleHealthAccessAlert = true
+    }
+
+    private func openAppSettings() {
+        #if canImport(UIKit)
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
+        #endif
     }
 
     private func syncFromAppleHealth() {
@@ -1869,34 +2200,101 @@ struct DataSourcesPlaceholderView: View {
 
         isSyncing = true
         syncMessage = nil
+        let syncRange = normalizedToDayRange(range)
         OutcomeHealthKitBridge.requestAuthorization(for: selectedMetricIdentifierRaw) { authResult in
             switch authResult {
             case .failure(let error):
                 DispatchQueue.main.async {
                     isSyncing = false
                     syncMessage = error.localizedDescription
+                    if OutcomeHealthKitBridge.isAuthorizationDenied(error) {
+                        presentAppleHealthAccessAlert(message: error.localizedDescription)
+                    }
                 }
             case .success:
                 OutcomeHealthKitBridge.readLatestPerDay(
                     identifierRaw: selectedMetricIdentifierRaw,
-                    start: range.lowerBound,
-                    end: range.upperBound
+                    start: syncRange.lowerBound,
+                    end: syncRange.upperBound
                 ) { result in
                     DispatchQueue.main.async {
                         isSyncing = false
                         switch result {
                         case .failure(let error):
                             syncMessage = error.localizedDescription
+                            if OutcomeHealthKitBridge.isAuthorizationDenied(error) {
+                                presentAppleHealthAccessAlert(message: error.localizedDescription)
+                            }
                         case .success(let dailyValues):
-                            applySyncedRows(dailyValues, within: range)
+                            applySyncedRows(dailyValues, within: syncRange)
+                            let syncedAtUnix = Date().timeIntervalSince1970
+                            lastSyncUnix = syncedAtUnix
+                            persistConfiguration(lastSyncUnixOverride: syncedAtUnix)
+                            let timestamp = formatSyncTimestamp(Date(timeIntervalSince1970: syncedAtUnix))
                             syncMessage = dailyValues.isEmpty
-                                ? "No Apple Health data found in the active outcome window."
-                                : "Synced \(dailyValues.count) day\(dailyValues.count == 1 ? "" : "s") from Apple Health."
+                                ? "No Apple Health data found in the active outcome window. Last sync: \(timestamp)."
+                                : "Synced \(dailyValues.count) day\(dailyValues.count == 1 ? "" : "s") from Apple Health. Last sync: \(timestamp)."
                         }
                     }
                 }
             }
         }
+    }
+
+    private var needsAuthorizationValidationOnExit: Bool {
+        isAppleHealthEnabled && !selectedMetricIdentifierRaw.isEmpty
+    }
+
+    private func attemptDismissDataSourcesView() {
+        guard needsAuthorizationValidationOnExit else {
+            dismiss()
+            return
+        }
+        guard !isCheckingAuthorizationBeforeExit else { return }
+        isCheckingAuthorizationBeforeExit = true
+        OutcomeHealthKitBridge.requestAuthorization(for: selectedMetricIdentifierRaw) { result in
+            switch result {
+            case .failure(let error):
+                DispatchQueue.main.async {
+                    isCheckingAuthorizationBeforeExit = false
+                    let message = error.localizedDescription
+                    syncMessage = message
+                    presentAppleHealthAccessAlert(
+                        message: message,
+                        allowReturnWithoutAccess: true
+                    )
+                }
+            case .success:
+                let today = Calendar.current.startOfDay(for: .now)
+                OutcomeHealthKitBridge.readLatestPerDay(
+                    identifierRaw: selectedMetricIdentifierRaw,
+                    start: today,
+                    end: today
+                ) { readResult in
+                    DispatchQueue.main.async {
+                        isCheckingAuthorizationBeforeExit = false
+                        switch readResult {
+                        case .success:
+                            dismiss()
+                        case .failure(let error):
+                            let message = error.localizedDescription
+                            syncMessage = message
+                            presentAppleHealthAccessAlert(
+                                message: message,
+                                allowReturnWithoutAccess: true
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func normalizedToDayRange(_ range: ClosedRange<Date>) -> ClosedRange<Date> {
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: range.lowerBound)
+        let end = calendar.startOfDay(for: range.upperBound)
+        return start...max(start, end)
     }
 
     private var outcomeDateRange: ClosedRange<Date>? {

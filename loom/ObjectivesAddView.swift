@@ -918,7 +918,7 @@ struct ChartActionsSection: View {
                             decimalPlaces: measureDecimalPlaces
                         )
                     } label: {
-                        Text("Data Sources & Access")
+                        Text("Connect Apple Health")
                     }
                 }
             }

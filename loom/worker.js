@@ -79,9 +79,20 @@ export default {
     const isAutoWriteMissionMode = detectAutoWriteMissionMode(nonSystemMessages);
     const isAutoWriteIdentityMode = detectAutoWriteIdentityMode(nonSystemMessages);
     const isAutoWriteLittleWinMode = detectAutoWriteLittleWinMode(nonSystemMessages);
+    const isAutoWritePlanResultMode = detectAutoWritePlanResultMode(nonSystemMessages);
     const isReflectReadableInsightsMode = detectReflectReadableInsightsMode(nonSystemMessages);
     const isFulfillmentReadableInsightMode = detectFulfillmentReadableInsightMode(nonSystemMessages);
     const isPurposeReadableInsightMode = detectPurposeReadableInsightMode(nonSystemMessages);
+    const latestUserMessage = [...nonSystemMessages].reverse().find((m) => m?.role === "user");
+    const latestUserContent = String(latestUserMessage?.content || "");
+    const isAutoWriteVisionRewordMode =
+      isAutoWriteVisionMode && /Vision mode:\s*Reword Vision/i.test(latestUserContent);
+    const fulfillmentInsightPayload = isFulfillmentReadableInsightMode
+      ? extractReadableInsightPayload(nonSystemMessages, "fulfillment")
+      : null;
+    const purposeInsightPayload = isPurposeReadableInsightMode
+      ? extractReadableInsightPayload(nonSystemMessages, "purpose")
+      : null;
 
     if (nonSystemMessages.length === 0) {
       return json(
@@ -105,7 +116,7 @@ export default {
     const workerPromptVersion = isAutoGroupMode
       ? "autogroup-v1"
       : (isAutoWriteVisionMode
-        ? "autowrite-vision-v1"
+        ? (isAutoWriteVisionRewordMode ? "autowrite-vision-v2-reword" : "autowrite-vision-v2")
       : (isAutoWritePassionsMode
         ? "autowrite-passions-v1"
       : (isAutoWriteLittleWinMode
@@ -114,13 +125,15 @@ export default {
         ? "autowrite-identity-v1"
       : (isAutoWriteMissionMode
         ? "autowrite-mission-v1"
+      : (isAutoWritePlanResultMode
+        ? "autowrite-plan-result-v1"
         : (isFollowUpPromptMode
         ? "followup-prompts-v1"
         : (isReflectReadableInsightsMode
           ? "reflect-readable-insights-v1"
           : (isFulfillmentReadableInsightMode
             ? "fulfillment-readable-insights-v1"
-            : (isPurposeReadableInsightMode ? "purpose-readable-insights-v1" : "grounding-cta-v3")))))))));
+            : (isPurposeReadableInsightMode ? "purpose-readable-insights-v1" : "grounding-cta-v3"))))))))));
 
     const coreInstructions = isAutoGroupMode ? [
       "You generate AutoGroup plans for Loom Plan Step 3 (Group).",
@@ -146,6 +159,10 @@ export default {
     ].join("\n") : isAutoWriteVisionMode ? [
       "You generate AutoWrite vision suggestions for Loom Purpose Vision.",
       "Use APP_CONTEXT_JSON and the provided current vision.",
+      "Respect the requested vision mode from the user message.",
+      'If it says "Vision mode: Reword Vision", improve/reword the current vision while preserving its intent and direction.',
+      'If it says "Vision mode: New Vision", generate fresh options from context.',
+      "If Reword Vision is requested but current vision is empty, fall back to New Vision behavior.",
       "Vision guidance to follow:",
       "- If there were no limits, what life would you create?",
       "- This is not a goal; it's long-term direction.",
@@ -237,6 +254,20 @@ export default {
       "- No numbering, no bullets, no markdown.",
       "- Suggestions must be relevant to the provided Fulfillment Area.",
       "- Do not output anything outside the JSON object."
+    ].join("\n") : isAutoWritePlanResultMode ? [
+      "You generate AutoWrite Result suggestions for Loom Plan Result page.",
+      "Use APP_CONTEXT_JSON and the provided fulfillment-area action context.",
+      "Each suggestion should represent the shared outcome that all listed actions in that area are moving toward.",
+      "Return JSON ONLY in this exact shape:",
+      '{"suggestions":[{"fulfillmentArea":"string","result":"string"}],"confidence":"high|medium|low"}',
+      "Rules:",
+      "- Return one suggestion per requested fulfillment area.",
+      "- Use only fulfillmentArea names provided in the prompt.",
+      "- Each result must be <=8 words (fewer is preferred).",
+      "- Keep wording concise, practical, and outcome-focused.",
+      "- Do not repeat existing results or prior suggestions when provided.",
+      "- No numbering, no bullets, no markdown.",
+      "- Do not output anything outside the JSON object."
     ].join("\n") : isFollowUpPromptMode ? [
       "You generate follow-up prompt chips for the Loom iOS app.",
       "Use APP_CONTEXT_JSON and the recent chat transcript to decide whether showing follow-up prompts is high-value.",
@@ -284,6 +315,7 @@ export default {
       "Use practical action verbs in line 2 (prefer: Complete, Revise, Connect, Clarify, Add, Replace, Shorten, Split).",
       "If both Little Wins and Action Blocks are weak, line 2 should address both together (for example: 'Complete more Little Wins and Action Blocks.').",
       "If carryover is high, line 2 should give practical load-management advice (for example: 'Balance only adding essential actions and completing more actions.').",
+      "If recentCategoryScores has only one value, treat it as baseline-only data: line 1 must explain trends/movers are not established yet and line 2 must give a starter action to build score foundations.",
       "Avoid filler phrases like 'During this week' or 'a total of'.",
       "Use plain language and be specific.",
       "If referencing an insight metric, use the exact label and include the displayed value in parentheses.",
@@ -314,6 +346,7 @@ export default {
       "Use practical action verbs in line 2 (prefer: Complete, Revise, Connect, Clarify, Add, Replace, Shorten, Split).",
       "If both Little Wins and Action Blocks are weak, line 2 should address both together (for example: 'Complete more Little Wins and Action Blocks.').",
       "If carryover is high, line 2 should give practical load-management advice (for example: 'Balance only adding essential actions and completing more actions.').",
+      "If recentScores has only one value, treat it as baseline-only data: line 1 must explain trends/movers are not established yet and line 2 must give a starter action to build score foundations.",
       "Avoid filler phrases like 'During this month' or 'a total of'.",
       "Use plain language and be specific.",
       "Do not mention the passion name directly (the UI already shows it).",
@@ -444,6 +477,18 @@ export default {
 
     const model = env.OPENAI_MODEL || "gpt-4o-mini";
     const temperature = 0.2;
+    const maxTokens = isAutoGroupMode ? 700
+      : isAutoWriteVisionMode ? 220
+      : isAutoWritePassionsMode ? 260
+      : isAutoWriteLittleWinMode ? 260
+      : isAutoWriteIdentityMode ? 260
+      : isAutoWriteMissionMode ? 220
+      : isAutoWritePlanResultMode ? 260
+      : isFollowUpPromptMode ? 350
+      : isReflectReadableInsightsMode ? 650
+      : isFulfillmentReadableInsightMode ? 450
+      : isPurposeReadableInsightMode ? 450
+      : 900;
 
     let upstreamText = "";
     let upstreamContentType = null;
@@ -460,7 +505,7 @@ export default {
           model,
           messages: groundedMessages,
           temperature,
-          max_tokens: isAutoGroupMode ? 700 : (isAutoWriteVisionMode ? 220 : (isAutoWritePassionsMode ? 260 : (isAutoWriteLittleWinMode ? 260 : (isAutoWriteIdentityMode ? 260 : (isAutoWriteMissionMode ? 220 : (isFollowUpPromptMode ? 350 : (isReflectReadableInsightsMode ? 650 : (isFulfillmentReadableInsightMode ? 450 : (isPurposeReadableInsightMode ? 450 : 900))))))))),
+          max_tokens: maxTokens,
           response_format: { type: "json_object" },
         }),
       });
@@ -709,6 +754,34 @@ export default {
       return json(out, 200, corsHeaders(request));
     }
 
+    if (isAutoWritePlanResultMode) {
+      const autoWrite = normalizeAutoWritePlanResultPayload(parsedModelJSON, upstreamText);
+      const out = {
+        message: JSON.stringify(autoWrite),
+        actions: [],
+        debug: {
+          ...buildWorkerDebug({
+            model,
+            contextBytes,
+            contextHash,
+            contextKeys,
+            contextInfo,
+            workerPromptVersion,
+            messages,
+            nonSystemMessages,
+            upstreamStatus,
+            upstreamContentType,
+            parseMode,
+          }),
+          usedContext: contextBytes > 0,
+          claimedUsedContext: null,
+          evidence: [],
+          confidence: autoWrite.confidence || null,
+        },
+      };
+      return json(out, 200, corsHeaders(request));
+    }
+
     if (isFollowUpPromptMode) {
       const followUp = normalizeFollowUpPromptPayload(parsedModelJSON, upstreamText);
       const out = {
@@ -794,7 +867,10 @@ export default {
           : contextBytes > 0 && modelEvidence.length > 0;
 
       const out = {
-        message: normalizeFulfillmentReadableInsightMessage(normalized.message),
+        message: normalizeReadableInsightMessage(normalized.message, {
+          mode: "fulfillment",
+          payload: fulfillmentInsightPayload
+        }),
         actions: [],
         debug: {
           ...buildWorkerDebug({
@@ -835,7 +911,10 @@ export default {
           : contextBytes > 0 && modelEvidence.length > 0;
 
       const out = {
-        message: normalizeFulfillmentReadableInsightMessage(normalized.message),
+        message: normalizeReadableInsightMessage(normalized.message, {
+          mode: "purpose",
+          payload: purposeInsightPayload
+        }),
         actions: [],
         debug: {
           ...buildWorkerDebug({
@@ -1021,6 +1100,12 @@ function detectAutoWriteLittleWinMode(nonSystemMessages) {
   const latestUser = [...(nonSystemMessages || [])].reverse().find((m) => m?.role === "user");
   const content = String(latestUser?.content || "");
   return content.includes("You are helping with Loom Fulfillment Little Wins (AutoWrite).");
+}
+
+function detectAutoWritePlanResultMode(nonSystemMessages) {
+  const latestUser = [...(nonSystemMessages || [])].reverse().find((m) => m?.role === "user");
+  const content = String(latestUser?.content || "");
+  return content.includes("You are helping with Loom Plan Result (AutoWrite).");
 }
 
 function detectReflectReadableInsightsMode(nonSystemMessages) {
@@ -1428,6 +1513,73 @@ function normalizeAutoWriteLittleWinPayload(parsed, fallbackText) {
   };
 }
 
+function normalizePlanResultArea(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function normalizePlanResultText(value) {
+  const cleaned = String(value || "").replace(/\s+/g, " ").trim();
+  if (!cleaned) return "";
+  const words = cleaned.split(" ").filter(Boolean).slice(0, 8).join(" ");
+  return truncateAtWordBoundary(words, 120);
+}
+
+function normalizeAutoWritePlanResultPayload(parsed, fallbackText) {
+  let raw = parsed && typeof parsed === "object" ? parsed : null;
+  if (!raw) {
+    try {
+      raw = JSON.parse(String(fallbackText || ""));
+    } catch {
+      raw = null;
+    }
+  }
+
+  const source = Array.isArray(raw?.suggestions)
+    ? raw.suggestions
+    : (Array.isArray(raw?.results) ? raw.results : []);
+
+  const suggestions = source
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const fulfillmentArea = normalizePlanResultArea(
+        item.fulfillmentArea || item.area || item.label || item.category || ""
+      );
+      const result = normalizePlanResultText(
+        item.result || item.suggestion || item.text || item.value || ""
+      );
+      if (!fulfillmentArea || !result) return null;
+      return { fulfillmentArea, result };
+    })
+    .filter(Boolean)
+    .slice(0, 8);
+
+  const deduped = [];
+  const seen = new Set();
+  for (const item of suggestions) {
+    const key = `${String(item.fulfillmentArea).toLowerCase()}|${String(item.result).toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(item);
+  }
+
+  const confidenceRaw = typeof raw?.confidence === "string" ? raw.confidence.toLowerCase().trim() : "";
+  const confidence = ["high", "medium", "low"].includes(confidenceRaw)
+    ? confidenceRaw
+    : (deduped.length > 0 ? "medium" : "low");
+
+  if (deduped.length === 0) {
+    return {
+      suggestions: [],
+      confidence: "low",
+    };
+  }
+
+  return {
+    suggestions: deduped,
+    confidence,
+  };
+}
+
 function normalizeReadableInsightsPayload(parsed, fallbackText) {
   let raw = parsed && typeof parsed === "object" ? parsed : null;
   if (!raw) {
@@ -1460,36 +1612,175 @@ function normalizeReadableInsightsPayload(parsed, fallbackText) {
   };
 }
 
-function normalizeFulfillmentReadableInsightMessage(message) {
-  let text = String(message || "").replace(/\s+/g, " ").trim();
-  if (!text) return "This Fulfillment Area shows a mixed pattern that needs closer review.";
+function extractReadableInsightPayload(nonSystemMessages, mode) {
+  const marker = mode === "purpose"
+    ? "Purpose passion insight payload JSON:"
+    : "Fulfillment insight payload JSON:";
+  const content = Array.isArray(nonSystemMessages)
+    ? nonSystemMessages.map((m) => String(m?.content || "")).join("\n\n")
+    : "";
+  const markerIndex = content.lastIndexOf(marker);
+  if (markerIndex < 0) return null;
+  const tail = content.slice(markerIndex + marker.length);
+  const objectText = extractFirstJSONObjectText(tail);
+  if (!objectText) return null;
+  try {
+    const parsed = JSON.parse(objectText);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
 
-  // Prefer a complete sentence within ~150 chars.
-  if (text.length > 150) {
-    let prefix = text.slice(0, 150).trim();
-    const sentenceIdx = Math.max(prefix.lastIndexOf("."), prefix.lastIndexOf("!"), prefix.lastIndexOf("?"));
-    if (sentenceIdx > 20) {
-      prefix = prefix.slice(0, sentenceIdx + 1).trim();
-    } else {
-      const punctIdx = Math.max(prefix.lastIndexOf(","), prefix.lastIndexOf(";"), prefix.lastIndexOf(":"));
-      if (punctIdx > 20) {
-        prefix = prefix.slice(0, punctIdx).trim() + ".";
-      } else {
-        const spaceIdx = prefix.lastIndexOf(" ");
-        prefix = (spaceIdx > 20 ? prefix.slice(0, spaceIdx) : prefix).trim() + ".";
+function extractFirstJSONObjectText(value) {
+  const s = String(value || "");
+  const start = s.indexOf("{");
+  if (start < 0) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < s.length; i += 1) {
+    const ch = s[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === "\\") {
+        escaped = true;
+      } else if (ch === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === "\"") {
+      inString = true;
+      continue;
+    }
+    if (ch === "{") {
+      depth += 1;
+      continue;
+    }
+    if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return s.slice(start, i + 1);
       }
     }
-    text = prefix;
+  }
+  return null;
+}
+
+function isSingleRecordReadableInsightPayload(payload, mode) {
+  if (!payload || typeof payload !== "object") return false;
+  const series = mode === "purpose" ? payload?.recentScores : payload?.recentCategoryScores;
+  return Array.isArray(series) && series.length <= 1;
+}
+
+function clamp01(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(1, n));
+}
+
+function baselineReadableInsightLines(mode, payload) {
+  if (mode === "purpose") {
+    const scored = [
+      ["Action Blocks", clamp01(payload?.actionBlocks)],
+      ["Little Wins", clamp01(payload?.littleWins)],
+      ["Evidence", clamp01(payload?.evidence)],
+      ["Structure", clamp01(payload?.structure)],
+      ["Outcomes", clamp01(payload?.outcomes)]
+    ].sort((a, b) => a[1] - b[1]);
+    const weakest = scored[0]?.[0] || "Action Blocks";
+    const line1 = `Baseline month only: trend and mover signals are not established yet; score gains depend on strengthening ${weakest}.`;
+    let line2 = "Add one Action Block and one Little Win tied to this passion.";
+    if (weakest === "Action Blocks") line2 = "Add one small Action Block tied to this passion this week.";
+    if (weakest === "Little Wins") line2 = "Add one repeatable Little Win tied to this passion and complete it daily.";
+    if (weakest === "Evidence") line2 = "Tag one completed action to this passion to build evidence.";
+    if (weakest === "Structure") line2 = "Refine this passion wording to make it clearer and more specific.";
+    if (weakest === "Outcomes") line2 = "Connect one Outcome that directly supports this passion.";
+    return { line1, line2 };
   }
 
-  // Reduce obvious recap/filler if model slips.
-  text = text
-    .replace(/^during (this|the) (loom )?fulfillment (area )?(week|insights?)[:,]?\s*/i, "")
-    .replace(/^during this week[:,]?\s*/i, "")
-    .replace(/^a total of\s+/i, "");
+  const scored = [
+    ["Action Blocks", clamp01(payload?.actionBlocks)],
+    ["Little Wins", clamp01(payload?.littleWins)],
+    ["Engagement", clamp01(payload?.engagement)],
+    ["Strategic Behavior", clamp01(payload?.strategicBehavior)],
+    ["Structure", clamp01(payload?.structure)],
+    ["Outcomes", clamp01(payload?.outcomes)]
+  ].sort((a, b) => a[1] - b[1]);
+  const weakest = scored[0]?.[0] || "Action Blocks";
+  const line1 = `Baseline week only: trend and mover signals are not established yet; score gains depend on improving ${weakest} consistency.`;
+  let line2 = "Complete one Action Block and one Little Win in this area this week.";
+  if (weakest === "Action Blocks") line2 = "Complete one realistic Action Block in this area today.";
+  if (weakest === "Little Wins") line2 = "Complete one Little Win in this area each day this week.";
+  if (weakest === "Engagement") line2 = "Do one small task in this area every day this week.";
+  if (weakest === "Strategic Behavior") line2 = "Revise Mission or Identity so this area guides daily choices.";
+  if (weakest === "Structure") line2 = "Clarify Mission and Identity for this area before adding more tasks.";
+  if (weakest === "Outcomes") line2 = "Connect one Outcome for this area and review it this week.";
+  return { line1, line2 };
+}
 
-  if (!/[.!?]$/.test(text)) text += ".";
-  return text.trim();
+function ensureTerminalSentence(value) {
+  const s = String(value || "").trim();
+  if (!s) return "";
+  return /[.!?]$/.test(s) ? s : `${s}.`;
+}
+
+function normalizeReadableInsightMessage(message, options = {}) {
+  const mode = options?.mode === "purpose" ? "purpose" : "fulfillment";
+  const payload = options?.payload && typeof options.payload === "object" ? options.payload : null;
+  const baseline = baselineReadableInsightLines(mode, payload);
+  const isSingleRecord = isSingleRecordReadableInsightPayload(payload, mode);
+
+  const text = String(message || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  const lines = text
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  let line1 = lines[0] || baseline.line1;
+  let line2 = lines[1] || baseline.line2;
+
+  if (isSingleRecord) {
+    line1 = baseline.line1;
+    line2 = baseline.line2;
+  }
+
+  line1 = line1
+    .replace(/^during (this|the) (loom )?(fulfillment area|purpose passion) (week|month|insights?)[:,]?\s*/i, "")
+    .replace(/^during this (week|month)[:,]?\s*/i, "")
+    .replace(/^a total of\s+/i, "")
+    .trim();
+  line1 = ensureTerminalSentence(truncateAtWordBoundary(line1 || baseline.line1, 170));
+
+  line2 = line2
+    .replace(/^in loom,\s*/i, "")
+    .replace(/^in loom\s*/i, "")
+    .replace(/^action block\b/i, "Action Blocks")
+    .trim();
+  line2 = ensureTerminalSentence(truncateAtWordBoundary(line2 || baseline.line2, 120));
+
+  let combined = `${line1}\n\n${line2}`;
+  if (combined.length <= 220) return combined;
+
+  line1 = ensureTerminalSentence(truncateAtWordBoundary(line1, 130));
+  line2 = ensureTerminalSentence(truncateAtWordBoundary(line2, 80));
+  combined = `${line1}\n\n${line2}`;
+  if (combined.length <= 220) return combined;
+
+  const maxLine2 = Math.max(30, 220 - (line1.length + 2));
+  line2 = ensureTerminalSentence(truncateAtWordBoundary(line2, maxLine2));
+  combined = `${line1}\n\n${line2}`;
+  if (combined.length <= 220) return combined;
+
+  const maxLine1 = Math.max(60, 220 - (line2.length + 2));
+  line1 = ensureTerminalSentence(truncateAtWordBoundary(line1, maxLine1));
+  return `${line1}\n\n${line2}`;
 }
 
 function isSupportedFollowUpPrompt(prompt) {

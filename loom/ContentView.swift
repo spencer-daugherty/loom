@@ -1991,7 +1991,7 @@ struct ContentView: View {
 
     private func usagePoints(for emotionLabel: String) -> Int {
         let key = emotionKey(for: emotionLabel)
-        if let score = latestMonthlyPassionScore(forEmotionKey: key) {
+        if let score = latestMonthlyPassionScore(forEmotionKey: key) ?? latestAvailablePassionScore(forEmotionKey: key) {
             return Int(PassionScoringMath.clamp(score.rounded(), min: 0, max: 4))
         }
         let ids = Set(passions.filter { $0.emotion == key }.map { $0.passion_id })
@@ -2002,10 +2002,34 @@ struct ContentView: View {
     private func latestMonthlyPassionScore(forEmotionKey emotionKey: String) -> Double? {
         guard let type = passionType(forEmotionKey: emotionKey) else { return nil }
         let monthStart = PassionScoringMath.monthWindow(for: .now).monthStart
-        return passionScoreSnapshots.first(where: {
-            $0.passionTypeRaw == type.rawValue &&
-            Calendar.current.isDate($0.monthStartDate, inSameDayAs: monthStart)
-        })?.score
+        return latestPassionSnapshot(for: type, monthStart: monthStart)?.score
+    }
+
+    private func latestAvailablePassionScore(forEmotionKey emotionKey: String) -> Double? {
+        guard let type = passionType(forEmotionKey: emotionKey) else { return nil }
+        return latestAvailablePassionSnapshot(for: type)?.score
+    }
+
+    private func latestPassionSnapshot(for type: PassionType, monthStart: Date) -> PassionScoreSnapshot? {
+        passionScoreSnapshots
+            .filter {
+                $0.passionTypeRaw == type.rawValue &&
+                Calendar.current.isDate($0.monthStartDate, inSameDayAs: monthStart)
+            }
+            .max(by: { $0.updatedAt < $1.updatedAt })
+    }
+
+    private func latestAvailablePassionSnapshot(for type: PassionType) -> PassionScoreSnapshot? {
+        passionScoreSnapshots
+            .filter { $0.passionTypeRaw == type.rawValue }
+            .max { lhs, rhs in
+                let lhsMonth = Calendar.current.startOfDay(for: lhs.monthStartDate)
+                let rhsMonth = Calendar.current.startOfDay(for: rhs.monthStartDate)
+                if lhsMonth == rhsMonth {
+                    return lhs.updatedAt < rhs.updatedAt
+                }
+                return lhsMonth < rhsMonth
+            }
     }
 
     private func passionType(forEmotionKey emotionKey: String) -> PassionType? {
@@ -2234,7 +2258,10 @@ struct ContentView: View {
                                     .font(.system(size: 28))
                             }
                             .buttonStyle(.plain)
-                            .allowsHitTesting(!shouldLockToFocusedHomeTarget)
+                            .opacity(homePageIndex == HomeSwipePage.littleWins.rawValue ? 0 : 1)
+                            .offset(x: homePageIndex == HomeSwipePage.littleWins.rawValue ? 8 : 0)
+                            .animation(.easeOut(duration: 0.10), value: homePageIndex)
+                            .allowsHitTesting(!shouldLockToFocusedHomeTarget && homePageIndex != HomeSwipePage.littleWins.rawValue)
                         }
                     }
                 }
@@ -2651,24 +2678,22 @@ struct ContentView: View {
 
             GeometryReader { middleProxy in
                 let contentHeight = max(0, middleProxy.size.height - (outerVerticalPadding * 2))
-                let targetCardHeight = min(262, max(176, (contentHeight - (cardSpacing * 2)) / 3))
+                let targetCardHeight = max(0, (contentHeight - (cardSpacing * 2)) / 3)
 
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: cardSpacing) {
-                        drivingForceSection
-                            .frame(minHeight: targetCardHeight, alignment: .top)
-                            .allowsHitTesting(allowsPurpose)
-                        fulfillmentSection
-                            .frame(minHeight: targetCardHeight, alignment: .top)
-                            .allowsHitTesting(allowsFulfillment)
-                        objectivesSection
-                            .frame(minHeight: targetCardHeight, alignment: .top)
-                            .allowsHitTesting(allowsObjectives)
-                    }
-                    .padding(.horizontal)
-                    .padding(.vertical, outerVerticalPadding)
+                VStack(spacing: cardSpacing) {
+                    drivingForceSection
+                        .frame(height: targetCardHeight, alignment: .top)
+                        .allowsHitTesting(allowsPurpose)
+                    fulfillmentSection
+                        .frame(height: targetCardHeight, alignment: .top)
+                        .allowsHitTesting(allowsFulfillment)
+                    objectivesSection
+                        .frame(height: targetCardHeight, alignment: .top)
+                        .allowsHitTesting(allowsObjectives)
                 }
-                .scrollDisabled(isFocusedLock)
+                .padding(.horizontal)
+                .padding(.vertical, outerVerticalPadding)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
         }
         .environment(\.contentCardDensity, cardDensity)
@@ -2872,7 +2897,7 @@ struct ContentView: View {
                 .background(Color(.systemGroupedBackground))
             }
         }
-        .overlay {
+        .overlay(alignment: .top) {
             if let previewDate = littleWinsCalendarPreviewDate {
                 if !previewCategoriesForActiveDate.isEmpty {
                     littleWinsCalendarFullScreenPreview(
@@ -3231,20 +3256,15 @@ struct ContentView: View {
                 let miniStackTopOverflow = CGFloat(max(0, visibleStackCount - 1)) * miniStackLiftPerCard
                 VStack(spacing: 3) {
                     if isTodayPreviewOpen {
-                        Button {
-                            closeLittleWinsCalendarPreview(animated: true)
-                        } label: {
+                        ZStack {
+                            Circle()
+                                .fill(Color.blue)
                             Image(systemName: "xmark")
-                                .font(.system(size: 14, weight: .bold))
-                                .foregroundStyle(.primary.opacity(0.85))
-                                .frame(width: 28, height: 28)
-                                .background(.ultraThinMaterial, in: Circle())
-                                .overlay(
-                                    Circle()
-                                        .stroke(Color.white.opacity(0.28), lineWidth: 1)
-                                )
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundStyle(.white)
                         }
-                        .buttonStyle(.plain)
+                        .allowsHitTesting(false)
+                        .frame(width: 28, height: 28, alignment: .top)
                         .frame(width: miniCardWidth, height: miniCardHeight, alignment: .top)
                     } else if !completedCardsForDate.isEmpty {
                         littleWinsCompletedTodayMiniCardStack(
@@ -3262,8 +3282,8 @@ struct ContentView: View {
                             .fill(Color(.systemGray5))
                             .frame(width: miniCardWidth, height: miniCardHeight)
                             .overlay {
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 17.5, weight: .semibold))
+                                Text("-")
+                                    .font(.system(size: 19, weight: .semibold))
                                     .foregroundStyle(Color(.systemGray2))
                             }
                     }
@@ -3279,6 +3299,7 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.top, 6)
                 .padding(.bottom, 1)
+                .contentShape(Rectangle())
                 .background(
                     ZStack {
                         if isHeldPreviewDate {
@@ -3297,7 +3318,8 @@ struct ContentView: View {
                             .padding(.top, isToday ? -miniStackTopOverflow : 0)
                     }
                 )
-                .onTapGesture {
+                .highPriorityGesture(
+                    TapGesture().onEnded {
                     if isTodayPreviewOpen {
                         closeLittleWinsCalendarPreview(animated: true)
                         return
@@ -3314,7 +3336,8 @@ struct ContentView: View {
                             littleWinsCalendarPreviewExpandedCardDragX = 0
                         }
                     }
-                }
+                    }
+                )
             }
         }
         .padding(.top, 2)
@@ -3376,7 +3399,7 @@ struct ContentView: View {
         let calendar = Calendar.current
         let isTodayPreview = calendar.isDateInToday(date)
         let horizontalPadding: CGFloat = 14
-        let topPadding: CGFloat = 2
+        let topPadding: CGFloat = 0
         let bottomPadding: CGFloat = 6
         let gridSpacing: CGFloat = 12
         let availableWidth = max(0, containerSize.width - (horizontalPadding * 2))
@@ -3397,7 +3420,7 @@ struct ContentView: View {
             count: gridColumnsCount
         )
 
-        return ZStack {
+        return ZStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 2) {
@@ -3443,7 +3466,7 @@ struct ContentView: View {
                                     }
                                 }
                         )
-                        Text("Swipe right to return")
+                        Text("Swipe right to return | Tap text to uncomplete")
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(.secondary)
                     }
@@ -3477,6 +3500,7 @@ struct ContentView: View {
                     }
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .padding(.horizontal, horizontalPadding)
             .padding(.top, topPadding)
             .padding(.bottom, bottomPadding)
@@ -6338,20 +6362,21 @@ struct ContentLittleWinsManagerSheetView: View {
 
                 if selectedCategoryID != nil {
                     Section {
-                        Button {
-                            startCreatingNew()
-                        } label: {
-                            HStack {
-                                Text("Add Little Win")
-                                    .foregroundStyle(Color.accentColor)
-                                Spacer()
+                        if !isDeleteMode && littleWinsForSelection.count < 3 {
+                            Button {
+                                startCreatingNew()
+                            } label: {
+                                HStack {
+                                    Text("Add Little Win")
+                                        .foregroundStyle(Color.accentColor)
+                                    Spacer()
+                                }
+                                .frame(minHeight: 44, alignment: .center)
+                                .padding(.horizontal, 14)
                             }
-                            .frame(minHeight: 44, alignment: .center)
-                            .padding(.horizontal, 14)
+                            .buttonStyle(.plain)
+                            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                         }
-                        .buttonStyle(.plain)
-                        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
-                        .disabled(isDeleteMode || littleWinsForSelection.count >= 3)
 
                         ForEach(littleWinsForSelection, id: \.id) { focus in
                             Button {

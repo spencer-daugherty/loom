@@ -971,8 +971,8 @@ struct ActionView: View {
                     (
                         Text("Please mark all of your actions to ")
                         + Text(Image(systemName: "xmark")) + Text(" Done, ")
-                        + Text(Image(systemName: "arrow.right")) + Text(" Carried to new capture list, or ")
-                        + Text(Image(systemName: "square")) + Text(" Didn't need to be done to acheive outcome (Delete).")
+                        + Text(Image(systemName: "arrow.right")) + Text(" Recapture for later, or ")
+                        + Text(Image(systemName: "square")) + Text(" Wasn't needed to acheive result (Delete).")
                     )
                     .font(.footnote)
                 }
@@ -1320,10 +1320,11 @@ struct ActionView: View {
                 if shouldShowActionBlocksOldCautionCard && !dismissActionBlocksCautionCard {
                     cautionRow
                 }
-                if !areAllActionBlocksCollapsed {
+                if !areAllActionBlocksCollapsed && !filterContext.orderedVisibleFilterChips.isEmpty {
                     filterChipsRow(filterContext: filterContext)
                 }
                 if !areAllActionBlocksCollapsed,
+                   !filterContext.orderedVisibleFilterChips.isEmpty,
                    let openFilter,
                    isFilterMenuAvailable(openFilter, filterContext: filterContext) {
                     filterDropdown(for: openFilter, filterContext: filterContext)
@@ -1553,7 +1554,7 @@ struct ActionView: View {
             }
         case .leveragedOnly:
             filterChip(
-                title: "Leveraged Only",
+                title: "Assigned Only",
                 iconName: "circle",
                 isActive: leveragedOnly,
                 showsChevron: false
@@ -1674,7 +1675,8 @@ struct ActionView: View {
         let allForChunk = allActions
         let isOtherChunk = chunk.labelId == PlanOtherLabel.id ||
             chunk.label.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == PlanOtherLabel.title.lowercased()
-        let fill: Color = isOtherChunk ? Color(.systemGray5) : categoryFillColor(for: chunk.category)
+        // Keep "Other" visually stable across light/dark appearances.
+        let fill: Color = isOtherChunk ? Color(red: 0.92, green: 0.92, blue: 0.94) : categoryFillColor(for: chunk.category)
         let accent: Color = isOtherChunk ? .black : categoryAccentColor(for: chunk.category)
         let step4 = weekStepFourStatesByChunkID[chunk.id]
         let step4ResultText = step4?.resultText ?? ""
@@ -1779,7 +1781,6 @@ struct ActionView: View {
             } else if isCollapsed {
                 collapsedChunkContent(
                     resultText: step4?.resultText ?? "",
-                    roleNoteText: step4?.roleNoteText ?? "",
                     actions: allForChunk,
                     defineByAction: defineByAction,
                     executionByAction: executionByAction
@@ -1822,7 +1823,6 @@ struct ActionView: View {
 
     private func collapsedChunkContent(
         resultText: String,
-        roleNoteText: String,
         actions: [PlannedChunkAction],
         defineByAction: [UUID: PlannedChunkActionDefineState],
         executionByAction: [UUID: PlannedChunkActionExecutionState]
@@ -1830,10 +1830,6 @@ struct ActionView: View {
         HStack(alignment: .center, spacing: 10) {
             VStack(alignment: .leading, spacing: 10) {
                 compactSummaryRow(label: "RESULT", text: resultText)
-
-                Divider().opacity(0.4)
-
-                compactSummaryRow(label: "PURPOSE", text: roleNoteText)
 
                 Divider().opacity(0.4)
 
@@ -4226,7 +4222,7 @@ private struct LeverageSheet: View {
         NavigationStack {
             List {
                 Section {
-                    Text("Leverage action to someone or something else")
+                    Text("Assign action to someone or something else")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -4304,7 +4300,7 @@ private struct LeverageSheet: View {
                     }
                 }
             }
-            .navigationTitle("Leverage")
+            .navigationTitle("Assign")
             .navigationBarTitleDisplayMode(.inline)
             .safeAreaInset(edge: .bottom) {
                 if isNewResourceMode && isNewResourceFocused {
@@ -4449,7 +4445,7 @@ private struct SensitivitySheet: View {
                                 }
                             }
 
-                            Text("Attention triggers countdown to display.")
+                            Text("Attention triggers countdown to display before due date and intelligently brings it into your attention.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -4573,7 +4569,7 @@ private struct SensitivitySheet: View {
                 .overlay(alignment: .bottom) {
                     if showLeverageDueDateError && !localHasDueDate {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("You must add a due date to leverage action to hold your resources accountable")
+                            Text("You must add a due date to assign this action so resources stay accountable")
                                 .font(.footnote)
                                 .fontWeight(.bold)
                             Text("If not completed in this action block, the Resource and due date will be saved to your Capture list and future Action Blocks.")
@@ -5502,15 +5498,15 @@ private extension ActionExecutionStatus {
         case .noAction:
             return "No action"
         case .leveraged:
-            return "Leveraged"
+            return "Assigned"
         case .inProgress:
             return "In progress"
         case .done:
             return "Done"
         case .carriedToCapture:
-            return "Carried to new capture list"
+            return "Recapture for later"
         case .notNeeded:
-            return "Didn't need to be done to acheive outcome (Delete)"
+            return "Wasn't needed to acheive result (Delete)"
         }
     }
 }

@@ -2238,13 +2238,13 @@ struct ManageRawDataView: View {
         .init(id: "chunkOutcome", name: "Step 4 Outcome Link"),
         .init(id: "define", name: "Define State"),
         .init(id: "exec", name: "Execution State"),
-        .init(id: "leverageRes", name: "Leverage Resource"),
-        .init(id: "leverageSel", name: "Leverage Selection"),
+        .init(id: "leverageRes", name: "Assign Resource"),
+        .init(id: "leverageSel", name: "Assign Selection"),
         .init(id: "placeCatalog", name: "Place Catalog"),
         .init(id: "placeLink", name: "Place Link"),
         .init(id: "actionNote", name: "Action Note"),
         .init(id: "actionAttachment", name: "Action Attachment"),
-        .init(id: "legacyLeverage", name: "Legacy Leverage Item"),
+        .init(id: "legacyLeverage", name: "Legacy Assign Item"),
         .init(id: "legacyPlace", name: "Legacy Sensitivity Place"),
         .init(id: "adhoc", name: "Action Ad Hoc Marker"),
         .init(id: "reflect", name: "Reflection Archive"),
@@ -2385,10 +2385,10 @@ struct ManageRawDataView: View {
             DataItem(id: "exec-\($0.id.uuidString)", source: "Execution State", content: $0.statusRaw, date: $0.updatedAt, emotion: nil, additionalFields: ["Action ID": $0.plannedChunkActionId.uuidString])
         }
         allItems += leverageResources.map {
-            DataItem(id: "leverageRes-\($0.id.uuidString)", source: "Leverage Resource", content: $0.value, date: $0.createdAt, emotion: nil, additionalFields: ["Kind": $0.kindRaw])
+            DataItem(id: "leverageRes-\($0.id.uuidString)", source: "Assign Resource", content: $0.value, date: $0.createdAt, emotion: nil, additionalFields: ["Kind": $0.kindRaw])
         }
         allItems += leverageSelections.map {
-            DataItem(id: "leverageSel-\($0.id.uuidString)", source: "Leverage Selection", content: $0.resourceId?.uuidString ?? "(none)", date: $0.updatedAt, emotion: nil, additionalFields: ["Action ID": $0.plannedChunkActionId.uuidString])
+            DataItem(id: "leverageSel-\($0.id.uuidString)", source: "Assign Selection", content: $0.resourceId?.uuidString ?? "(none)", date: $0.updatedAt, emotion: nil, additionalFields: ["Action ID": $0.plannedChunkActionId.uuidString])
         }
         allItems += placeCatalog.map {
             DataItem(id: "placeCatalog-\($0.id.uuidString)", source: "Place Catalog", content: $0.place, date: $0.createdAt, emotion: nil, additionalFields: [:])
@@ -2403,7 +2403,7 @@ struct ManageRawDataView: View {
             DataItem(id: "actionAttachment-\($0.id.uuidString)", source: "Action Attachment", content: $0.fileName ?? $0.urlString ?? "", date: $0.createdAt, emotion: nil, additionalFields: ["Kind": $0.kindRaw, "Action ID": $0.plannedChunkActionId.uuidString])
         }
         allItems += legacyLeverageItems.map {
-            DataItem(id: "legacyLeverage-\($0.id.uuidString)", source: "Legacy Leverage Item", content: $0.value, date: $0.createdAt, emotion: nil, additionalFields: ["Kind": $0.kindRaw, "Action ID": $0.plannedChunkActionId.uuidString])
+            DataItem(id: "legacyLeverage-\($0.id.uuidString)", source: "Legacy Assign Item", content: $0.value, date: $0.createdAt, emotion: nil, additionalFields: ["Kind": $0.kindRaw, "Action ID": $0.plannedChunkActionId.uuidString])
         }
         allItems += legacyPlaces.map {
             DataItem(id: "legacyPlace-\($0.id.uuidString)", source: "Legacy Sensitivity Place", content: $0.place, date: $0.createdAt, emotion: nil, additionalFields: ["Action ID": $0.plannedChunkActionId.uuidString])

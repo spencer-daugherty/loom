@@ -747,6 +747,8 @@ struct PassionScoringService {
         var linkSaturationCount: Double = 6
         var maxMonthlyDelta: Double = 1.0
         var discretizeToHalfSteps: Bool = true
+        var minimumSnapshotSpacingDays: Int = 28
+        var bootstrapRepairWindowDays: Int = 45
     }
 
     let provider: PassionScoringSignalProvider
@@ -798,14 +800,35 @@ struct PassionScoringService {
         let earliestMonthStart = PassionScoringMath.monthWindow(for: earliestCandidate, calendar: calendar).monthStart
         let boundedStart = calendar.date(byAdding: .month, value: -(maxLookbackMonths - 1), to: currentMonthStart) ?? earliestMonthStart
         let startMonth = max(earliestMonthStart, boundedStart)
-        let existingSnapshots = try modelContext.fetch(FetchDescriptor<PassionScoreSnapshot>())
+        var existingSnapshots = try modelContext.fetch(FetchDescriptor<PassionScoreSnapshot>())
+
+        if removePrematureCurrentMonthSnapshotsIfNeeded(in: modelContext, snapshots: &existingSnapshots, now: now, currentMonthStart: currentMonthStart) {
+            try modelContext.save()
+        }
+        if normalizeRecentBootstrapSnapshotsIfNeeded(snapshots: existingSnapshots, now: now) {
+            try modelContext.save()
+            existingSnapshots = try modelContext.fetch(FetchDescriptor<PassionScoreSnapshot>())
+        }
+
         let existingMonthStarts = Set(existingSnapshots.map { calendar.startOfDay(for: $0.monthStartDate) })
+        let latestSnapshotCreatedAt = existingSnapshots.map(\.createdAt).max()
+        let minimumSpacing = Double(config.minimumSnapshotSpacingDays) * 86_400
+        let canCreateCurrentMonthSnapshot: Bool = {
+            guard let latestSnapshotCreatedAt else { return true }
+            return now.timeIntervalSince(latestSnapshotCreatedAt) >= minimumSpacing
+        }()
 
         var all: [PassionScoreSnapshot] = []
         var cursor = startMonth
+        let normalizedCurrentMonthStart = calendar.startOfDay(for: currentMonthStart)
         while cursor <= currentMonthStart {
             let normalizedCursor = calendar.startOfDay(for: cursor)
-            let shouldCompute = normalizedCursor == calendar.startOfDay(for: currentMonthStart) || !existingMonthStarts.contains(normalizedCursor)
+            let shouldCompute: Bool
+            if normalizedCursor == normalizedCurrentMonthStart {
+                shouldCompute = !existingMonthStarts.contains(normalizedCursor) && canCreateCurrentMonthSnapshot
+            } else {
+                shouldCompute = !existingMonthStarts.contains(normalizedCursor)
+            }
             if shouldCompute {
                 let rows = try computeAndPersistSnapshots(for: cursor, in: modelContext)
                 all.append(contentsOf: rows)
@@ -825,24 +848,11 @@ struct PassionScoringService {
         let sortedHistory = history.sorted { $0.monthStartDate < $1.monthStartDate }
         let prev = sortedHistory.last
 
-        if prev == nil && signals.isEmptyForBootstrap {
-            let neutralScore = 2.0
-            let breakdown = PassionScoreBreakdown(
-                structure: 0.0,
-                actionCoverage: 0.0,
-                carryoverPenalty: 0.0,
-                littleWinsCoverage: 0.0,
-                outcomeCoverage: nil,
-                consistency: 1.0,
-                evidence: 0.5,
-                evidenceStable: 0.5,
-                targetScore: 2.0,
-                emaTarget: 2.0,
-                momentum: 0.0
-            )
+        if prev == nil {
             _ = monthStartDate
             _ = passion
-            return PassionScoreComputationResult(score: neutralScore, breakdown: breakdown)
+            _ = signals
+            return neutralBootstrapMonthlyResult()
         }
 
         let structure = computeStructure(signals)
@@ -892,6 +902,95 @@ struct PassionScoringService {
             momentum: momentum
         )
         return PassionScoreComputationResult(score: score, breakdown: breakdown)
+    }
+
+    private func neutralBootstrapMonthlyResult() -> PassionScoreComputationResult {
+        let neutralScore = 2.0
+        let breakdown = PassionScoreBreakdown(
+            structure: 0.0,
+            actionCoverage: 0.0,
+            carryoverPenalty: 0.0,
+            littleWinsCoverage: 0.0,
+            outcomeCoverage: nil,
+            consistency: 1.0,
+            evidence: 0.5,
+            evidenceStable: 0.5,
+            targetScore: 2.0,
+            emaTarget: 2.0,
+            momentum: 0.0
+        )
+        return PassionScoreComputationResult(score: neutralScore, breakdown: breakdown)
+    }
+
+    private func removePrematureCurrentMonthSnapshotsIfNeeded(
+        in modelContext: ModelContext,
+        snapshots: inout [PassionScoreSnapshot],
+        now: Date,
+        currentMonthStart: Date
+    ) -> Bool {
+        let normalizedCurrentMonthStart = calendar.startOfDay(for: currentMonthStart)
+        let currentMonthSnapshots = snapshots.filter {
+            calendar.isDate(calendar.startOfDay(for: $0.monthStartDate), inSameDayAs: normalizedCurrentMonthStart)
+        }
+        guard !currentMonthSnapshots.isEmpty else { return false }
+
+        let priorSnapshots = snapshots.filter {
+            calendar.startOfDay(for: $0.monthStartDate) < normalizedCurrentMonthStart
+        }
+        guard let latestPriorCreatedAt = priorSnapshots.map(\.createdAt).max() else { return false }
+
+        let minimumSpacing = Double(config.minimumSnapshotSpacingDays) * 86_400
+        guard now.timeIntervalSince(latestPriorCreatedAt) < minimumSpacing else { return false }
+
+        for snapshot in currentMonthSnapshots {
+            modelContext.delete(snapshot)
+        }
+        snapshots.removeAll {
+            calendar.isDate(calendar.startOfDay(for: $0.monthStartDate), inSameDayAs: normalizedCurrentMonthStart)
+        }
+        return true
+    }
+
+    private func normalizeRecentBootstrapSnapshotsIfNeeded(
+        snapshots: [PassionScoreSnapshot],
+        now: Date
+    ) -> Bool {
+        let repairWindow = Double(config.bootstrapRepairWindowDays) * 86_400
+        guard repairWindow > 0 else { return false }
+
+        let grouped = Dictionary(grouping: snapshots, by: \.passionTypeRaw)
+        var didUpdate = false
+
+        for passion in PassionType.allCases {
+            let group = (grouped[passion.rawValue] ?? []).sorted { lhs, rhs in
+                if lhs.monthStartDate == rhs.monthStartDate {
+                    return lhs.createdAt < rhs.createdAt
+                }
+                return lhs.monthStartDate < rhs.monthStartDate
+            }
+            guard let first = group.first else { continue }
+            guard now.timeIntervalSince(first.createdAt) <= repairWindow else { continue }
+            guard abs(first.score - 2.0) > 0.01 else { continue }
+
+            let neutral = neutralBootstrapMonthlyResult()
+            let b = neutral.breakdown
+            first.score = neutral.score
+            first.targetScore = b.targetScore
+            first.emaTarget = b.emaTarget
+            first.structure = b.structure
+            first.actionCoverage = b.actionCoverage
+            first.carryoverPenalty = b.carryoverPenalty
+            first.littleWinsCoverage = b.littleWinsCoverage
+            first.outcomeCoverage = b.outcomeCoverage
+            first.consistency = b.consistency
+            first.evidence = b.evidence
+            first.evidenceStable = b.evidenceStable
+            first.momentum = b.momentum
+            first.updatedAt = now
+            didUpdate = true
+        }
+
+        return didUpdate
     }
 
     private func frozenVacationMonthlyResult(history: [PassionScoreSnapshot]) -> PassionScoreComputationResult {
