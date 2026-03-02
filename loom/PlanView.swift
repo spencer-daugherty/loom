@@ -3829,6 +3829,7 @@ struct PlanStepFourResultView: View {
     @State private var autoWriteIconAnimating: Bool = false
     @State private var autoWriteIconAnimationTask: Task<Void, Never>? = nil
     @State private var isResultInfoExpanded: Bool = false
+    @State private var showResultAutoWriteErrorPopup: Bool = false
 
     private let footerPinnedHeight: CGFloat = 68
     private let keyboardFloatingGap: CGFloat = 15
@@ -3855,17 +3856,9 @@ struct PlanStepFourResultView: View {
             .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) }
     }
 
-    private struct PlanResultAutoWriteResponse: Decodable {
-        struct Suggestion: Decodable {
-            let fulfillmentArea: String?
-            let area: String?
-            let label: String?
-            let result: String?
-            let suggestion: String?
-            let text: String?
-        }
-        let suggestions: [Suggestion]?
-        let confidence: String?
+    private struct PlanResultAutoWriteRequestPayload: Encodable {
+        let areaName: String
+        let actions: [String]
     }
 
     private var resultAutoWriteAreaOptions: [String] {
@@ -4084,6 +4077,11 @@ struct PlanStepFourResultView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
             keyboardHeight = 0
+        }
+        .alert("Couldn’t generate a Result", isPresented: $showResultAutoWriteErrorPopup) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("LoomAI needs clearer actions to infer a Result. Try refining the actions first.")
         }
         .overlay {
             GeometryReader { proxy in
@@ -4493,11 +4491,145 @@ struct PlanStepFourResultView: View {
     }
 
     private func applyResultAutoWriteSuggestion(_ suggestion: String, to chunkID: UUID) {
-        let cleaned = truncateWords(suggestion, maxWords: 8)
+        let cleaned = truncateWords(suggestion, maxWords: 12)
         guard !cleaned.isEmpty else { return }
         resultTextByChunk[chunkID] = cleaned
         appliedResultAutoWriteByChunk[chunkID] = cleaned
         scheduleResultAutosave()
+    }
+
+    private func normalizedActionTitles(for chunks: [PlannedChunk]) -> [String] {
+        chunks
+            .flatMap { actionsForChunk($0) }
+            .map {
+                $0.text
+                    .replacingOccurrences(of: "\n", with: " ")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            .filter { !$0.isEmpty }
+    }
+
+    private func isVagueActionTitle(_ value: String) -> Bool {
+        let normalized = value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        guard !normalized.isEmpty else { return true }
+
+        let obviousPlaceholders = [
+            "^test\\s*\\d*$",
+            "^task\\s*\\d*$",
+            "^todo\\s*\\d*$",
+            "^action\\s*\\d*$",
+            "^item\\s*\\d*$",
+            "^placeholder\\b.*$",
+            "^tbd$",
+            "^n/?a$"
+        ]
+        if obviousPlaceholders.contains(where: { normalized.range(of: $0, options: .regularExpression) != nil }) {
+            return true
+        }
+
+        let genericTokens: Set<String> = ["test", "task", "todo", "action", "item", "thing", "stuff", "work"]
+        let tokens = normalized
+            .replacingOccurrences(of: "[^a-z0-9\\s]", with: " ", options: .regularExpression)
+            .split(separator: " ")
+            .map(String.init)
+
+        let meaningfulTokens = tokens.filter { token in
+            guard !token.isEmpty else { return false }
+            if token.allSatisfy(\.isNumber) { return false }
+            if genericTokens.contains(token) { return false }
+            return token.count >= 3
+        }
+        return meaningfulTokens.isEmpty
+    }
+
+    private func lacksConfidenceForResultInference(actions: [String]) -> Bool {
+        let nonEmpty = actions.filter {
+            !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        guard nonEmpty.count >= 2 else { return true }
+        return nonEmpty.allSatisfy(isVagueActionTitle)
+    }
+
+    private func actionKeywordSet(from actions: [String]) -> Set<String> {
+        let stopWords: Set<String> = [
+            "the", "and", "for", "with", "from", "that", "this", "into", "through",
+            "about", "your", "you", "our", "their", "then", "than", "just", "also",
+            "will", "what", "when", "where", "have", "has", "had", "plan", "planned"
+        ]
+
+        let tokens = actions
+            .joined(separator: " ")
+            .lowercased()
+            .replacingOccurrences(of: "[^a-z0-9\\s]", with: " ", options: .regularExpression)
+            .split(separator: " ")
+            .map(String.init)
+            .filter { token in
+                token.count >= 3 &&
+                !stopWords.contains(token) &&
+                !token.allSatisfy(\.isNumber)
+            }
+
+        return Set(tokens.map { token in
+            token.hasSuffix("s") && token.count > 4 ? String(token.dropLast()) : token
+        })
+    }
+
+    private func isPlanResultSuggestionAcceptable(_ value: String, actions: [String]) -> Bool {
+        let normalized = value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        let words = normalized.split(separator: " ")
+        guard words.count >= 6, words.count <= 12 else { return false }
+
+        let suggestionLower = normalized.lowercased()
+        let actionsLower = actions.joined(separator: " ").lowercased()
+        let genericTerms = ["improve", "enhance", "maximize", "support", "optimize"]
+        for term in genericTerms where suggestionLower.contains(term) && !actionsLower.contains(term) {
+            return false
+        }
+
+        let actionKeywords = actionKeywordSet(from: actions)
+        guard !actionKeywords.isEmpty else { return false }
+
+        let suggestionKeywords = Set(
+            suggestionLower
+                .replacingOccurrences(of: "[^a-z0-9\\s]", with: " ", options: .regularExpression)
+                .split(separator: " ")
+                .map(String.init)
+                .map { token in
+                    token.hasSuffix("s") && token.count > 4 ? String(token.dropLast()) : token
+                }
+        )
+        return !actionKeywords.intersection(suggestionKeywords).isEmpty
+    }
+
+    private func minimalPlanResultContextSnapshot() -> LoomAIContextSnapshot {
+        LoomAIContextSnapshot(
+            generatedAt: .now,
+            drivingForce: nil,
+            fulfillmentCategories: [],
+            activeOutcomes: [],
+            currentWeekActionBlocks: [],
+            recentActivity: .init(
+                quickCompletesLast7Days: 0,
+                littleWinsCompletionsLast7Days: 0,
+                carryoversLast7Days: 0
+            ),
+            dataInventory: [],
+            appGuide: [],
+            notes: [],
+            purposeDraft: nil,
+            fulfillmentSetup: nil,
+            personalization: nil
+        )
+    }
+
+    private func presentResultAutoWriteErrorPopup() {
+        showResultAutoWriteErrorPopup = false
+        showResultAutoWriteErrorPopup = true
     }
 
     private func requestAutoWriteResultSuggestions() async {
@@ -4512,146 +4644,66 @@ struct PlanStepFourResultView: View {
             resultAutoWriteSuggestionsByChunk.removeValue(forKey: id)
             appliedResultAutoWriteByChunk.removeValue(forKey: id)
         }
+        let groupedTargetChunks = Dictionary(grouping: targetChunks) { normalizeAreaLabel($0.label) }
+        let orderedAreaKeys = groupedTargetChunks.keys.sorted { lhs, rhs in
+            let lhsIndex = targetChunks.firstIndex { normalizeAreaLabel($0.label) == lhs } ?? .max
+            let rhsIndex = targetChunks.firstIndex { normalizeAreaLabel($0.label) == rhs } ?? .max
+            return lhsIndex < rhsIndex
+        }
 
-        do {
-            let contextSnapshot = try LoomAIViewModel().buildContextSnapshot(in: modelContext)
-            let groupedTargetChunks = Dictionary(grouping: targetChunks) { normalizeAreaLabel($0.label) }
-            let orderedAreaKeys = groupedTargetChunks.keys.sorted { lhs, rhs in
-                let lhsIndex = targetChunks.firstIndex { normalizeAreaLabel($0.label) == lhs } ?? .max
-                let rhsIndex = targetChunks.firstIndex { normalizeAreaLabel($0.label) == rhs } ?? .max
-                return lhsIndex < rhsIndex
+        let contextSnapshot = minimalPlanResultContextSnapshot()
+        let encoder = JSONEncoder()
+        var didFailGeneration = false
+        var skippedForLowConfidence = false
+
+        for areaKey in orderedAreaKeys {
+            guard let chunks = groupedTargetChunks[areaKey], let representativeChunk = chunks.first else { continue }
+            let areaLabel = representativeChunk.label.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !areaLabel.isEmpty else {
+                didFailGeneration = true
+                continue
             }
 
-            let targetAreaLabels = orderedAreaKeys.compactMap { key in
-                groupedTargetChunks[key]?.first?.label.trimmingCharacters(in: .whitespacesAndNewlines)
+            let actionTitles = normalizedActionTitles(for: chunks)
+            if lacksConfidenceForResultInference(actions: actionTitles) {
+                skippedForLowConfidence = true
+                continue
             }
 
-            let chunkContext = orderedAreaKeys.compactMap { areaKey -> String? in
-                guard let chunks = groupedTargetChunks[areaKey], let representativeChunk = chunks.first else { return nil }
-                let areaLabel = representativeChunk.label.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !areaLabel.isEmpty else { return nil }
-
-                let existingResults = chunks
-                    .compactMap { chunk -> String? in
-                        let text = (resultTextByChunk[chunk.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                        return text.isEmpty ? nil : text
-                    }
-                let previousSuggestions = chunks
-                    .compactMap { chunk -> String? in
-                        let text = (resultAutoWriteSuggestionsByChunk[chunk.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                        return text.isEmpty ? nil : text
-                    }
-                let actionLines = chunks
-                    .flatMap { actionsForChunk($0) }
-                    .map { action in
-                        let text = action.text
-                            .replacingOccurrences(of: "\n", with: " ")
-                            .trimmingCharacters(in: .whitespacesAndNewlines)
-                        return "- \(text)"
-                    }
-
-                return """
-                Fulfillment Area: \(areaLabel)
-                Existing Result: \(existingResults.isEmpty ? "<empty>" : existingResults.joined(separator: " | "))
-                Prior suggestions to avoid repeating: \(previousSuggestions.isEmpty ? "<none>" : previousSuggestions.joined(separator: " | "))
-                Actions:
-                \(actionLines.isEmpty ? "- <none>" : actionLines.joined(separator: "\n"))
-                """
+            let payload = PlanResultAutoWriteRequestPayload(areaName: areaLabel, actions: actionTitles)
+            guard
+                let payloadData = try? encoder.encode(payload),
+                let payloadJSON = String(data: payloadData, encoding: .utf8)
+            else {
+                didFailGeneration = true
+                continue
             }
-            .joined(separator: "\n\n")
 
-            let filterInstruction: String = {
-                if normalizeAreaLabel(selectedResultAutoWriteArea) == "all" {
-                    return "Selected filter: All. Return one suggestion for every listed Fulfillment Area."
+            do {
+                let response = try await loomAIService.sendChat(
+                    messages: [.init(role: "user", content: payloadJSON)],
+                    context: contextSnapshot,
+                    intent: "plan_result_autowrite",
+                    screen: "plan_result"
+                )
+
+                let suggestion = truncateWords(response.message, maxWords: 12)
+                guard isPlanResultSuggestionAcceptable(suggestion, actions: actionTitles) else {
+                    didFailGeneration = true
+                    continue
                 }
-                return "Selected filter: \(selectedResultAutoWriteArea). Return only that Fulfillment Area."
-            }()
 
-            let instruction = """
-            You are helping with Loom Plan Result (AutoWrite).
-            \(filterInstruction)
-
-            Generate one concise Result suggestion per requested Fulfillment Area.
-            The Result should describe the shared outcome that all actions in that area are moving toward.
-
-            Target Fulfillment Areas (use exact names):
-            \(targetAreaLabels.joined(separator: ", "))
-
-            Area context:
-            \(chunkContext)
-
-            Return JSON only:
-            {"suggestions":[{"fulfillmentArea":"string","result":"string"}],"confidence":"high|medium|low"}
-
-            Rules:
-            - Each result must be <=8 words.
-            - Use only as many words as needed.
-            - Do not repeat Existing Result or prior suggestions.
-            - Keep wording practical and outcome-focused.
-            - No bullets, numbering, or markdown outside JSON.
-            """
-
-            let response = try await loomAIService.sendChat(
-                messages: [.init(role: "user", content: instruction)],
-                context: contextSnapshot
-            )
-
-            let decodedSuggestions = decodeAutoWriteResultSuggestions(from: response.message)
-            guard !decodedSuggestions.isEmpty else { return }
-
-            var suggestionByArea: [String: String] = [:]
-            for item in decodedSuggestions {
-                let key = normalizeAreaLabel(item.area)
-                guard !key.isEmpty, suggestionByArea[key] == nil else { continue }
-                let suggestion = truncateWords(item.result, maxWords: 8)
-                guard !suggestion.isEmpty else { continue }
-                suggestionByArea[key] = suggestion
-            }
-
-            for areaKey in orderedAreaKeys {
-                guard let suggestion = suggestionByArea[areaKey],
-                      let chunks = groupedTargetChunks[areaKey]
-                else { continue }
                 for chunk in chunks {
                     resultAutoWriteSuggestionsByChunk[chunk.id] = suggestion
                 }
-            }
-        } catch {
-            return
-        }
-    }
-
-    private func decodeAutoWriteResultSuggestions(from raw: String) -> [(area: String, result: String)] {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let data = trimmed.data(using: .utf8),
-           let parsed = try? JSONDecoder().decode(PlanResultAutoWriteResponse.self, from: data) {
-            return (parsed.suggestions ?? []).compactMap { item in
-                let area = (item.fulfillmentArea ?? item.area ?? item.label ?? "")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                let result = truncateWords(
-                    (item.result ?? item.suggestion ?? item.text ?? "")
-                        .trimmingCharacters(in: .whitespacesAndNewlines),
-                    maxWords: 8
-                )
-                guard !area.isEmpty, !result.isEmpty else { return nil }
-                return (area: area, result: result)
+            } catch {
+                didFailGeneration = true
             }
         }
 
-        let fallbackLines = trimmed
-            .components(separatedBy: "\n")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-
-        if normalizeAreaLabel(selectedResultAutoWriteArea) != "all",
-           let first = fallbackLines.first {
-            let fallbackResult = truncateWords(first, maxWords: 8)
-            if !fallbackResult.isEmpty {
-                return [(area: selectedResultAutoWriteArea, result: fallbackResult)]
-            }
+        if skippedForLowConfidence || didFailGeneration {
+            presentResultAutoWriteErrorPopup()
         }
-
-        return []
     }
 
     private func setResultAutoWriteLoadingAnimation(_ isLoading: Bool) {

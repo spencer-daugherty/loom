@@ -475,6 +475,8 @@ struct AccountView: View {
     @AppStorage("dev_action_blocks_warning_old_blocks") private var devActionBlocksWarningOldBlocks = false
     @AppStorage(UserSessionStore.Keys.hasSeenOnboarding) private var hasSeenOnboarding = false
     @AppStorage(UserSessionStore.Keys.hasAccount) private var hasAccount = false
+    @AppStorage(UserSessionStore.Keys.hasCompletedDiagnostic) private var hasCompletedDiagnostic = false
+    @AppStorage(UserSessionStore.Keys.hasSeenDiagnosticInsights) private var hasSeenDiagnosticInsights = false
     @AppStorage(UserSessionStore.Keys.isSubscribed) private var isSubscribed = false
     @State private var presentedDeleteScope: DeleteScope? = nil
     @State private var deleteAllConfirmationCode = ""
@@ -540,7 +542,7 @@ struct AccountView: View {
                 }
 
                 NavigationLink {
-                    PersonalizationPlaceholderView()
+                    AccountPersonalizationView()
                 } label: {
                     HStack {
                         Text("Personalization")
@@ -605,6 +607,8 @@ struct AccountView: View {
                     // Replay the 7 onboarding screens, then return directly to app flow.
                     // Keep account + subscription satisfied so gate stops at onboarding.
                     hasAccount = true
+                    hasCompletedDiagnostic = true
+                    hasSeenDiagnosticInsights = true
                     isSubscribed = true
                     hasSeenOnboarding = false
                     hasSeenContentQuickstart = false
@@ -778,6 +782,8 @@ struct AccountView: View {
                             developerLaunchPaywallOnce = true
                             hasSeenOnboarding = true
                             hasAccount = false
+                            hasCompletedDiagnostic = true
+                            hasSeenDiagnosticInsights = true
                             isSubscribed = false
                         } label: {
                             HStack {
@@ -863,6 +869,8 @@ struct AccountView: View {
             // onboarding slides -> account step ("End Stress. Live Fulfilled.") -> Content quick tour.
             hasSeenOnboarding = false
             hasAccount = false
+            hasCompletedDiagnostic = true
+            hasSeenDiagnosticInsights = true
             isSubscribed = true
             hasSeenContentQuickstart = false
             forceShowContentQuickstartOnce = true
@@ -4246,19 +4254,6 @@ private struct NotificationsPlaceholderView: View {
         let refreshedStatus = await LoomNotificationScheduler.authorizationStatus()
         await MainActor.run { authorizationStatus = refreshedStatus }
         return isAuthorizationGranted(refreshedStatus)
-    }
-}
-
-private struct PersonalizationPlaceholderView: View {
-    var body: some View {
-        List {
-            Section {
-                Text("Personalization settings are coming soon.")
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .navigationTitle("Personalization")
-        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

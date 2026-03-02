@@ -56,6 +56,24 @@ struct LoomAIContextSnapshot: Codable {
         var summary: String
         var relatedSections: [String]
     }
+    struct PurposeDraftSummary: Codable {
+        var vision: String
+        var purpose: String
+        var passions: [PassionSummary]
+        var updatedAt: Date?
+    }
+    struct FulfillmentSetupSummary: Codable {
+        var selectedCategoryIDs: [String]
+        var selectedCategoryNames: [String]
+        var categoryCount: Int
+        var focusCategoryNames: [String]
+    }
+    struct PersonalizationSummary: Codable {
+        var current: PersonalizationSnapshot?
+        var recentChanges: [String]
+        var historyCount: Int
+        var lastChangedAt: Date?
+    }
 
     var generatedAt: Date
     var drivingForce: DrivingForceSummary?
@@ -66,6 +84,9 @@ struct LoomAIContextSnapshot: Codable {
     var dataInventory: [KnowledgeSectionSummary]
     var appGuide: [GuideTopic]
     var notes: [String]
+    var purposeDraft: PurposeDraftSummary?
+    var fulfillmentSetup: FulfillmentSetupSummary?
+    var personalization: PersonalizationSummary?
 
     func minimalized() -> LoomAIContextSnapshot {
         LoomAIContextSnapshot(
@@ -103,7 +124,42 @@ struct LoomAIContextSnapshot: Codable {
                 )
             },
             appGuide: Array(appGuide.prefix(12)),
-            notes: notes
+            notes: notes,
+            purposeDraft: purposeDraft.map {
+                .init(
+                    vision: String($0.vision.prefix(220)),
+                    purpose: String($0.purpose.prefix(220)),
+                    passions: Array($0.passions.prefix(8)),
+                    updatedAt: $0.updatedAt
+                )
+            },
+            fulfillmentSetup: fulfillmentSetup.map {
+                .init(
+                    selectedCategoryIDs: Array($0.selectedCategoryIDs.prefix(10)),
+                    selectedCategoryNames: Array($0.selectedCategoryNames.prefix(10)),
+                    categoryCount: $0.categoryCount,
+                    focusCategoryNames: Array($0.focusCategoryNames.prefix(4))
+                )
+            },
+            personalization: personalization.map { value in
+                .init(
+                    current: value.current.map { snapshot in
+                        PersonalizationSnapshot(
+                            id: snapshot.id,
+                            createdAt: snapshot.createdAt,
+                            stressSource: String(snapshot.stressSource.prefix(120)),
+                            breakPoint: String(snapshot.breakPoint.prefix(120)),
+                            lifeAreasSelected: Array(snapshot.lifeAreasSelected.prefix(7)),
+                            planningReality: String(snapshot.planningReality.prefix(120)),
+                            desiredChange: String(snapshot.desiredChange.prefix(120)),
+                            derivedTags: Array(snapshot.derivedTags.prefix(10))
+                        )
+                    },
+                    recentChanges: Array(value.recentChanges.prefix(3).map { String($0.prefix(150)) }),
+                    historyCount: value.historyCount,
+                    lastChangedAt: value.lastChangedAt
+                )
+            }
         )
     }
 }
@@ -216,7 +272,7 @@ final class LoomAIViewModel: ObservableObject {
             let systemPrompt = """
             You are LoomAI. Use the provided Loom context to answer questions and suggest practical next steps.
             Loom structure: Purpose = who the user is (vision + passions). Fulfillment Areas = why they live (life domains).
-            Objectives/Outcomes = what they want. Actions/Blocks = how they act weekly.
+            Goals/Outcomes = what they want. Actions/Blocks = how they act weekly.
             Prefer concise, actionable answers.
             If you are confident (the context clearly supports a practical next step), return 1-3 CTA actions the app can render as buttons.
             Prefer CTAs that directly modify Loom data when appropriate (for example a Little Win in a fulfillment area that is slipping).
@@ -1128,6 +1184,118 @@ final class LoomAIViewModel: ObservableObject {
             (ActionExecutionStatus(rawValue: $0.statusRaw) ?? .noAction) == .carriedToCapture
         }.count
 
+        let personalizationContext = PersonalizationStore.cachedContextForCurrentUser()
+        let personalizationState = PersonalizationStore.cachedStateForCurrentUser()
+        let personalizationHistoryCount = personalizationState.history.count
+        let personalizationLastChangedAt = (
+            [personalizationState.current?.createdAt] + personalizationState.history.map(\.createdAt)
+        )
+        .compactMap { $0 }
+        .max()
+        var inventory = buildDataInventory(
+            now: now,
+            weekStart: weekStart,
+            drivingForces: drivingForces,
+            drivingForceArchives: drivingForceArchives,
+            passions: passions,
+            passionArchives: passionArchives,
+            passionLinks: passionLinks,
+            passionLinkArchives: passionLinkArchives,
+            passionScoreSnapshots: passionScoreSnapshots,
+            fulfillments: fulfillments,
+            fulfillmentArchives: fulfillmentArchives,
+            roles: roles,
+            roleArchives: roleArchives,
+            foci: foci,
+            focusArchives: focusArchives,
+            resources: resources,
+            resourceArchives: resourceArchives,
+            replacedFulfillmentArchives: replacedFulfillmentArchives,
+            fulfillmentScores: fulfillmentScores,
+            outcomes: outcomes,
+            outcomeArchives: outcomeArchives,
+            outcomeMeasures: outcomeMeasures,
+            outcomeMeasureArchives: outcomeMeasureArchives,
+            outcomeMeasureEntries: outcomeMeasureEntries,
+            outcomeAnalyticsEvents: outcomeAnalyticsEvents,
+            completedOutcomeArchives: completedOutcomeArchives,
+            completedOutcomeContributionArchives: completedOutcomeContributionArchives,
+            completedOutcomePassionLinkArchives: completedOutcomePassionLinkArchives,
+            completedOutcomeMeasurePointArchives: completedOutcomeMeasurePointArchives,
+            captureItems: captureItems,
+            quickCompletes: quickCompletes,
+            recurringCaptureRules: recurringCaptureRules,
+            recurringCaptureDispatches: recurringCaptureDispatches,
+            recentlyDeletedItems: recentlyDeletedItems,
+            plannedChunks: plannedChunks,
+            plannedChunkStepFourStates: plannedChunkStepFourStates,
+            plannedChunkOutcomeLinks: plannedChunkOutcomeLinks,
+            plannedChunkActions: plannedChunkActions,
+            plannedChunkActionDefineStates: plannedChunkActionDefineStates,
+            plannedChunkActionExecutionStates: plannedChunkActionExecutionStates,
+            plannedChunkActionLeverageSelections: plannedChunkActionLeverageSelections,
+            leverageResources: leverageResources,
+            plannedChunkActionSensitivityPlaceLinks: plannedChunkActionSensitivityPlaceLinks,
+            sensitivityPlaceCatalogItems: sensitivityPlaceCatalogItems,
+            plannedChunkActionAttachments: plannedChunkActionAttachments,
+            plannedChunkActionNotes: plannedChunkActionNotes,
+            plannedChunkActionAdHocMarkers: plannedChunkActionAdHocMarkers,
+            reflectionArchives: reflectionArchives,
+            reflectionActions: reflectionActions,
+            reflectionOutcomes: reflectionOutcomes,
+            reflectionOutcomeContributions: reflectionOutcomeContributions,
+            weeklyMindsetEntries: weeklyMindsetEntries,
+            littleWinsCompletions: littleWinsCompletions,
+            vacationArchives: vacationArchives
+        )
+
+        if let personalizationContext {
+            inventory.insert(
+                .init(
+                    id: "personalization",
+                    title: "Personalization Diagnostic (stress, break point, planning reality, desired change)",
+                    currentCount: personalizationContext.current.lifeAreasSelected.count,
+                    historicalCount: personalizationContext.recentChanges.count,
+                    keySignals: [
+                        "stressSource=\(personalizationContext.current.stressSource)",
+                        "breakPoint=\(personalizationContext.current.breakPoint)",
+                        "planningReality=\(personalizationContext.current.planningReality)",
+                        "desiredChange=\(personalizationContext.current.desiredChange)"
+                    ],
+                    sampleItems: personalizationContext.current.lifeAreasSelected
+                ),
+                at: 0
+            )
+        }
+
+        let purposeDraftSummary = drivingForces.first.map { df in
+            LoomAIContextSnapshot.PurposeDraftSummary(
+                vision: df.ultimateVision,
+                purpose: df.ultimatePurpose,
+                passions: Array(passions.sorted { $0.date < $1.date }.prefix(12).map {
+                    .init(emotion: $0.emotion, title: $0.passion)
+                }),
+                updatedAt: df.updatedAt
+            )
+        }
+
+        let fulfillmentSetupSummary = LoomAIContextSnapshot.FulfillmentSetupSummary(
+            selectedCategoryIDs: categories.map(\.id),
+            selectedCategoryNames: categories.map(\.name),
+            categoryCount: categories.count,
+            focusCategoryNames: categories
+                .sorted { lhs, rhs in
+                    let lhsScore = lhs.weeklyScore ?? 0
+                    let rhsScore = rhs.weeklyScore ?? 0
+                    if lhsScore == rhsScore {
+                        return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+                    }
+                    return lhsScore < rhsScore
+                }
+                .prefix(3)
+                .map(\.name)
+        )
+
         let snapshot = LoomAIContextSnapshot(
             generatedAt: now,
             drivingForce: drivingForce,
@@ -1146,69 +1314,24 @@ final class LoomAIViewModel: ObservableObject {
                 littleWinsCompletionsLast7Days: littleWinsCompletions.filter { $0.completedAt >= last7Start }.count,
                 carryoversLast7Days: carryoverCount
             ),
-            dataInventory: buildDataInventory(
-                now: now,
-                weekStart: weekStart,
-                drivingForces: drivingForces,
-                drivingForceArchives: drivingForceArchives,
-                passions: passions,
-                passionArchives: passionArchives,
-                passionLinks: passionLinks,
-                passionLinkArchives: passionLinkArchives,
-                passionScoreSnapshots: passionScoreSnapshots,
-                fulfillments: fulfillments,
-                fulfillmentArchives: fulfillmentArchives,
-                roles: roles,
-                roleArchives: roleArchives,
-                foci: foci,
-                focusArchives: focusArchives,
-                resources: resources,
-                resourceArchives: resourceArchives,
-                replacedFulfillmentArchives: replacedFulfillmentArchives,
-                fulfillmentScores: fulfillmentScores,
-                outcomes: outcomes,
-                outcomeArchives: outcomeArchives,
-                outcomeMeasures: outcomeMeasures,
-                outcomeMeasureArchives: outcomeMeasureArchives,
-                outcomeMeasureEntries: outcomeMeasureEntries,
-                outcomeAnalyticsEvents: outcomeAnalyticsEvents,
-                completedOutcomeArchives: completedOutcomeArchives,
-                completedOutcomeContributionArchives: completedOutcomeContributionArchives,
-                completedOutcomePassionLinkArchives: completedOutcomePassionLinkArchives,
-                completedOutcomeMeasurePointArchives: completedOutcomeMeasurePointArchives,
-                captureItems: captureItems,
-                quickCompletes: quickCompletes,
-                recurringCaptureRules: recurringCaptureRules,
-                recurringCaptureDispatches: recurringCaptureDispatches,
-                recentlyDeletedItems: recentlyDeletedItems,
-                plannedChunks: plannedChunks,
-                plannedChunkStepFourStates: plannedChunkStepFourStates,
-                plannedChunkOutcomeLinks: plannedChunkOutcomeLinks,
-                plannedChunkActions: plannedChunkActions,
-                plannedChunkActionDefineStates: plannedChunkActionDefineStates,
-                plannedChunkActionExecutionStates: plannedChunkActionExecutionStates,
-                plannedChunkActionLeverageSelections: plannedChunkActionLeverageSelections,
-                leverageResources: leverageResources,
-                plannedChunkActionSensitivityPlaceLinks: plannedChunkActionSensitivityPlaceLinks,
-                sensitivityPlaceCatalogItems: sensitivityPlaceCatalogItems,
-                plannedChunkActionAttachments: plannedChunkActionAttachments,
-                plannedChunkActionNotes: plannedChunkActionNotes,
-                plannedChunkActionAdHocMarkers: plannedChunkActionAdHocMarkers,
-                reflectionArchives: reflectionArchives,
-                reflectionActions: reflectionActions,
-                reflectionOutcomes: reflectionOutcomes,
-                reflectionOutcomeContributions: reflectionOutcomeContributions,
-                weeklyMindsetEntries: weeklyMindsetEntries,
-                littleWinsCompletions: littleWinsCompletions,
-                vacationArchives: vacationArchives
-            ),
+            dataInventory: inventory,
             appGuide: buildAppGuideTopics(),
             notes: [
                 "Context is compact and list-limited for token efficiency.",
                 "Use action suggestions only when they are concrete and safe.",
                 "Use dataInventory to navigate available current/historical Loom data by section.",
                 "Prefer citing specific section keySignals/sampleItems when answering."
-            ]
+            ],
+            purposeDraft: purposeDraftSummary,
+            fulfillmentSetup: fulfillmentSetupSummary,
+            personalization: personalizationContext.map {
+                .init(
+                    current: $0.current,
+                    recentChanges: $0.recentChanges,
+                    historyCount: personalizationHistoryCount,
+                    lastChangedAt: personalizationLastChangedAt
+                )
+            }
         )
 
         return snapshot
@@ -1353,7 +1476,7 @@ final class LoomAIViewModel: ObservableObject {
             ),
             .init(
                 id: "objectives_outcomes",
-                title: "Objectives/Outcomes (upcoming, active, measured, analytics)",
+                title: "Goals/Outcomes (upcoming, active, measured, analytics)",
                 currentCount: outcomes.count,
                 historicalCount: outcomeArchives.count + completedOutcomeArchives.count,
                 keySignals: [
@@ -1516,8 +1639,14 @@ final class LoomAIViewModel: ObservableObject {
                 relatedSections: ["fulfillment_current", "fulfillment_history", "little_wins"]
             ),
             .init(
+                id: "personalization_diagnostic",
+                title: "Personalization Diagnostic",
+                summary: "Quick diagnostic captures stress source, break point, life-area scope, planning reality, and desired first change, with snapshot history for longitudinal context.",
+                relatedSections: ["personalization"]
+            ),
+            .init(
                 id: "outcomes_flow",
-                title: "Objectives / Outcomes Flow",
+                title: "Goals / Outcomes Flow",
                 summary: "Outcomes store reasons, target dates, measurement definitions, measurement entries, and analytics events (goal changes and target pushes), plus completed outcome archives with journals and contributions.",
                 relatedSections: ["objectives_outcomes", "completed_outcomes"]
             ),

@@ -25,6 +25,10 @@
 	<string></string>
 	<key>MicrosoftOAuthTenantID</key>
 	<string>common</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Loom uses the camera so you can capture and share your Little Wins progress.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Loom saves your Little Wins share snapshots to Photos when you choose Save.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>

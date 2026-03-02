@@ -86,6 +86,9 @@ typealias LoomAIAction = LoomAISuggestedAction
 struct LoomAIDebug: Codable, Hashable {
     var model: String?
     var usedContext: Bool?
+    var claimedUsedContext: Bool?
+    var confidence: String?
+    var evidence: [String]?
     var contextBytes: Int?
     var contextHash: String?
     var contextKeys: [String]?

@@ -66,6 +66,7 @@ private enum LoomPersistence {
         VacationModeArchive.self,
         LoomAIChatThread.self,
         LoomAIChatMessage.self,
+        DiagnosticsInsightsSnapshot.self,
         RecentlyDeletedItem.self,
         PlannedChunkActionAdHocMarker.self,
         ActionBlocksReflectionArchive.self,

@@ -8,6 +8,8 @@ final class UserSessionStore: ObservableObject {
     enum GateStep {
         case onboarding
         case account
+        case diagnostic
+        case insights
         case paywall
         case done
     }
@@ -15,6 +17,8 @@ final class UserSessionStore: ObservableObject {
     enum Keys {
         static let hasSeenOnboarding = "hasSeenOnboarding"
         static let hasAccount = "hasAccount"
+        static let hasCompletedDiagnostic = "hasCompletedDiagnostic"
+        static let hasSeenDiagnosticInsights = "hasSeenDiagnosticInsights"
         static let isSubscribed = "isSubscribed"
         static let appleUserID = "apple_user_id"
         static let googleUserID = "google_user_id"
@@ -25,6 +29,8 @@ final class UserSessionStore: ObservableObject {
 
     @Published private(set) var hasSeenOnboarding: Bool
     @Published private(set) var hasAccount: Bool
+    @Published private(set) var hasCompletedDiagnostic: Bool
+    @Published private(set) var hasSeenDiagnosticInsights: Bool
     @Published private(set) var isSubscribed: Bool
 
     private let defaults: UserDefaults
@@ -33,12 +39,36 @@ final class UserSessionStore: ObservableObject {
         self.defaults = defaults
         self.hasSeenOnboarding = defaults.bool(forKey: Keys.hasSeenOnboarding)
         self.hasAccount = defaults.bool(forKey: Keys.hasAccount)
+        let hasCompletedDiagnostic: Bool
+        if defaults.object(forKey: Keys.hasCompletedDiagnostic) == nil {
+            // Preserve existing user access when this gate is introduced midstream.
+            hasCompletedDiagnostic = defaults.bool(forKey: Keys.hasAccount)
+            defaults.set(hasCompletedDiagnostic, forKey: Keys.hasCompletedDiagnostic)
+        } else {
+            hasCompletedDiagnostic = defaults.bool(forKey: Keys.hasCompletedDiagnostic)
+        }
+        self.hasCompletedDiagnostic = hasCompletedDiagnostic
+
+        let hasSeenDiagnosticInsights: Bool
+        if defaults.object(forKey: Keys.hasSeenDiagnosticInsights) == nil {
+            // Existing users who already completed diagnostics should not be blocked by a new insights step.
+            hasSeenDiagnosticInsights = hasCompletedDiagnostic
+            defaults.set(hasSeenDiagnosticInsights, forKey: Keys.hasSeenDiagnosticInsights)
+        } else {
+            hasSeenDiagnosticInsights = defaults.bool(forKey: Keys.hasSeenDiagnosticInsights)
+        }
+        let resolvedHasSeenDiagnosticInsights = hasCompletedDiagnostic ? hasSeenDiagnosticInsights : false
+        self.hasSeenDiagnosticInsights = resolvedHasSeenDiagnosticInsights
+        defaults.set(resolvedHasSeenDiagnosticInsights, forKey: Keys.hasSeenDiagnosticInsights)
+
         self.isSubscribed = defaults.bool(forKey: Keys.isSubscribed)
     }
 
     var currentGateStep: GateStep {
         if !hasSeenOnboarding { return .onboarding }
         if !hasAccount { return .account }
+        if !hasCompletedDiagnostic { return .diagnostic }
+        if !hasSeenDiagnosticInsights { return .insights }
         if !isSubscribed { return .paywall }
         return .done
     }
@@ -57,6 +87,14 @@ final class UserSessionStore: ObservableObject {
         setIsSubscribed(true)
     }
 
+    func markDiagnosticCompleted() {
+        setHasCompletedDiagnostic(true)
+    }
+
+    func markDiagnosticInsightsSeen() {
+        setHasSeenDiagnosticInsights(true)
+    }
+
     func setHasSeenOnboarding(_ value: Bool) {
         hasSeenOnboarding = value
         defaults.set(value, forKey: Keys.hasSeenOnboarding)
@@ -65,6 +103,25 @@ final class UserSessionStore: ObservableObject {
     func setHasAccount(_ value: Bool) {
         hasAccount = value
         defaults.set(value, forKey: Keys.hasAccount)
+        if !value {
+            setHasCompletedDiagnostic(false)
+            setHasSeenDiagnosticInsights(false)
+        }
+    }
+
+    func setHasCompletedDiagnostic(_ value: Bool) {
+        let resolvedValue = hasAccount ? value : false
+        hasCompletedDiagnostic = resolvedValue
+        defaults.set(resolvedValue, forKey: Keys.hasCompletedDiagnostic)
+        if !resolvedValue {
+            setHasSeenDiagnosticInsights(false)
+        }
+    }
+
+    func setHasSeenDiagnosticInsights(_ value: Bool) {
+        let resolvedValue = (hasAccount && hasCompletedDiagnostic) ? value : false
+        hasSeenDiagnosticInsights = resolvedValue
+        defaults.set(resolvedValue, forKey: Keys.hasSeenDiagnosticInsights)
     }
 
     func setIsSubscribed(_ value: Bool) {
@@ -83,6 +140,8 @@ final class UserSessionStore: ObservableObject {
 
     func clearAccountSession() {
         setHasAccount(false)
+        setHasCompletedDiagnostic(false)
+        setHasSeenDiagnosticInsights(false)
         setIsSubscribed(false)
         defaults.removeObject(forKey: Keys.appleUserID)
         defaults.removeObject(forKey: Keys.googleUserID)
@@ -170,6 +229,8 @@ final class UserSessionStore: ObservableObject {
     func reloadFromDefaults() {
         hasSeenOnboarding = defaults.bool(forKey: Keys.hasSeenOnboarding)
         hasAccount = defaults.bool(forKey: Keys.hasAccount)
+        hasCompletedDiagnostic = defaults.bool(forKey: Keys.hasCompletedDiagnostic)
+        hasSeenDiagnosticInsights = defaults.bool(forKey: Keys.hasSeenDiagnosticInsights)
         isSubscribed = defaults.bool(forKey: Keys.isSubscribed)
     }
 }

@@ -13,6 +13,10 @@ struct LoomAIService {
         var appVersion: String
         var platform: String
         var locale: String
+        var intent: String?
+        var screen: String?
+        var requestId: String?
+        var requestHash: String?
     }
 
     struct TransportMessage: Codable {
@@ -224,7 +228,14 @@ struct LoomAIService {
         }
     }
 
-    func sendChat(messages: [TransportMessage], context: LoomAIContextSnapshot) async throws -> LoomAIResponse {
+    func sendChat(
+        messages: [TransportMessage],
+        context: LoomAIContextSnapshot,
+        intent: String? = nil,
+        screen: String? = nil,
+        requestID: String? = nil,
+        requestHash: String? = nil
+    ) async throws -> LoomAIResponse {
         if useMockLoomAIResponse {
             let mock = """
             {"message":"Mock LoomAI reply is working.","actions":[{"id":"mock-create","title":"Create test action","type":"createAction","payload":{"text":"Test action from LoomAI mock"}}]}
@@ -242,7 +253,11 @@ struct LoomAIService {
         let client = ClientInfo(
             appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
             platform: "iOS",
-            locale: Locale.current.identifier
+            locale: Locale.current.identifier,
+            intent: intent,
+            screen: screen,
+            requestId: sanitizedClientValue(requestID),
+            requestHash: sanitizedClientValue(requestHash)
         )
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -255,6 +270,13 @@ struct LoomAIService {
         }
 
         return try await post(path: "/chat", bodyData: bodyData)
+    }
+
+    private func sanitizedClientValue(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+            return nil
+        }
+        return String(trimmed.prefix(128))
     }
 
     private func post(path: String, bodyData: Data) async throws -> LoomAIResponse {
@@ -401,7 +423,10 @@ struct LoomAIService {
             recentActivity: .init(quickCompletesLast7Days: 0, littleWinsCompletionsLast7Days: 0, carryoversLast7Days: 0),
             dataInventory: [],
             appGuide: [],
-            notes: ["Manual LoomAIService test"]
+            notes: ["Manual LoomAIService test"],
+            purposeDraft: nil,
+            fulfillmentSetup: nil,
+            personalization: nil
         )
         do {
             let reply = try await sendChat(

@@ -33,12 +33,12 @@ struct OnboardingFlowView: View {
                 Button {
                     primaryTapped()
                 } label: {
-                    Text(isLastPage ? OnboardingCopy.createAccount : OnboardingCopy.next)
+                    Text(isLastPage ? lastPagePrimaryLabel : OnboardingCopy.next)
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
-                .accessibilityIdentifier(isLastPage ? "onboarding_createAccount" : "onboarding_next")
+                .accessibilityIdentifier(isLastPage ? (session.hasAccount ? "onboarding_continue" : "onboarding_createAccount") : "onboarding_next")
             }
             .padding(.horizontal, 20)
             .padding(.top, 20)
@@ -96,6 +96,10 @@ struct OnboardingFlowView: View {
             }
         }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: currentIndex)
+    }
+
+    private var lastPagePrimaryLabel: LocalizedStringKey {
+        session.hasAccount ? OnboardingCopy.continueText : OnboardingCopy.createAccount
     }
 
     private func primaryTapped() {

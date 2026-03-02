@@ -29,7 +29,7 @@ enum OnboardingCopy {
         .init(
             id: 4,
             headline: "Turn plans into action.",
-            body: "Make real progress effortless by focusing on what matters now to create the life you want.",
+            body: "Make real progress effortless by focusing on what matters now to create the life you want, not an endless to-do list.",
             visualKind: .execution
         ),
         .init(
@@ -49,4 +49,5 @@ enum OnboardingCopy {
     static let next: LocalizedStringKey = "Next"
     static let skip: LocalizedStringKey = "Skip"
     static let createAccount: LocalizedStringKey = "Create account"
+    static let continueText: LocalizedStringKey = "Continue"
 }

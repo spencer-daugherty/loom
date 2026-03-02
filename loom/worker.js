@@ -57,6 +57,8 @@ export default {
     const messages = Array.isArray(body?.messages) ? body.messages : null;
     const context = body?.context ?? null;
     const client = body?.client ?? null;
+    const clientRequestHash = sanitizeClientDebugValue(client?.requestHash);
+    const clientRequestId = sanitizeClientDebugValue(client?.requestId);
 
     if (!messages || messages.length === 0) {
       return json({ error: "Missing messages[]" }, 400, corsHeaders(request));
@@ -72,17 +74,44 @@ export default {
       .filter((m) => m.content.length > 0);
 
     const nonSystemMessages = normalizedMessages.filter((m) => m.role !== "system");
+    const requestedIntent = normalizeIntent(client?.intent);
     const isFollowUpPromptMode = detectFollowUpPromptMode(nonSystemMessages);
     const isAutoGroupMode = detectAutoGroupMode(nonSystemMessages);
-    const isAutoWriteVisionMode = detectAutoWriteVisionMode(nonSystemMessages);
-    const isAutoWritePassionsMode = detectAutoWritePassionsMode(nonSystemMessages);
-    const isAutoWriteMissionMode = detectAutoWriteMissionMode(nonSystemMessages);
-    const isAutoWriteIdentityMode = detectAutoWriteIdentityMode(nonSystemMessages);
-    const isAutoWriteLittleWinMode = detectAutoWriteLittleWinMode(nonSystemMessages);
-    const isAutoWritePlanResultMode = detectAutoWritePlanResultMode(nonSystemMessages);
+    const detectedAutoWriteVisionMode = detectAutoWriteVisionMode(nonSystemMessages);
+    const detectedAutoWritePassionsMode = detectAutoWritePassionsMode(nonSystemMessages);
+    const detectedAutoWriteMissionMode = detectAutoWriteMissionMode(nonSystemMessages);
+    const detectedAutoWriteIdentityMode = detectAutoWriteIdentityMode(nonSystemMessages);
+    const detectedAutoWriteLittleWinMode = detectAutoWriteLittleWinMode(nonSystemMessages);
+    const isPlanResultStrictIntent = requestedIntent === "plan_result_autowrite";
+    const isAutoWritePlanResultMode =
+      isPlanResultStrictIntent || detectAutoWritePlanResultMode(nonSystemMessages);
     const isReflectReadableInsightsMode = detectReflectReadableInsightsMode(nonSystemMessages);
     const isFulfillmentReadableInsightMode = detectFulfillmentReadableInsightMode(nonSystemMessages);
     const isPurposeReadableInsightMode = detectPurposeReadableInsightMode(nonSystemMessages);
+    const isOnboardingPurposeInsightsMode =
+      requestedIntent === "onboarding_insights_purpose" ||
+      detectOnboardingPurposeInsightsMode(nonSystemMessages);
+    const isOnboardingFulfillmentInsightsMode =
+      requestedIntent === "onboarding_insights_fulfillment" ||
+      detectOnboardingFulfillmentInsightsMode(nonSystemMessages);
+    const isOnboardingDiagnosticsInsightsMode =
+      requestedIntent === "onboarding_insights_diagnostics" ||
+      detectOnboardingDiagnosticsInsightsMode(nonSystemMessages);
+
+    const purposeAutoWriteMode = requestedIntent === "autowrite_purpose"
+      ? (detectedAutoWritePassionsMode ? "passions" : "vision")
+      : (detectedAutoWriteVisionMode ? "vision" : (detectedAutoWritePassionsMode ? "passions" : null));
+    const fulfillmentAutoWriteMode = requestedIntent === "autowrite_fulfillment"
+      ? (detectedAutoWriteIdentityMode ? "identity" : (detectedAutoWriteLittleWinMode ? "littlewin" : "mission"))
+      : (detectedAutoWriteMissionMode
+        ? "mission"
+        : (detectedAutoWriteIdentityMode ? "identity" : (detectedAutoWriteLittleWinMode ? "littlewin" : null)));
+
+    const isAutoWriteVisionMode = purposeAutoWriteMode === "vision";
+    const isAutoWritePassionsMode = purposeAutoWriteMode === "passions";
+    const isAutoWriteMissionMode = fulfillmentAutoWriteMode === "mission";
+    const isAutoWriteIdentityMode = fulfillmentAutoWriteMode === "identity";
+    const isAutoWriteLittleWinMode = fulfillmentAutoWriteMode === "littlewin";
     const latestUserMessage = [...nonSystemMessages].reverse().find((m) => m?.role === "user");
     const latestUserContent = String(latestUserMessage?.content || "");
     const isAutoWriteVisionRewordMode =
@@ -112,28 +141,30 @@ export default {
         ? Object.keys(context).slice(0, 40)
         : [];
     const placeholderSignals = collectPlaceholderSignals(context);
+    const personalizationInfo = buildPersonalizationContext(context);
 
-    const workerPromptVersion = isAutoGroupMode
-      ? "autogroup-v1"
-      : (isAutoWriteVisionMode
-        ? (isAutoWriteVisionRewordMode ? "autowrite-vision-v2-reword" : "autowrite-vision-v2")
-      : (isAutoWritePassionsMode
-        ? "autowrite-passions-v1"
-      : (isAutoWriteLittleWinMode
-        ? "autowrite-littlewin-v2"
-      : (isAutoWriteIdentityMode
-        ? "autowrite-identity-v1"
-      : (isAutoWriteMissionMode
-        ? "autowrite-mission-v1"
-      : (isAutoWritePlanResultMode
-        ? "autowrite-plan-result-v1"
-        : (isFollowUpPromptMode
-        ? "followup-prompts-v1"
-        : (isReflectReadableInsightsMode
-          ? "reflect-readable-insights-v1"
-          : (isFulfillmentReadableInsightMode
-            ? "fulfillment-readable-insights-v1"
-            : (isPurposeReadableInsightMode ? "purpose-readable-insights-v1" : "grounding-cta-v3"))))))))));
+    const workerPromptVersion = (() => {
+      if (isAutoGroupMode) return "autogroup-v1";
+      if (isAutoWriteVisionMode) {
+        return isAutoWriteVisionRewordMode
+          ? "autowrite-vision-v2-reword"
+          : "autowrite-vision-v2";
+      }
+      if (isAutoWritePassionsMode) return "autowrite-passions-v1";
+      if (isAutoWriteLittleWinMode) return "autowrite-littlewin-v2";
+      if (isAutoWriteIdentityMode) return "autowrite-identity-v1";
+      if (isAutoWriteMissionMode) return "autowrite-mission-v1";
+      if (isPlanResultStrictIntent) return "plan-result-autowrite-v1";
+      if (isAutoWritePlanResultMode) return "autowrite-plan-result-v1";
+      if (isOnboardingPurposeInsightsMode) return "onboarding-insights-purpose-v1";
+      if (isOnboardingFulfillmentInsightsMode) return "onboarding-insights-fulfillment-v1";
+      if (isOnboardingDiagnosticsInsightsMode) return "onboarding-insights-diagnostics-v2";
+      if (isFollowUpPromptMode) return "followup-prompts-v1";
+      if (isReflectReadableInsightsMode) return "reflect-readable-insights-v1";
+      if (isFulfillmentReadableInsightMode) return "fulfillment-readable-insights-v1";
+      if (isPurposeReadableInsightMode) return "purpose-readable-insights-v1";
+      return "grounding-cta-v3";
+    })();
 
     const coreInstructions = isAutoGroupMode ? [
       "You generate AutoGroup plans for Loom Plan Step 3 (Group).",
@@ -157,6 +188,7 @@ export default {
       "or",
       '{"confidence":"low","reason":"short string","groups":[]}'
     ].join("\n") : isAutoWriteVisionMode ? [
+      "Intent: autowrite_purpose.",
       "You generate AutoWrite vision suggestions for Loom Purpose Vision.",
       "Use APP_CONTEXT_JSON and the provided current vision.",
       "Respect the requested vision mode from the user message.",
@@ -177,6 +209,7 @@ export default {
       "- Suggestions must be relevant to Purpose Vision context.",
       "- Do not output anything outside the JSON object."
     ].join("\n") : isAutoWritePassionsMode ? [
+      "Intent: autowrite_purpose.",
       "You generate AutoWrite passion suggestions for Loom Purpose Passions.",
       "Use APP_CONTEXT_JSON, current passion buckets, and prior suggestions.",
       "Use guidance from Loom's Purpose instructions and Need ideas content.",
@@ -201,6 +234,7 @@ export default {
       "- No numbering, no bullets, no markdown.",
       "- Do not output anything outside the JSON object."
     ].join("\n") : isAutoWriteLittleWinMode ? [
+      "Intent: autowrite_fulfillment.",
       "You generate AutoWrite little win suggestions for Loom Fulfillment Little Wins.",
       "Use APP_CONTEXT_JSON and the provided Fulfillment Area name.",
       "If mission and identities are provided, align suggestions to them.",
@@ -221,6 +255,7 @@ export default {
       "- Suggestions must be relevant to the provided Fulfillment Area.",
       "- Do not output anything outside the JSON object."
     ].join("\n") : isAutoWriteIdentityMode ? [
+      "Intent: autowrite_fulfillment.",
       "You generate AutoWrite identity suggestions for Loom Fulfillment Set Identity.",
       "Use APP_CONTEXT_JSON and the provided Fulfillment Area name.",
       "Identity guidance to follow:",
@@ -240,6 +275,7 @@ export default {
       "- Suggestions must be relevant to the provided Fulfillment Area.",
       "- Do not output anything outside the JSON object."
     ].join("\n") : isAutoWriteMissionMode ? [
+      "Intent: autowrite_fulfillment.",
       "You generate AutoWrite mission suggestions for Loom Fulfillment Define Mission.",
       "Use APP_CONTEXT_JSON and the provided Fulfillment Area name.",
       "Mission guidance to follow:",
@@ -254,20 +290,89 @@ export default {
       "- No numbering, no bullets, no markdown.",
       "- Suggestions must be relevant to the provided Fulfillment Area.",
       "- Do not output anything outside the JSON object."
-    ].join("\n") : isAutoWritePlanResultMode ? [
-      "You generate AutoWrite Result suggestions for Loom Plan Result page.",
-      "Use APP_CONTEXT_JSON and the provided fulfillment-area action context.",
-      "Each suggestion should represent the shared outcome that all listed actions in that area are moving toward.",
+    ].join("\n") : isAutoWritePlanResultMode ? (
+      isPlanResultStrictIntent ? [
+        "Intent: plan_result_autowrite.",
+        "You generate one Result suggestion for Loom Plan Result AutoWrite.",
+        "Use ONLY the user payload JSON (areaName + actions[]).",
+        "Do not use APP_CONTEXT_JSON, diagnostics, or personalization.",
+        "Result must summarize the provided actions directly, not values language.",
+        "If confidence is low or actions are too vague, return an error object.",
+        "Return JSON in exactly one of these shapes:",
+        '{"message":"string","actions":[],"debug":{"usedContext":false,"confidence":"high|medium|low","evidence":["actions[]"]}}',
+        '{"error":"low_confidence","message":"Not enough clarity in actions to infer a Result."}',
+        "Rules:",
+        "- message must be 6-12 words.",
+        "- Keep wording specific and action-grounded.",
+        "- Avoid generic wording.",
+        "- No markdown, no bullets, no extra keys."
+      ].join("\n") : [
+        "You generate AutoWrite Result suggestions for Loom Plan Result page.",
+        "Use APP_CONTEXT_JSON and the provided fulfillment-area action context.",
+        "Each suggestion should represent the shared outcome that all listed actions in that area are moving toward.",
+        "Return JSON ONLY in this exact shape:",
+        '{"suggestions":[{"fulfillmentArea":"string","result":"string"}],"confidence":"high|medium|low"}',
+        "Rules:",
+        "- Return one suggestion per requested fulfillment area.",
+        "- Use only fulfillmentArea names provided in the prompt.",
+        "- Each result must be <=8 words (fewer is preferred).",
+        "- Keep wording concise, practical, and outcome-focused.",
+        "- Do not repeat existing results or prior suggestions when provided.",
+        "- No numbering, no bullets, no markdown.",
+        "- Do not output anything outside the JSON object."
+      ].join("\n")
+    ) : isOnboardingPurposeInsightsMode ? [
+      "Intent: onboarding_insights_purpose.",
+      "Generate Purpose onboarding insights for Loom.",
+      "Use APP_CONTEXT_JSON and the Purpose onboarding payload from the user message.",
+      "Focus on diagnostics A/B/D/E plus Purpose text (Vision/Purpose/Passions).",
+      "Output 3 cards in order: Your drivers, Your tension, First direction.",
+      "Each card must be concrete, concise, and actionable (1-2 short sentences).",
+      "When APP_CONTEXT_JSON exists, cite at least 2 concrete details from diagnostics + purpose content.",
+      "Do not give generic advice. Ground every card in user data.",
+      "If diagnostic personalization is missing, keep the cards useful but general and include a gentle nudge to complete Account -> Personalization.",
       "Return JSON ONLY in this exact shape:",
-      '{"suggestions":[{"fulfillmentArea":"string","result":"string"}],"confidence":"high|medium|low"}',
-      "Rules:",
-      "- Return one suggestion per requested fulfillment area.",
-      "- Use only fulfillmentArea names provided in the prompt.",
-      "- Each result must be <=8 words (fewer is preferred).",
-      "- Keep wording concise, practical, and outcome-focused.",
-      "- Do not repeat existing results or prior suggestions when provided.",
-      "- No numbering, no bullets, no markdown.",
-      "- Do not output anything outside the JSON object."
+      '{"cards":[{"title":"Your drivers","body":"string"},{"title":"Your tension","body":"string"},{"title":"First direction","body":"string"}],"confidence":"high|medium|low","nudge":"string optional","debug":{"usedContext":true,"evidence":["path.or.field.used"],"confidence":"high|medium|low"}}'
+    ].join("\n") : isOnboardingFulfillmentInsightsMode ? [
+      "Intent: onboarding_insights_fulfillment.",
+      "Generate Fulfillment onboarding insights for Loom.",
+      "Use APP_CONTEXT_JSON and the Fulfillment onboarding payload from the user message.",
+      "Focus on diagnostics C/D/E plus selected categories and early Fulfillment edits.",
+      "Output 3 cards in order: Your strands, Likely gap, First execution move.",
+      "Each card must be concrete, concise, and actionable (1-2 short sentences).",
+      "Your strands card should reference selected categories and coverage without rewarding volume.",
+      "Likely gap should infer one neglected area using stress source + break point + planning style.",
+      "First execution move should be a concrete starter move in Loom (small weekly focus or Little Win).",
+      "When APP_CONTEXT_JSON exists, cite at least 2 concrete details from diagnostics + fulfillment setup.",
+      "Do not give generic advice. Ground every card in user data.",
+      "If diagnostic personalization is missing, keep the cards useful but general and include a gentle nudge to complete Account -> Personalization.",
+      "Return JSON ONLY in this exact shape:",
+      '{"cards":[{"title":"Your strands","body":"string"},{"title":"Likely gap","body":"string"},{"title":"First execution move","body":"string"}],"confidence":"high|medium|low","nudge":"string optional","debug":{"usedContext":true,"evidence":["path.or.field.used"],"confidence":"high|medium|low"}}'
+    ].join("\n") : isOnboardingDiagnosticsInsightsMode ? [
+      "Intent: onboarding_insights_diagnostics.",
+      "Generate Quick Diagnostic insights for Loom onboarding.",
+      "Use APP_CONTEXT_JSON plus the diagnostic payload from the user message.",
+      "Output exactly 3 cards in this order and title casing: Root cause, Fulfillment areas, Next direction.",
+      "Root cause must be 1-2 short sentences and reference diagnostics A (stress source) and B (what breaks first).",
+      "Root cause must interpret behavior and tension, not copy labels.",
+      "Root cause must avoid quote-style phrasing and must not use 'You said' or 'You selected'.",
+      'Fulfillment areas must include selected areas and use this exact sentence when diagnostics exist: "Every task, goal, and little win will land in one of these areas, so your life stays organized."',
+      "Next direction must be 1-2 short sentences and <=40 words total.",
+      "Next direction must be forward-looking, confidence-building, and momentum-focused.",
+      "Next direction must emphasize focus, consistency, simpler priorities, and reduced overwhelm.",
+      "Next direction must avoid restating user answers or diagnostic labels.",
+      "Next direction must avoid phrases like 'Your current planning pattern', 'You selected', and 'This means'.",
+      "Next direction must avoid task instructions and immediate execution language.",
+      "Next direction must not repeat the Root cause card.",
+      "Hard rules:",
+      "- If APP_CONTEXT_JSON exists, use diagnostics to shape tone and emphasis implicitly without restating answers.",
+      "- Do not use 'this week' unless the user explicitly asked for a week-based plan.",
+      "- Do not use generic productivity advice.",
+      "- Do not include 'Goal:' labels or corporate phrasing.",
+      "Fallback rule for missing diagnostics:",
+      "- Keep the same 3 headers, explicitly state Loom does not have personalization yet, and tell the user to use Edit answers.",
+      "Return JSON ONLY in this exact shape:",
+      '{"cards":[{"title":"Root cause","body":"string"},{"title":"Fulfillment areas","body":"string"},{"title":"Next direction","body":"string"}],"confidence":"high|medium|low","nudge":"string optional","debug":{"usedContext":true,"evidence":["path.or.field.used"],"confidence":"high|medium|low"}}'
     ].join("\n") : isFollowUpPromptMode ? [
       "You generate follow-up prompt chips for the Loom iOS app.",
       "Use APP_CONTEXT_JSON and the recent chat transcript to decide whether showing follow-up prompts is high-value.",
@@ -278,7 +383,7 @@ export default {
       "Prefer prompts that help the user improve or edit data inside Loom (not generic external lifestyle advice).",
       "Prefer prompts that could plausibly lead to a Loom CTA action (add/replace/revise/clarify/connect/plan).",
       "Use APP_CONTEXT_JSON dataInventory and appGuide to understand the app's editable areas before proposing prompts.",
-      "Only suggest prompts tied to concepts clearly represented in APP_CONTEXT_JSON (e.g., Fulfillment Areas, Outcomes/Objectives, Action Blocks, Little Wins, Capture, Purpose, Vacation Mode, Recently Deleted).",
+      "Only suggest prompts tied to concepts clearly represented in APP_CONTEXT_JSON (e.g., Fulfillment Areas, Outcomes/Goals, Action Blocks, Little Wins, Capture, Purpose, Vacation Mode, Recently Deleted).",
       "Do NOT suggest prompts about unsupported/ambiguous concepts unless explicitly represented (e.g., 'skills' if no skills dataset is present).",
       "Do NOT suggest external domain-specific advice prompts (e.g., meal prep plans, supplement stacks, recipes) unless the app context explicitly tracks that concept as structured data.",
       "Target 1-3 prompts, each under 80 characters (hard max 120).",
@@ -447,33 +552,57 @@ export default {
       "Keep the answer concise, specific, and useful.",
     ].join("\n");
 
-    const groundedMessages = [
-      { role: "system", content: coreInstructions },
-      {
-        role: "system",
-        content: [
-          "APP_CONTEXT_METADATA:",
-          JSON.stringify(
-            {
-              hasContext: contextBytes > 0,
-              contextBytes,
-              contextKeys,
-              contextTruncated: contextInfo.truncated,
-              placeholderSignals,
-              workerPromptVersion,
-              client,
-            },
-            null,
-            2
-          ),
-        ].join("\n"),
-      },
-      {
-        role: "system",
-        content: `APP_CONTEXT_JSON:\n${contextBytes > 0 ? contextString : "{}"}`,
-      },
-      ...nonSystemMessages,
-    ];
+    const personalizationInstruction = [
+      "Personalization grounding rules:",
+      "- Personalization diagnostic context is provided in APP_CONTEXT_JSON.personalization and USER_PERSONALIZATION_CONTEXT.",
+      "- When giving planning, focus, or next-action guidance and personalization exists, ground recommendations in at least two concrete fields (stressSource, breakPoint, planningReality, desiredChange, lifeAreasSelected).",
+      "- Avoid generic guidance; tie suggestions and CTA ideas directly to those personalization fields when available.",
+      "- If personalization context is missing for planning/focus guidance, briefly state that diagnostic context is unavailable and suggest running Quick diagnostic once, then proceed with the best available context.",
+      "- Use only explicit diagnostic selections and do not infer sensitive traits."
+    ].join("\n");
+
+    const groundedMessages = isPlanResultStrictIntent
+      ? [
+        { role: "system", content: coreInstructions },
+        ...nonSystemMessages,
+      ]
+      : [
+        { role: "system", content: [coreInstructions, personalizationInstruction].join("\n\n") },
+        {
+          role: "system",
+          content: [
+            "APP_CONTEXT_METADATA:",
+            JSON.stringify(
+              {
+                hasContext: contextBytes > 0,
+                contextBytes,
+                contextKeys,
+                contextTruncated: contextInfo.truncated,
+                placeholderSignals,
+                hasPersonalizationContext: personalizationInfo.hasCurrent,
+                workerPromptVersion,
+                requestedIntent: requestedIntent || null,
+                client: {
+                  ...(client && typeof client === "object" ? client : {}),
+                  requestHash: clientRequestHash,
+                  requestId: clientRequestId,
+                },
+              },
+              null,
+              2
+            ),
+          ].join("\n"),
+        },
+        {
+          role: "system",
+          content: `APP_CONTEXT_JSON:\n${contextBytes > 0 ? contextString : "{}"}`,
+        },
+        {
+          role: "system",
+          content: `USER_PERSONALIZATION_CONTEXT:\n${personalizationInfo.text}`,
+        },
+        ...nonSystemMessages,
+      ];
 
     const model = env.OPENAI_MODEL || "gpt-4o-mini";
     const temperature = 0.2;
@@ -483,7 +612,10 @@ export default {
       : isAutoWriteLittleWinMode ? 260
       : isAutoWriteIdentityMode ? 260
       : isAutoWriteMissionMode ? 220
+      : isPlanResultStrictIntent ? 160
       : isAutoWritePlanResultMode ? 260
+      : isOnboardingPurposeInsightsMode ? 600
+      : isOnboardingFulfillmentInsightsMode ? 600
       : isFollowUpPromptMode ? 350
       : isReflectReadableInsightsMode ? 650
       : isFulfillmentReadableInsightMode ? 450
@@ -516,50 +648,58 @@ export default {
 
       if (!upstream.ok) {
         return json(
-          {
-            error: "OpenAI error",
-            status: upstreamStatus,
-            body: truncate(upstreamText, 2000),
-            debug: buildWorkerDebug({
-              model,
-              contextBytes,
-              contextHash,
-              contextKeys,
-              contextInfo,
-              workerPromptVersion,
-              messages,
-              nonSystemMessages,
-              upstreamStatus,
-              upstreamContentType,
-              parseMode: "upstream_error",
-            }),
-          },
-          502,
-          corsHeaders(request)
-        );
-      }
+	          {
+	            error: "OpenAI error",
+	            status: upstreamStatus,
+	            body: truncate(upstreamText, 2000),
+	            debug: {
+	              ...buildWorkerDebug({
+	                model,
+	                contextBytes,
+	                contextHash,
+	                contextKeys,
+	                contextInfo,
+	                workerPromptVersion,
+	                messages,
+	                nonSystemMessages,
+	                upstreamStatus,
+	                upstreamContentType,
+	                parseMode: "upstream_error",
+	              }),
+	              requestHash: clientRequestHash,
+	              requestId: clientRequestId,
+	            },
+	          },
+	          502,
+	          corsHeaders(request)
+	        );
+	      }
     } catch (e) {
-      return json(
-        {
-          error: "Upstream fetch failed",
-          details: String(e),
-          debug: buildWorkerDebug({
-            model,
-            contextBytes,
-            contextHash,
-            contextKeys,
-            contextInfo,
-            workerPromptVersion,
-            messages,
-            nonSystemMessages,
-            upstreamStatus,
-            upstreamContentType,
-            parseMode: "upstream_fetch_failed",
-          }),
-        },
-        502,
-        corsHeaders(request)
-      );
+	      return json(
+	        {
+	          error: "Upstream fetch failed",
+	          details: String(e),
+	          debug: {
+	            ...buildWorkerDebug({
+	              model,
+	              contextBytes,
+	              contextHash,
+	              contextKeys,
+	              contextInfo,
+	              workerPromptVersion,
+	              messages,
+	              nonSystemMessages,
+	              upstreamStatus,
+	              upstreamContentType,
+	              parseMode: "upstream_fetch_failed",
+	            }),
+	            requestHash: clientRequestHash,
+	            requestId: clientRequestId,
+	          },
+	        },
+	        502,
+	        corsHeaders(request)
+	      );
     }
 
     // Parse Chat Completions content safely
@@ -616,6 +756,9 @@ export default {
 
     if (isAutoWriteMissionMode) {
       const autoWrite = normalizeAutoWriteMissionPayload(parsedModelJSON, upstreamText);
+      if (!personalizationInfo.hasCurrent) {
+        autoWrite.nudge = "For more personalized suggestions, complete Account -> Personalization.";
+      }
       const out = {
         message: JSON.stringify(autoWrite),
         actions: [],
@@ -644,6 +787,9 @@ export default {
 
     if (isAutoWriteIdentityMode) {
       const autoWrite = normalizeAutoWriteIdentityPayload(parsedModelJSON, upstreamText);
+      if (!personalizationInfo.hasCurrent) {
+        autoWrite.nudge = "For more personalized suggestions, complete Account -> Personalization.";
+      }
       const out = {
         message: JSON.stringify(autoWrite),
         actions: [],
@@ -672,6 +818,9 @@ export default {
 
     if (isAutoWriteVisionMode) {
       const autoWrite = normalizeAutoWriteVisionPayload(parsedModelJSON, upstreamText);
+      if (!personalizationInfo.hasCurrent) {
+        autoWrite.nudge = "For more personalized suggestions, complete Account -> Personalization.";
+      }
       const out = {
         message: JSON.stringify(autoWrite),
         actions: [],
@@ -700,6 +849,9 @@ export default {
 
     if (isAutoWritePassionsMode) {
       const autoWrite = normalizeAutoWritePassionsPayload(parsedModelJSON, upstreamText);
+      if (!personalizationInfo.hasCurrent) {
+        autoWrite.nudge = "For more personalized suggestions, complete Account -> Personalization.";
+      }
       const out = {
         message: JSON.stringify(autoWrite),
         actions: [],
@@ -728,6 +880,9 @@ export default {
 
     if (isAutoWriteLittleWinMode) {
       const autoWrite = normalizeAutoWriteLittleWinPayload(parsedModelJSON, upstreamText);
+      if (!personalizationInfo.hasCurrent) {
+        autoWrite.nudge = "For more personalized suggestions, complete Account -> Personalization.";
+      }
       const out = {
         message: JSON.stringify(autoWrite),
         actions: [],
@@ -755,6 +910,31 @@ export default {
     }
 
     if (isAutoWritePlanResultMode) {
+      if (isPlanResultStrictIntent) {
+        const normalized = normalizePlanResultSinglePayload(parsedModelJSON, upstreamText);
+        if (normalized.error === "low_confidence") {
+          return json(
+            {
+              error: "low_confidence",
+              message: "Not enough clarity in actions to infer a Result.",
+            },
+            200,
+            corsHeaders(request)
+          );
+        }
+
+        const out = {
+          message: normalized.message,
+          actions: [],
+          debug: {
+            usedContext: false,
+            evidence: ["actions[]"],
+            confidence: normalized.confidence || "high",
+          },
+        };
+        return json(out, 200, corsHeaders(request));
+      }
+
       const autoWrite = normalizeAutoWritePlanResultPayload(parsedModelJSON, upstreamText);
       const out = {
         message: JSON.stringify(autoWrite),
@@ -777,6 +957,74 @@ export default {
           claimedUsedContext: null,
           evidence: [],
           confidence: autoWrite.confidence || null,
+        },
+      };
+      return json(out, 200, corsHeaders(request));
+    }
+
+    if (isOnboardingPurposeInsightsMode || isOnboardingFulfillmentInsightsMode || isOnboardingDiagnosticsInsightsMode) {
+      const mode = isOnboardingPurposeInsightsMode
+        ? "purpose"
+        : (isOnboardingFulfillmentInsightsMode ? "fulfillment" : "diagnostics");
+      const normalized = normalizeOnboardingInsightsPayload(
+        parsedModelJSON,
+        upstreamText,
+        mode,
+        !personalizationInfo.hasCurrent,
+        context
+      );
+      const modelDebug =
+        normalized.debug && typeof normalized.debug === "object" ? normalized.debug : {};
+      const modelEvidence = Array.isArray(modelDebug.evidence)
+        ? modelDebug.evidence.filter((x) => typeof x === "string").slice(0, 20)
+        : [];
+      const fallbackEvidenceBase = modelEvidence.length > 0
+        ? modelEvidence
+        : buildOnboardingInsightsEvidence(mode, context, personalizationInfo.hasCurrent);
+      const fallbackEvidence = mode === "diagnostics"
+        ? ensureDiagnosticsInsightsEvidencePaths(
+          fallbackEvidenceBase,
+          context,
+          personalizationInfo.hasCurrent
+        )
+        : fallbackEvidenceBase;
+      const claimedUsedContext =
+        typeof modelDebug.usedContext === "boolean" ? modelDebug.usedContext : null;
+      const confidence = typeof modelDebug.confidence === "string"
+        ? modelDebug.confidence
+        : (typeof normalized.confidence === "string" ? normalized.confidence : null);
+      const finalUsedContext =
+        typeof claimedUsedContext === "boolean"
+          ? claimedUsedContext
+          : contextBytes > 0 && fallbackEvidence.length > 0;
+
+      const out = {
+        message: JSON.stringify({
+          cards: normalized.cards,
+          confidence: normalized.confidence || "medium",
+          ...(normalized.nudge ? { nudge: normalized.nudge } : {}),
+        }),
+        actions: [],
+        debug: {
+          ...buildWorkerDebug({
+            model,
+            contextBytes,
+            contextHash,
+            contextKeys,
+            contextInfo,
+            workerPromptVersion,
+            messages,
+            nonSystemMessages,
+            upstreamStatus,
+            upstreamContentType,
+            parseMode,
+          }),
+          requestHash: clientRequestHash,
+          requestId: clientRequestId,
+          usedContext: finalUsedContext,
+          claimedUsedContext,
+          evidence: fallbackEvidence,
+          confidence,
         },
       };
       return json(out, 200, corsHeaders(request));
@@ -1036,6 +1284,19 @@ function flattenContent(content) {
   }
 }
 
+function normalizeIntent(value) {
+  const intent = String(value || "").trim().toLowerCase();
+  const supported = new Set([
+    "autowrite_purpose",
+    "autowrite_fulfillment",
+    "plan_result_autowrite",
+    "onboarding_insights_purpose",
+    "onboarding_insights_fulfillment",
+    "onboarding_insights_diagnostics",
+  ]);
+  return supported.has(intent) ? intent : "";
+}
+
 function normalizeAssistantJSON(parsed, fallbackText) {
   if (parsed && typeof parsed === "object" && typeof parsed.message === "string") {
     return {
@@ -1124,6 +1385,24 @@ function detectPurposeReadableInsightMode(nonSystemMessages) {
   const latestUser = [...(nonSystemMessages || [])].reverse().find((m) => m?.role === "user");
   const content = String(latestUser?.content || "");
   return content.includes("Create a readable insight for one Purpose passion in Loom Purpose Insights.");
+}
+
+function detectOnboardingPurposeInsightsMode(nonSystemMessages) {
+  const latestUser = [...(nonSystemMessages || [])].reverse().find((m) => m?.role === "user");
+  const content = String(latestUser?.content || "");
+  return content.includes("Generate Purpose onboarding insights for Loom.");
+}
+
+function detectOnboardingFulfillmentInsightsMode(nonSystemMessages) {
+  const latestUser = [...(nonSystemMessages || [])].reverse().find((m) => m?.role === "user");
+  const content = String(latestUser?.content || "");
+  return content.includes("Generate Fulfillment onboarding insights for Loom.");
+}
+
+function detectOnboardingDiagnosticsInsightsMode(nonSystemMessages) {
+  const latestUser = [...(nonSystemMessages || [])].reverse().find((m) => m?.role === "user");
+  const content = String(latestUser?.content || "");
+  return content.includes("Generate Quick Diagnostic insights for Loom");
 }
 
 function normalizeFollowUpPromptPayload(parsed, fallbackText) {
@@ -1517,11 +1796,11 @@ function normalizePlanResultArea(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
 
-function normalizePlanResultText(value) {
+function normalizePlanResultText(value, maxWords = 12) {
   const cleaned = String(value || "").replace(/\s+/g, " ").trim();
   if (!cleaned) return "";
-  const words = cleaned.split(" ").filter(Boolean).slice(0, 8).join(" ");
-  return truncateAtWordBoundary(words, 120);
+  const words = cleaned.split(" ").filter(Boolean).slice(0, maxWords).join(" ");
+  return truncateAtWordBoundary(words, 140);
 }
 
 function normalizeAutoWritePlanResultPayload(parsed, fallbackText) {
@@ -1546,6 +1825,7 @@ function normalizeAutoWritePlanResultPayload(parsed, fallbackText) {
       );
       const result = normalizePlanResultText(
         item.result || item.suggestion || item.text || item.value || ""
+        , 8
       );
       if (!fulfillmentArea || !result) return null;
       return { fulfillmentArea, result };
@@ -1580,6 +1860,44 @@ function normalizeAutoWritePlanResultPayload(parsed, fallbackText) {
   };
 }
 
+function normalizePlanResultSinglePayload(parsed, fallbackText) {
+  let raw = parsed && typeof parsed === "object" ? parsed : null;
+  if (!raw) {
+    try {
+      raw = JSON.parse(String(fallbackText || ""));
+    } catch {
+      raw = null;
+    }
+  }
+
+  const errorRaw = typeof raw?.error === "string" ? raw.error.toLowerCase().trim() : "";
+  if (errorRaw === "low_confidence") {
+    return {
+      error: "low_confidence",
+      message: "Not enough clarity in actions to infer a Result.",
+    };
+  }
+
+  const message = normalizePlanResultText(
+    raw?.message || raw?.result || raw?.text || "",
+    12
+  );
+  const confidenceRaw = typeof raw?.confidence === "string" ? raw.confidence.toLowerCase().trim() : "";
+  const confidence = ["high", "medium", "low"].includes(confidenceRaw) ? confidenceRaw : "medium";
+
+  if (!message || countWords(message) < 6 || countWords(message) > 12 || confidence === "low") {
+    return {
+      error: "low_confidence",
+      message: "Not enough clarity in actions to infer a Result.",
+    };
+  }
+
+  return {
+    message,
+    confidence,
+  };
+}
+
 function normalizeReadableInsightsPayload(parsed, fallbackText) {
   let raw = parsed && typeof parsed === "object" ? parsed : null;
   if (!raw) {
@@ -1610,6 +1928,393 @@ function normalizeReadableInsightsPayload(parsed, fallbackText) {
     message: message || "Loom could not generate readable insights for this session.",
     debug,
   };
+}
+
+function normalizeOnboardingInsightsPayload(parsed, fallbackText, mode, needsPersonalizationNudge, context) {
+  let raw = parsed && typeof parsed === "object" ? parsed : null;
+  if (!raw) {
+    try {
+      raw = JSON.parse(String(fallbackText || ""));
+    } catch {
+      raw = null;
+    }
+  }
+
+  const defaultTitles = mode === "purpose"
+    ? ["Your drivers", "Your tension", "First direction"]
+    : (mode === "fulfillment"
+      ? ["Your strands", "Likely gap", "First execution move"]
+      : ["Root cause", "Fulfillment areas", "Next direction"]);
+  const hasPersonalization = !!(context?.personalization?.current) && !needsPersonalizationNudge;
+  const defaultBodies = mode === "purpose"
+    ? [
+      "Your purpose direction points to progress and steadier control under pressure.",
+      "Ambition and bandwidth are currently in tension, so narrowing focus matters.",
+      "Choose one high-leverage next move that lowers stress and keeps momentum."
+    ]
+    : (mode === "fulfillment"
+      ? [
+        "Your selected strands are a useful base when you prioritize consistency over volume.",
+        "Current stress and planning patterns suggest one category is likely to be neglected.",
+        "Start with one simple weekly execution move tied to the category with the biggest gap."
+      ]
+      : defaultDiagnosticsInsightBodies(context, hasPersonalization));
+
+  const sourceCards = Array.isArray(raw?.cards)
+    ? raw.cards
+    : (Array.isArray(raw?.insights) ? raw.insights : []);
+  const bodyCandidates = sourceCards
+    .map((item) => extractOnboardingInsightBody(item))
+    .filter(Boolean)
+    .slice(0, 3);
+
+  while (bodyCandidates.length < 3) bodyCandidates.push(defaultBodies[bodyCandidates.length]);
+  const normalizedBodies = mode === "diagnostics"
+    ? normalizeDiagnosticsInsightBodies(bodyCandidates, context, hasPersonalization, defaultBodies)
+    : bodyCandidates;
+
+  const cards = defaultTitles.map((title, idx) => ({
+    title,
+    body: truncateAtWordBoundary(
+      String(normalizedBodies[idx] || defaultBodies[idx]).replace(/\s+/g, " ").trim(),
+      mode === "diagnostics" ? 420 : 280
+    ),
+  }));
+
+  const confidenceRaw = typeof raw?.confidence === "string" ? raw.confidence.toLowerCase().trim() : "";
+  const confidence = ["high", "medium", "low"].includes(confidenceRaw)
+    ? confidenceRaw
+    : "medium";
+  let nudge = typeof raw?.nudge === "string"
+    ? truncateAtWordBoundary(String(raw.nudge).replace(/\s+/g, " ").trim(), 180)
+    : "";
+  if (needsPersonalizationNudge && !nudge) {
+    nudge = mode === "diagnostics"
+      ? "Loom doesn’t have personalization yet. Use Edit answers to complete Quick diagnostic."
+      : "Complete Account -> Personalization for sharper Loom-specific insights.";
+  }
+
+  const debug = raw?.debug && typeof raw.debug === "object" ? raw.debug : null;
+  return {
+    cards,
+    confidence,
+    nudge: nudge || null,
+    debug,
+  };
+}
+
+function defaultDiagnosticsInsightBodies(context, hasPersonalization) {
+  const current = context?.personalization?.current;
+  if (!hasPersonalization || !current || typeof current !== "object") {
+    return [
+      "Loom doesn’t have your personalization yet. Use Edit answers to set your stress source and break point.",
+      "Loom doesn’t have your selected life areas yet. Use Edit answers so Loom can organize your tasks, goals, and little wins.",
+      "Loom can’t personalize your Next direction yet. Use Edit answers so Loom can tune your guidance."
+    ];
+  }
+
+  return [
+    buildImplicitRootCauseBody(current),
+    "Every task, goal, and little win will land in one of these areas, so your life stays organized.",
+    buildImplicitNextDirectionBody(current)
+  ];
+}
+
+function buildImplicitRootCauseBody(current) {
+  const stress = lowerFirstToken(
+    sanitizePersonalizationField(current?.stressSource, 120),
+    "competing priorities stack up"
+  );
+  const breakPoint = lowerFirstToken(
+    sanitizePersonalizationField(current?.breakPoint, 120),
+    "follow-through starts to slip"
+  );
+  return `Pressure builds when ${stress}, and momentum tends to break at ${breakPoint}. Loom will steady progress by narrowing focus and simplifying decisions.`;
+}
+
+function buildImplicitNextDirectionBody(current) {
+  const desired = sanitizePersonalizationField(current?.desiredChange, 120).toLowerCase();
+  const planning = sanitizePersonalizationField(current?.planningReality, 120).toLowerCase();
+  const stress = sanitizePersonalizationField(current?.stressSource, 120).toLowerCase();
+  const signal = `${desired} ${planning} ${stress}`;
+
+  if (/\bbalance\b|\baligned\b|\balignment\b|\bharmony\b/.test(signal)) {
+    return "Loom will align your priorities into a steadier rhythm, so progress stays sustainable. You’ll move forward with clearer focus, less overwhelm, and stronger long-term momentum.";
+  }
+  if (/\bconsistent\b|\bconsistency\b|\broutine\b|\bfollow\b|\breliable\b/.test(signal)) {
+    return "Loom will keep your priorities focused and repeatable, so follow-through stays steady. You’ll build reliable momentum with less friction and clearer direction.";
+  }
+  if (/\bcontrol\b|\bclarity\b|\borganized\b|\bstructure\b|\bfocus\b/.test(signal)) {
+    return "Loom will simplify your planning into clearer priorities, so decisions feel lighter. You’ll move forward with steady focus, less overwhelm, and stronger control.";
+  }
+  return "Loom will narrow your priorities and keep execution consistent, so progress compounds. You’ll build reliable momentum with less overwhelm and clearer focus.";
+}
+
+function normalizeDiagnosticsInsightBodies(candidates, context, hasPersonalization, defaultBodies) {
+  if (!hasPersonalization) return defaultBodies;
+
+  const current = context?.personalization?.current || {};
+  const stress = sanitizePersonalizationField(current?.stressSource, 120);
+  const breakPoint = sanitizePersonalizationField(current?.breakPoint, 120);
+
+  const rootCandidate = String(candidates[0] || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const rootSentences = splitIntoSentences(rootCandidate);
+  const rootText = rootSentences.slice(0, 2).join(" ");
+  const rootBody =
+    rootCandidate &&
+    rootSentences.length >= 1 &&
+    rootSentences.length <= 2 &&
+    countWords(rootText) <= 55 &&
+    includesPersonalizationReference(rootCandidate, stress) &&
+    includesPersonalizationReference(rootCandidate, breakPoint) &&
+    !hasQuoteStyleRootCauseLanguage(rootCandidate) &&
+    !containsDiagnosticsRestatementLanguage(rootCandidate)
+      ? rootText
+      : defaultBodies[0];
+
+  const nextDirectionCandidate = String(candidates[2] || "")
+    .replace(/\bGoal:\s*/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const nextDirectionSentences = splitIntoSentences(nextDirectionCandidate);
+  const hasWeekLanguage = /\bthis week\b/i.test(nextDirectionCandidate);
+  const nextDirectionText = nextDirectionSentences.slice(0, 2).join(" ");
+  const nextDirectionBody =
+    nextDirectionCandidate &&
+    !hasWeekLanguage &&
+    nextDirectionSentences.length >= 1 &&
+    nextDirectionSentences.length <= 2 &&
+    countWords(nextDirectionText) <= 40 &&
+    hasDirectionalLanguage(nextDirectionCandidate) &&
+    !hasTaskInstructionLanguage(nextDirectionCandidate) &&
+    !hasOnboardingActionLanguage(nextDirectionCandidate) &&
+    !repeatsDiagnosticsRootCauseLanguage(nextDirectionCandidate) &&
+    !containsDiagnosticsRestatementLanguage(nextDirectionCandidate) &&
+    !hasGenericProductivityAdviceLanguage(nextDirectionCandidate)
+      ? nextDirectionText
+      : defaultBodies[2];
+
+  return [
+    rootBody,
+    "Every task, goal, and little win will land in one of these areas, so your life stays organized.",
+    nextDirectionBody
+  ];
+}
+
+function splitIntoSentences(text) {
+  return String(text || "")
+    .split(/[.!?]+\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => `${part}.`);
+}
+
+function includesPersonalizationReference(text, rawValue) {
+  const value = String(rawValue || "").toLowerCase().trim();
+  if (!value) return false;
+  const haystack = String(text || "").toLowerCase();
+  if (haystack.includes(value)) return true;
+  const tokens = value
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter(Boolean)
+    .filter((token) => token.length > 4)
+    .slice(0, 6);
+  return tokens.some((token) => haystack.includes(token));
+}
+
+function countWords(text) {
+  return String(text || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length;
+}
+
+function hasDirectionalLanguage(text) {
+  const lower = String(text || "").toLowerCase();
+  const tokens = [
+    "we'll", "we will", "you'll", "you will",
+    "focus", "consistent", "consistency", "momentum",
+    "overwhelm", "clarity", "priority", "priorities",
+    "steady", "direction", "simpler"
+  ];
+  return tokens.some((token) => lower.includes(token));
+}
+
+function containsDiagnosticsRestatementLanguage(text) {
+  const lower = String(text || "").toLowerCase();
+  const fragments = [
+    "your current planning pattern",
+    "you selected",
+    "this means",
+    "stress source",
+    "break point",
+    "planning style",
+    "desired change",
+    "life areas"
+  ];
+  return fragments.some((fragment) => lower.includes(fragment));
+}
+
+function hasQuoteStyleRootCauseLanguage(text) {
+  const raw = String(text || "");
+  const lower = raw.toLowerCase();
+  if (/\byou said\b/.test(lower) || /\byou selected\b/.test(lower)) return true;
+  return /["“”]/u.test(raw);
+}
+
+function hasGenericProductivityAdviceLanguage(text) {
+  const lower = String(text || "").toLowerCase();
+  const fragments = [
+    "productivity",
+    "optimize",
+    "efficiency",
+    "hack",
+    "time management",
+    "maximize output"
+  ];
+  return fragments.some((fragment) => lower.includes(fragment));
+}
+
+function hasTaskInstructionLanguage(text) {
+  const lower = String(text || "").toLowerCase();
+  const patterns = [
+    /\bstart by\b/,
+    /\bstart now\b/,
+    /\bdo this today\b/,
+    /\bdo this now\b/,
+    /\btry\b/,
+    /\bopen\s+\w+/,
+    /\btap\s+\w+/,
+    /\badd\s+(one|a)\b/,
+    /\bcreate\s+(one|a)\b/,
+    /\bset up\b/,
+    /\bchoose\s+(one|a)\b/,
+  ];
+  return patterns.some((pattern) => pattern.test(lower));
+}
+
+function lowerFirstToken(value, fallback) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return fallback;
+  if (trimmed.length === 1) return trimmed.toLowerCase();
+  return `${trimmed[0].toLowerCase()}${trimmed.slice(1)}`;
+}
+
+function sanitizeClientDebugValue(value, maxLen = 128) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return truncateAtWordBoundary(trimmed, Math.max(16, maxLen));
+}
+
+function hasOnboardingActionLanguage(text) {
+  const lower = String(text || "").toLowerCase();
+  const patterns = [
+    /\bedit answers\b/,
+    /\bsave your responses\b/,
+    /\bcustomize\b/,
+    /\bchange settings\b/,
+    /\bupdate\b/,
+  ];
+  return patterns.some((pattern) => pattern.test(lower));
+}
+
+function repeatsDiagnosticsRootCauseLanguage(text) {
+  const lower = String(text || "").toLowerCase();
+  const fragments = [
+    "stress is mainly",
+    "you said stress",
+    "progress breaks",
+    "breaks at",
+  ];
+  return fragments.some((fragment) => lower.includes(fragment));
+}
+
+function extractOnboardingInsightBody(item) {
+  if (typeof item === "string") {
+    return String(item).replace(/\s+/g, " ").trim();
+  }
+  if (!item || typeof item !== "object") return "";
+  const bodyRaw = item.body || item.message || item.text || item.value || "";
+  return String(bodyRaw).replace(/\s+/g, " ").trim();
+}
+
+function buildOnboardingInsightsEvidence(mode, context, hasPersonalization) {
+  const evidence = [];
+  if (hasPersonalization && context?.personalization?.current) {
+    if (typeof context.personalization.current.stressSource === "string") {
+      evidence.push("personalization.current.stressSource");
+    }
+    if (typeof context.personalization.current.breakPoint === "string") {
+      evidence.push("personalization.current.breakPoint");
+    }
+    if (typeof context.personalization.current.planningReality === "string") {
+      evidence.push("personalization.current.planningReality");
+    }
+    if (Array.isArray(context.personalization.current.lifeAreasSelected)) {
+      evidence.push("personalization.current.lifeAreasSelected");
+    }
+  }
+
+  if (mode === "purpose") {
+    if (typeof context?.drivingForce?.vision === "string") {
+      evidence.push("drivingForce.vision");
+    }
+    if (typeof context?.drivingForce?.purpose === "string") {
+      evidence.push("drivingForce.purpose");
+    }
+    if (Array.isArray(context?.drivingForce?.passions)) {
+      evidence.push("drivingForce.passions");
+    }
+    if (typeof context?.purposeDraft?.vision === "string") {
+      evidence.push("purposeDraft.vision");
+    }
+  } else {
+    if (Array.isArray(context?.fulfillmentCategories)) {
+      evidence.push("fulfillmentCategories");
+    }
+    if (Array.isArray(context?.fulfillmentSetup?.selectedCategoryNames)) {
+      evidence.push("fulfillmentSetup.selectedCategoryNames");
+    }
+    if (Array.isArray(context?.fulfillmentSetup?.focusCategoryNames)) {
+      evidence.push("fulfillmentSetup.focusCategoryNames");
+    }
+  }
+
+  if (Array.isArray(context?.dataInventory) && context.dataInventory.length > 0) {
+    evidence.push("dataInventory");
+  }
+
+  return evidence.slice(0, 8);
+}
+
+function ensureDiagnosticsInsightsEvidencePaths(evidence, context, hasPersonalization) {
+  const out = Array.isArray(evidence)
+    ? evidence.filter((item) => typeof item === "string" && item.trim().length > 0)
+    : [];
+  if (!hasPersonalization || !context?.personalization?.current) {
+    return out.slice(0, 20);
+  }
+
+  const required = [];
+  if (typeof context.personalization.current.stressSource === "string") {
+    required.push("personalization.current.stressSource");
+  }
+  if (typeof context.personalization.current.breakPoint === "string") {
+    required.push("personalization.current.breakPoint");
+  }
+  if (Array.isArray(context.personalization.current.lifeAreasSelected)) {
+    required.push("personalization.current.lifeAreasSelected");
+  }
+
+  for (const path of required) {
+    if (!out.includes(path)) out.push(path);
+  }
+  return out.slice(0, 20);
 }
 
 function extractReadableInsightPayload(nonSystemMessages, mode) {
@@ -2292,6 +2997,54 @@ function looksLikePlaceholderValue(value) {
   if (/^test\d*$/.test(s)) return true;
   if (/^placeholder\d*$/.test(s)) return true;
   return false;
+}
+
+function buildPersonalizationContext(context) {
+  const current = context?.personalization?.current;
+  const recentChangesRaw = Array.isArray(context?.personalization?.recentChanges)
+    ? context.personalization.recentChanges
+    : [];
+  const recentChanges = recentChangesRaw
+    .filter((item) => typeof item === "string")
+    .map((item) => truncate(item.trim(), 160))
+    .filter(Boolean)
+    .slice(0, 3);
+
+  if (!current || typeof current !== "object") {
+    return {
+      hasCurrent: false,
+      text: "Diagnostic personalization context unavailable.",
+    };
+  }
+
+  const stress = sanitizePersonalizationField(current.stressSource, 140);
+  const breakPoint = sanitizePersonalizationField(current.breakPoint, 140);
+  const planning = sanitizePersonalizationField(current.planningReality, 140);
+  const desiredChange = sanitizePersonalizationField(current.desiredChange, 140);
+  const lifeAreas = Array.isArray(current.lifeAreasSelected)
+    ? current.lifeAreasSelected
+      .filter((item) => typeof item === "string")
+      .map((item) => sanitizePersonalizationField(item, 60))
+      .filter(Boolean)
+      .slice(0, 7)
+    : [];
+  const changesText = recentChanges.length > 0
+    ? recentChanges.join(" | ")
+    : "No recent changes.";
+
+  return {
+    hasCurrent: true,
+    text: `User personalization (current): Stress=${stress || "n/a"}, Breakpoint=${breakPoint || "n/a"}, Planning=${planning || "n/a"}, DesiredChange=${desiredChange || "n/a"}, LifeAreas=[${lifeAreas.join(", ")}]. Recent changes: ${changesText}`,
+  };
+}
+
+function sanitizePersonalizationField(value, maxLen = 120) {
+  return truncate(
+    String(value || "")
+      .replace(/\s+/g, " ")
+      .trim(),
+    maxLen
+  );
 }
 
 function collectPlaceholderSignals(context) {

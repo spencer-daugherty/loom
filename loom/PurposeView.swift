@@ -435,6 +435,7 @@ struct PurposeView: View {
     @State private var visionTextDraft: String = ""
     @State private var purposeTextDraft: String = ""
     @State private var addStates: [String: AddState] = [:]
+    @State private var focusedPassionFieldTextByEmotion: [String: String] = [:]
     @State private var isShowingInstructions: Bool = false
     @State private var isShowingHistoric = false
     @State private var activeEditor: DrivingForceEditor?
@@ -573,6 +574,23 @@ struct PurposeView: View {
 
     private var isKeyboardVisible: Bool { keyboardHeight > 0 }
 
+    private var focusedFieldHasNonBlankText: Bool {
+        switch focusedField {
+        case .vision:
+            return !visionTextDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .purpose:
+            return !purposeTextDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case let .passion(emotion):
+            if let text = focusedPassionFieldTextByEmotion[emotion] {
+                return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+            let text = addStates[emotion]?.newText ?? ""
+            return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case nil:
+            return false
+        }
+    }
+
     private func keyboardDismissBottomPadding(in proxy: GeometryProxy) -> CGFloat {
         guard keyboardHeight > 0 else { return 58 }
         let keyboardTopGlobal = UIScreen.main.bounds.height - keyboardHeight
@@ -587,15 +605,25 @@ struct PurposeView: View {
             focusedField = nil
             hideKeyboard()
         } label: {
-            Image(systemName: "keyboard.chevron.compact.down")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.primary.opacity(0.85))
-                .frame(width: 45, height: 45)
-                .background(.ultraThinMaterial, in: Circle())
-                .overlay(
-                    Circle()
-                        .stroke(Color.white.opacity(0.28), lineWidth: 1)
-                )
+            Group {
+                if focusedFieldHasNonBlankText {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 45, height: 45)
+                        .background(Color.blue, in: Circle())
+                } else {
+                    Image(systemName: "keyboard.chevron.compact.down")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.primary.opacity(0.85))
+                        .frame(width: 45, height: 45)
+                        .background(.ultraThinMaterial, in: Circle())
+                        .overlay(
+                            Circle()
+                                .stroke(Color.white.opacity(0.28), lineWidth: 1)
+                        )
+                }
+            }
         }
         .buttonStyle(.plain)
     }
@@ -1925,6 +1953,13 @@ struct PurposeView: View {
                     onAddStateChange: { newState in
                         addStates[category.emotion] = newState
                     },
+                    onActiveFieldTextChange: { text in
+                        if let text {
+                            focusedPassionFieldTextByEmotion[category.emotion] = text
+                        } else {
+                            focusedPassionFieldTextByEmotion.removeValue(forKey: category.emotion)
+                        }
+                    },
                     focusedField: $focusedField,
                     onCommit: { text in
                         commitPassion(text: text, emotion: category.emotion)
@@ -2064,6 +2099,7 @@ struct PurposeView: View {
             - Keep wording clear, practical, and specific.
             - If mode is Reword Vision and Current Vision is not empty, prioritize improving clarity/strength while keeping the same meaning.
             - If mode is Reword Vision but Current Vision is empty, fall back to New Vision behavior.
+            - If mode is New Vision and Current Vision is not empty, suggestions must be meaningfully different from Current Vision.
 
             Return JSON only:
             {"suggestions":["string"],"confidence":"high|medium|low"}
@@ -2082,9 +2118,16 @@ struct PurposeView: View {
             guard !suggestions.isEmpty else { return }
             let filtered = suggestions.filter { suggestion in
                 let normalized = normalizedVisionSuggestion(suggestion)
-                return !previousSuggestions.contains { normalizedVisionSuggestion($0) == normalized }
+                if previousSuggestions.contains(where: { normalizedVisionSuggestion($0) == normalized }) {
+                    return false
+                }
+                if selectedVisionAutoWriteMode == .newVision &&
+                    isVisionSuggestionTooSimilarToCurrentVision(suggestion) {
+                    return false
+                }
+                return true
             }
-            let nextSuggestions = Array((filtered.isEmpty ? suggestions : filtered).prefix(2))
+            let nextSuggestions = Array(filtered.prefix(2))
             guard !nextSuggestions.isEmpty else { return }
             autoWriteVisionSuggestions = nextSuggestions
         } catch {
@@ -2317,6 +2360,22 @@ struct PurposeView: View {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
             .lowercased()
+    }
+
+    private func isVisionSuggestionTooSimilarToCurrentVision(_ suggestion: String) -> Bool {
+        let current = normalizedVisionSuggestion(visionTextDraft)
+        let candidate = normalizedVisionSuggestion(suggestion)
+        guard !current.isEmpty, !candidate.isEmpty else { return false }
+
+        if current == candidate { return true }
+        if current.contains(candidate) || candidate.contains(current) { return true }
+
+        let currentTokens = Set(current.split(whereSeparator: \.isWhitespace).map(String.init))
+        let candidateTokens = Set(candidate.split(whereSeparator: \.isWhitespace).map(String.init))
+        guard !currentTokens.isEmpty, !candidateTokens.isEmpty else { return false }
+        let overlap = currentTokens.intersection(candidateTokens).count
+        let overlapRatio = Double(overlap) / Double(max(1, min(currentTokens.count, candidateTokens.count)))
+        return overlapRatio >= 0.8
     }
 
     private func truncateSuggestion(_ text: String, maxLength: Int) -> String {
@@ -2914,6 +2973,9 @@ private struct DrivingForceTrendsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 if trendsContentIsReady {
+                    if shouldShowBaselineMethodologyCard {
+                        baselineMethodologyCard
+                    }
                     summaryTiles
                     timelinePickerRow
                     trendGraphSection
@@ -3145,6 +3207,42 @@ private struct DrivingForceTrendsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var shouldShowBaselineMethodologyCard: Bool {
+        guard let snap = selectedSnapshot else { return false }
+        return purposeTrendsReadableInsightPayload(for: snap).recentScores.count <= 1
+    }
+
+    private var baselineMethodologyCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.orange)
+                Text("Baseline Mode")
+                    .font(.subheadline.weight(.semibold))
+            }
+
+            Text("Loom is establishing your first Purpose baseline from score foundations like Structure, Outcomes, Action Blocks, Little Wins, and Evidence.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text("Purpose Insights update monthly, so long-term direction and momentum become clearer over time.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(red: 0.98, green: 0.92, blue: 0.72))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.orange.opacity(0.35), lineWidth: 1)
+        )
     }
 
     private var passionsSection: some View {
@@ -3677,6 +3775,7 @@ struct PassionEditor: View {
     let addState: AddState
     let dismissCommitSignal: Int
     let onAddStateChange: (AddState) -> Void
+    let onActiveFieldTextChange: (String?) -> Void
     @FocusState.Binding var focusedField: Field?
     let onCommit: (String) -> Void
     let onDelete: (Passion) -> Void
@@ -3689,7 +3788,12 @@ struct PassionEditor: View {
             if addState.isAdding {
                 TextField("Add \(category.title)", text: Binding(
                     get: { addState.newText },
-                    set: { onAddStateChange(addStateWithNewText($0)) }
+                    set: {
+                        onAddStateChange(addStateWithNewText($0))
+                        if focusedField == .passion(category.emotion) {
+                            onActiveFieldTextChange($0)
+                        }
+                    }
                 ))
                 .focused($focusedField, equals: .passion(category.emotion))
                 .submitLabel(.done)
@@ -3710,7 +3814,15 @@ struct PassionEditor: View {
 
             ForEach(category.query, id: \.id) { passion in
                 if editingPassion?.id == passion.id {
-                    TextField("Edit passion", text: $editText)
+                    TextField("Edit passion", text: Binding(
+                        get: { editText },
+                        set: {
+                            editText = $0
+                            if focusedField == .passion(category.emotion) {
+                                onActiveFieldTextChange($0)
+                            }
+                        }
+                    ))
                         .focused($focusedField, equals: .passion(category.emotion))
                         .textInputAutocapitalization(.sentences)
                         .autocorrectionDisabled(false)
@@ -3745,6 +3857,12 @@ struct PassionEditor: View {
         }
         .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
         .onChange(of: focusedField) { _, newValue in
+            if newValue == .passion(category.emotion) {
+                let currentText = editingPassion != nil ? editText : addState.newText
+                onActiveFieldTextChange(currentText)
+            } else {
+                onActiveFieldTextChange(nil)
+            }
             // If focus leaves this category's inline add field, collapse back to "Add Item".
             guard addState.isAdding else { return }
             if newValue != .passion(category.emotion) {
@@ -3778,6 +3896,7 @@ struct PassionEditor: View {
     private func startEditing(_ passion: Passion) {
         editingPassion = passion
         editText = passion.passion
+        onActiveFieldTextChange(passion.passion)
         focusedField = .passion(category.emotion)
     }
     

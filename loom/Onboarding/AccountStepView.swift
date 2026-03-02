@@ -21,10 +21,23 @@ import CryptoKit
 import Security
 #endif
 
+private struct AccountStepDarkModeInvertImage: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+
+    func body(content: Content) -> some View {
+        if colorScheme == .dark {
+            content
+                .colorInvert()
+                .compositingGroup()
+        } else {
+            content
+        }
+    }
+}
+
 struct AccountStepView: View {
     @EnvironmentObject private var session: UserSessionStore
     @Environment(\.colorScheme) private var colorScheme
-    @AppStorage("return_to_onboarding_last_page_once") private var returnToOnboardingLastPageOnce = false
     @AppStorage("developer_launch_paywall_once") private var developerLaunchPaywallOnce = false
 
     @State private var appleSignInError: String?
@@ -195,48 +208,15 @@ struct AccountStepView: View {
         .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color(.systemBackground).ignoresSafeArea())
-        .safeAreaInset(edge: .top, spacing: 0) {
-            HStack(spacing: 12) {
-                Button {
-                    returnToOnboardingEnd()
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 36, height: 36)
-                        .background(Color(.secondarySystemBackground), in: Circle())
-                        .overlay(
-                            Circle()
-                                .stroke(Color.black.opacity(0.12), lineWidth: 1)
-                        )
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Back")
-
-                Spacer(minLength: 0)
-
-                Group {
-                    if colorScheme == .dark {
-                        Image("logo")
-                            .resizable()
-                            .renderingMode(.template)
-                            .foregroundStyle(.white)
-                    } else {
-                        Image("logo")
-                            .resizable()
-                    }
-                }
-                .scaledToFit()
-                .frame(height: 40)
-
-                Spacer(minLength: 0)
-
-                Color.clear
-                    .frame(width: 36, height: 36)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Image("logo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(height: 40)
+                    .modifier(AccountStepDarkModeInvertImage())
             }
-            .padding(.top, 8)
-            .padding(.horizontal, 4)
-            .frame(maxWidth: .infinity, alignment: .center)
         }
         .onAppear {
             if developerLaunchPaywallOnce {
@@ -247,6 +227,8 @@ struct AccountStepView: View {
                     developerLaunchPaywallOnce = false
                     session.setHasSeenOnboarding(true)
                     session.setHasAccount(true)
+                    session.setHasCompletedDiagnostic(true)
+                    session.setHasSeenDiagnosticInsights(true)
                     session.setIsSubscribed(false)
                 }
             }
@@ -262,16 +244,6 @@ struct AccountStepView: View {
                 AnalyticsLogger.log(.signupAbandoned(reason: "dismissed"))
             }
         }
-        .highPriorityGesture(
-            DragGesture(minimumDistance: 18)
-                .onEnded { value in
-                    let startedFromLeadingEdge = value.startLocation.x <= 28
-                    let isHorizontalBackSwipe = value.translation.width > 80 && abs(value.translation.height) < 80
-                    if startedFromLeadingEdge && isHorizontalBackSwipe {
-                        returnToOnboardingEnd()
-                    }
-                }
-        )
     }
 
     private var googleGIcon: some View {
@@ -325,11 +297,6 @@ struct AccountStepView: View {
 #else
         googleSignInError = "Google sign in SDK is not available in this build."
 #endif
-    }
-
-    private func returnToOnboardingEnd() {
-        returnToOnboardingLastPageOnce = true
-        session.setHasSeenOnboarding(false)
     }
 
     private func startAppleSignIn(credential: ASAuthorizationAppleIDCredential) {

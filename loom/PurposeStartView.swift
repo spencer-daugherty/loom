@@ -8,6 +8,7 @@ struct PurposeStartView: View {
 
     @Query(sort: \DrivingForce.updatedAt, order: .reverse) private var drivingForces: [DrivingForce]
     @Query(sort: \Passion.date, order: .forward) private var passions: [Passion]
+    @Query private var passionJoins: [PassionFulfillmentJoin]
 
     @State private var step: Step = .intro
     @State private var visionText: String = ""
@@ -30,10 +31,23 @@ struct PurposeStartView: View {
     @State private var autoWritePassionSuggestions: [AutoWritePassionSuggestion] = []
     @State private var isAutoWritingVision = false
     @State private var isAutoWritingPassions = false
+    @State private var autoWriteVisionErrorMessage: String? = nil
+    @State private var autoWritePassionsErrorMessage: String? = nil
+    @State private var autoWriteVisionLoadedKeys = Set<String>()
+    @State private var autoWritePassionsLoadedKeys = Set<String>()
+    @State private var autoWriteVisionSuggestionsCache: [String: [String]] = [:]
+    @State private var autoWritePassionSuggestionsCache: [String: [AutoWritePassionSuggestion]] = [:]
     @State private var selectedPassionAutoWriteFilter: PassionAutoWriteFilter = .all
     @State private var autoWriteMemory: PurposeAutoWriteMemory = .load()
     @State private var lastAppliedVisionSuggestion: String? = nil
     @State private var trackedEditForLastAppliedVision = false
+    @State private var purposeInsightCards: [PurposeInsightCard] = []
+    @State private var isGeneratingPurposeInsights = false
+    @State private var purposeInsightsErrorMessage: String? = nil
+    @State private var purposeInsightsNudgeMessage: String? = nil
+    @State private var purposeInsightsLoadedKeys = Set<String>()
+    @State private var purposeInsightsCache: [String: [PurposeInsightCard]] = [:]
+    @State private var purposeInsightsNudgeCache: [String: String] = [:]
     @State private var autoWriteOutlineAngle: Double = 0
     @State private var autoWriteIconAnimating: Bool = false
     @State private var autoWriteIconAnimationTask: Task<Void, Never>? = nil
@@ -56,6 +70,12 @@ struct PurposeStartView: View {
         let emotion: String
         let passion: String
         var id: String { "\(emotion)|\(passion.lowercased())" }
+    }
+
+    private struct PurposeInsightCard: Identifiable, Hashable {
+        let title: String
+        let body: String
+        var id: String { "\(title.lowercased())|\(body.lowercased())" }
     }
 
     private struct PurposeAutoWriteMemory: Codable {
@@ -186,6 +206,7 @@ struct PurposeStartView: View {
         case purpose = 2
         case passions = 3
         case summary = 4
+        case insights = 5
 
         var title: String {
             switch self {
@@ -194,6 +215,7 @@ struct PurposeStartView: View {
             case .purpose: return "Purpose"
             case .passions: return "Passions"
             case .summary: return "Summary"
+            case .insights: return "Loom sees…"
             }
         }
     }
@@ -207,6 +229,14 @@ struct PurposeStartView: View {
 
     private var currentDrivingForce: DrivingForce? {
         drivingForces.first
+    }
+
+    private var personalizationSnapshot: PersonalizationSnapshot? {
+        PersonalizationStore.cachedContextForCurrentUser()?.current
+    }
+
+    private var hasPersonalizationSnapshot: Bool {
+        personalizationSnapshot != nil
     }
 
     private var visionTrimmed: String {
@@ -246,7 +276,7 @@ struct PurposeStartView: View {
     }
 
     private var isScrollableStep: Bool {
-        step == .vision || step == .passions || step == .summary
+        step == .vision || step == .passions || step == .summary || step == .insights
     }
 
     private var editorSurfaceColor: Color {
@@ -258,7 +288,7 @@ struct PurposeStartView: View {
     }
 
     private var contentBottomPadding: CGFloat {
-        step == .summary ? 100 : 0
+        (step == .summary || step == .insights) ? 100 : 0
     }
     private var screenHeight: CGFloat { UIScreen.main.bounds.height }
     private var screenWidth: CGFloat { UIScreen.main.bounds.width }
@@ -324,6 +354,7 @@ struct PurposeStartView: View {
                     focusedField = nil
                 }
             }
+            handleAutoStartForStep(newStep)
         }
         .onChange(of: focusedField) { _, newValue in
             if case .some(.passion(let key)) = newValue {
@@ -338,12 +369,26 @@ struct PurposeStartView: View {
         .onChange(of: visionText) { _, newValue in
             clearStepValidationIfResolved()
             recordVisionEditIfNeeded(newValue: newValue)
+            if step == .insights {
+                purposeInsightsLoadedKeys.removeAll()
+            }
         }
-        .onChange(of: draftPassions) { _, _ in clearStepValidationIfResolved() }
+        .onChange(of: draftPassions) { _, _ in
+            clearStepValidationIfResolved()
+            if step == .insights {
+                purposeInsightsLoadedKeys.removeAll()
+            }
+        }
+        .onChange(of: isGeneratingPurposeInsights, initial: false) { _, newValue in
+            setAutoWriteLoadingAnimation(newValue)
+        }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(step != .intro)
-        .onAppear(perform: loadFromPersistentData)
+        .onAppear {
+            loadFromPersistentData()
+            handleAutoStartForStep(step)
+        }
         .onDisappear {
             autoWriteIconAnimationTask?.cancel()
             autoWriteIconAnimationTask = nil
@@ -436,6 +481,8 @@ struct PurposeStartView: View {
                 passionsStep
             case .summary:
                 summaryStep
+            case .insights:
+                insightsStep
             }
         }
         .padding(.horizontal)
@@ -518,7 +565,12 @@ struct PurposeStartView: View {
                 .frame(maxWidth: .infinity)
 
                 Button {
-                    finalizeAndContinue()
+                    guard summaryCanSave else {
+                        triggerHint("Please complete all required items.")
+                        return
+                    }
+                    saveVisionIfChanged()
+                    step = .insights
                 } label: {
                     Text("Continue")
                         .frame(maxWidth: .infinity)
@@ -527,6 +579,39 @@ struct PurposeStartView: View {
                 .buttonStyle(.borderedProminent)
                 .frame(maxWidth: .infinity)
                 .disabled(!summaryCanSave)
+            } else if step == .insights {
+                VStack(spacing: 10) {
+                    Button {
+                        step = .summary
+                    } label: {
+                        Text("Back")
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .contentShape(Rectangle())
+                    }
+                    .foregroundStyle(Color.primary)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color(.systemGray5))
+                    )
+                    .buttonStyle(.plain)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.black.opacity(0.12), lineWidth: 1)
+                    }
+                    .frame(maxWidth: .infinity)
+
+                    Button {
+                        finalizeAndContinue()
+                    } label: {
+                        Text("Continue")
+                            .frame(maxWidth: .infinity)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .frame(maxWidth: .infinity)
+                }
+                .frame(maxWidth: .infinity)
             } else {
                 Button {
                     switch step {
@@ -534,6 +619,8 @@ struct PurposeStartView: View {
                         step = .vision
                     case .summary:
                         step = .passions
+                    case .insights:
+                        step = .summary
                     default:
                         step = Step(rawValue: max(0, step.rawValue - 1)) ?? .intro
                     }
@@ -588,6 +675,8 @@ struct PurposeStartView: View {
             return "Passions"
         case .summary:
             return "Summary"
+        case .insights:
+            return "Loom sees…"
         }
     }
 
@@ -597,11 +686,12 @@ struct PurposeStartView: View {
         case .purpose: return 2
         case .passions: return 2
         case .summary: return 3
+        case .insights: return 4
         case .intro: return 0
         }
     }
 
-    private let progressTotalSteps: Int = 3
+    private let progressTotalSteps: Int = 4
 
     private var progressStrip: some View {
         HStack(spacing: 6) {
@@ -718,6 +808,19 @@ struct PurposeStartView: View {
                     }
                 }
 
+                if let error = autoWriteVisionErrorMessage {
+                    purposeRetryRow(
+                        message: error,
+                        buttonTitle: "Try again"
+                    ) {
+                        Task { await requestAutoWriteVisionSuggestions(forceRefresh: true) }
+                    }
+                } else if !hasPersonalizationSnapshot {
+                    Text("Suggestions are less personalized until you complete Account -> Personalization.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Button {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         showNeedIdeasVision.toggle()
@@ -822,9 +925,14 @@ struct PurposeStartView: View {
 
                     let values = draftPassions[bucket.key] ?? []
                     ForEach(Array(values.enumerated()), id: \.offset) { index, value in
+                        let selectionCount = passionSelectionCount(for: value, in: bucket.key)
                         HStack(spacing: 10) {
                             Text(value)
                                 .frame(maxWidth: .infinity, alignment: .leading)
+                            Text("\(selectionCount)")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
                             Button {
                                 deletePassions(at: IndexSet(integer: index), in: bucket.key)
                             } label: {
@@ -885,6 +993,19 @@ struct PurposeStartView: View {
                             .disabled(isApplied)
                         }
                     }
+                }
+
+                if let error = autoWritePassionsErrorMessage {
+                    purposeRetryRow(
+                        message: error,
+                        buttonTitle: "Try again"
+                    ) {
+                        Task { await requestAutoWritePassionSuggestions(forceRefresh: true) }
+                    }
+                } else if !hasPersonalizationSnapshot {
+                    Text("Add Personalization in Account for more tailored Passion suggestions.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 Button {
@@ -1012,6 +1133,77 @@ struct PurposeStartView: View {
             .padding(12)
             .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
         }
+    }
+
+    private var insightsStep: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let error = purposeInsightsErrorMessage {
+                purposeRetryRow(
+                    message: error,
+                    buttonTitle: "Try again"
+                ) {
+                    Task { await generatePurposeInsights(forceRefresh: true) }
+                }
+            }
+
+            if let nudge = purposeInsightsNudgeMessage, !nudge.isEmpty {
+                Text(nudge)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            ForEach(purposeInsightCards) { card in
+                purposeInsightsCard(card)
+            }
+        }
+        .padding(14)
+        .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func purposeRetryRow(
+        message: String,
+        buttonTitle: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 6)
+            Button(buttonTitle, action: action)
+                .font(.caption.weight(.semibold))
+                .buttonStyle(.plain)
+                .foregroundStyle(.blue)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func purposeInsightsCard(_ card: PurposeInsightCard) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(card.title)
+                .font(.caption.weight(.bold))
+                .textCase(.uppercase)
+                .foregroundStyle(.secondary)
+                .tracking(0.45)
+            Text(card.body)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(autoWriteSuggestionCardFill.opacity(colorScheme == .dark ? 0.34 : 0.28))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(autoWriteGradient.opacity(0.72), lineWidth: 1.2)
+        )
     }
 
     private func summaryCard(title: String, body: String, onEdit: @escaping () -> Void) -> some View {
@@ -1177,6 +1369,23 @@ struct PurposeStartView: View {
             guard values.indices.contains(index) else { continue }
             removeChip(values[index], from: bucketKey)
         }
+    }
+
+    private func passionSelectionCount(for passionText: String, in emotionKey: String) -> Int {
+        let matchingPassionIDs = Set(
+            passions
+                .filter {
+                    $0.emotion == emotionKey &&
+                    $0.passion.caseInsensitiveCompare(passionText) == .orderedSame
+                }
+                .map(\.passion_id)
+        )
+        guard !matchingPassionIDs.isEmpty else { return 0 }
+        return Set(
+            passionJoins
+                .filter { matchingPassionIDs.contains($0.passion_id) }
+                .map(\.category_id)
+        ).count
     }
 
     private func advanceFromCurrentStep() {
@@ -1385,7 +1594,7 @@ struct PurposeStartView: View {
         return VStack(alignment: .trailing, spacing: 8) {
             Button {
                 guard !isLoading else { return }
-                Task { await requestAutoWriteVisionSuggestions() }
+                Task { await requestAutoWriteVisionSuggestions(forceRefresh: true) }
             } label: {
                 HStack(spacing: 6) {
                     Image("LoomAI")
@@ -1433,7 +1642,7 @@ struct PurposeStartView: View {
             ZStack(alignment: .trailing) {
                 Button {
                     guard !isLoading else { return }
-                    Task { await requestAutoWritePassionSuggestions() }
+                    Task { await requestAutoWritePassionSuggestions(forceRefresh: true) }
                 } label: {
                     HStack(alignment: .top, spacing: 6) {
                         Image("LoomAI")
@@ -1523,11 +1732,37 @@ struct PurposeStartView: View {
         let confidence: String?
     }
 
-    private func requestAutoWriteVisionSuggestions() async {
+    private struct PurposeInsightsResponse: Decodable {
+        struct Card: Decodable {
+            let title: String?
+            let body: String?
+            let text: String?
+            let message: String?
+        }
+        let cards: [Card]?
+        let confidence: String?
+        let nudge: String?
+    }
+
+    private func requestAutoWriteVisionSuggestions(forceRefresh: Bool = false) async {
+        let requestKey = visionAutoWriteCacheKey
+        if !forceRefresh, let cached = autoWriteVisionSuggestionsCache[requestKey], !cached.isEmpty {
+            autoWriteVisionSuggestions = cached
+            autoWriteVisionErrorMessage = nil
+            return
+        }
+        if !forceRefresh, autoWriteVisionLoadedKeys.contains(requestKey) {
+            return
+        }
+        autoWriteVisionLoadedKeys.insert(requestKey)
+
         let previousSuggestions = autoWriteVisionSuggestions
+        autoWriteVisionErrorMessage = nil
         isAutoWritingVision = true
         defer { isAutoWritingVision = false }
-        autoWriteVisionSuggestions = []
+        if forceRefresh || autoWriteVisionSuggestionsCache[requestKey] == nil {
+            autoWriteVisionSuggestions = []
+        }
 
         do {
             let contextSnapshot = try LoomAIViewModel().buildContextSnapshot(in: context)
@@ -1549,7 +1784,7 @@ struct PurposeStartView: View {
             "I live a life of purpose, growth, and freedom. I build meaningful work that creates value for others while giving me time, financial independence, and the ability to choose how I live. I am healthy, energized, and surrounded by strong relationships, and I continue to learn, lead, and make a positive impact."
 
             Return JSON only:
-            {"suggestions":["string"],"confidence":"high|medium|low"}
+            {"suggestions":["string"],"confidence":"high|medium|low","nudge":"optional string"}
 
             Rules:
             - Return 1-2 suggestions.
@@ -1559,27 +1794,51 @@ struct PurposeStartView: View {
 
             let response = try await LoomAIService().sendChat(
                 messages: [.init(role: "user", content: instruction)],
-                context: contextSnapshot
+                context: contextSnapshot,
+                intent: "autowrite_purpose",
+                screen: "purpose_vision"
             )
             let suggestions = decodeAutoWriteVisionSuggestions(from: response.message)
-            guard !suggestions.isEmpty else { return }
+            guard !suggestions.isEmpty else {
+                autoWriteVisionErrorMessage = "No suggestions yet."
+                return
+            }
             let filtered = suggestions.filter { suggestion in
                 let normalized = normalizedVisionSuggestion(suggestion)
                 return !previousSuggestions.contains { normalizedVisionSuggestion($0) == normalized }
             }
             let nextSuggestions = Array((filtered.isEmpty ? suggestions : filtered).prefix(2))
-            guard !nextSuggestions.isEmpty else { return }
+            guard !nextSuggestions.isEmpty else {
+                autoWriteVisionErrorMessage = "No suggestions yet."
+                return
+            }
             autoWriteVisionSuggestions = nextSuggestions
+            autoWriteVisionSuggestionsCache[requestKey] = nextSuggestions
+            autoWriteVisionErrorMessage = nil
         } catch {
-            return
+            autoWriteVisionErrorMessage = "Couldn’t generate Vision suggestions."
         }
     }
 
-    private func requestAutoWritePassionSuggestions() async {
+    private func requestAutoWritePassionSuggestions(forceRefresh: Bool = false) async {
+        let requestKey = passionsAutoWriteCacheKey
+        if !forceRefresh, let cached = autoWritePassionSuggestionsCache[requestKey], !cached.isEmpty {
+            autoWritePassionSuggestions = cached
+            autoWritePassionsErrorMessage = nil
+            return
+        }
+        if !forceRefresh, autoWritePassionsLoadedKeys.contains(requestKey) {
+            return
+        }
+        autoWritePassionsLoadedKeys.insert(requestKey)
+
         let previousSuggestions = autoWritePassionSuggestions
+        autoWritePassionsErrorMessage = nil
         isAutoWritingPassions = true
         defer { isAutoWritingPassions = false }
-        autoWritePassionSuggestions = []
+        if forceRefresh || autoWritePassionSuggestionsCache[requestKey] == nil {
+            autoWritePassionSuggestions = []
+        }
 
         do {
             let contextSnapshot = try LoomAIViewModel().buildContextSnapshot(in: context)
@@ -1620,7 +1879,7 @@ struct PurposeStartView: View {
             - Passions should reflect stable values, commitments, and direction.
 
             Return JSON only:
-            {"suggestions":[{"emotion":"love|vows|thrill|just","passion":"string"}],"confidence":"high|medium|low"}
+            {"suggestions":[{"emotion":"love|vows|thrill|just","passion":"string"}],"confidence":"high|medium|low","nudge":"optional string"}
 
             Rules:
             - Return 2-4 suggestions.
@@ -1637,10 +1896,15 @@ struct PurposeStartView: View {
 
             let response = try await LoomAIService().sendChat(
                 messages: [.init(role: "user", content: instruction)],
-                context: contextSnapshot
+                context: contextSnapshot,
+                intent: "autowrite_purpose",
+                screen: "purpose_passions"
             )
             let suggestions = decodeAutoWritePassionSuggestions(from: response.message)
-            guard !suggestions.isEmpty else { return }
+            guard !suggestions.isEmpty else {
+                autoWritePassionsErrorMessage = "No suggestions yet."
+                return
+            }
 
             let bucketFiltered = suggestions.filter { suggestion in
                 if selectedPassionAutoWriteFilter == .all { return true }
@@ -1649,7 +1913,10 @@ struct PurposeStartView: View {
             let sourceSuggestions = (bucketFiltered.isEmpty ? suggestions : bucketFiltered).filter { suggestion in
                 !isPassionSuggestionTooSimilarToExisting(suggestion)
             }
-            guard !sourceSuggestions.isEmpty else { return }
+            guard !sourceSuggestions.isEmpty else {
+                autoWritePassionsErrorMessage = "No suggestions yet."
+                return
+            }
             let nextSuggestions = sourceSuggestions.filter { suggestion in
                 let normalized = normalizedVisionSuggestion(suggestion.passion)
                 let wasSuggestedBefore = previousSuggestions.contains {
@@ -1657,10 +1924,213 @@ struct PurposeStartView: View {
                 }
                 return !wasSuggestedBefore
             }
-            autoWritePassionSuggestions = Array((nextSuggestions.isEmpty ? sourceSuggestions : nextSuggestions).prefix(4))
+            let resolvedSuggestions = Array((nextSuggestions.isEmpty ? sourceSuggestions : nextSuggestions).prefix(4))
+            autoWritePassionSuggestions = resolvedSuggestions
+            autoWritePassionSuggestionsCache[requestKey] = resolvedSuggestions
+            autoWritePassionsErrorMessage = nil
         } catch {
+            autoWritePassionsErrorMessage = "Couldn’t generate Passion suggestions."
+        }
+    }
+
+    private func generatePurposeInsights(forceRefresh: Bool = false) async {
+        let requestKey = purposeInsightsCacheKey
+        if !forceRefresh, let cached = purposeInsightsCache[requestKey], !cached.isEmpty {
+            purposeInsightCards = cached
+            purposeInsightsNudgeMessage = purposeInsightsNudgeCache[requestKey]
+            purposeInsightsErrorMessage = nil
             return
         }
+        if !forceRefresh, purposeInsightsLoadedKeys.contains(requestKey) {
+            return
+        }
+        purposeInsightsLoadedKeys.insert(requestKey)
+
+        isGeneratingPurposeInsights = true
+        purposeInsightsErrorMessage = nil
+        purposeInsightsNudgeMessage = nil
+        if forceRefresh || purposeInsightsCache[requestKey] == nil {
+            purposeInsightCards = []
+        }
+        defer { isGeneratingPurposeInsights = false }
+
+        do {
+            let contextSnapshot = try LoomAIViewModel().buildContextSnapshot(in: context)
+            let payloadJSON = purposeInsightsPayloadJSONString()
+            let instruction = """
+            Generate Purpose onboarding insights for Loom.
+            Purpose onboarding payload JSON:
+            \(payloadJSON)
+
+            Requirements:
+            - Return JSON only with exactly 3 cards.
+            - Card 1 title: Your drivers
+            - Card 2 title: Your tension
+            - Card 3 title: First direction
+            - Ground the cards in diagnostics + purpose text; avoid generic advice.
+            - Include at least two concrete references to the user inputs when available.
+            - Keep each body concise and practical.
+            """
+
+            let response = try await LoomAIService().sendChat(
+                messages: [.init(role: "user", content: instruction)],
+                context: contextSnapshot,
+                intent: "onboarding_insights_purpose",
+                screen: "purpose_insights"
+            )
+            let decoded = decodePurposeInsights(from: response.message)
+            guard !decoded.cards.isEmpty else {
+                purposeInsightCards = defaultPurposeInsightsCards()
+                purposeInsightsErrorMessage = "Couldn’t generate insights yet."
+                return
+            }
+            purposeInsightCards = decoded.cards
+            purposeInsightsNudgeMessage = decoded.nudge
+            purposeInsightsCache[requestKey] = decoded.cards
+            if let nudge = decoded.nudge {
+                purposeInsightsNudgeCache[requestKey] = nudge
+            }
+        } catch {
+            purposeInsightCards = defaultPurposeInsightsCards()
+            purposeInsightsErrorMessage = "Couldn’t generate insights yet."
+        }
+    }
+
+    private func handleAutoStartForStep(_ newStep: Step) {
+        switch newStep {
+        case .vision:
+            Task { await requestAutoWriteVisionSuggestions() }
+        case .purpose, .passions:
+            Task { await requestAutoWritePassionSuggestions() }
+        case .insights:
+            Task { await generatePurposeInsights() }
+        default:
+            break
+        }
+    }
+
+    private var visionAutoWriteCacheKey: String {
+        "vision|\(stableHash(personalizationSignature() + "|" + normalizedVisionSuggestion(visionTrimmed)))"
+    }
+
+    private var passionsAutoWriteCacheKey: String {
+        "passions|\(stableHash(personalizationSignature() + "|" + selectedPassionAutoWriteFilter.rawValue + "|" + draftPassionsSignature()))"
+    }
+
+    private var purposeInsightsCacheKey: String {
+        "purpose_insights|\(stableHash(personalizationSignature() + "|" + normalizedVisionSuggestion(visionTrimmed) + "|" + draftPassionsSignature()))"
+    }
+
+    private func personalizationSignature() -> String {
+        guard let snapshot = personalizationSnapshot else { return "none" }
+        let parts: [String] = [
+            snapshot.createdAt.ISO8601Format(),
+            snapshot.stressSource,
+            snapshot.breakPoint,
+            snapshot.lifeAreasSelected.joined(separator: "|"),
+            snapshot.planningReality,
+            snapshot.desiredChange
+        ]
+        return parts.joined(separator: "||")
+    }
+
+    private func draftPassionsSignature() -> String {
+        bucketOrder
+            .map { bucket in
+                let values = (draftPassions[bucket.key] ?? [])
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                    .filter { !$0.isEmpty }
+                return "\(bucket.key):\(values.joined(separator: ","))"
+            }
+            .joined(separator: "|")
+    }
+
+    private func stableHash(_ raw: String) -> String {
+        raw.unicodeScalars.reduce(UInt64(5381)) { acc, scalar in
+            ((acc << 5) &+ acc) &+ UInt64(scalar.value)
+        }
+        .description
+    }
+
+    private func purposeInsightsPayloadJSONString() -> String {
+        let diagnostics = personalizationSnapshot.map { snapshot in
+            [
+                "stressSource": snapshot.stressSource,
+                "breakPoint": snapshot.breakPoint,
+                "planningReality": snapshot.planningReality,
+                "desiredChange": snapshot.desiredChange,
+                "lifeAreasSelected": snapshot.lifeAreasSelected,
+                "createdAt": snapshot.createdAt.ISO8601Format()
+            ] as [String: Any]
+        } ?? [
+            "missing": true
+        ]
+
+        let purposePayload: [String: Any] = [
+            "vision": visionTrimmed,
+            "purpose": purposeText.trimmingCharacters(in: .whitespacesAndNewlines),
+            "passionsByBucket": bucketOrder.reduce(into: [String: [String]]()) { partialResult, bucket in
+                partialResult[bucket.key] = draftPassions[bucket.key] ?? []
+            }
+        ]
+        let payload: [String: Any] = [
+            "diagnostics": diagnostics,
+            "purpose": purposePayload
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys, .prettyPrinted]),
+              let jsonString = String(data: data, encoding: .utf8) else {
+            return "{}"
+        }
+        return jsonString
+    }
+
+    private func decodePurposeInsights(from raw: String) -> (cards: [PurposeInsightCard], nudge: String?) {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let defaultTitles = ["Your drivers", "Your tension", "First direction"]
+        if let data = trimmed.data(using: .utf8),
+           let parsed = try? JSONDecoder().decode(PurposeInsightsResponse.self, from: data) {
+            let bodies = (parsed.cards ?? []).compactMap { card -> String? in
+                let body = (card.body ?? card.text ?? card.message ?? "")
+                    .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                return body.isEmpty ? nil : body
+            }
+            var cards: [PurposeInsightCard] = []
+            for (index, title) in defaultTitles.enumerated() {
+                let body = index < bodies.count ? bodies[index] : defaultPurposeInsightsCards()[index].body
+                cards.append(PurposeInsightCard(title: title, body: body))
+            }
+            return (cards, parsed.nudge?.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+
+        let fallbackBodies = trimmed
+            .components(separatedBy: "\n")
+            .map { $0.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        if fallbackBodies.count >= 3 {
+            return (
+                zip(defaultTitles, fallbackBodies.prefix(3)).map { PurposeInsightCard(title: $0.0, body: $0.1) },
+                nil
+            )
+        }
+        return (defaultPurposeInsightsCards(), nil)
+    }
+
+    private func defaultPurposeInsightsCards() -> [PurposeInsightCard] {
+        [
+            PurposeInsightCard(
+                title: "Your drivers",
+                body: "Your Purpose points to growth with less stress, anchored in what matters most to you right now."
+            ),
+            PurposeInsightCard(
+                title: "Your tension",
+                body: "Your profile suggests tension between ambition and available bandwidth, so focus needs to be narrowed."
+            ),
+            PurposeInsightCard(
+                title: "First direction",
+                body: "Pick one meaningful direction for this week and support it with one repeatable action."
+            )
+        ]
     }
 
     private func decodeAutoWritePassionSuggestions(from raw: String) -> [AutoWritePassionSuggestion] {

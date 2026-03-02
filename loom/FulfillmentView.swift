@@ -722,6 +722,32 @@ struct FulfillmentView: View {
 
     private var isKeyboardVisible: Bool { keyboardHeight > 0 }
 
+    private var focusedFieldHasNonBlankText: Bool {
+        if let focusedField {
+            switch focusedField {
+            case .role:
+                return !newRoleText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            case .focus:
+                return !newFocusText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            case .resource:
+                return !newResourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+        }
+        if let focusedVisionCategoryID {
+            let text = visionDrafts[focusedVisionCategoryID]
+                ?? fulfillments.first(where: { $0.category_id == focusedVisionCategoryID })?.category_vision
+                ?? ""
+            return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        if let focusedPurposeCategoryID {
+            let text = purposeDrafts[focusedPurposeCategoryID]
+                ?? fulfillments.first(where: { $0.category_id == focusedPurposeCategoryID })?.category_purpose
+                ?? ""
+            return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        return false
+    }
+
     private func keyboardDismissBottomPadding(in proxy: GeometryProxy) -> CGFloat {
         guard keyboardHeight > 0 else { return 58 }
         let keyboardTopGlobal = UIScreen.main.bounds.height - keyboardHeight
@@ -734,15 +760,25 @@ struct FulfillmentView: View {
         Button {
             dismissFulfillmentKeyboard()
         } label: {
-            Image(systemName: "keyboard.chevron.compact.down")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.primary.opacity(0.85))
-                .frame(width: 45, height: 45)
-                .background(.ultraThinMaterial, in: Circle())
-                .overlay(
-                    Circle()
-                        .stroke(Color.white.opacity(0.28), lineWidth: 1)
-                )
+            Group {
+                if focusedFieldHasNonBlankText {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 45, height: 45)
+                        .background(Color.blue, in: Circle())
+                } else {
+                    Image(systemName: "keyboard.chevron.compact.down")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.primary.opacity(0.85))
+                        .frame(width: 45, height: 45)
+                        .background(.ultraThinMaterial, in: Circle())
+                        .overlay(
+                            Circle()
+                                .stroke(Color.white.opacity(0.28), lineWidth: 1)
+                        )
+                }
+            }
         }
         .buttonStyle(.plain)
     }
@@ -3234,6 +3270,8 @@ private struct RoleEditorSheetView: View {
                                                     .font(.subheadline.weight(.bold))
                                                     .foregroundStyle(autoWriteSuggestionPrimaryColor(isApplied: isApplied))
                                                     .multilineTextAlignment(.leading)
+                                                    .lineLimit(nil)
+                                                    .fixedSize(horizontal: false, vertical: true)
                                                 if isApplied {
                                                     Text("Tap field to edit")
                                                         .font(.caption)
@@ -3393,8 +3431,7 @@ private struct RoleEditorSheetView: View {
 
             Rules:
             - Return 1-2 suggestions.
-            - identity must be 1-3 words.
-            - identity must be <=40 characters.
+            - identity should be a complete short phrase (about 2-8 words).
             - no numbering, no bullets, no markdown.
             """
 
@@ -3454,21 +3491,9 @@ private struct RoleEditorSheetView: View {
     }
 
     private func clampedIdentitySuggestion(_ text: String) -> String {
-        let cleaned = text
+        text
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleaned.isEmpty else { return "" }
-        let words = cleaned.split(whereSeparator: \.isWhitespace).prefix(3).joined(separator: " ")
-        return truncateSuggestion(words, maxLength: 40)
-    }
-
-    private func truncateSuggestion(_ text: String, maxLength: Int) -> String {
-        guard text.count > maxLength else { return text }
-        let prefix = String(text.prefix(maxLength))
-        if let space = prefix.lastIndex(of: " "), space > prefix.startIndex {
-            return String(prefix[..<space]).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        return prefix.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func normalizedAutoWriteText(_ text: String) -> String {
@@ -3815,6 +3840,7 @@ struct LittleWinEditorSheetView: View {
     @State private var autoWriteOutlineAngle: Double = 0
     @State private var autoWriteIconAnimating = false
     @State private var autoWriteIconAnimationTask: Task<Void, Never>?
+    @State private var keyboardHeight: CGFloat = 0
     @FocusState private var isTextFocused: Bool
 
     private struct LittleWinAutoWriteSuggestionDTO: Decodable {
@@ -3850,6 +3876,7 @@ struct LittleWinEditorSheetView: View {
 
     private var isEditing: Bool { focusID != nil }
     private var showsAutoWrite: Bool { !isEditing && littleWins.count < 3 }
+    private let autoWriteFloatingGap: CGFloat = 12
 
     private var doneDisabled: Bool {
         draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -3883,6 +3910,54 @@ struct LittleWinEditorSheetView: View {
         )
     }
 
+    private func autoWriteBottomPadding(in proxy: GeometryProxy) -> CGFloat {
+        guard keyboardHeight > 0 else { return 18 }
+        let keyboardTopGlobal = UIScreen.main.bounds.height - keyboardHeight
+        let viewBottomGlobal = proxy.frame(in: .global).maxY
+        let keyboardOverlapInView = max(0, viewBottomGlobal - keyboardTopGlobal)
+        return keyboardOverlapInView + autoWriteFloatingGap
+    }
+
+    private var floatingAutoWriteButton: some View {
+        Button {
+            guard !autoWriteIsLoading else { return }
+            Task { await requestAutoWriteSuggestions() }
+        } label: {
+            HStack(spacing: 6) {
+                Image("LoomAI")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 27, height: 27)
+                    .rotation3DEffect(
+                        .degrees(autoWriteIsLoading && autoWriteIconAnimating ? 180 : 0),
+                        axis: (x: 1, y: 0, z: 0)
+                    )
+                Text("AutoWrite")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(autoWriteGradient)
+            }
+            .padding(.horizontal, 15)
+            .padding(.vertical, 9)
+            .background(
+                Capsule()
+                    .fill(Color(.systemGroupedBackground))
+            )
+            .overlay(
+                Capsule()
+                    .stroke(autoWriteGradient, lineWidth: 2.25)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(autoWriteIsLoading)
+        .opacity(autoWriteIsLoading ? 0.7 : 1)
+        .onAppear {
+            guard autoWriteOutlineAngle == 0 else { return }
+            withAnimation(.linear(duration: 8).repeatForever(autoreverses: false)) {
+                autoWriteOutlineAngle = 360
+            }
+        }
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -3892,47 +3967,6 @@ struct LittleWinEditorSheetView: View {
                         .textInputAutocapitalization(.sentences)
 
                     if showsAutoWrite {
-                        HStack {
-                            Spacer()
-                            Button {
-                                guard !autoWriteIsLoading else { return }
-                                Task { await requestAutoWriteSuggestions() }
-                            } label: {
-                                HStack(spacing: 6) {
-                                    Image("LoomAI")
-                                        .resizable()
-                                        .scaledToFit()
-                                        .frame(width: 27, height: 27)
-                                        .rotation3DEffect(
-                                            .degrees(autoWriteIsLoading && autoWriteIconAnimating ? 180 : 0),
-                                            axis: (x: 1, y: 0, z: 0)
-                                        )
-                                    Text("AutoWrite")
-                                        .font(.subheadline.weight(.semibold))
-                                        .foregroundStyle(autoWriteGradient)
-                                }
-                                .padding(.horizontal, 15)
-                                .padding(.vertical, 9)
-                                .background(
-                                    Capsule()
-                                        .fill(Color(.systemGroupedBackground))
-                                )
-                                .overlay(
-                                    Capsule()
-                                        .stroke(autoWriteGradient, lineWidth: 2.25)
-                                )
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(autoWriteIsLoading)
-                            .opacity(autoWriteIsLoading ? 0.7 : 1)
-                        }
-                        .onAppear {
-                            guard autoWriteOutlineAngle == 0 else { return }
-                            withAnimation(.linear(duration: 8).repeatForever(autoreverses: false)) {
-                                autoWriteOutlineAngle = 360
-                            }
-                        }
-
                         if !autoWriteSuggestions.isEmpty {
                             VStack(alignment: .leading, spacing: 8) {
                                 ForEach(autoWriteSuggestions, id: \.self) { suggestion in
@@ -3961,6 +3995,8 @@ struct LittleWinEditorSheetView: View {
                                                     .font(.subheadline.weight(.bold))
                                                     .foregroundStyle(autoWriteSuggestionPrimaryColor(isApplied: isApplied))
                                                     .multilineTextAlignment(.leading)
+                                                    .lineLimit(nil)
+                                                    .fixedSize(horizontal: false, vertical: true)
                                                 if isApplied {
                                                     Text("Tap field to edit")
                                                         .font(.caption)
@@ -4095,6 +4131,18 @@ struct LittleWinEditorSheetView: View {
                 }
             }
         }
+        .overlay {
+            GeometryReader { proxy in
+                if showsAutoWrite {
+                    HStack(spacing: 8) {
+                        floatingAutoWriteButton
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                    .padding(.trailing, 16)
+                    .padding(.bottom, autoWriteBottomPadding(in: proxy))
+                }
+            }
+        }
         .presentationDetents([.medium])
         .presentationDragIndicator(.visible)
         .onAppear {
@@ -4115,6 +4163,14 @@ struct LittleWinEditorSheetView: View {
         }
         .onDisappear {
             setAutoWriteLoadingAnimation(false)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
+            guard let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
+            let screenHeight = UIScreen.main.bounds.height
+            keyboardHeight = max(0, screenHeight - frame.minY)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            keyboardHeight = 0
         }
         .sheet(item: $integrationSetupTarget) { target in
             LittleWinIntegrationSetupSheet(
@@ -4312,7 +4368,7 @@ struct LittleWinEditorSheetView: View {
 
             Rules:
             - Return 1-2 suggestions.
-            - activity must be <=7 words and <=80 characters.
+            - activity should be a complete short action (about 4-14 words).
             - no numbering, no bullets, no markdown.
             """
 
@@ -4372,21 +4428,9 @@ struct LittleWinEditorSheetView: View {
     }
 
     private func clampedLittleWinSuggestion(_ text: String) -> String {
-        let cleaned = text
+        text
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleaned.isEmpty else { return "" }
-        let words = cleaned.split(whereSeparator: \.isWhitespace).prefix(7).joined(separator: " ")
-        return truncateSuggestion(words, maxLength: 80)
-    }
-
-    private func truncateSuggestion(_ text: String, maxLength: Int) -> String {
-        guard text.count > maxLength else { return text }
-        let prefix = String(text.prefix(maxLength))
-        if let space = prefix.lastIndex(of: " "), space > prefix.startIndex {
-            return String(prefix[..<space]).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        return prefix.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func normalizedAutoWriteText(_ text: String) -> String {
@@ -5255,6 +5299,9 @@ private struct FulfillmentTrendsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
+                if shouldShowBaselineMethodologyCard {
+                    baselineMethodologyCard
+                }
                 summaryTiles
                 timelinePickerRow
                 trendGraphSection
@@ -5493,6 +5540,42 @@ private struct FulfillmentTrendsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var shouldShowBaselineMethodologyCard: Bool {
+        guard let snap = selectedSnapshot else { return false }
+        return trendsReadableInsightPayload(for: snap).recentCategoryScores.count <= 1
+    }
+
+    private var baselineMethodologyCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.orange)
+                Text("Baseline Mode")
+                    .font(.subheadline.weight(.semibold))
+            }
+
+            Text("Loom is establishing your first Fulfillment baseline from weekly signals like Structure, Outcomes, Action Blocks, Little Wins, Engagement, and Strategic Behavior.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text("Fulfillment Insights update weekly, so you can continuously improve each area and see traction build.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.orange.opacity(0.35))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.orange.opacity(0.35), lineWidth: 1)
+        )
     }
 
     private var insightsSection: some View {

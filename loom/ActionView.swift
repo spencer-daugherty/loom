@@ -135,6 +135,8 @@ struct ActionView: View {
     private var devManualWarningCardsEnabled: Bool = false
     @AppStorage("dev_action_blocks_warning_old_blocks")
     private var devActionBlocksWarningOldBlocks: Bool = false
+    @AppStorage("action_blocks_simple_view_enabled_v1")
+    private var actionBlocksSimpleViewEnabled: Bool = false
 
     @State private var isShowingInstructions: Bool = false
     @State private var openFilter: FilterMenu? = nil
@@ -1308,12 +1310,24 @@ struct ActionView: View {
 
     private func collapsibleHeader(filterContext: ActionFilterContext) -> some View {
         VStack(spacing: 8) {
-            Text("Action Blocks")
-                .font(isHeaderCollapsed ? .title3 : .largeTitle)
-                .fontWeight(.bold)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.top, 8)
-                .animation(.spring(response: 0.24, dampingFraction: 0.86), value: isHeaderCollapsed)
+            HStack(alignment: .center, spacing: 12) {
+                Text("Action Blocks")
+                    .font(isHeaderCollapsed ? .title3 : .largeTitle)
+                    .fontWeight(.bold)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .animation(.spring(response: 0.24, dampingFraction: 0.86), value: isHeaderCollapsed)
+
+                HStack(spacing: 8) {
+                    Text("Simple View")
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(.secondary)
+                    Toggle("", isOn: $actionBlocksSimpleViewEnabled)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .scaleEffect(0.86)
+                }
+            }
+            .padding(.top, 8)
 
             if !isHeaderCollapsed {
                 instructionsRow
@@ -2013,9 +2027,9 @@ struct ActionView: View {
                 )
             }
 
-            LazyVStack(spacing: 8) {
-                ForEach(rowContexts) { row in
-                    if canReorderDisplayedActions {
+            if actionBlocksSimpleViewEnabled {
+                LazyVStack(spacing: 8) {
+                    ForEach(rowContexts) { row in
                         actionRow(
                             action: row.action,
                             accent: accent,
@@ -2027,59 +2041,83 @@ struct ActionView: View {
                             hasSensitivity: row.hasSensitivity,
                             hasAttachments: row.hasAttachments,
                             highlightStatusBox: row.highlightStatusBox,
-                            showsReorderHandle: true
-                        )
-                        .id(row.id)
-                        .onDrag {
-                            let startingOrder = displayedFiltered.map(\.id)
-                            draggedActionChunkID = chunk.id
-                            localActionOrderIDs = startingOrder
-                            draggedActionID = row.id
-                            return NSItemProvider(object: row.id.uuidString as NSString)
-                        }
-                        .onDrop(
-                            of: [.text],
-                            delegate: AnimatedActionRowDropDelegate(
-                                targetID: row.id,
-                                draggedID: $draggedActionID,
-                                draggedChunkID: $draggedActionChunkID,
-                                localActionOrderIDs: $localActionOrderIDs,
-                                enabled: true,
-                                onCommit: { reorderedIDs in
-                                    commitActionOrder(in: chunk.id, visibleOrderedIDs: reorderedIDs)
-                                }
-                            )
-                        )
-                    } else {
-                        actionRow(
-                            action: row.action,
-                            accent: accent,
-                            duePresentation: row.duePresentation,
-                            defineState: row.defineState,
-                            status: row.status,
-                            hasLeverage: row.hasLeverage,
-                            leverageIconName: row.leverageIconName,
-                            hasSensitivity: row.hasSensitivity,
-                            hasAttachments: row.hasAttachments,
-                            highlightStatusBox: row.highlightStatusBox,
-                            showsReorderHandle: false
+                            showsReorderHandle: false,
+                            simpleMode: true
                         )
                         .id(row.id)
                     }
                 }
-            }
-            .onDrop(
-                of: [.text],
-                delegate: ResetActionRowDragStateDropDelegate(
-                    ownerChunkID: chunk.id,
-                    draggedID: $draggedActionID,
-                    draggedChunkID: $draggedActionChunkID,
-                    localActionOrderIDs: $localActionOrderIDs,
-                    onCommit: { reorderedIDs in
-                        commitActionOrder(in: chunk.id, visibleOrderedIDs: reorderedIDs)
+            } else {
+                LazyVStack(spacing: 8) {
+                    ForEach(rowContexts) { row in
+                        if canReorderDisplayedActions {
+                            actionRow(
+                                action: row.action,
+                                accent: accent,
+                                duePresentation: row.duePresentation,
+                                defineState: row.defineState,
+                                status: row.status,
+                                hasLeverage: row.hasLeverage,
+                                leverageIconName: row.leverageIconName,
+                                hasSensitivity: row.hasSensitivity,
+                                hasAttachments: row.hasAttachments,
+                                highlightStatusBox: row.highlightStatusBox,
+                                showsReorderHandle: true,
+                                simpleMode: false
+                            )
+                            .id(row.id)
+                            .onDrag {
+                                let startingOrder = displayedFiltered.map(\.id)
+                                draggedActionChunkID = chunk.id
+                                localActionOrderIDs = startingOrder
+                                draggedActionID = row.id
+                                return NSItemProvider(object: row.id.uuidString as NSString)
+                            }
+                            .onDrop(
+                                of: [.text],
+                                delegate: AnimatedActionRowDropDelegate(
+                                    targetID: row.id,
+                                    draggedID: $draggedActionID,
+                                    draggedChunkID: $draggedActionChunkID,
+                                    localActionOrderIDs: $localActionOrderIDs,
+                                    enabled: true,
+                                    onCommit: { reorderedIDs in
+                                        commitActionOrder(in: chunk.id, visibleOrderedIDs: reorderedIDs)
+                                    }
+                                )
+                            )
+                        } else {
+                            actionRow(
+                                action: row.action,
+                                accent: accent,
+                                duePresentation: row.duePresentation,
+                                defineState: row.defineState,
+                                status: row.status,
+                                hasLeverage: row.hasLeverage,
+                                leverageIconName: row.leverageIconName,
+                                hasSensitivity: row.hasSensitivity,
+                                hasAttachments: row.hasAttachments,
+                                highlightStatusBox: row.highlightStatusBox,
+                                showsReorderHandle: false,
+                                simpleMode: false
+                            )
+                            .id(row.id)
+                        }
                     }
+                }
+                .onDrop(
+                    of: [.text],
+                    delegate: ResetActionRowDragStateDropDelegate(
+                        ownerChunkID: chunk.id,
+                        draggedID: $draggedActionID,
+                        draggedChunkID: $draggedActionChunkID,
+                        localActionOrderIDs: $localActionOrderIDs,
+                        onCommit: { reorderedIDs in
+                            commitActionOrder(in: chunk.id, visibleOrderedIDs: reorderedIDs)
+                        }
+                    )
                 )
-            )
+            }
 
             Divider().opacity(0.35)
             HStack(alignment: .bottom) {
@@ -2192,7 +2230,8 @@ struct ActionView: View {
         hasSensitivity: Bool,
         hasAttachments: Bool,
         highlightStatusBox: Bool,
-        showsReorderHandle: Bool
+        showsReorderHandle: Bool,
+        simpleMode: Bool
     ) -> some View {
         signposted("build_action_row") {
             ActionSwipeRow(
@@ -2211,6 +2250,7 @@ struct ActionView: View {
                 hasAttachments: hasAttachments,
                 highlightStatusBox: highlightStatusBox,
                 showsReorderHandle: showsReorderHandle,
+                simpleMode: simpleMode,
                 focusedActionID: $focusedActionID,
                 onCommitText: { newValue in
                     handleActionTextCommit(action: action, newValue: newValue)
@@ -4990,6 +5030,7 @@ private struct ActionSwipeRow: View {
     let hasAttachments: Bool
     let highlightStatusBox: Bool
     let showsReorderHandle: Bool
+    let simpleMode: Bool
     @Binding var focusedActionID: UUID?
     let onCommitText: (String) -> Void
     let onOpenStatus: () -> Void
@@ -5017,6 +5058,7 @@ private struct ActionSwipeRow: View {
         hasAttachments: Bool,
         highlightStatusBox: Bool,
         showsReorderHandle: Bool,
+        simpleMode: Bool,
         focusedActionID: Binding<UUID?>,
         onCommitText: @escaping (String) -> Void,
         onOpenStatus: @escaping () -> Void,
@@ -5041,6 +5083,7 @@ private struct ActionSwipeRow: View {
         self.hasAttachments = hasAttachments
         self.highlightStatusBox = highlightStatusBox
         self.showsReorderHandle = showsReorderHandle
+        self.simpleMode = simpleMode
         self._focusedActionID = focusedActionID
         self.onCommitText = onCommitText
         self.onOpenStatus = onOpenStatus
@@ -5124,7 +5167,7 @@ private struct ActionSwipeRow: View {
             .buttonStyle(.plain)
 
             VStack(alignment: .leading, spacing: 8) {
-                if let dueStatusText {
+                if !simpleMode, let dueStatusText {
                     Text(dueStatusText)
                         .font(.caption)
                         .foregroundStyle(dueStatusColor)
@@ -5139,55 +5182,57 @@ private struct ActionSwipeRow: View {
                     onCommit: onCommitText
                 )
 
-                HStack(spacing: 18) {
-                    iconButton(
-                        systemName: effectiveIsMust ? "star.square.fill" : "star.square",
-                        isOn: effectiveIsMust,
-                        tint: iconTint,
-                        isEnabled: !isInactive,
-                        onTap: {
-                            let next = !effectiveIsMust
-                            localIsMust = next
-                            onToggleMust(next)
-                        }
-                    )
+                if !simpleMode {
+                    HStack(spacing: 18) {
+                        iconButton(
+                            systemName: effectiveIsMust ? "star.square.fill" : "star.square",
+                            isOn: effectiveIsMust,
+                            tint: iconTint,
+                            isEnabled: !isInactive,
+                            onTap: {
+                                let next = !effectiveIsMust
+                                localIsMust = next
+                                onToggleMust(next)
+                            }
+                        )
 
-                    clockButton(
-                        minutes: minutes,
-                        tint: isInactive ? inactiveTint : rowAccent,
-                        isEnabled: !isInactive,
-                        onTap: onOpenClock
-                    )
+                        clockButton(
+                            minutes: minutes,
+                            tint: isInactive ? inactiveTint : rowAccent,
+                            isEnabled: !isInactive,
+                            onTap: onOpenClock
+                        )
 
-                    iconButton(
-                        systemName: leverageIconName,
-                        isOn: hasLeverage,
-                        tint: iconTint,
-                        isEnabled: !isInactive,
-                        onTap: onOpenLeverage
-                    )
+                        iconButton(
+                            systemName: leverageIconName,
+                            isOn: hasLeverage,
+                            tint: iconTint,
+                            isEnabled: !isInactive,
+                            onTap: onOpenLeverage
+                        )
 
-                    iconButton(
-                        systemName: hasSensitivity ? "gearshape.fill" : "gearshape",
-                        isOn: hasSensitivity,
-                        tint: iconTint,
-                        isEnabled: !isInactive,
-                        onTap: onOpenSensitivity
-                    )
+                        iconButton(
+                            systemName: hasSensitivity ? "gearshape.fill" : "gearshape",
+                            isOn: hasSensitivity,
+                            tint: iconTint,
+                            isEnabled: !isInactive,
+                            onTap: onOpenSensitivity
+                        )
 
-                    iconButton(
-                        systemName: hasAttachments ? "paperclip.badge.ellipsis" : "paperclip",
-                        isOn: hasAttachments,
-                        tint: iconTint,
-                        isEnabled: !isInactive,
-                        onTap: onOpenAttachments
-                    )
+                        iconButton(
+                            systemName: hasAttachments ? "paperclip.badge.ellipsis" : "paperclip",
+                            isOn: hasAttachments,
+                            tint: iconTint,
+                            isEnabled: !isInactive,
+                            onTap: onOpenAttachments
+                        )
+                    }
+                    .font(.system(size: 19, weight: .semibold))
                 }
-                .font(.system(size: 19, weight: .semibold))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            if showsReorderHandle {
+            if showsReorderHandle && !simpleMode {
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Color(.systemGray))
@@ -5195,10 +5240,20 @@ private struct ActionSwipeRow: View {
             }
         }
         .padding(10)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(simpleMode ? accent.opacity(colorScheme == .dark ? 0.22 : 0.14) : Color(.secondarySystemBackground))
+        )
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .stroke(effectiveStatus == .inProgress ? rowAccent : Color.black.opacity(0.12), lineWidth: effectiveStatus == .inProgress ? 3 : 1)
+                .stroke(
+                    simpleMode
+                        ? accent.opacity(effectiveStatus == .inProgress ? 0.95 : 0.55)
+                        : (effectiveStatus == .inProgress ? rowAccent : Color.black.opacity(0.12)),
+                    lineWidth: simpleMode
+                        ? (effectiveStatus == .inProgress ? 2 : 1.2)
+                        : (effectiveStatus == .inProgress ? 3 : 1)
+                )
         )
         .contentShape(Rectangle())
         .onChange(of: isMust) { _, newValue in

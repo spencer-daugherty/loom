@@ -17,7 +17,7 @@ fileprivate let fulfillmentStartDefaultCategoryDefs: [FulfillmentStartCategoryDe
     .init(id: "health", title: "Health & Vitality", categoryID: PlanLabelSeeder.categoryIDs["Health & Vitality"]!),
 ]
 
-fileprivate let fulfillmentStartSelectableDefaultCategories: [String] = [
+let fulfillmentStartSelectableDefaultCategories: [String] = [
     "Career & Business",
     "Faith & Spirituality",
     "Wealth & Finance",
@@ -164,10 +164,26 @@ struct FulfillmentStartView: View {
     @State private var littleWinsAdvancedCategoryID: UUID? = nil
     @State private var autoWriteMissionSuggestionsByCategoryID: [UUID: [String]] = [:]
     @State private var autoWritingMissionCategoryID: UUID? = nil
+    @State private var autoWriteMissionErrorByCategoryID: [UUID: String] = [:]
+    @State private var autoWriteMissionLoadedKeys = Set<String>()
+    @State private var autoWriteMissionSuggestionsCache: [String: [String]] = [:]
     @State private var autoWriteIdentitySuggestionsByCategoryID: [UUID: [IdentityAutoWriteSuggestion]] = [:]
     @State private var autoWritingIdentityCategoryID: UUID? = nil
+    @State private var autoWriteIdentityErrorByCategoryID: [UUID: String] = [:]
+    @State private var autoWriteIdentityLoadedKeys = Set<String>()
+    @State private var autoWriteIdentitySuggestionsCache: [String: [IdentityAutoWriteSuggestion]] = [:]
     @State private var autoWriteLittleWinSuggestionsByCategoryID: [UUID: [LittleWinAutoWriteSuggestion]] = [:]
     @State private var autoWritingLittleWinCategoryID: UUID? = nil
+    @State private var autoWriteLittleWinErrorByCategoryID: [UUID: String] = [:]
+    @State private var autoWriteLittleWinLoadedKeys = Set<String>()
+    @State private var autoWriteLittleWinSuggestionsCache: [String: [LittleWinAutoWriteSuggestion]] = [:]
+    @State private var fulfillmentInsightCards: [FulfillmentInsightCard] = []
+    @State private var isGeneratingFulfillmentInsights = false
+    @State private var fulfillmentInsightsErrorMessage: String? = nil
+    @State private var fulfillmentInsightsNudgeMessage: String? = nil
+    @State private var fulfillmentInsightsLoadedKeys = Set<String>()
+    @State private var fulfillmentInsightsCache: [String: [FulfillmentInsightCard]] = [:]
+    @State private var fulfillmentInsightsNudgeCache: [String: String] = [:]
     @State private var autoWriteOutlineAngle: Double = 0
     @State private var autoWriteIconAnimating: Bool = false
     @State private var autoWriteIconAnimationTask: Task<Void, Never>? = nil
@@ -208,6 +224,7 @@ struct FulfillmentStartView: View {
         case resources
         case passions
         case summary
+        case insights
 
         var title: String {
             switch self {
@@ -221,8 +238,15 @@ struct FulfillmentStartView: View {
             case .resources: return "Note Resources"
             case .passions: return "Passions"
             case .summary: return "Summary"
+            case .insights: return "Insights"
             }
         }
+    }
+
+    private struct FulfillmentInsightCard: Identifiable, Hashable {
+        let title: String
+        let body: String
+        var id: String { "\(title.lowercased())|\(body.lowercased())" }
     }
 
     private var isAddSingleAreaMode: Bool { entryMode == .addSingleArea }
@@ -285,6 +309,14 @@ struct FulfillmentStartView: View {
         return orderedFulfillments.first(where: { $0.category_id == categoryID })
     }
 
+    private var personalizationSnapshot: PersonalizationSnapshot? {
+        PersonalizationStore.cachedContextForCurrentUser()?.current
+    }
+
+    private var hasPersonalizationSnapshot: Bool {
+        personalizationSnapshot != nil
+    }
+
     private var progressCurrentStep: Int {
         if isAddSingleAreaMode {
             switch step {
@@ -307,13 +339,14 @@ struct FulfillmentStartView: View {
         case .littleWins: return 5
         case .passions: return 6
         case .summary: return 7
+        case .insights: return 8
         case .resources: return 0
         case .intro: return 0
         }
     }
 
     private var progressTotalSteps: Int {
-        isAddSingleAreaMode ? 5 : 7
+        isAddSingleAreaMode ? 5 : 8
     }
 
     private var editorSurfaceColor: Color {
@@ -326,7 +359,7 @@ struct FulfillmentStartView: View {
 
     private var isScrollableStep: Bool {
         switch step {
-        case .createCategories, .visionSweep, .purposeSweep, .roles, .littleWins, .passions, .summary:
+        case .createCategories, .visionSweep, .purposeSweep, .roles, .littleWins, .passions, .summary, .insights:
             return true
         default:
             return false
@@ -667,6 +700,25 @@ struct FulfillmentStartView: View {
             }
             .onChange(of: step) { _, newValue in
                 handleStepFocusChange(newValue)
+                handleAutoStartForStep(newValue)
+            }
+            .onChange(of: purposeIndex) { _, _ in
+                if step == .purposeSweep {
+                    handleAutoStartForStep(step)
+                }
+            }
+            .onChange(of: roleIndex) { _, _ in
+                if step == .roles {
+                    handleAutoStartForStep(step)
+                }
+            }
+            .onChange(of: deepIndex) { _, _ in
+                if step == .littleWins {
+                    handleAutoStartForStep(step)
+                }
+            }
+            .onChange(of: isGeneratingFulfillmentInsights, initial: false) { _, newValue in
+                setAutoWriteLoadingAnimation(newValue)
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
                 handleKeyboardFrameChange(note)
@@ -743,6 +795,7 @@ struct FulfillmentStartView: View {
         } else if !restoreDraftIfAvailable() {
             loadFromPersistentData()
         }
+        handleAutoStartForStep(step)
     }
 
     private func handleBodyDisappear() {
@@ -799,6 +852,8 @@ struct FulfillmentStartView: View {
                 passionsStep
             case .summary:
                 summaryStep
+            case .insights:
+                insightsStep
             }
         }
         .padding(.horizontal)
@@ -1044,7 +1099,11 @@ struct FulfillmentStartView: View {
                 .frame(maxWidth: .infinity)
 
                 Button {
-                    finalizeAndContinue()
+                    guard summaryCanComplete else {
+                        triggerHint("Please complete required setup items.")
+                        return
+                    }
+                    step = .insights
                 } label: {
                     Text("Continue")
                         .frame(maxWidth: .infinity)
@@ -1053,6 +1112,36 @@ struct FulfillmentStartView: View {
                 .buttonStyle(.borderedProminent)
                 .frame(maxWidth: .infinity)
                 .disabled(!summaryCanComplete)
+            } else if step == .insights {
+                Button {
+                    step = .summary
+                } label: {
+                    Text("Back")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .contentShape(Rectangle())
+                }
+                .foregroundStyle(Color.primary)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color(.systemGray5))
+                )
+                .buttonStyle(.plain)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.black.opacity(0.12), lineWidth: 1)
+                }
+                .frame(maxWidth: .infinity)
+
+                Button {
+                    finalizeAndContinue()
+                } label: {
+                    Text("Continue")
+                        .frame(maxWidth: .infinity)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderedProminent)
+                .frame(maxWidth: .infinity)
             } else {
                 Button {
                     goBack()
@@ -1566,6 +1655,19 @@ struct FulfillmentStartView: View {
                         }
                     }
 
+                    if let error = autoWriteIdentityErrorByCategoryID[record.category_id] {
+                        fulfillmentRetryRow(
+                            message: error,
+                            buttonTitle: "Try again"
+                        ) {
+                            Task { await requestAutoWriteIdentitySuggestions(for: record, forceRefresh: true) }
+                        }
+                    } else if !hasPersonalizationSnapshot {
+                        Text("Add Personalization in Account for more tailored identity suggestions.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
                     Button {
                         withAnimation(.easeInOut(duration: 0.2)) {
                             showNeedIdeasRoles.toggle()
@@ -1762,6 +1864,45 @@ struct FulfillmentStartView: View {
                 }
             }
 
+            if let error = autoWriteLittleWinErrorByCategoryID[record.category_id] {
+                fulfillmentRetryRow(
+                    message: error,
+                    buttonTitle: "Try again"
+                ) {
+                    Task { await requestAutoWriteLittleWinSuggestions(for: record, forceRefresh: true) }
+                }
+            } else if !hasPersonalizationSnapshot {
+                Text("Add Personalization in Account for more tailored Little Win suggestions.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if !fociItems.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    VStack(spacing: 0) {
+                        Button {
+                            presentLittleWinsAdvancedSheet(for: record)
+                        } label: {
+                            HStack {
+                                Text("Advanced")
+                                    .font(.body.weight(.regular))
+                                    .foregroundStyle(.blue)
+                                Spacer()
+                            }
+                            .padding(.vertical, 10)
+                            .padding(.horizontal, 10)
+                            .background(rowSurfaceColor)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                    Text("Schedule Little Wins for certain week days and integrate with Apple Health (examples: 10,000 steps, 60 min workout)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     showNeedIdeasLittleWins.toggle()
@@ -1797,32 +1938,6 @@ struct FulfillmentStartView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(10)
                 .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
-            }
-
-            if !fociItems.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    VStack(spacing: 0) {
-                        Button {
-                            presentLittleWinsAdvancedSheet(for: record)
-                        } label: {
-                            HStack {
-                                Text("Advanced")
-                                    .font(.body.weight(.regular))
-                                    .foregroundStyle(.blue)
-                                Spacer()
-                            }
-                            .padding(.vertical, 10)
-                            .padding(.horizontal, 10)
-                            .background(rowSurfaceColor)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-
-                    Text("Schedule Little Wins for certain week days and integrate with Apple Health (examples: 10,000 steps, 60 min workout)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
             }
         }
     }
@@ -1945,6 +2060,7 @@ struct FulfillmentStartView: View {
                 VStack(spacing: 8) {
                     ForEach(passions, id: \.passion_id) { passion in
                         let isSelected = selectedPassionIDs(for: record.category_id).contains(passion.passion_id)
+                        let selectionCount = passionSelectionCount(for: passion.passion_id)
                         Button {
                             togglePassion(passion, for: record.category_id)
                         } label: {
@@ -1953,6 +2069,10 @@ struct FulfillmentStartView: View {
                                     .foregroundStyle(.primary)
                                     .multilineTextAlignment(.leading)
                                 Spacer()
+                                Text("\(selectionCount)")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                    .monospacedDigit()
                                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                                     .foregroundStyle(isSelected ? .blue : .secondary)
                             }
@@ -2050,6 +2170,179 @@ struct FulfillmentStartView: View {
             } onEdit: {
                 step = .roles
                 deepIndex = 0
+            }
+        }
+    }
+
+    private var insightsStep: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            FulfillmentInsightsThinkingHeader(
+                title: "LoomAI",
+                progress: 1.0
+            )
+
+            Text("Loom sees…")
+                .font(.system(size: 38, weight: .bold))
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let error = fulfillmentInsightsErrorMessage {
+                fulfillmentRetryRow(
+                    message: error,
+                    buttonTitle: "Try again"
+                ) {
+                    Task { await generateFulfillmentInsights(forceRefresh: true) }
+                }
+            }
+
+            if let nudge = fulfillmentInsightsNudgeMessage, !nudge.isEmpty {
+                Text(nudge)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            ForEach(fulfillmentInsightCards) { card in
+                fulfillmentInsightsCard(card)
+            }
+        }
+        .padding(14)
+        .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func fulfillmentRetryRow(
+        message: String,
+        buttonTitle: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 6)
+            Button(buttonTitle, action: action)
+                .font(.caption.weight(.semibold))
+                .buttonStyle(.plain)
+                .foregroundStyle(.blue)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func fulfillmentInsightsCard(_ card: FulfillmentInsightCard) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(card.title)
+                .font(.caption.weight(.bold))
+                .textCase(.uppercase)
+                .foregroundStyle(.secondary)
+                .tracking(0.45)
+            if card.title.caseInsensitiveCompare("Your strands") == .orderedSame {
+                let names = orderedFulfillments.map(\.category)
+                if !names.isEmpty {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], spacing: 8) {
+                        ForEach(names, id: \.self) { name in
+                            Text(name)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(fulfillmentCategoryColor(for: name))
+                                .lineLimit(1)
+                                .padding(.horizontal, 9)
+                                .padding(.vertical, 6)
+                                .frame(maxWidth: .infinity, alignment: .center)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                        .fill(fulfillmentCategoryColor(for: name).opacity(0.14))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                        .stroke(fulfillmentCategoryColor(for: name).opacity(0.32), lineWidth: 1)
+                                )
+                        }
+                    }
+                }
+            }
+            Text(card.body)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(colorScheme == .dark ? Color.white.opacity(0.18) : Color.black.opacity(0.08), lineWidth: 1)
+        )
+    }
+
+    private struct FulfillmentInsightsThinkingHeader: View {
+        let title: String
+        let progress: Double
+
+        @State private var shineOffset: CGFloat = -0.7
+
+        private static let gradientTokens: [Color] = [
+            Color(red: 0.22, green: 0.47, blue: 1.0),
+            Color(red: 0.15, green: 0.83, blue: 0.95),
+            Color(red: 0.62, green: 0.40, blue: 0.95),
+            Color(red: 0.80, green: 0.38, blue: 0.78),
+            Color(red: 0.98, green: 0.36, blue: 0.58),
+            Color(red: 0.22, green: 0.47, blue: 1.0)
+        ]
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Image("LoomAI")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 18, height: 18)
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+
+                GeometryReader { proxy in
+                    let fullWidth = max(1, proxy.size.width)
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color.secondary.opacity(0.16))
+
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: Self.gradientTokens,
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .frame(width: fullWidth * max(0, min(1, progress)))
+
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(0.0),
+                                        Color.white.opacity(0.45),
+                                        Color.white.opacity(0.0)
+                                    ],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .frame(width: fullWidth * 0.35)
+                            .offset(x: fullWidth * shineOffset)
+                    }
+                }
+                .frame(height: 12)
+            }
+            .onAppear {
+                withAnimation(.linear(duration: 1.8).repeatForever(autoreverses: false)) {
+                    shineOffset = 1.2
+                }
             }
         }
     }
@@ -2219,6 +2512,20 @@ struct FulfillmentStartView: View {
                 }
             }
 
+            if let record = currentPurposeRecord,
+               let error = autoWriteMissionErrorByCategoryID[record.category_id] {
+                fulfillmentRetryRow(
+                    message: error,
+                    buttonTitle: "Try again"
+                ) {
+                    Task { await requestAutoWriteMissionSuggestions(for: record, forceRefresh: true) }
+                }
+            } else if !hasPersonalizationSnapshot {
+                Text("Add Personalization in Account for more tailored mission suggestions.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     showNeedIdeasPurpose.toggle()
@@ -2322,11 +2629,25 @@ struct FulfillmentStartView: View {
         let weakestLittleWin: String?
     }
 
-    private func requestAutoWriteMissionSuggestions(for record: Fulfillment) async {
+    private func requestAutoWriteMissionSuggestions(for record: Fulfillment, forceRefresh: Bool = false) async {
+        let requestKey = missionAutoWriteCacheKey(for: record)
+        if !forceRefresh, let cached = autoWriteMissionSuggestionsCache[requestKey], !cached.isEmpty {
+            autoWriteMissionSuggestionsByCategoryID[record.category_id] = cached
+            autoWriteMissionErrorByCategoryID[record.category_id] = nil
+            return
+        }
+        if !forceRefresh, autoWriteMissionLoadedKeys.contains(requestKey) {
+            return
+        }
+        autoWriteMissionLoadedKeys.insert(requestKey)
+
         let previousSuggestions = autoWriteMissionSuggestionsByCategoryID[record.category_id] ?? []
+        autoWriteMissionErrorByCategoryID[record.category_id] = nil
         autoWritingMissionCategoryID = record.category_id
         defer { autoWritingMissionCategoryID = nil }
-        autoWriteMissionSuggestionsByCategoryID[record.category_id] = []
+        if forceRefresh || autoWriteMissionSuggestionsCache[requestKey] == nil {
+            autoWriteMissionSuggestionsByCategoryID[record.category_id] = []
+        }
 
         do {
             let contextSnapshot = try LoomAIViewModel().buildContextSnapshot(in: modelContext)
@@ -2347,7 +2668,7 @@ struct FulfillmentStartView: View {
             - Keep it simple and practical.
 
             Return JSON only:
-            {"suggestions":["string"],"confidence":"high|medium|low"}
+            {"suggestions":["string"],"confidence":"high|medium|low","nudge":"optional string"}
 
             Rules:
             - 1-2 suggestions
@@ -2358,18 +2679,29 @@ struct FulfillmentStartView: View {
 
             let response = try await LoomAIService().sendChat(
                 messages: [.init(role: "user", content: instruction)],
-                context: contextSnapshot
+                context: contextSnapshot,
+                intent: "autowrite_fulfillment",
+                screen: "fulfillment_mission"
             )
             let suggestions = decodeAutoWriteMissionSuggestions(from: response.message)
-            guard !suggestions.isEmpty else { return }
+            guard !suggestions.isEmpty else {
+                autoWriteMissionErrorByCategoryID[record.category_id] = "No suggestions yet."
+                return
+            }
             let filtered = suggestions.filter { suggestion in
                 let normalized = normalizedIdentitySuggestion(suggestion)
                 return !previousSuggestions.contains { normalizedIdentitySuggestion($0) == normalized }
             }
             let nextSuggestions = Array((filtered.isEmpty ? suggestions : filtered).prefix(2))
+            guard !nextSuggestions.isEmpty else {
+                autoWriteMissionErrorByCategoryID[record.category_id] = "No suggestions yet."
+                return
+            }
             autoWriteMissionSuggestionsByCategoryID[record.category_id] = nextSuggestions
+            autoWriteMissionSuggestionsCache[requestKey] = nextSuggestions
+            autoWriteMissionErrorByCategoryID[record.category_id] = nil
         } catch {
-            return
+            autoWriteMissionErrorByCategoryID[record.category_id] = "Couldn’t generate mission suggestions."
         }
     }
 
@@ -2404,11 +2736,25 @@ struct FulfillmentStartView: View {
         return prefix.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func requestAutoWriteIdentitySuggestions(for record: Fulfillment) async {
+    private func requestAutoWriteIdentitySuggestions(for record: Fulfillment, forceRefresh: Bool = false) async {
+        let requestKey = identityAutoWriteCacheKey(for: record)
+        if !forceRefresh, let cached = autoWriteIdentitySuggestionsCache[requestKey], !cached.isEmpty {
+            autoWriteIdentitySuggestionsByCategoryID[record.category_id] = cached
+            autoWriteIdentityErrorByCategoryID[record.category_id] = nil
+            return
+        }
+        if !forceRefresh, autoWriteIdentityLoadedKeys.contains(requestKey) {
+            return
+        }
+        autoWriteIdentityLoadedKeys.insert(requestKey)
+
         let previousSuggestions = autoWriteIdentitySuggestionsByCategoryID[record.category_id] ?? []
+        autoWriteIdentityErrorByCategoryID[record.category_id] = nil
         autoWritingIdentityCategoryID = record.category_id
         defer { autoWritingIdentityCategoryID = nil }
-        autoWriteIdentitySuggestionsByCategoryID[record.category_id] = []
+        if forceRefresh || autoWriteIdentitySuggestionsCache[requestKey] == nil {
+            autoWriteIdentitySuggestionsByCategoryID[record.category_id] = []
+        }
 
         do {
             let contextSnapshot = try LoomAIViewModel().buildContextSnapshot(in: modelContext)
@@ -2432,7 +2778,7 @@ struct FulfillmentStartView: View {
             - Suggestions should be clearly distinct from Current Identities.
 
             Return JSON only:
-            {"suggestions":[{"identity":"string","replaceIdentity":"string optional"}],"confidence":"high|medium|low"}
+            {"suggestions":[{"identity":"string","replaceIdentity":"string optional"}],"confidence":"high|medium|low","nudge":"optional string"}
 
             Rules:
             - Return 1-2 suggestions.
@@ -2446,10 +2792,15 @@ struct FulfillmentStartView: View {
 
             let response = try await LoomAIService().sendChat(
                 messages: [.init(role: "user", content: instruction)],
-                context: contextSnapshot
+                context: contextSnapshot,
+                intent: "autowrite_fulfillment",
+                screen: "fulfillment_identity"
             )
             let suggestions = decodeAutoWriteIdentitySuggestions(from: response.message)
-            guard !suggestions.isEmpty else { return }
+            guard !suggestions.isEmpty else {
+                autoWriteIdentityErrorByCategoryID[record.category_id] = "No suggestions yet."
+                return
+            }
             let filtered = suggestions.filter { suggestion in
                 let normalized = normalizedIdentitySuggestion(suggestion.identity)
                 return !previousSuggestions.contains { normalizedIdentitySuggestion($0.identity) == normalized }
@@ -2458,10 +2809,15 @@ struct FulfillmentStartView: View {
                 !isIdentitySuggestionTooSimilarToExisting(suggestion, for: record)
             }
             let nextSuggestions = Array((similarityFiltered.isEmpty ? (filtered.isEmpty ? suggestions : filtered) : similarityFiltered).prefix(2))
-            guard !nextSuggestions.isEmpty else { return }
+            guard !nextSuggestions.isEmpty else {
+                autoWriteIdentityErrorByCategoryID[record.category_id] = "No suggestions yet."
+                return
+            }
             autoWriteIdentitySuggestionsByCategoryID[record.category_id] = nextSuggestions
+            autoWriteIdentitySuggestionsCache[requestKey] = nextSuggestions
+            autoWriteIdentityErrorByCategoryID[record.category_id] = nil
         } catch {
-            return
+            autoWriteIdentityErrorByCategoryID[record.category_id] = "Couldn’t generate identity suggestions."
         }
     }
 
@@ -2681,11 +3037,25 @@ struct FulfillmentStartView: View {
         return 4
     }
 
-    private func requestAutoWriteLittleWinSuggestions(for record: Fulfillment) async {
+    private func requestAutoWriteLittleWinSuggestions(for record: Fulfillment, forceRefresh: Bool = false) async {
+        let requestKey = littleWinAutoWriteCacheKey(for: record)
+        if !forceRefresh, let cached = autoWriteLittleWinSuggestionsCache[requestKey], !cached.isEmpty {
+            autoWriteLittleWinSuggestionsByCategoryID[record.category_id] = cached
+            autoWriteLittleWinErrorByCategoryID[record.category_id] = nil
+            return
+        }
+        if !forceRefresh, autoWriteLittleWinLoadedKeys.contains(requestKey) {
+            return
+        }
+        autoWriteLittleWinLoadedKeys.insert(requestKey)
+
         let previousSuggestions = autoWriteLittleWinSuggestionsByCategoryID[record.category_id] ?? []
+        autoWriteLittleWinErrorByCategoryID[record.category_id] = nil
         autoWritingLittleWinCategoryID = record.category_id
         defer { autoWritingLittleWinCategoryID = nil }
-        autoWriteLittleWinSuggestionsByCategoryID[record.category_id] = []
+        if forceRefresh || autoWriteLittleWinSuggestionsCache[requestKey] == nil {
+            autoWriteLittleWinSuggestionsByCategoryID[record.category_id] = []
+        }
 
         do {
             let contextSnapshot = try LoomAIViewModel().buildContextSnapshot(in: modelContext)
@@ -2717,7 +3087,7 @@ struct FulfillmentStartView: View {
             - Suggestions should be clearly distinct from Current Little Wins.
 
             Return JSON only:
-            {"suggestions":[{"activity":"string","replaceActivity":"string optional"}],"confidence":"high|medium|low"}
+            {"suggestions":[{"activity":"string","replaceActivity":"string optional"}],"confidence":"high|medium|low","nudge":"optional string"}
 
             Rules:
             - Return 1-2 suggestions.
@@ -2730,10 +3100,15 @@ struct FulfillmentStartView: View {
 
             let response = try await LoomAIService().sendChat(
                 messages: [.init(role: "user", content: instruction)],
-                context: contextSnapshot
+                context: contextSnapshot,
+                intent: "autowrite_fulfillment",
+                screen: "fulfillment_littlewins"
             )
             let suggestions = decodeAutoWriteLittleWinSuggestions(from: response.message)
-            guard !suggestions.isEmpty else { return }
+            guard !suggestions.isEmpty else {
+                autoWriteLittleWinErrorByCategoryID[record.category_id] = "No suggestions yet."
+                return
+            }
             let filtered = suggestions.filter { suggestion in
                 let normalized = normalizedIdentitySuggestion(suggestion.activity)
                 return !previousSuggestions.contains { normalizedIdentitySuggestion($0.activity) == normalized }
@@ -2742,9 +3117,15 @@ struct FulfillmentStartView: View {
                 !isLittleWinSuggestionTooSimilarToExisting(suggestion, for: record)
             }
             let nextSuggestions = Array((similarityFiltered.isEmpty ? (filtered.isEmpty ? suggestions : filtered) : similarityFiltered).prefix(2))
+            guard !nextSuggestions.isEmpty else {
+                autoWriteLittleWinErrorByCategoryID[record.category_id] = "No suggestions yet."
+                return
+            }
             autoWriteLittleWinSuggestionsByCategoryID[record.category_id] = nextSuggestions
+            autoWriteLittleWinSuggestionsCache[requestKey] = nextSuggestions
+            autoWriteLittleWinErrorByCategoryID[record.category_id] = nil
         } catch {
-            return
+            autoWriteLittleWinErrorByCategoryID[record.category_id] = "Couldn’t generate Little Win suggestions."
         }
     }
 
@@ -2778,6 +3159,253 @@ struct FulfillmentStartView: View {
             .filter { !$0.isEmpty }
             .map { LittleWinAutoWriteSuggestion(activity: clampedLittleWinSuggestion($0), replaceActivity: nil) }
         return Array(fallback.prefix(2))
+    }
+
+    private struct FulfillmentInsightsResponse: Decodable {
+        struct Card: Decodable {
+            let title: String?
+            let body: String?
+            let text: String?
+            let message: String?
+        }
+        let cards: [Card]?
+        let confidence: String?
+        let nudge: String?
+    }
+
+    private func handleAutoStartForStep(_ targetStep: Step) {
+        switch targetStep {
+        case .purposeSweep:
+            guard let record = currentPurposeRecord else { return }
+            Task { await requestAutoWriteMissionSuggestions(for: record) }
+        case .roles:
+            guard let record = currentRoleRecord else { return }
+            Task { await requestAutoWriteIdentitySuggestions(for: record) }
+        case .littleWins:
+            guard let record = currentDeepRecord else { return }
+            Task { await requestAutoWriteLittleWinSuggestions(for: record) }
+        case .insights:
+            guard !isAddSingleAreaMode else { return }
+            Task { await generateFulfillmentInsights() }
+        default:
+            break
+        }
+    }
+
+    private func missionAutoWriteCacheKey(for record: Fulfillment) -> String {
+        let missionText = (purposeDrafts[record.category_id] ?? record.category_purpose)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return "mission|\(record.category_id.uuidString)|\(stableHash(personalizationSignature() + "|" + missionText))"
+    }
+
+    private func identityAutoWriteCacheKey(for record: Fulfillment) -> String {
+        let rolesText = getRoles(for: record)
+            .map(\.role)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .joined(separator: "|")
+        return "identity|\(record.category_id.uuidString)|\(stableHash(personalizationSignature() + "|" + rolesText))"
+    }
+
+    private func littleWinAutoWriteCacheKey(for record: Fulfillment) -> String {
+        let mission = (purposeDrafts[record.category_id] ?? record.category_purpose)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let identities = getRoles(for: record)
+            .map(\.role)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .joined(separator: "|")
+        let currentLittleWins = getFoci(for: record)
+            .map(\.activity)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .joined(separator: "|")
+        return "littlewins|\(record.category_id.uuidString)|\(stableHash(personalizationSignature() + "|" + mission + "|" + identities + "|" + currentLittleWins))"
+    }
+
+    private var fulfillmentInsightsCacheKey: String {
+        let categories = orderedFulfillments
+            .map { record in
+                let mission = (purposeDrafts[record.category_id] ?? record.category_purpose)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let identities = getRoles(for: record).map(\.role).joined(separator: ",")
+                let littleWins = getFoci(for: record).map(\.activity).joined(separator: ",")
+                return "\(record.category)|\(mission)|\(identities)|\(littleWins)"
+            }
+            .joined(separator: "||")
+        let priorities = priorityCategoryIDs.map(\.uuidString).sorted().joined(separator: "|")
+        return "fulfillment_insights|\(stableHash(personalizationSignature() + "|" + categories + "|" + priorities))"
+    }
+
+    private func personalizationSignature() -> String {
+        guard let snapshot = personalizationSnapshot else { return "none" }
+        let parts: [String] = [
+            snapshot.createdAt.ISO8601Format(),
+            snapshot.stressSource,
+            snapshot.breakPoint,
+            snapshot.lifeAreasSelected.joined(separator: "|"),
+            snapshot.planningReality,
+            snapshot.desiredChange
+        ]
+        return parts.joined(separator: "||")
+    }
+
+    private func stableHash(_ raw: String) -> String {
+        raw.unicodeScalars.reduce(UInt64(5381)) { acc, scalar in
+            ((acc << 5) &+ acc) &+ UInt64(scalar.value)
+        }
+        .description
+    }
+
+    private func generateFulfillmentInsights(forceRefresh: Bool = false) async {
+        let requestKey = fulfillmentInsightsCacheKey
+        if !forceRefresh, let cached = fulfillmentInsightsCache[requestKey], !cached.isEmpty {
+            fulfillmentInsightCards = cached
+            fulfillmentInsightsNudgeMessage = fulfillmentInsightsNudgeCache[requestKey]
+            fulfillmentInsightsErrorMessage = nil
+            return
+        }
+        if !forceRefresh, fulfillmentInsightsLoadedKeys.contains(requestKey) {
+            return
+        }
+        fulfillmentInsightsLoadedKeys.insert(requestKey)
+
+        fulfillmentInsightsErrorMessage = nil
+        fulfillmentInsightsNudgeMessage = nil
+        isGeneratingFulfillmentInsights = true
+        if forceRefresh || fulfillmentInsightsCache[requestKey] == nil {
+            fulfillmentInsightCards = []
+        }
+        defer { isGeneratingFulfillmentInsights = false }
+
+        do {
+            let contextSnapshot = try LoomAIViewModel().buildContextSnapshot(in: modelContext)
+            let payloadJSON = fulfillmentInsightsPayloadJSONString()
+            let instruction = """
+            Generate Fulfillment onboarding insights for Loom.
+            Fulfillment onboarding payload JSON:
+            \(payloadJSON)
+
+            Requirements:
+            - Return JSON only with exactly 3 cards.
+            - Card 1 title: Your strands
+            - Card 2 title: Likely gap
+            - Card 3 title: First execution move
+            - Ground the cards in diagnostics + selected categories + current fulfillment setup.
+            - Include at least two concrete references to user inputs when available.
+            - Keep each body concise and practical.
+            """
+
+            let response = try await LoomAIService().sendChat(
+                messages: [.init(role: "user", content: instruction)],
+                context: contextSnapshot,
+                intent: "onboarding_insights_fulfillment",
+                screen: "fulfillment_insights"
+            )
+            let decoded = decodeFulfillmentInsights(from: response.message)
+            guard !decoded.cards.isEmpty else {
+                fulfillmentInsightCards = defaultFulfillmentInsightsCards()
+                fulfillmentInsightsErrorMessage = "Couldn’t generate insights yet."
+                return
+            }
+            fulfillmentInsightCards = decoded.cards
+            fulfillmentInsightsNudgeMessage = decoded.nudge
+            fulfillmentInsightsCache[requestKey] = decoded.cards
+            if let nudge = decoded.nudge {
+                fulfillmentInsightsNudgeCache[requestKey] = nudge
+            }
+        } catch {
+            fulfillmentInsightCards = defaultFulfillmentInsightsCards()
+            fulfillmentInsightsErrorMessage = "Couldn’t generate insights yet."
+        }
+    }
+
+    private func fulfillmentInsightsPayloadJSONString() -> String {
+        let diagnostics = personalizationSnapshot.map { snapshot in
+            [
+                "stressSource": snapshot.stressSource,
+                "breakPoint": snapshot.breakPoint,
+                "planningReality": snapshot.planningReality,
+                "desiredChange": snapshot.desiredChange,
+                "lifeAreasSelected": snapshot.lifeAreasSelected,
+                "createdAt": snapshot.createdAt.ISO8601Format()
+            ] as [String: Any]
+        } ?? [
+            "missing": true
+        ]
+        let categoriesPayload: [[String: Any]] = orderedFulfillments.map { record in
+            [
+                "categoryID": record.category_id.uuidString,
+                "category": record.category,
+                "mission": (purposeDrafts[record.category_id] ?? record.category_purpose),
+                "identities": getRoles(for: record).map(\.role),
+                "littleWins": getFoci(for: record).map(\.activity),
+                "resources": getResources(for: record).map(\.resource),
+                "passions": selectedPassions(for: record.category_id).map { "\(displayEmotionLabel(for: $0.emotion)): \($0.passion)" }
+            ]
+        }
+        let priorityNames = priorityCategoryIDs.compactMap { id in
+            orderedFulfillments.first(where: { $0.category_id == id })?.category
+        }
+        let payload: [String: Any] = [
+            "diagnostics": diagnostics,
+            "selectedCategoryNames": orderedFulfillments.map(\.category),
+            "priorityCategoryNames": priorityNames,
+            "categories": categoriesPayload
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys, .prettyPrinted]),
+              let jsonString = String(data: data, encoding: .utf8) else {
+            return "{}"
+        }
+        return jsonString
+    }
+
+    private func decodeFulfillmentInsights(from raw: String) -> (cards: [FulfillmentInsightCard], nudge: String?) {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let defaultTitles = ["Your strands", "Likely gap", "First execution move"]
+        if let data = trimmed.data(using: .utf8),
+           let parsed = try? JSONDecoder().decode(FulfillmentInsightsResponse.self, from: data) {
+            let bodies = (parsed.cards ?? []).compactMap { card -> String? in
+                let body = (card.body ?? card.text ?? card.message ?? "")
+                    .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                return body.isEmpty ? nil : body
+            }
+            var cards: [FulfillmentInsightCard] = []
+            for (index, title) in defaultTitles.enumerated() {
+                let body = index < bodies.count ? bodies[index] : defaultFulfillmentInsightsCards()[index].body
+                cards.append(FulfillmentInsightCard(title: title, body: body))
+            }
+            return (cards, parsed.nudge?.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+
+        let fallbackBodies = trimmed
+            .components(separatedBy: "\n")
+            .map { $0.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        if fallbackBodies.count >= 3 {
+            return (
+                zip(defaultTitles, fallbackBodies.prefix(3)).map { FulfillmentInsightCard(title: $0.0, body: $0.1) },
+                nil
+            )
+        }
+        return (defaultFulfillmentInsightsCards(), nil)
+    }
+
+    private func defaultFulfillmentInsightsCards() -> [FulfillmentInsightCard] {
+        [
+            FulfillmentInsightCard(
+                title: "Your strands",
+                body: "Your selected categories give coverage, but execution quality will matter more than adding more categories."
+            ),
+            FulfillmentInsightCard(
+                title: "Likely gap",
+                body: "Your profile suggests one area may be neglected unless your weekly focus is tightened."
+            ),
+            FulfillmentInsightCard(
+                title: "First execution move",
+                body: "Choose one category and complete one repeatable Little Win daily this week."
+            )
+        ]
     }
 
     private func littleWinSuggestionTopLine(
@@ -2961,6 +3589,8 @@ struct FulfillmentStartView: View {
         case .summary:
             step = .passions
             passionIndex = max(roleCategoryIDs.count - 1, 0)
+        case .insights:
+            step = .summary
         case .intro:
             dismiss()
         }
@@ -3095,6 +3725,7 @@ struct FulfillmentStartView: View {
         } else {
             selectedCategoryNames = existingCategories
             customCategoryNames = existingCategories.filter { !fulfillmentStartSelectableDefaultCategories.contains($0) }
+            applyDiagnosticPrefillIfNeeded(existingCategories: existingCategories)
         }
         var map = FulfillmentCategoryTheme.persistedColorKeys()
         let cycleKeys = onboardingColorCycleKeys
@@ -3110,6 +3741,7 @@ struct FulfillmentStartView: View {
             }
         }
         categoryColorKeys = map
+        normalizeSelectedCategoryColorAssignments()
 
         visionDrafts = Dictionary(uniqueKeysWithValues: orderedFulfillments.map { ($0.category_id, $0.category_vision) })
         purposeDrafts = Dictionary(uniqueKeysWithValues: orderedFulfillments.map { ($0.category_id, $0.category_purpose) })
@@ -3168,6 +3800,73 @@ struct FulfillmentStartView: View {
         roleIndex = min(roleIndex, max(roleCategoryIDs.count - 1, 0))
         deepIndex = min(deepIndex, max(deepCategoryIDs.count - 1, 0))
         passionIndex = min(passionIndex, max(roleCategoryIDs.count - 1, 0))
+    }
+
+    private func applyDiagnosticPrefillIfNeeded(existingCategories: [String]) {
+        guard !isAddSingleAreaMode else { return }
+        guard existingCategories.isEmpty else { return }
+        guard selectedCategoryNames.isEmpty else { return }
+        guard let diagnosticAreas = PersonalizationStore.cachedContextForCurrentUser()?.current.lifeAreasSelected,
+              !diagnosticAreas.isEmpty else { return }
+
+        var preselected: [String] = []
+        var custom = customCategoryNames
+        for area in diagnosticAreas {
+            let mapped = mappedFulfillmentCategoryName(fromDiagnosticArea: area)
+            let trimmed = mapped.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+
+            let hasSelected = preselected.contains(where: { $0.caseInsensitiveCompare(trimmed) == .orderedSame })
+            if !hasSelected {
+                preselected.append(trimmed)
+            }
+
+            let isDefault = fulfillmentStartSelectableDefaultCategories.contains(where: { $0.caseInsensitiveCompare(trimmed) == .orderedSame })
+            let hasCustom = custom.contains(where: { $0.caseInsensitiveCompare(trimmed) == .orderedSame })
+            if !isDefault && !hasCustom {
+                custom.append(trimmed)
+            }
+        }
+
+        let limited = Array(preselected.prefix(7))
+        guard !limited.isEmpty else { return }
+        selectedCategoryNames = limited
+        customCategoryNames = custom
+    }
+
+    private func mappedFulfillmentCategoryName(fromDiagnosticArea area: String) -> String {
+        let normalized = categoryKey(area)
+        switch normalized {
+        case categoryKey("Health & Vitality"):
+            return "Health & Energy"
+        case categoryKey("Mind & Meaning"):
+            return "Mindset & Resilience"
+        case categoryKey("Home & Lifestyle"):
+            return "Home & Life"
+        case categoryKey("Community & Service"):
+            return "Service & Impact"
+        case categoryKey("Creativity & Fun"):
+            return "Lifestyle & Experiences"
+        default:
+            return area
+        }
+    }
+
+    private func normalizeSelectedCategoryColorAssignments() {
+        guard !selectedCategoryNames.isEmpty else { return }
+        var map = categoryColorKeys
+        var used = Set<String>()
+        for category in selectedCategoryNames {
+            let trimmed = category.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            let preferred = map[trimmed]
+                ?? FulfillmentCategoryTheme.defaultColorKeys()[trimmed]
+                ?? rotatedColorKey(for: trimmed)
+            let resolved = nextAvailableColorKey(preferred: preferred, unavailable: used)
+            map[trimmed] = resolved
+            used.insert(resolved)
+        }
+        categoryColorKeys = map
     }
 
     private func applyLoomAIPrefillIfAvailable() {
@@ -4176,6 +4875,15 @@ struct FulfillmentStartView: View {
         )
     }
 
+    private func passionSelectionCount(for passionID: UUID) -> Int {
+        let validCategoryIDs = Set(orderedFulfillments.map(\.category_id))
+        return Set(
+            draftPassionJoins
+                .filter { $0.passionID == passionID && validCategoryIDs.contains($0.categoryID) }
+                .map(\.categoryID)
+        ).count
+    }
+
     private func selectedPassions(for categoryID: UUID) -> [Passion] {
         let ids = selectedPassionIDs(for: categoryID)
         return passions.filter { ids.contains($0.passion_id) }
@@ -4388,7 +5096,7 @@ private extension FulfillmentStartView {
             VStack(alignment: .trailing, spacing: 8) {
                 Button {
                     guard !isLoading else { return }
-                    Task { await requestAutoWriteMissionSuggestions(for: record) }
+                    Task { await requestAutoWriteMissionSuggestions(for: record, forceRefresh: true) }
                 } label: {
                     HStack(spacing: 6) {
                         Image("LoomAI")
@@ -4438,7 +5146,7 @@ private extension FulfillmentStartView {
             VStack(alignment: .trailing, spacing: 8) {
                 Button {
                     guard !isLoading else { return }
-                    Task { await requestAutoWriteIdentitySuggestions(for: record) }
+                    Task { await requestAutoWriteIdentitySuggestions(for: record, forceRefresh: true) }
                 } label: {
                     HStack(spacing: 6) {
                         Image("LoomAI")
@@ -4488,7 +5196,7 @@ private extension FulfillmentStartView {
             VStack(alignment: .trailing, spacing: 8) {
                 Button {
                     guard !isLoading else { return }
-                    Task { await requestAutoWriteLittleWinSuggestions(for: record) }
+                    Task { await requestAutoWriteLittleWinSuggestions(for: record, forceRefresh: true) }
                 } label: {
                     HStack(spacing: 6) {
                         Image("LoomAI")

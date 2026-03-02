@@ -8,6 +8,10 @@ enum AnalyticsEvent {
     case signupStarted(source: String = "account")
     case signupCompleted(method: String, source: String = "account")
     case signupAbandoned(reason: String, source: String = "account")
+    case diagnosticStarted(source: String = "diagnostic", step: Int, elapsedSeconds: Int)
+    case diagnosticCompleted(source: String = "diagnostic", step: Int, elapsedSeconds: Int)
+    case diagnosticAbandoned(source: String = "diagnostic", step: Int, elapsedSeconds: Int)
+    case diagnosticUpdated(source: String = "diagnostic", step: Int, elapsedSeconds: Int)
     case paywallViewed(source: String = "paywall")
     case paywallAbandoned(reason: String, source: String = "paywall")
     case paywallPlanSelected(plan: String, source: String = "paywall")
@@ -30,6 +34,10 @@ enum AnalyticsEvent {
         case .signupStarted: return "signup_started"
         case .signupCompleted: return "signup_completed"
         case .signupAbandoned: return "signup_abandoned"
+        case .diagnosticStarted: return "diagnostic_started"
+        case .diagnosticCompleted: return "diagnostic_completed"
+        case .diagnosticAbandoned: return "diagnostic_abandoned"
+        case .diagnosticUpdated: return "diagnostic_updated"
         case .paywallViewed: return "paywall_viewed"
         case .paywallAbandoned: return "paywall_abandoned"
         case .paywallPlanSelected: return "paywall_plan_selected"
@@ -61,6 +69,14 @@ enum AnalyticsEvent {
             return ["source": source, "method": method]
         case .signupAbandoned(let reason, let source):
             return ["source": source, "reason": reason]
+        case .diagnosticStarted(let source, let step, let elapsedSeconds):
+            return ["source": source, "step": step, "time_spent_seconds": elapsedSeconds]
+        case .diagnosticCompleted(let source, let step, let elapsedSeconds):
+            return ["source": source, "step": step, "time_spent_seconds": elapsedSeconds]
+        case .diagnosticAbandoned(let source, let step, let elapsedSeconds):
+            return ["source": source, "step": step, "time_spent_seconds": elapsedSeconds]
+        case .diagnosticUpdated(let source, let step, let elapsedSeconds):
+            return ["source": source, "step": step, "time_spent_seconds": elapsedSeconds]
         case .paywallViewed(let source):
             return ["source": source]
         case .paywallAbandoned(let reason, let source):

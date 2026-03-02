@@ -279,7 +279,7 @@ struct ObjectivesView: View {
                 .padding(.bottom, 20)
             }
         }
-        .navigationTitle("Objectives")
+        .navigationTitle("Goals")
         .background(
             Color.clear
                 .contentShape(Rectangle())

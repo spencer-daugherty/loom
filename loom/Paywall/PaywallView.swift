@@ -8,9 +8,13 @@ struct PaywallView: View {
     @StateObject private var purchaseManager = PurchaseManager()
     @State private var selectedPlan: SubscriptionPlan = .annual
     @State private var presentedLegalDocument: LegalDocument?
+    @State private var isShowingTrialDetails = false
     @State private var previewIndex: Int = 0
     @State private var previewCycleTask: Task<Void, Never>?
     @State private var didLogPaywallViewed = false
+
+    private let trialSummaryText = "Annual includes a 10-day free trial."
+    private let trialDetailText = "Annual includes a 10-day free trial. Payment is charged to your Apple ID after confirmation (or after the trial ends). Subscription renews automatically unless canceled at least 24 hours before renewal. Manage or cancel anytime in Apple ID Settings."
 
     var body: some View {
         GeometryReader { geo in
@@ -60,9 +64,17 @@ struct PaywallView: View {
                 .disabled(purchaseManager.isProcessing)
                 .accessibilityIdentifier("paywall_primaryCTA")
 
-                Text("Annual includes a 10-day free trial. Payment is charged to your Apple ID after confirmation (or after the trial ends). Subscription renews automatically unless canceled at least 24 hours before renewal. Manage or cancel anytime in Apple ID Settings.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(trialSummaryText)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+
+                    Button("Show more") {
+                        isShowingTrialDetails = true
+                    }
+                    .font(.footnote.weight(.semibold))
+                    .buttonStyle(.plain)
+                }
 
                 Button {
                     Task { await purchaseManager.restorePurchases(session: session) }
@@ -88,6 +100,28 @@ struct PaywallView: View {
         .background(Color(.systemBackground).ignoresSafeArea())
         .sheet(item: $presentedLegalDocument) { document in
             LegalLinksView(document: document)
+        }
+        .sheet(isPresented: $isShowingTrialDetails) {
+            NavigationStack {
+                ScrollView {
+                    Text(trialDetailText)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(20)
+                }
+                .navigationTitle("Trial Details")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") {
+                            isShowingTrialDetails = false
+                        }
+                    }
+                }
+            }
+            .presentationDetents([.height(250)])
+            .presentationDragIndicator(.visible)
         }
         .onAppear {
             if !didLogPaywallViewed {
@@ -177,6 +211,11 @@ struct PaywallView: View {
                     Text(plan.priceText)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.primary)
+                    if let tierText = plan.tierText {
+                        Text(tierText)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     if let trialText = plan.trialText {
                         Text(trialText)
                             .font(.caption)

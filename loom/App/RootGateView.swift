@@ -13,10 +13,13 @@ struct RootGateView<MainContent: View>: View {
 
     @AppStorage(UserSessionStore.Keys.hasSeenOnboarding) private var hasSeenOnboarding = false
     @AppStorage(UserSessionStore.Keys.hasAccount) private var hasAccount = false
+    @AppStorage(UserSessionStore.Keys.hasCompletedDiagnostic) private var hasCompletedDiagnostic = false
+    @AppStorage(UserSessionStore.Keys.hasSeenDiagnosticInsights) private var hasSeenDiagnosticInsights = false
     @AppStorage(UserSessionStore.Keys.isSubscribed) private var isSubscribed = false
     @AppStorage("onboarding_reset_on_next_launch") private var onboardingResetOnNextLaunch = false
     @AppStorage("blank_homepage_mode") private var blankHomepageMode = false
     @AppStorage("setup_homepage_mode") private var setupHomepageMode = false
+    @AppStorage("return_to_onboarding_last_page_once") private var returnToOnboardingLastPageOnce = false
     @AppStorage("analytics_install_date") private var analyticsInstallDate = ""
     @AppStorage("analytics_last_active_date") private var analyticsLastActiveDate = ""
     @AppStorage("analytics_did_log_retention_day_1") private var analyticsDidLogRetentionDay1 = false
@@ -26,12 +29,16 @@ struct RootGateView<MainContent: View>: View {
     @State private var isGatePresented = false
     @State private var hasAppliedOnboardingResetForLaunch = false
     @State private var hasLoggedCoreOpenedThisSession = false
-    @State private var renderedGateStep: UserSessionStore.GateStep = .onboarding
-    @State private var gateStepDirection: GateStepDirection = .forward
+    @StateObject private var personalizationStore = PersonalizationStore()
+    @State private var gatePath: [GateRoute] = []
+    @State private var isSyncingGatePath = false
+    @State private var diagnosticPrefillDraft: PersonalizationDraft?
 
-    private enum GateStepDirection {
-        case forward
-        case backward
+    private enum GateRoute: Hashable {
+        case account
+        case diagnostic
+        case insights
+        case paywall
     }
 
     init(
@@ -45,12 +52,18 @@ struct RootGateView<MainContent: View>: View {
     var body: some View {
         mainContent
             .environmentObject(session)
+            .environmentObject(personalizationStore)
             .onAppear {
                 consumePendingOnboardingResetIfNeeded()
+                migrateDiagnosticCompletionIfNeeded()
                 initializeInstallDateIfNeeded()
                 syncSessionFromStorage()
                 syncGatePresentationState()
+                syncGatePathFromSession(animated: false)
                 trackCoreEntryIfNeeded()
+                Task {
+                    await personalizationStore.reloadForCurrentUser()
+                }
             }
             .task {
                 #if canImport(AuthenticationServices)
@@ -60,31 +73,63 @@ struct RootGateView<MainContent: View>: View {
             .onChange(of: hasSeenOnboarding) { _, _ in
                 syncSessionFromStorage()
                 syncGatePresentationState()
+                syncGatePathFromSession()
                 trackCoreEntryIfNeeded()
             }
             .onChange(of: hasAccount) { _, _ in
                 syncSessionFromStorage()
                 syncGatePresentationState()
+                syncGatePathFromSession()
+                trackCoreEntryIfNeeded()
+                Task { await personalizationStore.reloadForCurrentUser() }
+            }
+            .onChange(of: hasCompletedDiagnostic) { _, _ in
+                syncSessionFromStorage()
+                syncGatePresentationState()
+                syncGatePathFromSession()
+                trackCoreEntryIfNeeded()
+            }
+            .onChange(of: hasSeenDiagnosticInsights) { _, _ in
+                syncSessionFromStorage()
+                syncGatePresentationState()
+                syncGatePathFromSession()
                 trackCoreEntryIfNeeded()
             }
             .onChange(of: isSubscribed) { _, _ in
                 syncSessionFromStorage()
                 syncGatePresentationState()
+                syncGatePathFromSession()
                 trackCoreEntryIfNeeded()
             }
             .onChange(of: session.hasSeenOnboarding) { _, value in
                 hasSeenOnboarding = value
                 syncGatePresentationState()
+                syncGatePathFromSession()
                 trackCoreEntryIfNeeded()
             }
             .onChange(of: session.hasAccount) { _, value in
                 hasAccount = value
                 syncGatePresentationState()
+                syncGatePathFromSession()
+                trackCoreEntryIfNeeded()
+                Task { await personalizationStore.reloadForCurrentUser() }
+            }
+            .onChange(of: session.hasCompletedDiagnostic) { _, value in
+                hasCompletedDiagnostic = value
+                syncGatePresentationState()
+                syncGatePathFromSession()
+                trackCoreEntryIfNeeded()
+            }
+            .onChange(of: session.hasSeenDiagnosticInsights) { _, value in
+                hasSeenDiagnosticInsights = value
+                syncGatePresentationState()
+                syncGatePathFromSession()
                 trackCoreEntryIfNeeded()
             }
             .onChange(of: session.isSubscribed) { _, value in
                 isSubscribed = value
                 syncGatePresentationState()
+                syncGatePathFromSession()
                 trackCoreEntryIfNeeded()
             }
             .modifier(
@@ -113,64 +158,56 @@ struct RootGateView<MainContent: View>: View {
 
     @ViewBuilder
     private var gateContent: some View {
-        NavigationStack {
-            ZStack {
-                switch renderedGateStep {
-                case .onboarding:
-                    OnboardingFlowView()
-                        .transition(gateTransition)
-                case .account:
-                    AccountStepView()
-                        .transition(gateTransition)
-                case .paywall:
-                    PaywallView()
-                        .transition(gateTransition)
-                case .done:
-                    EmptyView()
-                        .transition(gateTransition)
+        NavigationStack(path: gatePathBinding) {
+            OnboardingFlowView()
+                .navigationDestination(for: GateRoute.self) { route in
+                    switch route {
+                    case .account:
+                        AccountStepView()
+                    case .diagnostic:
+                        DiagnosticFlowView(mode: .onboarding, initialDraft: diagnosticPrefillDraft) { draft, _ in
+                            let saved = try? await personalizationStore.saveSnapshot(from: draft, source: .onboarding)
+                            guard saved != nil else { return }
+                            diagnosticPrefillDraft = nil
+                            session.markDiagnosticCompleted()
+                            session.setHasSeenDiagnosticInsights(false)
+                        }
+                        .navigationTitle("Quick diagnostic")
+                        .navigationBarTitleDisplayMode(.inline)
+                    case .insights:
+                        DiagnosticInsightsView(
+                            onContinue: {
+                                session.markDiagnosticInsightsSeen()
+                            },
+                            onEditAnswers: {
+                                diagnosticPrefillDraft = personalizationStore.current.map(PersonalizationDraft.init(snapshot:))
+                                session.setHasCompletedDiagnostic(false)
+                                session.setHasSeenDiagnosticInsights(false)
+                            }
+                        )
+                        .navigationTitle("Insights")
+                        .navigationBarTitleDisplayMode(.inline)
+                    case .paywall:
+                        PaywallView()
+                            .navigationBarTitleDisplayMode(.inline)
+                    }
                 }
-            }
-            .animation(.easeInOut(duration: 0.26), value: renderedGateStep)
-            .onAppear {
-                renderedGateStep = session.currentGateStep
-            }
-            .onChange(of: session.currentGateStep) { oldValue, newValue in
-                gateStepDirection = gateStepRank(newValue) >= gateStepRank(oldValue) ? .forward : .backward
-                withAnimation(.easeInOut(duration: 0.26)) {
-                    renderedGateStep = newValue
-                }
-            }
         }
         .environmentObject(session)
-    }
-
-    private var gateTransition: AnyTransition {
-        switch gateStepDirection {
-        case .forward:
-            return .asymmetric(
-                insertion: .move(edge: .trailing),
-                removal: .move(edge: .leading)
-            )
-        case .backward:
-            return .asymmetric(
-                insertion: .move(edge: .leading),
-                removal: .move(edge: .trailing)
-            )
-        }
-    }
-
-    private func gateStepRank(_ step: UserSessionStore.GateStep) -> Int {
-        switch step {
-        case .onboarding: return 0
-        case .account: return 1
-        case .paywall: return 2
-        case .done: return 3
-        }
+        .environmentObject(personalizationStore)
     }
 
     private func syncSessionFromStorage() {
         session.setHasSeenOnboarding(hasSeenOnboarding)
         session.setHasAccount(hasAccount)
+        if !hasAccount, hasCompletedDiagnostic {
+            hasCompletedDiagnostic = false
+        }
+        if !hasCompletedDiagnostic, hasSeenDiagnosticInsights {
+            hasSeenDiagnosticInsights = false
+        }
+        session.setHasCompletedDiagnostic(hasCompletedDiagnostic)
+        session.setHasSeenDiagnosticInsights(hasSeenDiagnosticInsights)
         session.setIsSubscribed(isSubscribed)
     }
 
@@ -193,10 +230,76 @@ struct RootGateView<MainContent: View>: View {
         guard onboardingResetOnNextLaunch, !hasAppliedOnboardingResetForLaunch else { return }
         hasSeenOnboarding = false
         hasAccount = false
+        hasCompletedDiagnostic = false
+        hasSeenDiagnosticInsights = false
         isSubscribed = false
         blankHomepageMode = true
         setupHomepageMode = false
         hasAppliedOnboardingResetForLaunch = true
+    }
+
+    private func migrateDiagnosticCompletionIfNeeded() {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: UserSessionStore.Keys.hasCompletedDiagnostic) == nil {
+            // Existing account holders should not be forced through a new gate midstream.
+            hasCompletedDiagnostic = hasAccount
+        }
+        if defaults.object(forKey: UserSessionStore.Keys.hasSeenDiagnosticInsights) == nil {
+            hasSeenDiagnosticInsights = hasCompletedDiagnostic
+        }
+    }
+
+    private var desiredGatePath: [GateRoute] {
+        guard session.hasSeenOnboarding else { return [] }
+        if !session.hasAccount {
+            return [.account]
+        }
+        if !session.hasCompletedDiagnostic {
+            return [.diagnostic]
+        }
+        if !session.hasSeenDiagnosticInsights {
+            return [.insights]
+        }
+        if !session.isSubscribed {
+            return [.paywall]
+        }
+        return []
+    }
+
+    private var gatePathBinding: Binding<[GateRoute]> {
+        Binding(
+            get: { gatePath },
+            set: { newPath in
+                let oldPath = gatePath
+                if !isSyncingGatePath, newPath.count < oldPath.count {
+                    let removed = oldPath.suffix(oldPath.count - newPath.count)
+                    handleGateRoutePop(removed)
+                }
+                gatePath = newPath
+            }
+        )
+    }
+
+    private func syncGatePathFromSession(animated: Bool = true) {
+        let targetPath = desiredGatePath
+        guard gatePath != targetPath else { return }
+        isSyncingGatePath = true
+        if animated {
+            withAnimation(.easeInOut(duration: 0.22)) {
+                gatePath = targetPath
+            }
+        } else {
+            gatePath = targetPath
+        }
+        isSyncingGatePath = false
+    }
+
+    private func handleGateRoutePop(_ removedRoutes: ArraySlice<GateRoute>) {
+        guard !removedRoutes.isEmpty else { return }
+        if removedRoutes.contains(.paywall) || removedRoutes.contains(.insights) || removedRoutes.contains(.diagnostic) || removedRoutes.contains(.account) {
+            returnToOnboardingLastPageOnce = true
+            session.setHasSeenOnboarding(false)
+        }
     }
 
     private func initializeInstallDateIfNeeded() {

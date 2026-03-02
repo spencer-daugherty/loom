@@ -1,6 +1,7 @@
 import SwiftUI
 import Charts
 import SwiftData
+import UserNotifications
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -59,6 +60,7 @@ struct ContentView: View {
     @AppStorage("has_completed_plan_flow_once") private var hasCompletedPlanFlowOnce = false
     @AppStorage("has_seen_content_quickstart_v1") private var hasSeenContentQuickstart = false
     @AppStorage("force_show_content_quickstart_once") private var forceShowContentQuickstartOnce = false
+    @AppStorage("onboarding_capture_notifications_prompted_v1") private var hasPromptedCaptureNotifications = false
     @AppStorage("content_home_objectives_setup_skipped_v1") private var hasSkippedObjectivesSetupStep = false
     @AppStorage("content_home_action_setup_skipped_v1") private var hasSkippedActionPlanSetupStep = false
     @State private var isPresentingCaptureView = false
@@ -93,6 +95,7 @@ struct ContentView: View {
     @State private var littleWinsCalendarPreviewExpandedCardDragX: CGFloat = 0
     @State private var littleWinsShowHiddenPlaceholder = false
     @State private var isPresentingLittleWinsManagerSheet = false
+    @State private var isPresentingLittleWinsShareCamera = false
     @State private var littleWinsScheduleStoreRevision = 0
     @State private var littleWinsIntegrationStoreRevision = 0
     @State private var littleWinsIntegrationDetailTarget: LittleWinsIntegrationDetailTarget? = nil
@@ -117,6 +120,8 @@ struct ContentView: View {
     @State private var loomAIHeaderMenuButtonFrame: CGRect = .zero
     @State private var headerFrameInRootSpace: CGRect = .zero
     @State private var notificationResyncTask: Task<Void, Never>? = nil
+    @State private var notificationPermissionRequestTask: Task<Void, Never>? = nil
+    @State private var pendingCaptureCompletionNotificationPrompt = false
     @State private var contentQuickstartStepIndex: Int = 0
     @State private var contentQuickstartFrames: [ContentQuickstartTarget: CGRect] = [:]
     @State private var quickstartIsPageTransitionInFlight = false
@@ -166,9 +171,9 @@ struct ContentView: View {
             target: .fulfillment
         ),
         ContentQuickstartStep(
-            title: "Objectives",
+            title: "Goals",
             summary: "Turn your direction to long-term goals with clear outcomes you can track and acheive.",
-            lookAtPrompt: "Look at the Objectives area on this screen.",
+            lookAtPrompt: "Look at the Goals area on this screen.",
             target: .objectives
         ),
         ContentQuickstartStep(
@@ -856,6 +861,9 @@ struct ContentView: View {
 
     private var contentViewPresentationLayer: some View {
         contentViewNavigationLayer
+            .fullScreenCover(isPresented: $isPresentingLittleWinsShareCamera) {
+                LittleWinsShareCameraView()
+            }
             .sheet(isPresented: $isPresentingCaptureView) {
                 CaptureView(
                     forceSetupWelcome: activeHomeFocusTarget == .capture && shouldLockToFocusedHomeTarget
@@ -894,6 +902,15 @@ struct ContentView: View {
                     setupHomepageMode = false
                 }
             }
+            .onChange(of: activeHomeFocusTarget) { previousTarget, newTarget in
+                guard previousTarget == .capture, newTarget != .capture else { return }
+                pendingCaptureCompletionNotificationPrompt = true
+                requestNotificationsAfterCaptureCompletionIfNeeded()
+            }
+            .onChange(of: isPresentingCaptureView) { _, isPresented in
+                guard !isPresented else { return }
+                requestNotificationsAfterCaptureCompletionIfNeeded()
+            }
             .onChange(of: shouldShowContentQuickstart) { _, show in
                 if show {
                     contentQuickstartStepIndex = 0
@@ -929,6 +946,10 @@ struct ContentView: View {
                 if shouldShowLittleWinsLogoDot {
                     bounceLittleWinsLogoDotOnce()
                 }
+            }
+            .onDisappear {
+                notificationPermissionRequestTask?.cancel()
+                notificationPermissionRequestTask = nil
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("open_fulfillment_after_onboarding"))) { _ in
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
@@ -1095,6 +1116,42 @@ struct ContentView: View {
             }
             await LoomNotificationScheduler.reschedule(using: modelContext)
         }
+    }
+
+    private func requestNotificationsAfterCaptureCompletionIfNeeded() {
+        guard pendingCaptureCompletionNotificationPrompt else { return }
+        guard !isPresentingCaptureView else { return }
+        guard notificationPermissionRequestTask == nil else { return }
+
+        pendingCaptureCompletionNotificationPrompt = false
+
+        notificationPermissionRequestTask = Task { @MainActor in
+            defer { notificationPermissionRequestTask = nil }
+
+            let currentStatus = await LoomNotificationScheduler.authorizationStatus()
+            if isNotificationAuthorizationGranted(currentStatus) {
+                enableNotificationsAfterCaptureOnboardingGrant()
+                return
+            }
+
+            guard !hasPromptedCaptureNotifications else { return }
+            guard currentStatus == .notDetermined else { return }
+
+            hasPromptedCaptureNotifications = true
+            _ = await LoomNotificationScheduler.requestAuthorization()
+            let refreshedStatus = await LoomNotificationScheduler.authorizationStatus()
+            guard isNotificationAuthorizationGranted(refreshedStatus) else { return }
+            enableNotificationsAfterCaptureOnboardingGrant()
+        }
+    }
+
+    private func enableNotificationsAfterCaptureOnboardingGrant() {
+        LoomNotificationSettingsStore.setMasterEnabled(true)
+        scheduleNotificationResync(immediate: true)
+    }
+
+    private func isNotificationAuthorizationGranted(_ status: UNAuthorizationStatus) -> Bool {
+        status == .authorized || status == .provisional || status == .ephemeral
     }
 
     @Query(sort: \DrivingForce.updatedAt, order: .reverse)
@@ -2247,7 +2304,17 @@ struct ContentView: View {
                     Spacer()
 
                     Group {
-                        if homePageIndex == HomeSwipePage.littleWins.rawValue && littleWinsCalendarPreviewDate != nil {
+                        if homePageIndex == HomeSwipePage.social.rawValue {
+                            Button {
+                                isPresentingLittleWinsShareCamera = true
+                            } label: {
+                                Image(systemName: "camera")
+                                    .font(.system(size: 23, weight: .semibold))
+                                    .frame(width: 32, height: 32)
+                            }
+                            .buttonStyle(.plain)
+                            .allowsHitTesting(!shouldLockToFocusedHomeTarget && !shouldShowContentQuickstart)
+                        } else if homePageIndex == HomeSwipePage.littleWins.rawValue {
                             Color.clear
                                 .frame(width: 32, height: 32)
                         } else {
@@ -2258,10 +2325,7 @@ struct ContentView: View {
                                     .font(.system(size: 28))
                             }
                             .buttonStyle(.plain)
-                            .opacity(homePageIndex == HomeSwipePage.littleWins.rawValue ? 0 : 1)
-                            .offset(x: homePageIndex == HomeSwipePage.littleWins.rawValue ? 8 : 0)
-                            .animation(.easeOut(duration: 0.10), value: homePageIndex)
-                            .allowsHitTesting(!shouldLockToFocusedHomeTarget && homePageIndex != HomeSwipePage.littleWins.rawValue)
+                            .allowsHitTesting(!shouldLockToFocusedHomeTarget)
                         }
                     }
                 }
@@ -2687,9 +2751,11 @@ struct ContentView: View {
                     fulfillmentSection
                         .frame(height: targetCardHeight, alignment: .top)
                         .allowsHitTesting(allowsFulfillment)
+                        .opacity(allowsFulfillment ? 1.0 : 0.55)
                     objectivesSection
                         .frame(height: targetCardHeight, alignment: .top)
                         .allowsHitTesting(allowsObjectives)
+                        .opacity(allowsObjectives ? 1.0 : 0.55)
                 }
                 .padding(.horizontal)
                 .padding(.vertical, outerVerticalPadding)
@@ -4236,7 +4302,7 @@ struct ContentView: View {
         let isBlocked = !setupHomepageMode && !canOpenPlanOrActionFlow
         let isForward = isActiveActionFlow
         let symbolName = isForward ? "forward.fill" : "play.fill"
-        let backgroundColor: Color = isBlocked ? Color(.systemGray3) : Color.accentColor
+        let backgroundColor: Color = Color.accentColor
         let opacity: CGFloat = isBlocked ? 0.62 : 1.0
 
         return Image(systemName: symbolName)
@@ -4906,7 +4972,7 @@ struct ContentView: View {
 
         return SectionCard(
             iconName: "scope",
-            title: "Objectives",
+            title: "Goals",
             headerHint: "what you want",
             backgroundColor: Color(.secondarySystemBackground),
             fillsAvailableHeight: true
@@ -5442,7 +5508,7 @@ struct ContentView: View {
         } label: {
             SectionCard(
                 iconName: "scope",
-                title: "Objectives",
+                title: "Goals",
                 headerHint: "what you want",
                 backgroundColor: objectivesCardBackground
             ) {
@@ -5458,7 +5524,7 @@ struct ContentView: View {
                                 .multilineTextAlignment(.center)
                         }
 
-                        Text("Open Objectives")
+                        Text("Open Goals")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.gray)
                             .padding(.horizontal, 10)
