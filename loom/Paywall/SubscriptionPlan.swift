@@ -27,7 +27,7 @@ enum SubscriptionPlan: String, CaseIterable, Identifiable {
     var trialText: LocalizedStringKey? {
         switch self {
         case .annual:
-            return "7-day free trial"
+            return "10-day free trial"
         case .monthly:
             return nil
         }
@@ -45,7 +45,7 @@ enum SubscriptionPlan: String, CaseIterable, Identifiable {
     var ctaText: LocalizedStringKey {
         switch self {
         case .annual:
-            return "Start 7-Day Free Trial"
+            return "Start 10-Day Free Trial"
         case .monthly:
             return "Subscribe Monthly"
         }

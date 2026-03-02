@@ -60,7 +60,7 @@ struct PaywallView: View {
                 .disabled(purchaseManager.isProcessing)
                 .accessibilityIdentifier("paywall_primaryCTA")
 
-                Text("Annual includes a 7-day free trial. Payment is charged to your Apple ID after confirmation (or after the trial ends). Subscription renews automatically unless canceled at least 24 hours before renewal. Manage or cancel anytime in Apple ID Settings.")
+                Text("Annual includes a 10-day free trial. Payment is charged to your Apple ID after confirmation (or after the trial ends). Subscription renews automatically unless canceled at least 24 hours before renewal. Manage or cancel anytime in Apple ID Settings.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
 

@@ -468,6 +468,7 @@ struct AccountView: View {
     @AppStorage("setup_homepage_mode") private var setupHomepageMode = false
     @AppStorage("has_seen_content_quickstart_v1") private var hasSeenContentQuickstart = false
     @AppStorage("force_show_content_quickstart_once") private var forceShowContentQuickstartOnce = false
+    @AppStorage("developer_launch_paywall_once") private var developerLaunchPaywallOnce = false
     @AppStorage("dev_manual_warning_cards_enabled") private var devManualWarningCardsEnabled = false
     @AppStorage("dev_outcome_warning_target_passed") private var devOutcomeWarningTargetPassed = false
     @AppStorage("dev_outcome_warning_goal_achieved") private var devOutcomeWarningGoalAchieved = false
@@ -771,6 +772,22 @@ struct AccountView: View {
                         } label: {
                             Text("Launch Reflection")
                         }
+
+                        Button {
+                            // Show Account step first, then auto-advance to Paywall via one-time dev flag.
+                            developerLaunchPaywallOnce = true
+                            hasSeenOnboarding = true
+                            hasAccount = false
+                            isSubscribed = false
+                        } label: {
+                            HStack {
+                                Text("Launch Paywall")
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.footnote.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                     }
 
                     Section("Feature Flags") {
@@ -838,9 +855,17 @@ struct AccountView: View {
             }
         }
         .onChange(of: setupHomepageMode) { _, isOn in
-            if isOn, blankHomepageMode {
+            guard isOn else { return }
+            if blankHomepageMode {
                 blankHomepageMode = false
             }
+            // Developer setup replay flow:
+            // onboarding slides -> account step ("End Stress. Live Fulfilled.") -> Content quick tour.
+            hasSeenOnboarding = false
+            hasAccount = false
+            isSubscribed = true
+            hasSeenContentQuickstart = false
+            forceShowContentQuickstartOnce = true
         }
         .onChange(of: devOutcomeWarningTargetPassed) { _, isOn in
             if isOn {

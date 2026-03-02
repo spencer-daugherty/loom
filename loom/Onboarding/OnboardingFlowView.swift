@@ -5,6 +5,7 @@ struct OnboardingFlowView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage("has_seen_content_quickstart_v1") private var hasSeenContentQuickstart = false
     @AppStorage("force_show_content_quickstart_once") private var forceShowContentQuickstartOnce = false
+    @AppStorage("return_to_onboarding_last_page_once") private var returnToOnboardingLastPageOnce = false
 
     @State private var currentIndex = 0
     @State private var didLogOnboardingStarted = false
@@ -45,6 +46,10 @@ struct OnboardingFlowView: View {
         }
         .background(Color(.systemBackground).ignoresSafeArea())
         .onAppear {
+            if returnToOnboardingLastPageOnce {
+                currentIndex = max(0, pages.count - 1)
+                returnToOnboardingLastPageOnce = false
+            }
             if !didLogOnboardingStarted {
                 didLogOnboardingStarted = true
                 onboardingStartDate = Date()

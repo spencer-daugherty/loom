@@ -26,6 +26,13 @@ struct RootGateView<MainContent: View>: View {
     @State private var isGatePresented = false
     @State private var hasAppliedOnboardingResetForLaunch = false
     @State private var hasLoggedCoreOpenedThisSession = false
+    @State private var renderedGateStep: UserSessionStore.GateStep = .onboarding
+    @State private var gateStepDirection: GateStepDirection = .forward
+
+    private enum GateStepDirection {
+        case forward
+        case backward
+    }
 
     init(
         presentationStyle: RootGatePresentationStyle = .fullScreen,
@@ -107,18 +114,58 @@ struct RootGateView<MainContent: View>: View {
     @ViewBuilder
     private var gateContent: some View {
         NavigationStack {
-            switch session.currentGateStep {
-            case .onboarding:
-                OnboardingFlowView()
-            case .account:
-                AccountStepView()
-            case .paywall:
-                PaywallView()
-            case .done:
-                EmptyView()
+            ZStack {
+                switch renderedGateStep {
+                case .onboarding:
+                    OnboardingFlowView()
+                        .transition(gateTransition)
+                case .account:
+                    AccountStepView()
+                        .transition(gateTransition)
+                case .paywall:
+                    PaywallView()
+                        .transition(gateTransition)
+                case .done:
+                    EmptyView()
+                        .transition(gateTransition)
+                }
+            }
+            .animation(.easeInOut(duration: 0.26), value: renderedGateStep)
+            .onAppear {
+                renderedGateStep = session.currentGateStep
+            }
+            .onChange(of: session.currentGateStep) { oldValue, newValue in
+                gateStepDirection = gateStepRank(newValue) >= gateStepRank(oldValue) ? .forward : .backward
+                withAnimation(.easeInOut(duration: 0.26)) {
+                    renderedGateStep = newValue
+                }
             }
         }
         .environmentObject(session)
+    }
+
+    private var gateTransition: AnyTransition {
+        switch gateStepDirection {
+        case .forward:
+            return .asymmetric(
+                insertion: .move(edge: .trailing),
+                removal: .move(edge: .leading)
+            )
+        case .backward:
+            return .asymmetric(
+                insertion: .move(edge: .leading),
+                removal: .move(edge: .trailing)
+            )
+        }
+    }
+
+    private func gateStepRank(_ step: UserSessionStore.GateStep) -> Int {
+        switch step {
+        case .onboarding: return 0
+        case .account: return 1
+        case .paywall: return 2
+        case .done: return 3
+        }
     }
 
     private func syncSessionFromStorage() {

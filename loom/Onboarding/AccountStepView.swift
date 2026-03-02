@@ -24,6 +24,8 @@ import Security
 struct AccountStepView: View {
     @EnvironmentObject private var session: UserSessionStore
     @Environment(\.colorScheme) private var colorScheme
+    @AppStorage("return_to_onboarding_last_page_once") private var returnToOnboardingLastPageOnce = false
+    @AppStorage("developer_launch_paywall_once") private var developerLaunchPaywallOnce = false
 
     @State private var appleSignInError: String?
     @State private var googleSignInError: String?
@@ -32,6 +34,7 @@ struct AccountStepView: View {
     @State private var showMoreOptions = false
     @State private var didLogSignupStarted = false
     @State private var didCompleteSignup = false
+    @State private var developerPaywallLaunchTask: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: 22) {
@@ -193,33 +196,82 @@ struct AccountStepView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color(.systemBackground).ignoresSafeArea())
         .safeAreaInset(edge: .top, spacing: 0) {
-            Group {
-                if colorScheme == .dark {
-                    Image("logo")
-                        .resizable()
-                        .renderingMode(.template)
-                        .foregroundStyle(.white)
-                } else {
-                    Image("logo")
-                        .resizable()
+            HStack(spacing: 12) {
+                Button {
+                    returnToOnboardingEnd()
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 36, height: 36)
+                        .background(Color(.secondarySystemBackground), in: Circle())
+                        .overlay(
+                            Circle()
+                                .stroke(Color.black.opacity(0.12), lineWidth: 1)
+                        )
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Back")
+
+                Spacer(minLength: 0)
+
+                Group {
+                    if colorScheme == .dark {
+                        Image("logo")
+                            .resizable()
+                            .renderingMode(.template)
+                            .foregroundStyle(.white)
+                    } else {
+                        Image("logo")
+                            .resizable()
+                    }
+                }
+                .scaledToFit()
+                .frame(height: 40)
+
+                Spacer(minLength: 0)
+
+                Color.clear
+                    .frame(width: 36, height: 36)
             }
-            .scaledToFit()
-            .frame(height: 40)
             .padding(.top, 8)
+            .padding(.horizontal, 4)
             .frame(maxWidth: .infinity, alignment: .center)
         }
         .onAppear {
+            if developerLaunchPaywallOnce {
+                developerPaywallLaunchTask?.cancel()
+                developerPaywallLaunchTask = Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 450_000_000)
+                    guard !Task.isCancelled, developerLaunchPaywallOnce else { return }
+                    developerLaunchPaywallOnce = false
+                    session.setHasSeenOnboarding(true)
+                    session.setHasAccount(true)
+                    session.setIsSubscribed(false)
+                }
+            }
             if !didLogSignupStarted {
                 didLogSignupStarted = true
                 AnalyticsLogger.log(.signupStarted())
             }
         }
         .onDisappear {
+            developerPaywallLaunchTask?.cancel()
+            developerPaywallLaunchTask = nil
             if didLogSignupStarted && !didCompleteSignup && !session.hasAccount {
                 AnalyticsLogger.log(.signupAbandoned(reason: "dismissed"))
             }
         }
+        .highPriorityGesture(
+            DragGesture(minimumDistance: 18)
+                .onEnded { value in
+                    let startedFromLeadingEdge = value.startLocation.x <= 28
+                    let isHorizontalBackSwipe = value.translation.width > 80 && abs(value.translation.height) < 80
+                    if startedFromLeadingEdge && isHorizontalBackSwipe {
+                        returnToOnboardingEnd()
+                    }
+                }
+        )
     }
 
     private var googleGIcon: some View {
@@ -273,6 +325,11 @@ struct AccountStepView: View {
 #else
         googleSignInError = "Google sign in SDK is not available in this build."
 #endif
+    }
+
+    private func returnToOnboardingEnd() {
+        returnToOnboardingLastPageOnce = true
+        session.setHasSeenOnboarding(false)
     }
 
     private func startAppleSignIn(credential: ASAuthorizationAppleIDCredential) {
