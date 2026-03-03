@@ -392,7 +392,9 @@ struct ContentView: View {
     }
 
     private var shouldLockToFocusedHomeTarget: Bool {
-        activeHomeFocusTarget != nil
+        // Keep the 5/5 callout visible, but do not freeze the screen on that step.
+        guard activeHomeFocusTarget != .actionBlocks else { return false }
+        return activeHomeFocusTarget != nil
     }
 
     private var onboardingCallCardContent: (title: String, step: String)? {
@@ -5366,7 +5368,7 @@ struct ContentView: View {
                             Text("No life alignment")
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(.gray)
-                            Text("Tap to add fulfillment categories")
+                            Text("Tap to add fulfillment areas")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                                 .multilineTextAlignment(.center)

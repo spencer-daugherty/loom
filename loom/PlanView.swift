@@ -147,10 +147,6 @@ struct PlanStartView: View {
                         .background(Color(.systemGray5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                         .frame(maxWidth: .infinity, alignment: .center)
 
-                        Text("Start Action Plan")
-                            .font(.largeTitle)
-                            .fontWeight(.bold)
-                            .frame(maxWidth: .infinity, alignment: .center)
                     }
 
                     VStack(alignment: .leading, spacing: 10) {
@@ -188,13 +184,14 @@ struct PlanStartView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
                 .padding(.horizontal)
                 .padding(.top, 8)
                 .padding(.bottom, max(40, geo.safeAreaInsets.bottom + 32))
                 .background(Color(.systemGroupedBackground))
             }
         }
-        .navigationTitle("")
+        .navigationTitle("Start Action Plan")
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(isPresented: $navigateToPlan) {
             PlanView()
@@ -288,7 +285,6 @@ struct PlanView: View {
 
     var body: some View {
         PlanFlowHostView()
-        .toolbar(.hidden, for: .navigationBar)
     }
 
     private func saveStepOneAndAdvance() {
@@ -610,10 +606,6 @@ struct PlanStepTwoView: View {
             VStack(spacing: 1) {
                 PlanStepProgressBar(current: 1, total: 6)
                     .frame(maxWidth: .infinity, alignment: .center)
-                Text("Capture")
-                    .font(.largeTitle)
-                    .fontWeight(.bold)
-                    .frame(maxWidth: .infinity, alignment: .center)
             }
 
             HStack(alignment: .top, spacing: 10) {
@@ -793,6 +785,18 @@ struct PlanStepTwoView: View {
                 measuredStep2FooterHeight = height
             }
         }
+        .navigationTitle("Capture")
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    if let onBack { onBack() } else { dismiss() }
+                } label: {
+                    Label("Back", systemImage: "chevron.left")
+                }
+            }
+        }
     }
 
     private var stepTwoMinimumCountCautionCard: some View {
@@ -819,35 +823,21 @@ struct PlanStepTwoView: View {
     }
 
     private var stepTwoFooter: some View {
-        HStack(spacing: 12) {
-            Button {
-                if let onBack { onBack() } else { dismiss() }
-            } label: {
-                Text("Back")
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .foregroundStyle(colorScheme == .dark ? Color(.secondaryLabel) : .black)
+        Button {
+            if hasDraftInput {
+                triggerStep2InputValidationFeedback()
+            } else if !hasMinimumActiveCaptureActions {
+                triggerStep2MinimumCountFeedback()
+            } else {
+                if let onNext { onNext() }
             }
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color(.systemGray5))
-            )
-
-            Button {
-                if hasDraftInput {
-                    triggerStep2InputValidationFeedback()
-                } else if !hasMinimumActiveCaptureActions {
-                    triggerStep2MinimumCountFeedback()
-                } else {
-                    if let onNext { onNext() }
-                }
-            } label: {
-                Text("Next")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint((hasDraftInput || !hasMinimumActiveCaptureActions) ? Color(.systemGray3) : .accentColor)
+        } label: {
+            Text("Next")
+                .frame(maxWidth: .infinity)
         }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.large)
+        .tint((hasDraftInput || !hasMinimumActiveCaptureActions) ? Color(.systemGray3) : .accentColor)
         .padding(.bottom, 2)
     }
 
@@ -870,7 +860,7 @@ struct PlanStepTwoView: View {
                 .layoutPriority(1)
                 .frame(maxWidth: .infinity)
 
-            if isKeyboardVisible {
+            if isKeyboardVisible && !hasDraftInput {
                 Button {
                     dismissKeyboard()
                 } label: {
@@ -1466,351 +1456,33 @@ struct PlanStepThreeView: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            VStack(spacing: 1) {
-                PlanStepProgressBar(current: 2, total: 6)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                Text("Group")
-                    .font(.largeTitle)
-                    .fontWeight(.bold)
-                    .frame(maxWidth: .infinity, alignment: .center)
-            }
-
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "info.circle")
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 1)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    if isCategorizeExpanded {
-                        (
-                            Text("Categorize: ")
-                                .fontWeight(.bold)
-                            + Text("Look at your Capture list and ask, which items are related to a similar topic?")
-                        )
-                        .foregroundStyle(.secondary)
-                        .font(.subheadline)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                        Button("Show less") { isCategorizeExpanded = false }
-                            .font(.subheadline)
-                    } else {
-                        HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            (
-                                Text("Categorize: ")
-                                    .fontWeight(.bold)
-                                + Text("Look at your Capture list and ask, which items are related to a similar topic?")
-                            )
-                            .foregroundStyle(.secondary)
-                            .font(.subheadline)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-
-                            Button("Show more") { isCategorizeExpanded = true }
-                                .font(.subheadline)
-                                .layoutPriority(1)
-                        }
-                    }
-                }
-
-                Spacer(minLength: 0)
-            }
-
-            if !isStep3NextEnabled {
-                HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.subheadline)
-                        .foregroundStyle(Color.black.opacity(0.7))
-                        .padding(.top, 1)
-
-                    Text("Add at least 2 groups with 3 actions. Only add for this week.")
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(Color.black.opacity(0.7))
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(Color(red: 0.98, green: 0.92, blue: 0.72))
-                )
-            }
-
-            HStack(spacing: 10) {
-                Toggle(
-                    isOn: Binding(
-                        get: { showHidden },
-                        set: { newValue in
-                            if hasHiddenActionInAnyChunk && newValue == false {
-                                showHidden = true
-                                return
-                            }
-                            showHidden = newValue
-                        }
-                    )
-                ) { EmptyView() }
-                .labelsHidden()
-                .disabled(hasHiddenActionInAnyChunk)
-                .tint(hasHiddenActionInAnyChunk ? Color.blue.opacity(0.65) : .blue)
-
-                Image(systemName: hiddenUntilLaterIconName)
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(
-                        showHidden
-                        ? (hasHiddenActionInAnyChunk ? Color.blue.opacity(0.65) : .blue)
-                        : .secondary
-                    )
-                    .accessibilityHidden(true)
-
-                Text("Show Actions Hidden Until Later")
-                    .font(.subheadline)
-                    .foregroundStyle(.primary)
-
-                Spacer(minLength: 0)
-            }
+            step3ProgressHeader
+            step3CategorizeInfoRow
+            if !isStep3NextEnabled { step3ValidationBanner }
+            step3ShowHiddenRow
 
             GeometryReader { geometry in
-                let availableHeight = max(geometry.size.height, 1)
-                let sectionSpacing: CGFloat = 10
-                let minPoolHeight: CGFloat = 60
-                let minGroupHeight: CGFloat = 220
-                let collapsedGroupHeight = availableHeight * 0.5
-                let expandedGroupHeight = availableHeight * expandedGroupAreaRatio
-                let collapsedBoundedGroupHeight = min(max(collapsedGroupHeight, minGroupHeight), availableHeight - minPoolHeight)
-
-                let estimatedPoolContentHeight = max(minPoolHeight, CGFloat(max(poolItems.count, 0)) * 60 + 12)
-                let expandedPoolReserve = min(180, estimatedPoolContentHeight)
-                let expandedBoundedGroupHeight = min(max(expandedGroupHeight, minGroupHeight), availableHeight - expandedPoolReserve)
-
-                // Expand the group area only when the collapsed height cannot show all current
-                // group rows (including the Add Group row when present).
-                let fallbackChunkRowHeight: CGFloat = 170
-                let measuredChunkContentHeight = chunks.reduce(CGFloat.zero) { partial, chunk in
-                    partial + max(measuredStep3ChunkHeights[chunk.id] ?? 0, 0)
-                }
-                let estimatedChunkContentHeight = measuredChunkContentHeight > 0
-                    ? measuredChunkContentHeight
-                    : (CGFloat(chunks.count) * fallbackChunkRowHeight)
-                let addGroupRowHeight = chunks.count < maxChunks
-                    ? max(measuredStep3AddGroupRowHeight, 64)
-                    : 0
-                let estimatedGroupContentHeight = estimatedChunkContentHeight + addGroupRowHeight + 16
-                let collapsedGroupNeedsMoreHeight = estimatedGroupContentHeight > collapsedBoundedGroupHeight
-                let shouldExpandGroupArea =
-                    (isDraggingOverGroupArea || selectedPoolItemIDForTapGrouping != nil) &&
-                    collapsedGroupNeedsMoreHeight
-                let preferredGroupHeight = shouldExpandGroupArea ? expandedBoundedGroupHeight : collapsedBoundedGroupHeight
-                let poolHeightForPreferredGroup = max(minPoolHeight, availableHeight - preferredGroupHeight - sectionSpacing)
-
-                // If pool content fits in less space, shrink the top section and let group section use the freed space.
-                let maxPoolHeightWhenPreservingGroupMinimum = max(minPoolHeight, availableHeight - minGroupHeight - sectionSpacing)
-                let fittedPoolHeight = min(estimatedPoolContentHeight, maxPoolHeightWhenPreservingGroupMinimum)
-                let shouldFitPoolToContent = fittedPoolHeight < poolHeightForPreferredGroup
-
-                let poolHeight = shouldFitPoolToContent ? fittedPoolHeight : poolHeightForPreferredGroup
-                let maxGroupHeight = max(0, availableHeight - minPoolHeight)
-                let boundedGroupHeight = min(
-                    max(minGroupHeight, availableHeight - poolHeight - sectionSpacing),
-                    maxGroupHeight
-                )
-
-                VStack(spacing: sectionSpacing) {
-                    List {
-                        ForEach(poolItems) { item in
-                            rowView(
-                                text: item.text,
-                                showGhostOutline: item.isGhost,
-                                hiddenStatusText: hiddenStatusText(for: item),
-                                dueStatusText: dueDateStatusText(for: item),
-                                dueStatusColor: dueDateStatusColor(for: item),
-                                showDueBorder: hasVisibleDueStatus(for: item),
-                                isDraggable: true,
-                                dragPayload: DragPayload(itemID: item.id),
-                                isTapSelected: selectedPoolItemIDForTapGrouping == item.id
-                            )
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                if selectedPoolItemIDForTapGrouping == nil {
-                                    selectedPoolItemIDForTapGrouping = item.id
-                                } else {
-                                    selectedPoolItemIDForTapGrouping = nil
-                                }
-                            }
-                            .dropDestination(for: DragPayload.self) { payloads, _ in
-                                guard let payload = payloads.first else { return false }
-                                moveItemToPool(payload.itemID)
-                                isDraggingOverGroupArea = false
-
-                                enforceShowHiddenIfNeeded()
-                                persistStep3Plan()
-                                return true
-                            }
-                            .padding(.vertical, 4)
-                            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-                        }
-                        .listRowSeparator(.hidden)
-                    }
-                    .frame(height: poolHeight)
-                    .listRowSpacing(4)
-                    .listStyle(.plain)
-                    .scrollContentBackground(.hidden)
-                    .dropDestination(for: DragPayload.self) { payloads, _ in
-                        guard let payload = payloads.first else { return false }
-                        moveItemToPool(payload.itemID)
-                        isDraggingOverGroupArea = false
-
-                        enforceShowHiddenIfNeeded()
-                        persistStep3Plan()
-                        return true
-                    }
-                    .onChange(of: showHidden) { _, _ in
-                        enforceShowHiddenIfNeeded()
-                        syncPoolWithVisibility()
-                        persistStep3Plan()
-                    }
-
-                    List {
-                        ForEach(Array(chunks.enumerated()), id: \.element.id) { index, _ in
-                            chunkContainerView(chunkIndex: index)
-                                .background(
-                                    GeometryReader { proxy in
-                                        Color.clear.preference(
-                                            key: Step3ChunkRowHeightPreferenceKey.self,
-                                            value: [chunks[index].id: proxy.size.height]
-                                        )
-                                    }
-                                )
-                                .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
-                                .listRowSeparator(.hidden)
-                        }
-
-                        if chunks.count < maxChunks {
-                            addChunkRow
-                                .background(
-                                    GeometryReader { proxy in
-                                        Color.clear.preference(
-                                            key: Step3AddGroupRowHeightPreferenceKey.self,
-                                            value: proxy.size.height
-                                        )
-                                    }
-                                )
-                                .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
-                                .listRowSeparator(.hidden)
-                        }
-                    }
-                    .frame(height: boundedGroupHeight)
-                    .listStyle(.plain)
-                    .scrollContentBackground(.hidden)
-                    .dropDestination(
-                        for: DragPayload.self,
-                        action: { _, _ in false },
-                        isTargeted: { isTargeted in
-                            setGroupAreaDropTarget(isTargeted)
-                        }
-                    )
-                }
-                .onPreferenceChange(Step3ChunkRowHeightPreferenceKey.self) { heights in
-                    measuredStep3ChunkHeights.merge(heights) { _, new in new }
-                }
-                .onPreferenceChange(Step3AddGroupRowHeightPreferenceKey.self) { height in
-                    if height > 0 {
-                        measuredStep3AddGroupRowHeight = height
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                step3ContentArea(in: geometry)
             }
             .frame(maxHeight: .infinity)
 
-            if isRefreshVisible {
-                Button { refreshStep3() } label: {
-                    Text("Refresh")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .padding(.top, 2)
-                }
-                .buttonStyle(.plain)
-                .padding(.bottom, 2)
-            }
-
-            HStack(spacing: 12) {
-                Button {
-                    if let onBack { onBack() } else { dismiss() }
-                } label: {
-                    Text("Back")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .foregroundStyle(secondaryButtonTextColor)
-                }
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color(.systemGray5))
-                )
-
-                Button {
-                    if isStep3NextEnabled {
-                        shouldHighlightStep3Validation = false
-                        showStep3ValidationHint = false
-                        compactGroupsBeforeLabelStep()
-                        if let onNext { onNext() }
-                    } else {
-                        triggerStep3ValidationFeedback()
-                    }
-                } label: {
-                    Text("Next")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(isStep3NextEnabled ? .accentColor : Color(.systemGray3))
-            }
-            .padding(.top, isRefreshVisible ? 10 : 0)
-            .overlay(alignment: .topTrailing) {
-                Button {
-                    Task { await autoGroupRecentCaptureActions() }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image("LoomAI")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 27, height: 27)
-                            .rotation3DEffect(
-                                .degrees(isAutoGrouping && autoGroupIconAnimating ? 180 : 0),
-                                axis: (x: 1, y: 0, z: 0)
-                            )
-                        Text("AutoGroup")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(autoGroupGradient)
-                    }
-                    .padding(.horizontal, 15)
-                    .padding(.vertical, 9)
-                    .background(
-                        Capsule()
-                            .fill(Color(.systemGroupedBackground))
-                    )
-                    .overlay(
-                        Capsule()
-                            .stroke(autoGroupGradient, lineWidth: 2.25)
-                    )
-                }
-                .buttonStyle(.plain)
-                .disabled(isAutoGrouping)
-                .opacity(isAutoGrouping ? 0.7 : 1)
-                .offset(x: 0, y: -58)
-                .onAppear {
-                    guard autoGroupOutlineAngle == 0 else { return }
-                    withAnimation(.linear(duration: 8).repeatForever(autoreverses: false)) {
-                        autoGroupOutlineAngle = 360
-                    }
-                }
-                .onChange(of: isAutoGrouping, initial: false) { _, isLoading in
-                    setAutoGroupIconLoadingAnimation(isLoading)
-                }
-            }
+            if isRefreshVisible { step3RefreshButton }
+            step3FooterControls
             .padding(.bottom, 2)
         }
         .padding(.horizontal)
+        .navigationTitle("Group")
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    if let onBack { onBack() } else { dismiss() }
+                } label: {
+                    Label("Back", systemImage: "chevron.left")
+                }
+            }
+        }
         .overlay(alignment: .bottom) {
             if showStep3ValidationHint {
                 VStack(alignment: .center, spacing: 6) {
@@ -1909,6 +1581,337 @@ struct PlanStepThreeView: View {
                 )
             }
         }
+    }
+
+    private var step3ProgressHeader: some View {
+        VStack(spacing: 1) {
+            PlanStepProgressBar(current: 2, total: 6)
+                .frame(maxWidth: .infinity, alignment: .center)
+        }
+    }
+
+    private var step3CategorizeInfoRow: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "info.circle")
+                .foregroundStyle(.secondary)
+                .padding(.top, 1)
+
+            VStack(alignment: .leading, spacing: 6) {
+                if isCategorizeExpanded {
+                    step3CategorizePrompt
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Button("Show less") { isCategorizeExpanded = false }
+                        .font(.subheadline)
+                } else {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        step3CategorizePrompt
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+
+                        Button("Show more") { isCategorizeExpanded = true }
+                            .font(.subheadline)
+                            .layoutPriority(1)
+                    }
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var step3CategorizePrompt: some View {
+        (
+            Text("Categorize: ").fontWeight(.bold)
+            + Text("Look at your Capture list and ask, which items are related to a similar topic?")
+        )
+        .foregroundStyle(.secondary)
+        .font(.subheadline)
+    }
+
+    private var step3ValidationBanner: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.subheadline)
+                .foregroundStyle(Color.black.opacity(0.7))
+                .padding(.top, 1)
+
+            Text("Add at least 2 groups with 3 actions. Only add for this week.")
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .foregroundStyle(Color.black.opacity(0.7))
+                .fixedSize(horizontal: false, vertical: true)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(red: 0.98, green: 0.92, blue: 0.72))
+        )
+    }
+
+    private var step3ShowHiddenRow: some View {
+        HStack(spacing: 10) {
+            Toggle(
+                isOn: Binding(
+                    get: { showHidden },
+                    set: { newValue in
+                        if hasHiddenActionInAnyChunk && newValue == false {
+                            showHidden = true
+                            return
+                        }
+                        showHidden = newValue
+                    }
+                )
+            ) { EmptyView() }
+            .labelsHidden()
+            .disabled(hasHiddenActionInAnyChunk)
+            .tint(hasHiddenActionInAnyChunk ? Color.blue.opacity(0.65) : .blue)
+
+            Image(systemName: hiddenUntilLaterIconName)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(
+                    showHidden
+                    ? (hasHiddenActionInAnyChunk ? Color.blue.opacity(0.65) : .blue)
+                    : .secondary
+                )
+                .accessibilityHidden(true)
+
+            Text("Show Actions Hidden Until Later")
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var step3RefreshButton: some View {
+        Button { refreshStep3() } label: {
+            Text("Refresh")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.top, 2)
+        }
+        .buttonStyle(.plain)
+        .padding(.bottom, 2)
+    }
+
+    private var step3FooterControls: some View {
+        HStack(spacing: 12) {
+            Button {
+                if isStep3NextEnabled {
+                    shouldHighlightStep3Validation = false
+                    showStep3ValidationHint = false
+                    compactGroupsBeforeLabelStep()
+                    if let onNext { onNext() }
+                } else {
+                    triggerStep3ValidationFeedback()
+                }
+            } label: {
+                Text("Next")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .tint(isStep3NextEnabled ? .accentColor : Color(.systemGray3))
+        }
+        .padding(.top, isRefreshVisible ? 10 : 0)
+        .overlay(alignment: .topTrailing) {
+            Button {
+                Task { await autoGroupRecentCaptureActions() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image("LoomAI")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 27, height: 27)
+                        .rotation3DEffect(
+                            .degrees(isAutoGrouping && autoGroupIconAnimating ? 180 : 0),
+                            axis: (x: 1, y: 0, z: 0)
+                        )
+                    Text("AutoGroup")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(autoGroupGradient)
+                }
+                .padding(.horizontal, 15)
+                .padding(.vertical, 9)
+                .background(
+                    Capsule()
+                        .fill(Color(.systemGroupedBackground))
+                )
+                .overlay(
+                    Capsule()
+                        .stroke(autoGroupGradient, lineWidth: 2.25)
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(isAutoGrouping)
+            .opacity(isAutoGrouping ? 0.7 : 1)
+            .offset(x: 0, y: -56)
+            .onAppear {
+                guard autoGroupOutlineAngle == 0 else { return }
+                withAnimation(.linear(duration: 8).repeatForever(autoreverses: false)) {
+                    autoGroupOutlineAngle = 360
+                }
+            }
+            .onChange(of: isAutoGrouping, initial: false) { _, isLoading in
+                setAutoGroupIconLoadingAnimation(isLoading)
+            }
+        }
+    }
+
+    private func step3ContentArea(in geometry: GeometryProxy) -> some View {
+        let availableHeight = max(geometry.size.height, 1)
+        let sectionSpacing: CGFloat = 10
+        let minPoolHeight: CGFloat = 60
+        let minGroupHeight: CGFloat = 220
+        let collapsedGroupHeight = availableHeight * 0.5
+        let expandedGroupHeight = availableHeight * expandedGroupAreaRatio
+        let collapsedBoundedGroupHeight = min(max(collapsedGroupHeight, minGroupHeight), availableHeight - minPoolHeight)
+
+        let estimatedPoolContentHeight = max(minPoolHeight, CGFloat(max(poolItems.count, 0)) * 60 + 12)
+        let expandedPoolReserve = min(180, estimatedPoolContentHeight)
+        let expandedBoundedGroupHeight = min(max(expandedGroupHeight, minGroupHeight), availableHeight - expandedPoolReserve)
+
+        // Expand the group area only when the collapsed height cannot show all current
+        // group rows (including the Add Group row when present).
+        let fallbackChunkRowHeight: CGFloat = 170
+        let measuredChunkContentHeight = chunks.reduce(CGFloat.zero) { partial, chunk in
+            partial + max(measuredStep3ChunkHeights[chunk.id] ?? 0, 0)
+        }
+        let estimatedChunkContentHeight = measuredChunkContentHeight > 0
+            ? measuredChunkContentHeight
+            : (CGFloat(chunks.count) * fallbackChunkRowHeight)
+        let addGroupRowHeight = chunks.count < maxChunks
+            ? max(measuredStep3AddGroupRowHeight, 64)
+            : 0
+        let estimatedGroupContentHeight = estimatedChunkContentHeight + addGroupRowHeight + 16
+        let collapsedGroupNeedsMoreHeight = estimatedGroupContentHeight > collapsedBoundedGroupHeight
+        let shouldExpandGroupArea =
+            (isDraggingOverGroupArea || selectedPoolItemIDForTapGrouping != nil) &&
+            collapsedGroupNeedsMoreHeight
+        let preferredGroupHeight = shouldExpandGroupArea ? expandedBoundedGroupHeight : collapsedBoundedGroupHeight
+        let poolHeightForPreferredGroup = max(minPoolHeight, availableHeight - preferredGroupHeight - sectionSpacing)
+
+        // If pool content fits in less space, shrink the top section and let group section use the freed space.
+        let maxPoolHeightWhenPreservingGroupMinimum = max(minPoolHeight, availableHeight - minGroupHeight - sectionSpacing)
+        let fittedPoolHeight = min(estimatedPoolContentHeight, maxPoolHeightWhenPreservingGroupMinimum)
+        let shouldFitPoolToContent = fittedPoolHeight < poolHeightForPreferredGroup
+
+        let poolHeight = shouldFitPoolToContent ? fittedPoolHeight : poolHeightForPreferredGroup
+        let maxGroupHeight = max(0, availableHeight - minPoolHeight)
+        let boundedGroupHeight = min(
+            max(minGroupHeight, availableHeight - poolHeight - sectionSpacing),
+            maxGroupHeight
+        )
+
+        return VStack(spacing: sectionSpacing) {
+            List {
+                ForEach(poolItems) { item in
+                    rowView(
+                        text: item.text,
+                        showGhostOutline: item.isGhost,
+                        hiddenStatusText: hiddenStatusText(for: item),
+                        dueStatusText: dueDateStatusText(for: item),
+                        dueStatusColor: dueDateStatusColor(for: item),
+                        showDueBorder: hasVisibleDueStatus(for: item),
+                        isDraggable: true,
+                        dragPayload: DragPayload(itemID: item.id),
+                        isTapSelected: selectedPoolItemIDForTapGrouping == item.id
+                    )
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        if selectedPoolItemIDForTapGrouping == nil {
+                            selectedPoolItemIDForTapGrouping = item.id
+                        } else {
+                            selectedPoolItemIDForTapGrouping = nil
+                        }
+                    }
+                    .dropDestination(for: DragPayload.self) { payloads, _ in
+                        guard let payload = payloads.first else { return false }
+                        moveItemToPool(payload.itemID)
+                        isDraggingOverGroupArea = false
+
+                        enforceShowHiddenIfNeeded()
+                        persistStep3Plan()
+                        return true
+                    }
+                    .padding(.vertical, 4)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                }
+                .listRowSeparator(.hidden)
+            }
+            .frame(height: poolHeight)
+            .listRowSpacing(4)
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .dropDestination(for: DragPayload.self) { payloads, _ in
+                guard let payload = payloads.first else { return false }
+                moveItemToPool(payload.itemID)
+                isDraggingOverGroupArea = false
+
+                enforceShowHiddenIfNeeded()
+                persistStep3Plan()
+                return true
+            }
+            .onChange(of: showHidden) { _, _ in
+                enforceShowHiddenIfNeeded()
+                syncPoolWithVisibility()
+                persistStep3Plan()
+            }
+
+            List {
+                ForEach(Array(chunks.enumerated()), id: \.element.id) { index, _ in
+                    chunkContainerView(chunkIndex: index)
+                        .background(
+                            GeometryReader { proxy in
+                                Color.clear.preference(
+                                    key: Step3ChunkRowHeightPreferenceKey.self,
+                                    value: [chunks[index].id: proxy.size.height]
+                                )
+                            }
+                        )
+                        .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+                        .listRowSeparator(.hidden)
+                }
+
+                if chunks.count < maxChunks {
+                    addChunkRow
+                        .background(
+                            GeometryReader { proxy in
+                                Color.clear.preference(
+                                    key: Step3AddGroupRowHeightPreferenceKey.self,
+                                    value: proxy.size.height
+                                )
+                            }
+                        )
+                        .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+                        .listRowSeparator(.hidden)
+                }
+            }
+            .frame(height: boundedGroupHeight)
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .dropDestination(
+                for: DragPayload.self,
+                action: { _, _ in false },
+                isTargeted: { isTargeted in
+                    setGroupAreaDropTarget(isTargeted)
+                }
+            )
+        }
+        .onPreferenceChange(Step3ChunkRowHeightPreferenceKey.self) { heights in
+            measuredStep3ChunkHeights.merge(heights) { _, new in new }
+        }
+        .onPreferenceChange(Step3AddGroupRowHeightPreferenceKey.self) { height in
+            if height > 0 {
+                measuredStep3AddGroupRowHeight = height
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     private var addChunkRow: some View {
@@ -3410,10 +3413,6 @@ struct PlanStepThreeLabelView: View {
             VStack(spacing: 1) {
                 PlanStepProgressBar(current: 3, total: 6)
                     .frame(maxWidth: .infinity, alignment: .center)
-                Text("Label")
-                    .font(.largeTitle)
-                    .fontWeight(.bold)
-                    .frame(maxWidth: .infinity, alignment: .center)
             }
 
             HStack(alignment: .top, spacing: 10) {
@@ -3476,19 +3475,6 @@ struct PlanStepThreeLabelView: View {
 
             HStack(spacing: 12) {
                 Button {
-                    if let onBack { onBack() } else { dismiss() }
-                } label: {
-                    Text("Back")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .foregroundStyle(secondaryButtonTextColor)
-                }
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color(.systemGray5))
-                )
-
-                Button {
                     if isNextEnabled {
                         shouldHighlightMissingLabels = false
                         showValidationHint = false
@@ -3501,11 +3487,24 @@ struct PlanStepThreeLabelView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
                 .tint(isNextEnabled ? .accentColor : Color(.systemGray3))
             }
             .padding(.bottom, 2)
         }
         .padding(.horizontal)
+        .navigationTitle("Label")
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    if let onBack { onBack() } else { dismiss() }
+                } label: {
+                    Label("Back", systemImage: "chevron.left")
+                }
+            }
+        }
         .overlay(alignment: .bottom) {
             if showValidationHint {
                 VStack(alignment: .center, spacing: 6) {
@@ -3830,6 +3829,7 @@ struct PlanStepFourResultView: View {
     @State private var autoWriteIconAnimationTask: Task<Void, Never>? = nil
     @State private var isResultInfoExpanded: Bool = false
     @State private var showResultAutoWriteErrorPopup: Bool = false
+    @FocusState private var focusedResultChunkID: UUID?
 
     private let footerPinnedHeight: CGFloat = 68
     private let keyboardFloatingGap: CGFloat = 15
@@ -3908,11 +3908,18 @@ struct PlanStepFourResultView: View {
     }
 
     private func resultAutoWriteBottomPadding(in proxy: GeometryProxy) -> CGFloat {
-        guard keyboardHeight > 0 else { return 58 }
+        guard keyboardHeight > 0 else { return footerPinnedHeight + 8 }
         let keyboardTopGlobal = UIScreen.main.bounds.height - keyboardHeight
         let viewBottomGlobal = proxy.frame(in: .global).maxY
         let keyboardOverlapInView = max(0, viewBottomGlobal - keyboardTopGlobal)
         return keyboardOverlapInView + keyboardFloatingGap
+    }
+
+    private var resultKeyboardShowsCheckmark: Bool {
+        guard let chunkID = focusedResultChunkID else { return false }
+        return !(resultTextByChunk[chunkID] ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .isEmpty
     }
 
     private func normalizeAreaLabel(_ value: String) -> String {
@@ -3988,10 +3995,6 @@ struct PlanStepFourResultView: View {
         VStack(spacing: 12) {
             VStack(spacing: 1) {
                 PlanStepProgressBar(current: 4, total: 6)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                Text("Result")
-                    .font(.largeTitle)
-                    .fontWeight(.bold)
                     .frame(maxWidth: .infinity, alignment: .center)
             }
 
@@ -4087,14 +4090,28 @@ struct PlanStepFourResultView: View {
             GeometryReader { proxy in
                 if !plannedChunksForWeek.isEmpty {
                     HStack(spacing: 8) {
+                        resultAutoWriteControls
                         if isKeyboardVisible {
                             keyboardDismissButton
                         }
-                        resultAutoWriteControls
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
                     .padding(.trailing, 16)
                     .padding(.bottom, resultAutoWriteBottomPadding(in: proxy))
+                }
+            }
+        }
+        .navigationTitle("Result")
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    resultAutosaveTask?.cancel()
+                    persistResultsForWeekNow()
+                    if let onBack { onBack() } else { dismiss() }
+                } label: {
+                    Label("Back", systemImage: "chevron.left")
                 }
             }
         }
@@ -4164,39 +4181,23 @@ struct PlanStepFourResultView: View {
     }
 
     private var resultFooter: some View {
-        HStack(spacing: 12) {
-            Button {
-                resultAutosaveTask?.cancel()
-                persistResultsForWeekNow()
-                if let onBack { onBack() } else { dismiss() }
-            } label: {
-                Text("Back")
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .foregroundStyle(secondaryButtonTextColor)
+        Button {
+            resultAutosaveTask?.cancel()
+            persistResultsForWeekNow()
+            if isNextEnabled {
+                shouldHighlightMissingResults = false
+                showValidationHint = false
+                if let onNext { onNext() }
+            } else {
+                triggerValidationFeedback()
             }
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color(.systemGray5))
-            )
-
-            Button {
-                resultAutosaveTask?.cancel()
-                persistResultsForWeekNow()
-                if isNextEnabled {
-                    shouldHighlightMissingResults = false
-                    showValidationHint = false
-                    if let onNext { onNext() }
-                } else {
-                    triggerValidationFeedback()
-                }
-            } label: {
-                Text("Next")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(isNextEnabled ? .accentColor : Color(.systemGray3))
+        } label: {
+            Text("Next")
+                .frame(maxWidth: .infinity)
         }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.large)
+        .tint(isNextEnabled ? .accentColor : Color(.systemGray3))
         .padding(.bottom, 2)
     }
 
@@ -4258,6 +4259,7 @@ struct PlanStepFourResultView: View {
                     prompt: Text("Enter result all actions contribute to...")
                         .foregroundStyle(Color(red: 0.60, green: 0.60, blue: 0.60))
                 )
+                    .focused($focusedResultChunkID, equals: chunkID)
                     .font(resultFieldFont)
                     .submitLabel(.done)
                     .foregroundStyle(primaryTextColor)
@@ -4369,14 +4371,27 @@ struct PlanStepFourResultView: View {
             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
             #endif
         } label: {
-            Image(systemName: "keyboard.chevron.compact.down")
+            Image(systemName: resultKeyboardShowsCheckmark ? "checkmark" : "keyboard.chevron.compact.down")
                 .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.primary.opacity(0.85))
+                .foregroundStyle(resultKeyboardShowsCheckmark ? .white : .primary.opacity(0.85))
                 .frame(width: 45, height: 45)
-                .background(.ultraThinMaterial, in: Circle())
+                .background(
+                    Group {
+                        if resultKeyboardShowsCheckmark {
+                            Circle().fill(Color.blue)
+                        } else {
+                            Circle().fill(.ultraThinMaterial)
+                        }
+                    }
+                )
                 .overlay(
                     Circle()
-                        .stroke(Color.white.opacity(0.28), lineWidth: 1)
+                        .stroke(
+                            resultKeyboardShowsCheckmark
+                            ? Color.blue.opacity(0.9)
+                            : Color.white.opacity(0.28),
+                            lineWidth: 1
+                        )
                 )
         }
         .buttonStyle(.plain)
@@ -4955,9 +4970,18 @@ struct PlanStepFourView: View {
         return result
     }
 
+    private func associatedOutcomes(for chunk: PlannedChunk) -> [Outcomes] {
+        let normalizedCategory = chunk.label.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return outcomes.filter {
+            $0.category.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == normalizedCategory
+        }
+    }
+
     private func availableOutcomes(forChunk chunkID: UUID) -> [Outcomes] {
+        guard let chunk = plannedChunksForWeek.first(where: { $0.id == chunkID }) else { return [] }
+        let categoryOutcomes = associatedOutcomes(for: chunk)
         let takenByOtherChunks = selectedOutcomeIDs(excludingChunk: chunkID)
-        return outcomes.filter { !takenByOtherChunks.contains($0.outcome_id) }
+        return categoryOutcomes.filter { !takenByOtherChunks.contains($0.outcome_id) }
     }
 
     private func availableRoles(forChunk chunk: PlannedChunk?) -> [FulfillmentRoles] {
@@ -4993,10 +5017,6 @@ struct PlanStepFourView: View {
         VStack(spacing: 12) {
             VStack(spacing: 1) {
                 PlanStepProgressBar(current: 5, total: 6)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                Text("Plan")
-                    .font(.largeTitle)
-                    .fontWeight(.bold)
                     .frame(maxWidth: .infinity, alignment: .center)
             }
 
@@ -5123,42 +5143,40 @@ struct PlanStepFourView: View {
                 }
             }
         }
+        .navigationTitle("Plan")
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    step4AutosaveTask?.cancel()
+                    persistStep4ForWeekNow()
+                    if let onBack { onBack() } else { dismiss() }
+                } label: {
+                    Label("Back", systemImage: "chevron.left")
+                }
+            }
+        }
     }
 
     private var stepFourFooter: some View {
-        HStack(spacing: 12) {
-            Button {
-                step4AutosaveTask?.cancel()
-                persistStep4ForWeekNow()
-                if let onBack { onBack() } else { dismiss() }
-            } label: {
-                Text("Back")
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .foregroundStyle(secondaryButtonTextColor)
+        Button {
+            step4AutosaveTask?.cancel()
+            persistStep4ForWeekNow()
+            if isStep4NextEnabled {
+                shouldHighlightStep4Validation = false
+                showStep4ValidationHint = false
+                if let onNext { onNext() }
+            } else {
+                triggerStep4ValidationFeedback()
             }
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color(.systemGray5))
-            )
-
-            Button {
-                step4AutosaveTask?.cancel()
-                persistStep4ForWeekNow()
-                if isStep4NextEnabled {
-                    shouldHighlightStep4Validation = false
-                    showStep4ValidationHint = false
-                    if let onNext { onNext() }
-                } else {
-                    triggerStep4ValidationFeedback()
-                }
-            } label: {
-                Text("Next")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(isStep4NextEnabled ? .accentColor : Color(.systemGray3))
+        } label: {
+            Text("Next")
+                .frame(maxWidth: .infinity)
         }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.large)
+        .tint(isStep4NextEnabled ? .accentColor : Color(.systemGray3))
         .padding(.bottom, 2)
     }
 
@@ -5236,12 +5254,14 @@ struct PlanStepFourView: View {
             }
         )
 
+        let categoryOutcomes = associatedOutcomes(for: chunk)
         ChunkCardView(
             chunk: chunk,
             actions: actions,
-            outcomes: outcomes,
+            outcomes: categoryOutcomes,
             roles: roles,
             requiresIdentity: !isOtherChunk(chunk),
+            showsOutcomeConnect: !categoryOutcomes.isEmpty,
             colorScheme: colorScheme,
             targetIconName: targetIconName,
             fill: fill,
@@ -5269,6 +5289,7 @@ struct PlanStepFourView: View {
         let outcomes: [Outcomes]
         let roles: [FulfillmentRoles]
         let requiresIdentity: Bool
+        let showsOutcomeConnect: Bool
         let colorScheme: ColorScheme
         let targetIconName: String
         let fill: Color
@@ -5300,11 +5321,13 @@ struct PlanStepFourView: View {
                     roleConnectRow
                 }
 
-                outcomesConnectRow
+                if showsOutcomeConnect {
+                    outcomesConnectRow
 
-                let selectedOutcomes = resolvedSelectedOutcomes
-                if !selectedOutcomes.isEmpty {
-                    selectedOutcomesList(selectedOutcomes)
+                    let selectedOutcomes = resolvedSelectedOutcomes
+                    if !selectedOutcomes.isEmpty {
+                        selectedOutcomesList(selectedOutcomes)
+                    }
                 }
 
                 Divider().opacity(0.4)
@@ -5801,10 +5824,6 @@ struct PlanStepFiveView: View {
             VStack(spacing: 1) {
                 PlanStepProgressBar(current: 6, total: 6)
                     .frame(maxWidth: .infinity, alignment: .center)
-                Text("Define")
-                    .font(.largeTitle)
-                    .fontWeight(.bold)
-                    .frame(maxWidth: .infinity, alignment: .center)
             }
 
             instructionsRow
@@ -5835,21 +5854,6 @@ struct PlanStepFiveView: View {
 
             HStack(spacing: 12) {
                 Button {
-                    step5AutosaveTask?.cancel()
-                    persistStep5ForWeekNow()
-                    if let onBack { onBack() } else { dismiss() }
-                } label: {
-                    Text("Back")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .foregroundStyle(secondaryButtonTextColor)
-                }
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color(.systemGray5))
-                )
-
-                Button {
                     if isStep5StartEnabled {
                         isShowingStartConfirmation = true
                     } else {
@@ -5860,6 +5864,7 @@ struct PlanStepFiveView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
                 .tint(isStep5StartEnabled ? .accentColor : Color(.systemGray3))
             }
             .padding(.bottom, 2)
@@ -5884,6 +5889,20 @@ struct PlanStepFiveView: View {
             }
         }
         .padding(.horizontal)
+        .navigationTitle("Define")
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    step5AutosaveTask?.cancel()
+                    persistStep5ForWeekNow()
+                    if let onBack { onBack() } else { dismiss() }
+                } label: {
+                    Label("Back", systemImage: "chevron.left")
+                }
+            }
+        }
         .safeAreaPadding(.bottom)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .overlay {
@@ -7569,6 +7588,10 @@ private struct LeverageSheet: View {
                 }
             }
             .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    keyboardAccessoryButton
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
                         commitInlineResource()
@@ -7588,6 +7611,36 @@ private struct LeverageSheet: View {
         value = ""
         isNewResourceMode = false
         isNewResourceFocused = false
+    }
+
+    private var keyboardShowsCheckmark: Bool {
+        isNewResourceFocused && !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var keyboardAccessoryButton: some View {
+        Button {
+            if keyboardShowsCheckmark {
+                commitInlineResource()
+            } else {
+                dismissKeyboard()
+            }
+        } label: {
+            Image(systemName: keyboardShowsCheckmark ? "checkmark" : "keyboard.chevron.compact.down")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(keyboardShowsCheckmark ? .white : .primary.opacity(0.85))
+                .frame(width: 38, height: 38)
+                .background(
+                    Circle().fill(keyboardShowsCheckmark ? Color.blue : Color(.secondarySystemBackground))
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func dismissKeyboard() {
+        isNewResourceFocused = false
+        #if canImport(UIKit)
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        #endif
     }
 }
 
@@ -7767,6 +7820,10 @@ private struct SensitivitySheet: View {
             .navigationTitle("Sensitivities")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    keyboardAccessoryButton
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
                         commitInlinePlace()
@@ -7805,6 +7862,36 @@ private struct SensitivitySheet: View {
         newPlace = ""
         isNewPlaceMode = false
         isNewPlaceFocused = false
+    }
+
+    private var keyboardShowsCheckmark: Bool {
+        isNewPlaceFocused && !newPlace.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var keyboardAccessoryButton: some View {
+        Button {
+            if keyboardShowsCheckmark {
+                commitInlinePlace()
+            } else {
+                dismissKeyboard()
+            }
+        } label: {
+            Image(systemName: keyboardShowsCheckmark ? "checkmark" : "keyboard.chevron.compact.down")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(keyboardShowsCheckmark ? .white : .primary.opacity(0.85))
+                .frame(width: 38, height: 38)
+                .background(
+                    Circle().fill(keyboardShowsCheckmark ? Color.blue : Color(.secondarySystemBackground))
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func dismissKeyboard() {
+        isNewPlaceFocused = false
+        #if canImport(UIKit)
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        #endif
     }
 
     private func bindingForTimeOfDay(_ keyPath: WritableKeyPath<PlannedChunkActionDefineState, Bool>) -> Binding<Bool> {
@@ -7869,8 +7956,13 @@ private struct AttachmentsSheet: View {
     @Environment(\.openURL) private var openURL
     @State private var linkText: String = ""
     @State private var isNewLinkMode: Bool = false
-    @FocusState private var isNewLinkFocused: Bool
+    @FocusState private var focusedField: FocusedField?
     @State private var isFileImporterPresented: Bool = false
+
+    private enum FocusedField: Hashable {
+        case notes
+        case newLink
+    }
 
     var body: some View {
         NavigationStack {
@@ -7878,19 +7970,20 @@ private struct AttachmentsSheet: View {
                 Section("Notes") {
                     TextEditor(text: $noteText)
                         .frame(height: 120)
+                        .focused($focusedField, equals: .notes)
                 }
 
                 Section("Files and Links") {
                     Button {
                         isNewLinkMode = true
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                            isNewLinkFocused = true
+                            focusedField = .newLink
                         }
                     } label: {
                         HStack(spacing: 10) {
                             if isNewLinkMode {
                                 TextField("Add link…", text: $linkText)
-                                    .focused($isNewLinkFocused)
+                                    .focused($focusedField, equals: .newLink)
                                     .submitLabel(.done)
                                     .onSubmit {
                                         commitInlineLink()
@@ -7982,6 +8075,10 @@ private struct AttachmentsSheet: View {
             .navigationTitle("Attachments")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    keyboardAccessoryButton
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
                         commitInlineLink()
@@ -7999,7 +8096,57 @@ private struct AttachmentsSheet: View {
         onAddLink(trimmed)
         linkText = ""
         isNewLinkMode = false
-        isNewLinkFocused = false
+        focusedField = nil
+    }
+
+    private var keyboardShowsCheckmark: Bool {
+        switch focusedField {
+        case .notes:
+            return !noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .newLink:
+            return !linkText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .none:
+            return false
+        }
+    }
+
+    private var keyboardAccessoryButton: some View {
+        Button {
+            if keyboardShowsCheckmark {
+                handleKeyboardCheckmarkAction()
+            } else {
+                dismissKeyboard()
+            }
+        } label: {
+            Image(systemName: keyboardShowsCheckmark ? "checkmark" : "keyboard.chevron.compact.down")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(keyboardShowsCheckmark ? .white : .primary.opacity(0.85))
+                .frame(width: 38, height: 38)
+                .background(
+                    Circle().fill(keyboardShowsCheckmark ? Color.blue : Color(.secondarySystemBackground))
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func handleKeyboardCheckmarkAction() {
+        switch focusedField {
+        case .notes:
+            onSaveNote()
+            dismissKeyboard()
+            dismiss()
+        case .newLink:
+            commitInlineLink()
+        case .none:
+            break
+        }
+    }
+
+    private func dismissKeyboard() {
+        focusedField = nil
+        #if canImport(UIKit)
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        #endif
     }
 
     private func iconName(for a: PlannedChunkActionAttachment) -> String {
