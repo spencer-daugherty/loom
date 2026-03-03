@@ -627,7 +627,7 @@ struct AccountView: View {
             Section {
                 HStack {
                     Spacer()
-                    Text("Version: 0.1.0-alpha.4 | Made in USA")
+                    Text("Version: 0.1.0-alpha.6 | Made in USA")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                     Spacer()
