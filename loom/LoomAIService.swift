@@ -2,6 +2,7 @@ import Foundation
 
 struct LoomAIService {
     private let baseURL = URL(string: "https://loom-ai-proxy.spence0927.workers.dev")!
+    private let diagnosticBaseURL = URL(string: "https://loom-ai-minimal.spence0927.workers.dev")!
     private let session: URLSession
     private let useMockLoomAIResponse = false
 
@@ -30,10 +31,16 @@ struct LoomAIService {
         var client: ClientInfo
     }
 
+    struct DiagnosticInsightsRequest: Codable {
+        var diagnostic: DiagnosticAnswers
+        var client: DiagnosticInsightsClient
+    }
+
     struct LoomAIResponse: Decodable {
         let message: String
         let actions: [LoomAIAction]
         let debug: LoomAIDebug?
+        let elapsedMS: Double
 
         private enum CodingKeys: String, CodingKey {
             case message
@@ -42,10 +49,16 @@ struct LoomAIService {
             case debug
         }
 
-        init(message: String, actions: [LoomAIAction] = [], debug: LoomAIDebug? = nil) {
+        init(
+            message: String,
+            actions: [LoomAIAction] = [],
+            debug: LoomAIDebug? = nil,
+            elapsedMS: Double = 0
+        ) {
             self.message = message
             self.actions = actions
             self.debug = debug
+            self.elapsedMS = elapsedMS
         }
 
         init(from decoder: Decoder) throws {
@@ -56,6 +69,7 @@ struct LoomAIService {
             self.message = message
             self.actions = (try? container.decode([LoomAIAction].self, forKey: .actions)) ?? []
             self.debug = try? container.decode(LoomAIDebug.self, forKey: .debug)
+            self.elapsedMS = 0
         }
     }
 
@@ -228,6 +242,79 @@ struct LoomAIService {
         }
     }
 
+    func fetchDiagnosticInsights(
+        diagnostic: DiagnosticAnswers,
+        client: DiagnosticInsightsClient
+    ) async throws -> DiagnosticInsights {
+        let startedAt = CFAbsoluteTimeGetCurrent()
+        let encoder = JSONEncoder()
+        let body = try encoder.encode(DiagnosticInsightsRequest(diagnostic: diagnostic, client: client))
+
+        func performRequest(timeout: TimeInterval) async throws -> DiagnosticInsights {
+            var request = URLRequest(url: diagnosticBaseURL.appendingPathComponent("diagnostic/insights"))
+            request.httpMethod = "POST"
+            request.timeoutInterval = timeout
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = body
+
+            let (data, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                throw LoomAIServiceError(message: "Bad server response.", statusCode: nil, contentType: nil, rawBody: nil)
+            }
+            let rawBody = String(data: data, encoding: .utf8) ?? "<non-UTF8 \(data.count) bytes>"
+
+            guard (200...299).contains(http.statusCode) else {
+                throw LoomAIServiceError(
+                    message: "HTTP \(http.statusCode): \(rawBody)",
+                    statusCode: http.statusCode,
+                    contentType: http.value(forHTTPHeaderField: "Content-Type"),
+                    rawBody: rawBody
+                )
+            }
+
+            do {
+                let decoded = try JSONDecoder().decode(DiagnosticInsights.self, from: data)
+                let root = decoded.rootCause.trimmingCharacters(in: .whitespacesAndNewlines)
+                let next = decoded.nextDirection.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !root.isEmpty, !next.isEmpty else {
+                    throw LoomAIServiceError(
+                        message: "Invalid diagnostic insights payload.",
+                        statusCode: http.statusCode,
+                        contentType: http.value(forHTTPHeaderField: "Content-Type"),
+                        rawBody: rawBody
+                    )
+                }
+                return .init(rootCause: root, nextDirection: next)
+            } catch {
+                throw LoomAIServiceError(
+                    message: "Invalid diagnostic insights JSON.",
+                    statusCode: http.statusCode,
+                    contentType: http.value(forHTTPHeaderField: "Content-Type"),
+                    rawBody: rawBody
+                )
+            }
+        }
+
+        do {
+            let insights = try await performRequest(timeout: 45)
+            reportSlowDiagnosticInsightsIfNeeded(
+                insights: insights,
+                elapsedMS: (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
+            )
+            return insights
+        } catch {
+            guard shouldRetryWithMinimalContext(for: error) else {
+                throw error
+            }
+            let insights = try await performRequest(timeout: 75)
+            reportSlowDiagnosticInsightsIfNeeded(
+                insights: insights,
+                elapsedMS: (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
+            )
+            return insights
+        }
+    }
+
     func sendChat(
         messages: [TransportMessage],
         context: LoomAIContextSnapshot,
@@ -264,12 +351,43 @@ struct LoomAIService {
 
         var requestBody = ChatRequest(messages: messages, context: context, client: client)
         var bodyData = try encoder.encode(requestBody)
+        var isUsingMinimalContext = false
         if bodyData.count > LoomAIContextSnapshot.maxPayloadBytes {
             requestBody.context = context.minimalized()
             bodyData = try encoder.encode(requestBody)
+            isUsingMinimalContext = true
         }
 
-        return try await post(path: "/chat", bodyData: bodyData)
+        let timeout = requestTimeout(for: intent, usingMinimalContext: isUsingMinimalContext)
+        do {
+            let response = try await post(path: "/chat", bodyData: bodyData, timeout: timeout)
+            reportSlowResponseIfNeeded(
+                response,
+                intent: intent,
+                screen: screen,
+                requestID: requestID,
+                requestHash: requestHash
+            )
+            return response
+        } catch {
+            // If the first request timed out before we already switched to minimal context,
+            // retry once with a compact snapshot to keep AI features responsive.
+            guard shouldRetryWithMinimalContext(for: error), !isUsingMinimalContext else {
+                throw error
+            }
+            requestBody.context = context.minimalized()
+            bodyData = try encoder.encode(requestBody)
+            let retryTimeout = requestTimeout(for: intent, usingMinimalContext: true)
+            let retryResponse = try await post(path: "/chat", bodyData: bodyData, timeout: retryTimeout)
+            reportSlowResponseIfNeeded(
+                retryResponse,
+                intent: intent,
+                screen: screen,
+                requestID: requestID,
+                requestHash: requestHash
+            )
+            return retryResponse
+        }
     }
 
     private func sanitizedClientValue(_ value: String?) -> String? {
@@ -279,11 +397,11 @@ struct LoomAIService {
         return String(trimmed.prefix(128))
     }
 
-    private func post(path: String, bodyData: Data) async throws -> LoomAIResponse {
+    private func post(path: String, bodyData: Data, timeout: TimeInterval) async throws -> LoomAIResponse {
         let url = path.isEmpty ? baseURL : baseURL.appendingPathComponent(String(path.dropFirst()))
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.timeoutInterval = 30
+        request.timeoutInterval = timeout
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = bodyData
 
@@ -340,7 +458,12 @@ struct LoomAIService {
                 let text = normalized.message.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !text.isEmpty {
                     log("Parsed assistant text (normalized): \(text)")
-                    return LoomAIResponse(message: text, actions: normalized.actions ?? [], debug: normalized.debug)
+                    return LoomAIResponse(
+                        message: text,
+                        actions: normalized.actions ?? [],
+                        debug: normalized.debug,
+                        elapsedMS: elapsed * 1000
+                    )
                 }
             }
 
@@ -348,26 +471,31 @@ struct LoomAIService {
                 let text = direct.message.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !text.isEmpty {
                     log("Parsed assistant text (direct LoomAIResponse): \(text)")
-                    return LoomAIResponse(message: text, actions: direct.actions, debug: direct.debug)
+                    return LoomAIResponse(
+                        message: text,
+                        actions: direct.actions,
+                        debug: direct.debug,
+                        elapsedMS: elapsed * 1000
+                    )
                 }
             }
 
             if let openAIChat = try? decoder.decode(OpenAIChatCompletionsFallback.self, from: data),
                let text = openAIChat.assistantText {
                 log("Parsed assistant text (OpenAI Chat Completions): \(text)")
-                return LoomAIResponse(message: text, actions: [], debug: nil)
+                return LoomAIResponse(message: text, actions: [], debug: nil, elapsedMS: elapsed * 1000)
             }
 
             if let openAIResponses = try? decoder.decode(OpenAIResponsesAPIFallback.self, from: data),
                let text = openAIResponses.assistantText {
                 log("Parsed assistant text (OpenAI Responses API): \(text)")
-                return LoomAIResponse(message: text, actions: [], debug: nil)
+                return LoomAIResponse(message: text, actions: [], debug: nil, elapsedMS: elapsed * 1000)
             }
 
             let raw = try decoder.decode(RawResponse.self, from: data)
             if let apiError = raw.errorMessage, !apiError.isEmpty {
                 log("Parsed API error: \(apiError)")
-                return LoomAIResponse(message: apiError, actions: [], debug: raw.debug)
+                return LoomAIResponse(message: apiError, actions: [], debug: raw.debug, elapsedMS: elapsed * 1000)
             }
             guard let reply = raw.assistantText, !reply.isEmpty else {
                 throw LoomAIServiceError(
@@ -387,7 +515,7 @@ struct LoomAIService {
                 )
             }
             log("Parsed assistant text: \(reply)")
-            return LoomAIResponse(message: reply, actions: actions, debug: raw.debug)
+            return LoomAIResponse(message: reply, actions: actions, debug: raw.debug, elapsedMS: elapsed * 1000)
         } catch let decodeError as LoomAIServiceError {
             log("Parse guardrail error: \(decodeError.message)")
             #if DEBUG
@@ -412,6 +540,57 @@ struct LoomAIService {
         }
     }
 
+    private func requestTimeout(for intent: String?, usingMinimalContext: Bool) -> TimeInterval {
+        let normalizedIntent = intent?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        if normalizedIntent.hasPrefix("autowrite_") || normalizedIntent == "plan_result_autowrite" {
+            return usingMinimalContext ? 20 : 25
+        }
+        // gpt-5.2 paths can take longer, especially with larger context snapshots.
+        return usingMinimalContext ? 60 : 90
+    }
+
+    private func shouldRetryWithMinimalContext(for error: Error) -> Bool {
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .timedOut, .networkConnectionLost, .cannotConnectToHost, .notConnectedToInternet:
+                return true
+            default:
+                break
+            }
+        }
+        if let serviceError = error as? LoomAIServiceError,
+           let statusCode = serviceError.statusCode {
+            return statusCode == 408 || statusCode == 429 || statusCode == 502 || statusCode == 503 || statusCode == 504 || statusCode == 524
+        }
+        return false
+    }
+
+    private func reportSlowResponseIfNeeded(
+        _ response: LoomAIResponse,
+        intent: String?,
+        screen: String?,
+        requestID: String?,
+        requestHash: String?
+    ) {
+        let featureBase = (intent ?? screen ?? "loomai_service")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: #"\s+"#, with: "_", options: .regularExpression)
+            .lowercased()
+        let feature = "loomai_\(featureBase.isEmpty ? "service" : featureBase)"
+        guard let details = loomAISlowResponseTroubleshootingDetailsIfNeeded(
+            feature: feature,
+            elapsedMS: response.elapsedMS,
+            responsePreview: response.message,
+            intent: intent,
+            screen: screen,
+            requestID: requestID,
+            requestHash: requestHash
+        ) else {
+            return
+        }
+        loomAIReportTroubleshootingIfEnabled(details: details)
+    }
+
     #if DEBUG
     func debugManualWorkerTest() async {
         let minimal = LoomAIContextSnapshot(
@@ -426,7 +605,9 @@ struct LoomAIService {
             notes: ["Manual LoomAIService test"],
             purposeDraft: nil,
             fulfillmentSetup: nil,
-            personalization: nil
+            personalization: nil,
+            reflectionJournal: nil,
+            shareAttachmentPreview: nil
         )
         do {
             let reply = try await sendChat(
@@ -453,5 +634,23 @@ struct LoomAIService {
         print("[LoomAI] Decode failure content-type: \(contentType ?? "<none>")")
         print("[LoomAI] Decode failure body (first 2000): \(String(rawBody.prefix(2000)))")
         #endif
+    }
+
+    private func reportSlowDiagnosticInsightsIfNeeded(insights: DiagnosticInsights, elapsedMS: Double) {
+        let preview = """
+        {"rootCause":"\(insights.rootCause)","nextDirection":"\(insights.nextDirection)"}
+        """
+        guard let details = loomAISlowResponseTroubleshootingDetailsIfNeeded(
+            feature: "diagnostics_insights",
+            elapsedMS: elapsedMS,
+            responsePreview: preview,
+            intent: "diagnostic_insights",
+            screen: "diagnostic_insights",
+            requestID: nil,
+            requestHash: nil
+        ) else {
+            return
+        }
+        loomAIReportTroubleshootingIfEnabled(details: details)
     }
 }

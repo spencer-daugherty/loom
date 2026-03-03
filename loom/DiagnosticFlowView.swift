@@ -90,6 +90,7 @@ struct DiagnosticFlowView: View {
     @State private var isAutoAdvancing = false
     @State private var stepTask: Task<Void, Never>?
     @State private var revisitedSingleSelectSteps: Set<Step> = []
+    @State private var lifeAreaColorKeys: [String: String] = [:]
 
     init(
         mode: Mode = .onboarding,
@@ -160,7 +161,7 @@ struct DiagnosticFlowView: View {
                         beginBuildAndFinish()
                     }
                 case .building:
-                    buildingStep
+                    EmptyView()
                 }
             }
             .padding(.horizontal, 20)
@@ -194,6 +195,12 @@ struct DiagnosticFlowView: View {
                         elapsedSeconds: 0
                     )
                 )
+            }
+            ensureLifeAreaColorAssignments()
+        }
+        .onChange(of: step) { _, newStep in
+            if newStep == .lifeAreas {
+                ensureLifeAreaColorAssignments()
             }
         }
         .onDisappear {
@@ -255,12 +262,20 @@ struct DiagnosticFlowView: View {
 
             VStack(spacing: 8) {
                 ForEach(Self.lifeAreaOptions, id: \.self) { option in
-                    toggleCard(option, isSelected: draft.lifeAreasSelected.contains(option)) {
+                    toggleCard(
+                        option,
+                        isSelected: draft.lifeAreasSelected.contains(option),
+                        selectedColor: lifeAreaSelectionColor(for: option)
+                    ) {
                         toggleLifeArea(option)
                     }
                 }
                 ForEach(customLifeAreas, id: \.self) { custom in
-                    toggleCard(custom, isSelected: draft.lifeAreasSelected.contains(custom)) {
+                    toggleCard(
+                        custom,
+                        isSelected: draft.lifeAreasSelected.contains(custom),
+                        selectedColor: lifeAreaSelectionColor(for: custom)
+                    ) {
                         toggleLifeArea(custom)
                     }
                 }
@@ -304,21 +319,6 @@ struct DiagnosticFlowView: View {
             .controlSize(.large)
             .padding(.top, 6)
         }
-    }
-
-    private var buildingStep: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            DiagnosticThinkingHeader(
-                title: "Personalizing",
-                progress: 1
-            )
-            .padding(.bottom, 8)
-
-            Text("Loom is learning what will work for you.")
-                .font(.system(size: 29, weight: .bold))
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.top, 10)
     }
 
     private func singleSelectStep(
@@ -403,6 +403,7 @@ struct DiagnosticFlowView: View {
     private func toggleCard(
         _ title: String,
         isSelected: Bool,
+        selectedColor: Color = .accentColor,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: {
@@ -417,7 +418,7 @@ struct DiagnosticFlowView: View {
                 Spacer(minLength: 0)
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .font(.title3)
-                    .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+                    .foregroundStyle(isSelected ? selectedColor : .secondary)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 11)
@@ -427,7 +428,7 @@ struct DiagnosticFlowView: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(isSelected ? Color.accentColor.opacity(0.72) : Color.black.opacity(0.08), lineWidth: isSelected ? 2 : 1)
+                    .stroke(isSelected ? selectedColor.opacity(0.72) : Color.black.opacity(0.08), lineWidth: isSelected ? 2 : 1)
             )
             .overlay {
                 if isSelected {
@@ -448,6 +449,7 @@ struct DiagnosticFlowView: View {
 
     private func toggleLifeArea(_ area: String) {
         if let existing = draft.lifeAreasSelected.firstIndex(where: { $0.caseInsensitiveCompare(area) == .orderedSame }) {
+            removeLifeAreaColorAssignment(for: area)
             draft.lifeAreasSelected.remove(at: existing)
             return
         }
@@ -455,6 +457,7 @@ struct DiagnosticFlowView: View {
         if draft.lifeAreasSelected.count >= 7 { return }
 
         draft.lifeAreasSelected.append(area)
+        assignLifeAreaDefaultColorIfNeeded(for: area)
         triggerSelectionHaptic()
     }
 
@@ -465,6 +468,7 @@ struct DiagnosticFlowView: View {
         if !customLifeAreas.contains(where: { $0.caseInsensitiveCompare(custom) == .orderedSame }) {
             if draft.lifeAreasSelected.count < 7 {
                 draft.lifeAreasSelected.append(custom)
+                assignLifeAreaDefaultColorIfNeeded(for: custom)
                 triggerSelectionHaptic()
             }
         }
@@ -493,13 +497,8 @@ struct DiagnosticFlowView: View {
     }
 
     private func beginBuildAndFinish() {
-        withAnimation(.easeInOut(duration: reduceMotion ? 0.01 : 0.20)) {
-            step = .building
-        }
-
         stepTask?.cancel()
         stepTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_250_000_000)
             guard !Task.isCancelled else { return }
             guard draft.isComplete else { return }
 
@@ -554,6 +553,113 @@ struct DiagnosticFlowView: View {
         return draft.lifeAreasSelected.filter { !builtInSet.contains($0.lowercased()) }
     }
 
+    private var allSelectableLifeAreas: [String] {
+        var ordered: [String] = []
+        for area in Self.lifeAreaOptions + customLifeAreas + draft.lifeAreasSelected {
+            if !ordered.contains(where: { $0.caseInsensitiveCompare(area) == .orderedSame }) {
+                ordered.append(area)
+            }
+        }
+        return ordered
+    }
+
+    private var diagnosticsColorCycleKeys: [String] {
+        ["blue", "indigo", "green", "purple", "red", "orange"]
+    }
+
+    private func lifeAreaSelectionColor(for area: String) -> Color {
+        let key = lifeAreaColorKey(for: area, map: lifeAreaColorKeys)
+            ?? FulfillmentCategoryTheme.defaultColorKeys()[area]
+            ?? rotatedLifeAreaColorKey(for: area)
+        return FulfillmentCategoryTheme.color(forKey: key)
+    }
+
+    private func ensureLifeAreaColorAssignments() {
+        var map = lifeAreaColorKeys
+        for area in draft.lifeAreasSelected {
+            assignLifeAreaDefaultColorIfNeeded(for: area, map: &map)
+        }
+        map = map.filter { candidate in
+            draft.lifeAreasSelected.contains { $0.caseInsensitiveCompare(candidate.key) == .orderedSame }
+        }
+        lifeAreaColorKeys = map
+    }
+
+    private func assignLifeAreaDefaultColorIfNeeded(for area: String) {
+        var map = lifeAreaColorKeys
+        assignLifeAreaDefaultColorIfNeeded(for: area, map: &map)
+        lifeAreaColorKeys = map
+    }
+
+    private func assignLifeAreaDefaultColorIfNeeded(for area: String, map: inout [String: String]) {
+        let trimmed = area.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let preferred = lifeAreaColorKey(for: trimmed, map: map)
+            ?? FulfillmentCategoryTheme.defaultColorKeys()[trimmed]
+            ?? rotatedLifeAreaColorKey(for: trimmed)
+        let unavailable = unavailableLifeAreaColorKeys(for: trimmed, map: map)
+        let resolved = nextAvailableLifeAreaColorKey(preferred: preferred, unavailable: unavailable)
+        if let existingKey = map.keys.first(where: { $0.caseInsensitiveCompare(trimmed) == .orderedSame }) {
+            map[existingKey] = resolved
+        } else {
+            map[trimmed] = resolved
+        }
+    }
+
+    private func removeLifeAreaColorAssignment(for area: String) {
+        let trimmed = area.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        if let key = lifeAreaColorKeys.keys.first(where: { $0.caseInsensitiveCompare(trimmed) == .orderedSame }) {
+            lifeAreaColorKeys.removeValue(forKey: key)
+        }
+    }
+
+    private func lifeAreaColorKey(for area: String, map: [String: String]) -> String? {
+        if let exact = map[area] { return exact }
+        if let matchedKey = map.keys.first(where: { $0.caseInsensitiveCompare(area) == .orderedSame }) {
+            return map[matchedKey]
+        }
+        return nil
+    }
+
+    private func unavailableLifeAreaColorKeys(for area: String, map: [String: String]) -> Set<String> {
+        let trimmed = area.trimmingCharacters(in: .whitespacesAndNewlines)
+        var keys = Set<String>()
+        for other in draft.lifeAreasSelected {
+            let candidate = other.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !candidate.isEmpty else { continue }
+            guard candidate.caseInsensitiveCompare(trimmed) != .orderedSame else { continue }
+            let colorKey = lifeAreaColorKey(for: candidate, map: map)
+                ?? FulfillmentCategoryTheme.defaultColorKeys()[candidate]
+                ?? rotatedLifeAreaColorKey(for: candidate)
+            keys.insert(colorKey)
+        }
+        return keys
+    }
+
+    private func nextAvailableLifeAreaColorKey(preferred: String, unavailable: Set<String>) -> String {
+        let paletteKeys = FulfillmentCategoryTheme.palette.map(\.key)
+        guard !paletteKeys.isEmpty else { return "blue" }
+        let preferredKey = paletteKeys.contains(preferred) ? preferred : (paletteKeys.first ?? "blue")
+        let startIndex = paletteKeys.firstIndex(of: preferredKey) ?? 0
+        for offset in 0..<paletteKeys.count {
+            let candidate = paletteKeys[(startIndex + offset) % paletteKeys.count]
+            if !unavailable.contains(candidate) {
+                return candidate
+            }
+        }
+        return preferredKey
+    }
+
+    private func rotatedLifeAreaColorKey(for area: String) -> String {
+        let cycleKeys = diagnosticsColorCycleKeys
+        guard !cycleKeys.isEmpty else { return "blue" }
+        if let idx = allSelectableLifeAreas.firstIndex(where: { $0.caseInsensitiveCompare(area) == .orderedSame }) {
+            return cycleKeys[idx % cycleKeys.count]
+        }
+        return cycleKeys.first ?? "blue"
+    }
+
     private func handleBackTapped() {
         cancelPendingStepTask()
         if let previous = previousStep(for: step) {
@@ -592,7 +698,7 @@ struct DiagnosticFlowView: View {
         case .breakPoint: return .lifeAreas
         case .lifeAreas: return .planningReality
         case .planningReality: return .desiredChange
-        case .desiredChange: return .building
+        case .desiredChange: return nil
         case .building: return nil
         }
     }

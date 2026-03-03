@@ -35,24 +35,21 @@ final class DiagnosticsInsightsSnapshot {
 }
 
 enum DiagnosticsInsightsHasher {
-    static let schemaVersion = 1
+    static let schemaVersion = 2
 
     static func hash(for snapshot: PersonalizationSnapshot) -> String {
-        let canonicalLifeAreas = snapshot.lifeAreasSelected
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
-            .filter { !$0.isEmpty }
-            .sorted()
+        let normalizedAnswers = DiagnosticAnswers(
+            stress: snapshot.stressSource.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+            breaksFirst: snapshot.breakPoint.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+            areas: snapshot.lifeAreasSelected
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                .filter { !$0.isEmpty }
+                .sorted(),
+            planningStyle: snapshot.planningReality.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+            firstChange: snapshot.desiredChange.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        )
 
-        let payload: [String: Any] = [
-            "version": schemaVersion,
-            "stressSource": snapshot.stressSource.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
-            "breakPoint": snapshot.breakPoint.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
-            "planningReality": snapshot.planningReality.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
-            "desiredChange": snapshot.desiredChange.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
-            "lifeAreasSelected": canonicalLifeAreas
-        ]
-
-        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]) else {
+        guard let data = try? JSONEncoder().encode(normalizedAnswers) else {
             return "hash_error_v\(schemaVersion)"
         }
         let digest = SHA256.hash(data: data)

@@ -1,14 +1,24 @@
 import SwiftUI
 import SwiftData
+#if canImport(UIKit)
+import UIKit
+#endif
 
 struct DiagnosticInsightsView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var personalizationStore: PersonalizationStore
+    @AppStorage(loomAITroubleshootingDefaultsKey) private var loomAITroubleshootingEnabled = true
 
     let onContinue: () -> Void
     let onEditAnswers: () -> Void
 
     @StateObject private var viewModel = DiagnosticsInsightsViewModel()
+    @State private var showErrorAlert = false
+    @State private var lastFailedDiagnosticsHash: String?
+    @State private var showInlineRetryButton = false
+    @State private var hasTimedOutWaiting = false
+    @State private var timeoutTask: Task<Void, Never>?
+    @State private var timeoutAlertHash: String?
 
     private var currentSnapshot: PersonalizationSnapshot? {
         personalizationStore.current
@@ -23,8 +33,17 @@ struct DiagnosticInsightsView: View {
         return "\(userKey)|\(hash)|v\(DiagnosticsInsightsHasher.schemaVersion)"
     }
 
-    private var shouldDeferRefreshUntilPersonalizationLoads: Bool {
-        currentSnapshot == nil && personalizationStore.isLoading
+    private var currentDiagnosticsHash: String? {
+        guard let snapshot = currentSnapshot else { return nil }
+        return DiagnosticsInsightsHasher.hash(for: snapshot)
+    }
+
+    private var hasLoadedInsights: Bool {
+        !viewModel.insightCards.isEmpty && viewModel.insightsErrorMessage == nil
+    }
+
+    private var isWaitingForInsights: Bool {
+        !hasLoadedInsights && !hasTimedOutWaiting
     }
 
     var body: some View {
@@ -35,48 +54,13 @@ struct DiagnosticInsightsView: View {
                     progress: 1.0
                 )
 
-                Text("Loom sees…")
+                Text("Your quick diagnosis…")
                     .font(.system(size: 38, weight: .bold))
                     .fixedSize(horizontal: false, vertical: true)
 
-                Text("This will shape your experience.")
+                Text("This will shape your Loom experience.")
                     .font(.title3.weight(.medium))
                     .foregroundStyle(.secondary)
-
-                if viewModel.shouldShowPersonalizingLabel {
-                    Text("Personalizing")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                }
-
-                if let errorMessage = viewModel.insightsErrorMessage {
-                    HStack(alignment: .top, spacing: 8) {
-                        Text(errorMessage)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-
-                        Spacer(minLength: 6)
-
-                        Button("Try again") {
-                            Task {
-                                await refreshInsights(forceRefresh: true)
-                            }
-                        }
-                        .font(.caption.weight(.semibold))
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.blue)
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                }
-
-                if let nudge = viewModel.insightsNudge, !nudge.isEmpty {
-                    Text(nudge)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
 
                 if viewModel.isShowingSkeleton {
                     DiagnosticInsightsSkeletonStack()
@@ -87,15 +71,42 @@ struct DiagnosticInsightsView: View {
                     )
                 }
 
+                if loomAITroubleshootingEnabled,
+                   let troubleshooting = viewModel.troubleshootingMessage,
+                   !troubleshooting.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    LoomAITroubleshootingSection(details: troubleshooting)
+                }
+
+                if showInlineRetryButton {
+                    Button("Retry") {
+                        showInlineRetryButton = false
+                        restartTimeoutWindow()
+                        Task { await refreshInsights(forceRefresh: true) }
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.secondary)
+                    .controlSize(.large)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                }
+
                 Button {
                     onContinue()
                 } label: {
-                    Text("Continue")
-                        .frame(maxWidth: .infinity)
+                    ZStack {
+                        Text("Continue")
+                            .opacity(isWaitingForInsights ? 0.0 : 1.0)
+                            .frame(maxWidth: .infinity)
+                        if isWaitingForInsights {
+                            ProgressView()
+                                .progressViewStyle(.circular)
+                        }
+                    }
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 .padding(.top, 4)
+                .disabled(isWaitingForInsights)
+                .opacity(isWaitingForInsights ? 0.55 : 1.0)
 
                 Button("Edit diagnostic answers") {
                     onEditAnswers()
@@ -111,25 +122,82 @@ struct DiagnosticInsightsView: View {
         }
         .background(Color(.systemBackground).ignoresSafeArea())
         .onAppear {
+            restartTimeoutWindow()
             Task {
                 await refreshInsights()
             }
         }
         .onChange(of: diagnosticsSignature) { _, _ in
+            restartTimeoutWindow()
             Task {
                 await refreshInsights()
             }
         }
-        .onChange(of: personalizationStore.isLoading) { _, _ in
-            Task {
-                await refreshInsights()
+        .onChange(of: currentDiagnosticsHash) { _, newValue in
+            if newValue != lastFailedDiagnosticsHash {
+                lastFailedDiagnosticsHash = nil
+                showInlineRetryButton = false
             }
+            if timeoutAlertHash != newValue {
+                timeoutAlertHash = nil
+            }
+        }
+        .onChange(of: hasLoadedInsights) { _, loaded in
+            if loaded {
+                hasTimedOutWaiting = false
+                timeoutTask?.cancel()
+                timeoutTask = nil
+            } else if !hasTimedOutWaiting {
+                restartTimeoutWindow()
+            }
+        }
+        .onChange(of: viewModel.insightsErrorMessage) { _, newValue in
+            if newValue != nil {
+                lastFailedDiagnosticsHash = currentDiagnosticsHash
+                if loomAITroubleshootingEnabled,
+                   let details = viewModel.troubleshootingMessage,
+                   !details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    #if DEBUG
+                    print("[DiagnosticInsights] \(details)")
+                    #endif
+                    loomAIReportTroubleshootingIfEnabled(details: details)
+                }
+            } else if !viewModel.insightCards.isEmpty {
+                lastFailedDiagnosticsHash = nil
+                showInlineRetryButton = false
+            }
+        }
+        .onDisappear {
+            timeoutTask?.cancel()
+            timeoutTask = nil
+        }
+        .alert("Check your connection", isPresented: $showErrorAlert) {
+            if loomAITroubleshootingEnabled,
+               let details = viewModel.troubleshootingMessage,
+               !details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Button("Copy troubleshooting") {
+                    UIPasteboard.general.string = details
+                }
+            }
+            Button("OK", role: .cancel) {
+                showInlineRetryButton = true
+            }
+        } message: {
+            Text("Generate insights later in Account > Personalization.")
         }
     }
 
     private func refreshInsights(forceRefresh: Bool = false) async {
-        if shouldDeferRefreshUntilPersonalizationLoads {
+        guard currentSnapshot != nil else {
             viewModel.prepareForPendingPersonalizationLoad()
+            return
+        }
+        if !forceRefresh, showInlineRetryButton {
+            return
+        }
+        if !forceRefresh,
+           let failedHash = lastFailedDiagnosticsHash,
+           failedHash == currentDiagnosticsHash {
             return
         }
         await viewModel.refresh(
@@ -138,28 +206,45 @@ struct DiagnosticInsightsView: View {
             forceRefresh: forceRefresh
         )
     }
+
+    private func restartTimeoutWindow() {
+        hasTimedOutWaiting = false
+        timeoutTask?.cancel()
+        timeoutTask = Task {
+            try? await Task.sleep(nanoseconds: 60_000_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard !hasLoadedInsights else { return }
+                hasTimedOutWaiting = true
+                let currentHash = currentDiagnosticsHash
+                if timeoutAlertHash != currentHash {
+                    timeoutAlertHash = currentHash
+                    showErrorAlert = true
+                }
+            }
+        }
+    }
 }
 
 @MainActor
 final class DiagnosticsInsightsViewModel: ObservableObject {
+    private static let diagnosticsInsightsConnectionError = "Couldn’t personalize insights yet. Check your connection."
+
     @Published fileprivate private(set) var insightCards: [DiagnosticInsightCard] = []
     @Published private(set) var isGeneratingInsights = false
     @Published private(set) var insightsErrorMessage: String?
-    @Published private(set) var insightsNudge: String?
     @Published private(set) var isShowingSkeleton = false
+    @Published private(set) var troubleshootingMessage: String?
 
     private var loadedSnapshotKey: String?
     private var currentDiagnosticsHash: String?
+    private var failedSnapshotKey: String?
     private var currentTask: Task<DiagnosticsInsightsRemoteResult, Never>?
-
-    var shouldShowPersonalizingLabel: Bool {
-        isGeneratingInsights && isShowingSkeleton
-    }
 
     func prepareForPendingPersonalizationLoad() {
         guard insightCards.isEmpty else { return }
         insightsErrorMessage = nil
-        insightsNudge = nil
+        troubleshootingMessage = nil
         isGeneratingInsights = false
         isShowingSkeleton = true
     }
@@ -171,9 +256,9 @@ final class DiagnosticsInsightsViewModel: ObservableObject {
     ) async {
         guard let snapshot else {
             cancelInFlight()
-            insightCards = PersonalizationInsightsComposer.missingPersonalizationCards()
-            insightsNudge = PersonalizationInsightsComposer.missingPersonalizationNudge
-            insightsErrorMessage = nil
+            insightCards = []
+            insightsErrorMessage = Self.diagnosticsInsightsConnectionError
+            troubleshootingMessage = nil
             isGeneratingInsights = false
             isShowingSkeleton = false
             loadedSnapshotKey = nil
@@ -195,9 +280,15 @@ final class DiagnosticsInsightsViewModel: ObservableObject {
         }
 
         if !forceRefresh,
+           failedSnapshotKey == snapshotKey {
+            return
+        }
+
+        if !forceRefresh,
            let persisted = fetchStoredSnapshot(snapshotKey: snapshotKey, in: modelContext) {
             applyPersisted(persisted)
             loadedSnapshotKey = snapshotKey
+            failedSnapshotKey = nil
             currentDiagnosticsHash = diagnosticsHash
             return
         }
@@ -210,60 +301,66 @@ final class DiagnosticsInsightsViewModel: ObservableObject {
 
         cancelInFlight()
 
-        let contextSnapshot: LoomAIContextSnapshot
-        do {
-            contextSnapshot = try LoomAIViewModel().buildContextSnapshot(in: modelContext)
-        } catch {
-            let fallbackCards = PersonalizationInsightsComposer.defaultCards(from: snapshot)
-            insightCards = fallbackCards
-            insightsNudge = PersonalizationInsightsComposer.defaultNudge
-            insightsErrorMessage = "Couldn’t personalize insights yet."
-            isGeneratingInsights = false
-            isShowingSkeleton = false
-            loadedSnapshotKey = nil
-            currentDiagnosticsHash = diagnosticsHash
-            return
-        }
-
         isShowingSkeleton = true
         isGeneratingInsights = true
         insightsErrorMessage = nil
-        insightsNudge = nil
+        troubleshootingMessage = nil
         insightCards = []
         currentDiagnosticsHash = diagnosticsHash
 
-        let instruction = PersonalizationInsightsComposer.workerInstruction(for: snapshot)
         let requestID = UUID().uuidString
 
         let task = Task { () -> DiagnosticsInsightsRemoteResult in
             do {
-                let response = try await LoomAIService().sendChat(
-                    messages: [.init(role: "user", content: instruction)],
-                    context: contextSnapshot,
-                    intent: "onboarding_insights_diagnostics",
-                    screen: "diagnostic_insights",
-                    requestID: requestID,
-                    requestHash: diagnosticsHash
+                let response = try await LoomAIService().fetchDiagnosticInsights(
+                    diagnostic: DiagnosticAnswers(snapshot: snapshot),
+                    client: DiagnosticInsightsClient(
+                        appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
+                        platform: "ios",
+                        screen: "diagnostic_insights"
+                    )
                 )
-                let decoded = PersonalizationInsightsComposer.decodeRemotePayload(
-                    response.message,
-                    snapshot: snapshot
-                )
-                #if DEBUG
-                if let evidence = response.debug?.evidence, !evidence.isEmpty {
-                    print("[DiagnosticsInsights] evidence=\(evidence.joined(separator: ", "))")
-                }
-                #endif
+                let decoded = PersonalizationInsightsComposer.decodeRemotePayload(response)
+                let fulfillmentBody = Self.fulfillmentAreasBody(from: snapshot.lifeAreasSelected)
+                let rootCard = decoded.cards.first { $0.kind == .rootCause } ?? .init(kind: .rootCause, body: "")
+                let nextCard = decoded.cards.first { $0.kind == .nextDirection } ?? .init(kind: .nextDirection, body: "")
                 return DiagnosticsInsightsRemoteResult(
-                    cards: decoded.cards,
-                    nudge: decoded.nudge,
-                    errorMessage: decoded.usedFallback ? "Couldn’t personalize insights yet." : nil
+                    cards: decoded.usedFallback
+                    ? []
+                    : [
+                        rootCard,
+                        .init(kind: .fulfillmentAreas, body: fulfillmentBody),
+                        nextCard
+                    ],
+                    errorMessage: decoded.usedFallback ? Self.diagnosticsInsightsConnectionError : nil,
+                    troubleshootingMessage: decoded.usedFallback
+                    ? loomAITroubleshootingLocalDetails(
+                        feature: "diagnostics_insights",
+                        reason: "Response payload could not be decoded into insight cards.",
+                        responsePreview: "\(response.rootCause)\n\n\(response.nextDirection)",
+                        requestID: requestID,
+                        requestHash: diagnosticsHash
+                    )
+                    : nil,
+                    usedFallback: decoded.usedFallback,
+                    evidenceCount: 0,
+                    responseCharacters: response.rootCause.count + response.nextDirection.count,
+                    requestID: requestID
                 )
             } catch {
                 return DiagnosticsInsightsRemoteResult(
-                    cards: PersonalizationInsightsComposer.defaultCards(from: snapshot),
-                    nudge: PersonalizationInsightsComposer.defaultNudge,
-                    errorMessage: "Couldn’t personalize insights yet."
+                    cards: [],
+                    errorMessage: Self.diagnosticsInsightsConnectionError,
+                    troubleshootingMessage: loomAITroubleshootingDetails(
+                        feature: "diagnostics_insights",
+                        error: error,
+                        requestID: requestID,
+                        requestHash: diagnosticsHash
+                    ),
+                    usedFallback: false,
+                    evidenceCount: 0,
+                    responseCharacters: 0,
+                    requestID: requestID
                 )
             }
         }
@@ -283,17 +380,27 @@ final class DiagnosticsInsightsViewModel: ObservableObject {
         }
 
         insightCards = remote.cards
-        insightsNudge = remote.nudge
         insightsErrorMessage = remote.errorMessage
+        troubleshootingMessage = remote.troubleshootingMessage
         isGeneratingInsights = false
         isShowingSkeleton = false
-        loadedSnapshotKey = (remote.errorMessage == nil) ? snapshotKey : nil
+        if remote.errorMessage == nil {
+            loadedSnapshotKey = snapshotKey
+            failedSnapshotKey = nil
+        } else {
+            loadedSnapshotKey = nil
+            failedSnapshotKey = snapshotKey
+        }
         currentTask = nil
     }
 
     private func cancelInFlight() {
         currentTask?.cancel()
         currentTask = nil
+    }
+
+    private func errorStateCards() -> [DiagnosticInsightCard] {
+        []
     }
 
     private func fetchStoredSnapshot(
@@ -308,13 +415,16 @@ final class DiagnosticsInsightsViewModel: ObservableObject {
     }
 
     private func applyPersisted(_ snapshot: DiagnosticsInsightsSnapshot) {
+        let fulfillment = snapshot.fulfillmentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? Self.fulfillmentAreasBody(from: [])
+            : snapshot.fulfillmentText
         insightCards = [
             DiagnosticInsightCard(kind: .rootCause, body: snapshot.rootCauseText),
-            DiagnosticInsightCard(kind: .fulfillmentAreas, body: snapshot.fulfillmentText),
+            DiagnosticInsightCard(kind: .fulfillmentAreas, body: fulfillment),
             DiagnosticInsightCard(kind: .nextDirection, body: snapshot.nextDirectionText)
         ]
-        insightsNudge = nil
         insightsErrorMessage = nil
+        troubleshootingMessage = nil
         isGeneratingInsights = false
         isShowingSkeleton = false
     }
@@ -328,8 +438,7 @@ final class DiagnosticsInsightsViewModel: ObservableObject {
     ) {
         guard cards.count == 3 else { return }
         let root = cards.first(where: { $0.kind == .rootCause })?.body ?? ""
-        let fulfillment = cards.first(where: { $0.kind == .fulfillmentAreas })?.body
-            ?? PersonalizationInsightsComposer.fulfillmentAreasLine
+        let fulfillment = cards.first(where: { $0.kind == .fulfillmentAreas })?.body ?? ""
         let nextDirection = cards.first(where: { $0.kind == .nextDirection })?.body ?? ""
 
         if let existing = fetchStoredSnapshot(snapshotKey: snapshotKey, in: modelContext) {
@@ -355,17 +464,25 @@ final class DiagnosticsInsightsViewModel: ObservableObject {
 
         try? modelContext.save()
     }
+
+    private static func fulfillmentAreasBody(from areas: [String]) -> String {
+        _ = areas
+        return "Every task, goal, and little win will land in one of these areas, so your life stays organized."
+    }
 }
 
 private struct DiagnosticsInsightsRemoteResult: Sendable {
     var cards: [DiagnosticInsightCard]
-    var nudge: String?
     var errorMessage: String?
+    var troubleshootingMessage: String?
+    var usedFallback: Bool
+    var evidenceCount: Int
+    var responseCharacters: Int
+    var requestID: String?
 }
 
 private struct DiagnosticsInsightsDecodedPayload: Sendable {
     var cards: [DiagnosticInsightCard]
-    var nudge: String?
     var usedFallback: Bool
 }
 
@@ -400,394 +517,107 @@ private struct DiagnosticInsightsCardsStack: View {
         VStack(spacing: 12) {
             ForEach(cards) { card in
                 InsightsCard(title: card.kind.title) {
-                    if card.kind == .fulfillmentAreas && !lifeAreas.isEmpty {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 8)], spacing: 8) {
-                            ForEach(lifeAreas, id: \.self) { area in
-                                InsightsChip(title: area)
+                    if card.kind == .fulfillmentAreas {
+                        let areas = uniqueLifeAreas(from: lifeAreas)
+                        if !areas.isEmpty {
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 8)], spacing: 8) {
+                                ForEach(areas, id: \.self) { area in
+                                    InsightsChip(title: area)
+                                }
                             }
+                            .padding(.bottom, 2)
                         }
-                        .padding(.bottom, 2)
                     }
 
-                    Text(card.body)
-                        .font(card.kind == .nextDirection ? .body.weight(.medium) : .body)
-                        .lineSpacing(card.kind == .nextDirection ? 2.6 : 1.4)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    if !card.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text(card.body)
+                            .font(card.kind == .nextDirection ? .body.weight(.medium) : .body)
+                            .lineSpacing(card.kind == .nextDirection ? 2.6 : 1.4)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
         }
     }
+
+    private func uniqueLifeAreas(from items: [String]) -> [String] {
+        var seen = Set<String>()
+        return items
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .filter { seen.insert($0.lowercased()).inserted }
+    }
 }
 
 struct PersonalizationInsightsCards: View {
+    @Environment(\.modelContext) private var modelContext
     let snapshot: PersonalizationSnapshot
 
     var body: some View {
-        DiagnosticInsightsCardsStack(
-            cards: PersonalizationInsightsComposer.defaultCards(from: snapshot),
-            lifeAreas: snapshot.lifeAreasSelected
+        let userKey = PersonalizationUserIdentity.currentUserKey()
+        let diagnosticsHash = DiagnosticsInsightsHasher.hash(for: snapshot)
+        let snapshotKey = DiagnosticsInsightsHasher.snapshotKey(userKey: userKey, diagnosticsHash: diagnosticsHash)
+
+        if let stored = fetchStoredSnapshot(snapshotKey: snapshotKey) {
+            DiagnosticInsightsCardsStack(
+                cards: [
+                    DiagnosticInsightCard(kind: .rootCause, body: stored.rootCauseText),
+                    DiagnosticInsightCard(kind: .fulfillmentAreas, body: stored.fulfillmentText),
+                    DiagnosticInsightCard(kind: .nextDirection, body: stored.nextDirectionText)
+                ],
+                lifeAreas: snapshot.lifeAreasSelected
+            )
+        } else {
+            InsightsCard(title: "Insights") {
+                Text("Insights are generated after you finish the quick diagnostic.")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func fetchStoredSnapshot(snapshotKey: String) -> DiagnosticsInsightsSnapshot? {
+        let key = snapshotKey
+        let descriptor = FetchDescriptor<DiagnosticsInsightsSnapshot>(
+            predicate: #Predicate { $0.snapshotKey == key }
         )
+        return try? modelContext.fetch(descriptor).first
     }
-}
-
-private struct RemoteDiagnosticsInsightsPayload: Decodable {
-    struct Card: Decodable {
-        var body: String?
-        var message: String?
-        var text: String?
-        var value: String?
-    }
-
-    var cards: [Card]?
-    var nudge: String?
 }
 
 private enum PersonalizationInsightsComposer {
-    static let defaultNudge = ""
-    static let missingPersonalizationNudge = "Loom can personalize this once your Quick diagnostic answers are saved."
-    static let fulfillmentAreasLine = "Every task, goal, and little win will land in one of these areas, so your life stays organized."
+    static func decodeRemotePayload(_ insights: DiagnosticInsights) -> DiagnosticsInsightsDecodedPayload {
+        let root = normalizedBody(insights.rootCause)
+        let next = normalizedBody(insights.nextDirection)
 
-    static func workerInstruction(for snapshot: PersonalizationSnapshot) -> String {
-        let payload = payloadJSONString(for: snapshot)
-        return """
-        Generate Quick Diagnostic insights for Loom.
-        Diagnostic insights payload JSON:
-        \(payload)
-
-        Requirements:
-        - Return JSON only.
-        - Return exactly 3 cards in order with titles: Root cause, Fulfillment areas, Next direction.
-        - Root cause must reference diagnostics A and B.
-        - Fulfillment areas must mention selected areas and keep one clear sentence.
-        - Next direction must be 1-2 short sentences and <=40 words total.
-        - Next direction must be forward-looking, confident, and momentum-building.
-        - Next direction must emphasize focus, consistency, simpler priorities, and reduced overwhelm.
-        - Next direction must not restate user inputs or labels.
-        - Next direction must avoid phrases like "Your current planning pattern", "You selected", and "This means".
-        - Next direction must not include task instructions or immediate execution language.
-        - Do not use "this week" unless explicitly requested.
-        - Do not use generic productivity advice.
-
-        Return JSON only:
-        {"cards":[{"title":"Root cause","body":"string"},{"title":"Fulfillment areas","body":"string"},{"title":"Next direction","body":"string"}],"confidence":"high|medium|low","nudge":"string optional","debug":{"usedContext":true,"evidence":["path.or.field.used"],"confidence":"high|medium|low"}}
-        """
-    }
-
-    static func decodeRemotePayload(_ raw: String, snapshot: PersonalizationSnapshot) -> DiagnosticsInsightsDecodedPayload {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let data = trimmed.data(using: .utf8),
-              let decoded = try? JSONDecoder().decode(RemoteDiagnosticsInsightsPayload.self, from: data) else {
-            return DiagnosticsInsightsDecodedPayload(
-                cards: defaultCards(from: snapshot),
-                nudge: defaultNudge,
-                usedFallback: true
-            )
+        guard isValidInsightBody(root), isValidInsightBody(next) else {
+            return .init(cards: [], usedFallback: true)
         }
 
-        let bodies = (decoded.cards ?? [])
-            .compactMap { item in
-                let body = (item.body ?? item.message ?? item.text ?? item.value ?? "")
-                    .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                return body.isEmpty ? nil : body
-            }
-
-        let fallback = defaultCards(from: snapshot)
-        let rootBodyCandidate = bodies.indices.contains(0) ? bodies[0] : fallback[0].body
-        let nextDirectionBodyCandidate = bodies.indices.contains(2) ? bodies[2] : fallback[2].body
-
-        let cards: [DiagnosticInsightCard] = [
-            DiagnosticInsightCard(
-                kind: .rootCause,
-                body: validatedRootCauseBody(
-                    candidate: rootBodyCandidate,
-                    fallback: fallback[0].body,
-                    snapshot: snapshot
-                )
-            ),
-            DiagnosticInsightCard(kind: .fulfillmentAreas, body: fulfillmentAreasLine),
-            DiagnosticInsightCard(
-                kind: .nextDirection,
-                body: validatedNextDirectionBody(
-                    candidate: nextDirectionBodyCandidate,
-                    fallback: fallback[2].body
-                )
-            )
-        ]
-
-        let nudge = decoded.nudge?
-            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        return DiagnosticsInsightsDecodedPayload(
-            cards: cards,
-            nudge: nudge?.isEmpty == true ? nil : nudge,
+        return .init(
+            cards: [
+                .init(kind: .rootCause, body: root),
+                .init(kind: .nextDirection, body: next)
+            ],
             usedFallback: false
         )
     }
 
-    static func defaultCards(from snapshot: PersonalizationSnapshot) -> [DiagnosticInsightCard] {
-        [
-            DiagnosticInsightCard(kind: .rootCause, body: rootCauseText(snapshot)),
-            DiagnosticInsightCard(kind: .fulfillmentAreas, body: fulfillmentAreasLine),
-            DiagnosticInsightCard(kind: .nextDirection, body: nextDirectionText(snapshot))
-        ]
-    }
-
-    static func missingPersonalizationCards() -> [DiagnosticInsightCard] {
-        [
-            DiagnosticInsightCard(
-                kind: .rootCause,
-                body: "Loom doesn’t have your personalization yet. Tap Edit answers to set your stress source and break point."
-            ),
-            DiagnosticInsightCard(
-                kind: .fulfillmentAreas,
-                body: "Loom doesn’t have your selected life areas yet. Tap Edit answers so Loom can organize your tasks, goals, and little wins."
-            ),
-            DiagnosticInsightCard(
-                kind: .nextDirection,
-                body: "Loom will set a clear direction with simpler priorities and steadier follow-through. Your progress will feel calmer, more focused, and more reliable over time."
-            )
-        ]
-    }
-
-    private static func payloadJSONString(for snapshot: PersonalizationSnapshot) -> String {
-        let payload: [String: Any] = [
-            "diagnostics": [
-                "stressSource": snapshot.stressSource,
-                "breakPoint": snapshot.breakPoint,
-                "lifeAreasSelected": snapshot.lifeAreasSelected,
-                "planningReality": snapshot.planningReality,
-                "desiredChange": snapshot.desiredChange,
-                "createdAt": snapshot.createdAt.ISO8601Format(),
-                "weekBasedGoal": false
-            ]
-        ]
-        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys, .prettyPrinted]),
-              let jsonString = String(data: data, encoding: .utf8) else {
-            return "{}"
-        }
-        return jsonString
-    }
-
-    private static func rootCauseText(_ snapshot: PersonalizationSnapshot) -> String {
-        let stress = normalizedPhrase(snapshot.stressSource, fallback: "competing priorities pile up")
-        let breakPoint = normalizedPhrase(snapshot.breakPoint, fallback: "follow-through starts to slip")
-        return "Pressure builds when \(stress), and momentum tends to break at \(breakPoint). Loom will steady progress by narrowing focus and simplifying decisions."
-    }
-
-    private static func nextDirectionText(_ snapshot: PersonalizationSnapshot) -> String {
-        let desired = snapshot.desiredChange.lowercased()
-        let planning = snapshot.planningReality.lowercased()
-        let stress = snapshot.stressSource.lowercased()
-        let signal = "\(desired) \(planning) \(stress)"
-
-        if signal.contains("balance") || signal.contains("aligned") {
-            return "Loom will align your priorities into a steadier rhythm, so progress stays sustainable. You’ll move forward with clearer focus, less overwhelm, and stronger long-term momentum."
-        }
-        if signal.contains("consistent") || signal.contains("consistency") || signal.contains("routine") {
-            return "Loom will keep your priorities focused and repeatable, so follow-through stays steady. You’ll build reliable momentum with less friction and clearer direction."
-        }
-        if signal.contains("control") || signal.contains("clarity") || signal.contains("organized") || signal.contains("focus") {
-            return "Loom will simplify your planning into clearer priorities, so decisions feel lighter. You’ll move forward with steady focus, less overwhelm, and stronger control."
-        }
-        return "Loom will narrow your priorities and keep execution consistent, so progress compounds. You’ll build reliable momentum with less overwhelm and clearer focus."
-    }
-
-    private static func validatedNextDirectionBody(candidate: String, fallback: String) -> String {
-        let cleaned = candidate
-            .replacingOccurrences(of: #"\bGoal:\s*"#, with: "", options: .regularExpression)
-            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !cleaned.isEmpty else {
-            return fallback
-        }
-
-        let lower = cleaned.lowercased()
-        if lower.contains("this week") {
-            return fallback
-        }
-        if containsInstructionLanguage(lower)
-            || repeatsRootCauseLanguage(lower)
-            || containsDiagnosticsRestatementLanguage(lower)
-            || containsGenericProductivityLanguage(lower) {
-            return fallback
-        }
-
-        let sentences = splitSentences(cleaned)
-        guard sentences.count >= 1, sentences.count <= 2 else {
-            return fallback
-        }
-
-        let candidateText = Array(sentences.prefix(2)).joined(separator: " ")
-        let wordCount = candidateText.split(whereSeparator: \.isWhitespace).count
-        guard wordCount <= 40 else {
-            return fallback
-        }
-
-        guard containsDirectionalLanguage(lower) else {
-            return fallback
-        }
-
-        return truncate(candidateText, limit: 260)
-    }
-
-    private static func validatedRootCauseBody(
-        candidate: String,
-        fallback: String,
-        snapshot: PersonalizationSnapshot
-    ) -> String {
-        let cleaned = candidate
-            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !cleaned.isEmpty else {
-            return fallback
-        }
-
-        let lower = cleaned.lowercased()
-        if containsQuoteStyleRootCauseLanguage(lower: lower, raw: cleaned)
-            || containsDiagnosticsRestatementLanguage(lower)
-            || containsInstructionLanguage(lower) {
-            return fallback
-        }
-
-        let sentences = splitSentences(cleaned)
-        guard sentences.count >= 1, sentences.count <= 2 else {
-            return fallback
-        }
-
-        let rootText = Array(sentences.prefix(2)).joined(separator: " ")
-        guard rootText.split(whereSeparator: \.isWhitespace).count <= 55 else {
-            return fallback
-        }
-
-        guard includesPersonalizationReference(rootText, rawValue: snapshot.stressSource),
-              includesPersonalizationReference(rootText, rawValue: snapshot.breakPoint) else {
-            return fallback
-        }
-
-        return truncate(rootText, limit: 320)
-    }
-
-    private static func splitSentences(_ text: String) -> [String] {
+    private static func normalizedBody(_ text: String) -> String {
         text
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func isValidInsightBody(_ text: String) -> Bool {
+        guard !text.isEmpty else { return false }
+        let sentences = text
             .split(whereSeparator: { ".!?".contains($0) })
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-            .map { sentence in
-                sentence.hasSuffix(".") ? sentence : "\(sentence)."
-            }
-    }
-
-    private static func truncate(_ text: String, limit: Int) -> String {
-        guard text.count > limit else { return text }
-        let prefix = text.prefix(limit)
-        if let lastSpace = prefix.lastIndex(of: " ") {
-            return String(prefix[..<lastSpace]).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        return String(prefix).trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private static func containsInstructionLanguage(_ lower: String) -> Bool {
-        let forbiddenFragments = [
-            "start by",
-            "start now",
-            "do this today",
-            "do this now",
-            "try ",
-            "open ",
-            "add ",
-            "create ",
-            "tap ",
-            "edit ",
-            "save ",
-            "choose ",
-            "set up "
-        ]
-        return forbiddenFragments.contains(where: { lower.contains($0) })
-    }
-
-    private static func repeatsRootCauseLanguage(_ lower: String) -> Bool {
-        let rootCauseFragments = [
-            "stress is mainly",
-            "you said stress",
-            "progress breaks",
-            "breaks at"
-        ]
-        return rootCauseFragments.contains(where: { lower.contains($0) })
-    }
-
-    private static func containsDiagnosticsRestatementLanguage(_ lower: String) -> Bool {
-        let fragments = [
-            "your current planning pattern",
-            "you selected",
-            "this means",
-            "stress source",
-            "break point",
-            "planning style",
-            "desired change",
-            "life areas"
-        ]
-        return fragments.contains(where: { lower.contains($0) })
-    }
-
-    private static func containsQuoteStyleRootCauseLanguage(lower: String, raw: String) -> Bool {
-        if lower.contains("you said") || lower.contains("you selected") {
-            return true
-        }
-        return raw.contains("\"") || raw.contains("“") || raw.contains("”")
-    }
-
-    private static func containsDirectionalLanguage(_ lower: String) -> Bool {
-        let directionalTokens = [
-            "we'll", "we will", "you'll", "you will",
-            "focus", "clarity", "consistent", "consistency",
-            "momentum", "overwhelm", "priority", "priorities",
-            "steady", "direction", "simpler"
-        ]
-        return directionalTokens.contains(where: { lower.contains($0) })
-    }
-
-    private static func includesPersonalizationReference(_ text: String, rawValue: String) -> Bool {
-        let value = rawValue
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        guard !value.isEmpty else { return false }
-
-        let haystack = text.lowercased()
-        if haystack.contains(value) {
-            return true
-        }
-
-        let tokens = value
-            .replacingOccurrences(of: #"[^a-z0-9\s]"#, with: " ", options: .regularExpression)
-            .split(whereSeparator: \.isWhitespace)
-            .map(String.init)
-            .filter { $0.count > 4 }
-            .prefix(6)
-        return tokens.contains(where: { haystack.contains($0) })
-    }
-
-    private static func normalizedPhrase(_ value: String, fallback: String) -> String {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return fallback }
-        guard let first = trimmed.first else { return fallback }
-        return "\(String(first).lowercased())\(trimmed.dropFirst())"
-    }
-
-    private static func containsGenericProductivityLanguage(_ lower: String) -> Bool {
-        let genericTokens = [
-            "productivity",
-            "optimize",
-            "hack",
-            "efficiency",
-            "time management",
-            "maximize output"
-        ]
-        return genericTokens.contains(where: { lower.contains($0) })
+        return sentences.count >= 2 && sentences.count <= 3
     }
 }
 
@@ -802,9 +632,23 @@ private struct DiagnosticInsightsSkeletonStack: View {
                         .fill(Color.secondary.opacity(0.22))
                         .frame(width: 140, height: 12)
 
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(Color.secondary.opacity(0.15))
-                        .frame(height: index == 2 ? 74 : 58)
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text(index == 2 ? "Loading next-step summary..." : "Loading insight summary...")
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Text("This placeholder line represents incoming LoomAI text.")
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        if index != 1 {
+                            Text("Second placeholder sentence while diagnostics load.")
+                                .font(.body)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                    .redacted(reason: .placeholder)
                 }
                 .padding(16)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -860,7 +704,9 @@ private struct InsightsCard<Content: View>: View {
 private struct InsightsChip: View {
     let title: String
 
-    private var color: Color { FulfillmentCategoryTheme.color(for: title) }
+    private var color: Color {
+        FulfillmentCategoryTheme.color(for: title)
+    }
 
     var body: some View {
         Text(title)
@@ -894,9 +740,11 @@ private struct InsightsThinkingHeader: View {
                     .resizable()
                     .scaledToFit()
                     .frame(width: 18, height: 18)
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                if !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
             }
 
             GeometryReader { proxy in
