@@ -157,7 +157,7 @@ export default {
       if (isPlanResultStrictIntent) return "plan-result-autowrite-v1";
       if (isAutoWritePlanResultMode) return "autowrite-plan-result-v1";
       if (isOnboardingPurposeInsightsMode) return "onboarding-insights-purpose-v1";
-      if (isOnboardingFulfillmentInsightsMode) return "onboarding-insights-fulfillment-v1";
+      if (isOnboardingFulfillmentInsightsMode) return "onboarding-insights-fulfillment-v2";
       if (isOnboardingDiagnosticsInsightsMode) return "onboarding-insights-diagnostics-v2";
       if (isFollowUpPromptMode) return "followup-prompts-v1";
       if (isReflectReadableInsightsMode) return "reflect-readable-insights-v1";
@@ -337,17 +337,23 @@ export default {
       "Intent: onboarding_insights_fulfillment.",
       "Generate Fulfillment onboarding insights for Loom.",
       "Use APP_CONTEXT_JSON and the Fulfillment onboarding payload from the user message.",
-      "Focus on diagnostics C/D/E plus selected categories and early Fulfillment edits.",
-      "Output 3 cards in order: Your strands, Likely gap, First execution move.",
-      "Each card must be concrete, concise, and actionable (1-2 short sentences).",
-      "Your strands card should reference selected categories and coverage without rewarding volume.",
-      "Likely gap should infer one neglected area using stress source + break point + planning style.",
-      "First execution move should be a concrete starter move in Loom (small weekly focus or Little Win).",
-      "When APP_CONTEXT_JSON exists, cite at least 2 concrete details from diagnostics + fulfillment setup.",
-      "Do not give generic advice. Ground every card in user data.",
-      "If diagnostic personalization is missing, keep the cards useful but general and include a gentle nudge to complete Account -> Personalization.",
+      "Focus on diagnostics + purpose + fulfillment setup evidence.",
+      "Output exactly 2 cards in order: Fulfillment areas, Next direction.",
+      "Each card must be grounded, concise, and practical (1-3 short sentences).",
+      "Do NOT restate selected category names or list categories.",
+      "Do NOT use the phrase 'You selected'.",
+      "Do NOT rename selected fulfillment categories.",
+      "Do NOT invent gaps, neglect patterns, or category priorities without evidence.",
+      "Fulfillment areas card: explain how a well-rounded setup creates coverage and tradeoff clarity for this user.",
+      "Fulfillment areas card must reference at least one concrete diagnostic or purpose detail when available.",
+      "If diagnostics or purpose context are missing, explicitly say that limitation briefly and still provide a useful balanced fallback.",
+      "Next direction card: broad execution approach tied to evidence, without one-off habit advice.",
+      "Next direction card must end with a final sentence that starts with 'Loom will help you'.",
+      "Avoid random habit tips unless directly supported by evidence.",
+      "Avoid generic motivational fluff and avoid category listing.",
+      "When APP_CONTEXT_JSON has diagnostics/purpose context, debug.evidence must include at least 1 concrete purpose/diagnostic path.",
       "Return JSON ONLY in this exact shape:",
-      '{"cards":[{"title":"Your strands","body":"string"},{"title":"Likely gap","body":"string"},{"title":"First execution move","body":"string"}],"confidence":"high|medium|low","nudge":"string optional","debug":{"usedContext":true,"evidence":["path.or.field.used"],"confidence":"high|medium|low"}}'
+      '{"cards":[{"title":"FULFILLMENT AREAS","body":"string"},{"title":"NEXT DIRECTION","body":"string"}],"debug":{"usedContext":true,"evidence":["path.or.field.used"],"confidence":"high|medium|low"}}'
     ].join("\n") : isOnboardingDiagnosticsInsightsMode ? [
       "Intent: onboarding_insights_diagnostics.",
       "Generate Quick Diagnostic insights for Loom onboarding.",
@@ -987,7 +993,13 @@ export default {
           context,
           personalizationInfo.hasCurrent
         )
-        : fallbackEvidenceBase;
+        : (mode === "fulfillment"
+          ? ensureFulfillmentInsightsEvidencePaths(
+            fallbackEvidenceBase,
+            context,
+            personalizationInfo.hasCurrent
+          )
+          : fallbackEvidenceBase);
       const claimedUsedContext =
         typeof modelDebug.usedContext === "boolean" ? modelDebug.usedContext : null;
       const confidence = typeof modelDebug.confidence === "string"
@@ -997,13 +1009,23 @@ export default {
         typeof claimedUsedContext === "boolean"
           ? claimedUsedContext
           : contextBytes > 0 && fallbackEvidence.length > 0;
+      const responseMessagePayload = {
+        cards: normalized.cards,
+        confidence: normalized.confidence || "medium",
+        ...(normalized.nudge ? { nudge: normalized.nudge } : {}),
+        ...(mode === "fulfillment"
+          ? {
+            debug: {
+              usedContext: finalUsedContext,
+              evidence: fallbackEvidence,
+              confidence: confidence || normalized.confidence || "low",
+            },
+          }
+          : {}),
+      };
 
       const out = {
-        message: JSON.stringify({
-          cards: normalized.cards,
-          confidence: normalized.confidence || "medium",
-          ...(normalized.nudge ? { nudge: normalized.nudge } : {}),
-        }),
+        message: JSON.stringify(responseMessagePayload),
         actions: [],
         debug: {
           ...buildWorkerDebug({
@@ -1298,6 +1320,18 @@ function normalizeIntent(value) {
 }
 
 function normalizeAssistantJSON(parsed, fallbackText) {
+  if (parsed && typeof parsed === "object" && Array.isArray(parsed.cards)) {
+    return {
+      message: JSON.stringify({
+        cards: parsed.cards,
+        ...(typeof parsed.nudge === "string" ? { nudge: parsed.nudge } : {}),
+        ...(parsed.debug && typeof parsed.debug === "object" ? { debug: parsed.debug } : {}),
+      }),
+      actions: Array.isArray(parsed.actions) ? parsed.actions : [],
+      debug: parsed.debug && typeof parsed.debug === "object" ? parsed.debug : null,
+    };
+  }
+
   if (parsed && typeof parsed === "object" && typeof parsed.message === "string") {
     return {
       message: parsed.message,
@@ -1932,19 +1966,23 @@ function normalizeReadableInsightsPayload(parsed, fallbackText) {
 
 function normalizeOnboardingInsightsPayload(parsed, fallbackText, mode, needsPersonalizationNudge, context) {
   let raw = parsed && typeof parsed === "object" ? parsed : null;
+  let parsedFromJSON = true;
   if (!raw) {
     try {
       raw = JSON.parse(String(fallbackText || ""));
+      parsedFromJSON = true;
     } catch {
       raw = null;
+      parsedFromJSON = false;
     }
   }
 
   const defaultTitles = mode === "purpose"
     ? ["Your drivers", "Your tension", "First direction"]
     : (mode === "fulfillment"
-      ? ["Your strands", "Likely gap", "First execution move"]
+      ? ["Fulfillment areas", "Next direction"]
       : ["Root cause", "Fulfillment areas", "Next direction"]);
+  const targetCardCount = defaultTitles.length;
   const hasPersonalization = !!(context?.personalization?.current) && !needsPersonalizationNudge;
   const defaultBodies = mode === "purpose"
     ? [
@@ -1953,11 +1991,7 @@ function normalizeOnboardingInsightsPayload(parsed, fallbackText, mode, needsPer
       "Choose one high-leverage next move that lowers stress and keeps momentum."
     ]
     : (mode === "fulfillment"
-      ? [
-        "Your selected strands are a useful base when you prioritize consistency over volume.",
-        "Current stress and planning patterns suggest one category is likely to be neglected.",
-        "Start with one simple weekly execution move tied to the category with the biggest gap."
-      ]
+      ? defaultFulfillmentOnboardingInsightBodies(context, hasPersonalization)
       : defaultDiagnosticsInsightBodies(context, hasPersonalization));
 
   const sourceCards = Array.isArray(raw?.cards)
@@ -1966,12 +2000,14 @@ function normalizeOnboardingInsightsPayload(parsed, fallbackText, mode, needsPer
   const bodyCandidates = sourceCards
     .map((item) => extractOnboardingInsightBody(item))
     .filter(Boolean)
-    .slice(0, 3);
+    .slice(0, targetCardCount);
 
-  while (bodyCandidates.length < 3) bodyCandidates.push(defaultBodies[bodyCandidates.length]);
+  while (bodyCandidates.length < targetCardCount) bodyCandidates.push(defaultBodies[bodyCandidates.length]);
   const normalizedBodies = mode === "diagnostics"
     ? normalizeDiagnosticsInsightBodies(bodyCandidates, context, hasPersonalization, defaultBodies)
-    : bodyCandidates;
+    : (mode === "fulfillment"
+      ? normalizeFulfillmentOnboardingInsightBodies(bodyCandidates, context, hasPersonalization, defaultBodies)
+      : bodyCandidates);
 
   const cards = defaultTitles.map((title, idx) => ({
     title,
@@ -1980,23 +2016,28 @@ function normalizeOnboardingInsightsPayload(parsed, fallbackText, mode, needsPer
       mode === "diagnostics" ? 420 : 280
     ),
   }));
+  const finalCards = mode === "fulfillment"
+    ? sanitizeFulfillmentOnboardingCards(cards, context, defaultBodies)
+    : cards;
 
   const confidenceRaw = typeof raw?.confidence === "string" ? raw.confidence.toLowerCase().trim() : "";
   const confidence = ["high", "medium", "low"].includes(confidenceRaw)
     ? confidenceRaw
-    : "medium";
+    : (parsedFromJSON ? "medium" : "low");
   let nudge = typeof raw?.nudge === "string"
     ? truncateAtWordBoundary(String(raw.nudge).replace(/\s+/g, " ").trim(), 180)
     : "";
   if (needsPersonalizationNudge && !nudge) {
     nudge = mode === "diagnostics"
       ? "Loom doesn’t have personalization yet. Use Edit answers to complete Quick diagnostic."
-      : "Complete Account -> Personalization for sharper Loom-specific insights.";
+      : (mode === "fulfillment"
+        ? "Add diagnostic in Personalization for stronger Loom guidance."
+        : "Complete Account -> Personalization for sharper Loom-specific insights.");
   }
 
   const debug = raw?.debug && typeof raw.debug === "object" ? raw.debug : null;
   return {
-    cards,
+    cards: finalCards,
     confidence,
     nudge: nudge || null,
     debug,
@@ -2018,6 +2059,258 @@ function defaultDiagnosticsInsightBodies(context, hasPersonalization) {
     "Every task, goal, and little win will land in one of these areas, so your life stays organized.",
     buildImplicitNextDirectionBody(current)
   ];
+}
+
+function defaultFulfillmentOnboardingInsightBodies(context, hasPersonalization) {
+  const categoryCount = fulfillmentCategoryCountFromContext(context);
+  const hasCountSignal = Number.isFinite(categoryCount) && categoryCount > 0;
+  let categoryHint = "";
+  if (hasCountSignal && categoryCount < 3) {
+    categoryHint = "You may need a few more areas to get full life coverage; aim for 3-7.";
+  } else if (hasCountSignal && categoryCount > 7) {
+    categoryHint = "You may have too many areas to stay clear; aim for 3-7.";
+  }
+
+  const current = context?.personalization?.current || {};
+  const stress = sanitizePersonalizationField(current?.stressSource, 120);
+  const planning = sanitizePersonalizationField(current?.planningReality, 120);
+  const desired = sanitizePersonalizationField(current?.desiredChange, 120);
+  const purposeSignal =
+    sanitizePersonalizationField(context?.drivingForce?.purpose, 140) ||
+    sanitizePersonalizationField(context?.drivingForce?.vision, 140) ||
+    sanitizePersonalizationField(context?.purposeDraft?.purpose, 140) ||
+    sanitizePersonalizationField(context?.purposeDraft?.vision, 140) ||
+    "";
+
+  const hasDiagnosticSignal = !!(stress || planning || desired);
+  const hasPurposeSignal = !!purposeSignal;
+
+  const areasPrefix = hasDiagnosticSignal && hasPurposeSignal
+    ? `Given your aim for ${lowerFirstToken(desired || "steadier progress", "steadier progress")} and the direction in your Purpose,`
+    : (hasDiagnosticSignal
+      ? `Given your current pressure around ${lowerFirstToken(stress || "competing priorities", "competing priorities")},`
+      : (hasPurposeSignal
+        ? "Given the direction in your Purpose,"
+        : "I don't have full Purpose or diagnostic context yet, so this is a baseline:"));
+
+  const areasBody = [
+    `${areasPrefix} a well-rounded setup keeps coverage broad enough to reduce blind spots without creating overload.`,
+    "Loom uses fulfillment areas as a stable operating map so daily actions stay connected to long-term direction.",
+    categoryHint
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  let nextDirection = "";
+  if (!hasDiagnosticSignal && !hasPurposeSignal) {
+    nextDirection = [
+      "We'll start with a conservative focus rhythm until more personalization signal is available.",
+      "Loom will help you reduce overwhelm by narrowing priorities and keeping follow-through consistent."
+    ].join(" ");
+  } else if (/\breactive\b|\bdrift\b|\bbehind\b|\burgent\b|\bchaotic\b|\bfirefight\b|\boverwhelmed\b/.test((planning || "").toLowerCase())) {
+    nextDirection = [
+      "We'll shorten your planning horizon and tighten priority count so execution feels more predictable.",
+      "Loom will help you maintain steadier momentum with simpler weekly decisions."
+    ].join(" ");
+  } else if (desired) {
+    nextDirection = [
+      `We'll align your execution rhythm toward ${lowerFirstToken(desired, "clearer progress")} with fewer competing priorities.`,
+      "Loom will help you sustain momentum without overload as priorities shift."
+    ].join(" ");
+  } else {
+    nextDirection = [
+      "We'll keep planning directionally clear and reduce unnecessary priority switching.",
+      "Loom will help you stay consistent with fewer decisions and steadier follow-through."
+    ].join(" ");
+  }
+
+  return [
+    clampInsightBody(areasBody, 3),
+    ensureFulfillmentNextDirectionEnding(nextDirection)
+  ];
+}
+
+function normalizeFulfillmentOnboardingInsightBodies(candidates, context, hasPersonalization, defaultBodies) {
+  const knownCategoryNames = extractKnownFulfillmentCategoryNames(context);
+  const safeAreasFallback = defaultBodies[0];
+  const out = [0, 1].map((idx) => {
+    const raw = String(candidates[idx] || defaultBodies[idx] || "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!raw) return defaultBodies[idx];
+    if (/you selected/i.test(raw) || /you chose/i.test(raw)) {
+      return idx === 0 ? safeAreasFallback : defaultBodies[idx];
+    }
+    const hasCategoryParroting = containsAnyCategoryName(raw, knownCategoryNames);
+    if (hasCategoryParroting) {
+      return idx === 0 ? safeAreasFallback : defaultBodies[idx];
+    }
+    if (idx === 1) {
+      return ensureFulfillmentNextDirectionEnding(clampInsightBody(raw, 3));
+    }
+    return clampInsightBody(raw, 3);
+  });
+
+  if (!hasPersonalization && !hasAnyPurposeSignal(context)) {
+    out[0] = defaultBodies[0];
+    out[1] = ensureFulfillmentNextDirectionEnding(defaultBodies[1]);
+  } else {
+    out[1] = ensureFulfillmentNextDirectionEnding(out[1]);
+  }
+
+  return out;
+}
+
+function sanitizeFulfillmentOnboardingCards(cards, context, defaultBodies) {
+  const input = Array.isArray(cards) ? cards.slice(0, 2) : [];
+  if (input.length < 2) {
+    return [
+      { title: "Fulfillment areas", body: defaultBodies[0] },
+      { title: "Next direction", body: ensureFulfillmentNextDirectionEnding(defaultBodies[1]) }
+    ];
+  }
+
+  const names = extractKnownFulfillmentCategoryNames(context);
+  const areaRaw = String(input[0]?.body || "").replace(/\s+/g, " ").trim();
+  const nextRaw = String(input[1]?.body || "").replace(/\s+/g, " ").trim();
+  const hasParroting =
+    /you selected/i.test(areaRaw) ||
+    /you selected/i.test(nextRaw) ||
+    countCategoryNameMatches(areaRaw, names) >= 2 ||
+    countCategoryNameMatches(nextRaw, names) >= 2;
+
+  if (!hasParroting) {
+    return [
+      { title: "Fulfillment areas", body: clampInsightBody(areaRaw || defaultBodies[0], 3) },
+      { title: "Next direction", body: ensureFulfillmentNextDirectionEnding(nextRaw || defaultBodies[1]) }
+    ];
+  }
+
+  return [
+    {
+      title: "Fulfillment areas",
+      body: "Your areas are set. Next we'll use them to organize tasks, goals, and little wins into one direction."
+    },
+    {
+      title: "Next direction",
+      body: ensureFulfillmentNextDirectionEnding(defaultBodies[1])
+    }
+  ];
+}
+
+function countCategoryNameMatches(text, names) {
+  if (!Array.isArray(names) || names.length === 0) return 0;
+  const lower = String(text || "").toLowerCase();
+  let count = 0;
+  for (const name of names) {
+    if (typeof name !== "string" || !name) continue;
+    if (lower.includes(name.toLowerCase())) count += 1;
+  }
+  return count;
+}
+
+function hasAnyPurposeSignal(context) {
+  return !!(
+    sanitizePersonalizationField(context?.drivingForce?.vision, 120) ||
+    sanitizePersonalizationField(context?.drivingForce?.purpose, 120) ||
+    sanitizePersonalizationField(context?.purposeDraft?.vision, 120) ||
+    sanitizePersonalizationField(context?.purposeDraft?.purpose, 120)
+  );
+}
+
+function ensureFulfillmentNextDirectionEnding(text) {
+  const source = String(text || "").replace(/\s+/g, " ").trim();
+  if (!source) {
+    return "We'll keep your priorities focused and sequencing clear as inputs evolve. Loom will help you reduce overwhelm with steadier follow-through.";
+  }
+
+  const rawSentences = splitIntoSentences(source)
+    .map((sentence) => sentence.replace(/[.!?]+$/g, "").trim())
+    .filter(Boolean);
+  let sentences = rawSentences.length > 0 ? rawSentences : [source.replace(/[.!?]+$/g, "").trim()];
+
+  if (sentences.length > 3) {
+    const last = sentences[sentences.length - 1];
+    sentences = sentences.slice(0, 2);
+    sentences.push(last);
+  }
+
+  const loomIdx = sentences.findIndex((sentence) => /^loom will help you\b/i.test(sentence));
+  if (loomIdx >= 0) {
+    const loomSentence = sentences.splice(loomIdx, 1)[0];
+    sentences.push(loomSentence);
+  } else {
+    sentences.push("Loom will help you stay focused on fewer priorities with steadier follow-through");
+  }
+
+  if (sentences.length > 3) {
+    const last = sentences[sentences.length - 1];
+    sentences = sentences.slice(0, 2);
+    sentences.push(last);
+  }
+
+  const normalized = sentences
+    .map((sentence) => sentence.endsWith(".") ? sentence : `${sentence}.`)
+    .join(" ");
+  return truncateAtWordBoundary(normalized, 360);
+}
+
+function clampInsightBody(text, maxSentences = 3) {
+  const source = String(text || "").trim();
+  if (!source) return "";
+  const chunks = source.match(/[^.!?]+[.!?]?/g) || [source];
+  const kept = chunks
+    .map((chunk) => chunk.trim())
+    .filter(Boolean)
+    .slice(0, maxSentences)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return truncateAtWordBoundary(kept, 340);
+}
+
+function fulfillmentCategoryCountFromContext(context) {
+  const setup = context?.fulfillmentSetup;
+  if (Number.isFinite(setup?.categoryCount)) return Number(setup.categoryCount);
+  if (Array.isArray(setup?.selectedCategoryIDs)) return setup.selectedCategoryIDs.length;
+  if (Array.isArray(setup?.selectedCategoryNames)) return setup.selectedCategoryNames.length;
+  if (Array.isArray(context?.fulfillmentCategories)) return context.fulfillmentCategories.length;
+  return 0;
+}
+
+function firstMissingFulfillmentDiagnosticQuestion(current) {
+  const stress = sanitizePersonalizationField(current?.stressSource, 120);
+  if (!stress) return "What creates the most stress right now?";
+  const breakPoint = sanitizePersonalizationField(current?.breakPoint, 120);
+  if (!breakPoint) return "What usually breaks first when stress spikes?";
+  const planning = sanitizePersonalizationField(current?.planningReality, 120);
+  if (!planning) return "How does your planning usually drift off track?";
+  const desired = sanitizePersonalizationField(current?.desiredChange, 120);
+  if (!desired) return "What change would help you feel more in control first?";
+  return "What usually breaks first when stress spikes?";
+}
+
+function extractKnownFulfillmentCategoryNames(context) {
+  const names = [];
+  const setupNames = Array.isArray(context?.fulfillmentSetup?.selectedCategoryNames)
+    ? context.fulfillmentSetup.selectedCategoryNames
+    : [];
+  const categoryNames = Array.isArray(context?.fulfillmentCategories)
+    ? context.fulfillmentCategories.map((item) => item?.name)
+    : [];
+  for (const value of [...setupNames, ...categoryNames]) {
+    if (typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (!trimmed) continue;
+    names.push(trimmed.toLowerCase());
+  }
+  return Array.from(new Set(names)).slice(0, 20);
+}
+
+function containsAnyCategoryName(text, names) {
+  if (!Array.isArray(names) || names.length < 1) return false;
+  const lower = String(text || "").toLowerCase();
+  return names.some((name) => typeof name === "string" && name && lower.includes(name));
 }
 
 function buildImplicitRootCauseBody(current) {
@@ -2313,6 +2606,51 @@ function ensureDiagnosticsInsightsEvidencePaths(evidence, context, hasPersonaliz
 
   for (const path of required) {
     if (!out.includes(path)) out.push(path);
+  }
+  return out.slice(0, 20);
+}
+
+function ensureFulfillmentInsightsEvidencePaths(evidence, context, hasPersonalization) {
+  const out = Array.isArray(evidence)
+    ? evidence.filter((item) => typeof item === "string" && item.trim().length > 0)
+    : [];
+  const current = context?.personalization?.current;
+  const required = [];
+  if (hasPersonalization && current && typeof current === "object") {
+    if (typeof current.stressSource === "string") {
+      required.push("personalization.current.stressSource");
+    }
+    if (typeof current.breakPoint === "string") {
+      required.push("personalization.current.breakPoint");
+    }
+    if (typeof current.planningReality === "string") {
+      required.push("personalization.current.planningReality");
+    }
+    if (typeof current.desiredChange === "string") {
+      required.push("personalization.current.desiredChange");
+    }
+  }
+
+  if (typeof context?.drivingForce?.purpose === "string") {
+    required.push("drivingForce.purpose");
+  } else if (typeof context?.drivingForce?.vision === "string") {
+    required.push("drivingForce.vision");
+  } else if (typeof context?.purposeDraft?.purpose === "string") {
+    required.push("purposeDraft.purpose");
+  } else if (typeof context?.purposeDraft?.vision === "string") {
+    required.push("purposeDraft.vision");
+  }
+
+  if (Array.isArray(context?.fulfillmentSetup?.selectedCategoryIDs)) {
+    required.push("fulfillmentSetup.selectedCategoryIDs");
+  }
+
+  for (const path of required) {
+    if (!out.includes(path)) out.push(path);
+  }
+
+  if (out.length === 0 && Array.isArray(context?.dataInventory) && context.dataInventory.length > 0) {
+    out.push("dataInventory");
   }
   return out.slice(0, 20);
 }

@@ -32,6 +32,7 @@ let fulfillmentStartSelectableDefaultCategories: [String] = [
 
 struct FulfillmentStartView: View {
     private static let draftStorageKey = "fulfillment_start_onboarding_draft_v1"
+    private static let fulfillmentInsightsPromptVersion = "onboarding_fulfillment_insights_v3"
     enum EntryMode {
         case onboarding
         case addSingleArea
@@ -106,11 +107,13 @@ struct FulfillmentStartView: View {
     @Query private var resources: [FulfillmentResources]
     @Query private var passions: [Passion]
     @Query private var passionJoins: [PassionFulfillmentJoin]
+    @Query(sort: \DrivingForce.updatedAt, order: .reverse) private var drivingForces: [DrivingForce]
     @Query(sort: \ActivePlanState.id, order: .forward) private var activePlanStates: [ActivePlanState]
     @Query(sort: \PlannedChunk.updatedAt, order: .reverse) private var allPlannedChunks: [PlannedChunk]
     @Query(sort: \PlannedChunkAction.createdAt, order: .reverse) private var allPlannedActions: [PlannedChunkAction]
     @Query(sort: \Outcomes.updatedAt, order: .reverse) private var allOutcomes: [Outcomes]
     @Query(sort: \PlanLabel.category, order: .forward) private var planLabels: [PlanLabel]
+    @AppStorage("fulfillment_start_insights_cache_v3") private var fulfillmentInsightsCacheStorage: String = ""
 
     private let entryMode: EntryMode
     private let showsProgressStrip: Bool
@@ -181,10 +184,11 @@ struct FulfillmentStartView: View {
     @State private var isGeneratingFulfillmentInsights = false
     @State private var fulfillmentInsightsErrorMessage: String? = nil
     @State private var fulfillmentInsightsNudgeMessage: String? = nil
-    @State private var fulfillmentInsightsLoadedKeys = Set<String>()
     @State private var fulfillmentInsightsCache: [String: [FulfillmentInsightCard]] = [:]
     @State private var fulfillmentInsightsNudgeCache: [String: String] = [:]
+    @State private var fulfillmentInsightsActiveRequestKey: String? = nil
     @State private var autoWriteOutlineAngle: Double = 0
+    @State private var insightsOutlinePhase: CGFloat = 0
     @State private var autoWriteIconAnimating: Bool = false
     @State private var autoWriteIconAnimationTask: Task<Void, Never>? = nil
 
@@ -201,6 +205,7 @@ struct FulfillmentStartView: View {
     @State private var isAllSummaryExpanded = false
     @State private var addModeInitialActiveCategoryKeys = Set<String>()
     @State private var keyboardHeight: CGFloat = 0
+    @State private var shouldScrollCreateCategoriesToInputAfterKeyboard = false
     private let createCategoriesCustomCategoryScrollID = "create_categories_custom_category_scroll_anchor"
 
     @FocusState private var focusedField: Field?
@@ -553,7 +558,7 @@ struct FulfillmentStartView: View {
         return max(0, keyboardHeight - footerPinnedHeight + 24)
     }
     private func keyboardDismissBottomPadding(in proxy: GeometryProxy) -> CGFloat {
-        guard keyboardHeight > 0 else { return 58 }
+        guard keyboardHeight > 0 else { return footerPinnedHeight + 8 }
         let keyboardTopGlobal = UIScreen.main.bounds.height - keyboardHeight
         let viewBottomGlobal = proxy.frame(in: .global).maxY
         let keyboardOverlapInView = max(0, viewBottomGlobal - keyboardTopGlobal)
@@ -593,7 +598,7 @@ struct FulfillmentStartView: View {
                     mainContent
                 }
                 .onChange(of: focusedField) { _, newValue in
-                    guard step == .createCategories, newValue == .category else { return }
+                    guard step == .createCategories, newValue == .category, keyboardHeight > 0 else { return }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
                         withAnimation(.easeOut(duration: 0.2)) {
                             proxy.scrollTo(createCategoriesCustomCategoryScrollID, anchor: .bottom)
@@ -601,11 +606,18 @@ struct FulfillmentStartView: View {
                     }
                 }
                 .onChange(of: keyboardHeight) { _, newValue in
-                    guard step == .createCategories, focusedField == .category, newValue > 0 else { return }
+                    guard
+                        step == .createCategories,
+                        addingCategory,
+                        focusedField == .category,
+                        newValue > 0,
+                        shouldScrollCreateCategoriesToInputAfterKeyboard
+                    else { return }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
                         withAnimation(.easeOut(duration: 0.2)) {
                             proxy.scrollTo(createCategoriesCustomCategoryScrollID, anchor: .bottom)
                         }
+                        shouldScrollCreateCategoriesToInputAfterKeyboard = false
                     }
                 }
             }
@@ -667,9 +679,20 @@ struct FulfillmentStartView: View {
                 introFooterOverlay
             }
             .ignoresSafeArea(.keyboard, edges: .bottom)
-            .navigationTitle("")
+            .navigationTitle(currentStepDisplayTitle)
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarBackButtonHidden(step != .intro)
+            .toolbar {
+                if step != .intro {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button {
+                            goBack()
+                        } label: {
+                            Label("Back", systemImage: "chevron.left")
+                        }
+                    }
+                }
+            }
     }
 
     private var bodyLifecycle: some View {
@@ -761,15 +784,15 @@ struct FulfillmentStartView: View {
         GeometryReader { proxy in
             if isKeyboardVisible || shouldShowMissionAutoWriteControls || shouldShowIdentityAutoWriteControls || shouldShowLittleWinAutoWriteControls {
                 HStack(spacing: 8) {
-                    if isKeyboardVisible {
-                        keyboardDismissButton
-                    }
                     if shouldShowMissionAutoWriteControls {
                         missionAutoWriteControls
                     } else if shouldShowIdentityAutoWriteControls {
                         identityAutoWriteControls
                     } else if shouldShowLittleWinAutoWriteControls {
                         littleWinAutoWriteControls
+                    }
+                    if isKeyboardVisible {
+                        keyboardDismissButton
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
@@ -863,19 +886,99 @@ struct FulfillmentStartView: View {
 
     private var keyboardDismissButton: some View {
         Button {
-            dismissKeyboard()
+            handleKeyboardAccessoryTap()
         } label: {
-            Image(systemName: "keyboard.chevron.compact.down")
+            Image(systemName: keyboardDismissShowsCheckmark ? "checkmark" : "keyboard.chevron.compact.down")
                 .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.primary.opacity(0.85))
+                .foregroundStyle(keyboardDismissShowsCheckmark ? .white : .primary.opacity(0.85))
                 .frame(width: 45, height: 45)
-                .background(.ultraThinMaterial, in: Circle())
+                .background(
+                    Group {
+                        if keyboardDismissShowsCheckmark {
+                            Circle().fill(Color.blue)
+                        } else {
+                            Circle().fill(.ultraThinMaterial)
+                        }
+                    }
+                )
                 .overlay(
                     Circle()
-                        .stroke(Color.white.opacity(0.28), lineWidth: 1)
+                        .stroke(
+                            keyboardDismissShowsCheckmark
+                            ? Color.blue.opacity(0.9)
+                            : Color.white.opacity(0.28),
+                            lineWidth: 1
+                        )
                 )
         }
         .buttonStyle(.plain)
+    }
+
+    private var keyboardDismissShowsCheckmark: Bool {
+        switch step {
+        case .createCategories:
+            return addingCategory && !newCategoryText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .visionSweep:
+            return !currentMissionVisionTextTrimmed.isEmpty
+        case .purposeSweep:
+            return !currentMissionPurposeTextTrimmed.isEmpty
+        case .roles:
+            return addingRole && !roleEntry.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .littleWins:
+            return addingFocus && !focusEntry.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        default:
+            return false
+        }
+    }
+
+    private var currentMissionVisionTextTrimmed: String {
+        guard let record = currentVisionRecord else { return "" }
+        return (visionDrafts[record.category_id] ?? record.category_vision)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var currentMissionPurposeTextTrimmed: String {
+        guard let record = currentPurposeRecord else { return "" }
+        return (purposeDrafts[record.category_id] ?? record.category_purpose)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func handleKeyboardAccessoryTap() {
+        if step == .visionSweep, keyboardDismissShowsCheckmark {
+            highlightInvalid = false
+            invalidCategoryIDs = []
+            showValidationHint = false
+            focusedField = nil
+            advanceFromCurrentStep()
+            return
+        }
+
+        if step == .purposeSweep, keyboardDismissShowsCheckmark {
+            highlightInvalid = false
+            invalidCategoryIDs = []
+            showValidationHint = false
+            focusedField = nil
+            advanceFromCurrentStep()
+            return
+        }
+
+        if step == .roles, keyboardDismissShowsCheckmark, let record = currentRoleRecord {
+            commitRole(record)
+            #if canImport(UIKit)
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            #endif
+            return
+        }
+
+        if step == .littleWins, keyboardDismissShowsCheckmark, let record = currentDeepRecord {
+            commitFocus(record)
+            #if canImport(UIKit)
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            #endif
+            return
+        }
+
+        dismissKeyboard()
     }
 
     private func dismissKeyboard() {
@@ -971,12 +1074,6 @@ struct FulfillmentStartView: View {
                 .frame(maxWidth: .infinity, alignment: .center)
             }
 
-            if !(isAddSingleAreaMode && !showsProgressStrip && step == .createCategories) {
-                Text(currentStepDisplayTitle)
-                    .font(isCompactIntroLayout && step == .intro ? .title2 : .largeTitle)
-                    .fontWeight(.bold)
-                    .frame(maxWidth: .infinity, alignment: .center)
-            }
         }
     }
 
@@ -1076,28 +1173,9 @@ struct FulfillmentStartView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
                 .frame(maxWidth: .infinity)
             } else if step == .summary {
-                Button {
-                    step = .passions
-                } label: {
-                    Text("Back")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .contentShape(Rectangle())
-                }
-                .foregroundStyle(Color.primary)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color(.systemGray5))
-                )
-                .buttonStyle(.plain)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.black.opacity(0.12), lineWidth: 1)
-                }
-                .frame(maxWidth: .infinity)
-
                 Button {
                     guard summaryCanComplete else {
                         triggerHint("Please complete required setup items.")
@@ -1110,29 +1188,10 @@ struct FulfillmentStartView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
                 .frame(maxWidth: .infinity)
                 .disabled(!summaryCanComplete)
             } else if step == .insights {
-                Button {
-                    step = .summary
-                } label: {
-                    Text("Back")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .contentShape(Rectangle())
-                }
-                .foregroundStyle(Color.primary)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color(.systemGray5))
-                )
-                .buttonStyle(.plain)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.black.opacity(0.12), lineWidth: 1)
-                }
-                .frame(maxWidth: .infinity)
-
                 Button {
                     finalizeAndContinue()
                 } label: {
@@ -1141,28 +1200,9 @@ struct FulfillmentStartView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
                 .frame(maxWidth: .infinity)
             } else {
-                Button {
-                    goBack()
-                } label: {
-                    Text("Back")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .contentShape(Rectangle())
-                }
-                .foregroundStyle(Color.primary)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color(.systemGray5))
-                )
-                .buttonStyle(.plain)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.black.opacity(0.12), lineWidth: 1)
-                }
-                .frame(maxWidth: .infinity)
-
                 Button {
                     if shouldForceColorPickerBeforeProceed {
                         guard let category = selectedCategoryNames.first?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -1188,6 +1228,7 @@ struct FulfillmentStartView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(isNextDisabled ? Color(.systemGray3) : .accentColor)
+                .controlSize(.large)
                 .frame(maxWidth: .infinity)
             }
         }
@@ -1350,6 +1391,7 @@ struct FulfillmentStartView: View {
                     Button("+ Custom Category") {
                         addingCategory = true
                         newCategoryText = ""
+                        shouldScrollCreateCategoriesToInputAfterKeyboard = true
                         DispatchQueue.main.async {
                             focusedField = .category
                         }
@@ -1553,10 +1595,16 @@ struct FulfillmentStartView: View {
                                 .padding(.horizontal, 10)
                                 .background(isInvalid ? Color.red.opacity(0.08) : rowSurfaceColor)
                         } else {
-                            Button("+ Add Identity") {
+                            Button {
                                 addingRole = true
                                 roleEntry = ""
                                 focusedField = .role
+                            } label: {
+                                HStack(spacing: 0) {
+                                    Text("+ Add Identity")
+                                    Spacer(minLength: 0)
+                                }
+                                .contentShape(Rectangle())
                             }
                             .foregroundStyle(.blue)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1763,10 +1811,16 @@ struct FulfillmentStartView: View {
                     .padding(.horizontal, 10)
                     .background(rowBackground)
             } else if fociItems.count < 3 {
-                Button("+ Add Little Win") {
+                Button {
                     addingFocus = true
                     focusEntry = ""
                     focusedField = .focus
+                } label: {
+                    HStack(spacing: 0) {
+                        Text("+ Add Little Win")
+                        Spacer(minLength: 0)
+                    }
+                    .contentShape(Rectangle())
                 }
                 .foregroundStyle(.blue)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -2200,12 +2254,30 @@ struct FulfillmentStartView: View {
                     .foregroundStyle(.secondary)
             }
 
-            ForEach(fulfillmentInsightCards) { card in
-                fulfillmentInsightsCard(card)
+            if isGeneratingFulfillmentInsights && fulfillmentInsightCards.isEmpty {
+                ForEach(0..<2, id: \.self) { _ in
+                    fulfillmentInsightsLoadingCard
+                }
+            } else {
+                ForEach(Array(fulfillmentInsightCards.prefix(2))) { card in
+                    fulfillmentInsightsCard(card)
+                }
             }
         }
         .padding(14)
         .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+        .onAppear {
+            if autoWriteOutlineAngle == 0 {
+                withAnimation(.linear(duration: 8).repeatForever(autoreverses: false)) {
+                    autoWriteOutlineAngle = 360
+                }
+            }
+            if insightsOutlinePhase == 0 {
+                withAnimation(.linear(duration: 2.1).repeatForever(autoreverses: false)) {
+                    insightsOutlinePhase = 1
+                }
+            }
+        }
     }
 
     private func fulfillmentRetryRow(
@@ -2236,30 +2308,6 @@ struct FulfillmentStartView: View {
                 .textCase(.uppercase)
                 .foregroundStyle(.secondary)
                 .tracking(0.45)
-            if card.title.caseInsensitiveCompare("Your strands") == .orderedSame {
-                let names = orderedFulfillments.map(\.category)
-                if !names.isEmpty {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], spacing: 8) {
-                        ForEach(names, id: \.self) { name in
-                            Text(name)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(fulfillmentCategoryColor(for: name))
-                                .lineLimit(1)
-                                .padding(.horizontal, 9)
-                                .padding(.vertical, 6)
-                                .frame(maxWidth: .infinity, alignment: .center)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                        .fill(fulfillmentCategoryColor(for: name).opacity(0.14))
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                        .stroke(fulfillmentCategoryColor(for: name).opacity(0.32), lineWidth: 1)
-                                )
-                        }
-                    }
-                }
-            }
             Text(card.body)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.primary)
@@ -2273,8 +2321,40 @@ struct FulfillmentStartView: View {
                 .fill(Color(.secondarySystemBackground))
         )
         .overlay(
+            ZStack {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(autoWriteGradient.opacity(0.68), lineWidth: 1.2)
+
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .trim(from: insightsOutlinePhase, to: min(insightsOutlinePhase + 0.22, 1))
+                    .stroke(autoWriteGradient, style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
+            }
+        )
+    }
+
+    private var fulfillmentInsightsLoadingCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .fill(Color.secondary.opacity(0.22))
+                .frame(width: 140, height: 11)
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .fill(Color.secondary.opacity(0.16))
+                .frame(height: 12)
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .fill(Color.secondary.opacity(0.14))
+                .frame(height: 12)
+        }
+        .redacted(reason: .placeholder)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(colorScheme == .dark ? Color.white.opacity(0.18) : Color.black.opacity(0.08), lineWidth: 1)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(autoWriteGradient.opacity(0.35), lineWidth: 1)
         )
     }
 
@@ -3173,6 +3253,18 @@ struct FulfillmentStartView: View {
         let nudge: String?
     }
 
+    private struct FulfillmentInsightsPersistedCard: Codable {
+        let title: String
+        let body: String
+    }
+
+    private struct FulfillmentInsightsPersistedEntry: Codable {
+        let cacheKey: String
+        let savedAt: Date
+        let cards: [FulfillmentInsightsPersistedCard]
+        let nudge: String?
+    }
+
     private func handleAutoStartForStep(_ targetStep: Step) {
         switch targetStep {
         case .purposeSweep:
@@ -3223,17 +3315,53 @@ struct FulfillmentStartView: View {
     }
 
     private var fulfillmentInsightsCacheKey: String {
-        let categories = orderedFulfillments
+        let diagnosticsHash = stableHash(personalizationSignature())
+        let purposeHash = stableHash(purposeContextSignature())
+        let fulfillmentHash = stableHash(fulfillmentSelectionSignature())
+        return "fulfillment_insights|\(Self.fulfillmentInsightsPromptVersion)|\(diagnosticsHash)|\(purposeHash)|\(fulfillmentHash)"
+    }
+
+    private func purposeContextSignature() -> String {
+        let drivingForce = drivingForces.first
+        let vision = (drivingForce?.ultimateVision ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let purpose = (drivingForce?.ultimatePurpose ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let passionSignal = passions
+            .map { "\($0.emotion.lowercased()):\($0.passion.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())" }
+            .sorted()
+            .joined(separator: "|")
+        return [vision, purpose, passionSignal].joined(separator: "||")
+    }
+
+    private func fulfillmentSelectionSignature() -> String {
+        orderedFulfillments
             .map { record in
                 let mission = (purposeDrafts[record.category_id] ?? record.category_purpose)
                     .trimmingCharacters(in: .whitespacesAndNewlines)
-                let identities = getRoles(for: record).map(\.role).joined(separator: ",")
-                let littleWins = getFoci(for: record).map(\.activity).joined(separator: ",")
-                return "\(record.category)|\(mission)|\(identities)|\(littleWins)"
+                    .lowercased()
+                let identities = getRoles(for: record)
+                    .map(\.role)
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                    .sorted()
+                    .joined(separator: "|")
+                let littleWins = getFoci(for: record)
+                    .map(\.activity)
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                    .sorted()
+                    .joined(separator: "|")
+                return [
+                    record.category_id.uuidString.lowercased(),
+                    record.category.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+                    mission,
+                    identities,
+                    littleWins
+                ].joined(separator: "::")
             }
+            .sorted()
             .joined(separator: "||")
-        let priorities = priorityCategoryIDs.map(\.uuidString).sorted().joined(separator: "|")
-        return "fulfillment_insights|\(stableHash(personalizationSignature() + "|" + categories + "|" + priorities))"
     }
 
     private func personalizationSignature() -> String {
@@ -3258,24 +3386,43 @@ struct FulfillmentStartView: View {
 
     private func generateFulfillmentInsights(forceRefresh: Bool = false) async {
         let requestKey = fulfillmentInsightsCacheKey
+        #if DEBUG
+        print("[FulfillmentInsights] key=\(requestKey) cached=\((fulfillmentInsightsCache[requestKey]?.isEmpty == false)) active=\(fulfillmentInsightsActiveRequestKey == requestKey)")
+        #endif
         if !forceRefresh, let cached = fulfillmentInsightsCache[requestKey], !cached.isEmpty {
             fulfillmentInsightCards = cached
             fulfillmentInsightsNudgeMessage = fulfillmentInsightsNudgeCache[requestKey]
             fulfillmentInsightsErrorMessage = nil
             return
         }
-        if !forceRefresh, fulfillmentInsightsLoadedKeys.contains(requestKey) {
+        if !forceRefresh,
+           let persisted = persistedFulfillmentInsights(for: requestKey) {
+            fulfillmentInsightCards = persisted.cards
+            fulfillmentInsightsNudgeMessage = persisted.nudge
+            fulfillmentInsightsErrorMessage = nil
+            fulfillmentInsightsCache[requestKey] = persisted.cards
+            if let nudge = persisted.nudge {
+                fulfillmentInsightsNudgeCache[requestKey] = nudge
+            }
             return
         }
-        fulfillmentInsightsLoadedKeys.insert(requestKey)
+        if !forceRefresh, fulfillmentInsightsActiveRequestKey == requestKey {
+            return
+        }
 
         fulfillmentInsightsErrorMessage = nil
         fulfillmentInsightsNudgeMessage = nil
+        fulfillmentInsightsActiveRequestKey = requestKey
         isGeneratingFulfillmentInsights = true
-        if forceRefresh || fulfillmentInsightsCache[requestKey] == nil {
+        if fulfillmentInsightCards.isEmpty || forceRefresh {
             fulfillmentInsightCards = []
         }
-        defer { isGeneratingFulfillmentInsights = false }
+        defer {
+            if fulfillmentInsightsActiveRequestKey == requestKey {
+                fulfillmentInsightsActiveRequestKey = nil
+            }
+            isGeneratingFulfillmentInsights = false
+        }
 
         do {
             let contextSnapshot = try LoomAIViewModel().buildContextSnapshot(in: modelContext)
@@ -3286,34 +3433,48 @@ struct FulfillmentStartView: View {
             \(payloadJSON)
 
             Requirements:
-            - Return JSON only with exactly 3 cards.
-            - Card 1 title: Your strands
-            - Card 2 title: Likely gap
-            - Card 3 title: First execution move
-            - Ground the cards in diagnostics + selected categories + current fulfillment setup.
-            - Include at least two concrete references to user inputs when available.
-            - Keep each body concise and practical.
+            - Return JSON only with exactly 2 cards.
+            - Card 1 title: Fulfillment areas
+            - Card 2 title: Next direction
+            - Do not list selected category names and do not say "You selected".
+            - Do not rename or re-label selected fulfillment areas.
+            - Ground cards in diagnostics + purpose + fulfillment setup evidence only.
+            - Keep each card to 1-3 sentences with calm, practical language.
+            - If diagnostics or purpose are missing, say that briefly and provide a useful fallback without inventing claims.
+            - Next direction must end with a final sentence that starts with "Loom will help you".
             """
 
             let response = try await LoomAIService().sendChat(
                 messages: [.init(role: "user", content: instruction)],
                 context: contextSnapshot,
                 intent: "onboarding_insights_fulfillment",
-                screen: "fulfillment_insights"
+                screen: "fulfillment_insights",
+                requestID: UUID().uuidString,
+                requestHash: requestKey
             )
             let decoded = decodeFulfillmentInsights(from: response.message)
             guard !decoded.cards.isEmpty else {
+                guard requestKey == fulfillmentInsightsCacheKey else { return }
                 fulfillmentInsightCards = defaultFulfillmentInsightsCards()
                 fulfillmentInsightsErrorMessage = "Couldn’t generate insights yet."
                 return
             }
+            guard requestKey == fulfillmentInsightsCacheKey else { return }
             fulfillmentInsightCards = decoded.cards
             fulfillmentInsightsNudgeMessage = decoded.nudge
             fulfillmentInsightsCache[requestKey] = decoded.cards
             if let nudge = decoded.nudge {
                 fulfillmentInsightsNudgeCache[requestKey] = nudge
+            } else {
+                fulfillmentInsightsNudgeCache.removeValue(forKey: requestKey)
             }
+            persistFulfillmentInsights(
+                for: requestKey,
+                cards: decoded.cards,
+                nudge: decoded.nudge
+            )
         } catch {
+            guard requestKey == fulfillmentInsightsCacheKey else { return }
             fulfillmentInsightCards = defaultFulfillmentInsightsCards()
             fulfillmentInsightsErrorMessage = "Couldn’t generate insights yet."
         }
@@ -3346,8 +3507,16 @@ struct FulfillmentStartView: View {
         let priorityNames = priorityCategoryIDs.compactMap { id in
             orderedFulfillments.first(where: { $0.category_id == id })?.category
         }
+        let purposePayload: [String: Any] = [
+            "vision": drivingForces.first?.ultimateVision ?? "",
+            "purpose": drivingForces.first?.ultimatePurpose ?? "",
+            "passions": passions
+                .map { "\(displayEmotionLabel(for: $0.emotion)): \($0.passion)" }
+                .sorted()
+        ]
         let payload: [String: Any] = [
             "diagnostics": diagnostics,
+            "purpose": purposePayload,
             "selectedCategoryNames": orderedFulfillments.map(\.category),
             "priorityCategoryNames": priorityNames,
             "categories": categoriesPayload
@@ -3361,7 +3530,8 @@ struct FulfillmentStartView: View {
 
     private func decodeFulfillmentInsights(from raw: String) -> (cards: [FulfillmentInsightCard], nudge: String?) {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        let defaultTitles = ["Your strands", "Likely gap", "First execution move"]
+        let defaultTitles = ["Fulfillment areas", "Next direction"]
+        let fallbackCards = defaultFulfillmentInsightsCards()
         if let data = trimmed.data(using: .utf8),
            let parsed = try? JSONDecoder().decode(FulfillmentInsightsResponse.self, from: data) {
             let bodies = (parsed.cards ?? []).compactMap { card -> String? in
@@ -3370,42 +3540,249 @@ struct FulfillmentStartView: View {
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 return body.isEmpty ? nil : body
             }
-            var cards: [FulfillmentInsightCard] = []
-            for (index, title) in defaultTitles.enumerated() {
-                let body = index < bodies.count ? bodies[index] : defaultFulfillmentInsightsCards()[index].body
-                cards.append(FulfillmentInsightCard(title: title, body: body))
-            }
-            return (cards, parsed.nudge?.trimmingCharacters(in: .whitespacesAndNewlines))
+            let areasCandidate = bodies.indices.contains(0) ? bodies[0] : fallbackCards[0].body
+            let nextCandidate = bodies.indices.contains(1) ? bodies[1] : fallbackCards[1].body
+
+            let cards: [FulfillmentInsightCard] = [
+                FulfillmentInsightCard(
+                    title: defaultTitles[0],
+                    body: validatedFulfillmentAreasBody(
+                        candidate: areasCandidate,
+                        fallback: fallbackCards[0].body
+                    )
+                ),
+                FulfillmentInsightCard(
+                    title: defaultTitles[1],
+                    body: validatedNextDirectionBody(
+                        candidate: nextCandidate,
+                        fallback: fallbackCards[1].body
+                    )
+                )
+            ]
+            let nudge = parsed.nudge?
+                .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return (cards, nudge?.isEmpty == true ? nil : nudge)
         }
 
         let fallbackBodies = trimmed
             .components(separatedBy: "\n")
             .map { $0.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-        if fallbackBodies.count >= 3 {
+        if fallbackBodies.count >= 2 {
             return (
-                zip(defaultTitles, fallbackBodies.prefix(3)).map { FulfillmentInsightCard(title: $0.0, body: $0.1) },
+                [
+                    FulfillmentInsightCard(
+                        title: defaultTitles[0],
+                        body: validatedFulfillmentAreasBody(
+                            candidate: fallbackBodies[0],
+                            fallback: fallbackCards[0].body
+                        )
+                    ),
+                    FulfillmentInsightCard(
+                        title: defaultTitles[1],
+                        body: validatedNextDirectionBody(
+                            candidate: fallbackBodies[1],
+                            fallback: fallbackCards[1].body
+                        )
+                    )
+                ],
                 nil
             )
         }
-        return (defaultFulfillmentInsightsCards(), nil)
+        return (fallbackCards, nil)
     }
 
     private func defaultFulfillmentInsightsCards() -> [FulfillmentInsightCard] {
-        [
+        let categoryCount = orderedFulfillments.count
+        let categoryCountHint: String
+        if categoryCount < 3 {
+            categoryCountHint = "You may need a few more areas for full coverage; aim for 3-7."
+        } else if categoryCount > 7 {
+            categoryCountHint = "You may have too many areas to stay clear; aim for 3-7."
+        } else {
+            categoryCountHint = ""
+        }
+        let areasBody = defaultFulfillmentAreasBody(categoryCountHint: categoryCountHint)
+        let nextDirectionBody = defaultFulfillmentNextDirectionBody()
+
+        return [
             FulfillmentInsightCard(
-                title: "Your strands",
-                body: "Your selected categories give coverage, but execution quality will matter more than adding more categories."
+                title: "Fulfillment areas",
+                body: areasBody
             ),
             FulfillmentInsightCard(
-                title: "Likely gap",
-                body: "Your profile suggests one area may be neglected unless your weekly focus is tightened."
-            ),
-            FulfillmentInsightCard(
-                title: "First execution move",
-                body: "Choose one category and complete one repeatable Little Win daily this week."
+                title: "Next direction",
+                body: nextDirectionBody
             )
         ]
+    }
+
+    private func validatedFulfillmentAreasBody(candidate: String, fallback: String) -> String {
+        let normalized = candidate
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return fallback }
+        let lower = normalized.lowercased()
+        if lower.contains("you selected") || lower.contains("you chose") {
+            return fallback
+        }
+        let matchedCategoryCount = orderedFulfillments.reduce(0) { partial, record in
+            let category = record.category.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !category.isEmpty else { return partial }
+            return lower.contains(category) ? partial + 1 : partial
+        }
+        if matchedCategoryCount >= 1 {
+            return fallback
+        }
+        return truncateMissionSuggestion(normalized, maxLength: 340)
+    }
+
+    private func validatedNextDirectionBody(candidate: String, fallback: String) -> String {
+        let normalized = candidate
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return ensureNextDirectionEnding(fallback) }
+        return ensureNextDirectionEnding(normalized)
+    }
+
+    private func ensureNextDirectionEnding(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return "We’ll narrow your planning to fewer priorities so progress feels steady and sustainable. Loom will help you keep decisions simple and follow-through consistent."
+        }
+
+        var sentences = trimmed
+            .split(whereSeparator: { ".!?".contains($0) })
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        if sentences.isEmpty {
+            sentences = [trimmed]
+        }
+
+        if let loomIndex = sentences.firstIndex(where: { $0.lowercased().hasPrefix("loom will help you") }) {
+            let loomSentence = sentences.remove(at: loomIndex)
+            sentences.append(loomSentence)
+        } else {
+            sentences.append("Loom will help you stay focused on fewer priorities with steadier follow-through")
+        }
+
+        if sentences.count > 3 {
+            let last = sentences.last ?? "Loom will help you stay focused on fewer priorities with steadier follow-through"
+            sentences = Array(sentences.prefix(2)) + [last]
+        }
+
+        let joined = sentences.map { sentence in
+            sentence.hasSuffix(".") ? sentence : "\(sentence)."
+        }
+        .joined(separator: " ")
+        return truncateMissionSuggestion(joined, maxLength: 360)
+    }
+
+    private func defaultFulfillmentAreasBody(categoryCountHint: String) -> String {
+        let desiredChange = personalizationSnapshot?
+            .desiredChange
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let stressSource = personalizationSnapshot?
+            .stressSource
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let purposeSignal = (drivingForces.first?.ultimatePurpose ?? drivingForces.first?.ultimateVision ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let contextClause: String
+        if !desiredChange.isEmpty && !purposeSignal.isEmpty {
+            contextClause = "Given your goal of \(desiredChange.lowercased()) and the direction in your Purpose,"
+        } else if !desiredChange.isEmpty {
+            contextClause = "Given your goal of \(desiredChange.lowercased()),"
+        } else if !stressSource.isEmpty {
+            contextClause = "Given the pressure you feel around \(stressSource.lowercased()),"
+        } else if !purposeSignal.isEmpty {
+            contextClause = "Given the direction in your Purpose,"
+        } else {
+            contextClause = "I don’t have full Purpose and diagnostic context yet, so this is a baseline:"
+        }
+
+        return [
+            "\(contextClause) a well-rounded setup keeps coverage broad enough to avoid blind spots without creating overload.",
+            "Loom will use fulfillment areas as a stable map so tasks, goals, and little wins stay connected to long-term direction.",
+            categoryCountHint
+        ]
+        .filter { !$0.isEmpty }
+        .joined(separator: " ")
+    }
+
+    private func defaultFulfillmentNextDirectionBody() -> String {
+        let planning = personalizationSnapshot?
+            .planningReality
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() ?? ""
+        let desiredChange = personalizationSnapshot?
+            .desiredChange
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() ?? ""
+
+        let firstSentence: String
+        if planning.contains("reactive") || planning.contains("behind") || planning.contains("drift") || planning.contains("overwhelm") {
+            firstSentence = "We’ll shorten the planning horizon and tighten priorities so execution stays predictable instead of reactive."
+        } else if !desiredChange.isEmpty {
+            firstSentence = "We’ll align weekly priorities to your desired shift toward \(desiredChange) so momentum stays clear and sustainable."
+        } else {
+            firstSentence = "We’ll keep priorities narrower and sequencing clearer so progress stays steady without constant re-planning."
+        }
+
+        return ensureNextDirectionEnding(
+            "\(firstSentence) Loom will help you maintain consistent follow-through with simpler decisions and less overwhelm."
+        )
+    }
+
+    private func persistedFulfillmentInsights(for cacheKey: String) -> (cards: [FulfillmentInsightCard], nudge: String?)? {
+        guard let data = fulfillmentInsightsCacheStorage.data(using: .utf8),
+              let map = try? JSONDecoder().decode([String: FulfillmentInsightsPersistedEntry].self, from: data),
+              let entry = map[cacheKey] else {
+            return nil
+        }
+
+        let cards = entry.cards.map { FulfillmentInsightCard(title: $0.title, body: $0.body) }
+        guard !cards.isEmpty else { return nil }
+        let nudge = entry.nudge?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (Array(cards.prefix(2)), nudge?.isEmpty == true ? nil : nudge)
+    }
+
+    private func persistFulfillmentInsights(
+        for cacheKey: String,
+        cards: [FulfillmentInsightCard],
+        nudge: String?
+    ) {
+        let normalizedCards = Array(cards.prefix(2))
+            .map { FulfillmentInsightsPersistedCard(title: $0.title, body: $0.body) }
+        guard !normalizedCards.isEmpty else { return }
+
+        var map: [String: FulfillmentInsightsPersistedEntry] = [:]
+        if let data = fulfillmentInsightsCacheStorage.data(using: .utf8),
+           let decoded = try? JSONDecoder().decode([String: FulfillmentInsightsPersistedEntry].self, from: data) {
+            map = decoded
+        }
+
+        map[cacheKey] = FulfillmentInsightsPersistedEntry(
+            cacheKey: cacheKey,
+            savedAt: .now,
+            cards: normalizedCards,
+            nudge: nudge?.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+
+        if map.count > 24 {
+            let sortedKeys = map
+                .sorted { lhs, rhs in lhs.value.savedAt > rhs.value.savedAt }
+                .map(\.key)
+            let keep = Set(sortedKeys.prefix(24))
+            map = map.filter { keep.contains($0.key) }
+        }
+
+        if let encoded = try? JSONEncoder().encode(map),
+           let jsonString = String(data: encoded, encoding: .utf8) {
+            fulfillmentInsightsCacheStorage = jsonString
+        }
     }
 
     private func littleWinSuggestionTopLine(

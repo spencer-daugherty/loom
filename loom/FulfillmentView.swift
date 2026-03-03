@@ -3134,6 +3134,7 @@ private struct RoleEditorSheetView: View {
     @State private var autoWriteOutlineAngle: Double = 0
     @State private var autoWriteIconAnimating = false
     @State private var autoWriteIconAnimationTask: Task<Void, Never>?
+    @State private var keyboardHeight: CGFloat = 0
     @FocusState private var isTextFocused: Bool
 
     private struct IdentityAutoWriteSuggestionDTO: Decodable {
@@ -3163,6 +3164,7 @@ private struct RoleEditorSheetView: View {
     private var isEditing: Bool { roleID != nil }
     private var doneDisabled: Bool { draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     private var showsAutoWrite: Bool { !isEditing && categoryRoles.count < 3 }
+    private let autoWriteFloatingGap: CGFloat = 12
 
     private var autoWriteGradient: AngularGradient {
         AngularGradient(
@@ -3192,6 +3194,54 @@ private struct RoleEditorSheetView: View {
         )
     }
 
+    private func autoWriteBottomPadding(in proxy: GeometryProxy) -> CGFloat {
+        guard keyboardHeight > 0 else { return 18 }
+        let keyboardTopGlobal = UIScreen.main.bounds.height - keyboardHeight
+        let viewBottomGlobal = proxy.frame(in: .global).maxY
+        let keyboardOverlapInView = max(0, viewBottomGlobal - keyboardTopGlobal)
+        return keyboardOverlapInView + autoWriteFloatingGap
+    }
+
+    private var floatingAutoWriteButton: some View {
+        Button {
+            guard !autoWriteIsLoading else { return }
+            Task { await requestAutoWriteSuggestions() }
+        } label: {
+            HStack(spacing: 6) {
+                Image("LoomAI")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 27, height: 27)
+                    .rotation3DEffect(
+                        .degrees(autoWriteIsLoading && autoWriteIconAnimating ? 180 : 0),
+                        axis: (x: 1, y: 0, z: 0)
+                    )
+                Text("AutoWrite")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(autoWriteGradient)
+            }
+            .padding(.horizontal, 15)
+            .padding(.vertical, 9)
+            .background(
+                Capsule()
+                    .fill(Color(.systemGroupedBackground))
+            )
+            .overlay(
+                Capsule()
+                    .stroke(autoWriteGradient, lineWidth: 2.25)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(autoWriteIsLoading)
+        .opacity(autoWriteIsLoading ? 0.7 : 1)
+        .onAppear {
+            guard autoWriteOutlineAngle == 0 else { return }
+            withAnimation(.linear(duration: 8).repeatForever(autoreverses: false)) {
+                autoWriteOutlineAngle = 360
+            }
+        }
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -3201,47 +3251,6 @@ private struct RoleEditorSheetView: View {
                         .textInputAutocapitalization(.sentences)
 
                     if showsAutoWrite {
-                        HStack {
-                            Spacer()
-                            Button {
-                                guard !autoWriteIsLoading else { return }
-                                Task { await requestAutoWriteSuggestions() }
-                            } label: {
-                                HStack(spacing: 6) {
-                                    Image("LoomAI")
-                                        .resizable()
-                                        .scaledToFit()
-                                        .frame(width: 27, height: 27)
-                                        .rotation3DEffect(
-                                            .degrees(autoWriteIsLoading && autoWriteIconAnimating ? 180 : 0),
-                                            axis: (x: 1, y: 0, z: 0)
-                                        )
-                                    Text("AutoWrite")
-                                        .font(.subheadline.weight(.semibold))
-                                        .foregroundStyle(autoWriteGradient)
-                                }
-                                .padding(.horizontal, 15)
-                                .padding(.vertical, 9)
-                                .background(
-                                    Capsule()
-                                        .fill(Color(.systemGroupedBackground))
-                                )
-                                .overlay(
-                                    Capsule()
-                                        .stroke(autoWriteGradient, lineWidth: 2.25)
-                                )
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(autoWriteIsLoading)
-                            .opacity(autoWriteIsLoading ? 0.7 : 1)
-                        }
-                        .onAppear {
-                            guard autoWriteOutlineAngle == 0 else { return }
-                            withAnimation(.linear(duration: 8).repeatForever(autoreverses: false)) {
-                                autoWriteOutlineAngle = 360
-                            }
-                        }
-
                         if !autoWriteSuggestions.isEmpty {
                             VStack(alignment: .leading, spacing: 8) {
                                 ForEach(autoWriteSuggestions, id: \.self) { suggestion in
@@ -3313,6 +3322,18 @@ private struct RoleEditorSheetView: View {
                 }
             }
         }
+        .overlay {
+            GeometryReader { proxy in
+                if showsAutoWrite {
+                    HStack(spacing: 8) {
+                        floatingAutoWriteButton
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                    .padding(.trailing, 16)
+                    .padding(.bottom, autoWriteBottomPadding(in: proxy))
+                }
+            }
+        }
         .presentationDetents([.height(220), .medium])
         .presentationDragIndicator(.visible)
         .onAppear {
@@ -3331,6 +3352,14 @@ private struct RoleEditorSheetView: View {
         }
         .onDisappear {
             setAutoWriteLoadingAnimation(false)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
+            guard let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
+            let screenHeight = UIScreen.main.bounds.height
+            keyboardHeight = max(0, screenHeight - frame.minY)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            keyboardHeight = 0
         }
     }
 
@@ -5570,7 +5599,7 @@ private struct FulfillmentTrendsView: View {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 12)
-                .fill(Color.orange.opacity(0.35))
+                .fill(Color(red: 0.98, green: 0.92, blue: 0.72))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12)

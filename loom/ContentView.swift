@@ -856,7 +856,9 @@ struct ContentView: View {
             .fullScreenCover(item: $playSheetDestination) { destination in
                 switch destination {
                 case .action:
-                    ActionView()
+                    NavigationStack {
+                        ActionView()
+                    }
                 }
             }
     }

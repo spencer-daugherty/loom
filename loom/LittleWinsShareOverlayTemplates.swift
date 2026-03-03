@@ -7,6 +7,8 @@ enum LittleWinsShareTemplate: String, CaseIterable, Identifiable {
     case streak
     case hotStreak
     case fullSnapshot
+    case fullHouse
+    case royalFlush
 
     var id: String { rawValue }
 
@@ -21,9 +23,13 @@ enum LittleWinsShareTemplate: String, CaseIterable, Identifiable {
         case .streak:
             return "Streak"
         case .hotStreak:
-            return "Hot Streak"
+            return "Building hot streak"
         case .fullSnapshot:
             return "Full Snapshot"
+        case .fullHouse:
+            return "Full House"
+        case .royalFlush:
+            return "Royal Flush"
         }
     }
 
@@ -32,32 +38,19 @@ enum LittleWinsShareTemplate: String, CaseIterable, Identifiable {
         case .todaysWins:
             return "Working cards"
         case .completedWins:
-            return "Recent check-ins"
+            return "Completed cards"
         case .weeklyCalendar:
             return "Mini card stacks"
         case .streak:
-            return "Consistency meter"
+            return "Consistency view"
         case .hotStreak:
             return "Momentum mode"
         case .fullSnapshot:
-            return "All signals"
-        }
-    }
-
-    var symbolName: String {
-        switch self {
-        case .todaysWins:
-            return "rectangle.stack.fill.badge.plus"
-        case .completedWins:
-            return "checkmark.seal.fill"
-        case .weeklyCalendar:
-            return "calendar"
-        case .streak:
-            return "bolt.fill"
-        case .hotStreak:
-            return "flame.fill"
-        case .fullSnapshot:
-            return "sparkles.rectangle.stack.fill"
+            return "Cards + calendar"
+        case .fullHouse:
+            return "Unlock with all cards completed"
+        case .royalFlush:
+            return "Unlock with 7 straight full-house days"
         }
     }
 }
@@ -83,27 +76,51 @@ enum LittleWinsShareImageFilter: String, CaseIterable, Identifiable {
     func next() -> LittleWinsShareImageFilter {
         let all = Self.allCases
         guard let index = all.firstIndex(of: self) else { return .vivid }
-        let nextIndex = (index + 1) % all.count
-        return all[nextIndex]
+        return all[(index + 1) % all.count]
     }
 }
 
-struct LittleWinsShareOverlayCard: Identifiable, Hashable {
-    let id = UUID()
+struct LittleWinsShareOverlayWin: Identifiable {
+    let id: UUID
     let title: String
-    let wins: [String]
+    let isCompleted: Bool
+}
+
+struct LittleWinsShareOverlayCard: Identifiable {
+    let id: UUID
+    let title: String
+    let cardColor: Color
+    let titleColor: Color
+    let wins: [LittleWinsShareOverlayWin]
+
+    var completedCount: Int {
+        wins.filter(\.isCompleted).count
+    }
+
+    var isCompleted: Bool {
+        !wins.isEmpty && completedCount == wins.count
+    }
+}
+
+struct LittleWinsShareOverlayMiniCardStyle {
+    let fillColor: Color
+    let strokeColor: Color
 }
 
 struct LittleWinsShareOverlayData {
-    let workingCards: [LittleWinsShareOverlayCard]
-    let completedWins: [String]
-    let last7DayCompletionCounts: [Int]
+    let activeCards: [LittleWinsShareOverlayCard]
+    let completedCardsToday: [LittleWinsShareOverlayCard]
+    let completedCardStylesLast7Days: [[LittleWinsShareOverlayMiniCardStyle]]
+    let radarSideCount: Int
     let streak: Int
     let hotStreak: Bool
     let totalWeekCompletions: Int
+    let fullHouseUnlocked: Bool
+    let royalFlushUnlocked: Bool
+    let royalFlushProgressDays: Int
 
     var hasAnyWins: Bool {
-        !workingCards.isEmpty || !completedWins.isEmpty || totalWeekCompletions > 0
+        !activeCards.isEmpty || totalWeekCompletions > 0
     }
 }
 
@@ -115,9 +132,9 @@ struct LittleWinsShareOverlayTemplateView: View {
         ZStack(alignment: .topLeading) {
             LinearGradient(
                 colors: [
-                    Color.black.opacity(0.32),
-                    Color.black.opacity(0.18),
-                    Color.black.opacity(0.28)
+                    Color.black.opacity(0.28),
+                    Color.black.opacity(0.14),
+                    Color.black.opacity(0.24)
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
@@ -137,30 +154,30 @@ struct LittleWinsShareOverlayTemplateView: View {
                 hotStreakLayout
             case .fullSnapshot:
                 fullSnapshotLayout
+            case .fullHouse:
+                fullHouseLayout
+            case .royalFlush:
+                royalFlushLayout
             }
         }
     }
 
     private var standardTemplatePadding: EdgeInsets {
-        EdgeInsets(top: 50, leading: 20, bottom: 20, trailing: 20)
+        EdgeInsets(top: 130, leading: 20, bottom: 20, trailing: 20)
+    }
+
+    private var dockedTemplatePadding: EdgeInsets {
+        EdgeInsets(top: 130, leading: 20, bottom: 150, trailing: 20)
     }
 
     private var todaysWinsLayout: some View {
         VStack(alignment: .leading, spacing: 10) {
-            titleBadge(text: "Working On")
+            templateTitle("Working On")
 
-            if data.workingCards.isEmpty {
-                emptyStateCard
+            if data.activeCards.isEmpty {
+                emptyStateCard(text: "Create Little Wins to start building cards.")
             } else {
-                ForEach(data.workingCards.prefix(3)) { card in
-                    overlayCard(title: card.title, icon: "bolt.badge.clock.fill") {
-                        VStack(alignment: .leading, spacing: 5) {
-                            ForEach(card.wins.prefix(3), id: \.self) { win in
-                                rowLabel(text: win, systemImage: "circle.fill")
-                            }
-                        }
-                    }
-                }
+                templateCardsGrid(cards: Array(data.activeCards.prefix(4)), cardOpacity: 0.5)
             }
 
             Spacer(minLength: 0)
@@ -170,20 +187,12 @@ struct LittleWinsShareOverlayTemplateView: View {
 
     private var completedWinsLayout: some View {
         VStack(alignment: .leading, spacing: 10) {
-            titleBadge(text: "Completed Wins")
+            templateTitle("Completed Today")
 
-            overlayCard(title: "Recent completions", icon: "checkmark.circle.fill") {
-                VStack(alignment: .leading, spacing: 6) {
-                    if data.completedWins.isEmpty {
-                        Text("No completions yet today.")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(.white.opacity(0.86))
-                    } else {
-                        ForEach(data.completedWins.prefix(6), id: \.self) { win in
-                            rowLabel(text: win, systemImage: "checkmark.circle.fill")
-                        }
-                    }
-                }
+            if data.completedCardsToday.isEmpty {
+                emptyStateCard(text: "Complete every row in a card to stack it in today\'s wins.")
+            } else {
+                templateCardsGrid(cards: Array(data.completedCardsToday.prefix(4)), cardOpacity: 0.5)
             }
 
             Spacer(minLength: 0)
@@ -193,116 +202,97 @@ struct LittleWinsShareOverlayTemplateView: View {
 
     private var weeklyCalendarLayout: some View {
         VStack(alignment: .leading, spacing: 10) {
-            titleBadge(text: "Weekly Calendar")
-
-            overlayCard(title: "Mini card stacks", icon: "calendar.badge.clock") {
-                LittleWinsWeekMiniStacksView(counts: data.last7DayCompletionCounts)
-            }
-
+            templateTitle("Weekly Calendar")
+            calendarMiniStackBoard
             Spacer(minLength: 0)
         }
         .padding(standardTemplatePadding)
     }
 
     private var streakLayout: some View {
-        VStack(spacing: 10) {
-            HStack {
-                titleBadge(text: "Streak")
-                Spacer()
-            }
-
+        VStack(alignment: .leading, spacing: 10) {
             Spacer(minLength: 0)
 
+            templateTitle("Streak")
             bigStreakCard(
                 title: "Current streak",
                 count: data.streak,
-                subtitle: data.streak > 0 ? "Keep the rhythm going." : "Start with one win today.",
+                subtitle: data.streak > 0
+                    ? "\(data.streak) day streak in motion."
+                    : "Start with one completed card today.",
                 symbol: "bolt.fill",
                 tint: .blue
             )
-
-            Spacer(minLength: 0)
         }
-        .padding(20)
+        .padding(dockedTemplatePadding)
     }
 
     private var hotStreakLayout: some View {
-        VStack(spacing: 10) {
-            HStack {
-                titleBadge(text: "Hot Streak")
-                Spacer()
-            }
-
+        VStack(alignment: .leading, spacing: 10) {
             Spacer(minLength: 0)
 
+            templateTitle("Building hot streak")
+
             bigStreakCard(
-                title: data.hotStreak ? "Hot streak active" : "Building hot streak",
+                title: "Hot streak",
                 count: data.streak,
-                subtitle: data.hotStreak ? "Momentum is locked in." : "Reach 5 days to ignite hot streak.",
+                subtitle: data.hotStreak
+                    ? "Keep cards complete each day to protect momentum."
+                    : "Reach 5 straight days to ignite hot streak mode.",
                 symbol: "flame.fill",
                 tint: .orange
             )
-
-            Spacer(minLength: 0)
         }
-        .padding(20)
+        .padding(dockedTemplatePadding)
+        .overlay {
+            if !data.hotStreak {
+                lockedTemplateOverlay(text: "Complete Little Wins 5 days straight to unlock")
+            }
+        }
     }
 
     private var fullSnapshotLayout: some View {
         VStack(alignment: .leading, spacing: 10) {
-            titleBadge(text: "Full Snapshot")
+            Spacer(minLength: 0)
 
-            HStack(spacing: 10) {
-                compactMetricCard(
-                    title: "Streak",
-                    value: "\(data.streak)",
-                    icon: data.hotStreak ? "flame.fill" : "bolt.fill",
-                    tint: data.hotStreak ? .orange : .blue
-                )
-                compactMetricCard(
-                    title: "This week",
-                    value: "\(data.totalWeekCompletions)",
-                    icon: "checkmark.seal.fill",
-                    tint: .green
-                )
+            templateTitle("Full Snapshot")
+
+            if data.activeCards.isEmpty {
+                emptyStateCard(text: "Set a few Little Wins to generate your snapshot.")
+            } else {
+                templateCardsGrid(cards: Array(data.activeCards.prefix(4)), cardOpacity: 0.5)
             }
 
-            overlayCard(title: "Working cards", icon: "rectangle.stack.fill.badge.plus") {
-                if data.workingCards.isEmpty {
-                    Text("No Little Wins yet.")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.86))
-                } else {
-                    VStack(alignment: .leading, spacing: 5) {
-                        ForEach(data.workingCards.prefix(2)) { card in
-                            Text("• \(card.title): \(card.wins.prefix(2).joined(separator: ", "))")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.white.opacity(0.92))
-                        }
-                    }
-                }
-            }
+            calendarMiniStackBoard
+        }
+        .padding(dockedTemplatePadding)
+    }
 
-            overlayCard(title: "Calendar", icon: "calendar") {
-                LittleWinsWeekMiniStacksView(counts: data.last7DayCompletionCounts)
-            }
-
+    private var fullHouseLayout: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            templateTitle("Full House")
             Spacer(minLength: 0)
         }
         .padding(standardTemplatePadding)
-    }
-
-    private var emptyStateCard: some View {
-        overlayCard(title: "No Little Wins yet", icon: "sparkles") {
-            Text("Create a few Little Wins to unlock share snapshots.")
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.white.opacity(0.86))
+        .overlay {
+            lockedTemplateOverlay(text: "Complete all Little Wins today to unlock")
         }
     }
 
-    private func titleBadge(text: String) -> some View {
+    private var royalFlushLayout: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            templateTitle("Royal Flush")
+            Spacer(minLength: 0)
+        }
+        .padding(standardTemplatePadding)
+        .overlay {
+            lockedTemplateOverlay(text: "Complete all Little Wins for 7 straight days to unlock")
+        }
+    }
+
+    private func templateTitle(_ text: String) -> some View {
         Text(text)
-            .font(.headline.weight(.bold))
+            .font(.headline.weight(.semibold))
             .foregroundStyle(.white)
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
@@ -312,69 +302,50 @@ struct LittleWinsShareOverlayTemplateView: View {
             )
             .overlay(
                 Capsule(style: .continuous)
-                    .stroke(
-                        LinearGradient(
-                            colors: [.white.opacity(0.45), .white.opacity(0.16)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 1
-                    )
+                    .stroke(Color.white.opacity(0.22), lineWidth: 1)
             )
     }
 
-    private func overlayCard<Content: View>(title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 7) {
-                Image(systemName: icon)
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.white.opacity(0.9))
-                Text(title)
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.white.opacity(0.88))
+    private func templateCardsGrid(cards: [LittleWinsShareOverlayCard], cardOpacity: Double) -> some View {
+        let visibleCards = Array(cards.prefix(4))
+        let columns = [
+            GridItem(.flexible(), spacing: 12, alignment: .top),
+            GridItem(.flexible(), spacing: 12, alignment: .top)
+        ]
+        let cardWidth = max(100, (UIScreen.main.bounds.width - 40 - 12) / 2)
+        let cardHeight = min(cardWidth * 1.42, 252)
+        let rowCount = max(1, Int(ceil(Double(max(visibleCards.count, 1)) / 2.0)))
+        let gridHeight = (CGFloat(rowCount) * cardHeight) + (CGFloat(max(0, rowCount - 1)) * 12)
+
+        return LazyVGrid(columns: columns, spacing: 12) {
+            ForEach(visibleCards) { card in
+                littleWinsCard(card)
+                    .frame(height: cardHeight)
+                    .opacity(cardOpacity)
             }
-            content()
         }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color.black.opacity(0.44),
-                            Color.black.opacity(0.24)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(0.42),
-                            Color.white.opacity(0.12)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 1
-                )
-        )
+        .frame(height: gridHeight, alignment: .top)
     }
 
-    private func rowLabel(text: String, systemImage: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Image(systemName: systemImage)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.92))
-            Text(text)
+    private func streakSummaryCard(title: String, subtitle: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.white.opacity(0.95))
-                .lineLimit(2)
+            Text(subtitle)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.white.opacity(0.85))
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.black.opacity(0.34))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.white.opacity(0.22), lineWidth: 1)
+        )
     }
 
     private func bigStreakCard(
@@ -432,79 +403,439 @@ struct LittleWinsShareOverlayTemplateView: View {
         )
     }
 
-    private func compactMetricCard(title: String, value: String, icon: String, tint: Color) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 5) {
-                Image(systemName: icon)
-                Text(title)
-            }
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.white.opacity(0.9))
+    private var calendarMiniStackBoard: some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 8) {
+                ForEach(Array(completedDays.enumerated()), id: \.offset) { _, day in
+                    VStack(spacing: 3) {
+                        miniCardStack(styles: day.styles)
+                            .frame(width: 28, height: 42, alignment: .top)
 
-            Text(value)
-                .font(.title2.weight(.bold))
-                .foregroundStyle(.white)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
+                        Text(day.weekday)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.82))
+
+                        Text(day.dayNumber)
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.74))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 2)
+                }
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 8)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(10)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(tint.opacity(0.30))
+                .fill(Color.black.opacity(0.34))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.white.opacity(0.32), lineWidth: 1)
+                .stroke(Color.white.opacity(0.22), lineWidth: 1)
         )
     }
-}
 
-private struct LittleWinsWeekMiniStacksView: View {
-    let counts: [Int]
-
-    private var dayLabels: [String] {
+    private var completedDays: [(weekday: String, dayNumber: String, styles: [LittleWinsShareOverlayMiniCardStyle])] {
         let calendar = Calendar.current
-        let symbols = calendar.veryShortWeekdaySymbols
-        let weekdayIndex = max(0, calendar.component(.weekday, from: .now) - 1)
-
-        let last7Indices = (0..<7).map { offset -> Int in
-            let idx = (weekdayIndex - (6 - offset) + 14) % 7
-            return idx
+        let today = calendar.startOfDay(for: .now)
+        let stylesByDay = normalizedCompletedCardStyles
+        return stylesByDay.enumerated().compactMap { index, styles in
+            guard let date = calendar.date(byAdding: .day, value: -(6 - index), to: today) else { return nil }
+            return (
+                weekday: date.formatted(.dateTime.weekday(.narrow)),
+                dayNumber: date.formatted(.dateTime.day()),
+                styles: styles
+            )
         }
-        return last7Indices.map { symbols[$0] }
     }
 
-    var body: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            ForEach(Array(counts.enumerated()), id: \.offset) { index, count in
-                VStack(spacing: 4) {
-                    ZStack(alignment: .bottom) {
-                        ForEach(0..<max(1, min(4, count)), id: \.self) { layer in
-                            RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                .fill(layer == 0 ? Color.white.opacity(0.92) : Color.white.opacity(0.42))
-                                .frame(width: 20, height: 10)
-                                .offset(y: -CGFloat(layer) * 4)
-                        }
-                    }
-                    .frame(width: 24, height: 28, alignment: .bottom)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            .stroke(Color.white.opacity(0.16), lineWidth: 0.8)
-                    )
+    private var normalizedCompletedCardStyles: [[LittleWinsShareOverlayMiniCardStyle]] {
+        let styles = data.completedCardStylesLast7Days
+        if styles.count == 7 { return styles }
+        if styles.count > 7 { return Array(styles.suffix(7)) }
+        return Array(repeating: [], count: max(0, 7 - styles.count)) + styles
+    }
 
-                    Text(dayLabels[safe: index] ?? "")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.78))
+    private func miniCardStack(styles: [LittleWinsShareOverlayMiniCardStyle]) -> some View {
+        let visibleStyles = Array(styles.suffix(7))
+        let stackLiftPerCard: CGFloat = 5
+
+        return ZStack {
+            if visibleStyles.isEmpty {
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(Color(.systemGray5))
+                    .frame(width: 28, height: 40)
+                    .overlay {
+                        Text("-")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Color(.systemGray2))
+                    }
+            } else {
+                ForEach(Array(visibleStyles.enumerated()), id: \.offset) { index, style in
+                    let depth = CGFloat(visibleStyles.count - 1 - index)
+                    miniCard(style: style)
+                        .offset(y: -(depth * stackLiftPerCard))
+                        .zIndex(Double(index))
                 }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private func miniCard(style: LittleWinsShareOverlayMiniCardStyle) -> some View {
+        return RoundedRectangle(cornerRadius: 4, style: .continuous)
+            .fill(style.fillColor)
+            .frame(width: 28, height: 40)
+            .overlay {
+                LittleWinsRadarPolygonOutline(sides: data.radarSideCount)
+                    .stroke(style.strokeColor.opacity(0.85), lineWidth: 1.6)
+                    .padding(4)
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .stroke(Color.white.opacity(0.25), lineWidth: 0.8)
+            }
+    }
+
+    private func littleWinsCard(_ card: LittleWinsShareOverlayCard) -> some View {
+        GeometryReader { proxy in
+            let width = max(proxy.size.width, 1)
+            let height = max(proxy.size.height, 1)
+            let baseWidth: CGFloat = 300
+            let baseHeight: CGFloat = baseWidth * 1.42
+            let scale = min(width / baseWidth, height / baseHeight)
+            let fixedPrimaryText = Color.black.opacity(0.82)
+            let fixedSecondaryText = Color.black.opacity(0.56)
+            let radarSideCount = data.radarSideCount
+            let titleFontSize = max(12, 17 * scale)
+            let rowFontSize = max(11, 36 * scale)
+            let rowIconSize = max(10, 26 * scale)
+            let rowIconFrameWidth = max(14, 30 * scale)
+            let titleHorizontalPadding = max(10, 18 * scale)
+            let titleTopPadding = max(6, 10 * scale)
+            let titleBottomPadding = max(8, 18 * scale)
+            let rowHorizontalPadding = max(14, 38 * scale)
+            let rowVerticalPadding = max(6, 14 * scale)
+            let footerTopPadding = max(6, 10 * scale)
+            let footerBottomPadding = max(8, 14 * scale)
+            let footerFontSize = max(11, 17 * scale)
+            let rowSpacing = max(4, 10 * scale)
+            let rowIconTopPadding = max(1, 6 * scale)
+
+            VStack(spacing: 0) {
+                Text(card.title)
+                    .font(.system(size: titleFontSize, weight: .semibold))
+                    .foregroundStyle(card.titleColor)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .padding(.horizontal, titleHorizontalPadding)
+                    .padding(.top, titleTopPadding)
+                    .padding(.bottom, titleBottomPadding)
+
+                GeometryReader { middleGeo in
+                    VStack {
+                        Spacer(minLength: 0)
+
+                        VStack(alignment: .leading, spacing: rowSpacing) {
+                            ForEach(card.wins.prefix(4)) { win in
+                                HStack(alignment: .top, spacing: 8) {
+                                    Image(systemName: win.isCompleted ? "checkmark.circle.fill" : "circle")
+                                        .font(.system(size: rowIconSize, weight: .regular))
+                                        .foregroundStyle(win.isCompleted ? card.titleColor : fixedSecondaryText)
+                                        .frame(width: rowIconFrameWidth, alignment: .center)
+                                        .padding(.top, rowIconTopPadding)
+
+                                    Text(win.title)
+                                        .font(.system(size: rowFontSize, weight: .semibold))
+                                        .foregroundStyle(fixedPrimaryText)
+                                        .multilineTextAlignment(.leading)
+                                        .lineLimit(2)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .strikethrough(win.isCompleted, color: fixedPrimaryText.opacity(0.7))
+                                        .opacity(win.isCompleted ? 0.72 : 1)
+                                }
+                            }
+                        }
+
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, rowHorizontalPadding)
+                    .padding(.vertical, rowVerticalPadding)
+                    .frame(maxWidth: .infinity, minHeight: middleGeo.size.height, alignment: .center)
+                    .clipped()
+                }
+
+                Spacer(minLength: 0)
+
+                HStack {
+                    Spacer()
+                    Text("Little Wins")
+                        .font(.system(size: footerFontSize, weight: .semibold))
+                        .foregroundStyle(fixedPrimaryText)
+                    Spacer()
+                }
+                .padding(.horizontal, titleHorizontalPadding)
+                .padding(.top, footerTopPadding)
+                .padding(.bottom, footerBottomPadding)
+            }
+            .frame(width: width, height: height, alignment: .top)
+            .background {
+                littleWinsCardBackground(
+                    cardColor: card.cardColor,
+                    titleColor: card.titleColor,
+                    patternText: card.title,
+                    width: width,
+                    height: height,
+                    radarSideCount: radarSideCount,
+                    scale: scale
+                )
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .shadow(color: Color.black.opacity(0.10), radius: 10, x: 0, y: 6)
+        }
+    }
+
+    private func emptyStateCard(text: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(text)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.white.opacity(0.92))
+                .multilineTextAlignment(.leading)
+        }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.black.opacity(0.34))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.white.opacity(0.22), lineWidth: 1)
+        )
+    }
+
+    private func lockedTemplateOverlay(text: String) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(Color.black.opacity(0.58))
+                .padding(.horizontal, 18)
+                .padding(.vertical, 120)
+
+            VStack(spacing: 10) {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(.white)
+                Text(text)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    private func littleWinsCardBackground(
+        cardColor: Color,
+        titleColor: Color,
+        patternText: String,
+        width: CGFloat,
+        height: CGFloat,
+        radarSideCount: Int,
+        scale: CGFloat
+    ) -> some View {
+        let cornerShapeSize: CGFloat = max(20, 52 * scale)
+        let cornerShapePadding: CGFloat = max(6, 14 * scale)
+        let topTitleCutoutWidth = min(max(width * 0.62, 200), width - 86)
+        let bottomTitleCutoutWidth = min(max(width * 0.32, 120), 180)
+        let largeInsetLineWidth = max(1.2, 4 * scale)
+        let shapeLineWidth = max(1.8, 6 * scale)
+
+        return RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .fill(cardColor)
+            .overlay {
+                littleWinsCardTextPatternBackground(
+                    categoryTitle: patternText,
+                    color: titleColor,
+                    width: width,
+                    height: height
+                )
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.12),
+                                Color.clear,
+                                Color.black.opacity(0.02)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.white.opacity(0.28), lineWidth: 1)
+            }
+            .overlay {
+                littleWinsInsetGuideLine(
+                    inset: 18,
+                    cornerRadius: 28,
+                    strokeColor: titleColor.opacity(0.22),
+                    lineWidth: largeInsetLineWidth,
+                    width: width,
+                    height: height,
+                    topLeadingShapeCutout: .init(width: 112, height: 112),
+                    bottomTrailingShapeCutout: .init(width: 112, height: 112),
+                    shapePadding: cornerShapePadding,
+                    shapeSize: cornerShapeSize,
+                    topCutoutWidth: topTitleCutoutWidth,
+                    bottomCutoutWidth: bottomTitleCutoutWidth
+                )
+            }
+            .overlay(alignment: .topLeading) {
+                LittleWinsRadarPolygonOutline(sides: radarSideCount)
+                    .stroke(titleColor, style: StrokeStyle(lineWidth: shapeLineWidth))
+                    .frame(width: cornerShapeSize, height: cornerShapeSize)
+                    .padding(.leading, cornerShapePadding)
+                    .padding(.top, cornerShapePadding)
+                    .opacity(0.9)
+            }
+            .overlay(alignment: .bottomTrailing) {
+                LittleWinsRadarPolygonOutline(sides: radarSideCount)
+                    .stroke(titleColor, style: StrokeStyle(lineWidth: shapeLineWidth))
+                    .frame(width: cornerShapeSize, height: cornerShapeSize)
+                    .padding(.trailing, cornerShapePadding)
+                    .padding(.bottom, cornerShapePadding)
+                    .opacity(0.9)
+            }
+    }
+
+    private func littleWinsInsetGuideLine(
+        inset: CGFloat,
+        cornerRadius: CGFloat,
+        strokeColor: Color,
+        lineWidth: CGFloat,
+        width: CGFloat,
+        height: CGFloat,
+        topLeadingShapeCutout: CGSize = .zero,
+        bottomTrailingShapeCutout: CGSize = .zero,
+        shapePadding: CGFloat = 14,
+        shapeSize: CGFloat = 52,
+        topCutoutWidth: CGFloat? = nil,
+        bottomCutoutWidth: CGFloat? = nil
+    ) -> some View {
+        let topCutoutWidth = topCutoutWidth ?? min(max(width * 0.34, 120), 190)
+        let bottomCutoutWidth = bottomCutoutWidth ?? min(max(width * 0.56, 180), width - (inset * 2) - 20)
+        let topY = inset
+        let bottomY = height - inset
+        let topLeadingCutoutCenter = CGPoint(
+            x: shapePadding + (shapeSize / 2),
+            y: shapePadding + (shapeSize / 2)
+        )
+        let bottomTrailingCutoutCenter = CGPoint(
+            x: width - shapePadding - (shapeSize / 2),
+            y: height - shapePadding - (shapeSize / 2)
+        )
+
+        return ZStack {
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .inset(by: inset)
+                .stroke(strokeColor, lineWidth: lineWidth)
+
+            Rectangle()
+                .fill(Color.black)
+                .frame(width: topCutoutWidth, height: lineWidth + 10)
+                .position(x: width / 2, y: topY)
+
+            Rectangle()
+                .fill(Color.black)
+                .frame(width: bottomCutoutWidth, height: lineWidth + 10)
+                .position(x: width / 2, y: bottomY)
+        }
+        .compositingGroup()
+        .blendMode(.normal)
+        .mask(
+            Rectangle()
+                .overlay {
+                    Rectangle().fill(Color.white)
+                    Rectangle()
+                        .frame(width: topCutoutWidth, height: lineWidth + 12)
+                        .position(x: width / 2, y: topY)
+                        .blendMode(.destinationOut)
+                    Rectangle()
+                        .frame(width: bottomCutoutWidth, height: lineWidth + 12)
+                        .position(x: width / 2, y: bottomY)
+                        .blendMode(.destinationOut)
+                    if topLeadingShapeCutout != .zero {
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .frame(width: topLeadingShapeCutout.width, height: topLeadingShapeCutout.height)
+                            .position(topLeadingCutoutCenter)
+                            .blendMode(.destinationOut)
+                    }
+                    if bottomTrailingShapeCutout != .zero {
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .frame(width: bottomTrailingShapeCutout.width, height: bottomTrailingShapeCutout.height)
+                            .position(bottomTrailingCutoutCenter)
+                            .blendMode(.destinationOut)
+                    }
+                }
+                .compositingGroup()
+        )
+    }
+
+    private func littleWinsCardTextPatternBackground(
+        categoryTitle: String,
+        color: Color,
+        width: CGFloat,
+        height: CGFloat
+    ) -> some View {
+        let textSize: CGFloat = 8.5
+        let rowHeight: CGFloat = 9
+        let rowCount = max(1, Int(ceil(height / rowHeight)) + 2)
+        let repeatedLine = String(repeating: categoryTitle + " ", count: max(8, Int(width / 28)))
+
+        return VStack(alignment: .leading, spacing: 0) {
+            ForEach(0..<rowCount, id: \.self) { row in
+                Text(repeatedLine)
+                    .font(.system(size: textSize, weight: .semibold, design: .rounded))
+                    .foregroundStyle(color.opacity(row.isMultiple(of: 2) ? 0.1 : 0.2))
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .frame(width: width, height: height, alignment: .topLeading)
+        .clipped()
+        .allowsHitTesting(false)
     }
 }
 
-private extension Collection {
-    subscript(safe index: Index) -> Element? {
-        indices.contains(index) ? self[index] : nil
+private struct LittleWinsRadarPolygonOutline: Shape {
+    let sides: Int
+
+    func path(in rect: CGRect) -> Path {
+        let sideCount = max(3, sides)
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let radius = min(rect.width, rect.height) / 2
+        var path = Path()
+
+        for index in 0..<sideCount {
+            let angle = (Double(index) / Double(sideCount)) * (Double.pi * 2) - (Double.pi / 2)
+            let point = CGPoint(
+                x: center.x + CGFloat(cos(angle)) * radius,
+                y: center.y + CGFloat(sin(angle)) * radius
+            )
+            if index == 0 {
+                path.move(to: point)
+            } else {
+                path.addLine(to: point)
+            }
+        }
+
+        path.closeSubpath()
+        return path
     }
 }

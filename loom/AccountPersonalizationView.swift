@@ -27,7 +27,7 @@ struct AccountPersonalizationView: View {
                         .foregroundStyle(.blue)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .listRowInsets(EdgeInsets(top: 10, leading: 0, bottom: 10, trailing: 0))
+                    .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
                 } else {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Finish your diagnostic")

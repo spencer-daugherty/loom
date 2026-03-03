@@ -306,7 +306,7 @@ struct PurposeStartView: View {
     }
 
     private func autoWriteBottomPadding(in proxy: GeometryProxy) -> CGFloat {
-        guard keyboardHeight > 0 else { return 58 }
+        guard keyboardHeight > 0 else { return footerPinnedHeight + 8 }
         let keyboardTopGlobal = UIScreen.main.bounds.height - keyboardHeight
         let viewBottomGlobal = proxy.frame(in: .global).maxY
         let keyboardOverlapInView = max(0, viewBottomGlobal - keyboardTopGlobal)
@@ -382,9 +382,20 @@ struct PurposeStartView: View {
         .onChange(of: isGeneratingPurposeInsights, initial: false) { _, newValue in
             setAutoWriteLoadingAnimation(newValue)
         }
-        .navigationTitle("")
+        .navigationTitle(stepTitle)
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(step != .intro)
+        .toolbar {
+            if step != .intro {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button {
+                        goBackFromCurrentStep()
+                    } label: {
+                        Label("Back", systemImage: "chevron.left")
+                    }
+                }
+            }
+        }
         .onAppear {
             loadFromPersistentData()
             handleAutoStartForStep(step)
@@ -427,17 +438,17 @@ struct PurposeStartView: View {
                 Group {
                     if step == .vision {
                         HStack(spacing: 8) {
+                            visionAutoWriteControls
                             if isVisionKeyboardVisible {
                                 keyboardDismissButton
                             }
-                            visionAutoWriteControls
                         }
                     } else if step == .passions || step == .purpose {
                         HStack(spacing: 8) {
+                            passionsAutoWriteControls
                             if isPassionsKeyboardVisible {
                                 keyboardDismissButton
                             }
-                            passionsAutoWriteControls
                         }
                     }
                 }
@@ -450,19 +461,67 @@ struct PurposeStartView: View {
 
     private var keyboardDismissButton: some View {
         Button {
-            focusedField = nil
+            if step == .vision && keyboardDismissShowsCheckmark {
+                if isNextDisabled {
+                    triggerStepValidationFeedback()
+                } else {
+                    shouldHighlightStepValidation = false
+                    invalidPassionKeys = []
+                    showValidationHint = false
+                    focusedField = nil
+                    advanceFromCurrentStep()
+                }
+            } else if (step == .passions || step == .purpose) && keyboardDismissShowsCheckmark {
+                if case .passion(let bucketKey) = focusedField {
+                    savePassionEntryFromKeyboard(bucketKey)
+                }
+            } else {
+                focusedField = nil
+            }
         } label: {
-            Image(systemName: "keyboard.chevron.compact.down")
+            Image(systemName: keyboardDismissShowsCheckmark ? "checkmark" : "keyboard.chevron.compact.down")
                 .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.primary.opacity(0.85))
+                .foregroundStyle(keyboardDismissShowsCheckmark ? .white : .primary.opacity(0.85))
                 .frame(width: autoWritePillHeight, height: autoWritePillHeight)
-                .background(.ultraThinMaterial, in: Circle())
+                .background(
+                    Group {
+                        if keyboardDismissShowsCheckmark {
+                            Circle().fill(Color.blue)
+                        } else {
+                            Circle().fill(.ultraThinMaterial)
+                        }
+                    }
+                )
                 .overlay(
                     Circle()
-                        .stroke(Color.white.opacity(0.28), lineWidth: 1)
+                        .stroke(
+                            keyboardDismissShowsCheckmark
+                            ? Color.blue.opacity(0.9)
+                            : Color.white.opacity(0.28),
+                            lineWidth: 1
+                        )
                 )
         }
         .buttonStyle(.plain)
+    }
+
+    private var keyboardDismissShowsCheckmark: Bool {
+        switch focusedField {
+        case .vision:
+            return !visionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .purpose:
+            return !purposeText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .passion(let key):
+            return !(entryText[key] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case nil:
+            if step == .vision {
+                return !visionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+            if step == .passions || step == .purpose {
+                return entryText.values.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            }
+            return false
+        }
     }
 
     @ViewBuilder
@@ -524,10 +583,6 @@ struct PurposeStartView: View {
                 .background(Color(.systemGray5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .frame(maxWidth: .infinity, alignment: .center)
             }
-            Text(stepTitle)
-                .font(.largeTitle)
-                .fontWeight(.bold)
-                .frame(maxWidth: .infinity, alignment: .center)
         }
     }
 
@@ -542,28 +597,9 @@ struct PurposeStartView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
                 .frame(maxWidth: .infinity)
             } else if step == .summary {
-                Button {
-                    step = .passions
-                } label: {
-                    Text("Back")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .contentShape(Rectangle())
-                }
-                .foregroundStyle(Color.primary)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color(.systemGray5))
-                )
-                .buttonStyle(.plain)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.black.opacity(0.12), lineWidth: 1)
-                }
-                .frame(maxWidth: .infinity)
-
                 Button {
                     guard summaryCanSave else {
                         triggerHint("Please complete all required items.")
@@ -577,71 +613,21 @@ struct PurposeStartView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
                 .frame(maxWidth: .infinity)
                 .disabled(!summaryCanSave)
             } else if step == .insights {
-                VStack(spacing: 10) {
-                    Button {
-                        step = .summary
-                    } label: {
-                        Text("Back")
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 8)
-                            .contentShape(Rectangle())
-                    }
-                    .foregroundStyle(Color.primary)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color(.systemGray5))
-                    )
-                    .buttonStyle(.plain)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.black.opacity(0.12), lineWidth: 1)
-                    }
-                    .frame(maxWidth: .infinity)
-
-                    Button {
-                        finalizeAndContinue()
-                    } label: {
-                        Text("Continue")
-                            .frame(maxWidth: .infinity)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .frame(maxWidth: .infinity)
-                }
-                .frame(maxWidth: .infinity)
-            } else {
                 Button {
-                    switch step {
-                    case .passions:
-                        step = .vision
-                    case .summary:
-                        step = .passions
-                    case .insights:
-                        step = .summary
-                    default:
-                        step = Step(rawValue: max(0, step.rawValue - 1)) ?? .intro
-                    }
+                    finalizeAndContinue()
                 } label: {
-                    Text("Back")
+                    Text("Continue")
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
                         .contentShape(Rectangle())
                 }
-                .foregroundStyle(Color.primary)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color(.systemGray5))
-                )
-                .buttonStyle(.plain)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.black.opacity(0.12), lineWidth: 1)
-                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
                 .frame(maxWidth: .infinity)
-
+            } else {
                 Button {
                     if isNextDisabled {
                         triggerStepValidationFeedback()
@@ -658,8 +644,24 @@ struct PurposeStartView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(isNextDisabled ? Color(.systemGray3) : .accentColor)
+                .controlSize(.large)
                 .frame(maxWidth: .infinity)
             }
+        }
+    }
+
+    private func goBackFromCurrentStep() {
+        switch step {
+        case .intro:
+            dismiss()
+        case .vision:
+            step = .intro
+        case .purpose, .passions:
+            step = .vision
+        case .summary:
+            step = .passions
+        case .insights:
+            step = .summary
         }
     }
 
@@ -911,10 +913,16 @@ struct PurposeStartView: View {
                             .padding(.vertical, 10)
                             .background(bucketValidationRowBackground(isInvalid: shouldOutlineBucket))
                     } else {
-                        Button("+ Add \(bucket.title)") {
+                        Button {
                             addingPassionBuckets = [bucket.key]
                             entryText[bucket.key] = ""
                             focusedField = .passion(bucket.key)
+                        } label: {
+                            HStack(spacing: 0) {
+                                Text("+ Add \(bucket.title)")
+                                Spacer(minLength: 0)
+                            }
+                            .contentShape(Rectangle())
                         }
                         .foregroundStyle(.blue)
                         .padding(.horizontal, 12)
@@ -1338,6 +1346,15 @@ struct PurposeStartView: View {
         addChip(from: bucketKey)
         addingPassionBuckets.remove(bucketKey)
         focusedField = nil
+    }
+
+    private func savePassionEntryFromKeyboard(_ bucketKey: String) {
+        let raw = entryText[bucketKey] ?? ""
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        addChip(from: bucketKey)
+        addingPassionBuckets = [bucketKey]
+        focusedField = .passion(bucketKey)
     }
 
     private func removeChip(_ value: String, from bucketKey: String) {

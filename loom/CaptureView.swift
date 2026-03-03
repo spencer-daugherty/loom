@@ -794,19 +794,36 @@ struct CaptureView: View {
         return keyboardOverlapInView + 15
     }
 
+    private var editActionKeyboardShowsCheckmark: Bool {
+        !editingItemText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     private var editActionKeyboardDismissButton: some View {
         Button {
             isFullTextEditorFocused = false
             focusedField = nil
         } label: {
-            Image(systemName: "keyboard.chevron.compact.down")
+            Image(systemName: editActionKeyboardShowsCheckmark ? "checkmark" : "keyboard.chevron.compact.down")
                 .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.primary.opacity(0.85))
+                .foregroundStyle(editActionKeyboardShowsCheckmark ? .white : .primary.opacity(0.85))
                 .frame(width: 45, height: 45)
-                .background(.ultraThinMaterial, in: Circle())
+                .background(
+                    Group {
+                        if editActionKeyboardShowsCheckmark {
+                            Circle().fill(Color.blue)
+                        } else {
+                            Circle().fill(.ultraThinMaterial)
+                        }
+                    }
+                )
                 .overlay(
                     Circle()
-                        .stroke(Color.white.opacity(0.28), lineWidth: 1)
+                        .stroke(
+                            editActionKeyboardShowsCheckmark
+                            ? Color.blue.opacity(0.9)
+                            : Color.white.opacity(0.28),
+                            lineWidth: 1
+                        )
                 )
         }
         .buttonStyle(.plain)
@@ -1085,6 +1102,7 @@ struct CaptureView: View {
                 || (editingItemHasDueDate && editingItemAttentionDays != editingItemOriginalAttentionDays)
                 || editingItemLeverageResourceID != editingItemOriginalLeverageResourceID
                 || (editingItemIsGhost && Calendar.current.startOfDay(for: editingItemHiddenUntil) != Calendar.current.startOfDay(for: editingItemOriginalHiddenUntil))
+            let hasNonBlankActionText = !editingItemText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             let dueDateSettingsChanged =
                 editingItemHasDueDate != editingItemOriginalHasDueDate
                 || (editingItemHasDueDate && Calendar.current.startOfDay(for: editingItemDueDate) != Calendar.current.startOfDay(for: editingItemOriginalDueDate))
@@ -1227,7 +1245,7 @@ struct CaptureView: View {
                         }
                         .foregroundColor(hasChanges ? .red : .primary)
                     }
-                    if hasChanges {
+                    if hasChanges && hasNonBlankActionText {
                         ToolbarItem(placement: .navigationBarTrailing) {
                             Button("Update") {
                                 guard let id = editingItemID,

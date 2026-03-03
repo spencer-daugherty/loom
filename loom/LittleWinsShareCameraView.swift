@@ -4,7 +4,9 @@ import AVFoundation
 import Photos
 import CoreImage
 import CoreImage.CIFilterBuiltins
+import LinkPresentation
 import UIKit
+import UniformTypeIdentifiers
 
 struct LittleWinsShareCameraView: View {
     @Environment(\.dismiss) private var dismiss
@@ -26,8 +28,6 @@ struct LittleWinsShareCameraView: View {
     @State private var showCaptureFailureAlert = false
 
     private let ciContext = CIContext()
-    private let templateSwipeThreshold: CGFloat = 40
-
     private var isCameraDenied: Bool {
         cameraSession.authorizationStatus == .denied || cameraSession.authorizationStatus == .restricted
     }
@@ -49,7 +49,7 @@ struct LittleWinsShareCameraView: View {
                         self.capturedImage = nil
                         cameraSession.startSession()
                     },
-                    onDone: { dismiss() }
+                    onClose: { dismiss() }
                 )
             } else if isCameraDenied {
                 LittleWinsCameraPermissionDeniedView(onClose: { dismiss() })
@@ -92,9 +92,8 @@ struct LittleWinsShareCameraView: View {
             }
             .ignoresSafeArea()
 
-            LittleWinsShareOverlayTemplateView(template: selectedTemplate, data: overlayData)
+            liveTemplatePager
                 .ignoresSafeArea()
-                .allowsHitTesting(false)
 
             LinearGradient(
                 colors: [
@@ -110,8 +109,8 @@ struct LittleWinsShareCameraView: View {
 
             VStack(spacing: 0) {
                 topControls
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
+                    .padding(.horizontal, 18)
+                    .padding(.top, 0)
 
                 Spacer()
 
@@ -142,15 +141,12 @@ struct LittleWinsShareCameraView: View {
                 }
             }
         }
-        .contentShape(Rectangle())
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 24)
-                .onEnded(handleTemplateSwipe)
-        )
     }
 
     private var topControls: some View {
         HStack {
+            Spacer()
+
             Button {
                 dismiss()
             } label: {
@@ -158,31 +154,38 @@ struct LittleWinsShareCameraView: View {
                     .font(.headline.weight(.semibold))
                     .foregroundStyle(.white)
                     .frame(width: 36, height: 36)
-                    .background(Color.black.opacity(0.42), in: Circle())
+                    .background(Color.white.opacity(0.14), in: Circle())
             }
             .buttonStyle(.plain)
-
-            Spacer()
-
-            Button {
-                Task { await cameraSession.toggleCamera() }
-            } label: {
-                Image(systemName: "camera.rotate")
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 36, height: 36)
-                    .background(Color.black.opacity(0.42), in: Circle())
-            }
-            .buttonStyle(.plain)
-            .disabled(!cameraSession.isConfigured || isRenderingCapture)
-            .opacity(cameraSession.isConfigured ? 1 : 0.6)
         }
     }
 
     private var bottomControls: some View {
-        captureControlsRow
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
+        VStack(spacing: 10) {
+            templateNavigationRow
+            captureControlsRow
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+    }
+
+    private var templateNavigationRow: some View {
+        HStack(spacing: 7) {
+            ForEach(Array(LittleWinsShareTemplate.allCases.enumerated()), id: \.element.id) { _, template in
+                Button {
+                    withAnimation(.interactiveSpring(response: 0.30, dampingFraction: 0.88)) {
+                        selectedTemplate = template
+                    }
+                } label: {
+                    Capsule(style: .continuous)
+                        .fill(template == selectedTemplate ? Color.white : Color.white.opacity(0.32))
+                        .frame(width: template == selectedTemplate ? 20 : 10, height: 4)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.vertical, 2)
+        .frame(maxWidth: .infinity)
     }
 
     private var captureControlsRow: some View {
@@ -223,8 +226,36 @@ struct LittleWinsShareCameraView: View {
 
             Spacer()
 
-            Color.clear.frame(width: 56, height: 56)
+            cameraSwitchButton
         }
+    }
+
+    private var cameraSwitchButton: some View {
+        Button {
+            Task { await cameraSession.toggleCamera() }
+        } label: {
+            Image(systemName: "camera.rotate")
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(.white)
+                .frame(width: 56, height: 56)
+                .background(Color.black.opacity(0.48), in: Circle())
+                .overlay(Circle().stroke(Color.white.opacity(0.22), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .disabled(!cameraSession.isConfigured || isRenderingCapture)
+        .opacity(cameraSession.isConfigured ? 1 : 0.6)
+    }
+
+    private var liveTemplatePager: some View {
+        TabView(selection: $selectedTemplate) {
+            ForEach(LittleWinsShareTemplate.allCases) { template in
+                LittleWinsShareOverlayTemplateView(template: template, data: overlayData)
+                    .tag(template)
+                    .ignoresSafeArea()
+            }
+        }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+        .indexViewStyle(.page(backgroundDisplayMode: .never))
     }
 
     private var livePreviewSaturation: Double {
@@ -320,51 +351,27 @@ struct LittleWinsShareCameraView: View {
     private func buildCompositedImage(from rawImage: UIImage) async -> UIImage? {
         let normalized = rawImage.loomNormalizedOrientation()
         guard let filtered = applyFilter(to: normalized, style: selectedFilter) else { return nil }
-        guard let overlay = renderOverlayImage(size: filtered.size) else { return filtered }
-        return composite(base: filtered, overlay: overlay)
+        let viewportCropped = cropToLiveViewportAspect(image: filtered)
+        let outputPixelSize = pixelSize(for: viewportCropped)
+        guard let overlay = renderOverlayImage(
+            referencePhotoSize: viewportCropped.size,
+            outputPixelSize: outputPixelSize
+        ) else { return viewportCropped }
+        return composite(base: viewportCropped, overlay: overlay)
     }
 
     @MainActor
-    private func renderOverlayImage(size: CGSize) -> UIImage? {
+    private func renderOverlayImage(referencePhotoSize: CGSize, outputPixelSize: CGSize) -> UIImage? {
         let referenceWidth = max(UIScreen.main.bounds.width, 1)
-        let referenceHeight = referenceWidth * (size.height / max(size.width, 1))
+        let referenceHeight = referenceWidth * (referencePhotoSize.height / max(referencePhotoSize.width, 1))
+        let overlayScale = max(outputPixelSize.width / referenceWidth, 1)
         let overlayView = LittleWinsShareOverlayTemplateView(template: selectedTemplate, data: overlayData)
             .frame(width: referenceWidth, height: referenceHeight)
             .ignoresSafeArea()
         let renderer = ImageRenderer(content: overlayView)
-        renderer.scale = 1
+        renderer.scale = overlayScale
         renderer.proposedSize = .init(width: referenceWidth, height: referenceHeight)
         return renderer.uiImage
-    }
-
-    private func handleTemplateSwipe(_ value: DragGesture.Value) {
-        guard abs(value.translation.width) > abs(value.translation.height) else { return }
-        guard abs(value.translation.width) >= templateSwipeThreshold else { return }
-        if value.translation.width < 0 {
-            selectNextTemplate()
-        } else {
-            selectPreviousTemplate()
-        }
-    }
-
-    private func selectNextTemplate() {
-        let all = LittleWinsShareTemplate.allCases
-        guard let index = all.firstIndex(of: selectedTemplate) else {
-            selectedTemplate = .todaysWins
-            return
-        }
-        let nextIndex = (index + 1) % all.count
-        selectedTemplate = all[nextIndex]
-    }
-
-    private func selectPreviousTemplate() {
-        let all = LittleWinsShareTemplate.allCases
-        guard let index = all.firstIndex(of: selectedTemplate) else {
-            selectedTemplate = .todaysWins
-            return
-        }
-        let previousIndex = (index - 1 + all.count) % all.count
-        selectedTemplate = all[previousIndex]
     }
 
     private func applyFilter(to image: UIImage, style: LittleWinsShareImageFilter) -> UIImage? {
@@ -405,21 +412,71 @@ struct LittleWinsShareCameraView: View {
     }
 
     private func composite(base: UIImage, overlay: UIImage) -> UIImage {
+        let canvasSize = pixelSize(for: base)
         let format = UIGraphicsImageRendererFormat.default()
         format.scale = 1
-        let renderer = UIGraphicsImageRenderer(size: base.size, format: format)
+        let renderer = UIGraphicsImageRenderer(size: canvasSize, format: format)
         return renderer.image { context in
-            base.draw(in: CGRect(origin: .zero, size: base.size))
-            overlay.draw(in: CGRect(origin: .zero, size: base.size))
+            let bounds = CGRect(origin: .zero, size: canvasSize)
+            base.draw(in: bounds)
+            overlay.draw(in: bounds)
             _ = context
         }
+    }
+
+    private func pixelSize(for image: UIImage) -> CGSize {
+        if let cgImage = image.cgImage {
+            return CGSize(width: CGFloat(cgImage.width), height: CGFloat(cgImage.height))
+        }
+        return CGSize(
+            width: image.size.width * image.scale,
+            height: image.size.height * image.scale
+        )
+    }
+
+    private func cropToLiveViewportAspect(image: UIImage) -> UIImage {
+        guard let cgImage = image.cgImage else { return image }
+
+        let sourceWidth = CGFloat(cgImage.width)
+        let sourceHeight = CGFloat(cgImage.height)
+        guard sourceWidth > 0, sourceHeight > 0 else { return image }
+
+        let viewportSize = UIScreen.main.bounds.size
+        let targetAspect = max(viewportSize.width, 1) / max(viewportSize.height, 1)
+        let sourceAspect = sourceWidth / sourceHeight
+
+        if abs(sourceAspect - targetAspect) < 0.001 {
+            return image
+        }
+
+        let cropRect: CGRect
+        if sourceAspect > targetAspect {
+            let cropWidth = sourceHeight * targetAspect
+            cropRect = CGRect(
+                x: (sourceWidth - cropWidth) / 2,
+                y: 0,
+                width: cropWidth,
+                height: sourceHeight
+            )
+        } else {
+            let cropHeight = sourceWidth / targetAspect
+            cropRect = CGRect(
+                x: 0,
+                y: (sourceHeight - cropHeight) / 2,
+                width: sourceWidth,
+                height: cropHeight
+            )
+        }
+
+        guard let croppedCGImage = cgImage.cropping(to: cropRect.integral) else { return image }
+        return UIImage(cgImage: croppedCGImage, scale: image.scale, orientation: .up)
     }
 }
 
 private struct LittleWinsSharePreviewView: View {
     let image: UIImage
     let onRetake: () -> Void
-    let onDone: () -> Void
+    let onClose: () -> Void
 
     @State private var isShowingShareSheet = false
     @State private var isSaving = false
@@ -432,29 +489,12 @@ private struct LittleWinsSharePreviewView: View {
             Color.black.ignoresSafeArea()
 
             VStack(spacing: 14) {
-                HStack {
-                    Button("Retake") {
-                        onRetake()
-                    }
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(.white)
-
-                    Spacer()
-
-                    Button("Done") {
-                        onDone()
-                    }
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(.white)
-                }
-                .padding(.horizontal, 18)
-                .padding(.top, 12)
-
                 GeometryReader { proxy in
                     Image(uiImage: image)
                         .resizable()
-                        .scaledToFit()
+                        .scaledToFill()
                         .frame(width: proxy.size.width, height: proxy.size.height)
+                        .clipped()
                         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                         .overlay(
                             RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -488,9 +528,48 @@ private struct LittleWinsSharePreviewView: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 16)
             }
+
+            VStack {
+                HStack {
+                    Button {
+                        onRetake()
+                    } label: {
+                        Text("Retake")
+                            .font(.headline.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 12)
+                            .frame(height: 36)
+                            .background(Color.white.opacity(0.14), in: Capsule(style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .contentShape(Rectangle())
+
+                    Spacer()
+
+                    Button {
+                        onClose()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.headline.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 36, height: 36)
+                            .background(Color.white.opacity(0.14), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .contentShape(Rectangle())
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 56)
+                .padding(.bottom, 10)
+                .background(Color.black.opacity(0.001))
+
+                Spacer()
+            }
+            .ignoresSafeArea(edges: .top)
+            .zIndex(5)
         }
         .sheet(isPresented: $isShowingShareSheet) {
-            LittleWinsShareActivityView(items: [image])
+            LittleWinsShareActivityView(image: image)
         }
         .alert(feedbackTitle, isPresented: $isShowingFeedback) {
             Button("OK", role: .cancel) { }
@@ -632,14 +711,50 @@ private struct LittleWinsCameraPermissionDeniedView: View {
 }
 
 private struct LittleWinsShareActivityView: UIViewControllerRepresentable {
-    let items: [Any]
+    let image: UIImage
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
-        let controller = UIActivityViewController(activityItems: items, applicationActivities: nil)
+        let source = LittleWinsShareActivityItemSource(image: image)
+        let controller = UIActivityViewController(activityItems: [source], applicationActivities: nil)
         return controller
     }
 
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) { }
+}
+
+private final class LittleWinsShareActivityItemSource: NSObject, UIActivityItemSource {
+    private let image: UIImage
+
+    init(image: UIImage) {
+        self.image = image
+        super.init()
+    }
+
+    func activityViewControllerPlaceholderItem(_ activityViewController: UIActivityViewController) -> Any {
+        image
+    }
+
+    func activityViewController(
+        _ activityViewController: UIActivityViewController,
+        itemForActivityType activityType: UIActivity.ActivityType?
+    ) -> Any? {
+        image
+    }
+
+    func activityViewController(
+        _ activityViewController: UIActivityViewController,
+        dataTypeIdentifierForActivityType activityType: UIActivity.ActivityType?
+    ) -> String {
+        UTType.image.identifier
+    }
+
+    func activityViewControllerLinkMetadata(_ activityViewController: UIActivityViewController) -> LPLinkMetadata? {
+        let metadata = LPLinkMetadata()
+        metadata.title = "Little Win"
+        metadata.imageProvider = NSItemProvider(object: image)
+        metadata.iconProvider = nil
+        return metadata
+    }
 }
 
 private enum LittleWinsShareOverlayDataFactory {
@@ -651,68 +766,74 @@ private enum LittleWinsShareOverlayDataFactory {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: .now)
 
-        let categoryTitleByID = Dictionary(uniqueKeysWithValues: fulfillments.map {
-            ($0.category_id, $0.category.trimmed)
-        })
-
-        let focusByID = Dictionary(uniqueKeysWithValues: foci.map { ($0.id, $0) })
-        let activeFoci = foci.filter { isFocusActive($0, on: today, calendar: calendar) }
-        let activeByCategory = Dictionary(grouping: activeFoci, by: \.category_id)
-
-        var workingCards: [LittleWinsShareOverlayCard] = activeByCategory.map { entry in
-            let categoryID = entry.key
-            let categoryFoci = entry.value
-            let cardTitle = (categoryTitleByID[categoryID] ?? "Little Wins").nonEmptyOr("Little Wins")
-            let wins = categoryFoci
-                .sorted { lhs, rhs in
-                    if lhs.rank == rhs.rank {
-                        return lhs.activity.localizedCaseInsensitiveCompare(rhs.activity) == .orderedAscending
-                    }
-                    return lhs.rank < rhs.rank
-                }
-                .map { $0.activity.trimmed }
-                .filter { !$0.isEmpty }
-            return LittleWinsShareOverlayCard(title: cardTitle, wins: wins)
-        }
-        workingCards = workingCards.filter { card in !card.wins.isEmpty }
-        workingCards.sort { lhs, rhs in
-            lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
-        }
-
         var completionFocusIDsByDay: [Date: Set<UUID>] = [:]
         completionFocusIDsByDay.reserveCapacity(16)
         for row in completions {
             let day = calendar.startOfDay(for: row.day)
             completionFocusIDsByDay[day, default: []].insert(row.focusId)
         }
+        let categoryTitleByID = Dictionary(uniqueKeysWithValues: fulfillments.map {
+            ($0.category_id, $0.category.trimmed)
+        })
+        let candidateFoci = foci.filter { !$0.activity.trimmed.isEmpty }
 
-        let completedTodayFocusIDs = completionFocusIDsByDay[today] ?? []
-        var completedWins: [String] = completedTodayFocusIDs.compactMap { focusID in
-            let local = focusByID[focusID]?.activity ?? ""
-            return local.trimmed.nonEmpty
-        }
-        .sorted { lhs, rhs in
-            lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
-        }
+        func cards(on day: Date) -> [LittleWinsShareOverlayCard] {
+            let dayStart = calendar.startOfDay(for: day)
+            let completedIDs = completionFocusIDsByDay[dayStart] ?? []
+            let activeByCategory = Dictionary(
+                grouping: candidateFoci.filter { isFocusActive($0, on: dayStart, calendar: calendar) },
+                by: \.category_id
+            )
 
-        if completedWins.isEmpty {
-            var seen = Set<UUID>()
-            var fallback: [String] = []
-            for row in completions {
-                guard seen.insert(row.focusId).inserted else { continue }
-                let local = (focusByID[row.focusId]?.activity ?? "").trimmed.nonEmpty
-                let snapshot = (row.focusTitleSnapshot ?? "").trimmed.nonEmpty
-                if let value = local ?? snapshot {
-                    fallback.append(value)
+            var cards: [LittleWinsShareOverlayCard] = activeByCategory.compactMap { entry in
+                let categoryID = entry.key
+                let categoryFoci = entry.value
+                    .sorted { lhs, rhs in
+                        if lhs.rank == rhs.rank {
+                            return lhs.activity.localizedCaseInsensitiveCompare(rhs.activity) == .orderedAscending
+                        }
+                        return lhs.rank < rhs.rank
+                    }
+                guard !categoryFoci.isEmpty else { return nil }
+
+                let cardTitle = (categoryTitleByID[categoryID] ?? "Little Wins").nonEmptyOr("Little Wins")
+                let rows = categoryFoci.map { focus in
+                    LittleWinsShareOverlayWin(
+                        id: focus.id,
+                        title: focus.activity.trimmed,
+                        isCompleted: completedIDs.contains(focus.id)
+                    )
                 }
-                if fallback.count >= 6 { break }
+
+                return LittleWinsShareOverlayCard(
+                    id: categoryID,
+                    title: cardTitle,
+                    cardColor: FulfillmentCategoryTheme.lightColor(for: cardTitle),
+                    titleColor: FulfillmentCategoryTheme.color(for: cardTitle),
+                    wins: rows
+                )
             }
-            completedWins = fallback
+            cards.sort { lhs, rhs in
+                lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+            }
+            return cards
         }
 
-        let last7DayCompletionCounts: [Int] = stride(from: 6, through: 0, by: -1).map { dayOffset in
-            guard let day = calendar.date(byAdding: .day, value: -dayOffset, to: today) else { return 0 }
-            return completionFocusIDsByDay[calendar.startOfDay(for: day)]?.count ?? 0
+        let todayCards = cards(on: today)
+        let completedCardsToday = todayCards.filter(\.isCompleted)
+        let fullHouseUnlocked = !todayCards.isEmpty && completedCardsToday.count == todayCards.count
+
+        let completedCardsByDayLast7: [[LittleWinsShareOverlayCard]] = stride(from: 6, through: 0, by: -1).map { dayOffset in
+            guard let day = calendar.date(byAdding: .day, value: -dayOffset, to: today) else { return [] }
+            return cards(on: day).filter(\.isCompleted)
+        }
+        let completedCardStylesLast7Days: [[LittleWinsShareOverlayMiniCardStyle]] = completedCardsByDayLast7.map { dayCards in
+            dayCards.map { card in
+                LittleWinsShareOverlayMiniCardStyle(
+                    fillColor: card.cardColor,
+                    strokeColor: card.titleColor
+                )
+            }
         }
 
         var streak = 0
@@ -726,16 +847,37 @@ private enum LittleWinsShareOverlayDataFactory {
             }
         }
 
-        let totalWeekCompletions = last7DayCompletionCounts.reduce(0, +)
+        var fullHouseStreak = 0
+        for dayOffset in 0..<30 {
+            guard let day = calendar.date(byAdding: .day, value: -dayOffset, to: today) else { break }
+            let dayCards = cards(on: day)
+            let isDayFullHouse = !dayCards.isEmpty && dayCards.allSatisfy(\.isCompleted)
+            if isDayFullHouse {
+                fullHouseStreak += 1
+            } else {
+                break
+            }
+        }
+
+        let totalWeekCompletions = stride(from: 6, through: 0, by: -1).reduce(0) { partial, dayOffset in
+            guard let day = calendar.date(byAdding: .day, value: -dayOffset, to: today) else { return partial }
+            return partial + (completionFocusIDsByDay[calendar.startOfDay(for: day)]?.count ?? 0)
+        }
         let hotStreak = streak >= 5
+        let royalFlushUnlocked = fullHouseStreak >= 7
+        let radarSideCount = max(3, min(7, max(fulfillments.count, 3)))
 
         return LittleWinsShareOverlayData(
-            workingCards: workingCards,
-            completedWins: completedWins,
-            last7DayCompletionCounts: last7DayCompletionCounts,
+            activeCards: todayCards,
+            completedCardsToday: completedCardsToday,
+            completedCardStylesLast7Days: completedCardStylesLast7Days,
+            radarSideCount: radarSideCount,
             streak: streak,
             hotStreak: hotStreak,
-            totalWeekCompletions: totalWeekCompletions
+            totalWeekCompletions: totalWeekCompletions,
+            fullHouseUnlocked: fullHouseUnlocked,
+            royalFlushUnlocked: royalFlushUnlocked,
+            royalFlushProgressDays: min(7, fullHouseStreak)
         )
     }
 

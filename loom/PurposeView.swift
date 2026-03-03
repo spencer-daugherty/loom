@@ -3215,23 +3215,25 @@ private struct DrivingForceTrendsView: View {
     }
 
     private var baselineMethodologyCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let cautionTextColor = Color.black.opacity(0.78)
+        return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Color.orange)
                 Text("Baseline Mode")
                     .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(cautionTextColor)
             }
 
             Text("Loom is establishing your first Purpose baseline from score foundations like Structure, Outcomes, Action Blocks, Little Wins, and Evidence.")
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(cautionTextColor)
                 .fixedSize(horizontal: false, vertical: true)
 
             Text("Purpose Insights update monthly, so long-term direction and momentum become clearer over time.")
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(cautionTextColor)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(12)
