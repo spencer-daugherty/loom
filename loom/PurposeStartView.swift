@@ -1,5 +1,8 @@
 import SwiftUI
 import SwiftData
+#if canImport(UIKit)
+import UIKit
+#endif
 
 struct PurposeStartView: View {
     @Environment(\.modelContext) private var context
@@ -9,6 +12,10 @@ struct PurposeStartView: View {
     @Query(sort: \DrivingForce.updatedAt, order: .reverse) private var drivingForces: [DrivingForce]
     @Query(sort: \Passion.date, order: .forward) private var passions: [Passion]
     @Query private var passionJoins: [PassionFulfillmentJoin]
+    @Query(sort: \DiagnosticsInsightsSnapshot.generatedAt, order: .reverse) private var diagnosticsInsightsSnapshots: [DiagnosticsInsightsSnapshot]
+    @Query(sort: \PurposeProfileInsightsSnapshot.generatedAt, order: .reverse) private var purposeProfileInsightsSnapshots: [PurposeProfileInsightsSnapshot]
+    @AppStorage(loomAITroubleshootingDefaultsKey) private var loomAITroubleshootingEnabled = true
+    private let startAtInsights: Bool
 
     @State private var step: Step = .intro
     @State private var visionText: String = ""
@@ -33,21 +40,19 @@ struct PurposeStartView: View {
     @State private var isAutoWritingPassions = false
     @State private var autoWriteVisionErrorMessage: String? = nil
     @State private var autoWritePassionsErrorMessage: String? = nil
+    @State private var autoWriteVisionTroubleshootingMessage: String? = nil
+    @State private var autoWritePassionsTroubleshootingMessage: String? = nil
     @State private var autoWriteVisionLoadedKeys = Set<String>()
     @State private var autoWritePassionsLoadedKeys = Set<String>()
-    @State private var autoWriteVisionSuggestionsCache: [String: [String]] = [:]
     @State private var autoWritePassionSuggestionsCache: [String: [AutoWritePassionSuggestion]] = [:]
     @State private var selectedPassionAutoWriteFilter: PassionAutoWriteFilter = .all
     @State private var autoWriteMemory: PurposeAutoWriteMemory = .load()
     @State private var lastAppliedVisionSuggestion: String? = nil
     @State private var trackedEditForLastAppliedVision = false
     @State private var purposeInsightCards: [PurposeInsightCard] = []
+    @State private var purposeInsightProfileName: String = ""
     @State private var isGeneratingPurposeInsights = false
-    @State private var purposeInsightsErrorMessage: String? = nil
-    @State private var purposeInsightsNudgeMessage: String? = nil
-    @State private var purposeInsightsLoadedKeys = Set<String>()
-    @State private var purposeInsightsCache: [String: [PurposeInsightCard]] = [:]
-    @State private var purposeInsightsNudgeCache: [String: String] = [:]
+    @State private var insightsOutlinePhase: CGFloat = 0
     @State private var autoWriteOutlineAngle: Double = 0
     @State private var autoWriteIconAnimating: Bool = false
     @State private var autoWriteIconAnimationTask: Task<Void, Never>? = nil
@@ -58,6 +63,11 @@ struct PurposeStartView: View {
     @State private var shouldHighlightStepValidation = false
     @State private var invalidPassionKeys = Set<String>()
     @State private var addingPassionBuckets: Set<String> = []
+    @State private var showPurposeInsightsTimeoutAlert = false
+    @State private var hasTimedOutPurposeInsights = false
+    @State private var purposeInsightsTimeoutTask: Task<Void, Never>?
+    @State private var purposeInsightsTroubleshootingMessage: String? = nil
+    @State private var loadedPurposeInsightsCycleKey: String?
 
     @FocusState private var focusedField: Field?
     private enum Field: Hashable {
@@ -73,9 +83,35 @@ struct PurposeStartView: View {
     }
 
     private struct PurposeInsightCard: Identifiable, Hashable {
+        struct Signals: Hashable {
+            let stressTrigger: String
+            let breakingPoint: String
+        }
+
         let title: String
-        let body: String
-        var id: String { "\(title.lowercased())|\(body.lowercased())" }
+        let body: String?
+        let signals: Signals?
+        var id: String {
+            if let body {
+                return "\(title.lowercased())|\(body.lowercased())"
+            }
+            if let signals {
+                return "\(title.lowercased())|\(signals.stressTrigger.lowercased())|\(signals.breakingPoint.lowercased())"
+            }
+            return title.lowercased()
+        }
+
+        init(title: String, body: String) {
+            self.title = title
+            self.body = body
+            self.signals = nil
+        }
+
+        init(title: String, signals: Signals) {
+            self.title = title
+            self.body = nil
+            self.signals = signals
+        }
     }
 
     private struct PurposeAutoWriteMemory: Codable {
@@ -215,9 +251,14 @@ struct PurposeStartView: View {
             case .purpose: return "Purpose"
             case .passions: return "Passions"
             case .summary: return "Summary"
-            case .insights: return "Loom sees…"
+            case .insights: return "How Loom sees you (so far)..."
             }
         }
+    }
+
+    init(startAtInsights: Bool = false) {
+        self.startAtInsights = startAtInsights
+        _step = State(initialValue: startAtInsights ? .insights : .intro)
     }
 
     private let bucketOrder: [(key: String, title: String)] = [
@@ -354,6 +395,13 @@ struct PurposeStartView: View {
                     focusedField = nil
                 }
             }
+            if newStep == .insights {
+                restartPurposeInsightsTimeoutWindow()
+            } else {
+                hasTimedOutPurposeInsights = false
+                purposeInsightsTimeoutTask?.cancel()
+                purposeInsightsTimeoutTask = nil
+            }
             handleAutoStartForStep(newStep)
         }
         .onChange(of: focusedField) { _, newValue in
@@ -369,15 +417,9 @@ struct PurposeStartView: View {
         .onChange(of: visionText) { _, newValue in
             clearStepValidationIfResolved()
             recordVisionEditIfNeeded(newValue: newValue)
-            if step == .insights {
-                purposeInsightsLoadedKeys.removeAll()
-            }
         }
         .onChange(of: draftPassions) { _, _ in
             clearStepValidationIfResolved()
-            if step == .insights {
-                purposeInsightsLoadedKeys.removeAll()
-            }
         }
         .onChange(of: isGeneratingPurposeInsights, initial: false) { _, newValue in
             setAutoWriteLoadingAnimation(newValue)
@@ -398,11 +440,25 @@ struct PurposeStartView: View {
         }
         .onAppear {
             loadFromPersistentData()
+            if step == .insights {
+                restartPurposeInsightsTimeoutWindow()
+            }
             handleAutoStartForStep(step)
         }
         .onDisappear {
             autoWriteIconAnimationTask?.cancel()
             autoWriteIconAnimationTask = nil
+            purposeInsightsTimeoutTask?.cancel()
+            purposeInsightsTimeoutTask = nil
+        }
+        .onChange(of: purposeInsightCards) { _, newValue in
+            if !newValue.isEmpty {
+                hasTimedOutPurposeInsights = false
+                purposeInsightsTimeoutTask?.cancel()
+                purposeInsightsTimeoutTask = nil
+            } else if step == .insights && !hasTimedOutPurposeInsights {
+                restartPurposeInsightsTimeoutWindow()
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
             guard
@@ -433,6 +489,29 @@ struct PurposeStartView: View {
                     .transition(.opacity)
             }
         }
+        .overlay(alignment: .bottom) {
+            if let troubleshooting = bottomCopyTroubleshootingDetails {
+                LoomAIBottomCopyTroubleshootingButton(details: troubleshooting)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, keyboardHeight > 0 ? (keyboardHeight + 12) : 84)
+                    .transition(.opacity)
+            } else if shouldShowBottomTroubleshootingPending {
+                Text("Preparing troubleshooting…")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, keyboardHeight > 0 ? (keyboardHeight + 12) : 84)
+                    .transition(.opacity)
+            }
+        }
         .overlay {
             GeometryReader { proxy in
                 Group {
@@ -456,6 +535,18 @@ struct PurposeStartView: View {
                 .padding(.trailing, 16)
                 .padding(.bottom, autoWriteBottomPadding(in: proxy))
             }
+        }
+        .alert("Check your connection", isPresented: $showPurposeInsightsTimeoutAlert) {
+            if loomAITroubleshootingEnabled,
+               let details = purposeInsightsTroubleshootingMessage,
+               !details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Button("Copy troubleshooting") {
+                    UIPasteboard.general.string = details
+                }
+            }
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("Generate insights later in Account > Personalization.")
         }
     }
 
@@ -566,7 +657,7 @@ struct PurposeStartView: View {
                 .frame(height: 420)
                 .padding(.bottom, 2)
             }
-            if step != .intro {
+            if step != .intro && !(startAtInsights && step == .insights) {
                 progressStrip
                     .frame(maxWidth: .infinity, alignment: .center)
             }
@@ -605,7 +696,6 @@ struct PurposeStartView: View {
                         triggerHint("Please complete all required items.")
                         return
                     }
-                    saveVisionIfChanged()
                     step = .insights
                 } label: {
                     Text("Continue")
@@ -617,16 +707,38 @@ struct PurposeStartView: View {
                 .frame(maxWidth: .infinity)
                 .disabled(!summaryCanSave)
             } else if step == .insights {
-                Button {
-                    finalizeAndContinue()
-                } label: {
-                    Text("Continue")
-                        .frame(maxWidth: .infinity)
+                if startAtInsights {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Text("Back")
+                            .frame(maxWidth: .infinity)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .frame(maxWidth: .infinity)
+                } else {
+                    Button {
+                        finalizeAndContinue()
+                    } label: {
+                        ZStack {
+                            Text("Continue")
+                                .opacity(isWaitingForPurposeInsights ? 0.0 : 1.0)
+                                .frame(maxWidth: .infinity)
+                            if isWaitingForPurposeInsights {
+                                ProgressView()
+                                    .progressViewStyle(.circular)
+                            }
+                        }
                         .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .frame(maxWidth: .infinity)
+                    .disabled(isWaitingForPurposeInsights)
+                    .opacity(isWaitingForPurposeInsights ? 0.55 : 1.0)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .frame(maxWidth: .infinity)
             } else {
                 Button {
                     if isNextDisabled {
@@ -651,6 +763,10 @@ struct PurposeStartView: View {
     }
 
     private func goBackFromCurrentStep() {
+        if startAtInsights, step == .insights {
+            dismiss()
+            return
+        }
         switch step {
         case .intro:
             dismiss()
@@ -678,8 +794,12 @@ struct PurposeStartView: View {
         case .summary:
             return "Summary"
         case .insights:
-            return "Loom sees…"
+            return "How Loom sees you (so far)..."
         }
+    }
+
+    private var isWaitingForPurposeInsights: Bool {
+        step == .insights && purposeInsightCards.isEmpty && !hasTimedOutPurposeInsights
     }
 
     private var progressCurrentStep: Int {
@@ -813,6 +933,7 @@ struct PurposeStartView: View {
                 if let error = autoWriteVisionErrorMessage {
                     purposeRetryRow(
                         message: error,
+                        troubleshooting: autoWriteVisionTroubleshootingMessage,
                         buttonTitle: "Try again"
                     ) {
                         Task { await requestAutoWriteVisionSuggestions(forceRefresh: true) }
@@ -1006,6 +1127,7 @@ struct PurposeStartView: View {
                 if let error = autoWritePassionsErrorMessage {
                     purposeRetryRow(
                         message: error,
+                        troubleshooting: autoWritePassionsTroubleshootingMessage,
                         buttonTitle: "Try again"
                     ) {
                         Task { await requestAutoWritePassionSuggestions(forceRefresh: true) }
@@ -1145,48 +1267,108 @@ struct PurposeStartView: View {
 
     private var insightsStep: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if let error = purposeInsightsErrorMessage {
-                purposeRetryRow(
-                    message: error,
-                    buttonTitle: "Try again"
-                ) {
-                    Task { await generatePurposeInsights(forceRefresh: true) }
-                }
-            }
+            PurposeInsightsThinkingHeader(
+                title: "LoomAI",
+                progress: 1.0
+            )
 
-            if let nudge = purposeInsightsNudgeMessage, !nudge.isEmpty {
-                Text(nudge)
-                    .font(.caption)
+            if !(isGeneratingPurposeInsights && purposeInsightCards.isEmpty) {
+                Text("This will personalize your Loom experience.")
+                    .font(.title3.weight(.medium))
                     .foregroundStyle(.secondary)
             }
 
-            ForEach(purposeInsightCards) { card in
-                purposeInsightsCard(card)
+            Text(purposeInsightHeadingText)
+                .font(.system(size: 38, weight: .bold))
+                .fixedSize(horizontal: false, vertical: true)
+
+            if isGeneratingPurposeInsights && purposeInsightCards.isEmpty {
+                ForEach(0..<1, id: \.self) { _ in
+                    purposeInsightsLoadingCard
+                }
+            } else {
+                ForEach(purposeInsightCards) { card in
+                    purposeInsightsCard(card)
+                }
             }
+
+            Text("This may change overtime and with different data. View anytime in Account > Personalization")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(14)
         .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+        .onAppear {
+            if autoWriteOutlineAngle == 0 {
+                withAnimation(.linear(duration: 8).repeatForever(autoreverses: false)) {
+                    autoWriteOutlineAngle = 360
+                }
+            }
+            if insightsOutlinePhase == 0 {
+                withAnimation(.linear(duration: 2.1).repeatForever(autoreverses: false)) {
+                    insightsOutlinePhase = 1
+                }
+            }
+        }
     }
 
     private func purposeRetryRow(
         message: String,
+        troubleshooting: String? = nil,
         buttonTitle: String,
         action: @escaping () -> Void
     ) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Text(message)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 6)
-            Button(buttonTitle, action: action)
-                .font(.caption.weight(.semibold))
-                .buttonStyle(.plain)
-                .foregroundStyle(.blue)
+        let hasTroubleshooting = loomAITroubleshootingEnabled && !(troubleshooting ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 6)
+                HStack(spacing: 10) {
+                    Button(buttonTitle, action: action)
+                        .font(.caption.weight(.semibold))
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.blue)
+                }
+            }
+
+            if hasTroubleshooting, let troubleshooting {
+                LoomAITroubleshootingSection(details: troubleshooting)
+            }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private var bottomCopyTroubleshootingDetails: String? {
+        guard loomAITroubleshootingEnabled else { return nil }
+        return [
+            autoWriteVisionTroubleshootingMessage,
+            autoWritePassionsTroubleshootingMessage
+        ]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first(where: { !$0.isEmpty })
+    }
+
+    private var shouldShowBottomTroubleshootingPending: Bool {
+        guard loomAITroubleshootingEnabled else { return false }
+        guard bottomCopyTroubleshootingDetails == nil else { return false }
+        let hasError = [
+            autoWriteVisionErrorMessage,
+            autoWritePassionsErrorMessage
+        ]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .contains { !$0.isEmpty }
+        return hasError
+    }
+
+    private var purposeInsightHeadingText: String {
+        let profile = purposeInsightProfileName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return profile.isEmpty ? "How Loom sees you (so far)..." : profile
     }
 
     private func purposeInsightsCard(_ card: PurposeInsightCard) -> some View {
@@ -1196,22 +1378,148 @@ struct PurposeStartView: View {
                 .textCase(.uppercase)
                 .foregroundStyle(.secondary)
                 .tracking(0.45)
-            Text(card.body)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.primary)
-                .fixedSize(horizontal: false, vertical: true)
+            if let body = card.body {
+                Text(body)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if let signals = card.signals {
+                VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Stress trigger")
+                            .italic()
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Text(signals.stressTrigger)
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Breaking point")
+                            .italic()
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Text(signals.breakingPoint)
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(autoWriteSuggestionCardFill.opacity(colorScheme == .dark ? 0.34 : 0.28))
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            ZStack {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(autoWriteGradient.opacity(0.68), lineWidth: 1.2)
+
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .trim(from: insightsOutlinePhase, to: min(insightsOutlinePhase + 0.22, 1))
+                    .stroke(autoWriteGradient, style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
+            }
+        )
+    }
+
+    private var purposeInsightsLoadingCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .fill(Color.secondary.opacity(0.22))
+                .frame(width: 140, height: 11)
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .fill(Color.secondary.opacity(0.16))
+                .frame(height: 12)
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .fill(Color.secondary.opacity(0.14))
+                .frame(height: 12)
+        }
+        .redacted(reason: .placeholder)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(autoWriteGradient.opacity(0.72), lineWidth: 1.2)
+                .stroke(autoWriteGradient.opacity(0.35), lineWidth: 1)
         )
+    }
+
+    private struct PurposeInsightsThinkingHeader: View {
+        let title: String
+        let progress: Double
+
+        @State private var shineOffset: CGFloat = -0.7
+
+        private static let gradientTokens: [Color] = [
+            Color(red: 0.22, green: 0.47, blue: 1.0),
+            Color(red: 0.15, green: 0.83, blue: 0.95),
+            Color(red: 0.62, green: 0.40, blue: 0.95),
+            Color(red: 0.80, green: 0.38, blue: 0.78),
+            Color(red: 0.98, green: 0.36, blue: 0.58),
+            Color(red: 0.22, green: 0.47, blue: 1.0)
+        ]
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Image("LoomAI")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 18, height: 18)
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+
+                GeometryReader { proxy in
+                    let fullWidth = max(1, proxy.size.width)
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color.secondary.opacity(0.16))
+
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: Self.gradientTokens,
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .frame(width: fullWidth * max(0, min(1, progress)))
+
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(0.0),
+                                        Color.white.opacity(0.45),
+                                        Color.white.opacity(0.0)
+                                    ],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .frame(width: fullWidth * 0.35)
+                            .offset(x: fullWidth * shineOffset)
+                    }
+                }
+                .frame(height: 12)
+            }
+            .onAppear {
+                withAnimation(.linear(duration: 1.8).repeatForever(autoreverses: false)) {
+                    shineOffset = 1.2
+                }
+            }
+        }
     }
 
     private func summaryCard(title: String, body: String, onEdit: @escaping () -> Void) -> some View {
@@ -1493,7 +1801,7 @@ struct PurposeStartView: View {
         case "love": return "What do I love?"
         case "vows": return "What am I committed to?"
         case "thrill": return "What excites me?"
-        case "just": return "What do I hate?"
+        case "just": return "What do I refuse to tolerate (hate)?"
         default: return ""
         }
     }
@@ -1749,91 +2057,70 @@ struct PurposeStartView: View {
         let confidence: String?
     }
 
-    private struct PurposeInsightsResponse: Decodable {
-        struct Card: Decodable {
-            let title: String?
-            let body: String?
-            let text: String?
-            let message: String?
-        }
-        let cards: [Card]?
-        let confidence: String?
-        let nudge: String?
-    }
-
     private func requestAutoWriteVisionSuggestions(forceRefresh: Bool = false) async {
         let requestKey = visionAutoWriteCacheKey
-        if !forceRefresh, let cached = autoWriteVisionSuggestionsCache[requestKey], !cached.isEmpty {
-            autoWriteVisionSuggestions = cached
-            autoWriteVisionErrorMessage = nil
-            return
-        }
         if !forceRefresh, autoWriteVisionLoadedKeys.contains(requestKey) {
             return
         }
         autoWriteVisionLoadedKeys.insert(requestKey)
+        let markFailed = { _ = autoWriteVisionLoadedKeys.remove(requestKey) }
 
         let previousSuggestions = autoWriteVisionSuggestions
         autoWriteVisionErrorMessage = nil
+        autoWriteVisionTroubleshootingMessage = nil
         isAutoWritingVision = true
         defer { isAutoWritingVision = false }
-        if forceRefresh || autoWriteVisionSuggestionsCache[requestKey] == nil {
+        if forceRefresh {
             autoWriteVisionSuggestions = []
         }
 
         do {
             let contextSnapshot = try LoomAIViewModel().buildContextSnapshot(in: context)
-            let previousSuggestionsContext = previousSuggestions.isEmpty
-                ? "No prior suggestions."
-                : "Prior suggestions to avoid repeating: \(previousSuggestions.joined(separator: " | "))"
-            let preferenceMemory = autoWriteMemory.visionSummary()
-            let instruction = """
-            You are helping with Loom Purpose Vision (AutoWrite).
-            Current Vision: \(visionTrimmed.isEmpty ? "<empty>" : visionTrimmed)
-            \(previousSuggestionsContext)
-            Compressed preference memory: \(preferenceMemory)
-
-            Need ideas guidance to follow:
-            - If there were no limits, what life would you create?
-            - This is not a goal. It's long-term direction.
-            - Keep wording clear, practical, and specific.
-            - Example of a strong vision:
-            "I live a life of purpose, growth, and freedom. I build meaningful work that creates value for others while giving me time, financial independence, and the ability to choose how I live. I am healthy, energized, and surrounded by strong relationships, and I continue to learn, lead, and make a positive impact."
-
-            Return JSON only:
-            {"suggestions":["string"],"confidence":"high|medium|low","nudge":"optional string"}
-
-            Rules:
-            - Return 1-2 suggestions.
-            - each suggestion must be <=150 characters
-            - no numbering, no bullets
-            """
-
-            let response = try await LoomAIService().sendChat(
-                messages: [.init(role: "user", content: instruction)],
+            let effectivePreviousSuggestions = visionTrimmed.isEmpty ? [] : previousSuggestions
+            let response = try await LoomAIService().sendPurposeVisionAutoWrite(
+                currentVision: visionTrimmed,
+                previousSuggestions: effectivePreviousSuggestions,
+                mode: "newVision",
                 context: contextSnapshot,
-                intent: "autowrite_purpose",
-                screen: "purpose_vision"
+                requestHash: requestKey
             )
             let suggestions = decodeAutoWriteVisionSuggestions(from: response.message)
             guard !suggestions.isEmpty else {
                 autoWriteVisionErrorMessage = "No suggestions yet."
+                autoWriteVisionTroubleshootingMessage = loomAITroubleshootingLocalDetails(
+                    feature: "purpose_start_autowrite_vision",
+                    reason: "No suggestions were returned in the response.",
+                    responsePreview: response.message,
+                    requestHash: requestKey
+                )
+                markFailed()
                 return
             }
-            let filtered = suggestions.filter { suggestion in
-                let normalized = normalizedVisionSuggestion(suggestion)
-                return !previousSuggestions.contains { normalizedVisionSuggestion($0) == normalized }
-            }
-            let nextSuggestions = Array((filtered.isEmpty ? suggestions : filtered).prefix(2))
+            let nextSuggestions = Array(suggestions.prefix(2))
             guard !nextSuggestions.isEmpty else {
-                autoWriteVisionErrorMessage = "No suggestions yet."
+                autoWriteVisionErrorMessage = "No new suggestions yet."
+                let duplicateDetails = loomAIDuplicateSuggestionTroubleshootingDetails(
+                    feature: "purpose_start_autowrite_vision",
+                    reason: "No usable suggestions were returned after parsing.",
+                    responsePreview: response.message,
+                    requestHash: requestKey
+                )
+                autoWriteVisionTroubleshootingMessage = duplicateDetails
+                loomAIReportTroubleshootingIfEnabled(details: duplicateDetails)
+                markFailed()
                 return
             }
             autoWriteVisionSuggestions = nextSuggestions
-            autoWriteVisionSuggestionsCache[requestKey] = nextSuggestions
             autoWriteVisionErrorMessage = nil
+            autoWriteVisionTroubleshootingMessage = nil
         } catch {
-            autoWriteVisionErrorMessage = "Couldn’t generate Vision suggestions."
+            autoWriteVisionErrorMessage = "Couldn’t generate Vision suggestions. Check your connection."
+            autoWriteVisionTroubleshootingMessage = loomAITroubleshootingDetails(
+                feature: "purpose_start_autowrite_vision",
+                error: error,
+                requestHash: requestKey
+            )
+            markFailed()
         }
     }
 
@@ -1842,174 +2129,170 @@ struct PurposeStartView: View {
         if !forceRefresh, let cached = autoWritePassionSuggestionsCache[requestKey], !cached.isEmpty {
             autoWritePassionSuggestions = cached
             autoWritePassionsErrorMessage = nil
+            autoWritePassionsTroubleshootingMessage = nil
             return
         }
         if !forceRefresh, autoWritePassionsLoadedKeys.contains(requestKey) {
             return
         }
         autoWritePassionsLoadedKeys.insert(requestKey)
+        let markFailed = { _ = autoWritePassionsLoadedKeys.remove(requestKey) }
 
-        let previousSuggestions = autoWritePassionSuggestions
         autoWritePassionsErrorMessage = nil
+        autoWritePassionsTroubleshootingMessage = nil
         isAutoWritingPassions = true
         defer { isAutoWritingPassions = false }
         if forceRefresh || autoWritePassionSuggestionsCache[requestKey] == nil {
             autoWritePassionSuggestions = []
         }
-
-        do {
-            let contextSnapshot = try LoomAIViewModel().buildContextSnapshot(in: context)
-            let selectedFilterInstruction: String = {
-                if selectedPassionAutoWriteFilter == .all {
-                    return "Selected filter: All (suggest across buckets)."
-                }
-                return "Selected filter: \(selectedPassionAutoWriteFilter.label) only. Return only that bucket."
-            }()
-            let passionPreferenceMemory = autoWriteMemory.passionsSummary(filter: selectedPassionAutoWriteFilter)
-            let currentPassions = bucketOrder
-                .map { bucket in
-                    let draftItems = draftPassions[bucket.key] ?? []
-                    let pendingInput = (entryText[bucket.key] ?? "")
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                    let items = (pendingInput.isEmpty ? draftItems : (draftItems + [pendingInput]))
-                        .joined(separator: " | ")
-                    return "- \(bucket.title): \(items.isEmpty ? "<empty>" : items)"
-                }
-                .joined(separator: "\n")
-            let previousContext = previousSuggestions.isEmpty
-                ? "No prior suggestions."
-                : "Prior suggestions to avoid repeating: \(previousSuggestions.map { "\(bucketTitle(for: $0.emotion)): \($0.passion)" }.joined(separator: " | "))"
-
-            let instruction = """
-            You are helping with Loom Purpose Passions (AutoWrite).
-            \(selectedFilterInstruction)
-            Compressed preference memory: \(passionPreferenceMemory)
-            Current passions by bucket:
-            \(currentPassions)
-            \(previousContext)
-
-            Use this Loom guidance from the PurposeView graduation-cap instructions sheet and Need ideas section:
-            - Love examples: Time with family and close relationships; Learning, growth, and self-improvement; Building and creating something meaningful.
-            - Vows (commitments) examples: Always act with integrity; Take full responsibility for my life; Keep growing and becoming better.
-            - Thrill examples: Achieving difficult goals; Solving hard problems; Taking risks and pursuing new opportunities.
-            - Hate examples: Wasted potential; Dishonesty and manipulation; Laziness and excuses.
-            - Passions should reflect stable values, commitments, and direction.
-
-            Return JSON only:
-            {"suggestions":[{"emotion":"love|vows|thrill|just","passion":"string"}],"confidence":"high|medium|low","nudge":"optional string"}
-
-            Rules:
-            - Return 2-4 suggestions.
-            - Keep each passion to 1-5 words. Fewer words is preferred.
-            - Keep wording concrete, strong, and value-driven.
-            - Use the provided bucket context and existing items to improve quality.
-            - Never repeat, paraphrase, or lightly reword existing bucket items.
-            - Avoid semantic overlap with current items (must be clearly distinct concepts).
-            - Prefer direct noun phrases; avoid verb-led formats like "Rejecting ...", "Challenging ...", "Avoiding ...".
-            - Suggestions must make sense as standalone passion items.
-            - Prefer variety across buckets when possible.
-            - No numbering, no bullets, no markdown.
-            """
-
-            let response = try await LoomAIService().sendChat(
-                messages: [.init(role: "user", content: instruction)],
-                context: contextSnapshot,
-                intent: "autowrite_purpose",
-                screen: "purpose_passions"
-            )
-            let suggestions = decodeAutoWritePassionSuggestions(from: response.message)
-            guard !suggestions.isEmpty else {
-                autoWritePassionsErrorMessage = "No suggestions yet."
-                return
-            }
-
-            let bucketFiltered = suggestions.filter { suggestion in
-                if selectedPassionAutoWriteFilter == .all { return true }
-                return suggestion.emotion == selectedPassionAutoWriteFilter.rawValue
-            }
-            let sourceSuggestions = (bucketFiltered.isEmpty ? suggestions : bucketFiltered).filter { suggestion in
-                !isPassionSuggestionTooSimilarToExisting(suggestion)
-            }
-            guard !sourceSuggestions.isEmpty else {
-                autoWritePassionsErrorMessage = "No suggestions yet."
-                return
-            }
-            let nextSuggestions = sourceSuggestions.filter { suggestion in
-                let normalized = normalizedVisionSuggestion(suggestion.passion)
-                let wasSuggestedBefore = previousSuggestions.contains {
-                    $0.emotion == suggestion.emotion && normalizedVisionSuggestion($0.passion) == normalized
-                }
-                return !wasSuggestedBefore
-            }
-            let resolvedSuggestions = Array((nextSuggestions.isEmpty ? sourceSuggestions : nextSuggestions).prefix(4))
-            autoWritePassionSuggestions = resolvedSuggestions
-            autoWritePassionSuggestionsCache[requestKey] = resolvedSuggestions
-            autoWritePassionsErrorMessage = nil
-        } catch {
-            autoWritePassionsErrorMessage = "Couldn’t generate Passion suggestions."
+        let delayNanos = UInt64.random(in: 2_000_000_000...5_000_000_000)
+        try? await Task.sleep(nanoseconds: delayNanos)
+        guard !Task.isCancelled else {
+            markFailed()
+            return
         }
+
+        let existingByEmotion = Dictionary(uniqueKeysWithValues: bucketOrder.map { bucket in
+            var items = draftPassions[bucket.key] ?? []
+            let pendingInput = (entryText[bucket.key] ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !pendingInput.isEmpty {
+                items.append(pendingInput)
+            }
+            return (bucket.key, items)
+        })
+        let selectedEmotion = selectedPassionAutoWriteFilter == .all ? nil : selectedPassionAutoWriteFilter.rawValue
+        let generated = PassionAutoWriteSuggestionTable.pickSuggestions(
+            filterEmotion: selectedEmotion,
+            existingByEmotion: existingByEmotion,
+            singleBucketCount: 2
+        )
+        let resolvedSuggestions = generated.map { AutoWritePassionSuggestion(emotion: $0.emotion, passion: $0.passion) }
+
+        guard !resolvedSuggestions.isEmpty else {
+            autoWritePassionsErrorMessage = "No suggestions yet."
+            autoWritePassionsTroubleshootingMessage = loomAITroubleshootingLocalDetails(
+                feature: "purpose_start_autowrite_passions",
+                reason: "No local table suggestions were available after filtering currently selected passions.",
+                requestHash: requestKey
+            )
+            markFailed()
+            return
+        }
+
+        autoWritePassionSuggestions = resolvedSuggestions
+        autoWritePassionSuggestionsCache[requestKey] = resolvedSuggestions
+        autoWritePassionsErrorMessage = nil
+        autoWritePassionsTroubleshootingMessage = nil
     }
 
     private func generatePurposeInsights(forceRefresh: Bool = false) async {
-        let requestKey = purposeInsightsCacheKey
-        if !forceRefresh, let cached = purposeInsightsCache[requestKey], !cached.isEmpty {
-            purposeInsightCards = cached
-            purposeInsightsNudgeMessage = purposeInsightsNudgeCache[requestKey]
-            purposeInsightsErrorMessage = nil
+        let fallbackRecord = defaultPurposeInsightRecord()
+        guard let personalizationSnapshot else {
+            applyPurposeInsightRecord(fallbackRecord)
             return
         }
-        if !forceRefresh, purposeInsightsLoadedKeys.contains(requestKey) {
+
+        let diagnostics = DiagnosticAnswers(snapshot: personalizationSnapshot)
+        let diagnosticsInsights = latestDiagnosticsInsightsSnapshot(for: personalizationSnapshot)
+        let rootCause = diagnosticsInsights?.rootCauseText.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let nextDirection = diagnosticsInsights?.nextDirectionText.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let currentVision = visionTrimmed.isEmpty
+            ? currentDrivingForce?.ultimateVision.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            : visionTrimmed
+        let passions = currentPassionPhrasesForProfileInsights()
+        let userKey = PersonalizationUserIdentity.currentUserKey()
+        let monthKey = PurposeProfileInsightsHasher.monthKey()
+        let cycleKey = "\(userKey)|\(monthKey)"
+        if !forceRefresh,
+           loadedPurposeInsightsCycleKey == cycleKey,
+           !purposeInsightCards.isEmpty {
             return
         }
-        purposeInsightsLoadedKeys.insert(requestKey)
+        if !forceRefresh,
+           let stored = latestPurposeProfileSnapshot(for: userKey),
+           stored.monthKey == monthKey {
+            applyPurposeInsightSnapshot(stored)
+            loadedPurposeInsightsCycleKey = cycleKey
+            return
+        }
 
         isGeneratingPurposeInsights = true
-        purposeInsightsErrorMessage = nil
-        purposeInsightsNudgeMessage = nil
-        if forceRefresh || purposeInsightsCache[requestKey] == nil {
+        if forceRefresh || purposeInsightCards.isEmpty {
             purposeInsightCards = []
+            purposeInsightProfileName = ""
         }
-        defer { isGeneratingPurposeInsights = false }
+        defer {
+            isGeneratingPurposeInsights = false
+        }
+        guard !Task.isCancelled else { return }
+        let inputsHash = PurposeProfileInsightsHasher.hash(
+            diagnostic: diagnostics,
+            rootCause: rootCause,
+            nextDirection: nextDirection,
+            vision: currentVision,
+            passions: passions
+        )
 
         do {
-            let contextSnapshot = try LoomAIViewModel().buildContextSnapshot(in: context)
-            let payloadJSON = purposeInsightsPayloadJSONString()
-            let instruction = """
-            Generate Purpose onboarding insights for Loom.
-            Purpose onboarding payload JSON:
-            \(payloadJSON)
-
-            Requirements:
-            - Return JSON only with exactly 3 cards.
-            - Card 1 title: Your drivers
-            - Card 2 title: Your tension
-            - Card 3 title: First direction
-            - Ground the cards in diagnostics + purpose text; avoid generic advice.
-            - Include at least two concrete references to the user inputs when available.
-            - Keep each body concise and practical.
-            """
-
-            let response = try await LoomAIService().sendChat(
-                messages: [.init(role: "user", content: instruction)],
-                context: contextSnapshot,
-                intent: "onboarding_insights_purpose",
-                screen: "purpose_insights"
+            let response = try await LoomAIService().fetchPurposeProfileInsights(
+                diagnostic: diagnostics,
+                rootCause: rootCause,
+                nextDirection: nextDirection,
+                vision: currentVision,
+                passions: passions
             )
-            let decoded = decodePurposeInsights(from: response.message)
-            guard !decoded.cards.isEmpty else {
-                purposeInsightCards = defaultPurposeInsightsCards()
-                purposeInsightsErrorMessage = "Couldn’t generate insights yet."
+            guard !Task.isCancelled else { return }
+            let resolved = PurposeProfilesCatalog.record(named: response.profile) ?? PurposeProfileRecord(
+                profile: response.profile,
+                strength: response.strength,
+                weakness: response.weakness,
+                stressTrigger: response.stressTrigger,
+                breakingPoint: response.breakingPoint
+            )
+            persistPurposeProfileSnapshot(
+                record: resolved,
+                userKey: userKey,
+                monthKey: monthKey,
+                inputsHash: inputsHash
+            )
+            purposeInsightsTroubleshootingMessage = nil
+            applyPurposeInsightRecord(resolved)
+            loadedPurposeInsightsCycleKey = cycleKey
+        } catch {
+            purposeInsightsTroubleshootingMessage = loomAITroubleshootingDetails(
+                feature: "purpose_start_insights_profile",
+                error: error
+            )
+            if let stored = latestPurposeProfileSnapshot(for: userKey) {
+                applyPurposeInsightSnapshot(stored)
+                loadedPurposeInsightsCycleKey = cycleKey
                 return
             }
-            purposeInsightCards = decoded.cards
-            purposeInsightsNudgeMessage = decoded.nudge
-            purposeInsightsCache[requestKey] = decoded.cards
-            if let nudge = decoded.nudge {
-                purposeInsightsNudgeCache[requestKey] = nudge
+            // Freeze fallback for the month when upstream fails to avoid repeated re-analysis.
+            persistPurposeProfileSnapshot(
+                record: fallbackRecord,
+                userKey: userKey,
+                monthKey: monthKey,
+                inputsHash: inputsHash
+            )
+            applyPurposeInsightRecord(fallbackRecord)
+            loadedPurposeInsightsCycleKey = cycleKey
+        }
+    }
+
+    private func restartPurposeInsightsTimeoutWindow() {
+        hasTimedOutPurposeInsights = false
+        purposeInsightsTimeoutTask?.cancel()
+        purposeInsightsTimeoutTask = Task {
+            try? await Task.sleep(nanoseconds: 60_000_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard step == .insights else { return }
+                guard purposeInsightCards.isEmpty else { return }
+                hasTimedOutPurposeInsights = true
+                showPurposeInsightsTimeoutAlert = true
             }
-        } catch {
-            purposeInsightCards = defaultPurposeInsightsCards()
-            purposeInsightsErrorMessage = "Couldn’t generate insights yet."
         }
     }
 
@@ -2032,10 +2315,6 @@ struct PurposeStartView: View {
 
     private var passionsAutoWriteCacheKey: String {
         "passions|\(stableHash(personalizationSignature() + "|" + selectedPassionAutoWriteFilter.rawValue + "|" + draftPassionsSignature()))"
-    }
-
-    private var purposeInsightsCacheKey: String {
-        "purpose_insights|\(stableHash(personalizationSignature() + "|" + normalizedVisionSuggestion(visionTrimmed) + "|" + draftPassionsSignature()))"
     }
 
     private func personalizationSignature() -> String {
@@ -2069,101 +2348,177 @@ struct PurposeStartView: View {
         .description
     }
 
-    private func purposeInsightsPayloadJSONString() -> String {
-        let diagnostics = personalizationSnapshot.map { snapshot in
-            [
-                "stressSource": snapshot.stressSource,
-                "breakPoint": snapshot.breakPoint,
-                "planningReality": snapshot.planningReality,
-                "desiredChange": snapshot.desiredChange,
-                "lifeAreasSelected": snapshot.lifeAreasSelected,
-                "createdAt": snapshot.createdAt.ISO8601Format()
-            ] as [String: Any]
-        } ?? [
-            "missing": true
-        ]
-
-        let purposePayload: [String: Any] = [
-            "vision": visionTrimmed,
-            "purpose": purposeText.trimmingCharacters(in: .whitespacesAndNewlines),
-            "passionsByBucket": bucketOrder.reduce(into: [String: [String]]()) { partialResult, bucket in
-                partialResult[bucket.key] = draftPassions[bucket.key] ?? []
-            }
-        ]
-        let payload: [String: Any] = [
-            "diagnostics": diagnostics,
-            "purpose": purposePayload
-        ]
-        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys, .prettyPrinted]),
-              let jsonString = String(data: data, encoding: .utf8) else {
-            return "{}"
-        }
-        return jsonString
+    private func applyPurposeInsightRecord(_ record: PurposeProfileRecord) {
+        purposeInsightProfileName = record.profile
+        purposeInsightCards = purposeInsightCards(for: record)
     }
 
-    private func decodePurposeInsights(from raw: String) -> (cards: [PurposeInsightCard], nudge: String?) {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        let defaultTitles = ["Your drivers", "Your tension", "First direction"]
-        if let data = trimmed.data(using: .utf8),
-           let parsed = try? JSONDecoder().decode(PurposeInsightsResponse.self, from: data) {
-            let bodies = (parsed.cards ?? []).compactMap { card -> String? in
-                let body = (card.body ?? card.text ?? card.message ?? "")
-                    .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                return body.isEmpty ? nil : body
-            }
-            var cards: [PurposeInsightCard] = []
-            for (index, title) in defaultTitles.enumerated() {
-                let body = index < bodies.count ? bodies[index] : defaultPurposeInsightsCards()[index].body
-                cards.append(PurposeInsightCard(title: title, body: body))
-            }
-            return (cards, parsed.nudge?.trimmingCharacters(in: .whitespacesAndNewlines))
-        }
+    private func purposeInsightCards(for record: PurposeProfileRecord) -> [PurposeInsightCard] {
+        [
+            PurposeInsightCard(title: "Strength", body: record.strength),
+            PurposeInsightCard(title: "Weakness", body: record.weakness),
+            PurposeInsightCard(
+                title: "Signals",
+                signals: .init(
+                    stressTrigger: record.stressTrigger,
+                    breakingPoint: record.breakingPoint
+                )
+            )
+        ]
+    }
 
-        let fallbackBodies = trimmed
-            .components(separatedBy: "\n")
+    private func currentPassionPhrasesForProfileInsights() -> [String] {
+        let byBucket = bucketOrder.flatMap { bucket -> [String] in
+            var values = draftPassions[bucket.key] ?? []
+            let pending = (entryText[bucket.key] ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !pending.isEmpty {
+                values.append(pending)
+            }
+            return values
+        }
+        let normalized = byBucket
             .map { $0.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-        if fallbackBodies.count >= 3 {
-            return (
-                zip(defaultTitles, fallbackBodies.prefix(3)).map { PurposeInsightCard(title: $0.0, body: $0.1) },
-                nil
-            )
-        }
-        return (defaultPurposeInsightsCards(), nil)
+        return Array(Set(normalized)).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
-    private func defaultPurposeInsightsCards() -> [PurposeInsightCard] {
-        [
-            PurposeInsightCard(
-                title: "Your drivers",
-                body: "Your Purpose points to growth with less stress, anchored in what matters most to you right now."
-            ),
-            PurposeInsightCard(
-                title: "Your tension",
-                body: "Your profile suggests tension between ambition and available bandwidth, so focus needs to be narrowed."
-            ),
-            PurposeInsightCard(
-                title: "First direction",
-                body: "Pick one meaningful direction for this week and support it with one repeatable action."
+    private func latestDiagnosticsInsightsSnapshot(for personalization: PersonalizationSnapshot?) -> DiagnosticsInsightsSnapshot? {
+        let userKey = PersonalizationUserIdentity.currentUserKey()
+        if let personalization {
+            let diagnosticsHash = DiagnosticsInsightsHasher.hash(for: personalization)
+            if let exact = diagnosticsInsightsSnapshots.first(where: {
+                $0.userKey == userKey && $0.diagnosticsHash == diagnosticsHash
+            }) {
+                return exact
+            }
+        }
+        if let latestForUser = diagnosticsInsightsSnapshots.first(where: { $0.userKey == userKey }) {
+            return latestForUser
+        }
+        return diagnosticsInsightsSnapshots.first
+    }
+
+    private func latestPurposeProfileSnapshot(for userKey: String) -> PurposeProfileInsightsSnapshot? {
+        purposeProfileInsightsSnapshots.first(where: { $0.userKey == userKey })
+    }
+
+    private func applyPurposeInsightSnapshot(_ snapshot: PurposeProfileInsightsSnapshot) {
+        let record = PurposeProfileRecord(
+            profile: snapshot.profile,
+            strength: snapshot.strength,
+            weakness: snapshot.weakness,
+            stressTrigger: snapshot.stressTrigger,
+            breakingPoint: snapshot.breakingPoint
+        )
+        applyPurposeInsightRecord(record)
+    }
+
+    private func persistPurposeProfileSnapshot(
+        record: PurposeProfileRecord,
+        userKey: String,
+        monthKey: String,
+        inputsHash: String
+    ) {
+        let snapshotKey = PurposeProfileInsightsHasher.snapshotKey(
+            userKey: userKey,
+            monthKey: monthKey,
+            inputsHash: inputsHash
+        )
+        if let existing = purposeProfileInsightsSnapshots.first(where: { $0.snapshotKey == snapshotKey }) {
+            existing.generatedAt = .now
+            existing.profile = record.profile
+            existing.strength = record.strength
+            existing.weakness = record.weakness
+            existing.stressTrigger = record.stressTrigger
+            existing.breakingPoint = record.breakingPoint
+            existing.inputsHash = inputsHash
+            existing.monthKey = monthKey
+            existing.userKey = userKey
+        } else {
+            context.insert(
+                PurposeProfileInsightsSnapshot(
+                    snapshotKey: snapshotKey,
+                    userKey: userKey,
+                    monthKey: monthKey,
+                    inputsHash: inputsHash,
+                    generatedAt: .now,
+                    profile: record.profile,
+                    strength: record.strength,
+                    weakness: record.weakness,
+                    stressTrigger: record.stressTrigger,
+                    breakingPoint: record.breakingPoint
+                )
             )
-        ]
+        }
+        try? context.save()
+    }
+
+    private func defaultPurposeInsightRecord() -> PurposeProfileRecord {
+        let diagnostics = personalizationSnapshot
+        let stress = diagnostics?.stressSource.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let breakPoint = diagnostics?.breakPoint.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let planning = diagnostics?.planningReality.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let desired = diagnostics?.desiredChange.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let preferredProfile = purposeProfileDescriptor(
+            stress: stress,
+            breakPoint: breakPoint,
+            planning: planning,
+            desired: desired
+        )
+        return PurposeProfilesCatalog.record(named: preferredProfile) ?? PurposeProfilesCatalog.fallback()
+    }
+
+    private func purposeProfileDescriptor(
+        stress: String,
+        breakPoint: String,
+        planning: String,
+        desired: String
+    ) -> String {
+        let signal = "\(stress) \(breakPoint) \(planning) \(desired)".lowercased()
+        if signal.contains("overwhelm") || signal.contains("too many") || signal.contains("competing") {
+            return "Strategic Integrator"
+        }
+        if signal.contains("reactive") || signal.contains("chaotic") || signal.contains("behind") {
+            return "Adaptive Stabilizer"
+        }
+        if signal.contains("balance") || signal.contains("aligned") {
+            return "Steady Alignment Builder"
+        }
+        if signal.contains("control") || signal.contains("clarity") || signal.contains("structure") {
+            return "Structured Clarity Driver"
+        }
+        return "Purpose-Led Planner"
     }
 
     private func decodeAutoWritePassionSuggestions(from raw: String) -> [AutoWritePassionSuggestion] {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let data = trimmed.data(using: .utf8),
-           let parsed = try? JSONDecoder().decode(PurposePassionsAutoWriteResponse.self, from: data) {
-            return Array((parsed.suggestions ?? [])
-                .compactMap { item in
-                    let emotionRaw = item.emotion ?? item.bucket ?? ""
-                    guard let emotion = normalizedPassionEmotionKey(emotionRaw) else { return nil }
-                    let passionRaw = item.passion ?? item.text ?? ""
-                    let passion = normalizedPassionPhrase(passionRaw)
+        if let data = trimmed.data(using: .utf8) {
+            if let parsed = try? JSONDecoder().decode(PurposePassionsAutoWriteResponse.self, from: data) {
+                return Array((parsed.suggestions ?? [])
+                    .compactMap { item in
+                        let emotionRaw = item.emotion ?? item.bucket ?? ""
+                        guard let emotion = normalizedPassionEmotionKey(emotionRaw) else { return nil }
+                        let passionRaw = item.passion ?? item.text ?? ""
+                        let passion = normalizedPassionPhrase(passionRaw)
+                        guard !passion.isEmpty else { return nil }
+                        return AutoWritePassionSuggestion(emotion: emotion, passion: passion)
+                    }
+                    .prefix(4))
+            }
+            if let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let map = root["suggestions"] as? [String: Any] {
+                let orderedBuckets = ["love", "vows", "thrill", "just"]
+                let mapped = orderedBuckets.compactMap { bucket -> AutoWritePassionSuggestion? in
+                    let value = (map[bucket] as? String) ?? (map[bucket.uppercased()] as? String)
+                    let passion = normalizedPassionPhrase(value ?? "")
                     guard !passion.isEmpty else { return nil }
-                    return AutoWritePassionSuggestion(emotion: emotion, passion: passion)
+                    return AutoWritePassionSuggestion(emotion: bucket, passion: passion)
                 }
-                .prefix(4))
+                if !mapped.isEmpty {
+                    return mapped
+                }
+            }
         }
 
         return Array(trimmed
@@ -2196,7 +2551,7 @@ struct PurposeStartView: View {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else { return "" }
         let words = cleaned.split(whereSeparator: \.isWhitespace)
-        let limited = words.prefix(5).joined(separator: " ")
+        let limited = words.prefix(3).joined(separator: " ")
         return truncateSuggestion(String(limited), maxLength: 60)
     }
 
@@ -2206,11 +2561,54 @@ struct PurposeStartView: View {
         return values.contains { normalizedVisionSuggestion($0) == normalizedSuggestion }
     }
 
+    private func selectPassionSuggestionsForCurrentFilter(
+        from suggestions: [AutoWritePassionSuggestion],
+        maxCount: Int
+    ) -> [AutoWritePassionSuggestion] {
+        let ranked = rankPassionSuggestionsForBrevity(suggestions)
+        guard selectedPassionAutoWriteFilter == .all else {
+            return Array(ranked.prefix(maxCount))
+        }
+        let orderedBuckets = ["love", "vows", "thrill", "just"]
+        var selected: [AutoWritePassionSuggestion] = []
+        for bucket in orderedBuckets {
+            guard let match = ranked.first(where: { $0.emotion == bucket }) else { continue }
+            selected.append(match)
+        }
+        return selected
+    }
+
+    private func rankPassionSuggestionsForBrevity(
+        _ suggestions: [AutoWritePassionSuggestion]
+    ) -> [AutoWritePassionSuggestion] {
+        suggestions.sorted { lhs, rhs in
+            let lhsWords = passionSuggestionWordCount(lhs.passion)
+            let rhsWords = passionSuggestionWordCount(rhs.passion)
+            let lhsOneWordPenalty = lhsWords == 1 ? 0 : 1
+            let rhsOneWordPenalty = rhsWords == 1 ? 0 : 1
+            if lhsOneWordPenalty != rhsOneWordPenalty {
+                return lhsOneWordPenalty < rhsOneWordPenalty
+            }
+            if lhsWords != rhsWords {
+                return lhsWords < rhsWords
+            }
+            if lhs.passion.count != rhs.passion.count {
+                return lhs.passion.count < rhs.passion.count
+            }
+            return lhs.passion.localizedCaseInsensitiveCompare(rhs.passion) == .orderedAscending
+        }
+    }
+
+    private func passionSuggestionWordCount(_ text: String) -> Int {
+        max(1, text.split(whereSeparator: \.isWhitespace).count)
+    }
+
     private func isPassionSuggestionTooSimilarToExisting(_ suggestion: AutoWritePassionSuggestion) -> Bool {
-        let existing = (draftPassions[suggestion.emotion] ?? []) + {
-            let pending = (entryText[suggestion.emotion] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            return pending.isEmpty ? [] : [pending]
-        }()
+        var existing = draftPassions[suggestion.emotion] ?? []
+        let pending = (entryText[suggestion.emotion] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !pending.isEmpty {
+            existing.append(pending)
+        }
         let suggestionNorm = normalizedVisionSuggestion(suggestion.passion)
         let suggestionTokens = Set(suggestionNorm.split(separator: " ").map(String.init))
 
@@ -2218,12 +2616,11 @@ struct PurposeStartView: View {
             let itemNorm = normalizedVisionSuggestion(item)
             if itemNorm.isEmpty { continue }
             if itemNorm == suggestionNorm { return true }
-            if suggestionNorm.contains(itemNorm) || itemNorm.contains(suggestionNorm) { return true }
             let itemTokens = Set(itemNorm.split(separator: " ").map(String.init))
             if !itemTokens.isEmpty {
                 let overlapCount = suggestionTokens.intersection(itemTokens).count
                 let overlapRatio = Double(overlapCount) / Double(max(1, min(suggestionTokens.count, itemTokens.count)))
-                if overlapRatio >= 0.6 { return true }
+                if overlapRatio >= 0.75 { return true }
             }
         }
         return false
@@ -2254,9 +2651,11 @@ struct PurposeStartView: View {
 
     private func normalizedVisionSuggestion(_ text: String) -> String {
         text
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .lowercased()
+            .replacingOccurrences(of: #"[^\p{L}\p{N}\s]"#, with: " ", options: .regularExpression)
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
     }
 
     private func decodeAutoWriteVisionSuggestions(from raw: String) -> [String] {
@@ -2266,8 +2665,7 @@ struct PurposeStartView: View {
             return Array((parsed.suggestions ?? [])
                 .map { $0.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
-                .map { truncateSuggestion($0, maxLength: 150) }
-                .prefix(2))
+                .prefix(3))
         }
 
         return Array(trimmed
@@ -2276,8 +2674,7 @@ struct PurposeStartView: View {
             .map { $0.replacingOccurrences(of: #"^\d+[\.\)]\s*"#, with: "", options: .regularExpression) }
             .map { $0.replacingOccurrences(of: #"^[-•]\s*"#, with: "", options: .regularExpression) }
             .filter { !$0.isEmpty }
-            .map { truncateSuggestion($0, maxLength: 150) }
-            .prefix(2))
+            .prefix(3))
     }
 
     private func truncateSuggestion(_ text: String, maxLength: Int) -> String {
