@@ -247,6 +247,7 @@ export default {
       maxOutputTokens: 320,
       timeoutMs: 26000
     });
+    const diagnosticUsage = normalizeResponsesUsage(result.usage, "gpt-5.1");
 
     let responseBody;
     if (result.error) {
@@ -261,6 +262,9 @@ export default {
       } else {
         responseBody = { rootCause, nextDirection };
       }
+    }
+    if (diagnosticUsage) {
+      responseBody.usage = diagnosticUsage;
     }
 
     if (env.DEBUG_DIAGNOSTIC !== "1") {
@@ -394,6 +398,25 @@ async function handlePurposeInsightsProfile(request, env) {
       .map((item) => String(item ?? "").trim())
       .filter(Boolean)
   ).slice(0, 16);
+  const heuristicSeed = buildPurposeProfileHeuristicSeed({
+    diagnostic: normalizedDiagnostic,
+    rootCause,
+    nextDirection,
+    vision,
+    passions
+  });
+  const heuristicRanking = rankPurposeProfilesHeuristically({
+    diagnostic: normalizedDiagnostic,
+    rootCause,
+    nextDirection,
+    vision,
+    passions
+  });
+  const heuristicBest = pickPurposeProfileFromTopBand(heuristicRanking, heuristicSeed);
+  const heuristicTop = heuristicRanking.slice(0, 4).map((item) => ({
+    profile: item.profile,
+    score: Number(item.score.toFixed(3))
+  }));
 
   const profileCatalogPrompt = PURPOSE_PROFILE_CATALOG.map((item, index) => {
     return `${index + 1}. ${item.profile} | strength=${item.strength} | weakness=${item.weakness} | stressTrigger=${item.stressTrigger} | breakingPoint=${item.breakingPoint}`;
@@ -401,6 +424,8 @@ async function handlePurposeInsightsProfile(request, env) {
 
   const systemPrompt = [
     "You select one Loom behavioral profile that best fits the user.",
+    "Treat profile names as labels only. Do not infer fit from profile names.",
+    "Start with equal prior probability for every profile.",
     "Use only these inputs: diagnostic answers, rootCause, nextDirection, vision, and passions.",
     "Compare evidence against each profile's strength, weakness, stressTrigger, and breakingPoint.",
     "Pick the closest overall fit, not a blend.",
@@ -434,7 +459,8 @@ async function handlePurposeInsightsProfile(request, env) {
       nextDirection,
       vision,
       passions,
-      profileCatalog: profileCatalogPrompt
+      profileCatalog: profileCatalogPrompt,
+      heuristicTopProfiles: heuristicTop
     },
     responseSchema: schema,
     maxOutputTokens: 80,
@@ -442,35 +468,93 @@ async function handlePurposeInsightsProfile(request, env) {
     reasoningEffort: "low",
     allowRetry: true
   });
+  const profileUsage = normalizeResponsesUsage(result.usage, "gpt-5-mini");
 
   if (result.error) {
-    return json({ error: result.error, details: result.details }, result.status, corsHeaders(request));
+    if (!heuristicBest) {
+      const response = { error: result.error, details: result.details };
+      if (profileUsage) {
+        response.usage = profileUsage;
+      }
+      return json(response, result.status, corsHeaders(request));
+    }
+    const fallback = PURPOSE_PROFILE_CATALOG.find((item) => item.profile === heuristicBest.profile) || heuristicBest;
+    const response = {
+      profile: fallback.profile,
+      strength: fallback.strength,
+      weakness: fallback.weakness,
+      stressTrigger: fallback.stressTrigger,
+      breakingPoint: fallback.breakingPoint,
+      debug: {
+        model: "heuristic-fallback",
+        confidence: "low",
+        evidence: [
+          "Fallback selected from ranked profile-descriptor matching.",
+          `Top heuristic candidates: ${heuristicTop.map((item) => `${item.profile}(${item.score})`).join(", ")}`
+        ]
+      }
+    };
+    if (profileUsage) {
+      response.usage = profileUsage;
+    }
+    return json(response, 200, corsHeaders(request));
   }
 
   const profileName = nonEmptyString(result.json?.profile);
-  const matched = PURPOSE_PROFILE_CATALOG.find(
+  const modelMatched = PURPOSE_PROFILE_CATALOG.find(
     (item) => item.profile.toLowerCase() === profileName.toLowerCase()
   );
+  const matched = modelMatched || (heuristicBest
+    ? PURPOSE_PROFILE_CATALOG.find((item) => item.profile === heuristicBest.profile) || heuristicBest
+    : null);
   if (!matched) {
-    return json({ error: "Could not map profile" }, 502, corsHeaders(request));
+    const response = { error: "Could not map profile" };
+    if (profileUsage) {
+      response.usage = profileUsage;
+    }
+    return json(response, 502, corsHeaders(request));
   }
-
-  return json(
-    {
-      profile: matched.profile,
-      strength: matched.strength,
-      weakness: matched.weakness,
-      stressTrigger: matched.stressTrigger,
-      breakingPoint: matched.breakingPoint,
-      debug: {
-        model: "gpt-5-mini",
-        confidence: nonEmptyString(result.json?.confidence) || "medium",
-        evidence: [truncate(String(result.json?.reason || ""), 180)]
-      }
-    },
-    200,
-    corsHeaders(request)
+  const modelConfidence = (nonEmptyString(result.json?.confidence) || "medium").toLowerCase();
+  const modelScore = heuristicRanking.find((item) => item.profile === matched.profile)?.score ?? 0;
+  const bestScore = heuristicBest?.score ?? modelScore;
+  const scoreGap = bestScore - modelScore;
+  const topBandProfiles = new Set(purposeProfileTopBand(heuristicRanking).map((item) => item.profile));
+  const modelInTopBand = topBandProfiles.has(matched.profile);
+  const shouldOverrideWithHeuristic = Boolean(
+    heuristicBest &&
+      heuristicBest.profile !== matched.profile &&
+      (!modelInTopBand || scoreGap >= 0.85 || (modelConfidence === "low" && scoreGap >= 0.35))
   );
+  const selected = shouldOverrideWithHeuristic
+    ? PURPOSE_PROFILE_CATALOG.find((item) => item.profile === heuristicBest.profile) || heuristicBest
+    : matched;
+  const reason = truncate(String(result.json?.reason || ""), 180);
+  const alignmentMessage = shouldOverrideWithHeuristic
+    ? "Heuristic override applied because model selection was outside top heuristic evidence or materially lower-scoring."
+    : (heuristicBest && heuristicBest.profile !== matched.profile
+      ? "Model selection kept because it remained inside the top heuristic evidence band."
+      : "Model selection aligned with heuristic ranking.");
+
+  const response = {
+    profile: selected.profile,
+    strength: selected.strength,
+    weakness: selected.weakness,
+    stressTrigger: selected.stressTrigger,
+    breakingPoint: selected.breakingPoint,
+    debug: {
+      model: shouldOverrideWithHeuristic ? "gpt-5-mini+heuristic" : "gpt-5-mini",
+      confidence: shouldOverrideWithHeuristic ? "medium" : modelConfidence,
+      evidence: [
+        reason || "Model selected profile from catalog evidence.",
+        `Top heuristic candidates: ${heuristicTop.map((item) => `${item.profile}(${item.score})`).join(", ")}`,
+        alignmentMessage
+      ]
+    }
+  };
+  if (profileUsage) {
+    response.usage = profileUsage;
+  }
+  return json(response, 200, corsHeaders(request));
 }
 
 async function handleChat(request, env) {
@@ -490,29 +574,31 @@ async function handleChat(request, env) {
   }
 
   const intent = String(payload?.client?.intent || "").trim().toLowerCase();
-  if (intent === "loomai_chat") {
-    return handleLoomAIChat({ request, env, apiKey, payload });
+  if (isPurposeVisionChatRequest(payload)) {
+    const latestUserMessage = extractLatestUserMessage(payload);
+    return purposeVisionAutowriteResponse({
+      request,
+      apiKey,
+      payload,
+      currentVision: extractCurrentVisionFromInstruction(latestUserMessage),
+      previousSuggestions: [],
+      mode: extractVisionModeFromInstruction(latestUserMessage)
+    });
   }
 
-  if (!isPurposeVisionChatRequest(payload)) {
-    return json({ error: "Unsupported chat intent." }, 400, corsHeaders(request));
-  }
-
-  const latestUserMessage = extractLatestUserMessage(payload);
-  return purposeVisionAutowriteResponse({
-    request,
-    apiKey,
-    payload,
-    currentVision: extractCurrentVisionFromInstruction(latestUserMessage),
-    previousSuggestions: [],
-    mode: extractVisionModeFromInstruction(latestUserMessage)
-  });
+  // All non-autowrite intents use the Loom chat pipeline (including autogroup_plan).
+  return handleLoomAIChat({ request, env, apiKey, payload });
 }
 
 async function handleLoomAIChat({ request, env, apiKey, payload }) {
   const messages = Array.isArray(payload?.messages) ? payload.messages : [];
-  const context = payload?.context && typeof payload.context === "object" ? payload.context : {};
   const client = payload?.client && typeof payload.client === "object" ? payload.client : {};
+  const normalizedIntent = String(client.intent || "").trim().toLowerCase();
+  const rawContext = payload?.context && typeof payload.context === "object" ? payload.context : {};
+  const context = normalizedIntent === "autogroup_plan"
+    ? compactAutoGroupContext(rawContext)
+    : rawContext;
+  const shouldForceMiniModel = normalizedIntent === "autogroup_plan";
   const latestUserMessage = extractLatestUserMessage(payload).trim();
   const hasContext = hasMeaningfulLoomContext(context);
   const unrelatedPrompt = isLikelyUnrelatedPrompt(latestUserMessage);
@@ -548,12 +634,16 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
     );
   }
 
-  const preferredModel = nonEmptyString(env.OPENAI_MODEL) || DEFAULT_CHAT_MODEL;
-  const modelCandidates = uniqueOrdered(
-    [preferredModel, "gpt-5.1", "gpt-5-mini"]
-      .map((value) => nonEmptyString(value))
-      .filter(Boolean)
-  );
+  const preferredModel = shouldForceMiniModel
+    ? "gpt-5-mini"
+    : (nonEmptyString(env.OPENAI_MODEL) || DEFAULT_CHAT_MODEL);
+  const modelCandidates = shouldForceMiniModel
+    ? ["gpt-5-mini"]
+    : uniqueOrdered(
+      [preferredModel, "gpt-5.1", "gpt-5-mini"]
+        .map((value) => nonEmptyString(value))
+        .filter(Boolean)
+    );
   const schema = {
     name: "loom_chat_response",
     strict: true,
@@ -737,14 +827,15 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
   }
 
   if (result.error) {
-    return json(
-      safeChatFallback({
-        hasContext,
-        context
-      }),
-      200,
-      corsHeaders(request)
-    );
+    const response = safeChatFallback({
+      hasContext,
+      context
+    });
+    const usage = normalizeResponsesUsage(result.usage, usedModel || preferredModel);
+    if (usage) {
+      response.usage = usage;
+    }
+    return json(response, 200, corsHeaders(request));
   }
 
   const response = sanitizeLoomChatResponse(result.json, {
@@ -767,6 +858,34 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
     await caches.default.put(chatCacheKey, cacheResponse);
   }
   return json(response, 200, corsHeaders(request));
+}
+
+function compactAutoGroupContext(context) {
+  const src = context && typeof context === "object" ? context : {};
+  const rawTopItems = Array.isArray(src?.capture?.topItems) ? src.capture.topItems : [];
+  const captureItems = Array.isArray(src?.captureItems)
+    ? src.captureItems
+        .map((item) => ({
+          id: truncate(String(item?.id || ""), 64),
+          text: truncate(String(item?.text || ""), 140)
+        }))
+        .filter((item) => item.id && item.text)
+        .slice(0, 25)
+    : [];
+  const fallbackTopItems = captureItems.map((item) => item.text);
+  const topItems = (rawTopItems.length > 0 ? rawTopItems : fallbackTopItems)
+    .map((item) => truncate(String(item || ""), 140))
+    .filter(Boolean)
+    .slice(0, 12);
+  const totalCountRaw = Number(src?.capture?.totalCount);
+  const totalCount = Number.isFinite(totalCountRaw) ? Math.max(0, Math.floor(totalCountRaw)) : captureItems.length;
+  return {
+    capture: {
+      totalCount,
+      topItems
+    },
+    captureItems
+  };
 }
 
 async function handlePurposeVisionAutowrite(request, env) {
@@ -993,8 +1112,10 @@ async function purposeVisionAutowriteResponse({
     reasoningEffort: "none",
     allowRetry: false
   });
+  const autowriteUsage = combineResponsesUsage(insightResult.usage, visionResult.usage);
+  const normalizedAutowriteUsage = normalizeResponsesUsage(autowriteUsage, "gpt-5.1");
   if (visionResult.error) {
-    return json({
+    const response = {
       error: visionResult.error,
       details: buildVisionTroubleshootingDetails("vision_model_error", {
         ...requestMeta,
@@ -1002,11 +1123,15 @@ async function purposeVisionAutowriteResponse({
         areasCount: normalizedDiagnostic.areas.length,
         upstream: visionResult.details ? truncate(String(visionResult.details), 1400) : null
       })
-    }, visionResult.status, corsHeaders(request));
+    };
+    if (normalizedAutowriteUsage) {
+      response.usage = normalizedAutowriteUsage;
+    }
+    return json(response, visionResult.status, corsHeaders(request));
   }
 
   if (typeof visionResult.json?.error === "string" && visionResult.json.error.trim() !== "") {
-    return json({
+    const response = {
       error: "Couldn’t generate insights",
       details: buildVisionTroubleshootingDetails("insufficient_signal", {
         ...requestMeta,
@@ -1014,7 +1139,11 @@ async function purposeVisionAutowriteResponse({
         areasCount: normalizedDiagnostic.areas.length,
         modelError: visionResult.json.error
       })
-    }, 422, corsHeaders(request));
+    };
+    if (normalizedAutowriteUsage) {
+      response.usage = normalizedAutowriteUsage;
+    }
+    return json(response, 422, corsHeaders(request));
   }
 
   const rawSuggestions = Array.isArray(visionResult.json?.visions)
@@ -1028,7 +1157,7 @@ async function purposeVisionAutowriteResponse({
     : uniqueOrdered(rawSuggestions)
   ).slice(0, 2);
   if (suggestions.length === 0) {
-    return json({
+    const response = {
       error: "Couldn’t generate insights",
       details: buildVisionTroubleshootingDetails("no_usable_suggestions", {
         ...requestMeta,
@@ -1036,10 +1165,14 @@ async function purposeVisionAutowriteResponse({
         areasCount: normalizedDiagnostic.areas.length,
         returnedVisionCount: Array.isArray(visionResult.json?.visions) ? visionResult.json.visions.length : 0
       })
-    }, 422, corsHeaders(request));
+    };
+    if (normalizedAutowriteUsage) {
+      response.usage = normalizedAutowriteUsage;
+    }
+    return json(response, 422, corsHeaders(request));
   }
 
-  return json({
+  const response = {
     message: JSON.stringify({
       suggestions,
       confidence: "high"
@@ -1051,7 +1184,11 @@ async function purposeVisionAutowriteResponse({
       personalizationHash,
       hasStrongDiagnosticContext
     }
-  }, 200, corsHeaders(request));
+  };
+  if (normalizedAutowriteUsage) {
+    response.usage = normalizedAutowriteUsage;
+  }
+  return json(response, 200, corsHeaders(request));
 }
 
 async function performOpenAIResponsesAttempt({
@@ -1123,6 +1260,7 @@ async function performOpenAIResponsesAttempt({
   }
 
   const upstreamText = await openAIResponse.text();
+  const upstreamUsage = extractResponsesUsageFromText(upstreamText);
 
   if (!openAIResponse.ok) {
     if (openAIResponse.status === 400) {
@@ -1149,7 +1287,8 @@ async function performOpenAIResponsesAttempt({
           `status=${openAIResponse.status}${upstreamError ? ` ${upstreamError}` : ""}`,
           1000
         ),
-        status: 502
+        status: 502,
+        usage: upstreamUsage
       }
     };
   }
@@ -1185,7 +1324,8 @@ async function performOpenAIResponsesAttempt({
     result: {
       error: "Missing model output",
       details: truncate(upstreamText, 1000),
-      status: 502
+      status: 502,
+      usage: extractResponsesUsage(parsed)
     }
   };
 }
@@ -1249,6 +1389,7 @@ async function performOpenAIResponsesAttemptWithoutSchema({
   }
 
   const upstreamText = await openAIResponse.text();
+  const upstreamUsage = extractResponsesUsageFromText(upstreamText);
   if (!openAIResponse.ok) {
     const upstreamError = extractUpstreamErrorSignature(upstreamText);
     return {
@@ -1257,7 +1398,8 @@ async function performOpenAIResponsesAttemptWithoutSchema({
       result: {
         error: "Upstream model error",
         details: truncate(`status=${openAIResponse.status}${upstreamError ? ` ${upstreamError}` : ""}`, 1000),
-        status: 502
+        status: 502,
+        usage: upstreamUsage
       }
     };
   }
@@ -1292,7 +1434,8 @@ async function performOpenAIResponsesAttemptWithoutSchema({
     result: {
       error: "Missing model output",
       details: truncate(upstreamText, 1000),
-      status: 502
+      status: 502,
+      usage: extractResponsesUsage(parsed)
     }
   };
 }
@@ -1415,6 +1558,169 @@ function canonicalizeDiagnostic(input) {
     planningStyle: normalize(input?.planningStyle),
     firstChange: normalize(input?.firstChange)
   };
+}
+
+function rankPurposeProfilesHeuristically({ diagnostic, rootCause, nextDirection, vision, passions }) {
+  const d = diagnostic || {};
+  const input = {
+    stress: String(d.stress || ""),
+    breaksFirst: String(d.breaksFirst || ""),
+    planningStyle: String(d.planningStyle || ""),
+    firstChange: String(d.firstChange || ""),
+    rootCause: String(rootCause || ""),
+    nextDirection: String(nextDirection || ""),
+    vision: String(vision || ""),
+    passions: Array.isArray(passions) ? passions : []
+  };
+  const evidenceTokens = buildPurposeProfileEvidenceTokens(input);
+  const stressTokens = purposeProfileTokenSet(`${d.stress || ""} ${rootCause || ""}`);
+  const executionTokens = purposeProfileTokenSet(
+    `${d.breaksFirst || ""} ${d.planningStyle || ""} ${d.firstChange || ""} ${nextDirection || ""}`
+  );
+  const visionTokens = purposeProfileTokenSet(`${vision || ""} ${(Array.isArray(passions) ? passions : []).join(" ")} ${d.firstChange || ""}`);
+  const seed = buildPurposeProfileHeuristicSeed(input);
+
+  return PURPOSE_PROFILE_CATALOG
+    .map((profile) => {
+      const stressDescriptor = purposeProfileTokenSet(profile.stressTrigger);
+      const breakDescriptor = purposeProfileTokenSet(profile.breakingPoint);
+      const strengthDescriptor = purposeProfileTokenSet(profile.strength);
+      const weaknessDescriptor = purposeProfileTokenSet(profile.weakness);
+      const descriptorUnion = new Set([
+        ...stressDescriptor,
+        ...breakDescriptor,
+        ...strengthDescriptor,
+        ...weaknessDescriptor
+      ]);
+
+      let score = 0;
+      score += purposeProfileOverlap(stressTokens, stressDescriptor) * 3.0;
+      score += purposeProfileOverlap(executionTokens, breakDescriptor) * 3.0;
+      score += purposeProfileOverlap(visionTokens, strengthDescriptor) * 1.4;
+      score += purposeProfileOverlap(executionTokens, weaknessDescriptor) * 1.4;
+      score += purposeProfileOverlap(evidenceTokens, descriptorUnion) * 2.2;
+
+      return {
+        profile: profile.profile,
+        strength: profile.strength,
+        weakness: profile.weakness,
+        stressTrigger: profile.stressTrigger,
+        breakingPoint: profile.breakingPoint,
+        score
+      };
+    })
+    .sort((a, b) => {
+      const diff = b.score - a.score;
+      if (Math.abs(diff) > 0.0001) return diff;
+      return purposeProfileTieBreakRank(seed, a.profile) - purposeProfileTieBreakRank(seed, b.profile);
+    });
+}
+
+function buildPurposeProfileHeuristicSeed(input) {
+  return Array.from(buildPurposeProfileEvidenceTokens(input)).sort().join("|");
+}
+
+function pickPurposeProfileFromTopBand(ranked, seed) {
+  const band = purposeProfileTopBand(ranked);
+  if (band.length === 0) return null;
+  if (band.length <= 1) return band[0];
+  const index = purposeProfileTieBreakRank(`${seed}|band`, String(band.length)) % band.length;
+  return band[index];
+}
+
+function purposeProfileTopBand(ranked) {
+  if (!Array.isArray(ranked) || ranked.length === 0) return [];
+  const top = ranked[0];
+  const threshold = Math.max(top.score * 0.92, top.score - 0.28);
+  return ranked.filter((item) => item.score >= threshold);
+}
+
+function buildPurposeProfileEvidenceTokens(input) {
+  const combined = [
+    input.stress || "",
+    input.breaksFirst || "",
+    input.planningStyle || "",
+    input.firstChange || "",
+    input.rootCause || "",
+    input.nextDirection || "",
+    input.vision || "",
+    Array.isArray(input.passions) ? input.passions.join(" ") : ""
+  ].join(" ");
+  const tokens = new Set(purposeProfileTokenSet(combined));
+  const signal = String(combined || "").toLowerCase();
+
+  const expansions = [
+    ["too many priorities", ["competing", "priorities", "tradeoffs", "coordination"]],
+    ["feeling behind", ["chaos", "stability", "cadence", "consistency"]],
+    ["disorganized", ["chaos", "stability", "structure"]],
+    ["distractions", ["focus", "noise", "context", "switching"]],
+    ["work pressure", ["pressure", "commitments", "deadlines"]],
+    ["money pressure", ["resources", "constraints", "budget", "finance"]],
+    ["low energy", ["energy", "capacity", "recovery"]],
+    ["health", ["energy", "capacity", "recovery"]],
+    ["relationship tension", ["interpersonal", "tension", "conflict"]],
+    ["i don t start", ["start", "activation", "friction"]],
+    ["lose momentum", ["consistency", "cadence", "follow", "through"]],
+    ["distracted", ["focus", "context", "switching"]],
+    ["overthink", ["analysis", "delay", "specificity"]],
+    ["don t finish", ["finish", "follow", "through", "consistency"]],
+    ["react to what s urgent", ["urgent", "reactive", "firefighting", "triage"]],
+    ["off track", ["drift", "consistency", "boundary"]],
+    ["follow through consistently", ["consistency", "cadence", "reliability"]],
+    ["in control", ["clarity", "standards", "ownership"]],
+    ["clear direction", ["clarity", "priorities", "alignment"]],
+    ["faster progress", ["momentum", "velocity", "shipping"]],
+    ["balanced across life", ["balance", "harmony", "alignment"]]
+  ];
+
+  for (const [needle, mapped] of expansions) {
+    if (!signal.includes(needle)) continue;
+    for (const token of mapped) {
+      tokens.add(token);
+    }
+  }
+
+  return tokens;
+}
+
+function purposeProfileTokenSet(raw) {
+  const stopWords = new Set([
+    "and", "are", "for", "from", "that", "this", "with", "your", "you", "the",
+    "will", "into", "when", "then", "what", "have", "has", "but", "not", "yet",
+    "too", "very", "more", "less", "across", "life", "loom", "through", "only"
+  ]);
+  return new Set(
+    String(raw || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9 ]/g, " ")
+      .split(/\s+/)
+      .map((token) => token.trim())
+      .filter((token) => token.length > 2 && !stopWords.has(token))
+  );
+}
+
+function purposeProfileOverlap(aSet, bSet) {
+  if (!aSet?.size || !bSet?.size) return 0;
+  let intersection = 0;
+  for (const token of aSet) {
+    if (bSet.has(token)) intersection += 1;
+  }
+  return intersection / Math.max(1, bSet.size);
+}
+
+function purposeProfileTieBreakRank(seed, profile) {
+  return stableHash64(`${seed}|${String(profile || "").toLowerCase()}`);
+}
+
+function stableHash64(value) {
+  let hash = 1469598103934665603n;
+  const prime = 1099511628211n;
+  const text = String(value || "");
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= BigInt(text.charCodeAt(i));
+    hash = (hash * prime) & 0xffffffffffffffffn;
+  }
+  return Number(hash & 0x1fffffffffffffn);
 }
 
 function uniqueOrdered(items) {
@@ -1789,6 +2095,38 @@ function extractResponsesUsage(parsed) {
     cachedInputTokens: Number.isFinite(cachedInputTokens) ? Math.max(0, Math.floor(cachedInputTokens)) : 0,
     outputTokens: Number.isFinite(outputTokens) ? Math.max(0, Math.floor(outputTokens)) : 0,
     totalTokens: Number.isFinite(totalTokens) ? Math.max(0, Math.floor(totalTokens)) : null
+  };
+}
+
+function extractResponsesUsageFromText(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return extractResponsesUsage(parsed);
+  } catch {
+    return null;
+  }
+}
+
+function combineResponsesUsage(a, b) {
+  const first = a && typeof a === "object" ? a : null;
+  const second = b && typeof b === "object" ? b : null;
+  if (!first && !second) return null;
+  if (!first) return second;
+  if (!second) return first;
+  const add = (x, y) => {
+    const xn = Number(x);
+    const yn = Number(y);
+    const xv = Number.isFinite(xn) ? xn : 0;
+    const yv = Number.isFinite(yn) ? yn : 0;
+    return xv + yv;
+  };
+  return {
+    inputTokens: add(first.inputTokens, second.inputTokens),
+    cachedInputTokens: add(first.cachedInputTokens, second.cachedInputTokens),
+    outputTokens: add(first.outputTokens, second.outputTokens),
+    totalTokens: add(first.totalTokens, second.totalTokens)
   };
 }
 

@@ -1,12 +1,27 @@
 import SwiftUI
 
-private struct IntroRouteLinesCanvas: View {
+struct IntroRouteLinesCanvas: View {
     let lineCount: Int
     let colors: [Color]
     let laneOffsetForIndex: (Int, Int) -> CGFloat
     let routedPoint: (CGFloat, CGSize, CGFloat) -> CGPoint
+    let lineSeedOffset: Int
 
     @State private var animationStartDate: Date = .now
+
+    init(
+        lineCount: Int,
+        colors: [Color],
+        laneOffsetForIndex: @escaping (Int, Int) -> CGFloat,
+        routedPoint: @escaping (CGFloat, CGSize, CGFloat) -> CGPoint,
+        lineSeedOffset: Int = 0
+    ) {
+        self.lineCount = lineCount
+        self.colors = colors
+        self.laneOffsetForIndex = laneOffsetForIndex
+        self.routedPoint = routedPoint
+        self.lineSeedOffset = lineSeedOffset
+    }
 
     private func rand(_ seed: Int, _ a: Double, _ b: Double) -> Double {
         let seedD = Double(seed)
@@ -27,28 +42,29 @@ private struct IntroRouteLinesCanvas: View {
                 let startupElapsed = context.date.timeIntervalSince(animationStartDate)
 
                 for i in 0..<lineCount {
+                    let seededIndex = i + (lineSeedOffset * 997)
                     let color = colors[i % colors.count]
                     let laneOffset = laneOffsetForIndex(i, max(lineCount, 1))
 
-                    let lineDelay = rand(i * 83 + 17, 0.00, 0.36)
-                    let lineRevealDuration = rand(i * 89 + 23, 0.62, 1.05)
+                    let lineDelay = rand(seededIndex * 83 + 17, 0.00, 0.36)
+                    let lineRevealDuration = rand(seededIndex * 89 + 23, 0.62, 1.05)
                     let rawReveal = (startupElapsed - lineDelay) / lineRevealDuration
                     let revealProgress = max(0.0, min(rawReveal, 1.0))
                     if revealProgress <= 0.0 { continue }
 
-                    let speed = rand(i * 13 + 1, 0.15, 0.35)
-                    let phase = rand(i * 17 + 3, 0.0, 1.0)
+                    let speed = rand(seededIndex * 13 + 1, 0.15, 0.35)
+                    let phase = rand(seededIndex * 17 + 3, 0.0, 1.0)
                     let posFrac = (t * speed + phase).truncatingRemainder(dividingBy: 1)
 
-                    let amp = rand(i * 23 + 5, 10.0, 40.0)
-                    let freq = rand(i * 29 + 9, 2.0, 6.0)
-                    let sigma = rand(i * 31 + 11, 0.08, 0.16)
-                    let wobblePhase = rand(i * 37 + 13, 0.0, 2 * .pi)
-                    let chop1 = rand(i * 41 + 101, 6.0, 12.0)
-                    let chop2 = rand(i * 47 + 103, 12.0, 22.0)
-                    let chopPhase1 = rand(i * 53 + 107, 0.0, 2 * .pi)
-                    let chopPhase2 = rand(i * 59 + 109, 0.0, 2 * .pi)
-                    let timeScale: Double = 0.8 + rand(i * 61 + 113, 0.0, 0.8)
+                    let amp = rand(seededIndex * 23 + 5, 10.0, 40.0)
+                    let freq = rand(seededIndex * 29 + 9, 2.0, 6.0)
+                    let sigma = rand(seededIndex * 31 + 11, 0.08, 0.16)
+                    let wobblePhase = rand(seededIndex * 37 + 13, 0.0, 2 * .pi)
+                    let chop1 = rand(seededIndex * 41 + 101, 6.0, 12.0)
+                    let chop2 = rand(seededIndex * 47 + 103, 12.0, 22.0)
+                    let chopPhase1 = rand(seededIndex * 53 + 107, 0.0, 2 * .pi)
+                    let chopPhase2 = rand(seededIndex * 59 + 109, 0.0, 2 * .pi)
+                    let timeScale: Double = 0.8 + rand(seededIndex * 61 + 113, 0.0, 0.8)
                     let oceanTime: Double = t * timeScale
 
                     var path = Path()

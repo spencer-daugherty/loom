@@ -2203,9 +2203,8 @@ struct PurposeStartView: View {
     }
 
     private func generatePurposeInsights(forceRefresh: Bool = false) async {
-        let fallbackRecord = defaultPurposeInsightRecord()
         guard let personalizationSnapshot else {
-            applyPurposeInsightRecord(fallbackRecord)
+            applyPurposeInsightRecord(PurposeProfilesCatalog.fallback())
             return
         }
 
@@ -2217,6 +2216,16 @@ struct PurposeStartView: View {
             ? currentDrivingForce?.ultimateVision.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             : visionTrimmed
         let passions = currentPassionPhrasesForProfileInsights()
+        let fallbackRecord = defaultPurposeInsightRecord(
+            stress: diagnostics.stress,
+            breakPoint: diagnostics.breaksFirst,
+            planning: diagnostics.planningStyle,
+            desired: diagnostics.firstChange,
+            rootCause: rootCause,
+            nextDirection: nextDirection,
+            vision: currentVision,
+            passions: passions
+        )
         let userKey = PersonalizationUserIdentity.currentUserKey()
         let monthKey = PurposeProfileInsightsHasher.monthKey()
         let cycleKey = "\(userKey)|\(monthKey)"
@@ -2473,41 +2482,28 @@ struct PurposeStartView: View {
         try? context.save()
     }
 
-    private func defaultPurposeInsightRecord() -> PurposeProfileRecord {
-        let diagnostics = personalizationSnapshot
-        let stress = diagnostics?.stressSource.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let breakPoint = diagnostics?.breakPoint.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let planning = diagnostics?.planningReality.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let desired = diagnostics?.desiredChange.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let preferredProfile = purposeProfileDescriptor(
-            stress: stress,
-            breakPoint: breakPoint,
-            planning: planning,
-            desired: desired
-        )
-        return PurposeProfilesCatalog.record(named: preferredProfile) ?? PurposeProfilesCatalog.fallback()
-    }
-
-    private func purposeProfileDescriptor(
+    private func defaultPurposeInsightRecord(
         stress: String,
         breakPoint: String,
         planning: String,
-        desired: String
-    ) -> String {
-        let signal = "\(stress) \(breakPoint) \(planning) \(desired)".lowercased()
-        if signal.contains("overwhelm") || signal.contains("too many") || signal.contains("competing") {
-            return "Strategic Integrator"
-        }
-        if signal.contains("reactive") || signal.contains("chaotic") || signal.contains("behind") {
-            return "Adaptive Stabilizer"
-        }
-        if signal.contains("balance") || signal.contains("aligned") {
-            return "Steady Alignment Builder"
-        }
-        if signal.contains("control") || signal.contains("clarity") || signal.contains("structure") {
-            return "Structured Clarity Driver"
-        }
-        return "Purpose-Led Planner"
+        desired: String,
+        rootCause: String,
+        nextDirection: String,
+        vision: String,
+        passions: [String]
+    ) -> PurposeProfileRecord {
+        PurposeProfileMatcher.bestMatch(
+            inputs: .init(
+                stress: stress,
+                breakPoint: breakPoint,
+                planning: planning,
+                desired: desired,
+                rootCause: rootCause,
+                nextDirection: nextDirection,
+                vision: vision,
+                passions: passions
+            )
+        )
     }
 
     private func decodeAutoWritePassionSuggestions(from raw: String) -> [AutoWritePassionSuggestion] {

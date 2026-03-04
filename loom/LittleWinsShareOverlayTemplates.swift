@@ -9,6 +9,7 @@ enum LittleWinsShareTemplate: String, CaseIterable, Identifiable {
     case fullSnapshot
     case fullHouse
     case royalFlush
+    case foundingMember
 
     var id: String { rawValue }
 
@@ -30,6 +31,8 @@ enum LittleWinsShareTemplate: String, CaseIterable, Identifiable {
             return "Full House"
         case .royalFlush:
             return "Royal Flush"
+        case .foundingMember:
+            return "Founding Member"
         }
     }
 
@@ -51,6 +54,8 @@ enum LittleWinsShareTemplate: String, CaseIterable, Identifiable {
             return "Unlock with all cards completed"
         case .royalFlush:
             return "Unlock with 7 straight full-house days"
+        case .foundingMember:
+            return "Locked"
         }
     }
 }
@@ -158,6 +163,8 @@ struct LittleWinsShareOverlayTemplateView: View {
                 fullHouseLayout
             case .royalFlush:
                 royalFlushLayout
+            case .foundingMember:
+                foundingMemberLayout
             }
         }
     }
@@ -290,20 +297,40 @@ struct LittleWinsShareOverlayTemplateView: View {
         }
     }
 
+    private var foundingMemberLayout: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            templateTitle("Founding Member")
+            Spacer(minLength: 0)
+        }
+        .padding(standardTemplatePadding)
+        .overlay {
+            lockedTemplateOverlay(text: "Founding Member template is locked for now")
+        }
+    }
+
     private func templateTitle(_ text: String) -> some View {
-        Text(text)
-            .font(.headline.weight(.semibold))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(Color.black.opacity(0.40))
-            )
-            .overlay(
-                Capsule(style: .continuous)
-                    .stroke(Color.white.opacity(0.22), lineWidth: 1)
-            )
+        let badgeHeight: CGFloat = 32
+
+        return HStack(spacing: 8) {
+            Image("logo")
+                .resizable()
+                .scaledToFit()
+                .frame(height: badgeHeight)
+
+            Text(text)
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12)
+                .frame(minHeight: badgeHeight)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(Color.black.opacity(0.40))
+                )
+                .overlay(
+                    Capsule(style: .continuous)
+                        .stroke(Color.white.opacity(0.22), lineWidth: 1)
+                )
+        }
     }
 
     private func templateCardsGrid(cards: [LittleWinsShareOverlayCard], cardOpacity: Double) -> some View {
@@ -312,19 +339,14 @@ struct LittleWinsShareOverlayTemplateView: View {
             GridItem(.flexible(), spacing: 12, alignment: .top),
             GridItem(.flexible(), spacing: 12, alignment: .top)
         ]
-        let cardWidth = max(100, (UIScreen.main.bounds.width - 40 - 12) / 2)
-        let cardHeight = min(cardWidth * 1.42, 252)
-        let rowCount = max(1, Int(ceil(Double(max(visibleCards.count, 1)) / 2.0)))
-        let gridHeight = (CGFloat(rowCount) * cardHeight) + (CGFloat(max(0, rowCount - 1)) * 12)
 
         return LazyVGrid(columns: columns, spacing: 12) {
             ForEach(visibleCards) { card in
                 littleWinsCard(card)
-                    .frame(height: cardHeight)
+                    .aspectRatio(1.0 / 1.42, contentMode: .fit)
                     .opacity(cardOpacity)
             }
         }
-        .frame(height: gridHeight, alignment: .top)
     }
 
     private func streakSummaryCard(title: String, subtitle: String) -> some View {
@@ -647,8 +669,8 @@ struct LittleWinsShareOverlayTemplateView: View {
     ) -> some View {
         let cornerShapeSize: CGFloat = max(20, 52 * scale)
         let cornerShapePadding: CGFloat = max(6, 14 * scale)
-        let topTitleCutoutWidth = min(max(width * 0.62, 200), width - 86)
-        let bottomTitleCutoutWidth = min(max(width * 0.32, 120), 180)
+        let topTitleCutoutWidth = max(0, min(max(width * 0.62, 200), width - 86))
+        let bottomTitleCutoutWidth = max(0, min(max(width * 0.32, 120), 180))
         let largeInsetLineWidth = max(1.2, 4 * scale)
         let shapeLineWidth = max(1.8, 6 * scale)
 
@@ -728,17 +750,29 @@ struct LittleWinsShareOverlayTemplateView: View {
         topCutoutWidth: CGFloat? = nil,
         bottomCutoutWidth: CGFloat? = nil
     ) -> some View {
-        let topCutoutWidth = topCutoutWidth ?? min(max(width * 0.34, 120), 190)
-        let bottomCutoutWidth = bottomCutoutWidth ?? min(max(width * 0.56, 180), width - (inset * 2) - 20)
+        let safeWidth = width.isFinite ? max(width, 0) : 0
+        let safeHeight = height.isFinite ? max(height, 0) : 0
+        let sanitizeDimension: (CGFloat) -> CGFloat = { value in
+            guard value.isFinite else { return 0 }
+            return max(value, 0)
+        }
+
+        let defaultTopCutoutWidth = min(max(safeWidth * 0.34, 120), 190)
+        let defaultBottomCutoutWidth = min(
+            max(safeWidth * 0.56, 180),
+            safeWidth - (inset * 2) - 20
+        )
+        let topCutoutWidth = sanitizeDimension(topCutoutWidth ?? defaultTopCutoutWidth)
+        let bottomCutoutWidth = sanitizeDimension(bottomCutoutWidth ?? defaultBottomCutoutWidth)
         let topY = inset
-        let bottomY = height - inset
+        let bottomY = safeHeight - inset
         let topLeadingCutoutCenter = CGPoint(
             x: shapePadding + (shapeSize / 2),
             y: shapePadding + (shapeSize / 2)
         )
         let bottomTrailingCutoutCenter = CGPoint(
-            x: width - shapePadding - (shapeSize / 2),
-            y: height - shapePadding - (shapeSize / 2)
+            x: safeWidth - shapePadding - (shapeSize / 2),
+            y: safeHeight - shapePadding - (shapeSize / 2)
         )
 
         return ZStack {
@@ -749,12 +783,12 @@ struct LittleWinsShareOverlayTemplateView: View {
             Rectangle()
                 .fill(Color.black)
                 .frame(width: topCutoutWidth, height: lineWidth + 10)
-                .position(x: width / 2, y: topY)
+                .position(x: safeWidth / 2, y: topY)
 
             Rectangle()
                 .fill(Color.black)
                 .frame(width: bottomCutoutWidth, height: lineWidth + 10)
-                .position(x: width / 2, y: bottomY)
+                .position(x: safeWidth / 2, y: bottomY)
         }
         .compositingGroup()
         .blendMode(.normal)
@@ -764,11 +798,11 @@ struct LittleWinsShareOverlayTemplateView: View {
                     Rectangle().fill(Color.white)
                     Rectangle()
                         .frame(width: topCutoutWidth, height: lineWidth + 12)
-                        .position(x: width / 2, y: topY)
+                        .position(x: safeWidth / 2, y: topY)
                         .blendMode(.destinationOut)
                     Rectangle()
                         .frame(width: bottomCutoutWidth, height: lineWidth + 12)
-                        .position(x: width / 2, y: bottomY)
+                        .position(x: safeWidth / 2, y: bottomY)
                         .blendMode(.destinationOut)
                     if topLeadingShapeCutout != .zero {
                         RoundedRectangle(cornerRadius: 16, style: .continuous)

@@ -798,8 +798,12 @@ struct FulfillmentView: View {
                     Spacer()
                 }
                 .frame(minHeight: 44, alignment: .center)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 14)
+                .contentShape(Rectangle())
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
             .buttonStyle(.plain)
 
             if !items.isEmpty {
@@ -1982,8 +1986,12 @@ struct FulfillmentView: View {
                                 Spacer()
                             }
                             .frame(minHeight: 44, alignment: .center)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 14)
+                            .contentShape(Rectangle())
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                         .buttonStyle(.plain)
 
                         if !fociForRecord.isEmpty {
@@ -2283,7 +2291,9 @@ struct FulfillmentView: View {
             let contextSnapshot = try LoomAIViewModel().buildContextSnapshot(in: modelContext)
             let response = try await LoomAIService().sendChat(
                 messages: [.init(role: "user", content: fulfillmentReadableInsightPrompt(for: payload))],
-                context: contextSnapshot
+                context: contextSnapshot,
+                intent: "readable_insight_fulfillment",
+                screen: "fulfillment_readable_header"
             )
             let normalized = normalizeFulfillmentReadableInsightMetricReferences(response.message, payload: payload)
             let text = limitFulfillmentReadableInsightText(normalized, maxCharacters: 220)
@@ -3122,6 +3132,7 @@ private struct RoleEditorSheetView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.modelContext) private var modelContext
+    @AppStorage(loomAITroubleshootingDefaultsKey) private var loomAITroubleshootingEnabled = true
     @Query private var roles: [FulfillmentRoles]
     @Query private var fulfillments: [Fulfillment]
 
@@ -3130,6 +3141,8 @@ private struct RoleEditorSheetView: View {
     @State private var autoWriteSuggestions: [String] = []
     @State private var autoWritePreviousSuggestions: [String] = []
     @State private var autoWriteAppliedSuggestion: String?
+    @State private var autoWriteErrorMessage: String? = nil
+    @State private var autoWriteTroubleshootingMessage: String? = nil
     @State private var autoWriteIsLoading = false
     @State private var autoWriteOutlineAngle: Double = 0
     @State private var autoWriteIconAnimating = false
@@ -3165,6 +3178,9 @@ private struct RoleEditorSheetView: View {
     private var doneDisabled: Bool { draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     private var showsAutoWrite: Bool { !isEditing && categoryRoles.count < 3 }
     private let autoWriteFloatingGap: CGFloat = 12
+    private var keyboardAccessoryShowsCheckmark: Bool {
+        !draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 
     private var autoWriteGradient: AngularGradient {
         AngularGradient(
@@ -3242,6 +3258,40 @@ private struct RoleEditorSheetView: View {
         }
     }
 
+    private var keyboardAutoWriteButton: some View {
+        Button {
+            guard !autoWriteIsLoading else { return }
+            Task { await requestAutoWriteSuggestions() }
+        } label: {
+            HStack(spacing: 5) {
+                Image("LoomAI")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 16, height: 16)
+                    .rotation3DEffect(
+                        .degrees(autoWriteIsLoading && autoWriteIconAnimating ? 180 : 0),
+                        axis: (x: 1, y: 0, z: 0)
+                    )
+                Text("AutoWrite")
+                    .font(.subheadline.weight(.semibold))
+            }
+            .foregroundStyle(autoWriteGradient)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule()
+                    .fill(Color(.secondarySystemBackground))
+            )
+            .overlay(
+                Capsule()
+                    .stroke(autoWriteGradient, lineWidth: 1.8)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(autoWriteIsLoading)
+        .opacity(autoWriteIsLoading ? 0.7 : 1)
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -3306,6 +3356,14 @@ private struct RoleEditorSheetView: View {
                                 }
                             }
                         }
+                        if let errorMessage = autoWriteErrorMessage {
+                            autoWriteRetryRow(
+                                message: errorMessage,
+                                troubleshooting: autoWriteTroubleshootingMessage
+                            ) {
+                                Task { await requestAutoWriteSuggestions() }
+                            }
+                        }
                     }
                 }
             }
@@ -3320,11 +3378,46 @@ private struct RoleEditorSheetView: View {
                     Button("Done") { saveAndDismiss() }
                         .disabled(doneDisabled)
                 }
+                ToolbarItemGroup(placement: .keyboard) {
+                    if isTextFocused {
+                        Spacer(minLength: 0)
+                        if showsAutoWrite {
+                            keyboardAutoWriteButton
+                        }
+                        Button {
+                            if keyboardAccessoryShowsCheckmark {
+                                saveAndDismiss()
+                            } else {
+                                isTextFocused = false
+                            }
+                        } label: {
+                            Image(systemName: keyboardAccessoryShowsCheckmark ? "checkmark" : "keyboard.chevron.compact.down")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(keyboardAccessoryShowsCheckmark ? .white : .primary.opacity(0.85))
+                                .frame(width: 30, height: 30)
+                                .background(
+                                    Circle().fill(
+                                        keyboardAccessoryShowsCheckmark
+                                            ? Color.blue
+                                            : Color(.secondarySystemBackground)
+                                    )
+                                )
+                                .overlay(
+                                    Circle()
+                                        .stroke(
+                                            Color.black.opacity(keyboardAccessoryShowsCheckmark ? 0 : 0.08),
+                                            lineWidth: 1
+                                        )
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
             }
         }
         .overlay {
             GeometryReader { proxy in
-                if showsAutoWrite {
+                if showsAutoWrite && !isTextFocused {
                     HStack(spacing: 8) {
                         floatingAutoWriteButton
                     }
@@ -3433,63 +3526,178 @@ private struct RoleEditorSheetView: View {
         guard !autoWriteIsLoading else { return }
         autoWriteIsLoading = true
         let previousSuggestions = autoWritePreviousSuggestions
+        autoWriteErrorMessage = nil
+        autoWriteTroubleshootingMessage = nil
         autoWriteSuggestions = []
         defer { autoWriteIsLoading = false }
 
+        let delaySeconds = Int.random(in: 2...4)
         do {
-            let contextSnapshot = try LoomAIViewModel().buildContextSnapshot(in: modelContext)
-            let roleList = categoryRoles.map(\.role)
-            let existingRoles = roleList.isEmpty ? "<none>" : roleList.joined(separator: ", ")
-            let previousSuggestionsContext = previousSuggestions.isEmpty
-                ? "No prior suggestions."
-                : "Prior suggestions to avoid repeating: \(previousSuggestions.joined(separator: " | "))"
-
-            let instruction = """
-            You are helping with Loom Fulfillment Set Identity (AutoWrite).
-            Fulfillment Area: \(categoryTitle)
-            Current Identities: \(existingRoles)
-            \(previousSuggestionsContext)
-
-            Need ideas guidance to follow:
-            - Roles define identity.
-            - Keep suggestions clear, empowering, and practical for this area.
-            - Avoid repeating or lightly rewording current identities.
-
-            Return JSON only:
-            {"suggestions":[{"identity":"string"}],"confidence":"high|medium|low"}
-
-            Rules:
-            - Return 1-2 suggestions.
-            - identity should be a complete short phrase (about 2-8 words).
-            - no numbering, no bullets, no markdown.
-            """
-
-            let response = try await LoomAIService().sendChat(
-                messages: [.init(role: "user", content: instruction)],
-                context: contextSnapshot
-            )
-            let decoded = decodeIdentitySuggestions(from: response.message)
-            guard !decoded.isEmpty else { return }
-
-            let filtered = decoded.filter { suggestion in
-                let normalized = normalizedAutoWriteText(suggestion)
-                let alreadyExists = roleList.contains { normalizedAutoWriteText($0) == normalized }
-                let usedBefore = previousSuggestions.contains { normalizedAutoWriteText($0) == normalized }
-                return !alreadyExists && !usedBefore
-            }
-            let nextSuggestions = Array((filtered.isEmpty ? decoded : filtered).prefix(2))
-            guard !nextSuggestions.isEmpty else { return }
-            autoWriteSuggestions = nextSuggestions
-            for suggestion in nextSuggestions {
-                let normalized = normalizedAutoWriteText(suggestion)
-                let exists = autoWritePreviousSuggestions.contains { normalizedAutoWriteText($0) == normalized }
-                if !exists {
-                    autoWritePreviousSuggestions.append(suggestion)
-                }
-            }
+            try await Task.sleep(nanoseconds: UInt64(delaySeconds) * 1_000_000_000)
         } catch {
             return
         }
+        if Task.isCancelled { return }
+
+        guard isSelectableDefaultCategoryForAutoWrite(categoryTitle) else {
+            autoWriteSuggestions = []
+            autoWriteErrorMessage = nil
+            autoWriteTroubleshootingMessage = nil
+            return
+        }
+
+        let candidates = identitySuggestionPool(for: categoryTitle)
+        guard !candidates.isEmpty else {
+            autoWriteErrorMessage = "No suggestions yet."
+            autoWriteTroubleshootingMessage = nil
+            return
+        }
+
+        var existingRoles = categoryRoles.map(\.role)
+        let pending = draftText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !pending.isEmpty {
+            existingRoles.append(pending)
+        }
+        let existingSet = Set(existingRoles.map(normalizedAutoWriteText).filter { !$0.isEmpty })
+        let priorSuggestionSet = Set(previousSuggestions.map(normalizedAutoWriteText).filter { !$0.isEmpty })
+
+        let filtered = candidates.filter { suggestion in
+            let normalized = normalizedAutoWriteText(suggestion)
+            if normalized.isEmpty { return false }
+            return !existingSet.contains(normalized) && !priorSuggestionSet.contains(normalized)
+        }
+        let nonExisting = candidates.filter { suggestion in
+            let normalized = normalizedAutoWriteText(suggestion)
+            if normalized.isEmpty { return false }
+            return !existingSet.contains(normalized)
+        }
+
+        let primaryPool: [String]
+        if filtered.count >= 2 {
+            primaryPool = filtered
+        } else if nonExisting.count >= 2 {
+            primaryPool = nonExisting
+        } else {
+            primaryPool = candidates
+        }
+
+        var picked: [String] = []
+        var pickedSet = Set<String>()
+        for candidate in primaryPool.shuffled() {
+            let normalized = normalizedAutoWriteText(candidate)
+            if normalized.isEmpty || pickedSet.contains(normalized) { continue }
+            picked.append(candidate)
+            pickedSet.insert(normalized)
+            if picked.count == 2 { break }
+        }
+        if picked.count < 2 {
+            for candidate in candidates.shuffled() {
+                let normalized = normalizedAutoWriteText(candidate)
+                if normalized.isEmpty || pickedSet.contains(normalized) { continue }
+                picked.append(candidate)
+                pickedSet.insert(normalized)
+                if picked.count == 2 { break }
+            }
+        }
+
+        let nextSuggestions = picked
+            .map(clampedIdentitySuggestion)
+            .filter { !$0.isEmpty }
+            .prefix(2)
+
+        guard nextSuggestions.count == 2 else {
+            autoWriteErrorMessage = "No suggestions yet."
+            autoWriteTroubleshootingMessage = nil
+            return
+        }
+
+        autoWriteSuggestions = Array(nextSuggestions)
+        autoWriteErrorMessage = nil
+        autoWriteTroubleshootingMessage = nil
+        for suggestion in nextSuggestions {
+            let normalized = normalizedAutoWriteText(suggestion)
+            let exists = autoWritePreviousSuggestions.contains { normalizedAutoWriteText($0) == normalized }
+            if !exists {
+                autoWritePreviousSuggestions.append(suggestion)
+            }
+        }
+    }
+
+    private func identitySuggestionPool(for category: String) -> [String] {
+        let normalizedCategory = normalizedCategoryForAutoWrite(category)
+        guard let values = fulfillmentStartIdentitySuggestionMap.first(where: {
+            $0.key.caseInsensitiveCompare(normalizedCategory) == .orderedSame
+        })?.value else {
+            return []
+        }
+
+        return values
+            .map { $0.replacingOccurrences(of: "\"", with: "") }
+            .map { $0.replacingOccurrences(of: "fulfillment_area,identity", with: "") }
+            .map { $0.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression) }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private func isSelectableDefaultCategoryForAutoWrite(_ category: String) -> Bool {
+        let normalizedCategory = normalizedCategoryForAutoWrite(category)
+        return fulfillmentStartSelectableDefaultCategories.contains {
+            $0.caseInsensitiveCompare(normalizedCategory) == .orderedSame
+        }
+    }
+
+    private func normalizedCategoryForAutoWrite(_ category: String) -> String {
+        let trimmed = category.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch trimmed.lowercased() {
+        case "health & vitality":
+            return "Health & Energy"
+        case "wealth & lifestyle":
+            return "Wealth & Finance"
+        case "mind & meaning":
+            return "Mindset & Resilience"
+        case "leadership & impact":
+            return "Service & Impact"
+        default:
+            return trimmed
+        }
+    }
+
+    private func autoWriteRetryRow(
+        message: String,
+        troubleshooting: String?,
+        action: @escaping () -> Void
+    ) -> some View {
+        let hasTroubleshooting = loomAITroubleshootingEnabled && !(troubleshooting ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 6)
+                HStack(spacing: 10) {
+                    Button("Try again", action: action)
+                        .font(.caption.weight(.semibold))
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.blue)
+                    if hasTroubleshooting, let troubleshooting {
+                        Button("Copy troubleshooting") {
+                            loomAICopyTroubleshootingToClipboard(troubleshooting)
+                        }
+                        .font(.caption.weight(.semibold))
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            if hasTroubleshooting, let troubleshooting {
+                LoomAITroubleshootingSection(details: troubleshooting)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     private func decodeIdentitySuggestions(from raw: String) -> [String] {
@@ -3527,9 +3735,11 @@ private struct RoleEditorSheetView: View {
 
     private func normalizedAutoWriteText(_ text: String) -> String {
         text
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .lowercased()
+            .replacingOccurrences(of: #"[^\p{L}\p{N}\s]"#, with: " ", options: .regularExpression)
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
     }
 
     private func autoWriteSuggestionPrimaryColor(isApplied: Bool) -> Color {
@@ -3847,6 +4057,7 @@ struct LittleWinEditorSheetView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.modelContext) private var modelContext
+    @AppStorage(loomAITroubleshootingDefaultsKey) private var loomAITroubleshootingEnabled = true
     @Query private var roles: [FulfillmentRoles]
     @Query private var fulfillments: [Fulfillment]
     @Query private var foci: [FulfillmentFocus]
@@ -3865,6 +4076,8 @@ struct LittleWinEditorSheetView: View {
     @State private var autoWriteSuggestions: [String] = []
     @State private var autoWritePreviousSuggestions: [String] = []
     @State private var autoWriteAppliedSuggestion: String?
+    @State private var autoWriteErrorMessage: String? = nil
+    @State private var autoWriteTroubleshootingMessage: String? = nil
     @State private var autoWriteIsLoading = false
     @State private var autoWriteOutlineAngle: Double = 0
     @State private var autoWriteIconAnimating = false
@@ -3909,6 +4122,9 @@ struct LittleWinEditorSheetView: View {
 
     private var doneDisabled: Bool {
         draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+    private var keyboardAccessoryShowsCheckmark: Bool {
+        !draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var autoWriteGradient: AngularGradient {
@@ -3987,6 +4203,40 @@ struct LittleWinEditorSheetView: View {
         }
     }
 
+    private var keyboardAutoWriteButton: some View {
+        Button {
+            guard !autoWriteIsLoading else { return }
+            Task { await requestAutoWriteSuggestions() }
+        } label: {
+            HStack(spacing: 5) {
+                Image("LoomAI")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 16, height: 16)
+                    .rotation3DEffect(
+                        .degrees(autoWriteIsLoading && autoWriteIconAnimating ? 180 : 0),
+                        axis: (x: 1, y: 0, z: 0)
+                    )
+                Text("AutoWrite")
+                    .font(.subheadline.weight(.semibold))
+            }
+            .foregroundStyle(autoWriteGradient)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule()
+                    .fill(Color(.secondarySystemBackground))
+            )
+            .overlay(
+                Capsule()
+                    .stroke(autoWriteGradient, lineWidth: 1.8)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(autoWriteIsLoading)
+        .opacity(autoWriteIsLoading ? 0.7 : 1)
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -4049,6 +4299,14 @@ struct LittleWinEditorSheetView: View {
                                     .buttonStyle(.plain)
                                     .disabled(isApplied)
                                 }
+                            }
+                        }
+                        if let errorMessage = autoWriteErrorMessage {
+                            autoWriteRetryRow(
+                                message: errorMessage,
+                                troubleshooting: autoWriteTroubleshootingMessage
+                            ) {
+                                Task { await requestAutoWriteSuggestions() }
                             }
                         }
                     }
@@ -4158,11 +4416,46 @@ struct LittleWinEditorSheetView: View {
                     }
                     .disabled(doneDisabled)
                 }
+                ToolbarItemGroup(placement: .keyboard) {
+                    if isTextFocused {
+                        if showsAutoWrite {
+                            keyboardAutoWriteButton
+                        }
+                        Spacer(minLength: 0)
+                        Button {
+                            if keyboardAccessoryShowsCheckmark {
+                                saveAndDismiss()
+                            } else {
+                                isTextFocused = false
+                            }
+                        } label: {
+                            Image(systemName: keyboardAccessoryShowsCheckmark ? "checkmark" : "keyboard.chevron.compact.down")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(keyboardAccessoryShowsCheckmark ? .white : .primary.opacity(0.85))
+                                .frame(width: 30, height: 30)
+                                .background(
+                                    Circle().fill(
+                                        keyboardAccessoryShowsCheckmark
+                                            ? Color.blue
+                                            : Color(.secondarySystemBackground)
+                                    )
+                                )
+                                .overlay(
+                                    Circle()
+                                        .stroke(
+                                            Color.black.opacity(keyboardAccessoryShowsCheckmark ? 0 : 0.08),
+                                            lineWidth: 1
+                                        )
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
             }
         }
         .overlay {
             GeometryReader { proxy in
-                if showsAutoWrite {
+                if showsAutoWrite && !isTextFocused {
                     HStack(spacing: 8) {
                         floatingAutoWriteButton
                     }
@@ -4363,85 +4656,217 @@ struct LittleWinEditorSheetView: View {
         guard !autoWriteIsLoading else { return }
         autoWriteIsLoading = true
         let previousSuggestions = autoWritePreviousSuggestions
+        autoWriteErrorMessage = nil
+        autoWriteTroubleshootingMessage = nil
         autoWriteSuggestions = []
         defer { autoWriteIsLoading = false }
 
+        let delaySeconds = Int.random(in: 2...4)
         do {
-            let contextSnapshot = try LoomAIViewModel().buildContextSnapshot(in: modelContext)
-            let littleWinsNow = littleWins.map(\.activity)
-            let currentLittleWins = littleWinsNow.isEmpty ? "<none>" : littleWinsNow.joined(separator: ", ")
-            let mission = (categoryRecord?.category_purpose ?? "")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let identitiesNow = categoryRoles.map(\.role)
-            let identities = identitiesNow.isEmpty ? "<none>" : identitiesNow.joined(separator: ", ")
-            let previousSuggestionsContext = previousSuggestions.isEmpty
-                ? "No prior suggestions."
-                : "Prior suggestions to avoid repeating: \(previousSuggestions.joined(separator: " | "))"
-
-            let instruction = """
-            You are helping with Loom Fulfillment Little Wins (AutoWrite).
-            Fulfillment Area: \(categoryTitle)
-            Mission: \(mission.isEmpty ? "<none>" : mission)
-            Identities: \(identities)
-            Current Little Wins: \(currentLittleWins)
-            \(previousSuggestionsContext)
-
-            Need ideas guidance to follow:
-            - Small actions create momentum.
-            - Keep each little win concise and practical.
-            - Align suggestions to Mission and Identities when provided.
-            - Avoid repeating or lightly rewording Current Little Wins.
-
-            Return JSON only:
-            {"suggestions":[{"activity":"string"}],"confidence":"high|medium|low"}
-
-            Rules:
-            - Return 1-2 suggestions.
-            - activity should be a complete short action (about 4-14 words).
-            - no numbering, no bullets, no markdown.
-            """
-
-            let response = try await LoomAIService().sendChat(
-                messages: [.init(role: "user", content: instruction)],
-                context: contextSnapshot
-            )
-            let decoded = decodeLittleWinSuggestions(from: response.message)
-            guard !decoded.isEmpty else { return }
-
-            let filtered = decoded.filter { suggestion in
-                let normalized = normalizedAutoWriteText(suggestion)
-                let alreadyExists = littleWinsNow.contains { normalizedAutoWriteText($0) == normalized }
-                let usedBefore = previousSuggestions.contains { normalizedAutoWriteText($0) == normalized }
-                return !alreadyExists && !usedBefore
-            }
-            let nextSuggestions = Array((filtered.isEmpty ? decoded : filtered).prefix(2))
-            guard !nextSuggestions.isEmpty else { return }
-            autoWriteSuggestions = nextSuggestions
-            for suggestion in nextSuggestions {
-                let normalized = normalizedAutoWriteText(suggestion)
-                let exists = autoWritePreviousSuggestions.contains { normalizedAutoWriteText($0) == normalized }
-                if !exists {
-                    autoWritePreviousSuggestions.append(suggestion)
-                }
-            }
+            try await Task.sleep(nanoseconds: UInt64(delaySeconds) * 1_000_000_000)
         } catch {
             return
         }
+        if Task.isCancelled { return }
+
+        guard isSelectableDefaultCategoryForAutoWrite(categoryTitle) else {
+            autoWriteSuggestions = []
+            autoWriteErrorMessage = nil
+            autoWriteTroubleshootingMessage = nil
+            return
+        }
+
+        let candidates = littleWinSuggestionPool(for: categoryTitle)
+        guard !candidates.isEmpty else {
+            autoWriteErrorMessage = "No suggestions yet."
+            autoWriteTroubleshootingMessage = nil
+            return
+        }
+
+        var littleWinsNow = littleWins.map(\.activity)
+        let pending = draftText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !pending.isEmpty {
+            littleWinsNow.append(pending)
+        }
+        let existingSet = Set(littleWinsNow.map(normalizedAutoWriteText).filter { !$0.isEmpty })
+        let priorSuggestionSet = Set(previousSuggestions.map(normalizedAutoWriteText).filter { !$0.isEmpty })
+
+        let filtered = candidates.filter { suggestion in
+            let normalized = normalizedAutoWriteText(suggestion)
+            if normalized.isEmpty { return false }
+            return !existingSet.contains(normalized) && !priorSuggestionSet.contains(normalized)
+        }
+        let nonExisting = candidates.filter { suggestion in
+            let normalized = normalizedAutoWriteText(suggestion)
+            if normalized.isEmpty { return false }
+            return !existingSet.contains(normalized)
+        }
+
+        let primaryPool: [String]
+        if filtered.count >= 2 {
+            primaryPool = filtered
+        } else if nonExisting.count >= 2 {
+            primaryPool = nonExisting
+        } else {
+            primaryPool = candidates
+        }
+
+        var picked: [String] = []
+        var pickedSet = Set<String>()
+        for candidate in primaryPool.shuffled() {
+            let normalized = normalizedAutoWriteText(candidate)
+            if normalized.isEmpty || pickedSet.contains(normalized) { continue }
+            picked.append(candidate)
+            pickedSet.insert(normalized)
+            if picked.count == 2 { break }
+        }
+        if picked.count < 2 {
+            for candidate in candidates.shuffled() {
+                let normalized = normalizedAutoWriteText(candidate)
+                if normalized.isEmpty || pickedSet.contains(normalized) { continue }
+                picked.append(candidate)
+                pickedSet.insert(normalized)
+                if picked.count == 2 { break }
+            }
+        }
+
+        var nextSuggestions = picked
+            .map(clampedLittleWinSuggestion)
+            .filter { !$0.isEmpty }
+            .filter { !isLittleWinSuggestionTooSimilarToExisting($0, existing: littleWinsNow) }
+        nextSuggestions = Array(nextSuggestions.prefix(2))
+
+        guard nextSuggestions.count == 2 else {
+            autoWriteErrorMessage = "No new suggestions yet."
+            autoWriteTroubleshootingMessage = nil
+            return
+        }
+
+        autoWriteSuggestions = nextSuggestions
+        autoWriteErrorMessage = nil
+        autoWriteTroubleshootingMessage = nil
+        for suggestion in nextSuggestions {
+            let normalized = normalizedAutoWriteText(suggestion)
+            let exists = autoWritePreviousSuggestions.contains { normalizedAutoWriteText($0) == normalized }
+            if !exists {
+                autoWritePreviousSuggestions.append(suggestion)
+            }
+        }
+    }
+
+    private func littleWinSuggestionPool(for category: String) -> [String] {
+        let normalizedCategory = normalizedCategoryForAutoWrite(category)
+        if isHealthEnergyCategoryForAutoWrite(normalizedCategory) {
+            return fulfillmentStartHealthEnergyLittleWinFlags
+                .map(\.activity)
+                .map { $0.replacingOccurrences(of: "\"", with: "") }
+                .map { $0.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression) }
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        }
+
+        guard let corpus = fulfillmentStartLittleWinCorpusByCategory.first(where: {
+            $0.key.caseInsensitiveCompare(normalizedCategory) == .orderedSame
+        })?.value else {
+            return []
+        }
+
+        return corpus
+            .components(separatedBy: .newlines)
+            .map { $0.replacingOccurrences(of: "\"", with: "") }
+            .map { $0.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression) }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private func isSelectableDefaultCategoryForAutoWrite(_ category: String) -> Bool {
+        let normalizedCategory = normalizedCategoryForAutoWrite(category)
+        return fulfillmentStartSelectableDefaultCategories.contains {
+            $0.caseInsensitiveCompare(normalizedCategory) == .orderedSame
+        }
+    }
+
+    private func isHealthEnergyCategoryForAutoWrite(_ category: String) -> Bool {
+        category.caseInsensitiveCompare("Health & Energy") == .orderedSame
+    }
+
+    private func normalizedCategoryForAutoWrite(_ category: String) -> String {
+        let trimmed = category.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch trimmed.lowercased() {
+        case "health & vitality":
+            return "Health & Energy"
+        case "wealth & lifestyle":
+            return "Wealth & Finance"
+        case "mind & meaning":
+            return "Mindset & Resilience"
+        case "leadership & impact":
+            return "Service & Impact"
+        default:
+            return trimmed
+        }
+    }
+
+    private func autoWriteRetryRow(
+        message: String,
+        troubleshooting: String?,
+        action: @escaping () -> Void
+    ) -> some View {
+        let hasTroubleshooting = loomAITroubleshootingEnabled && !(troubleshooting ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 6)
+                HStack(spacing: 10) {
+                    Button("Try again", action: action)
+                        .font(.caption.weight(.semibold))
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.blue)
+                    if hasTroubleshooting, let troubleshooting {
+                        Button("Copy troubleshooting") {
+                            loomAICopyTroubleshootingToClipboard(troubleshooting)
+                        }
+                        .font(.caption.weight(.semibold))
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            if hasTroubleshooting, let troubleshooting {
+                LoomAITroubleshootingSection(details: troubleshooting)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     private func decodeLittleWinSuggestions(from raw: String) -> [String] {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let data = trimmed.data(using: .utf8),
-           let parsed = try? JSONDecoder().decode(LittleWinAutoWriteResponse.self, from: data) {
-            let normalized = (parsed.suggestions ?? [])
-                .compactMap { dto -> String? in
-                    let rawValue = (dto.activity ?? dto.littleWin ?? dto.text ?? "")
-                        .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                    let suggestion = clampedLittleWinSuggestion(rawValue)
-                    return suggestion.isEmpty ? nil : suggestion
+        if let data = trimmed.data(using: .utf8) {
+            if let parsed = try? JSONDecoder().decode(LittleWinAutoWriteResponse.self, from: data) {
+                let normalized = (parsed.suggestions ?? [])
+                    .compactMap { dto -> String? in
+                        let rawValue = (dto.activity ?? dto.littleWin ?? dto.text ?? "")
+                            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                        let suggestion = clampedLittleWinSuggestion(rawValue)
+                        return suggestion.isEmpty ? nil : suggestion
+                    }
+                return Array(normalized.prefix(2))
+            }
+            if let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let suggestionsMap = root["suggestions"] as? [String: Any] {
+                let mapped = suggestionsMap.values
+                    .map { clampedLittleWinSuggestion(String(describing: $0)) }
+                    .filter { !$0.isEmpty }
+                if !mapped.isEmpty {
+                    return Array(mapped.prefix(2))
                 }
-            return Array(normalized.prefix(2))
+            }
         }
 
         let fallback = trimmed
@@ -4462,11 +4887,32 @@ struct LittleWinEditorSheetView: View {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private func isLittleWinSuggestionTooSimilarToExisting(_ candidate: String, existing: [String]) -> Bool {
+        let candidateNorm = normalizedAutoWriteText(candidate)
+        guard !candidateNorm.isEmpty else { return false }
+        let candidateTokens = Set(candidateNorm.split(separator: " ").map(String.init))
+        for item in existing {
+            let itemNorm = normalizedAutoWriteText(item)
+            if itemNorm.isEmpty { continue }
+            if itemNorm == candidateNorm { return true }
+            if candidateNorm.contains(itemNorm) || itemNorm.contains(candidateNorm) { return true }
+            let itemTokens = Set(itemNorm.split(separator: " ").map(String.init))
+            if !itemTokens.isEmpty {
+                let overlap = candidateTokens.intersection(itemTokens).count
+                let ratio = Double(overlap) / Double(max(1, min(candidateTokens.count, itemTokens.count)))
+                if ratio >= 0.6 { return true }
+            }
+        }
+        return false
+    }
+
     private func normalizedAutoWriteText(_ text: String) -> String {
         text
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .lowercased()
+            .replacingOccurrences(of: #"[^\p{L}\p{N}\s]"#, with: " ", options: .regularExpression)
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
     }
 
     private func autoWriteSuggestionPrimaryColor(isApplied: Bool) -> Color {
@@ -5021,6 +5467,7 @@ private struct FulfillmentTrendsView: View {
     @State private var cachedDisplayCategoryTitleByID: [UUID: String] = [:]
     @State private var aiReadableInsightsByKey: [String: String] = [:]
     @State private var aiReadableInsightLoadingKeys: Set<String> = []
+    @State private var isHowItWorksExpanded = false
 
     private var snapshots: [FulfillmentCategoryScoreSnapshot] {
         cachedFilteredSnapshots
@@ -5326,7 +5773,7 @@ private struct FulfillmentTrendsView: View {
     }
 
     var body: some View {
-        ScrollView {
+        ScrollView(.vertical) {
             VStack(alignment: .leading, spacing: 12) {
                 if shouldShowBaselineMethodologyCard {
                     baselineMethodologyCard
@@ -5577,23 +6024,25 @@ private struct FulfillmentTrendsView: View {
     }
 
     private var baselineMethodologyCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let cautionTextColor = Color.black.opacity(0.78)
+        return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Color.orange)
                 Text("Baseline Mode")
                     .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(cautionTextColor)
             }
 
-            Text("Loom is establishing your first Fulfillment baseline from weekly signals like Structure, Outcomes, Action Blocks, Little Wins, Engagement, and Strategic Behavior.")
+            Text("Your starting value is set at the midpoint so Loom can establish a neutral baseline before enough trend data exists.")
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(cautionTextColor)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Text("Fulfillment Insights update weekly, so you can continuously improve each area and see traction build.")
+            Text("What you do can move this score up to signal progress, or down to signal lack of attention.")
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(cautionTextColor)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(12)
@@ -5666,6 +6115,8 @@ private struct FulfillmentTrendsView: View {
                 }
                 .padding(10)
                 .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+
+                fulfillmentInsightsMethodologySection(for: snap)
             }
         }
     }
@@ -5676,6 +6127,100 @@ private struct FulfillmentTrendsView: View {
             Spacer(minLength: 0)
             Text(value).font(.subheadline.weight(.semibold)).foregroundStyle(color)
         }
+    }
+
+    @ViewBuilder
+    private func fulfillmentInsightsMethodologySection(for snap: FulfillmentCategoryScoreSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Text("Last update: \(insightsDateText(snap.updatedAt))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+                Text("Next update: \(insightsDateText(nextFulfillmentUpdateDate(from: snap.updatedAt)))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Button {
+                withAnimation(.easeInOut(duration: 0.22)) {
+                    isHowItWorksExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Text("How it works")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                    Image(systemName: isHowItWorksExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .buttonStyle(.plain)
+
+            if isHowItWorksExpanded {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Loom blends your weekly score trend with execution signals to identify where support is strong and where friction is blocking results. It then surfaces the highest-leverage focus so improvements are measurable, repeatable, and easier to sustain.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        fulfillmentMetricLegendRow("Current Score", "overall area level")
+                        fulfillmentMetricLegendRow("Week Score", "this week's target")
+                        fulfillmentMetricLegendRow("Momentum", "direction of change")
+                        fulfillmentMetricLegendRow("Consistency", "stability over time")
+                        fulfillmentMetricLegendRow("Structure", "clarity and setup")
+                        fulfillmentMetricLegendRow("Outcomes", "outcome alignment")
+                        fulfillmentMetricLegendRow("Action blocks", "planned execution support")
+                        fulfillmentMetricLegendRow("Little Wins", "daily execution follow-through")
+                        fulfillmentMetricLegendRow("Engagement", "active involvement")
+                        fulfillmentMetricLegendRow("Strategic Behavior", "high-value prioritization")
+                        fulfillmentMetricLegendRow("Carryover penalty", "unfinished work drag")
+                    }
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .padding(10)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func fulfillmentMetricLegendRow(_ title: String, _ description: String) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Text("•")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text("\(title): \(description)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func nextFulfillmentUpdateDate(from lastUpdate: Date) -> Date {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: .now)
+        var nextDate = calendar.date(byAdding: .day, value: 7, to: calendar.startOfDay(for: lastUpdate)) ?? today
+        var guardCount = 0
+        while nextDate < today && guardCount < 520 {
+            nextDate = calendar.date(byAdding: .day, value: 7, to: nextDate) ?? today
+            guardCount += 1
+        }
+        return nextDate
+    }
+
+    private func insightsDateText(_ date: Date) -> String {
+        let calendar = Calendar.current
+        let currentYear = calendar.component(.year, from: .now)
+        let dateYear = calendar.component(.year, from: date)
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = (currentYear == dateYear) ? "M/d" : "M/d/yyyy"
+        return formatter.string(from: date)
     }
 
     private var categoriesSection: some View {
@@ -5923,7 +6468,9 @@ private struct FulfillmentTrendsView: View {
             let contextSnapshot = try LoomAIViewModel().buildContextSnapshot(in: modelContext)
             let response = try await LoomAIService().sendChat(
                 messages: [.init(role: "user", content: fulfillmentReadableInsightPrompt(for: payload))],
-                context: contextSnapshot
+                context: contextSnapshot,
+                intent: "readable_insight_fulfillment",
+                screen: "fulfillment_readable_trends"
             )
             let normalized = normalizeFulfillmentReadableInsightMetricReferences(response.message, payload: payload)
             let text = limitFulfillmentReadableInsightText(normalized, maxCharacters: 220)

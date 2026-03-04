@@ -192,6 +192,11 @@ private func groupedDecimalStringOutcome(_ value: Double, fractionDigits: Int) -
 }
 
 struct OutcomeView: View {
+    private enum OutcomeKeyboardField: Hashable {
+        case goal
+        case reasons
+    }
+
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
@@ -235,6 +240,7 @@ struct OutcomeView: View {
     @State private var measureDecimalPlaces: Int = 0
     @State private var updateGoalInput: String = ""
     @State private var updateGoalDate: Date = Calendar.current.startOfDay(for: .now)
+    @FocusState private var focusedOutcomeField: OutcomeKeyboardField?
     @FocusState private var isUpdateGoalFieldFocused: Bool
     @State private var completionSuccessLevel: Int = 3
     @State private var completionJournalText: String = ""
@@ -270,6 +276,25 @@ struct OutcomeView: View {
 
     private var popupForegroundColor: Color {
         Color.black.opacity(0.7)
+    }
+
+    private var outcomeFieldKeyboardShowsCheckmark: Bool {
+        switch focusedOutcomeField {
+        case .goal:
+            return !goal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .reasons:
+            return !reasons.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .none:
+            return false
+        }
+    }
+
+    private var updateGoalKeyboardShowsCheckmark: Bool {
+        !updateGoalInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var completionJournalKeyboardShowsCheckmark: Bool {
+        !completionJournalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var categoryOptions: [String] {
@@ -824,8 +849,16 @@ struct OutcomeView: View {
             )
             contributingLittleWinsSection
             contributingActionsSection
-            GoalSection(goal: $goal)
-            ReasonsSection(reasons: $reasons)
+            Section("Goal") {
+                TextField("Enter your goal", text: $goal)
+                    .submitLabel(.done)
+                    .focused($focusedOutcomeField, equals: .goal)
+            }
+            Section("Reasons") {
+                TextField("Why is this important?", text: $reasons)
+                    .submitLabel(.done)
+                    .focused($focusedOutcomeField, equals: .reasons)
+            }
             if !isStartEditable {
                 OutcomeStartedOnSection(startDate: outcome.start)
             } else {
@@ -862,6 +895,23 @@ struct OutcomeView: View {
             .navigationTitle(goal.isEmpty ? "Outcome" : goal)
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.visible, for: .navigationBar)
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    if focusedOutcomeField != nil {
+                        Spacer(minLength: 0)
+                        Button {
+                            guard outcomeFieldKeyboardShowsCheckmark else {
+                                focusedOutcomeField = nil
+                                return
+                            }
+                            focusedOutcomeField = nil
+                        } label: {
+                            keyboardAccessoryIcon(showCheckmark: outcomeFieldKeyboardShowsCheckmark)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
             .alert("Delete Outcome?", isPresented: $isShowingDeleteOutcomeAlert) {
                 Button("Delete", role: .destructive) {
                     let archivedOutcome = OutcomesArchive(
@@ -1088,6 +1138,27 @@ struct OutcomeView: View {
                     triggerUpdateGoalFieldFocus()
                 }
                 .toolbar {
+                    ToolbarItemGroup(placement: .keyboard) {
+                        if isUpdateGoalFieldFocused {
+                            Spacer(minLength: 0)
+                            Button {
+                                guard updateGoalKeyboardShowsCheckmark else {
+                                    isUpdateGoalFieldFocused = false
+                                    return
+                                }
+
+                                isUpdateGoalFieldFocused = false
+                                let newGoalValue = parseFormattedDecimalOutcome(updateGoalInput)
+                                if let newGoalValue, newGoalValue != (currentGoalValue ?? 0) {
+                                    saveUpdatedGoal(newGoalValue)
+                                }
+                                isShowingUpdateGoalSheet = false
+                            } label: {
+                                keyboardAccessoryIcon(showCheckmark: updateGoalKeyboardShowsCheckmark)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
                     ToolbarItem(placement: .cancellationAction) {
                         Button("Cancel") {
                             isShowingUpdateGoalSheet = false
@@ -1220,12 +1291,15 @@ struct OutcomeView: View {
                 }
                 .toolbar {
                     ToolbarItemGroup(placement: .keyboard) {
-                        Spacer()
-                        Button("Done") {
-                            isCompletionJournalFocused = false
-                            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                        if isCompletionJournalFocused {
+                            Spacer(minLength: 0)
+                            Button {
+                                isCompletionJournalFocused = false
+                            } label: {
+                                keyboardAccessoryIcon(showCheckmark: completionJournalKeyboardShowsCheckmark)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .foregroundStyle(.blue)
                     }
                     ToolbarItem(placement: .cancellationAction) {
                         Button("Cancel") { isShowingCompleteOutcomeSheet = false }
@@ -1616,6 +1690,28 @@ struct OutcomeView: View {
                 : min(3, max(0, measureDecimalPlaces))
             measureGoal = groupedDecimalStringOutcome(value, fractionDigits: places)
         }
+    }
+
+    @ViewBuilder
+    private func keyboardAccessoryIcon(showCheckmark: Bool) -> some View {
+        Image(systemName: showCheckmark ? "checkmark" : "keyboard.chevron.compact.down")
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(showCheckmark ? .white : .primary.opacity(0.85))
+            .frame(width: 30, height: 30)
+            .background(
+                Circle().fill(
+                    showCheckmark
+                        ? Color.blue
+                        : Color(.secondarySystemBackground)
+                )
+            )
+            .overlay(
+                Circle()
+                    .stroke(
+                        Color.black.opacity(showCheckmark ? 0 : 0.08),
+                        lineWidth: 1
+                    )
+            )
     }
 
     private func saveOutcome() {

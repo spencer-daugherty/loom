@@ -583,19 +583,19 @@ enum LittleWinsHealthKitBridge {
       completion(.failure(BridgeError.unavailable))
       return
     }
-    do {
-      let readTypes = try littleWinsReadTypes()
-      store.requestAuthorization(toShare: nil, read: readTypes) { success, error in
-        if let error {
-          completion(.failure(error))
-        } else if success {
-          verifyLittleWinsReadAuthorization(completion: completion)
-        } else {
-          completion(.failure(BridgeError.authorizationDenied))
-        }
+    let readTypes = littleWinsReadTypes()
+    guard !readTypes.isEmpty else {
+      completion(.failure(BridgeError.typeUnavailable))
+      return
+    }
+    store.requestAuthorization(toShare: nil, read: readTypes) { success, error in
+      if let error {
+        completion(.failure(error))
+      } else if success {
+        verifyLittleWinsReadAuthorization(completion: completion)
+      } else {
+        completion(.failure(BridgeError.authorizationDenied))
       }
-    } catch {
-      completion(.failure(error))
     }
   }
 
@@ -677,31 +677,16 @@ enum LittleWinsHealthKitBridge {
     }
   }
 
-  private static func littleWinsReadTypes() throws -> Set<HKObjectType> {
+  private static func littleWinsReadTypes() -> Set<HKObjectType> {
     var types = Set<HKObjectType>()
-    types.formUnion(try readTypesForMetric(.steps))
-    types.formUnion(try readTypesForMetric(.workoutMinutes))
-    types.formUnion(try readTypesForMetric(.sleepHours))
-    return types
-  }
-
-  private static func readTypesForMetric(_ metric: LittleWinsIntegrationConfig.Metric) throws -> Set<HKObjectType> {
-    switch metric {
-    case .steps:
-      guard let type = HKObjectType.quantityType(forIdentifier: .stepCount) else {
-        throw BridgeError.typeUnavailable
-      }
-      return [type]
-    case .workoutMinutes:
-      return [HKObjectType.workoutType()]
-    case .sleepHours:
-      guard let type = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) else {
-        throw BridgeError.typeUnavailable
-      }
-      return [type]
-    case .socialMediaMinutes, .totalScreenTimeMinutes:
-      throw BridgeError.unsupportedMetric
+    if let stepsType = HKObjectType.quantityType(forIdentifier: .stepCount) {
+      types.insert(stepsType)
     }
+    types.insert(HKObjectType.workoutType())
+    if let sleepType = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) {
+      types.insert(sleepType)
+    }
+    return types
   }
 
   private static func dayBounds(for day: Date) -> (start: Date, end: Date) {
@@ -1769,6 +1754,14 @@ extension ActivePlanState {
 }
 
 // MARK: - Rolling Capture
+enum CaptureActionSource: String, Codable, CaseIterable, Identifiable {
+  case normal = "normal"
+  case sharedIn = "shared_in"
+  case integrated = "integrated"
+
+  var id: String { rawValue }
+}
+
 @Model
 final class RollingCaptureItem {
   @Attribute(.unique) var id: UUID
@@ -1822,6 +1815,26 @@ final class RollingCaptureItem {
     self.unhideDate = unhideDate
     self.unhiddenAt = unhiddenAt
   }
+
+  var actionSource: CaptureActionSource {
+    get {
+      guard let sourceType = sourceType?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !sourceType.isEmpty else { return .normal }
+      return CaptureActionSource(rawValue: sourceType) ?? .integrated
+    }
+    set {
+      switch newValue {
+      case .normal:
+        sourceType = nil
+      default:
+        sourceType = newValue.rawValue
+      }
+    }
+  }
+
+  var isShareCreated: Bool {
+    actionSource == .sharedIn
+  }
 }
 
 @Model
@@ -1829,15 +1842,27 @@ final class QuickCompletedCaptureItem {
   @Attribute(.unique) var id: UUID
   var text: String
   var completedAt: Date
+  var sourceType: String?
+  var sourceExternalID: String?
 
   init(
     id: UUID = .init(),
     text: String,
-    completedAt: Date = .now
+    completedAt: Date = .now,
+    sourceType: String? = nil,
+    sourceExternalID: String? = nil
   ) {
     self.id = id
     self.text = text
     self.completedAt = completedAt
+    self.sourceType = sourceType
+    self.sourceExternalID = sourceExternalID
+  }
+
+  var actionSource: CaptureActionSource {
+    guard let sourceType = sourceType?.trimmingCharacters(in: .whitespacesAndNewlines),
+          !sourceType.isEmpty else { return .normal }
+    return CaptureActionSource(rawValue: sourceType) ?? .integrated
   }
 }
 
@@ -2227,6 +2252,7 @@ final class PlannedChunkAction {
     var plannedChunkId: UUID
 
     var text: String
+    var sourceType: String?
     var sortOrder: Int
     var createdAt: Date
 
@@ -2236,6 +2262,7 @@ final class PlannedChunkAction {
         chunkIndex: Int,
         plannedChunkId: UUID,
         text: String,
+        sourceType: String? = nil,
         sortOrder: Int,
         createdAt: Date = .now
     ) {
@@ -2244,8 +2271,15 @@ final class PlannedChunkAction {
         self.chunkIndex = chunkIndex
         self.plannedChunkId = plannedChunkId
         self.text = text
+        self.sourceType = sourceType
         self.sortOrder = sortOrder
         self.createdAt = createdAt
+    }
+
+    var actionSource: CaptureActionSource {
+        guard let sourceType = sourceType?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !sourceType.isEmpty else { return .normal }
+        return CaptureActionSource(rawValue: sourceType) ?? .integrated
     }
 }
 

@@ -94,6 +94,12 @@ private func sanitizeAndFormatDecimalInput(_ input: String, maxFractionDigits: I
 }
 
 struct ObjectivesAddView: View {
+    enum KeyboardField: Hashable {
+        case goal
+        case reasons
+        case measureGoal
+    }
+
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
 
@@ -116,7 +122,7 @@ struct ObjectivesAddView: View {
     @State private var measureFormat: MeasureFormat = .number
     @State private var measureUnit: String = UnitOption.defaultUnit
     @State private var measureDecimalPlaces: Int = 0
-    @FocusState private var isMeasureGoalFieldFocused: Bool
+    @FocusState private var focusedField: KeyboardField?
     let onSaved: ((UUID) -> Void)?
     
     private let outcome: Outcomes?
@@ -386,8 +392,8 @@ struct ObjectivesAddView: View {
                         isShowingAddMeasureSheet = true
                     }
                 )
-                GoalSection(goal: $goal)
-                ReasonsSection(reasons: $reasons)
+                GoalSection(goal: $goal, focusedField: $focusedField)
+                ReasonsSection(reasons: $reasons, focusedField: $focusedField)
                 if !isStartEditable {
                     StartedOnSection(startDate: outcome!.start)
                 } else {
@@ -399,7 +405,7 @@ struct ObjectivesAddView: View {
                     measureGoal: $measureGoal,
                     measureFormat: $measureFormat,
                     measureDecimalPlaces: $measureDecimalPlaces,
-                    isMeasureGoalFieldFocused: $isMeasureGoalFieldFocused
+                    focusedField: $focusedField
                 )
                 CategorySection(
                     selectedCategory: $selectedCategory,
@@ -443,12 +449,31 @@ struct ObjectivesAddView: View {
                     .disabled(isSaveDisabled)
                 }
                 ToolbarItemGroup(placement: .keyboard) {
-                    if isMeasureGoalFieldFocused {
+                    if let focusedField {
                         Spacer()
-                        Button("Done") {
-                            isMeasureGoalFieldFocused = false
+                        Button {
+                            handleKeyboardAccessoryTap(for: focusedField)
+                        } label: {
+                            Image(systemName: keyboardAccessoryShowsCheckmark ? "checkmark" : "keyboard.chevron.compact.down")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(keyboardAccessoryShowsCheckmark ? .white : .primary.opacity(0.85))
+                                .frame(width: 30, height: 30)
+                                .background(
+                                    Circle().fill(
+                                        keyboardAccessoryShowsCheckmark
+                                            ? Color.blue
+                                            : Color(.secondarySystemBackground)
+                                    )
+                                )
+                                .overlay(
+                                    Circle()
+                                        .stroke(
+                                            Color.black.opacity(keyboardAccessoryShowsCheckmark ? 0 : 0.08),
+                                            lineWidth: 1
+                                        )
+                                )
                         }
-                        .foregroundStyle(.blue)
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -752,6 +777,36 @@ struct ObjectivesAddView: View {
         return max(0, components.day ?? 0)
     }
 
+    private var keyboardAccessoryShowsCheckmark: Bool {
+        guard let focusedField else { return false }
+        switch focusedField {
+        case .goal:
+            return !goal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .reasons:
+            return !reasons.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .measureGoal:
+            return !measureGoal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+    }
+
+    private func handleKeyboardAccessoryTap(for field: KeyboardField) {
+        guard keyboardAccessoryShowsCheckmark else {
+            focusedField = nil
+            return
+        }
+
+        switch field {
+        case .goal:
+            if reasons.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                focusedField = .reasons
+            } else {
+                focusedField = nil
+            }
+        case .reasons, .measureGoal:
+            focusedField = nil
+        }
+    }
+
     private func hydrateMeasureFromLatestEntry() {
         guard let outcomeID = outcome?.outcome_id else { return }
         guard let latest = allMeasureEntries.filter({ $0.outcome_id == outcomeID }).max(by: { $0.measuredAt < $1.measuredAt }) else { return }
@@ -928,22 +983,26 @@ struct ChartActionsSection: View {
 
 struct GoalSection: View {
     @Binding var goal: String
+    var focusedField: FocusState<ObjectivesAddView.KeyboardField?>.Binding
 
     var body: some View {
         Section("Goal") {
             TextField("Enter your goal", text: $goal)
                 .submitLabel(.done)
+                .focused(focusedField, equals: .goal)
         }
     }
 }
 
 struct ReasonsSection: View {
     @Binding var reasons: String
+    var focusedField: FocusState<ObjectivesAddView.KeyboardField?>.Binding
 
     var body: some View {
         Section("Reasons") {
             TextField("Why is this important?", text: $reasons)
                 .submitLabel(.done)
+                .focused(focusedField, equals: .reasons)
         }
     }
 }
@@ -1037,7 +1096,7 @@ struct MeasureSection: View {
     @Binding var measureGoal: String
     @Binding var measureFormat: ObjectivesAddView.MeasureFormat
     @Binding var measureDecimalPlaces: Int
-    var isMeasureGoalFieldFocused: FocusState<Bool>.Binding
+    var focusedField: FocusState<ObjectivesAddView.KeyboardField?>.Binding
 
     var body: some View {
         Section("Measure Data") {
@@ -1096,7 +1155,7 @@ struct MeasureSection: View {
                     TextField("Goal", text: $measureGoal)
                         .keyboardType(.decimalPad)
                         .submitLabel(.done)
-                        .focused(isMeasureGoalFieldFocused)
+                        .focused(focusedField, equals: .measureGoal)
                         .multilineTextAlignment(.trailing)
                         .frame(width: 100)
                         .onChange(of: measureGoal) { _, newValue in

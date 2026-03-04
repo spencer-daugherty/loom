@@ -92,8 +92,10 @@ final class PersonalizationStore: ObservableObject {
 
     func reloadForCurrentUser() async {
         let resolvedUserKey = PersonalizationUserIdentity.currentUserKey()
+        AppDebugActivityLog.log("PersonalizationStore", "reloadForCurrentUser started userKey=\(resolvedUserKey)")
         if resolvedUserKey != userKey {
             userKey = resolvedUserKey
+            AppDebugActivityLog.log("PersonalizationStore", "userKey changed to \(resolvedUserKey), applying cached state")
             apply(state: Self.cachedState(for: resolvedUserKey), updateUserKey: false)
         }
 
@@ -103,8 +105,13 @@ final class PersonalizationStore: ObservableObject {
             let loaded = try await repository.loadState(for: resolvedUserKey)
             apply(state: loaded, updateUserKey: false)
             Self.cacheState(normalizedState(), for: resolvedUserKey)
+            AppDebugActivityLog.log(
+                "PersonalizationStore",
+                "reloadForCurrentUser succeeded current=\(current != nil) history=\(history.count)"
+            )
         } catch {
             // Keep cached in-memory state if repository load fails.
+            AppDebugActivityLog.log("PersonalizationStore", "reloadForCurrentUser failed error=\(error.localizedDescription)")
         }
     }
 
@@ -113,8 +120,13 @@ final class PersonalizationStore: ObservableObject {
         source _: PersonalizationSaveSource
     ) async throws -> PersonalizationSnapshot {
         guard let snapshot = draft.snapshotValue() else {
+            AppDebugActivityLog.log("PersonalizationStore", "saveSnapshot failed: incomplete draft")
             throw PersonalizationStoreError.incompleteDraft
         }
+        AppDebugActivityLog.log(
+            "PersonalizationStore",
+            "saveSnapshot started snapshot=\(snapshot.id.uuidString) createdAt=\(snapshot.createdAt.ISO8601Format())"
+        )
 
         var nextHistory = history
         if let existingCurrent = current {
@@ -128,6 +140,10 @@ final class PersonalizationStore: ObservableObject {
         let state = normalizedState()
         try await repository.saveState(state, for: userKey)
         Self.cacheState(state, for: userKey)
+        AppDebugActivityLog.log(
+            "PersonalizationStore",
+            "saveSnapshot completed current=\(snapshot.id.uuidString) history=\(history.count)"
+        )
         return snapshot
     }
 

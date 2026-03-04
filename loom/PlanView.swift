@@ -601,6 +601,12 @@ struct PlanStepTwoView: View {
         return max(0, keyboardHeight - footerHeight + composerKeyboardGap)
     }
 
+    private var brainstormPromptText: Text {
+        Text("Brainstorm: ")
+            .fontWeight(.bold)
+        + Text("What needs to get done? What are any outcomes, actions or communications that need to happen? Are there any projects you’re working on that need your focus?")
+    }
+
     var body: some View {
         VStack(spacing: 12) {
             VStack(spacing: 1) {
@@ -615,11 +621,7 @@ struct PlanStepTwoView: View {
 
                 VStack(alignment: .leading, spacing: 6) {
                     if isBrainstormExpanded {
-                        (
-                            Text("Brainstorm: ")
-                                .fontWeight(.bold)
-                            + Text("What needs to get done? What are any outcomes, actions or communications that need to happen? Are there any projects you’re working on that need your focus?")
-                        )
+                        brainstormPromptText
                         .foregroundStyle(.secondary)
                         .font(.subheadline)
                         .fixedSize(horizontal: false, vertical: true)
@@ -628,11 +630,7 @@ struct PlanStepTwoView: View {
                             .font(.subheadline)
                     } else {
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            (
-                                Text("Brainstorm: ")
-                                    .fontWeight(.bold)
-                                + Text("What needs to get done? What are any outcomes, actions or communications that need to happen? Are there any projects you’re working on that need your focus?")
-                            )
+                            brainstormPromptText
                             .foregroundStyle(.secondary)
                             .font(.subheadline)
                             .lineLimit(1)
@@ -673,7 +671,7 @@ struct PlanStepTwoView: View {
                 ForEach(displayItems) { item in
                     HStack(alignment: .center, spacing: 8) {
                         if baselineItemIDs.contains(item.id) {
-                            Image(systemName: (item.sourceType?.isEmpty == false) ? "link" : "plus.viewfinder")
+                            Image(systemName: captureSourceIconName(for: item.sourceType))
                                 .foregroundStyle(.secondary)
                         } else if showHidden, item.isGhost {
                             Image(systemName: hiddenUntilLaterIconName)
@@ -860,25 +858,9 @@ struct PlanStepTwoView: View {
                 .layoutPriority(1)
                 .frame(maxWidth: .infinity)
 
-            if isKeyboardVisible && !hasDraftInput {
-                Button {
-                    dismissKeyboard()
-                } label: {
-                    Image(systemName: "keyboard.chevron.compact.down")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.primary.opacity(0.85))
-                        .frame(width: 44, height: 44)
-                        .background(.ultraThinMaterial, in: Circle())
-                        .overlay(
-                            Circle()
-                                .stroke(Color.white.opacity(0.28), lineWidth: 1)
-                        )
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Dismiss Keyboard")
-            }
-
-            if hasDraftInput {
+            if isKeyboardVisible {
+                stepTwoKeyboardAccessoryButton
+            } else if hasDraftInput {
                 Button {
                     addItem()
                 } label: {
@@ -914,6 +896,45 @@ struct PlanStepTwoView: View {
                 .transition(.opacity)
             }
         }
+    }
+
+    private var stepTwoKeyboardShowsCheckmark: Bool {
+        isKeyboardVisible && hasDraftInput
+    }
+
+    private var stepTwoKeyboardAccessoryButton: some View {
+        Button {
+            if stepTwoKeyboardShowsCheckmark {
+                addItem()
+            } else {
+                dismissKeyboard()
+            }
+        } label: {
+            Image(systemName: stepTwoKeyboardShowsCheckmark ? "checkmark" : "keyboard.chevron.compact.down")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(stepTwoKeyboardShowsCheckmark ? .white : .primary.opacity(0.85))
+                .frame(width: 44, height: 44)
+                .background(
+                    Group {
+                        if stepTwoKeyboardShowsCheckmark {
+                            Circle().fill(Color.blue)
+                        } else {
+                            Circle().fill(.ultraThinMaterial)
+                        }
+                    }
+                )
+                .overlay(
+                    Circle()
+                        .stroke(
+                            stepTwoKeyboardShowsCheckmark
+                            ? Color.blue.opacity(0.9)
+                            : Color.white.opacity(0.28),
+                            lineWidth: 1
+                        )
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(stepTwoKeyboardShowsCheckmark ? "Add Action" : "Dismiss Keyboard")
     }
 
     @ViewBuilder
@@ -976,7 +997,14 @@ struct PlanStepTwoView: View {
     }
 
     private func quickCompleteItem(_ item: RollingCaptureItem) {
-        modelContext.insert(QuickCompletedCaptureItem(text: item.text, completedAt: .now))
+        modelContext.insert(
+            QuickCompletedCaptureItem(
+                text: item.text,
+                completedAt: .now,
+                sourceType: item.sourceType,
+                sourceExternalID: item.sourceExternalID
+            )
+        )
         RecentlyDeletedStore.trash(item, in: modelContext)
         try? modelContext.save()
     }
@@ -1056,6 +1084,17 @@ struct PlanStepTwoView: View {
 
     private func dueDateStatusBorderColor(for item: RollingCaptureItem) -> Color {
         dueDateStatusColor(for: item).opacity(0.85)
+    }
+
+    private func captureSourceIconName(for sourceType: String?) -> String {
+        guard let trimmed = sourceType?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty else {
+            return "plus.viewfinder"
+        }
+        if trimmed == LoomShareSourceType.sharedIn {
+            return "square.and.arrow.down"
+        }
+        return "link"
     }
 
     private func triggerStep2InputValidationFeedback() {
@@ -2242,7 +2281,7 @@ struct PlanStepThreeView: View {
         VStack(spacing: 0) {
             if chunk.itemIDs.isEmpty {
                 if selectedPoolItemIDForTapGrouping == nil {
-                    Text("Drag actions here")
+                    Text("Tap or drag actions here")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .padding(.vertical, 14)
@@ -2557,6 +2596,7 @@ struct PlanStepThreeView: View {
         struct DesiredPlanActionEntry {
             let key: String
             let text: String
+            let sourceType: String?
             let chunkIndex: Int
             let plannedChunkId: UUID
             let sortOrder: Int
@@ -2586,6 +2626,7 @@ struct PlanStepThreeView: View {
                     DesiredPlanActionEntry(
                         key: key,
                         text: text,
+                        sourceType: item.sourceType,
                         chunkIndex: chunkIndex,
                         plannedChunkId: plannedChunk.id,
                         sortOrder: order
@@ -2622,12 +2663,14 @@ struct PlanStepThreeView: View {
                 action.plannedChunkId = desired.plannedChunkId
                 action.sortOrder = desired.sortOrder
                 if action.text != desired.text { action.text = desired.text }
+                action.sourceType = desired.sourceType
             } else {
                 let planned = PlannedChunkAction(
                     weekStart: weekStart,
                     chunkIndex: desired.chunkIndex,
                     plannedChunkId: desired.plannedChunkId,
                     text: desired.text,
+                    sourceType: desired.sourceType,
                     sortOrder: desired.sortOrder,
                     createdAt: .now
                 )
@@ -2649,6 +2692,17 @@ struct PlanStepThreeView: View {
         let m = comps.month ?? 0
         let d = comps.day ?? 0
         return String(format: "%04d-%02d-%02d", y, m, d)
+    }
+
+    private func captureSourceIconName(for sourceType: String?) -> String {
+        guard let trimmed = sourceType?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty else {
+            return "plus.viewfinder"
+        }
+        if trimmed == LoomShareSourceType.sharedIn {
+            return "square.and.arrow.down"
+        }
+        return "link"
     }
 
     private func normalizedPlanActionText(_ text: String) -> String {
@@ -3160,19 +3214,19 @@ struct PlanStepThreeView: View {
         guard items.count >= 6 else { return nil }
 
         do {
-            let contextSnapshot = try LoomAIViewModel().buildContextSnapshot(in: modelContext)
-            let selectableAreaNames = selectableLabels.map(\.label)
-
-            let actionLines = items.enumerated().map { index, item in
+            let normalizedItems: [(id: UUID, text: String)] = items.map { item in
                 let cleanText = item.text
                     .replacingOccurrences(of: "\n", with: " ")
                     .trimmingCharacters(in: .whitespacesAndNewlines)
-                return "\(index + 1). id=\(item.id.uuidString) | text=\(cleanText)"
+                return (item.id, cleanText)
+            }
+            let actionLines = normalizedItems.enumerated().map { index, item in
+                "\(index + 1). id=\(item.id.uuidString) | text=\(item.text)"
             }
 
             let instruction = """
             You are helping with Loom Plan Step 3 (Group).
-            Group the provided Capture actions into meaningful topical groups inspired by the user's Fulfillment Areas when possible.
+            Group the provided Capture actions into meaningful topical groups.
 
             Hard rules:
             - Return ONLY JSON
@@ -3183,24 +3237,29 @@ struct PlanStepThreeView: View {
             - Use only the provided actionIDs
             - Do not duplicate an actionID across groups
             - Prefer grouping by what the actions are related to (topic/domain), not by effort level or urgency
-            - If a group clearly aligns to a Fulfillment Area, set fulfillmentArea to one of the provided Fulfillment Area names exactly
-            - If not, leave fulfillmentArea as empty string and still create a useful topical group
+            - Set fulfillmentArea to an empty string unless an action explicitly names one
             - It is OK to leave low-confidence/ambiguous actions ungrouped if needed
             - If leaving actions ungrouped, still satisfy the minimum grouping rules with the grouped subset
 
             Return JSON exactly:
             {"confidence":"high","reason":"short string","groups":[{"name":"string","fulfillmentArea":"string","actionIDs":["uuid"]}]}
 
-            Fulfillment Area options:
-            \(selectableAreaNames.joined(separator: ", "))
-
             Capture actions to group (latest up to 25):
             \(actionLines.joined(separator: "\n"))
             """
 
-            let response = try await loomAIService.sendChat(
+            let captureContextItems = normalizedItems.map { item in
+                LoomAIService.AutoGroupContext.CaptureItem(
+                    id: item.id.uuidString,
+                    text: item.text
+                )
+            }
+            let response = try await loomAIService.sendAutoGroupChat(
                 messages: [.init(role: "user", content: instruction)],
-                context: contextSnapshot
+                captureItems: captureContextItems,
+                totalCaptureCount: items.count,
+                intent: "autogroup_plan",
+                screen: "plan_group"
             )
 
             let raw = response.message.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -4624,6 +4683,8 @@ struct PlanStepFourResultView: View {
     private func minimalPlanResultContextSnapshot() -> LoomAIContextSnapshot {
         LoomAIContextSnapshot(
             generatedAt: .now,
+            personalizationHash: "",
+            diagnostic: nil,
             drivingForce: nil,
             fulfillmentCategories: [],
             activeOutcomes: [],
@@ -4633,12 +4694,17 @@ struct PlanStepFourResultView: View {
                 littleWinsCompletionsLast7Days: 0,
                 carryoversLast7Days: 0
             ),
+            capture: nil,
+            recentlyDeleted: nil,
+            sectionTimestamps: nil,
             dataInventory: [],
             appGuide: [],
             notes: [],
             purposeDraft: nil,
             fulfillmentSetup: nil,
-            personalization: nil
+            personalization: nil,
+            reflectionJournal: nil,
+            shareAttachmentPreview: nil
         )
     }
 
@@ -7492,9 +7558,12 @@ private struct LeverageSheet: View {
         NavigationStack {
             List {
                 Section {
-                    Text("Assign action to someone or something else")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Assign action to someone or something else")
+                        Text("NOTE: Does not alert who you assign to, for personal tracking only to hold people accountable.")
+                    }
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
                 }
 
                 Section("Resources") {
@@ -7601,13 +7670,22 @@ private struct LeverageSheet: View {
                 }
             }
             .onAppear { localSelection = selectedResourceId }
+            .onChange(of: isNewResourceFocused) { _, isFocused in
+                guard !isFocused else { return }
+                guard trimmedInlineResourceValue.isEmpty else { return }
+                isNewResourceMode = false
+                value = ""
+            }
         }
     }
 
+    private var trimmedInlineResourceValue: String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private func commitInlineResource() {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard isNewResourceMode, !trimmed.isEmpty else { return }
-        onAdd(kind, trimmed)
+        guard isNewResourceMode, !trimmedInlineResourceValue.isEmpty else { return }
+        onAdd(kind, trimmedInlineResourceValue)
         value = ""
         isNewResourceMode = false
         isNewResourceFocused = false
@@ -7852,13 +7930,22 @@ private struct SensitivitySheet: View {
             .onDisappear {
                 normalizeTimeOfDayIfNoneSelected()
             }
+            .onChange(of: isNewPlaceFocused) { _, isFocused in
+                guard !isFocused else { return }
+                guard trimmedInlinePlaceValue.isEmpty else { return }
+                isNewPlaceMode = false
+                newPlace = ""
+            }
         }
     }
 
+    private var trimmedInlinePlaceValue: String {
+        newPlace.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private func commitInlinePlace() {
-        let trimmed = newPlace.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard isNewPlaceMode, !trimmed.isEmpty else { return }
-        onAddPlaceToCatalog(trimmed)
+        guard isNewPlaceMode, !trimmedInlinePlaceValue.isEmpty else { return }
+        onAddPlaceToCatalog(trimmedInlinePlaceValue)
         newPlace = ""
         isNewPlaceMode = false
         isNewPlaceFocused = false
@@ -8087,13 +8174,22 @@ private struct AttachmentsSheet: View {
                     }
                 }
             }
+            .onChange(of: focusedField) { _, newValue in
+                guard newValue != .newLink else { return }
+                guard trimmedInlineLinkValue.isEmpty else { return }
+                isNewLinkMode = false
+                linkText = ""
+            }
         }
     }
 
+    private var trimmedInlineLinkValue: String {
+        linkText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private func commitInlineLink() {
-        let trimmed = linkText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard isNewLinkMode, !trimmed.isEmpty else { return }
-        onAddLink(trimmed)
+        guard isNewLinkMode, !trimmedInlineLinkValue.isEmpty else { return }
+        onAddLink(trimmedInlineLinkValue)
         linkText = ""
         isNewLinkMode = false
         focusedField = nil

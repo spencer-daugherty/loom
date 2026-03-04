@@ -129,6 +129,10 @@ struct ReflectView: View {
         let carriedActionTexts: [String]
     }
 
+    private var stepTitle: String {
+        step == 1 ? "Insights" : "Journal"
+    }
+
     init(weekStart: Date, onFinish: @escaping () -> Void) {
         let ws = WeeklyMindsetEntry.weekStart(for: weekStart)
         let we = Calendar.current.date(byAdding: .day, value: 7, to: ws) ?? ws
@@ -709,7 +713,9 @@ struct ReflectView: View {
                 messages: [
                     .init(role: "user", content: prompt)
                 ],
-                context: contextSnapshot
+                context: contextSnapshot,
+                intent: "readable_insights_reflect",
+                screen: "reflect_readable_insights"
             )
             let text = response.message.trimmingCharacters(in: .whitespacesAndNewlines)
             readableInsightsText = text.isEmpty ? nil : limitedReadableInsightsText(text, maxCharacters: 200)
@@ -808,6 +814,20 @@ struct ReflectView: View {
                 celebrationView
             }
         }
+        .navigationTitle(showCelebration ? "" : stepTitle)
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true)
+        .toolbar {
+            if !showCelebration {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button {
+                        handleHeaderBackTapped()
+                    } label: {
+                        Label("Back", systemImage: "chevron.left")
+                    }
+                }
+            }
+        }
         .sheet(isPresented: $showContributionPrompt) {
             contributionPromptSheet
                 .presentationDetents([.large])
@@ -880,12 +900,6 @@ struct ReflectView: View {
 
     private var mainContent: some View {
         VStack(spacing: 10) {
-            Text(step == 1 ? "Insights" : "Journal")
-                .font(.largeTitle)
-                .fontWeight(.bold)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.top, 8)
-
             if step == 1 {
                 if shouldRenderHeavyInsights {
                     insightsStep
@@ -897,7 +911,6 @@ struct ReflectView: View {
             }
         }
         .padding(.horizontal)
-        .safeAreaPadding(.top)
         .safeAreaPadding(.bottom)
     }
 
@@ -1178,25 +1191,15 @@ struct ReflectView: View {
 
             HStack(spacing: 12) {
                 Button {
-                    onFinish()
-                } label: {
-                    Text("Back")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .foregroundStyle(colorScheme == .dark ? Color(.secondaryLabel) : .black)
-                }
-                .background(
-                    RoundedRectangle(cornerRadius: 8).fill(Color(.systemGray5))
-                )
-
-                Button {
                     beginContributionFlowOrProceed()
                 } label: {
                     Text("Next")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
             }
+            .padding(.bottom, 2)
         }
         )
     }
@@ -1224,18 +1227,6 @@ struct ReflectView: View {
 
             HStack(spacing: 12) {
                 Button {
-                    step = 1
-                } label: {
-                    Text("Back")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .foregroundStyle(colorScheme == .dark ? Color(.secondaryLabel) : .black)
-                }
-                .background(
-                    RoundedRectangle(cornerRadius: 8).fill(Color(.systemGray5))
-                )
-
-                Button {
                     if journalIsValid {
                         handleJournalSaveTapped()
                     } else {
@@ -1246,8 +1237,18 @@ struct ReflectView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
                 .tint(journalIsValid ? .accentColor : Color(.systemGray3))
             }
+            .padding(.bottom, 2)
+        }
+    }
+
+    private func handleHeaderBackTapped() {
+        if step == 2 {
+            step = 1
+        } else {
+            onFinish()
         }
     }
 
@@ -2162,6 +2163,7 @@ struct ReflectView: View {
                     text: text,
                     isGhost: false,
                     createdAt: .now,
+                    sourceType: action.sourceType,
                     leverageKindRaw: profile?.leverageKindRaw,
                     leverageValue: profile?.leverageValue
                 )

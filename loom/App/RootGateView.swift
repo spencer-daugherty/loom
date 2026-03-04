@@ -140,6 +140,9 @@ struct RootGateView<MainContent: View>: View {
                     onDismiss: handleGateDismiss
                 )
             )
+            .overlay(alignment: .bottom) {
+                LoomAITroubleshootingBannerHost()
+            }
     }
 
     private var gatePresentationBinding: Binding<Bool> {
@@ -259,9 +262,6 @@ struct RootGateView<MainContent: View>: View {
         }
         if !session.hasSeenDiagnosticInsights {
             return [.insights]
-        }
-        if !session.isSubscribed {
-            return [.paywall]
         }
         return []
     }

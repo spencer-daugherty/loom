@@ -35,6 +35,25 @@ private extension CGRect {
     var area: CGFloat {
         max(0, width) * max(0, height)
     }
+
+    func roundedToScreenScale() -> CGRect {
+        #if canImport(UIKit)
+        let scale = max(UIScreen.main.scale, 1)
+        #else
+        let scale: CGFloat = 1
+        #endif
+
+        func round(_ value: CGFloat) -> CGFloat {
+            (value * scale).rounded() / scale
+        }
+
+        return CGRect(
+            x: round(origin.x),
+            y: round(origin.y),
+            width: round(size.width),
+            height: round(size.height)
+        )
+    }
 }
 
 private struct DarkModeInvertImage: ViewModifier {
@@ -53,6 +72,7 @@ private struct DarkModeInvertImage: ViewModifier {
 }
 
 struct ContentView: View {
+    @AppStorage(UserSessionStore.Keys.isSubscribed) private var isSubscribed = false
     @AppStorage("enable_projects_feature") private var enableProjectsFeature = false
     @AppStorage("blank_homepage_mode") private var blankHomepageMode = false
     @AppStorage("setup_homepage_mode") private var setupHomepageMode = false
@@ -60,10 +80,11 @@ struct ContentView: View {
     @AppStorage("has_completed_plan_flow_once") private var hasCompletedPlanFlowOnce = false
     @AppStorage("has_seen_content_quickstart_v1") private var hasSeenContentQuickstart = false
     @AppStorage("force_show_content_quickstart_once") private var forceShowContentQuickstartOnce = false
+    @AppStorage("developer_demo_mode_enabled") private var developerDemoModeEnabled = false
     @AppStorage("onboarding_capture_notifications_prompted_v1") private var hasPromptedCaptureNotifications = false
     @AppStorage("content_home_objectives_setup_skipped_v1") private var hasSkippedObjectivesSetupStep = false
-    @AppStorage("content_home_action_setup_skipped_v1") private var hasSkippedActionPlanSetupStep = false
     @State private var isPresentingCaptureView = false
+    @State private var pendingSharePayloadID: String? = nil
     @State private var pressedEmotion: String? = nil
     @State private var pressedOutcome: Outcomes? = nil
     @State private var showVisionPurposePopup: Bool = false
@@ -124,10 +145,29 @@ struct ContentView: View {
     @State private var pendingCaptureCompletionNotificationPrompt = false
     @State private var contentQuickstartStepIndex: Int = 0
     @State private var contentQuickstartFrames: [ContentQuickstartTarget: CGRect] = [:]
+    @State private var pendingQuickstartFrames: [ContentQuickstartTarget: CGRect]? = nil
+    @State private var isApplyingQuickstartFrames = false
     @State private var quickstartIsPageTransitionInFlight = false
+    @State private var hasDeferredActionPlanCalloutThisSession = false
+    @State private var isPresentingPurposeSetupPaywall = false
+    @State private var pendingPurposeOpenAfterPaywall = false
+    @State private var onboardingCallCardDestination: OnboardingCallCardDestination? = nil
 
     private enum PlayDestination: String, Identifiable, Hashable {
         case action
+        var id: String { rawValue }
+    }
+
+    private enum OnboardingCallCardDestination: String, Identifiable, Hashable {
+        case purposeStart
+        case purpose
+        case fulfillmentStart
+        case fulfillment
+        case objectivesStart
+        case objectives
+        case planStart
+        case plan
+
         var id: String { rawValue }
     }
 
@@ -228,7 +268,11 @@ struct ContentView: View {
     }
 
     private var shouldShowBlankHomepageAppearance: Bool {
-        blankHomepageMode || setupHomepageMode
+        isDeveloperDemoMode || blankHomepageMode || setupHomepageMode
+    }
+
+    private var isDeveloperDemoMode: Bool {
+        developerDemoModeEnabled
     }
 
     private var quickstartPageTransitionAnimation: Animation {
@@ -265,7 +309,7 @@ struct ContentView: View {
     }
 
     private var shouldShowContentQuickstart: Bool {
-        (!hasSeenContentQuickstart || forceShowContentQuickstartOnce) && !showSplash
+        !isDeveloperDemoMode && (!hasSeenContentQuickstart || forceShowContentQuickstartOnce) && !showSplash
     }
 
     private func quickstartPage(for stepIndex: Int) -> Int {
@@ -347,17 +391,22 @@ struct ContentView: View {
     }
 
     private var activeHomeFocusTarget: HomeStartupFocusTarget? {
+        guard !isDeveloperDemoMode else { return nil }
         guard !shouldShowContentQuickstart else { return nil }
         if !hasCompletedPurposeSetup { return .purpose }
         if !hasCompletedFulfillmentSetup { return .fulfillment }
         if !hasCompletedObjectivesSetup && !hasSkippedObjectivesSetupStep { return .objectives }
         if !hasCompletedCaptureSetup { return .capture }
-        if !isActiveActionFlow && !hasSkippedActionPlanSetupStep { return .actionBlocks }
+        if !isActiveActionFlow && !hasDeferredActionPlanCalloutThisSession { return .actionBlocks }
         return nil
     }
 
     private var shouldShowDrivingOnboardingPulse: Bool {
         activeHomeFocusTarget == .purpose
+    }
+
+    private var shouldRequirePaywallBeforePurposeSetup: Bool {
+        !isSubscribed && activeHomeFocusTarget == .purpose && isDrivingForceEmptyState
     }
 
     private var shouldShowFulfillmentOnboardingPulse: Bool {
@@ -378,7 +427,7 @@ struct ContentView: View {
 
     private func markCaptureSetupCompletedIfNeeded() {
         guard !hasCompletedCaptureSetupOnce else { return }
-        let hasAdvancedPastCaptureSetup = hasSkippedActionPlanSetupStep || isActiveActionFlow || hasCompletedPlanFlowOnce
+        let hasAdvancedPastCaptureSetup = hasDeferredActionPlanCalloutThisSession || isActiveActionFlow || hasCompletedPlanFlowOnce
         guard notificationCaptureItems.count >= 6 || hasAdvancedPastCaptureSetup else { return }
         hasCompletedCaptureSetupOnce = true
     }
@@ -392,8 +441,12 @@ struct ContentView: View {
     }
 
     private var shouldLockToFocusedHomeTarget: Bool {
-        // Keep the 5/5 callout visible, but do not freeze the screen on that step.
-        guard activeHomeFocusTarget != .actionBlocks else { return false }
+        // Keep callouts visible, but do not freeze the screen on 3/5, 4/5, or 5/5.
+        if activeHomeFocusTarget == .objectives
+            || activeHomeFocusTarget == .capture
+            || activeHomeFocusTarget == .actionBlocks {
+            return false
+        }
         return activeHomeFocusTarget != nil
     }
 
@@ -408,7 +461,8 @@ struct ContentView: View {
         case .capture:
             return ("Master To Do List", "4/5")
         case .actionBlocks:
-            return ("Start Weekly Action Plan", "5/5")
+            let stepPrefix = reflectionArchives.isEmpty ? "5/5" : ""
+            return ("Start Weekly Action Plan", stepPrefix)
         case .none:
             return nil
         }
@@ -467,6 +521,29 @@ struct ContentView: View {
     private var contentViewNavigationRoot: some View {
         NavigationStack {
             contentViewNavigationStackBody
+                .navigationDestination(isPresented: $navigateToFulfillmentFromOnboarding) {
+                    FulfillmentView()
+                }
+                .navigationDestination(item: $onboardingCallCardDestination) { destination in
+                    switch destination {
+                    case .purposeStart:
+                        PurposeStartView()
+                    case .purpose:
+                        PurposeView(autoOpenCreateVision: false)
+                    case .fulfillmentStart:
+                        FulfillmentStartView()
+                    case .fulfillment:
+                        FulfillmentView()
+                    case .objectivesStart:
+                        ObjectivesStartView()
+                    case .objectives:
+                        ObjectivesView(autoOpenAddOutcome: false)
+                    case .planStart:
+                        PlanStartView()
+                    case .plan:
+                        PlanView()
+                    }
+                }
         }
     }
 
@@ -537,13 +614,25 @@ struct ContentView: View {
                         homePageContent
                             .tag(HomeSwipePage.home.rawValue)
 
-                        LoomAIChatView(isActivePage: homePageIndex == HomeSwipePage.littleWins.rawValue && !shouldShowContentQuickstart)
-                            .background(contentQuickstartTargetFrame(.loomAI))
-                            .tag(HomeSwipePage.littleWins.rawValue)
+                        Group {
+                            if isDeveloperDemoMode {
+                                demoLoomAIMiddlePage
+                            } else {
+                                LoomAIChatView(isActivePage: homePageIndex == HomeSwipePage.littleWins.rawValue && !shouldShowContentQuickstart)
+                            }
+                        }
+                        .background(quickstartTargetFrameIfNeeded(.loomAI))
+                        .tag(HomeSwipePage.littleWins.rawValue)
                     }
                     .tabViewStyle(.page(indexDisplayMode: .never))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .onPreferenceChange(ContentQuickstartFramePreferenceKey.self) { frames in
+                        guard shouldShowContentQuickstart else {
+                            if !contentQuickstartFrames.isEmpty {
+                                enqueueQuickstartFrameUpdateIfNeeded([:])
+                            }
+                            return
+                        }
                         var resolved = contentQuickstartFrames
                         let screenBounds = UIScreen.main.bounds
                         for (target, candidates) in frames {
@@ -564,12 +653,10 @@ struct ContentView: View {
                                 return lhs.area < rhs.area
                             } ?? valid.last ?? candidates.last
                             if let picked {
-                                resolved[target] = picked
+                                resolved[target] = picked.roundedToScreenScale()
                             }
                         }
-                        if resolved != contentQuickstartFrames {
-                            contentQuickstartFrames = resolved
-                        }
+                        enqueueQuickstartFrameUpdateIfNeeded(resolved)
                     }
                     .environment(\.contentCardDensity, cardDensity)
                 }
@@ -850,9 +937,6 @@ struct ContentView: View {
 
     private var contentViewNavigationLayer: some View {
         contentViewNavigationRoot
-            .navigationDestination(isPresented: $navigateToFulfillmentFromOnboarding) {
-                FulfillmentView()
-            }
             .fullScreenCover(item: $playSheetDestination) { destination in
                 switch destination {
                 case .action:
@@ -865,12 +949,23 @@ struct ContentView: View {
 
     private var contentViewPresentationLayer: some View {
         contentViewNavigationLayer
+            .fullScreenCover(isPresented: $isPresentingPurposeSetupPaywall) {
+                NavigationStack {
+                    PaywallView()
+                }
+            }
             .fullScreenCover(isPresented: $isPresentingLittleWinsShareCamera) {
                 LittleWinsShareCameraView()
             }
             .sheet(isPresented: $isPresentingCaptureView) {
                 CaptureView(
-                    forceSetupWelcome: activeHomeFocusTarget == .capture && shouldLockToFocusedHomeTarget
+                    forceSetupWelcome: activeHomeFocusTarget == .capture && shouldLockToFocusedHomeTarget,
+                    pendingSharePayloadID: pendingSharePayloadID,
+                    onSharePayloadHandled: { handledID in
+                        if pendingSharePayloadID == handledID {
+                            pendingSharePayloadID = nil
+                        }
+                    }
                 )
                     .presentationDragIndicator(.visible)
             }
@@ -904,6 +999,25 @@ struct ContentView: View {
             .onChange(of: isActiveActionFlow) { _, newValue in
                 if newValue {
                     setupHomepageMode = false
+                }
+            }
+            .onChange(of: isDeveloperDemoMode) { _, isOn in
+                if isOn {
+                    showLoomAIChatMenu = false
+                    homePageIndex = HomeSwipePage.home.rawValue
+                }
+            }
+            .onChange(of: isSubscribed) { _, newValue in
+                guard newValue, isPresentingPurposeSetupPaywall else { return }
+                isPresentingPurposeSetupPaywall = false
+            }
+            .onChange(of: isPresentingPurposeSetupPaywall) { _, isPresented in
+                guard !isPresented else { return }
+                let shouldOpenPurpose = pendingPurposeOpenAfterPaywall
+                pendingPurposeOpenAfterPaywall = false
+                guard shouldOpenPurpose else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    openOnboardingCallCardDestination(.purposeStart)
                 }
             }
             .onChange(of: activeHomeFocusTarget) { previousTarget, newTarget in
@@ -962,6 +1076,11 @@ struct ContentView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: .loomAIOpenAddFulfillmentAreaPrefill)) { _ in
                 isPresentingLoomAIFulfillmentAreaPrefill = true
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .loomSharePayloadReceived)) { note in
+                guard let payloadID = note.object as? String else { return }
+                pendingSharePayloadID = payloadID
+                isPresentingCaptureView = true
             }
             .onReceive(NotificationCenter.default.publisher(for: .vacationModeDidChange)) { _ in
                 dismissVacationModeBanner = false
@@ -2278,7 +2397,7 @@ struct ContentView: View {
                             .opacity(homePageIndex == HomeSwipePage.social.rawValue ? 0 : (homePageIndex == HomeSwipePage.littleWins.rawValue ? 0 : 1))
                             .offset(x: homePageIndex == HomeSwipePage.littleWins.rawValue ? -8 : 0)
 
-                        if homePageIndex == HomeSwipePage.littleWins.rawValue {
+                        if homePageIndex == HomeSwipePage.littleWins.rawValue && !isDeveloperDemoMode {
                             Button {
                                 withAnimation(.easeInOut(duration: 0.2)) {
                                     showLoomAIChatMenu.toggle()
@@ -2309,15 +2428,22 @@ struct ContentView: View {
 
                     Group {
                         if homePageIndex == HomeSwipePage.social.rawValue {
-                            Button {
-                                isPresentingLittleWinsShareCamera = true
-                            } label: {
-                                Image(systemName: "camera")
-                                    .font(.system(size: 23, weight: .semibold))
-                                    .frame(width: 32, height: 32)
+                            Group {
+                                if isDeveloperDemoMode {
+                                    Color.clear
+                                        .frame(width: 32, height: 32)
+                                } else {
+                                    Button {
+                                        isPresentingLittleWinsShareCamera = true
+                                    } label: {
+                                        Image(systemName: "camera")
+                                            .font(.system(size: 23, weight: .semibold))
+                                            .frame(width: 32, height: 32)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .allowsHitTesting(!shouldLockToFocusedHomeTarget && !shouldShowContentQuickstart)
+                                }
                             }
-                            .buttonStyle(.plain)
-                            .allowsHitTesting(!shouldLockToFocusedHomeTarget && !shouldShowContentQuickstart)
                         } else if homePageIndex == HomeSwipePage.littleWins.rawValue {
                             Color.clear
                                 .frame(width: 32, height: 32)
@@ -2809,43 +2935,67 @@ struct ContentView: View {
         return AnyShapeStyle(Color.primary.opacity(0.22))
     }
 
+    @ViewBuilder
     private func littleWinsMiddlePage() -> some View {
-        GeometryReader { proxy in
-            littleWinsMiddlePageContent(proxy: proxy)
-        }
-        .contentShape(Rectangle())
-        .onAppear(perform: syncLittleWinsCompletionStateFromStore)
-        .onAppear(perform: syncIntegratedLittleWinsCompletionsFromProgress)
-        .onAppear(perform: refreshAppleHealthIntegratedLittleWinsProgressIfNeeded)
-        .onAppear(perform: syncLittleWinsCardOrder)
-        .onChange(of: littleWinsDailyCompletions.map(\.id)) { _, _ in
-            syncLittleWinsCompletionStateFromStore()
-            syncIntegratedLittleWinsCompletionsFromProgress()
-            closeLittleWinsCalendarPreviewIfNoHistory()
-        }
-        .onChange(of: littleWinsSourceCardIDs) { _, _ in
-            syncLittleWinsCardOrder()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .littleWinsScheduleDidChange)) { _ in
-            littleWinsScheduleStoreRevision &+= 1
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .littleWinsIntegrationDidChange)) { _ in
-            littleWinsIntegrationStoreRevision &+= 1
-            syncIntegratedLittleWinsCompletionsFromProgress()
-        }
-        .onChange(of: scenePhase) { _, phase in
-            guard phase == .active else { return }
-            refreshAppleHealthIntegratedLittleWinsProgressIfNeeded()
-        }
-        .onChange(of: homePageIndex) { _, _ in
-            if littleWinsCalendarPreviewDate != nil {
-                closeLittleWinsCalendarPreview(animated: true)
+        if isDeveloperDemoMode {
+            VStack(spacing: 0) {
+                quickstartLittleWinsDemoCard
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .background(Color(.systemGroupedBackground))
+            .contentShape(Rectangle())
+        } else {
+            GeometryReader { proxy in
+                littleWinsMiddlePageContent(proxy: proxy)
+            }
+            .contentShape(Rectangle())
+            .onAppear(perform: syncLittleWinsCompletionStateFromStore)
+            .onAppear(perform: syncIntegratedLittleWinsCompletionsFromProgress)
+            .onAppear(perform: refreshAppleHealthIntegratedLittleWinsProgressIfNeeded)
+            .onAppear(perform: syncLittleWinsCardOrder)
+            .onChange(of: littleWinsDailyCompletions.map(\.id)) { _, _ in
+                syncLittleWinsCompletionStateFromStore()
+                syncIntegratedLittleWinsCompletionsFromProgress()
+                closeLittleWinsCalendarPreviewIfNoHistory()
+            }
+            .onChange(of: littleWinsSourceCardIDs) { _, _ in
+                syncLittleWinsCardOrder()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .littleWinsScheduleDidChange)) { _ in
+                littleWinsScheduleStoreRevision &+= 1
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .littleWinsIntegrationDidChange)) { _ in
+                littleWinsIntegrationStoreRevision &+= 1
+                syncIntegratedLittleWinsCompletionsFromProgress()
+            }
+            .onChange(of: scenePhase) { _, phase in
+                guard phase == .active else { return }
+                refreshAppleHealthIntegratedLittleWinsProgressIfNeeded()
+            }
+            .onChange(of: homePageIndex) { _, _ in
+                if littleWinsCalendarPreviewDate != nil {
+                    closeLittleWinsCalendarPreview(animated: true)
+                }
+            }
+            .sheet(item: $littleWinsIntegrationDetailTarget, content: littleWinsIntegrationDetailSheet)
+            .onDisappear {
+                closeLittleWinsCalendarPreview(animated: false)
             }
         }
-        .sheet(item: $littleWinsIntegrationDetailTarget, content: littleWinsIntegrationDetailSheet)
-        .onDisappear {
-            closeLittleWinsCalendarPreview(animated: false)
+    }
+
+    private var demoLoomAIMiddlePage: some View {
+        VStack(spacing: 10) {
+            quickstartLoomAIDemoView
+            quickstartLoomAIComposer
+                .padding(.horizontal, 12)
+                .padding(.bottom, 8)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(Color(.systemGroupedBackground))
     }
 
     private func littleWinsMiddlePageContent(proxy: GeometryProxy) -> some View {
@@ -3157,7 +3307,7 @@ struct ContentView: View {
                         height: cardHeight,
                         isSetupPlaceholder: showsSetupPlaceholder
                     )
-                    .background(contentQuickstartTargetFrame(.littleWins))
+                    .background(quickstartTargetFrameIfNeeded(.littleWins))
                 } else {
                     ForEach(Array(visibleCards.enumerated()), id: \.element.id) { index, card in
                         let depth = CGFloat(index)
@@ -4146,12 +4296,15 @@ struct ContentView: View {
         let isActionBlocksAllowedWhileLocked = activeHomeFocusTarget == .actionBlocks || hasPassedOnboardingStep(.actionBlocks)
         return VStack(spacing: 6) {
             HStack(spacing: 16) {
-                Button(action: { isPresentingCaptureView = true }) {
+                Button(action: {
+                    guard !isDeveloperDemoMode else { return }
+                    isPresentingCaptureView = true
+                }) {
                     captureActionButtonVisual
                     .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.plain)
-                .disabled(isFocusedLock && !isCaptureAllowedWhileLocked)
+                .disabled(isDeveloperDemoMode || (isFocusedLock && !isCaptureAllowedWhileLocked))
                 .scaleEffect(
                     shouldShowCaptureOnboardingPulse
                         ? (drivingCardBounceOn ? 1.012 : 1.0)
@@ -4168,22 +4321,25 @@ struct ContentView: View {
                         : .default,
                     value: drivingCardBounceOn
                 )
-                .background(contentQuickstartTargetFrame(.capture))
+                .background(quickstartTargetFrameIfNeeded(.capture))
                 .overlay(alignment: .top) {
                     if activeHomeFocusTarget == .capture, let callCard = onboardingCallCardContent {
                         onboardingCallCard(
                             title: callCard.title,
                             step: callCard.step,
                             leadingButtonLabel: shouldShowCaptureBackButton ? "Back" : nil,
-                            leadingButtonAction: shouldShowCaptureBackButton ? returnToObjectivesSetupStep : nil
+                            leadingButtonAction: shouldShowCaptureBackButton ? returnToObjectivesSetupStep : nil,
+                            cardTapAction: { openOnboardingCallCardTarget(.capture) }
                         )
                             .offset(y: -58)
-                            .allowsHitTesting(shouldShowCaptureBackButton)
+                            .allowsHitTesting(true)
                     }
                 }
 
                 Group {
-                    if isActiveActionFlow {
+                    if isDeveloperDemoMode {
+                        actionBlocksPlayButtonVisual
+                    } else if isActiveActionFlow {
                         Button(action: {
                             playSheetDestination = .action
                         }) {
@@ -4217,7 +4373,7 @@ struct ContentView: View {
                         .buttonStyle(.plain)
                     }
                 }
-                .disabled(isFocusedLock && !isActionBlocksAllowedWhileLocked)
+                .disabled(isDeveloperDemoMode || (isFocusedLock && !isActionBlocksAllowedWhileLocked))
                 .scaleEffect(
                     shouldShowActionBlocksOnboardingBounce
                         ? (drivingCardBounceOn ? 1.012 : 1.0)
@@ -4234,7 +4390,7 @@ struct ContentView: View {
                         : .default,
                     value: drivingCardBounceOn
                 )
-                .background(contentQuickstartTargetFrame(.actionBlocks))
+                .background(quickstartTargetFrameIfNeeded(.actionBlocks))
                 .overlay(alignment: .topTrailing) {
                     if activeHomeFocusTarget == .actionBlocks, let callCard = onboardingCallCardContent {
                         onboardingCallCard(
@@ -4242,6 +4398,7 @@ struct ContentView: View {
                             step: callCard.step,
                             trailingButtonLabel: shouldShowActionPlanLaterButton ? "later" : nil,
                             trailingButtonAction: shouldShowActionPlanLaterButton ? skipActionPlanSetupStep : nil,
+                            cardTapAction: { openOnboardingCallCardTarget(.actionBlocks) },
                             pointerTrailingInset: 24
                         )
                         .offset(y: -58)
@@ -4325,6 +4482,7 @@ struct ContentView: View {
         leadingButtonAction: (() -> Void)? = nil,
         trailingButtonLabel: String? = nil,
         trailingButtonAction: (() -> Void)? = nil,
+        cardTapAction: (() -> Void)? = nil,
         pointerTrailingInset: CGFloat? = nil
     ) -> some View {
         let isDark = colorScheme == .dark
@@ -4337,22 +4495,44 @@ struct ContentView: View {
             VStack(spacing: 0) {
                 HStack(spacing: 8) {
                     if let leadingButtonLabel, let leadingButtonAction {
-                        Button(leadingButtonLabel, action: leadingButtonAction)
-                            .buttonStyle(.plain)
+                        Text(leadingButtonLabel)
                             .font(.system(size: 13.5, weight: .semibold))
                             .foregroundStyle(.blue)
+                            .contentShape(Rectangle())
+                            .highPriorityGesture(
+                                TapGesture().onEnded {
+                                    leadingButtonAction()
+                                }
+                            )
                     }
-                    Text(step)
-                        .font(.system(size: 13.75, weight: .semibold))
-                        .foregroundStyle(calloutSecondaryText)
-                    Text(title)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(calloutPrimaryText)
+                    HStack(spacing: 8) {
+                        if !step.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Text(step)
+                                .font(.system(size: 13.75, weight: .semibold))
+                                .foregroundStyle(calloutSecondaryText)
+                        }
+                        Text(title)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(calloutPrimaryText)
+                        Spacer(minLength: 0)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .highPriorityGesture(
+                        TapGesture().onEnded {
+                            cardTapAction?()
+                        }
+                    )
                     if let trailingButtonLabel, let trailingButtonAction {
-                        Button(trailingButtonLabel, action: trailingButtonAction)
-                            .buttonStyle(.plain)
+                        Text(trailingButtonLabel)
                             .font(.system(size: 13.5, weight: .semibold))
                             .foregroundStyle(.blue)
+                            .contentShape(Rectangle())
+                            .highPriorityGesture(
+                                TapGesture().onEnded {
+                                    trailingButtonAction()
+                                }
+                            )
                     }
                 }
                 .padding(.horizontal, 12)
@@ -4406,6 +4586,15 @@ struct ContentView: View {
         }
     }
 
+    @ViewBuilder
+    private func quickstartTargetFrameIfNeeded(_ target: ContentQuickstartTarget) -> some View {
+        if shouldShowContentQuickstart {
+            contentQuickstartTargetFrame(target)
+        } else {
+            Color.clear
+        }
+    }
+
     private func quickstartRectInOverlaySpace(
         rawRect: CGRect,
         overlayFrameInGlobal: CGRect,
@@ -4416,6 +4605,20 @@ struct ContentView: View {
             return CGRect(x: 24, y: 180, width: max(160, overlayBounds.width - 48), height: 80)
         }
         return localRect
+    }
+
+    private func enqueueQuickstartFrameUpdateIfNeeded(_ frames: [ContentQuickstartTarget: CGRect]) {
+        guard frames != contentQuickstartFrames else { return }
+        pendingQuickstartFrames = frames
+        guard !isApplyingQuickstartFrames else { return }
+        isApplyingQuickstartFrames = true
+        DispatchQueue.main.async {
+            let pending = pendingQuickstartFrames
+            pendingQuickstartFrames = nil
+            isApplyingQuickstartFrames = false
+            guard let pending, pending != contentQuickstartFrames else { return }
+            contentQuickstartFrames = pending
+        }
     }
 
     @ViewBuilder
@@ -5140,7 +5343,7 @@ struct ContentView: View {
     }
 
     // MARK: - Extracted Sections to reduce body complexity
-    private var drivingForceSection: some View {
+    private var drivingForceSection: AnyView {
         let ultimateVision = drivingForces.first?.ultimateVision ?? ""
         let condenseForVacationBanner = shouldShowVacationModeBanner
         let purposeCardVerticalSpacing: CGFloat = condenseForVacationBanner ? 8 : 12
@@ -5154,7 +5357,15 @@ struct ContentView: View {
             ? Color(.systemGray5)
             : Color(.secondarySystemBackground)
 
-        return NavigationLink {
+        if isDeveloperDemoMode {
+            return AnyView(
+                quickstartPurposeDemoCard
+                    .allowsHitTesting(false)
+                    .background(quickstartTargetFrameIfNeeded(.purpose))
+            )
+        }
+
+        return AnyView(NavigationLink {
             Group {
                 if isDrivingForceEmptyState {
                     PurposeStartView()
@@ -5334,22 +5545,44 @@ struct ContentView: View {
             RoundedRectangle(cornerRadius: 16)
                 .stroke(highlightDrivingRequirement ? Color.red.opacity(0.9) : Color.clear, lineWidth: 2)
         )
-        .overlay(alignment: .top) {
-            if activeHomeFocusTarget == .purpose, let callCard = onboardingCallCardContent {
-                onboardingCallCard(title: callCard.title, step: callCard.step)
-                    .offset(y: -50)
-                    .allowsHitTesting(false)
+        .overlay {
+            if shouldRequirePaywallBeforePurposeSetup {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        pendingPurposeOpenAfterPaywall = true
+                        isPresentingPurposeSetupPaywall = true
+                    }
             }
         }
-        .background(contentQuickstartTargetFrame(.purpose))
+        .overlay(alignment: .top) {
+            if activeHomeFocusTarget == .purpose, let callCard = onboardingCallCardContent {
+                onboardingCallCard(
+                    title: callCard.title,
+                    step: callCard.step,
+                    cardTapAction: { openOnboardingCallCardTarget(.purpose) }
+                )
+                    .offset(y: -50)
+            }
+        }
+        .background(quickstartTargetFrameIfNeeded(.purpose))
+        )
     }
 
-    private var fulfillmentSection: some View {
+    private var fulfillmentSection: AnyView {
         let fulfillmentCardBackground: Color = isFulfillmentEmptyState
             ? Color(.systemGray5)
             : Color(.secondarySystemBackground)
 
-        return NavigationLink {
+        if isDeveloperDemoMode {
+            return AnyView(
+                quickstartFulfillmentDemoCard
+                    .allowsHitTesting(false)
+                    .background(quickstartTargetFrameIfNeeded(.fulfillment))
+            )
+        }
+
+        return AnyView(NavigationLink {
             Group {
                 if isFulfillmentEmptyState {
                     FulfillmentStartView()
@@ -5411,7 +5644,8 @@ struct ContentView: View {
                             id: "fulfillmentGraph",
                             in: graphNamespace,
                             properties: .frame,
-                            anchor: .center
+                            anchor: .center,
+                            isSource: false
                         )
                         
                         // labels
@@ -5491,19 +5725,30 @@ struct ContentView: View {
         )
         .overlay(alignment: .top) {
             if activeHomeFocusTarget == .fulfillment, let callCard = onboardingCallCardContent {
-                onboardingCallCard(title: callCard.title, step: callCard.step)
+                onboardingCallCard(
+                    title: callCard.title,
+                    step: callCard.step,
+                    cardTapAction: { openOnboardingCallCardTarget(.fulfillment) }
+                )
                     .offset(y: -50)
-                    .allowsHitTesting(false)
             }
         }
-        .background(contentQuickstartTargetFrame(.fulfillment))
+        .background(quickstartTargetFrameIfNeeded(.fulfillment))
+        )
     }
 
-    private var objectivesSection: some View {
+    private var objectivesSection: AnyView {
         let objectivesCardBackground: Color = isObjectivesEmptyState
             ? Color(.systemGray5)
             : Color(.secondarySystemBackground)
-        return NavigationLink {
+        if isDeveloperDemoMode {
+            return AnyView(
+                quickstartObjectivesDemoCard
+                    .allowsHitTesting(false)
+                    .background(quickstartTargetFrameIfNeeded(.objectives))
+            )
+        }
+        return AnyView(NavigationLink {
             if isObjectivesEmptyState {
                 ObjectivesStartView()
             } else {
@@ -5747,12 +5992,14 @@ struct ContentView: View {
                     title: callCard.title,
                     step: callCard.step,
                     trailingButtonLabel: shouldShowObjectivesSkipButton ? "Skip" : nil,
-                    trailingButtonAction: shouldShowObjectivesSkipButton ? skipObjectivesSetupStep : nil
+                    trailingButtonAction: shouldShowObjectivesSkipButton ? skipObjectivesSetupStep : nil,
+                    cardTapAction: { openOnboardingCallCardTarget(.objectives) }
                 )
                 .offset(y: -50)
             }
         }
-        .background(contentQuickstartTargetFrame(.objectives))
+        .background(quickstartTargetFrameIfNeeded(.objectives))
+        )
     }
 
     private func skipObjectivesSetupStep() {
@@ -5764,8 +6011,61 @@ struct ContentView: View {
     }
 
     private func skipActionPlanSetupStep() {
-        hasSkippedActionPlanSetupStep = true
+        hasDeferredActionPlanCalloutThisSession = true
         setupHomepageMode = false
+    }
+
+    private func openOnboardingCallCardTarget(_ target: HomeStartupFocusTarget) {
+        switch target {
+        case .purpose:
+            if shouldRequirePaywallBeforePurposeSetup {
+                pendingPurposeOpenAfterPaywall = true
+                isPresentingPurposeSetupPaywall = true
+            } else {
+                openOnboardingCallCardDestination(isDrivingForceEmptyState ? .purposeStart : .purpose)
+            }
+        case .fulfillment:
+            if isDrivingForceEmptyState && !setupHomepageMode {
+                triggerPlayBlockedFeedback(
+                    kind: .drivingForFulfillment,
+                    highlightDriving: true,
+                    highlightFulfillment: false
+                )
+            } else {
+                openOnboardingCallCardDestination(isFulfillmentEmptyState ? .fulfillmentStart : .fulfillment)
+            }
+        case .objectives:
+            if !canOpenPlanOrActionFlow {
+                triggerPlayBlockedFeedback()
+            } else {
+                openOnboardingCallCardDestination(isObjectivesEmptyState ? .objectivesStart : .objectives)
+            }
+        case .capture:
+            guard !isDeveloperDemoMode else { return }
+            isPresentingCaptureView = true
+        case .actionBlocks:
+            guard !isDeveloperDemoMode else { return }
+            if isActiveActionFlow {
+                playSheetDestination = .action
+            } else if setupHomepageMode {
+                openOnboardingCallCardDestination(.planStart)
+            } else if !canOpenPlanOrActionFlow {
+                triggerPlayBlockedFeedback()
+            } else {
+                openOnboardingCallCardDestination(hasCompletedPlanFlowOnce ? .plan : .planStart)
+            }
+        }
+    }
+
+    private func openOnboardingCallCardDestination(_ destination: OnboardingCallCardDestination) {
+        if onboardingCallCardDestination == destination {
+            onboardingCallCardDestination = nil
+            DispatchQueue.main.async {
+                onboardingCallCardDestination = destination
+            }
+        } else {
+            onboardingCallCardDestination = destination
+        }
     }
 
     private func bounceDrivingCardOnce() {

@@ -48,6 +48,8 @@ struct AccountStepView: View {
     @State private var didLogSignupStarted = false
     @State private var didCompleteSignup = false
     @State private var developerPaywallLaunchTask: Task<Void, Never>?
+    @State private var authTapCooldownTask: Task<Void, Never>?
+    @State private var isAuthTapCoolingDown = false
 
     var body: some View {
         VStack(spacing: 22) {
@@ -70,6 +72,7 @@ struct AccountStepView: View {
             VStack(spacing: 12) {
                 #if canImport(AuthenticationServices)
                 SignInWithAppleButton(.continue) { request in
+                    guard beginAuthTapCooldownIfNeeded() else { return }
                     request.requestedScopes = [.fullName, .email]
                     let nonce = randomNonceString()
                     appleSignInNonce = nonce
@@ -122,6 +125,7 @@ struct AccountStepView: View {
                     .allowsHitTesting(false)
                 }
                 .accessibilityIdentifier("account_continueWithApple")
+                .disabled(isGoogleSignInInProgress || isAuthTapCoolingDown)
                 #else
                 Button {
                     appleSignInError = "Sign in with Apple is unavailable on this platform."
@@ -143,6 +147,7 @@ struct AccountStepView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("account_continueWithApple")
+                .disabled(isGoogleSignInInProgress || isAuthTapCoolingDown)
                 #endif
 
                 if !showMoreOptions {
@@ -162,6 +167,7 @@ struct AccountStepView: View {
 
                 if showMoreOptions {
                     Button {
+                        guard beginAuthTapCooldownIfNeeded() else { return }
                         startGoogleSignIn()
                     } label: {
                         HStack(spacing: 10) {
@@ -181,7 +187,7 @@ struct AccountStepView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("account_continueWithGoogle")
-                    .disabled(isGoogleSignInInProgress)
+                    .disabled(isGoogleSignInInProgress || isAuthTapCoolingDown)
                 }
             }
             .padding(.top, 6)
@@ -240,6 +246,9 @@ struct AccountStepView: View {
         .onDisappear {
             developerPaywallLaunchTask?.cancel()
             developerPaywallLaunchTask = nil
+            authTapCooldownTask?.cancel()
+            authTapCooldownTask = nil
+            isAuthTapCoolingDown = false
             if didLogSignupStarted && !didCompleteSignup && !session.hasAccount {
                 AnalyticsLogger.log(.signupAbandoned(reason: "dismissed"))
             }
@@ -251,6 +260,19 @@ struct AccountStepView: View {
             .resizable()
             .scaledToFit()
             .frame(width: 40, height: 40, alignment: .center)
+    }
+
+    private func beginAuthTapCooldownIfNeeded() -> Bool {
+        guard !isAuthTapCoolingDown else { return false }
+        isAuthTapCoolingDown = true
+        authTapCooldownTask?.cancel()
+        authTapCooldownTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard !Task.isCancelled else { return }
+            isAuthTapCoolingDown = false
+            authTapCooldownTask = nil
+        }
+        return true
     }
 
     private func startGoogleSignIn() {

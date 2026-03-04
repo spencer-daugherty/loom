@@ -91,6 +91,147 @@ private struct MicrosoftTodoDateTime: Decodable {
     var timeZone: String?
 }
 
+private struct CaptureSharedDraftAttachment: Identifiable, Hashable {
+    let id: UUID
+    let kind: ActionAttachmentKind
+    let title: String
+    let urlString: String?
+    let fileName: String?
+    let fileBookmarkData: Data?
+
+    init(
+        id: UUID = UUID(),
+        kind: ActionAttachmentKind,
+        title: String,
+        urlString: String? = nil,
+        fileName: String? = nil,
+        fileBookmarkData: Data? = nil
+    ) {
+        self.id = id
+        self.kind = kind
+        self.title = title
+        self.urlString = urlString
+        self.fileName = fileName
+        self.fileBookmarkData = fileBookmarkData
+    }
+
+    var asCarriedAttachment: CarriedActionAttachmentSnapshot {
+        CarriedActionAttachmentSnapshot(
+            kindRaw: kind.rawValue,
+            urlString: urlString,
+            fileName: fileName,
+            fileBookmarkData: fileBookmarkData
+        )
+    }
+}
+
+private struct CaptureSharedCompletedSheetID: Identifiable {
+    let id: UUID
+}
+
+private struct CaptureSharedAttachmentsReadOnlySheet: View {
+    let title: String
+    let noteText: String
+    let attachments: [CaptureSharedDraftAttachment]
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Action") {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(2)
+                }
+
+                if !noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Section("Notes") {
+                        Text(noteText)
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                Section("Attachments") {
+                    if attachments.isEmpty {
+                        Text("No attachments available.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(attachments) { attachment in
+                            Button {
+                                openAttachment(attachment)
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: attachmentIconName(for: attachment))
+                                        .foregroundStyle(.secondary)
+                                    Text(attachment.title)
+                                        .font(.subheadline)
+                                        .foregroundStyle(.primary)
+                                        .lineLimit(2)
+                                    Spacer(minLength: 0)
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Attachments")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Close") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func attachmentIconName(for attachment: CaptureSharedDraftAttachment) -> String {
+        switch attachment.kind {
+        case .link:
+            return "link"
+        case .file:
+            return "doc"
+        case .note:
+            return "note.text"
+        }
+    }
+
+    private func openAttachment(_ attachment: CaptureSharedDraftAttachment) {
+        switch attachment.kind {
+        case .link:
+            guard let value = attachment.urlString, let url = URL(string: value) else { return }
+            openURL(url)
+        case .file:
+            guard let bookmark = attachment.fileBookmarkData else { return }
+            var isStale = false
+            guard let url = try? URL(
+                resolvingBookmarkData: bookmark,
+                options: [.withoutUI],
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            ) else { return }
+            let didAccess = url.startAccessingSecurityScopedResource()
+            openURL(url)
+            if didAccess {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    url.stopAccessingSecurityScopedResource()
+                }
+            }
+        case .note:
+            break
+        }
+    }
+}
+
 private struct MicrosoftTodoEnvelope {
     var listID: String
     var taskID: String
@@ -231,9 +372,12 @@ struct CaptureView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.openURL) private var openURL
     @AppStorage("setup_homepage_mode") private var setupHomepageMode = false
     @AppStorage("capture_setup_completed_once_v1") private var hasCompletedCaptureSetupOnce = false
     private let forceSetupWelcome: Bool
+    private let pendingSharePayloadID: String?
+    private let onSharePayloadHandled: ((String) -> Void)?
 
     @Query(sort: \RollingCaptureItem.createdAt, order: .reverse)
     private var allItems: [RollingCaptureItem]
@@ -285,6 +429,8 @@ struct CaptureView: View {
     @State private var editingItemAttentionDays: Int = 7
     @State private var editingItemOriginalAttentionDays: Int = 7
     @State private var editingItemSourceType: String? = nil
+    @State private var editingItemSharedNoteText: String = ""
+    @State private var editingItemSharedAttachments: [CaptureSharedDraftAttachment] = []
     @State private var editingItemLeverageResourceID: UUID? = nil
     @State private var editingItemOriginalLeverageResourceID: UUID? = nil
     @State private var showEditLeverageDueDateError: Bool = false
@@ -363,9 +509,34 @@ struct CaptureView: View {
     @FocusState private var isFullTextEditorFocused: Bool
     @FocusState private var repeatEditorTextFocused: Bool
     @State private var editActionKeyboardHeight: CGFloat = 0
+    @State private var handledSharePayloadID: String? = nil
+    @State private var showSharedCreateSheet = false
+    @State private var sharedDraftActionText: String = ""
+    @State private var sharedDraftHasDueDate = false
+    @State private var sharedDraftDueDate = Calendar.current.startOfDay(for: Date())
+    @State private var sharedDraftAttentionDays = 7
+    @State private var sharedDraftNoteText: String = ""
+    @State private var sharedDraftSourceType: String = LoomShareSourceType.sharedIn
+    @State private var sharedDraftSourceExternalID: String? = nil
+    @State private var sharedDraftSourceApp: String? = nil
+    @State private var sharedDraftSourceTitle: String? = nil
+    @State private var sharedDraftAttachments: [CaptureSharedDraftAttachment] = []
+    @State private var isGeneratingSharedAutoWrite = false
+    @State private var sharedAutoWriteSuggestion: String? = nil
+    @State private var sharedAutoWriteErrorMessage: String? = nil
+    @State private var sharedAutoWriteTroubleshootingMessage: String? = nil
+    @State private var sharedAutoWriteHistory: [String] = []
+    @State private var sharedCompletedAttachmentsViewerID: CaptureSharedCompletedSheetID? = nil
+    @AppStorage(loomAITroubleshootingDefaultsKey) private var loomAITroubleshootingEnabled = true
 
-    init(forceSetupWelcome: Bool = false) {
+    init(
+        forceSetupWelcome: Bool = false,
+        pendingSharePayloadID: String? = nil,
+        onSharePayloadHandled: ((String) -> Void)? = nil
+    ) {
         self.forceSetupWelcome = forceSetupWelcome
+        self.pendingSharePayloadID = pendingSharePayloadID
+        self.onSharePayloadHandled = onSharePayloadHandled
     }
 
     private enum FocusField: Hashable {
@@ -530,6 +701,11 @@ struct CaptureView: View {
         return completedItems.filter { normalizedActionText($0.text).contains(query) }
     }
 
+    private var sharedCompletedAttachmentsViewerItem: QuickCompletedCaptureItem? {
+        guard let id = sharedCompletedAttachmentsViewerID?.id else { return nil }
+        return completedItems.first(where: { $0.id == id })
+    }
+
     private var recurringDispatchItemIDs: Set<UUID> {
         Set(recurringDispatches.map(\.captureItemID))
     }
@@ -625,7 +801,7 @@ struct CaptureView: View {
         return formatter.string(from: date)
     }
 
-    var body: some View {
+    private var captureNavigationBody: some View {
         NavigationView {
             ZStack {
                 (colorScheme == .dark ? Color(.systemGroupedBackground) : Color.white).ignoresSafeArea()
@@ -691,6 +867,7 @@ struct CaptureView: View {
                 }
                 .toolbar(isCaptureSetupWelcomePage ? .hidden : .visible, for: .navigationBar)
                     .onAppear {
+                        handleIncomingSharePayloadIfNeeded()
                         markCaptureSetupCompletedIfNeeded()
                         runAutoUnhideIfNeeded()
                         dedupeCaptureItemsIfNeeded()
@@ -766,8 +943,26 @@ struct CaptureView: View {
                 }
             }
         }
+    }
+
+    var body: some View {
+        captureNavigationBody
         .sheet(isPresented: $showRecurringSettingsSheet) {
             recurringSettingsSheet()
+        }
+        .sheet(isPresented: $showSharedCreateSheet) {
+            sharedCreateActionSheet
+        }
+        .sheet(item: $sharedCompletedAttachmentsViewerID) { _ in
+            if let item = sharedCompletedAttachmentsViewerItem {
+                CaptureSharedAttachmentsReadOnlySheet(
+                    title: item.text,
+                    noteText: ActionCarryProfileStore.load(for: item.text)?.noteText ?? "",
+                    attachments: sharedAttachmentsFromCarryProfile(forText: item.text)
+                )
+            } else {
+                EmptyView()
+            }
         }
         .onChange(of: showFullTextEditorSheet) { _, isShowing in
             if isShowing {
@@ -783,6 +978,9 @@ struct CaptureView: View {
                 isComposerFocused = false
                 focusedField = nil
             }
+        }
+        .onChange(of: pendingSharePayloadID) { _, _ in
+            handleIncomingSharePayloadIfNeeded()
         }
     }
 
@@ -930,7 +1128,7 @@ struct CaptureView: View {
             ForEach(displayItems) { item in
                 HStack(alignment: .center, spacing: 8) {
                     if item.sourceType != nil {
-                        Image(systemName: "link")
+                        Image(systemName: captureSourceIconName(for: item.sourceType))
                             .font(.system(size: 16, weight: .semibold))
                             .foregroundStyle(.secondary)
                     }
@@ -1061,11 +1259,26 @@ struct CaptureView: View {
                 if isSearchMode || showCompletedList {
                     ForEach(Array(displayCompletedItems.enumerated()), id: \.element.id) { index, item in
                         let row = HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            if item.actionSource != .normal {
+                                Image(systemName: captureSourceIconName(for: item.sourceType))
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                            }
                             Text(item.text)
                                 .font(.body.weight(.medium))
                                 .foregroundStyle(.secondary)
                                 .strikethrough(true, color: .secondary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
+                            if item.actionSource == .sharedIn {
+                                Button {
+                                    sharedCompletedAttachmentsViewerID = .init(id: item.id)
+                                } label: {
+                                    Image(systemName: "ellipsis.rectangle")
+                                        .font(.system(size: 22, weight: .semibold))
+                                        .foregroundStyle(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
                         .padding(8)
                         .padding(.vertical, 2)
@@ -1217,6 +1430,45 @@ struct CaptureView: View {
                             Spacer()
                             Text(sourceLabel)
                                 .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    if editingItemSourceType == LoomShareSourceType.sharedIn {
+                        Section("Attachments") {
+                            if !editingItemSharedNoteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text("Notes")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                    Text(editingItemSharedNoteText)
+                                        .font(.subheadline)
+                                        .foregroundStyle(.primary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+
+                            if editingItemSharedAttachments.isEmpty {
+                                Text("No attachments available.")
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                ForEach(editingItemSharedAttachments) { attachment in
+                                    Button {
+                                        openSharedDraftAttachment(attachment)
+                                    } label: {
+                                        HStack(spacing: 10) {
+                                            Image(systemName: iconName(for: attachment))
+                                                .foregroundStyle(.secondary)
+                                            Text(attachment.title)
+                                                .font(.subheadline)
+                                                .foregroundStyle(.primary)
+                                                .lineLimit(2)
+                                            Spacer(minLength: 0)
+                                        }
+                                        .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
                         }
                     }
 
@@ -3010,6 +3262,537 @@ struct CaptureView: View {
         }
     }
 
+    private var canSaveSharedDraftAction: Bool {
+        !sharedDraftActionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    @ViewBuilder
+    private var sharedCreateActionSheet: some View {
+        NavigationStack {
+            List {
+                Section("Action") {
+                    TextField("Action", text: $sharedDraftActionText, axis: .vertical)
+                        .lineLimit(3, reservesSpace: true)
+                        .textInputAutocapitalization(.sentences)
+                        .autocorrectionDisabled(false)
+                        .foregroundStyle(.primary)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Button {
+                            Task { await refreshSharedAutoWriteSuggestion() }
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "wand.and.stars")
+                                Text(isGeneratingSharedAutoWrite ? "AutoWrite" : "AutoWrite")
+                                if isGeneratingSharedAutoWrite {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                }
+                            }
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(
+                                Capsule(style: .continuous)
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [
+                                                Color(red: 0.23, green: 0.48, blue: 1.0),
+                                                Color(red: 0.17, green: 0.80, blue: 0.94)
+                                            ],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                    )
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isGeneratingSharedAutoWrite)
+
+                        if let sharedAutoWriteSuggestion,
+                           !sharedAutoWriteSuggestion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Button {
+                                rememberSharedAutoWriteSuggestion(sharedAutoWriteSuggestion)
+                                sharedDraftActionText = sharedAutoWriteSuggestion
+                            } label: {
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text("SUGGESTION")
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                    Text(sharedAutoWriteSuggestion)
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(.primary)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(10)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .fill(Color(.secondarySystemBackground))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .stroke(Color.blue.opacity(0.25), lineWidth: 1)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        if let sharedAutoWriteErrorMessage,
+                           !sharedAutoWriteErrorMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(sharedAutoWriteErrorMessage)
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                if loomAITroubleshootingEnabled,
+                                   let troubleshooting = sharedAutoWriteTroubleshootingMessage,
+                                   !troubleshooting.isEmpty {
+                                    LoomAITroubleshootingSection(details: troubleshooting)
+                                }
+                            }
+                        }
+                    }
+                    .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                }
+
+                Section("Due Date") {
+                    Toggle("Set Due Date", isOn: $sharedDraftHasDueDate)
+                    if sharedDraftHasDueDate {
+                        DatePicker(
+                            "Due Date",
+                            selection: $sharedDraftDueDate,
+                            in: Calendar.current.startOfDay(for: Date())...,
+                            displayedComponents: .date
+                        )
+                        Stepper(value: $sharedDraftAttentionDays, in: 7...30) {
+                            Text("Attention: \(sharedDraftAttentionDays) days")
+                        }
+                    }
+                }
+
+                Section("Attachments") {
+                    if !sharedDraftNoteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Notes")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            Text(sharedDraftNoteText)
+                                .font(.subheadline)
+                                .foregroundStyle(.primary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+
+                    if sharedDraftAttachments.isEmpty {
+                        Text("No attachments found in shared content.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(sharedDraftAttachments) { attachment in
+                            Button {
+                                openSharedDraftAttachment(attachment)
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: iconName(for: attachment))
+                                        .foregroundStyle(.secondary)
+                                    Text(attachment.title)
+                                        .font(.subheadline)
+                                        .foregroundStyle(.primary)
+                                        .lineLimit(2)
+                                    Spacer(minLength: 0)
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("New Shared Action")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        showSharedCreateSheet = false
+                    }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Save") {
+                        saveSharedDraftAction()
+                    }
+                    .disabled(!canSaveSharedDraftAction)
+                }
+            }
+            .onAppear {
+                Task { await generateSharedAutoWriteSuggestion(force: false) }
+            }
+        }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func handleIncomingSharePayloadIfNeeded() {
+        guard let payloadID = pendingSharePayloadID,
+              handledSharePayloadID != payloadID else {
+            return
+        }
+        handledSharePayloadID = payloadID
+        defer { onSharePayloadHandled?(payloadID) }
+
+        guard let payload = ShareIntoLoomBridge.consumePayload(id: payloadID) else { return }
+
+        sharedDraftSourceType = LoomShareSourceType.sharedIn
+        sharedDraftSourceExternalID = payload.id.uuidString
+        sharedDraftSourceApp = payload.sourceApp
+        sharedDraftSourceTitle = payload.sourceTitle
+        sharedDraftHasDueDate = false
+        sharedDraftDueDate = Calendar.current.startOfDay(for: Date())
+        sharedDraftAttentionDays = 7
+        sharedAutoWriteSuggestion = nil
+        sharedAutoWriteErrorMessage = nil
+        isGeneratingSharedAutoWrite = false
+        sharedAutoWriteHistory = []
+
+        let baseTitle = payload.sourceTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let textTrimmed = payload.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let fallback = payload.urlString.flatMap { URL(string: $0)?.host } ?? ""
+        sharedDraftActionText = [baseTitle, textTrimmed.components(separatedBy: .newlines).first ?? ""]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first(where: { !$0.isEmpty }) ?? fallback
+
+        sharedDraftNoteText = textTrimmed
+        sharedDraftAttachments = buildSharedDraftAttachments(from: payload)
+        showSharedCreateSheet = true
+    }
+
+    private func buildSharedDraftAttachments(from payload: ShareIntoLoomPayload) -> [CaptureSharedDraftAttachment] {
+        var result: [CaptureSharedDraftAttachment] = []
+        var seenLinkValues: Set<String> = []
+
+        if let urlString = payload.urlString?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !urlString.isEmpty {
+            result.append(
+                CaptureSharedDraftAttachment(
+                    kind: .link,
+                    title: urlString,
+                    urlString: urlString
+                )
+            )
+            seenLinkValues.insert(urlString.lowercased())
+        }
+
+        for attachment in payload.attachments {
+            switch attachment.kind {
+            case .url:
+                let value = (attachment.urlString ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !value.isEmpty else { continue }
+                let dedupe = value.lowercased()
+                guard !seenLinkValues.contains(dedupe) else { continue }
+                seenLinkValues.insert(dedupe)
+                result.append(
+                    CaptureSharedDraftAttachment(
+                        id: attachment.id,
+                        kind: .link,
+                        title: attachment.displayName.isEmpty ? value : attachment.displayName,
+                        urlString: value
+                    )
+                )
+            case .image, .file:
+                guard let fileURL = ShareIntoLoomBridge.fileURL(for: attachment) else { continue }
+                let bookmark = try? fileURL.bookmarkData(
+                    options: .minimalBookmark,
+                    includingResourceValuesForKeys: nil,
+                    relativeTo: nil
+                )
+                result.append(
+                    CaptureSharedDraftAttachment(
+                        id: attachment.id,
+                        kind: .file,
+                        title: attachment.displayName.isEmpty ? (attachment.fileName ?? fileURL.lastPathComponent) : attachment.displayName,
+                        fileName: attachment.fileName ?? fileURL.lastPathComponent,
+                        fileBookmarkData: bookmark
+                    )
+                )
+            case .text:
+                continue
+            }
+        }
+        return result
+    }
+
+    private func saveSharedDraftAction() {
+        let trimmedAction = sharedDraftActionText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedAction.isEmpty else { return }
+
+        if let duplicate = allItems.first(where: { normalizedActionText($0.text) == normalizedActionText(trimmedAction) }) {
+            triggerDuplicateFeedback(duplicateID: duplicate.id)
+            return
+        }
+
+        let dueDate = sharedDraftHasDueDate ? Calendar.current.startOfDay(for: sharedDraftDueDate) : nil
+        let newItem = RollingCaptureItem(
+            text: trimmedAction,
+            isGhost: false,
+            createdAt: .now,
+            dueDate: dueDate,
+            dueDateAttentionDays: sharedDraftAttentionDays,
+            sourceType: LoomShareSourceType.sharedIn,
+            sourceExternalID: sharedDraftSourceExternalID,
+            unhideDate: nil,
+            unhiddenAt: nil
+        )
+        modelContext.insert(newItem)
+
+        let profile = CarriedActionProfile(
+            isMust: false,
+            timeEstimateMinutes: nil,
+            sensitiveMorning: true,
+            sensitiveAfternoon: true,
+            sensitiveEvening: true,
+            leverageKindRaw: nil,
+            leverageValue: nil,
+            placeNames: [],
+            noteText: sharedDraftNoteText,
+            attachments: sharedDraftAttachments.map(\.asCarriedAttachment),
+            updatedAtUnix: Date().timeIntervalSince1970
+        )
+        ActionCarryProfileStore.save(for: trimmedAction, profile: profile)
+
+        try? modelContext.save()
+        showSharedCreateSheet = false
+        isComposerFocused = true
+    }
+
+    private func sharedAttachmentsFromCarryProfile(forText text: String) -> [CaptureSharedDraftAttachment] {
+        guard let profile = ActionCarryProfileStore.load(for: text) else { return [] }
+        return profile.attachments.map { snapshot in
+            let kind = ActionAttachmentKind(rawValue: snapshot.kindRaw) ?? .file
+            let title: String = {
+                switch kind {
+                case .link:
+                    return snapshot.urlString ?? "(link)"
+                case .file:
+                    return snapshot.fileName ?? "(file)"
+                case .note:
+                    return "Note"
+                }
+            }()
+            return CaptureSharedDraftAttachment(
+                kind: kind,
+                title: title,
+                urlString: snapshot.urlString,
+                fileName: snapshot.fileName,
+                fileBookmarkData: snapshot.fileBookmarkData
+            )
+        }
+    }
+
+    private func generateSharedAutoWriteSuggestion(force: Bool) async {
+        if isGeneratingSharedAutoWrite { return }
+        if !force, sharedAutoWriteSuggestion != nil { return }
+        isGeneratingSharedAutoWrite = true
+        sharedAutoWriteErrorMessage = nil
+        sharedAutoWriteTroubleshootingMessage = nil
+        defer { isGeneratingSharedAutoWrite = false }
+
+        do {
+            let baseContext = try LoomAIViewModel().buildContextSnapshot(in: modelContext)
+            var contextSnapshot = baseContext
+            contextSnapshot.shareAttachmentPreview = .init(
+                sourceApp: sharedDraftSourceApp,
+                sourceTitle: sharedDraftSourceTitle ?? sharedDraftActionText,
+                attachmentTypes: sharedDraftAttachments.map(\.kind.rawValue),
+                textPreview: String(sharedDraftNoteText.prefix(500)),
+                urlHostPath: sharedDraftAttachments
+                    .first(where: { $0.kind == .link })
+                    .flatMap { $0.urlString }
+                    .flatMap(sharedURLHostPath)
+            )
+
+            var disallowed = sharedAutoWriteDisallowedSuggestions()
+
+            for attempt in 0..<4 {
+                let previousSuggestionsLine = disallowed.isEmpty
+                    ? "No prior suggestions."
+                    : "Prior suggestions to avoid repeating: \(disallowed.joined(separator: " | "))"
+                let requestText = """
+                Suggest a single Capture action title from shared content.
+                Requirements:
+                - 3 to 6 words preferred
+                - Hard maximum 8 words
+                - Keep it concrete and specific
+                - No punctuation-only filler
+                - If prior suggestions are listed, return a distinctly different option
+                \(previousSuggestionsLine)
+                Shared context preview:
+                title=\(sharedDraftActionText)
+                text=\(String(sharedDraftNoteText.prefix(500)))
+                Attempt: \(attempt + 1)
+                """
+
+                let response = try await LoomAIService().sendChat(
+                    messages: [.init(role: "user", content: requestText)],
+                    context: contextSnapshot,
+                    intent: "autowrite_shared_capture",
+                    screen: "capture_shared",
+                    requestID: UUID().uuidString,
+                    requestHash: stableHash(requestText + "|" + String(sharedDraftNoteText.prefix(500)))
+                )
+
+                let suggestion = sanitizeSharedSuggestion(response.message)
+                if suggestion.isEmpty {
+                    if attempt == 3 {
+                        sharedAutoWriteErrorMessage = "LoomAI couldn’t infer a short action yet."
+                        sharedAutoWriteTroubleshootingMessage = loomAITroubleshootingLocalDetails(
+                            feature: "capture_shared_autowrite",
+                            reason: "Response did not include a valid short suggestion.",
+                            responsePreview: response.message
+                        )
+                    }
+                    continue
+                }
+                if isSharedAutoWriteSuggestionDisallowed(suggestion, disallowed: disallowed) {
+                    if !disallowed.contains(where: { normalizedSharedAutoWriteSuggestion($0) == normalizedSharedAutoWriteSuggestion(suggestion) }) {
+                        disallowed.append(suggestion)
+                    }
+                    if attempt == 3 {
+                        sharedAutoWriteErrorMessage = "LoomAI repeated a prior suggestion. Tap AutoWrite again."
+                        let duplicateDetails = loomAIDuplicateSuggestionTroubleshootingDetails(
+                            feature: "capture_shared_autowrite",
+                            reason: "Response suggestion matched prior selected/current suggestion.",
+                            responsePreview: response.message
+                        )
+                        sharedAutoWriteTroubleshootingMessage = duplicateDetails
+                        loomAIReportTroubleshootingIfEnabled(details: duplicateDetails)
+                    }
+                    continue
+                }
+                sharedAutoWriteSuggestion = suggestion
+                rememberSharedAutoWriteSuggestion(suggestion)
+                sharedAutoWriteTroubleshootingMessage = nil
+                return
+            }
+        } catch {
+            sharedAutoWriteErrorMessage = "LoomAI couldn’t generate a suggestion right now."
+            sharedAutoWriteTroubleshootingMessage = loomAITroubleshootingDetails(
+                feature: "capture_shared_autowrite",
+                error: error
+            )
+        }
+    }
+
+    private func sanitizeSharedSuggestion(_ raw: String) -> String {
+        let normalized = raw
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return "" }
+        let words = normalized.split(separator: " ").map(String.init)
+        guard !words.isEmpty else { return "" }
+        return words.prefix(8).joined(separator: " ")
+    }
+
+    private func rememberSharedAutoWriteSuggestion(_ suggestion: String) {
+        let trimmed = suggestion.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let normalized = normalizedSharedAutoWriteSuggestion(trimmed)
+        guard !normalized.isEmpty else { return }
+        guard !sharedAutoWriteHistory.contains(where: { normalizedSharedAutoWriteSuggestion($0) == normalized }) else {
+            return
+        }
+        sharedAutoWriteHistory.append(trimmed)
+        if sharedAutoWriteHistory.count > 20 {
+            sharedAutoWriteHistory = Array(sharedAutoWriteHistory.suffix(20))
+        }
+    }
+
+    private func refreshSharedAutoWriteSuggestion() async {
+        if let current = sharedAutoWriteSuggestion {
+            rememberSharedAutoWriteSuggestion(current)
+        }
+        await generateSharedAutoWriteSuggestion(force: true)
+    }
+
+    private func normalizedSharedAutoWriteSuggestion(_ text: String) -> String {
+        text
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .replacingOccurrences(of: "[^a-z0-9\\s]", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+
+    private func sharedAutoWriteDisallowedSuggestions() -> [String] {
+        var result: [String] = []
+        var seen: Set<String> = []
+
+        let candidates = sharedAutoWriteHistory + [sharedAutoWriteSuggestion, sharedDraftActionText].compactMap { $0 }
+        for candidate in candidates {
+            let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            let normalized = normalizedSharedAutoWriteSuggestion(trimmed)
+            guard !normalized.isEmpty, !seen.contains(normalized) else { continue }
+            seen.insert(normalized)
+            result.append(trimmed)
+        }
+        return result
+    }
+
+    private func isSharedAutoWriteSuggestionDisallowed(_ suggestion: String, disallowed: [String]) -> Bool {
+        let normalized = normalizedSharedAutoWriteSuggestion(suggestion)
+        guard !normalized.isEmpty else { return true }
+        return disallowed.contains { normalizedSharedAutoWriteSuggestion($0) == normalized }
+    }
+
+    private func sharedURLHostPath(_ urlString: String) -> String? {
+        guard let url = URL(string: urlString), let host = url.host else { return nil }
+        let path = url.path.trimmingCharacters(in: .whitespacesAndNewlines)
+        return path.isEmpty || path == "/" ? host : "\(host)\(path)"
+    }
+
+    private func stableHash(_ raw: String) -> String {
+        raw.unicodeScalars.reduce(UInt64(5381)) { acc, scalar in
+            ((acc << 5) &+ acc) &+ UInt64(scalar.value)
+        }
+        .description
+    }
+
+    private func iconName(for attachment: CaptureSharedDraftAttachment) -> String {
+        switch attachment.kind {
+        case .link:
+            return "link"
+        case .file:
+            return "doc"
+        case .note:
+            return "note.text"
+        }
+    }
+
+    private func openSharedDraftAttachment(_ attachment: CaptureSharedDraftAttachment) {
+        switch attachment.kind {
+        case .link:
+            guard let urlString = attachment.urlString, let url = URL(string: urlString) else { return }
+            openURL(url)
+        case .file:
+            guard let data = attachment.fileBookmarkData else { return }
+            var isStale = false
+            if let url = try? URL(
+                resolvingBookmarkData: data,
+                options: [.withoutUI],
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            ) {
+                let didAccess = url.startAccessingSecurityScopedResource()
+                openURL(url)
+                if didAccess {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                        url.stopAccessingSecurityScopedResource()
+                    }
+                }
+            }
+        case .note:
+            break
+        }
+    }
+
     private func addItem() {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -3130,6 +3913,9 @@ struct CaptureView: View {
         editingItemAttentionDays = resolvedAttention
         editingItemOriginalAttentionDays = resolvedAttention
         editingItemSourceType = item.sourceType
+        let sharedProfile = ActionCarryProfileStore.load(for: item.text)
+        editingItemSharedNoteText = sharedProfile?.noteText ?? ""
+        editingItemSharedAttachments = sharedAttachmentsFromCarryProfile(forText: item.text)
         let leverageResourceID = resolvedLeverageResourceID(for: item)
         editingItemLeverageResourceID = leverageResourceID
         editingItemOriginalLeverageResourceID = leverageResourceID
@@ -3263,6 +4049,8 @@ struct CaptureView: View {
         editingItemHasDueDate = false
         editingItemOriginalHasDueDate = false
         editingItemSourceType = nil
+        editingItemSharedNoteText = ""
+        editingItemSharedAttachments = []
         editingItemLeverageResourceID = nil
         editingItemOriginalLeverageResourceID = nil
         showEditLeverageDueDateError = false
@@ -3297,9 +4085,22 @@ struct CaptureView: View {
             return "Microsoft To Do"
         case "google_tasks":
             return "Google Tasks"
+        case LoomShareSourceType.sharedIn:
+            return "Share into Loom"
         default:
             return nil
         }
+    }
+
+    private func captureSourceIconName(for sourceType: String?) -> String {
+        guard let trimmed = sourceType?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty else {
+            return "plus.viewfinder"
+        }
+        if trimmed == LoomShareSourceType.sharedIn {
+            return "square.and.arrow.down"
+        }
+        return "link"
     }
 
     private func normalizedCaptureText(_ text: String) -> String {
@@ -4497,7 +5298,14 @@ struct CaptureView: View {
 
     private func quickCompleteItem(_ item: RollingCaptureItem) {
         applyExternalSourceMutationIfNeeded(for: item, action: .complete)
-        modelContext.insert(QuickCompletedCaptureItem(text: item.text, completedAt: .now))
+        modelContext.insert(
+            QuickCompletedCaptureItem(
+                text: item.text,
+                completedAt: .now,
+                sourceType: item.sourceType,
+                sourceExternalID: item.sourceExternalID
+            )
+        )
         RecentlyDeletedStore.trash(item, in: modelContext)
         try? modelContext.save()
     }
@@ -4511,6 +5319,8 @@ struct CaptureView: View {
                 text: item.text,
                 isGhost: false,
                 createdAt: .now,
+                sourceType: item.sourceType,
+                sourceExternalID: item.sourceExternalID,
                 unhideDate: nil,
                 unhiddenAt: nil
             ))

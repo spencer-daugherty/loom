@@ -23,17 +23,6 @@ struct DiagnosticFlowView: View {
         case planningReality = 3
         case desiredChange = 4
         case building = 5
-
-        var questionIndex: Int? {
-            switch self {
-            case .stressSource: return 1
-            case .breakPoint: return 2
-            case .lifeAreas: return 3
-            case .planningReality: return 4
-            case .desiredChange: return 5
-            case .building: return nil
-            }
-        }
     }
 
     private static let stressOptions: [String] = [
@@ -108,10 +97,10 @@ struct DiagnosticFlowView: View {
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 18) {
-                if let questionIndex = step.questionIndex {
+                if let questionIndex = questionIndex(for: step) {
                     DiagnosticThinkingHeader(
-                        title: "\(questionIndex) of 5",
-                        progress: Double(questionIndex) / 5.0
+                        title: "\(questionIndex) of \(totalQuestionCount)",
+                        progress: Double(questionIndex) / Double(max(1, totalQuestionCount))
                     )
                 }
 
@@ -193,7 +182,7 @@ struct DiagnosticFlowView: View {
                 AnalyticsLogger.log(
                     .diagnosticStarted(
                         source: mode.analyticsSource,
-                        step: step.questionIndex ?? 0,
+                        step: questionIndex(for: step) ?? 0,
                         elapsedSeconds: 0
                     )
                 )
@@ -211,7 +200,7 @@ struct DiagnosticFlowView: View {
             AnalyticsLogger.log(
                 .diagnosticAbandoned(
                     source: mode.analyticsSource,
-                    step: step.questionIndex ?? 0,
+                    step: questionIndex(for: step) ?? 0,
                     elapsedSeconds: elapsedSeconds
                 )
             )
@@ -511,7 +500,7 @@ struct DiagnosticFlowView: View {
             AnalyticsLogger.log(
                 .diagnosticCompleted(
                     source: mode.analyticsSource,
-                    step: 5,
+                    step: totalQuestionCount,
                     elapsedSeconds: elapsed
                 )
             )
@@ -519,7 +508,7 @@ struct DiagnosticFlowView: View {
                 AnalyticsLogger.log(
                     .diagnosticUpdated(
                         source: mode.analyticsSource,
-                        step: 5,
+                        step: totalQuestionCount,
                         elapsedSeconds: elapsed
                     )
                 )
@@ -711,7 +700,7 @@ struct DiagnosticFlowView: View {
     private func nextStep(after step: Step) -> Step? {
         switch step {
         case .stressSource: return .breakPoint
-        case .breakPoint: return .lifeAreas
+        case .breakPoint: return includesLifeAreasStep ? .lifeAreas : .planningReality
         case .lifeAreas: return .planningReality
         case .planningReality: return .desiredChange
         case .desiredChange: return nil
@@ -724,10 +713,30 @@ struct DiagnosticFlowView: View {
         case .stressSource: return nil
         case .breakPoint: return .stressSource
         case .lifeAreas: return .breakPoint
-        case .planningReality: return .lifeAreas
+        case .planningReality: return includesLifeAreasStep ? .lifeAreas : .breakPoint
         case .desiredChange: return .planningReality
         case .building: return .desiredChange
         }
+    }
+
+    private var includesLifeAreasStep: Bool {
+        mode == .onboarding
+    }
+
+    private var visibleQuestionSteps: [Step] {
+        if includesLifeAreasStep {
+            return [.stressSource, .breakPoint, .lifeAreas, .planningReality, .desiredChange]
+        }
+        return [.stressSource, .breakPoint, .planningReality, .desiredChange]
+    }
+
+    private var totalQuestionCount: Int {
+        visibleQuestionSteps.count
+    }
+
+    private func questionIndex(for step: Step) -> Int? {
+        guard let index = visibleQuestionSteps.firstIndex(of: step) else { return nil }
+        return index + 1
     }
 
     @ViewBuilder

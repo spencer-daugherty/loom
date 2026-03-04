@@ -9,11 +9,35 @@ import UIKit
 /// Delete this file and the `showTemporaryVisionAutoWriteDebugPage` branch in `loomApp.swift`
 /// to remove it entirely.
 struct TemporaryVisionAutoWriteDebugView: View {
-    private enum DebugMode: String {
+    private enum DebugMode: String, CaseIterable, Identifiable {
         case newVision
         case rewordVision
         case loomAI
         case diagnostic
+        case personalities
+        case autoGroup
+        case all
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .newVision:
+                return "newVision"
+            case .rewordVision:
+                return "rewordVision"
+            case .loomAI:
+                return "LoomAI"
+            case .diagnostic:
+                return "Diagnostic"
+            case .personalities:
+                return "Personalities"
+            case .autoGroup:
+                return "AutoGroup"
+            case .all:
+                return "All"
+            }
+        }
     }
 
     let onClose: () -> Void
@@ -23,7 +47,7 @@ struct TemporaryVisionAutoWriteDebugView: View {
     }
 
     @Environment(\.modelContext) private var modelContext
-    @AppStorage("loom.ai.context.compact.enabled") private var compactContextEnabled = true
+    @ObservedObject private var appActivityLog = AppDebugActivityLog.shared
 
     @State private var currentVision: String = ""
     @State private var mode: DebugMode = .loomAI
@@ -40,11 +64,13 @@ struct TemporaryVisionAutoWriteDebugView: View {
     @State private var requestCopied = false
     @State private var responseCopied = false
     @State private var contextCopied = false
+    @State private var allCopied = false
     @FocusState private var isInputFocused: Bool
 
     private let autoWriteEndpointURL = URL(string: "https://loom-ai-minimal.spence0927.workers.dev/purpose/vision/autowrite")!
     private let chatEndpointURL = URL(string: "https://loom-ai-minimal.spence0927.workers.dev/chat")!
     private let diagnosticInsightsEndpointURL = URL(string: "https://loom-ai-minimal.spence0927.workers.dev/diagnostic/insights")!
+    private let purposeProfileInsightsEndpointURL = URL(string: "https://loom-ai-minimal.spence0927.workers.dev/purpose/insights/profile")!
 
     private static let diagnosticStressOptions: [String] = [
         "Too many priorities competing",
@@ -82,110 +108,193 @@ struct TemporaryVisionAutoWriteDebugView: View {
         "I feel balanced across life"
     ]
 
+    private static let randomVisionOptions: [String] = [
+        "I build a calm, focused life where my work and health both move forward each week.",
+        "I create stable routines that protect deep work, strong relationships, and clear recovery time.",
+        "I grow my career and finances with steady consistency while still staying present at home.",
+        "I become the kind of person who starts quickly, follows through, and keeps promises to myself.",
+        "I design each week around my highest priorities so urgent noise does not run my life.",
+        "I maintain high energy and simple systems that help me finish important work without burning out.",
+        "I make meaningful progress on long-term goals while keeping balance across my core life areas.",
+        "I operate with clear direction, strong boundaries, and daily action on what matters most."
+    ]
+
+    private static let randomPassionOptions: [String] = [
+        "Fitness training",
+        "Public speaking",
+        "Building useful products",
+        "Family time",
+        "Deep learning",
+        "Financial independence",
+        "Writing ideas clearly",
+        "Coaching others",
+        "Travel and exploration",
+        "Creative problem solving",
+        "Leading teams",
+        "Designing better systems",
+        "Helping friends grow",
+        "Protecting focus time",
+        "Community impact",
+        "Learning new skills"
+    ]
+
+    private static let randomRootCauseOptions: [String] = [
+        "You set plans but urgent tasks keep stealing attention before real progress starts.",
+        "Important work is clear, but starting friction and distractions break momentum early.",
+        "Too many priorities compete at once, so your day gets split before one thing is completed.",
+        "Energy drops and decision fatigue push your schedule toward quick wins instead of key priorities.",
+        "Plans exist, but unprotected focus blocks make it easy for reactive work to take over."
+    ]
+
+    private static let randomNextDirectionOptions: [String] = [
+        "Loom will place one clear priority first and route other tasks behind it.",
+        "Loom will lock a short start block daily so activation happens before distractions.",
+        "Loom will separate urgent items from meaningful items so your week stays directional.",
+        "Loom will add structured checkpoints to keep momentum after you begin.",
+        "Loom will turn your priorities into a simple sequence with fewer switching costs."
+    ]
+
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("Vision AutoWrite Debug")
-                        .font(.title2.weight(.bold))
-                    Spacer(minLength: 0)
-                    Button(action: onClose) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(.primary)
-                            .frame(width: 30, height: 30)
-                            .background(
-                                Circle()
-                                    .fill(Color(.secondarySystemBackground))
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Close Debug")
-                }
-
-                Picker("Mode", selection: $mode) {
-                    Text("newVision").tag(DebugMode.newVision)
-                    Text("rewordVision").tag(DebugMode.rewordVision)
-                    Text("LoomAI").tag(DebugMode.loomAI)
-                    Text("Diagnostic").tag(DebugMode.diagnostic)
-                }
-                .pickerStyle(.segmented)
-
-                Toggle("Compact", isOn: $compactContextEnabled)
-                    .toggleStyle(.switch)
-
-                if mode == .loomAI {
-                    TextField("Prompt", text: $loomAIPrompt, axis: .vertical)
-                        .textFieldStyle(.roundedBorder)
-                        .focused($isInputFocused)
-                } else if mode == .diagnostic {
-                    Text("Sends random diagnostic answers (stress, break point, 3-7 life areas, planning style, and desired change) to the Diagnostic Insights endpoint.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                } else {
-                    TextField("Current vision (optional)", text: $currentVision, axis: .vertical)
-                        .textFieldStyle(.roundedBorder)
-                        .focused($isInputFocused)
-
-                    TextField("Previous suggestions (one per line)", text: $previousSuggestionsText, axis: .vertical)
-                        .textFieldStyle(.roundedBorder)
-                        .focused($isInputFocused)
-                }
-
-                Button {
-                    Task { await sendRequest() }
-                } label: {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
                     HStack {
-                        if isLoading {
-                            ProgressView()
-                                .progressViewStyle(.circular)
+                        Text("Vision AutoWrite Debug")
+                            .font(.title2.weight(.bold))
+                        Spacer(minLength: 0)
+                        Button(action: onClose) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundStyle(.primary)
+                                .frame(width: 30, height: 30)
+                                .background(
+                                    Circle()
+                                        .fill(Color(.secondarySystemBackground))
+                                )
                         }
-                        Text(isLoading ? "Loading..." : buttonTitle)
-                            .fontWeight(.semibold)
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Close Debug")
                     }
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(isLoading)
 
-                Text("Status: \(responseStatus)")
-                    .font(.footnote.monospaced())
-                    .foregroundStyle(.secondary)
-                Text("Duration: \(responseDurationText)")
-                    .font(.footnote.monospaced())
-                    .foregroundStyle(.secondary)
-                if mode == .loomAI {
-                    Text("Usage: \(usageSummaryText)")
-                        .font(.footnote.monospaced())
-                        .foregroundStyle(.secondary)
-                    Text("Estimated cost: \(estimatedCostText)")
-                        .font(.footnote.monospaced())
-                        .foregroundStyle(.secondary)
-                }
-
-                Group {
-                    Text("Raw Request JSON")
-                        .font(.caption.weight(.semibold))
-                    copyableCodeBlock(rawRequestText, copied: $requestCopied)
-                }
-
-                if mode == .loomAI {
-                    Group {
-                        Text("Raw Context JSON")
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Mode")
                             .font(.caption.weight(.semibold))
-                        copyableCodeBlock(rawContextText, copied: $contextCopied)
+                            .foregroundStyle(.secondary)
+                        Picker("Mode", selection: $mode) {
+                            ForEach(DebugMode.allCases) { item in
+                                Text(item.title).tag(item)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
+
+                    NavigationLink("Compact") {
+                        CompactContextDebugView()
+                    }
+                    .font(.subheadline.weight(.semibold))
+
+                    if mode == .loomAI {
+                        TextField("Prompt", text: $loomAIPrompt, axis: .vertical)
+                            .textFieldStyle(.roundedBorder)
+                            .focused($isInputFocused)
+                    } else if mode == .diagnostic {
+                        Text("Sends random diagnostic answers (stress, break point, 3-7 life areas, planning style, and desired change) to the Diagnostic Insights endpoint.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    } else if mode == .personalities {
+                        Text("Sends randomized diagnostic inputs plus root cause, next direction, vision, and passions to the Purpose Personality endpoint. Tap Send Random to inspect full JSON below.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    } else if mode == .autoGroup {
+                        Text("Sends your existing Capture list (latest up to 25) to AutoGroup using intent autogroup_plan.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    } else if mode == .all {
+                        Text("Live app activity log. Includes networking and refresh paths (for example Personalization insights).")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        TextField("Current vision (optional)", text: $currentVision, axis: .vertical)
+                            .textFieldStyle(.roundedBorder)
+                            .focused($isInputFocused)
+
+                        TextField("Previous suggestions (one per line)", text: $previousSuggestionsText, axis: .vertical)
+                            .textFieldStyle(.roundedBorder)
+                            .focused($isInputFocused)
+                    }
+
+                    if mode == .all {
+                        HStack(spacing: 10) {
+                            Button("Clear Log") {
+                                appActivityLog.clear()
+                            }
+                            .buttonStyle(.bordered)
+                            Button(allCopied ? "Copied" : "Copy Log") {
+                                markCopied($allCopied, value: appActivityLog.exportText())
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+                        .frame(maxWidth: .infinity)
+                        Group {
+                            Text("All Activity")
+                                .font(.caption.weight(.semibold))
+                            copyableCodeBlock(appActivityLog.exportText(), copied: $allCopied)
+                        }
+                    } else {
+                        Button {
+                            Task { await sendRequest() }
+                        } label: {
+                            HStack {
+                                if isLoading {
+                                    ProgressView()
+                                        .progressViewStyle(.circular)
+                                }
+                                Text(isLoading ? "Loading..." : buttonTitle)
+                                    .fontWeight(.semibold)
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(isLoading)
+
+                        Text("Status: \(responseStatus)")
+                            .font(.footnote.monospaced())
+                            .foregroundStyle(.secondary)
+                        Text("Duration: \(responseDurationText)")
+                            .font(.footnote.monospaced())
+                            .foregroundStyle(.secondary)
+                        Text("Usage: \(usageSummaryText)")
+                            .font(.footnote.monospaced())
+                            .foregroundStyle(.secondary)
+                        Text("Estimated cost: \(estimatedCostText)")
+                            .font(.footnote.monospaced())
+                            .foregroundStyle(.secondary)
+
+                        Group {
+                            Text("Raw Request JSON")
+                                .font(.caption.weight(.semibold))
+                            copyableCodeBlock(rawRequestText, copied: $requestCopied)
+                        }
+
+                        if mode == .loomAI || mode == .autoGroup {
+                            Group {
+                                Text("Raw Context JSON")
+                                    .font(.caption.weight(.semibold))
+                                copyableCodeBlock(rawContextText, copied: $contextCopied)
+                            }
+                        }
+
+                        Group {
+                            Text("Raw Response JSON")
+                                .font(.caption.weight(.semibold))
+                            copyableCodeBlock(rawResponseText, copied: $responseCopied)
+                        }
                     }
                 }
-
-                Group {
-                    Text("Raw Response JSON")
-                        .font(.caption.weight(.semibold))
-                    copyableCodeBlock(rawResponseText, copied: $responseCopied)
-                }
-
-                Spacer(minLength: 0)
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(16)
+            .scrollDismissesKeyboard(.interactively)
             .navigationBarTitleDisplayMode(.inline)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -297,6 +406,12 @@ struct TemporaryVisionAutoWriteDebugView: View {
             await sendLoomAIChatRequest()
         } else if mode == .diagnostic {
             await sendDiagnosticInsightsRequest()
+        } else if mode == .personalities {
+            await sendPurposeProfileInsightsRequest()
+        } else if mode == .autoGroup {
+            await sendAutoGroupRequest()
+        } else if mode == .all {
+            return
         } else {
             await sendAutoWriteRequest()
         }
@@ -308,6 +423,12 @@ struct TemporaryVisionAutoWriteDebugView: View {
             return "Send"
         case .diagnostic:
             return "Send Random"
+        case .personalities:
+            return "Send Random"
+        case .autoGroup:
+            return "AutoGroup"
+        case .all:
+            return "Refresh"
         case .newVision, .rewordVision:
             return "AutoWrite"
         }
@@ -325,7 +446,7 @@ struct TemporaryVisionAutoWriteDebugView: View {
 
         do {
             let fullSnapshot = try LoomAIViewModel().buildContextSnapshot(in: modelContext)
-            let contextSnapshot = compactContextEnabled ? fullSnapshot.compactedForLoomAI() : fullSnapshot
+            let contextSnapshot = fullSnapshot.compactedForLoomAI()
             let requestID = UUID().uuidString
             let previousSuggestions = previousSuggestionsText
                 .components(separatedBy: .newlines)
@@ -374,6 +495,7 @@ struct TemporaryVisionAutoWriteDebugView: View {
             rawResponseText = responseText
             responseStatus = "HTTP \(finalStatus)"
             responseDurationText = formatDuration(Date().timeIntervalSince(startedAt))
+            updateUsageEstimate(from: finalData, requestData: bodyData, fallbackModel: "gpt-5.1")
         } catch {
             let nsError = error as NSError
             if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorTimedOut {
@@ -407,7 +529,7 @@ struct TemporaryVisionAutoWriteDebugView: View {
 
         do {
             let fullSnapshot = try LoomAIViewModel().buildContextSnapshot(in: modelContext)
-            let contextSnapshot = compactContextEnabled ? fullSnapshot.compactedForLoomAI() : fullSnapshot
+            let contextSnapshot = fullSnapshot.compactedForLoomAI()
             let context = try contextSnapshot.toDictionary()
             let contextData = try JSONSerialization.data(withJSONObject: context, options: [.prettyPrinted, .sortedKeys])
             rawContextText = String(data: contextData, encoding: .utf8) ?? "<context encoding failed>"
@@ -447,7 +569,7 @@ struct TemporaryVisionAutoWriteDebugView: View {
             rawResponseText = responseText
             responseStatus = "HTTP \(status)"
             responseDurationText = formatDuration(Date().timeIntervalSince(startedAt))
-            updateUsageEstimate(from: data)
+            updateUsageEstimate(from: data, requestData: bodyData, fallbackModel: "gpt-5.2")
         } catch {
             let nsError = error as NSError
             if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorTimedOut {
@@ -488,6 +610,7 @@ struct TemporaryVisionAutoWriteDebugView: View {
             rawResponseText = responseText
             responseStatus = "HTTP \(status)"
             responseDurationText = formatDuration(Date().timeIntervalSince(startedAt))
+            updateUsageEstimate(from: data, requestData: bodyData, fallbackModel: "gpt-5.1")
         } catch {
             let nsError = error as NSError
             if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorTimedOut {
@@ -500,21 +623,187 @@ struct TemporaryVisionAutoWriteDebugView: View {
         }
     }
 
+    private func sendPurposeProfileInsightsRequest() async {
+        isLoading = true
+        responseStatus = "Preparing request..."
+        responseDurationText = "-"
+        usageSummaryText = "-"
+        estimatedCostText = "-"
+        rawContextText = ""
+        defer { isLoading = false }
+        let startedAt = Date()
+
+        do {
+            let body = makeRandomPurposeProfileRequestBody()
+            let bodyData = try JSONSerialization.data(withJSONObject: body, options: [.prettyPrinted, .sortedKeys])
+            rawRequestText = String(data: bodyData, encoding: .utf8) ?? "<request encoding failed>"
+
+            var request = URLRequest(url: purposeProfileInsightsEndpointURL)
+            request.httpMethod = "POST"
+            request.timeoutInterval = 45
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = bodyData
+
+            responseStatus = "Sending..."
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            let responseText = String(data: data, encoding: .utf8) ?? "<non-UTF8 \(data.count) bytes>"
+            rawResponseText = responseText
+            responseStatus = "HTTP \(status)"
+            responseDurationText = formatDuration(Date().timeIntervalSince(startedAt))
+            updateUsageEstimate(from: data, requestData: bodyData, fallbackModel: "gpt-5-mini")
+        } catch {
+            let nsError = error as NSError
+            if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorTimedOut {
+                responseStatus = "Request timed out"
+            } else {
+                responseStatus = "Request failed"
+            }
+            rawResponseText = String(describing: error)
+            responseDurationText = formatDuration(Date().timeIntervalSince(startedAt))
+        }
+    }
+
+    private func sendAutoGroupRequest() async {
+        isLoading = true
+        responseStatus = "Preparing request..."
+        responseDurationText = "-"
+        usageSummaryText = "-"
+        estimatedCostText = "-"
+        defer { isLoading = false }
+        let startedAt = Date()
+
+        let candidates = loadAutoGroupCandidates()
+        guard candidates.count >= 6 else {
+            responseStatus = "Need at least 6 capture items"
+            rawRequestText = "<no request sent>"
+            rawContextText = ""
+            rawResponseText = "AutoGroup debug requires at least 6 non-empty, non-ghost Capture items."
+            responseDurationText = formatDuration(Date().timeIntervalSince(startedAt))
+            return
+        }
+
+        do {
+            let normalizedItems: [(id: String, text: String)] = candidates.map { item in
+                let cleanText = item.text
+                    .replacingOccurrences(of: "\n", with: " ")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                return (item.id.uuidString, cleanText)
+            }
+            let actionLines = normalizedItems.enumerated().map { index, item in
+                "\(index + 1). id=\(item.id) | text=\(item.text)"
+            }
+
+            let instruction = """
+            You are helping with Loom Plan Step 3 (Group).
+            Group the provided Capture actions into meaningful topical groups.
+
+            Hard rules:
+            - Return ONLY JSON
+            - High-confidence only. If confidence is not high, return confidence="low" and groups=[]
+            - Minimum 2 groups
+            - Each group must have at least 3 actions
+            - Maximum 8 groups
+            - Use only the provided actionIDs
+            - Do not duplicate an actionID across groups
+            - Prefer grouping by what the actions are related to (topic/domain), not by effort level or urgency
+            - Set fulfillmentArea to an empty string unless an action explicitly names one
+            - It is OK to leave low-confidence/ambiguous actions ungrouped if needed
+            - If leaving actions ungrouped, still satisfy the minimum grouping rules with the grouped subset
+
+            Return JSON exactly:
+            {"confidence":"high","reason":"short string","groups":[{"name":"string","fulfillmentArea":"string","actionIDs":["uuid"]}]}
+
+            Capture actions to group (latest up to 25):
+            \(actionLines.joined(separator: "\n"))
+            """
+
+            let context: [String: Any] = [
+                "capture": [
+                    "totalCount": normalizedItems.count,
+                    "topItems": Array(normalizedItems.prefix(8).map { $0.text })
+                ],
+                "captureItems": normalizedItems.map { item in
+                    [
+                        "id": item.id,
+                        "text": item.text
+                    ]
+                }
+            ]
+            let contextData = try JSONSerialization.data(withJSONObject: context, options: [.prettyPrinted, .sortedKeys])
+            rawContextText = String(data: contextData, encoding: .utf8) ?? "<context encoding failed>"
+
+            let body: [String: Any] = [
+                "messages": [
+                    [
+                        "role": "user",
+                        "content": instruction
+                    ]
+                ],
+                "context": context,
+                "client": [
+                    "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
+                    "platform": "iOS",
+                    "locale": Locale.current.identifier,
+                    "intent": "autogroup_plan",
+                    "screen": "plan_group_debug",
+                    "userLocalDate": Self.localDayKey(),
+                    "timezone": TimeZone.current.identifier
+                ]
+            ]
+
+            let bodyData = try JSONSerialization.data(withJSONObject: body, options: [.prettyPrinted, .sortedKeys])
+            rawRequestText = String(data: bodyData, encoding: .utf8) ?? "<request encoding failed>"
+
+            var request = URLRequest(url: chatEndpointURL)
+            request.httpMethod = "POST"
+            request.timeoutInterval = 60
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = bodyData
+
+            responseStatus = "Sending..."
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            let responseText = String(data: data, encoding: .utf8) ?? "<non-UTF8 \(data.count) bytes>"
+            rawResponseText = responseText
+            responseStatus = "HTTP \(status)"
+            responseDurationText = formatDuration(Date().timeIntervalSince(startedAt))
+            updateUsageEstimate(from: data, requestData: bodyData, fallbackModel: "gpt-5-mini")
+        } catch {
+            let nsError = error as NSError
+            if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorTimedOut {
+                responseStatus = "Request timed out"
+            } else {
+                responseStatus = "Request failed"
+            }
+            rawResponseText = String(describing: error)
+            responseDurationText = formatDuration(Date().timeIntervalSince(startedAt))
+        }
+    }
+
+    private func loadAutoGroupCandidates() -> [RollingCaptureItem] {
+        do {
+            var descriptor = FetchDescriptor<RollingCaptureItem>(
+                sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
+            )
+            descriptor.fetchLimit = 120
+            let fetched = try modelContext.fetch(descriptor)
+            return Array(
+                fetched
+                    .filter { !$0.isGhost && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                    .prefix(25)
+            )
+        } catch {
+            AppDebugActivityLog.log("Debug", "AutoGroup candidate fetch failed: \(error.localizedDescription)")
+            return []
+        }
+    }
+
     private func makeRandomDiagnosticRequestBody() -> [String: Any] {
-        let stress = Self.diagnosticStressOptions.randomElement() ?? "Not sure yet"
-        let breaksFirst = Self.diagnosticBreakPointOptions.randomElement() ?? "I’m not sure"
-        let planningStyle = Self.diagnosticPlanningRealityOptions.randomElement() ?? "It depends on the day"
-        let firstChange = Self.diagnosticDesiredChangeOptions.randomElement() ?? "I feel balanced across life"
-        let areas = randomDiagnosticLifeAreas()
+        let diagnostic = makeRandomDiagnosticAnswers()
 
         return [
-            "diagnostic": [
-                "stress": stress,
-                "breaksFirst": breaksFirst,
-                "areas": areas,
-                "planningStyle": planningStyle,
-                "firstChange": firstChange
-            ],
+            "diagnostic": diagnostic,
             "client": [
                 "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
                 "platform": "ios",
@@ -523,10 +812,55 @@ struct TemporaryVisionAutoWriteDebugView: View {
         ]
     }
 
+    private func makeRandomPurposeProfileRequestBody() -> [String: Any] {
+        let diagnostic = makeRandomDiagnosticAnswers()
+        let vision = Self.randomVisionOptions.randomElement() ?? "I build a focused life with steady progress."
+        let passions = randomPassions()
+        let rootCause = Self.randomRootCauseOptions.randomElement()
+            ?? "Plans get split by competing priorities before momentum is built."
+        let nextDirection = Self.randomNextDirectionOptions.randomElement()
+            ?? "Loom will create one clear priority path and protect start time."
+
+        return [
+            "diagnostic": diagnostic,
+            "rootCause": rootCause,
+            "nextDirection": nextDirection,
+            "vision": vision,
+            "passions": passions,
+            "client": [
+                "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
+                "platform": "iOS",
+                "locale": Locale.current.identifier,
+                "intent": "purpose_profile_insights",
+                "screen": "purpose_profile_debug"
+            ]
+        ]
+    }
+
+    private func makeRandomDiagnosticAnswers() -> [String: Any] {
+        let stress = Self.diagnosticStressOptions.randomElement() ?? "Not sure yet"
+        let breaksFirst = Self.diagnosticBreakPointOptions.randomElement() ?? "I’m not sure"
+        let planningStyle = Self.diagnosticPlanningRealityOptions.randomElement() ?? "It depends on the day"
+        let firstChange = Self.diagnosticDesiredChangeOptions.randomElement() ?? "I feel balanced across life"
+        let areas = randomDiagnosticLifeAreas()
+        return [
+            "stress": stress,
+            "breaksFirst": breaksFirst,
+            "areas": areas,
+            "planningStyle": planningStyle,
+            "firstChange": firstChange
+        ]
+    }
+
     private func randomDiagnosticLifeAreas() -> [String] {
         let options = fulfillmentStartSelectableDefaultCategories.shuffled()
         let count = Int.random(in: 3...7)
         return Array(options.prefix(min(count, options.count)))
+    }
+
+    private func randomPassions() -> [String] {
+        let count = Int.random(in: 4...10)
+        return Array(Self.randomPassionOptions.shuffled().prefix(min(count, Self.randomPassionOptions.count)))
     }
 
     private func shouldRetryDiagnosticInsightsDebugResponse(statusCode: Int, data: Data) -> Bool {
@@ -539,18 +873,16 @@ struct TemporaryVisionAutoWriteDebugView: View {
         return hasMissingModelOutput && hasTokenCapSignal
     }
 
-    private func updateUsageEstimate(from data: Data) {
+    private func updateUsageEstimate(from data: Data, requestData: Data? = nil, fallbackModel: String? = nil) {
         guard
             let object = try? JSONSerialization.jsonObject(with: data, options: []),
             let json = object as? [String: Any]
         else {
-            usageSummaryText = "-"
-            estimatedCostText = "-"
+            applyEstimatedUsageFallback(requestData: requestData, responseData: data, fallbackModel: fallbackModel)
             return
         }
         guard let usage = json["usage"] as? [String: Any] else {
-            usageSummaryText = "n/a"
-            estimatedCostText = "n/a"
+            applyEstimatedUsageFallback(requestData: requestData, responseData: data, fallbackModel: fallbackModel)
             return
         }
 
@@ -571,6 +903,32 @@ struct TemporaryVisionAutoWriteDebugView: View {
         estimatedCostText = String(format: "$%.6f", cost)
     }
 
+    private func applyEstimatedUsageFallback(requestData: Data?, responseData: Data, fallbackModel: String?) {
+        guard let requestData else {
+            usageSummaryText = "n/a"
+            estimatedCostText = "n/a"
+            return
+        }
+        let model = (fallbackModel ?? "gpt-5.2").lowercased()
+        let inputTokens = estimatedTokenCount(for: requestData)
+        let outputTokens = estimatedTokenCount(for: responseData)
+        let cachedInputTokens = 0
+        let totalTokens = inputTokens + outputTokens
+
+        usageSummaryText = "in \(inputTokens) (cached \(cachedInputTokens)) out \(outputTokens) total \(totalTokens) (est.)"
+
+        let pricing = pricingForModel(model)
+        let cost =
+            (Double(inputTokens) / 1_000_000.0) * pricing.inputPerM +
+            (Double(outputTokens) / 1_000_000.0) * pricing.outputPerM
+        estimatedCostText = String(format: "~$%.6f", cost)
+    }
+
+    private func estimatedTokenCount(for data: Data) -> Int {
+        // Fast approximation for debug display when upstream usage is unavailable.
+        max(1, Int(ceil(Double(data.count) / 4.0)))
+    }
+
     private func intValue(_ raw: Any?) -> Int {
         if let value = raw as? Int { return max(0, value) }
         if let value = raw as? NSNumber { return max(0, value.intValue) }
@@ -581,13 +939,15 @@ struct TemporaryVisionAutoWriteDebugView: View {
     private func pricingForModel(_ model: String) -> (inputPerM: Double, cachedInputPerM: Double, outputPerM: Double) {
         switch model {
         case "gpt-5.2":
-            return (0.875, 0.0875, 7.00)
+            return (1.75, 0.175, 14.00)
         case "gpt-5.1":
+            return (1.25, 0.125, 10.00)
+        case "gpt-5":
             return (1.25, 0.125, 10.00)
         case "gpt-5-mini":
             return (0.25, 0.025, 2.00)
         default:
-            return (0.875, 0.0875, 7.00)
+            return (1.75, 0.175, 14.00)
         }
     }
 
@@ -615,5 +975,77 @@ private extension LoomAIContextSnapshot {
             return [:]
         }
         return dictionary
+    }
+}
+
+private struct CompactContextDebugView: View {
+    @Environment(\.modelContext) private var modelContext
+
+    @State private var compactJSONText: String = ""
+    @State private var statusText: String = "Loading..."
+    @State private var copied = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Status: \(statusText)")
+                .font(.footnote.monospaced())
+                .foregroundStyle(.secondary)
+
+            ScrollView {
+                Text(compactJSONText.isEmpty ? "<empty>" : compactJSONText)
+                    .font(.caption.monospaced())
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 10)
+            }
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Color.black.opacity(0.08), lineWidth: 1)
+            )
+
+            HStack(spacing: 10) {
+                Button(copied ? "Copied" : "Copy") {
+                    #if canImport(UIKit)
+                    UIPasteboard.general.string = compactJSONText
+                    #endif
+                    copied = true
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .seconds(1.2))
+                        copied = false
+                    }
+                }
+                .buttonStyle(.bordered)
+
+                Button("Refresh") {
+                    Task { await loadCompactJSON() }
+                }
+                .buttonStyle(.borderedProminent)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .navigationTitle("Compact")
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            await loadCompactJSON()
+        }
+    }
+
+    private func loadCompactJSON() async {
+        statusText = "Loading..."
+        do {
+            let fullSnapshot = try LoomAIViewModel().buildContextSnapshot(in: modelContext)
+            let compact = fullSnapshot.compactedForLoomAI()
+            let dictionary = try compact.toDictionary()
+            let data = try JSONSerialization.data(withJSONObject: dictionary, options: [.prettyPrinted, .sortedKeys])
+            compactJSONText = String(data: data, encoding: .utf8) ?? "<encoding failed>"
+            statusText = "Ready"
+        } catch {
+            compactJSONText = String(describing: error)
+            statusText = "Failed"
+        }
     }
 }

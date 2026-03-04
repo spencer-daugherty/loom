@@ -48,6 +48,7 @@ struct ObjectivesStartView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
                 .frame(maxWidth: .infinity)
             }
             .padding(.horizontal)

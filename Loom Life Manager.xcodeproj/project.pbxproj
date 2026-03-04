@@ -13,6 +13,7 @@
 		1DD77E2B2F5275A600F08917 /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 1DD77E2A2F5275A600F08917 /* GoogleSignInSwift */; };
 		1EE9C9A22F60000100F08917 /* FirebaseCrashlytics in Frameworks */ = {isa = PBXBuildFile; productRef = 1EE9C9A12F60000100F08917 /* FirebaseCrashlytics */; };
 		1EE9C9B42F60000200F08917 /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = 1EE9C9B32F60000200F08917 /* FirebaseAnalytics */; };
+		A10000000000000000000001 /* Share into Loom.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* Share into Loom.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -30,12 +31,34 @@
 			remoteGlobalIDString = 1D8E61C52DC0526000167931;
 			remoteInfo = loom;
 		};
+		A1000000000000000000000C /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1D8E61BE2DC0526000167931 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A10000000000000000000008;
+			remoteInfo = "Share into Loom";
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		A10000000000000000000004 /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				A10000000000000000000001 /* Share into Loom.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		1D8E61C62DC0526000167931 /* loom.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = loom.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		1D8E61D72DC0526500167931 /* loomTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = loomTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1D8E61E12DC0526500167931 /* loomUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = loomUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000000000000000000002 /* Share into Loom.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "Share into Loom.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -65,6 +88,11 @@
 		1D8E61E42DC0526500167931 /* loomUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = loomUITests;
+			sourceTree = "<group>";
+		};
+		A10000000000000000000003 /* ShareIntoLoomExtension */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = ShareIntoLoomExtension;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -97,6 +125,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A10000000000000000000006 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -106,6 +141,7 @@
 				1D8E61C82DC0526000167931 /* loom */,
 				1D8E61DA2DC0526500167931 /* loomTests */,
 				1D8E61E42DC0526500167931 /* loomUITests */,
+				A10000000000000000000003 /* ShareIntoLoomExtension */,
 				1D8E61C72DC0526000167931 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -116,6 +152,7 @@
 				1D8E61C62DC0526000167931 /* loom.app */,
 				1D8E61D72DC0526500167931 /* loomTests.xctest */,
 				1D8E61E12DC0526500167931 /* loomUITests.xctest */,
+				A10000000000000000000002 /* Share into Loom.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -130,11 +167,13 @@
 				1D8E61C22DC0526000167931 /* Sources */,
 				1D8E61C32DC0526000167931 /* Frameworks */,
 				1D8E61C42DC0526000167931 /* Resources */,
+				A10000000000000000000004 /* Embed App Extensions */,
 				1EE9C9A32F60000100F08917 /* Upload Crashlytics Symbols */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				A1000000000000000000000D /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				1D8E61C82DC0526000167931 /* loom */,
@@ -198,6 +237,27 @@
 			productReference = 1D8E61E12DC0526500167931 /* loomUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		A10000000000000000000008 /* Share into Loom */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A10000000000000000000009 /* Build configuration list for PBXNativeTarget "Share into Loom" */;
+			buildPhases = (
+				A10000000000000000000005 /* Sources */,
+				A10000000000000000000006 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				A10000000000000000000003 /* ShareIntoLoomExtension */,
+			);
+			name = "Share into Loom";
+			packageProductDependencies = (
+			);
+			productName = "Share into Loom";
+			productReference = A10000000000000000000002 /* Share into Loom.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -218,6 +278,9 @@
 					1D8E61E02DC0526500167931 = {
 						CreatedOnToolsVersion = 16.3;
 						TestTargetID = 1D8E61C52DC0526000167931;
+					};
+					A10000000000000000000008 = {
+						CreatedOnToolsVersion = 16.3;
 					};
 				};
 			};
@@ -240,6 +303,7 @@
 			projectRoot = "";
 			targets = (
 				1D8E61C52DC0526000167931 /* loom */,
+				A10000000000000000000008 /* Share into Loom */,
 				1D8E61D62DC0526500167931 /* loomTests */,
 				1D8E61E02DC0526500167931 /* loomUITests */,
 			);
@@ -321,6 +385,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A10000000000000000000005 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -334,6 +405,11 @@
 			target = 1D8E61C52DC0526000167931 /* loom */;
 			targetProxy = 1D8E61E22DC0526500167931 /* PBXContainerItemProxy */;
 		};
+		A1000000000000000000000D /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A10000000000000000000008 /* Share into Loom */;
+			targetProxy = A1000000000000000000000C /* PBXContainerItemProxy */;
+		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
@@ -344,7 +420,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = loom/loom.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 3D885624HS;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -365,8 +441,8 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = srd.loom;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(LOOM_BASE_BUNDLE_IDENTIFIER)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
@@ -381,7 +457,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = loom/loom.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 3D885624HS;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -402,8 +478,8 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = srd.loom;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(LOOM_BASE_BUNDLE_IDENTIFIER)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
@@ -466,6 +542,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				LOOM_BASE_BUNDLE_IDENTIFIER = srd.loom;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -529,6 +606,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				LOOM_BASE_BUNDLE_IDENTIFIER = srd.loom;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				OTHER_LDFLAGS = (
@@ -614,6 +692,58 @@
 			};
 			name = Release;
 		};
+		A1000000000000000000000A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = ShareIntoLoomExtension/ShareIntoLoomExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3D885624HS;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ShareIntoLoomExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(LOOM_BASE_BUNDLE_IDENTIFIER).ShareIntoLoomExtension";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		A1000000000000000000000B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = ShareIntoLoomExtension/ShareIntoLoomExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3D885624HS;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ShareIntoLoomExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(LOOM_BASE_BUNDLE_IDENTIFIER).ShareIntoLoomExtension";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -649,6 +779,15 @@
 			buildConfigurations = (
 				1D8E61F32DC0526500167931 /* Debug */,
 				1D8E61F42DC0526500167931 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A10000000000000000000009 /* Build configuration list for PBXNativeTarget "Share into Loom" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1000000000000000000000A /* Debug */,
+				A1000000000000000000000B /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

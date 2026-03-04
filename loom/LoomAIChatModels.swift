@@ -37,6 +37,7 @@ final class LoomAIChatMessage {
     var roleRaw: String
     var content: String
     var createdAt: Date
+    var chipsJSON: String?
     var actionsJSON: String?
     var debugJSON: String?
 
@@ -47,6 +48,7 @@ final class LoomAIChatMessage {
         roleRaw: String,
         content: String,
         createdAt: Date = .now,
+        chipsJSON: String? = nil,
         actionsJSON: String? = nil,
         debugJSON: String? = nil
     ) {
@@ -56,6 +58,7 @@ final class LoomAIChatMessage {
         self.roleRaw = roleRaw
         self.content = content
         self.createdAt = createdAt
+        self.chipsJSON = chipsJSON
         self.actionsJSON = actionsJSON
         self.debugJSON = debugJSON
     }
@@ -82,6 +85,18 @@ struct LoomAISuggestedAction: Codable, Identifiable, Hashable {
 }
 
 typealias LoomAIAction = LoomAISuggestedAction
+
+struct LoomAIPromptChip: Codable, Identifiable, Hashable {
+    var id: String
+    var title: String
+    var prompt: String
+
+    init(id: String = UUID().uuidString, title: String, prompt: String) {
+        self.id = id
+        self.title = title
+        self.prompt = prompt
+    }
+}
 
 struct LoomAIDebug: Codable, Hashable {
     var model: String?
@@ -132,6 +147,37 @@ enum LoomAIChatMessageActionsCodec {
             .sorted()
             .joined(separator: "&")
         return "\(normalizedType)|\(normalizedTitle)|\(normalizedPayload)"
+    }
+}
+
+enum LoomAIChatMessageChipsCodec {
+    static func encode(_ chips: [LoomAIPromptChip]) -> String? {
+        guard !chips.isEmpty else { return nil }
+        let encoder = JSONEncoder()
+        guard let data = try? encoder.encode(chips) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func decode(_ json: String?) -> [LoomAIPromptChip] {
+        guard let json, let data = json.data(using: .utf8) else { return [] }
+        let decoded = (try? JSONDecoder().decode([LoomAIPromptChip].self, from: data)) ?? []
+        return deduplicated(decoded)
+    }
+
+    private static func deduplicated(_ chips: [LoomAIPromptChip]) -> [LoomAIPromptChip] {
+        var seen = Set<String>()
+        var unique: [LoomAIPromptChip] = []
+        unique.reserveCapacity(chips.count)
+        for chip in chips {
+            let prompt = chip.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+            let title = chip.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !prompt.isEmpty, !title.isEmpty else { continue }
+            let key = "\(title.lowercased())|\(prompt.lowercased())"
+            if seen.insert(key).inserted {
+                unique.append(.init(id: chip.id, title: title, prompt: prompt))
+            }
+        }
+        return unique
     }
 }
 

@@ -152,6 +152,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        AppDebugActivityLog.log("App", "didFinishLaunching")
         if LoomRuntime.isPreviewSafeModeEnabled {
             return true
         }
@@ -198,7 +199,7 @@ struct loomApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ZStack(alignment: .topLeading) {
+            ZStack(alignment: .bottomLeading) {
                 Group {
                     if enableLoomAIDebug && showLoomAIDebugPage {
                         TemporaryVisionAutoWriteDebugView {
@@ -212,6 +213,7 @@ struct loomApp: App {
                         }
                     }
                 }
+                .id(enableLoomAIDebug && showLoomAIDebugPage ? "loom-debug-root" : "loom-main-root")
 
                 if enableLoomAIDebug && !showLoomAIDebugPage {
                     Button {
@@ -229,7 +231,7 @@ struct loomApp: App {
                     }
                     .buttonStyle(.plain)
                     .padding(.leading, 12)
-                    .padding(.top, 10)
+                    .padding(.bottom, 14)
                     .zIndex(10)
                 }
             }
@@ -242,6 +244,7 @@ struct loomApp: App {
 #endif
             }
             .onChange(of: enableLoomAIDebug) { _, isEnabled in
+                AppDebugActivityLog.log("App", "LoomAI Debug mode toggled \(isEnabled ? "on" : "off")")
                 if isEnabled {
                     showLoomAIDebugPage = true
                 }

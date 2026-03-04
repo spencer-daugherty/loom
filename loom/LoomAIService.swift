@@ -34,6 +34,27 @@ struct LoomAIService {
         var client: ClientInfo
     }
 
+    struct AutoGroupContext: Codable {
+        struct CaptureItem: Codable {
+            var id: String
+            var text: String
+        }
+
+        struct CaptureSummary: Codable {
+            var totalCount: Int
+            var topItems: [String]
+        }
+
+        var capture: CaptureSummary
+        var captureItems: [CaptureItem]
+    }
+
+    struct AutoGroupChatRequest: Codable {
+        var messages: [TransportMessage]
+        var context: AutoGroupContext
+        var client: ClientInfo
+    }
+
     struct PurposeVisionAutoWriteRequest: Codable {
         var currentVision: String
         var previousSuggestions: [String]
@@ -551,6 +572,60 @@ struct LoomAIService {
         }
     }
 
+    func sendAutoGroupChat(
+        messages: [TransportMessage],
+        captureItems: [AutoGroupContext.CaptureItem],
+        totalCaptureCount: Int,
+        intent: String? = "autogroup_plan",
+        screen: String? = "plan_group",
+        requestID: String? = nil,
+        requestHash: String? = nil,
+        userLocalDate: String? = nil,
+        timezone: String? = nil
+    ) async throws -> LoomAIResponse {
+        let client = ClientInfo(
+            appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
+            platform: "iOS",
+            locale: Locale.current.identifier,
+            intent: intent,
+            screen: screen,
+            requestId: sanitizedClientValue(requestID),
+            requestHash: sanitizedClientValue(requestHash),
+            userLocalDate: sanitizedClientValue(userLocalDate),
+            timezone: sanitizedClientValue(timezone),
+            remainingDailyResponses: nil
+        )
+
+        let topItems = captureItems
+            .map(\.text)
+            .map { String($0.prefix(120)) }
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .prefix(12)
+        let context = AutoGroupContext(
+            capture: .init(
+                totalCount: max(totalCaptureCount, captureItems.count),
+                topItems: Array(topItems)
+            ),
+            captureItems: captureItems
+        )
+
+        let encoder = JSONEncoder()
+        let bodyData = try encoder.encode(
+            AutoGroupChatRequest(messages: messages, context: context, client: client)
+        )
+
+        let timeout = requestTimeout(for: intent, usingMinimalContext: true)
+        let response = try await post(path: "/chat", bodyData: bodyData, timeout: timeout)
+        reportSlowResponseIfNeeded(
+            response,
+            intent: intent,
+            screen: screen,
+            requestID: requestID,
+            requestHash: requestHash
+        )
+        return response
+    }
+
     func fetchPurposeProfileInsights(
         diagnostic: DiagnosticAnswers,
         rootCause: String,
@@ -990,12 +1065,17 @@ struct LoomAIService {
     #endif
 
     private func log(_ message: String) {
+        AppDebugActivityLog.log("LoomAIService", message)
         #if DEBUG
         print("[LoomAI] \(message)")
         #endif
     }
 
     private func debugLogDecodeFailure(error: Error, statusCode: Int, contentType: String?, rawBody: String) {
+        AppDebugActivityLog.log(
+            "LoomAIService",
+            "Decode error status=\(statusCode) contentType=\(contentType ?? "<none>") error=\(error.localizedDescription) body=\(String(rawBody.prefix(400)))"
+        )
         #if DEBUG
         print("[LoomAI] Decode error: \(error.localizedDescription)")
         print("[LoomAI] Decode failure status: \(statusCode)")

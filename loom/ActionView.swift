@@ -910,17 +910,19 @@ struct ActionView: View {
                     }
                 }
             }) {
-                ReflectView(
-                    weekStart: currentWeekStart,
-                    onFinish: {
-                        dismissActionViewAfterReflect = true
-                        var transaction = Transaction()
-                        transaction.disablesAnimations = true
-                        withTransaction(transaction) {
-                            showReflectionFlow = false
+                NavigationStack {
+                    ReflectView(
+                        weekStart: currentWeekStart,
+                        onFinish: {
+                            dismissActionViewAfterReflect = true
+                            var transaction = Transaction()
+                            transaction.disablesAnimations = true
+                            withTransaction(transaction) {
+                                showReflectionFlow = false
+                            }
                         }
-                    }
-                )
+                    )
+                }
             }
             .sheet(item: $addActionChunkID) { wrapper in
                 AddActionFromCaptureSheet(
@@ -1377,7 +1379,7 @@ struct ActionView: View {
         } label: {
             Image(systemName: keyboardAccessoryShowsCheckmark ? "checkmark" : "keyboard.chevron.compact.down")
                 .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(keyboardAccessoryShowsCheckmark ? .white : .primary.opacity(0.85))
+                .foregroundStyle(keyboardAccessoryShowsCheckmark ? Color.white : Color.primary.opacity(0.85))
                 .frame(width: 38, height: 38)
                 .background(
                     Circle().fill(keyboardAccessoryShowsCheckmark ? Color.blue : Color(.secondarySystemBackground))
@@ -1646,7 +1648,7 @@ struct ActionView: View {
         case .inProgressOnly:
             filterChip(
                 title: "In Progress Only",
-                iconName: "checkmark",
+                iconName: "progress.indicator",
                 isActive: inProgressOnly,
                 showsChevron: false
             ) {
@@ -1758,7 +1760,7 @@ struct ActionView: View {
         let outcomesForChunk = selectedOutcomeIDs.compactMap { outcomesByID[$0] }
         let isCollapsed = areAllActionBlocksCollapsed
         let canShowFooterControls = !isAnyFilterApplied
-        let showNoApplicableActionsPlaceholder = filtered.isEmpty && isAnyFilterApplied
+        let showNoApplicableActionsPlaceholder = filtered.isEmpty && isAnyFilterApplied && !actionBlocksSimpleViewEnabled
         let showCompletedInactiveHeader = !isAnyFilterApplied && filtered.isEmpty && !allForChunk.isEmpty
         let canReorderDisplayedActions = !isAnyFilterApplied && filtered.count > 1
         let canonicalFilteredIDs = filtered.map(\.id)
@@ -2065,11 +2067,16 @@ struct ActionView: View {
         Divider().opacity(0.4)
 
         VStack(alignment: .leading, spacing: 8) {
+            let usesFullViewPalette = !actionBlocksSimpleViewEnabled
             HStack {
                 Text("ACTIONS")
                     .font(.caption)
                     .fontWeight(.bold)
-                    .foregroundStyle(colorScheme == .dark ? Color.white : .black)
+                    .foregroundStyle(
+                        usesFullViewPalette
+                            ? Color.black
+                            : (colorScheme == .dark ? Color.white : .black)
+                    )
                 Spacer()
                 if !actionBlocksSimpleViewEnabled {
                     Text("How can I best acheive it now?")
@@ -2083,7 +2090,11 @@ struct ActionView: View {
                 HStack(alignment: .center, spacing: 8) {
                     Text("All Actions are Inactive")
                         .font(.footnote)
-                        .foregroundStyle(colorScheme == .dark ? Color.white : Color.black.opacity(0.72))
+                        .foregroundStyle(
+                            usesFullViewPalette
+                                ? Color.black.opacity(0.72)
+                                : (colorScheme == .dark ? Color.white : Color.black.opacity(0.72))
+                        )
                     Spacer(minLength: 8)
                     Button("Show Inactive") {
                         inactiveOnly = true
@@ -2236,12 +2247,17 @@ struct ActionView: View {
     }
 
     private func resultSection(resultText: String, showsPrompt: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let usesFullViewPalette = showsPrompt
+        return VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("RESULT")
                     .font(.caption)
                     .fontWeight(.bold)
-                    .foregroundStyle(colorScheme == .dark ? Color.white : .black)
+                    .foregroundStyle(
+                        usesFullViewPalette
+                            ? Color.black
+                            : (colorScheme == .dark ? Color.white : .black)
+                    )
                 Spacer()
                 if showsPrompt {
                     Text("What do I want? Why do I want it?")
@@ -2254,9 +2270,13 @@ struct ActionView: View {
             Text(resultText.isEmpty ? "-" : resultText)
                 .font(.subheadline)
                 .foregroundStyle(
-                    colorScheme == .dark
-                        ? Color.white
-                        : (resultText.isEmpty ? Color.secondary : .black)
+                    usesFullViewPalette
+                        ? (resultText.isEmpty ? Color.secondary : .black)
+                        : (
+                            colorScheme == .dark
+                                ? Color.white
+                                : (resultText.isEmpty ? Color.secondary : .black)
+                        )
                 )
         }
     }
@@ -2598,14 +2618,23 @@ struct ActionView: View {
     }
 
     private func compactSummaryRow(label: String, text: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
+        let usesFullViewPalette = !actionBlocksSimpleViewEnabled
+        return HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(label)
                 .font(.caption)
                 .fontWeight(.bold)
-                .foregroundStyle(colorScheme == .dark ? Color.white : .black)
+                .foregroundStyle(
+                    usesFullViewPalette
+                        ? Color.black
+                        : (colorScheme == .dark ? Color.white : .black)
+                )
             Text(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "-" : text)
                 .font(.subheadline)
-                .foregroundStyle(colorScheme == .dark ? Color.white : .black)
+                .foregroundStyle(
+                    usesFullViewPalette
+                        ? Color.black
+                        : (colorScheme == .dark ? Color.white : .black)
+                )
                 .lineLimit(1)
                 .truncationMode(.tail)
         }
@@ -2615,6 +2644,7 @@ struct ActionView: View {
         actions: [PlannedChunkAction],
         executionByAction: [UUID: PlannedChunkActionExecutionState]
     ) -> some View {
+        let usesFullViewPalette = !actionBlocksSimpleViewEnabled
         let statuses = actions.map { executionByAction[$0.id]?.status ?? .noAction }
         let leveragedCount = statuses.filter { $0 == .leveraged }.count
         let inProgressCount = statuses.filter { $0 == .inProgress }.count
@@ -2627,7 +2657,11 @@ struct ActionView: View {
             Text("ACTIONS")
                 .font(.caption)
                 .fontWeight(.bold)
-                .foregroundStyle(colorScheme == .dark ? Color.white : .black)
+                .foregroundStyle(
+                    usesFullViewPalette
+                        ? Color.black
+                        : (colorScheme == .dark ? Color.white : .black)
+                )
 
             if leveragedCount > 0 {
                 compactStatusCount(icon: ActionExecutionStatus.leveraged.icon, count: leveragedCount)
@@ -4363,36 +4397,148 @@ private struct LeverageSheet: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    Text("Assign action to someone or something else")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
+            leverageContent
+        }
+    }
 
-                Section("Resources") {
+    private var leverageContent: some View {
+        List {
+            introSection
+            resourcesSection
+        }
+        .navigationTitle("Assign")
+        .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .bottom) {
+            if isNewResourceMode && isNewResourceFocused {
+                VStack(spacing: 8) {
+                    Picker("Type", selection: $kind) {
+                        ForEach(ActionLeverageKind.allCases) { k in
+                            Text(k.title).tag(k)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+                .padding(.horizontal)
+                .padding(.top, 8)
+                .padding(.bottom, 10)
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done") {
+                    commitInlineResource()
+                    onSelectResource(localSelection)
+                    dismiss()
+                }
+            }
+            ToolbarItemGroup(placement: .keyboard) {
+                if isNewResourceMode && isNewResourceFocused {
+                    Spacer(minLength: 0)
                     Button {
-                        isNewResourceMode = true
-                        localSelection = nil
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                            isNewResourceFocused = true
+                        if trimmedInlineResourceValue.isEmpty {
+                            isNewResourceFocused = false
+                        } else {
+                            commitInlineResource()
                         }
                     } label: {
-                        HStack(spacing: 10) {
-                            if isNewResourceMode {
-                                TextField(kind == .person ? "Add person…" : "Add tool…", text: $value)
-                                    .focused($isNewResourceFocused)
-                                    .submitLabel(.done)
-                                    .onSubmit {
-                                        commitInlineResource()
-                                    }
-                            } else {
-                                Text("+ Add Resource")
-                                    .fontWeight(.semibold)
-                                    .foregroundStyle(.blue)
+                        Image(systemName: trimmedInlineResourceValue.isEmpty ? "keyboard.chevron.compact.down" : "checkmark")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(trimmedInlineResourceValue.isEmpty ? Color.primary.opacity(0.85) : Color.white)
+                            .frame(width: 30, height: 30)
+                            .background(
+                                Circle().fill(
+                                    trimmedInlineResourceValue.isEmpty
+                                        ? Color(.secondarySystemBackground)
+                                        : Color.blue
+                                )
+                            )
+                            .overlay(
+                                Circle()
+                                    .stroke(
+                                        Color.black.opacity(trimmedInlineResourceValue.isEmpty ? 0.08 : 0),
+                                        lineWidth: 1
+                                    )
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .onAppear { localSelection = selectedResourceId }
+        .onChange(of: isNewResourceFocused) { _, isFocused in
+            guard !isFocused else { return }
+            guard trimmedInlineResourceValue.isEmpty else { return }
+            isNewResourceMode = false
+            value = ""
+        }
+    }
+
+    private var introSection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Assign action to someone or something else")
+                Text("NOTE: Does not alert who you assign to, for personal tracking only to hold people accountable.")
+            }
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+        }
+    }
+
+    private var resourcesSection: some View {
+        Section("Resources") {
+            Button {
+                isNewResourceMode = true
+                localSelection = nil
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    isNewResourceFocused = true
+                }
+            } label: {
+                HStack(spacing: 10) {
+                    if isNewResourceMode {
+                        TextField(kind == .person ? "Add person…" : "Add tool…", text: $value)
+                            .focused($isNewResourceFocused)
+                            .submitLabel(.done)
+                            .onSubmit {
+                                commitInlineResource()
                             }
-                            Spacer()
-                            if isNewResourceMode {
+                    } else {
+                        Text("+ Add Resource")
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.blue)
+                    }
+                    Spacer()
+                    if isNewResourceMode {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.blue)
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if leverageCatalog.isEmpty {
+                Text("None yet.")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(leverageCatalog.sorted(by: { $0.createdAt < $1.createdAt })) { item in
+                    Button {
+                        if isNewResourceMode {
+                            isNewResourceMode = false
+                            value = ""
+                            isNewResourceFocused = false
+                        }
+                        localSelection = (localSelection == item.id) ? nil : item.id
+                    } label: {
+                        HStack {
+                            Text(item.kind == .person ? "Person" : "Tool")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .frame(width: 60, alignment: .leading)
+
+                            Text(item.value)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+
+                            if localSelection == item.id {
                                 Image(systemName: "checkmark.circle.fill")
                                     .foregroundStyle(.blue)
                             }
@@ -4400,83 +4546,26 @@ private struct LeverageSheet: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-
-                    if leverageCatalog.isEmpty {
-                        Text("None yet.")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(leverageCatalog.sorted(by: { $0.createdAt < $1.createdAt })) { item in
-                            Button {
-                                if isNewResourceMode {
-                                    isNewResourceMode = false
-                                    value = ""
-                                    isNewResourceFocused = false
-                                }
-                                localSelection = (localSelection == item.id) ? nil : item.id
-                            } label: {
-                                HStack {
-                                    Text(item.kind == .person ? "Person" : "Tool")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .frame(width: 60, alignment: .leading)
-
-                                    Text(item.value)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                                    if localSelection == item.id {
-                                        Image(systemName: "checkmark.circle.fill")
-                                            .foregroundStyle(.blue)
-                                    }
-                                }
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .swipeActions(edge: .trailing) {
-                                Button(role: .destructive) {
-                                    onDeleteCatalogItems([item.id])
-                                } label: {
-                                    Text("Delete")
-                                }
-                                .tint(.red)
-                            }
+                    .swipeActions(edge: .trailing) {
+                        Button(role: .destructive) {
+                            onDeleteCatalogItems([item.id])
+                        } label: {
+                            Text("Delete")
                         }
+                        .tint(.red)
                     }
                 }
             }
-            .navigationTitle("Assign")
-            .navigationBarTitleDisplayMode(.inline)
-            .safeAreaInset(edge: .bottom) {
-                if isNewResourceMode && isNewResourceFocused {
-                    VStack(spacing: 8) {
-                        Picker("Type", selection: $kind) {
-                            ForEach(ActionLeverageKind.allCases) { k in
-                                Text(k.title).tag(k)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                    }
-                    .padding(.horizontal)
-                    .padding(.top, 8)
-                    .padding(.bottom, 10)
-                }
-            }
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") {
-                        commitInlineResource()
-                        onSelectResource(localSelection)
-                        dismiss()
-                    }
-                }
-            }
-            .onAppear { localSelection = selectedResourceId }
         }
     }
 
+    private var trimmedInlineResourceValue: String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private func commitInlineResource() {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard isNewResourceMode, !trimmed.isEmpty else { return }
-        onAdd(kind, trimmed)
+        guard isNewResourceMode, !trimmedInlineResourceValue.isEmpty else { return }
+        onAdd(kind, trimmedInlineResourceValue)
         value = ""
         isNewResourceMode = false
         isNewResourceFocused = false
@@ -4511,114 +4600,262 @@ private struct SensitivitySheet: View {
     var body: some View {
         NavigationStack {
             ScrollViewReader { proxy in
-                List {
-                Section("Time of Day") {
-                    HStack {
-                        Text("Can be completed anytime")
-                        Spacer()
-                        Menu {
-                            Button("Yes") { setAnytimeOfDay(true) }
-                            Button("No") { setAnytimeOfDay(false) }
-                        } label: {
-                            HStack(spacing: 4) {
-                                Text(isAnytimeOfDay ? "Yes" : "No")
-                                Image(systemName: "chevron.up.chevron.down")
-                            }
-                            .foregroundStyle(.blue)
-                        }
-                    }
+                sensitivityContent(proxy: proxy)
+            }
+        }
+    }
 
-                    if !isAnytimeOfDay {
-                        Toggle("Morning", isOn: bindingForTimeOfDay(\.sensitiveMorning))
-                        Toggle("Afternoon", isOn: bindingForTimeOfDay(\.sensitiveAfternoon))
-                        Toggle("Evening", isOn: bindingForTimeOfDay(\.sensitiveEvening))
-                    }
-                }
+    private func sensitivityContent(proxy: ScrollViewProxy) -> some View {
+        List {
+            timeOfDaySection
 
-                if dueDateEditor != nil {
-                    Section("Due Date") {
-                        HStack {
-                            Text("Due Date")
-                            Spacer()
-                            Menu {
-                                Button("No") { localHasDueDate = false }
-                                Button("Yes") { localHasDueDate = true }
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Text(localHasDueDate ? "Yes" : "No")
-                                    Image(systemName: "chevron.up.chevron.down")
-                                }
-                                .foregroundStyle(.blue)
-                            }
-                        }
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(showLeverageDueDateError && !localHasDueDate ? Color.red : Color.clear, lineWidth: 2)
-                        )
-
-                        if localHasDueDate {
-                            HStack {
-                                Text("Set Due Date")
-                                Spacer()
-                                DatePicker(
-                                    "",
-                                    selection: $localDueDate,
-                                    in: localMinimumDate...,
-                                    displayedComponents: .date
-                                )
-                                .labelsHidden()
-                                .datePickerStyle(.compact)
-                            }
-
-                            HStack {
-                                Text("Attention")
-                                Spacer()
-                                Menu {
-                                    ForEach(7...30, id: \.self) { value in
-                                        Button("\(value) days") {
-                                            localAttentionDays = value
-                                        }
-                                    }
-                                } label: {
-                                    HStack(spacing: 4) {
-                                        Text("\(min(max(localAttentionDays, 7), 30)) days")
-                                        Image(systemName: "chevron.up.chevron.down")
-                                    }
-                                    .foregroundStyle(.blue)
-                                }
-                            }
-
-                            Text("Attention triggers countdown to display before due date and intelligently brings it into your attention.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
+            if dueDateEditor != nil {
+                dueDateSection
                     .id(dueDateScrollAnchorID)
-                }
+            }
 
-                Section("Places") {
+            placesSection
+        }
+        .navigationTitle("Sensitivities")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done") {
+                    commitInlinePlace()
+                    if dueDateEditor != nil {
+                        onSaveDueDateEditor(
+                            ActionView.DueDateEditorState(
+                                hasDueDate: localHasDueDate,
+                                dueDate: localDueDate,
+                                attentionDays: min(max(localAttentionDays, 7), 30),
+                                minimumDate: localMinimumDate
+                            )
+                        )
+                    }
+                    dismiss()
+                }
+            }
+            ToolbarItemGroup(placement: .keyboard) {
+                if isNewPlaceMode && isNewPlaceFocused {
+                    Spacer(minLength: 0)
                     Button {
-                        isNewPlaceMode = true
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                            isNewPlaceFocused = true
+                        if trimmedInlinePlaceValue.isEmpty {
+                            isNewPlaceFocused = false
+                        } else {
+                            commitInlinePlace()
                         }
                     } label: {
-                        HStack(spacing: 10) {
-                            if isNewPlaceMode {
-                                TextField("Add place…", text: $newPlace)
-                                    .focused($isNewPlaceFocused)
-                                    .submitLabel(.done)
-                                    .onSubmit {
-                                        commitInlinePlace()
-                                    }
-                            } else {
-                                Text("+ New Place")
-                                    .fontWeight(.semibold)
-                                    .foregroundStyle(.blue)
+                        Image(systemName: trimmedInlinePlaceValue.isEmpty ? "keyboard.chevron.compact.down" : "checkmark")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(trimmedInlinePlaceValue.isEmpty ? Color.primary.opacity(0.85) : Color.white)
+                            .frame(width: 30, height: 30)
+                            .background(
+                                Circle().fill(
+                                    trimmedInlinePlaceValue.isEmpty
+                                        ? Color(.secondarySystemBackground)
+                                        : Color.blue
+                                )
+                            )
+                            .overlay(
+                                Circle()
+                                    .stroke(
+                                        Color.black.opacity(trimmedInlinePlaceValue.isEmpty ? 0.08 : 0),
+                                        lineWidth: 1
+                                    )
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .onAppear {
+            if let dueDateEditor {
+                localHasDueDate = dueDateEditor.hasDueDate
+                localDueDate = dueDateEditor.dueDate
+                localAttentionDays = dueDateEditor.attentionDays
+                localMinimumDate = dueDateEditor.minimumDate
+            }
+            showLeverageDueDateError = highlightDueDateRequirementOnAppear
+            if highlightDueDateRequirementOnAppear {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        proxy.scrollTo(dueDateScrollAnchorID, anchor: .center)
+                    }
+                }
+            }
+        }
+        .onChange(of: localHasDueDate) { _, hasDueDate in
+            if hasDueDate {
+                showLeverageDueDateError = false
+            }
+        }
+        .onChange(of: isNewPlaceFocused) { _, isFocused in
+            guard !isFocused else { return }
+            guard trimmedInlinePlaceValue.isEmpty else { return }
+            isNewPlaceMode = false
+            newPlace = ""
+        }
+        .onDisappear {
+            normalizeTimeOfDayIfNoneSelected()
+        }
+        .overlay(alignment: .bottom) {
+            if showLeverageDueDateError && !localHasDueDate {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("You must add a due date to assign this action so resources stay accountable")
+                        .font(.footnote)
+                        .fontWeight(.bold)
+                    Text("If not completed in this action block, the Resource and due date will be saved to your Capture list and future Action Blocks.")
+                        .font(.footnote)
+                }
+                .multilineTextAlignment(.leading)
+                .padding(10)
+                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Color.black.opacity(0.12), lineWidth: 1)
+                )
+                .padding(.horizontal, 8)
+                .padding(.bottom, 8)
+                .transition(.opacity)
+            }
+        }
+    }
+
+    private var timeOfDaySection: some View {
+        Section("Time of Day") {
+            HStack {
+                Text("Can be completed anytime")
+                Spacer()
+                Menu {
+                    Button("Yes") { setAnytimeOfDay(true) }
+                    Button("No") { setAnytimeOfDay(false) }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(isAnytimeOfDay ? "Yes" : "No")
+                        Image(systemName: "chevron.up.chevron.down")
+                    }
+                    .foregroundStyle(.blue)
+                }
+            }
+
+            if !isAnytimeOfDay {
+                Toggle("Morning", isOn: bindingForTimeOfDay(\.sensitiveMorning))
+                Toggle("Afternoon", isOn: bindingForTimeOfDay(\.sensitiveAfternoon))
+                Toggle("Evening", isOn: bindingForTimeOfDay(\.sensitiveEvening))
+            }
+        }
+    }
+
+    private var dueDateSection: some View {
+        Section("Due Date") {
+            HStack {
+                Text("Due Date")
+                Spacer()
+                Menu {
+                    Button("No") { localHasDueDate = false }
+                    Button("Yes") { localHasDueDate = true }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(localHasDueDate ? "Yes" : "No")
+                        Image(systemName: "chevron.up.chevron.down")
+                    }
+                    .foregroundStyle(.blue)
+                }
+            }
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(showLeverageDueDateError && !localHasDueDate ? Color.red : Color.clear, lineWidth: 2)
+            )
+
+            if localHasDueDate {
+                HStack {
+                    Text("Set Due Date")
+                    Spacer()
+                    DatePicker(
+                        "",
+                        selection: $localDueDate,
+                        in: localMinimumDate...,
+                        displayedComponents: .date
+                    )
+                    .labelsHidden()
+                    .datePickerStyle(.compact)
+                }
+
+                HStack {
+                    Text("Attention")
+                    Spacer()
+                    Menu {
+                        ForEach(7...30, id: \.self) { value in
+                            Button("\(value) days") {
+                                localAttentionDays = value
                             }
-                            Spacer()
-                            if isNewPlaceMode {
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("\(min(max(localAttentionDays, 7), 30)) days")
+                            Image(systemName: "chevron.up.chevron.down")
+                        }
+                        .foregroundStyle(.blue)
+                    }
+                }
+
+                Text("Attention triggers countdown to display before due date and intelligently brings it into your attention.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private var placesSection: some View {
+        Section("Places") {
+            Button {
+                isNewPlaceMode = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    isNewPlaceFocused = true
+                }
+            } label: {
+                HStack(spacing: 10) {
+                    if isNewPlaceMode {
+                        TextField("Add place…", text: $newPlace)
+                            .focused($isNewPlaceFocused)
+                            .submitLabel(.done)
+                            .onSubmit {
+                                commitInlinePlace()
+                            }
+                    } else {
+                        Text("+ New Place")
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.blue)
+                    }
+                    Spacer()
+                    if isNewPlaceMode {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.blue)
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if placesCatalog.isEmpty {
+                Text("No places yet.")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(placesCatalog) { p in
+                    Button {
+                        if isNewPlaceMode {
+                            isNewPlaceMode = false
+                            newPlace = ""
+                            isNewPlaceFocused = false
+                        }
+                        onTogglePlaceSelected(p.id)
+                    } label: {
+                        HStack {
+                            Text(p.place)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+
+                            if selectedPlaceIDs.contains(p.id) {
                                 Image(systemName: "checkmark.circle.fill")
                                     .foregroundStyle(.blue)
                             }
@@ -4626,118 +4863,26 @@ private struct SensitivitySheet: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-
-                    if placesCatalog.isEmpty {
-                        Text("No places yet.")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(placesCatalog) { p in
-                            Button {
-                                if isNewPlaceMode {
-                                    isNewPlaceMode = false
-                                    newPlace = ""
-                                    isNewPlaceFocused = false
-                                }
-                                onTogglePlaceSelected(p.id)
-                            } label: {
-                                HStack {
-                                    Text(p.place)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                                    if selectedPlaceIDs.contains(p.id) {
-                                        Image(systemName: "checkmark.circle.fill")
-                                            .foregroundStyle(.blue)
-                                    }
-                                }
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .swipeActions(edge: .trailing) {
-                                Button(role: .destructive) {
-                                    onDeleteCatalogPlaces([p.id])
-                                } label: {
-                                    Text("Delete")
-                                }
-                                .tint(.red)
-                            }
+                    .swipeActions(edge: .trailing) {
+                        Button(role: .destructive) {
+                            onDeleteCatalogPlaces([p.id])
+                        } label: {
+                            Text("Delete")
                         }
-                    }
-                }
-
-                }
-                .navigationTitle("Sensitivities")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Done") {
-                            commitInlinePlace()
-                            if dueDateEditor != nil {
-                                onSaveDueDateEditor(
-                                    ActionView.DueDateEditorState(
-                                        hasDueDate: localHasDueDate,
-                                        dueDate: localDueDate,
-                                        attentionDays: min(max(localAttentionDays, 7), 30),
-                                        minimumDate: localMinimumDate
-                                    )
-                                )
-                            }
-                            dismiss()
-                        }
-                    }
-                }
-                .onAppear {
-                    if let dueDateEditor {
-                        localHasDueDate = dueDateEditor.hasDueDate
-                        localDueDate = dueDateEditor.dueDate
-                        localAttentionDays = dueDateEditor.attentionDays
-                        localMinimumDate = dueDateEditor.minimumDate
-                    }
-                    showLeverageDueDateError = highlightDueDateRequirementOnAppear
-                    if highlightDueDateRequirementOnAppear {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                proxy.scrollTo(dueDateScrollAnchorID, anchor: .center)
-                            }
-                        }
-                    }
-                }
-                .onChange(of: localHasDueDate) { _, hasDueDate in
-                    if hasDueDate {
-                        showLeverageDueDateError = false
-                    }
-                }
-                .onDisappear {
-                    normalizeTimeOfDayIfNoneSelected()
-                }
-                .overlay(alignment: .bottom) {
-                    if showLeverageDueDateError && !localHasDueDate {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("You must add a due date to assign this action so resources stay accountable")
-                                .font(.footnote)
-                                .fontWeight(.bold)
-                            Text("If not completed in this action block, the Resource and due date will be saved to your Capture list and future Action Blocks.")
-                                .font(.footnote)
-                        }
-                        .multilineTextAlignment(.leading)
-                        .padding(10)
-                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .stroke(Color.black.opacity(0.12), lineWidth: 1)
-                        )
-                        .padding(.horizontal, 8)
-                        .padding(.bottom, 8)
-                        .transition(.opacity)
+                        .tint(.red)
                     }
                 }
             }
         }
     }
 
+    private var trimmedInlinePlaceValue: String {
+        newPlace.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private func commitInlinePlace() {
-        let trimmed = newPlace.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard isNewPlaceMode, !trimmed.isEmpty else { return }
-        onAddPlaceToCatalog(trimmed)
+        guard isNewPlaceMode, !trimmedInlinePlaceValue.isEmpty else { return }
+        onAddPlaceToCatalog(trimmedInlinePlaceValue)
         newPlace = ""
         isNewPlaceMode = false
         isNewPlaceFocused = false
@@ -4805,6 +4950,7 @@ private struct AttachmentsSheet: View {
     @Environment(\.openURL) private var openURL
     @State private var linkText: String = ""
     @State private var isNewLinkMode: Bool = false
+    @FocusState private var isNoteFocused: Bool
     @FocusState private var isNewLinkFocused: Bool
     @State private var isFileImporterPresented: Bool = false
     @State private var noteText: String = ""
@@ -4815,6 +4961,7 @@ private struct AttachmentsSheet: View {
             List {
                 Section("Notes") {
                     TextEditor(text: $noteText)
+                        .focused($isNoteFocused)
                         .frame(height: 120)
                 }
 
@@ -4925,10 +5072,79 @@ private struct AttachmentsSheet: View {
                         dismiss()
                     }
                 }
+                ToolbarItemGroup(placement: .keyboard) {
+                    if isNoteFocused {
+                        Spacer(minLength: 0)
+                        Button {
+                            if trimmedNoteText.isEmpty {
+                                isNoteFocused = false
+                            } else {
+                                isNoteFocused = false
+                                commitNoteIfNeeded()
+                                dismiss()
+                            }
+                        } label: {
+                            Image(systemName: trimmedNoteText.isEmpty ? "keyboard.chevron.compact.down" : "checkmark")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(trimmedNoteText.isEmpty ? Color.primary.opacity(0.85) : Color.white)
+                                .frame(width: 30, height: 30)
+                                .background(
+                                    Circle().fill(
+                                        trimmedNoteText.isEmpty
+                                            ? Color(.secondarySystemBackground)
+                                            : Color.blue
+                                    )
+                                )
+                                .overlay(
+                                    Circle()
+                                        .stroke(
+                                            Color.black.opacity(trimmedNoteText.isEmpty ? 0.08 : 0),
+                                            lineWidth: 1
+                                        )
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    } else if isNewLinkMode && isNewLinkFocused {
+                        Spacer(minLength: 0)
+                        Button {
+                            if trimmedInlineLinkValue.isEmpty {
+                                isNewLinkFocused = false
+                            } else {
+                                commitInlineLink()
+                            }
+                        } label: {
+                            Image(systemName: trimmedInlineLinkValue.isEmpty ? "keyboard.chevron.compact.down" : "checkmark")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(trimmedInlineLinkValue.isEmpty ? Color.primary.opacity(0.85) : Color.white)
+                                .frame(width: 30, height: 30)
+                                .background(
+                                    Circle().fill(
+                                        trimmedInlineLinkValue.isEmpty
+                                            ? Color(.secondarySystemBackground)
+                                            : Color.blue
+                                    )
+                                )
+                                .overlay(
+                                    Circle()
+                                        .stroke(
+                                            Color.black.opacity(trimmedInlineLinkValue.isEmpty ? 0.08 : 0),
+                                            lineWidth: 1
+                                        )
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
             }
             .onAppear {
                 noteText = initialNoteText
                 hasSavedNote = false
+            }
+            .onChange(of: isNewLinkFocused) { _, isFocused in
+                guard !isFocused else { return }
+                guard trimmedInlineLinkValue.isEmpty else { return }
+                isNewLinkMode = false
+                linkText = ""
             }
             .onDisappear {
                 commitNoteIfNeeded()
@@ -4943,12 +5159,19 @@ private struct AttachmentsSheet: View {
     }
 
     private func commitInlineLink() {
-        let trimmed = linkText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard isNewLinkMode, !trimmed.isEmpty else { return }
-        onAddLink(trimmed)
+        guard isNewLinkMode, !trimmedInlineLinkValue.isEmpty else { return }
+        onAddLink(trimmedInlineLinkValue)
         linkText = ""
         isNewLinkMode = false
         isNewLinkFocused = false
+    }
+
+    private var trimmedNoteText: String {
+        noteText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedInlineLinkValue: String {
+        linkText.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func iconName(for a: PlannedChunkActionAttachment) -> String {
@@ -5251,6 +5474,13 @@ private struct ActionSwipeRow: View {
         isInactive ? inactiveTint : accent
     }
 
+    private var actionTextColor: Color {
+        // Simple View should retain the existing darker text treatment in dark mode.
+        guard !simpleMode else { return inactiveTint }
+        guard colorScheme == .dark else { return inactiveTint }
+        return isInactive ? Color.white.opacity(0.72) : Color.white
+    }
+
     private var statusMarkerIconName: String {
         if effectiveStatus == .leveraged, hasLeverage {
             if leverageIconName == "person.fill" { return "person" }
@@ -5297,7 +5527,7 @@ private struct ActionSwipeRow: View {
                     actionId: actionId,
                     sourceText: text,
                     font: actionFont(status: effectiveStatus),
-                    textColor: inactiveTint,
+                    textColor: actionTextColor,
                     strike: effectiveStatus == .done || effectiveStatus == .carriedToCapture || effectiveStatus == .notNeeded,
                     focusedActionID: $focusedActionID,
                     onTextChange: onLiveTextChange,

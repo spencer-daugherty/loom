@@ -238,11 +238,18 @@ private enum OutcomeHealthKitBridge {
             completion(.failure(BridgeError.unavailable))
             return
         }
-        guard let type = quantityType(from: identifierRaw) else {
+        guard let selectedType = quantityType(from: identifierRaw) else {
             completion(.failure(BridgeError.invalidIdentifier))
             return
         }
-        store.requestAuthorization(toShare: nil, read: [type]) { success, error in
+        var readTypes = allReadableQuantityTypes()
+        readTypes.insert(selectedType)
+        guard !readTypes.isEmpty else {
+            completion(.failure(BridgeError.invalidIdentifier))
+            return
+        }
+
+        store.requestAuthorization(toShare: nil, read: readTypes) { success, error in
             if let error {
                 completion(.failure(error))
             } else if success {
@@ -370,6 +377,10 @@ private enum OutcomeHealthKitBridge {
 
     private static func quantityType(from raw: String) -> HKQuantityType? {
         HKQuantityType.quantityType(forIdentifier: HKQuantityTypeIdentifier(rawValue: raw))
+    }
+
+    private static func allReadableQuantityTypes() -> Set<HKObjectType> {
+        Set(quantityIdentifiers.compactMap { HKQuantityType.quantityType(forIdentifier: $0) })
     }
 
     private static func defaultUnit(for identifierRaw: String) -> HKUnit {
@@ -1209,6 +1220,10 @@ struct AddOutcomeMeasureSheet: View {
     @State private var pendingCurrentValue: Double?
     @State private var pendingMeasuredDay: Date?
 
+    private var measureKeyboardShowsCheckmark: Bool {
+        !measureText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     private var canSave: Bool {
         let trimmed = measureText.trimmingCharacters(in: .whitespacesAndNewlines)
         return !trimmed.isEmpty && parseFormattedDecimalChart(measureText) != nil
@@ -1246,25 +1261,29 @@ struct AddOutcomeMeasureSheet: View {
                 }
             }
             .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    if isMeasureFieldFocused {
+                        Spacer(minLength: 0)
+                        Button {
+                            guard measureKeyboardShowsCheckmark else {
+                                isMeasureFieldFocused = false
+                                return
+                            }
+                            isMeasureFieldFocused = false
+                            attemptSaveFromInput()
+                        } label: {
+                            keyboardAccessoryIcon(showCheckmark: measureKeyboardShowsCheckmark)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     if canSave {
                         Button("Save") {
-                            let current = parseFormattedDecimalChart(measureText) ?? 0
-                            let selectedDay = Calendar.current.startOfDay(for: measuredDate)
-                            let existingSameDay = entries.filter {
-                                Calendar.current.isDate($0.measuredAt, inSameDayAs: selectedDay)
-                            }
-                            if existingSameDay.isEmpty {
-                                persistMeasure(current: current, measuredDay: selectedDay, overrideExisting: false)
-                                dismiss()
-                            } else {
-                                pendingCurrentValue = current
-                                pendingMeasuredDay = selectedDay
-                                showOverrideAlert = true
-                            }
+                            attemptSaveFromInput()
                         }
                     }
                 }
@@ -1285,6 +1304,44 @@ struct AddOutcomeMeasureSheet: View {
                 Text("A value already exists for this date. Would you like to override it?")
             }
         }
+    }
+
+    private func attemptSaveFromInput() {
+        guard let current = parseFormattedDecimalChart(measureText) else { return }
+        let selectedDay = Calendar.current.startOfDay(for: measuredDate)
+        let existingSameDay = entries.filter {
+            Calendar.current.isDate($0.measuredAt, inSameDayAs: selectedDay)
+        }
+        if existingSameDay.isEmpty {
+            persistMeasure(current: current, measuredDay: selectedDay, overrideExisting: false)
+            dismiss()
+        } else {
+            pendingCurrentValue = current
+            pendingMeasuredDay = selectedDay
+            showOverrideAlert = true
+        }
+    }
+
+    @ViewBuilder
+    private func keyboardAccessoryIcon(showCheckmark: Bool) -> some View {
+        Image(systemName: showCheckmark ? "checkmark" : "keyboard.chevron.compact.down")
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(showCheckmark ? .white : .primary.opacity(0.85))
+            .frame(width: 30, height: 30)
+            .background(
+                Circle().fill(
+                    showCheckmark
+                        ? Color.blue
+                        : Color(.secondarySystemBackground)
+                )
+            )
+            .overlay(
+                Circle()
+                    .stroke(
+                        Color.black.opacity(showCheckmark ? 0 : 0.08),
+                        lineWidth: 1
+                    )
+            )
     }
 
     private var goalValue: Double {
@@ -1425,6 +1482,7 @@ struct OutcomesAllDataView: View {
     @Query(sort: \OutcomeAnalyticsEvent.occurredAt, order: .reverse) private var allEvents: [OutcomeAnalyticsEvent]
     @State private var isEditingStartingValue = false
     @State private var startingValueInput = ""
+    @FocusState private var isStartingValueFieldFocused: Bool
 
     init(outcomeID: UUID, formatRaw: String, unitRaw: String, decimalPlaces: Int) {
         self.outcomeID = outcomeID
@@ -1520,6 +1578,10 @@ struct OutcomesAllDataView: View {
         !goalChangeEvents.isEmpty
     }
 
+    private var startingValueKeyboardShowsCheckmark: Bool {
+        !startingValueInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     private var originalGoalValue: Double {
         goalChangeEvents
             .sorted { $0.occurredAt < $1.occurredAt }
@@ -1610,6 +1672,7 @@ struct OutcomesAllDataView: View {
                         Spacer()
                         TextField("0", text: $startingValueInput)
                             .keyboardType(.decimalPad)
+                            .focused($isStartingValueFieldFocused)
                             .multilineTextAlignment(.trailing)
                             .frame(width: 120)
                             .onChange(of: startingValueInput) { _, newValue in
@@ -1622,7 +1685,29 @@ struct OutcomesAllDataView: View {
                 }
                 .navigationTitle("Edit Starting Value")
                 .navigationBarTitleDisplayMode(.inline)
+                .onAppear {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                        isStartingValueFieldFocused = true
+                    }
+                }
                 .toolbar {
+                    ToolbarItemGroup(placement: .keyboard) {
+                        if isStartingValueFieldFocused {
+                            Spacer(minLength: 0)
+                            Button {
+                                guard startingValueKeyboardShowsCheckmark else {
+                                    isStartingValueFieldFocused = false
+                                    return
+                                }
+                                isStartingValueFieldFocused = false
+                                saveStartingValue()
+                                isEditingStartingValue = false
+                            } label: {
+                                keyboardAccessoryIcon(showCheckmark: startingValueKeyboardShowsCheckmark)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
                     ToolbarItem(placement: .cancellationAction) {
                         Button("Cancel") { isEditingStartingValue = false }
                     }
@@ -1637,6 +1722,28 @@ struct OutcomesAllDataView: View {
             .presentationDetents([.medium])
             .presentationDragIndicator(.visible)
         }
+    }
+
+    @ViewBuilder
+    private func keyboardAccessoryIcon(showCheckmark: Bool) -> some View {
+        Image(systemName: showCheckmark ? "checkmark" : "keyboard.chevron.compact.down")
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(showCheckmark ? .white : .primary.opacity(0.85))
+            .frame(width: 30, height: 30)
+            .background(
+                Circle().fill(
+                    showCheckmark
+                        ? Color.blue
+                        : Color(.secondarySystemBackground)
+                )
+            )
+            .overlay(
+                Circle()
+                    .stroke(
+                        Color.black.opacity(showCheckmark ? 0 : 0.08),
+                        lineWidth: 1
+                    )
+            )
     }
 
     @ViewBuilder

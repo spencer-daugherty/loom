@@ -69,7 +69,6 @@ final class UserSessionStore: ObservableObject {
         if !hasAccount { return .account }
         if !hasCompletedDiagnostic { return .diagnostic }
         if !hasSeenDiagnosticInsights { return .insights }
-        if !isSubscribed { return .paywall }
         return .done
     }
 

@@ -32,6 +32,10 @@ struct CompletedActionBlocksListView: View {
     @FocusState private var isSearchFocused: Bool
     @State private var pendingDeleteSession: ActionBlocksReflectionArchive?
 
+    private var searchKeyboardShowsCheckmark: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     private var actionsBySession: [UUID: [ActionBlocksReflectionArchiveAction]] {
         Dictionary(grouping: actions, by: \.archiveId)
     }
@@ -154,6 +158,36 @@ struct CompletedActionBlocksListView: View {
             .background(.clear)
         }
         .navigationTitle("Completed Action Blocks")
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                if isSearchFocused {
+                    Spacer(minLength: 0)
+                    Button {
+                        isSearchFocused = false
+                    } label: {
+                        Image(systemName: searchKeyboardShowsCheckmark ? "checkmark" : "keyboard.chevron.compact.down")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(searchKeyboardShowsCheckmark ? .white : .primary.opacity(0.85))
+                            .frame(width: 30, height: 30)
+                            .background(
+                                Circle().fill(
+                                    searchKeyboardShowsCheckmark
+                                        ? Color.blue
+                                        : Color(.secondarySystemBackground)
+                                )
+                            )
+                            .overlay(
+                                Circle()
+                                    .stroke(
+                                        Color.black.opacity(searchKeyboardShowsCheckmark ? 0 : 0.08),
+                                        lineWidth: 1
+                                    )
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
         .alert("Delete Action Blocks?", isPresented: Binding(
             get: { pendingDeleteSession != nil },
             set: { if !$0 { pendingDeleteSession = nil } }

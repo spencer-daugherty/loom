@@ -246,6 +246,7 @@ struct DiagnosticInsightsView: View {
 @MainActor
 final class DiagnosticsInsightsViewModel: ObservableObject {
     private static let diagnosticsInsightsConnectionError = "Couldn’t personalize insights yet. Check your connection."
+    private static var inMemoryCardsBySnapshotKey: [String: [DiagnosticInsightCard]] = [:]
 
     @Published fileprivate private(set) var insightCards: [DiagnosticInsightCard] = []
     @Published private(set) var isGeneratingInsights = false
@@ -258,22 +259,26 @@ final class DiagnosticsInsightsViewModel: ObservableObject {
     private var failedSnapshotKey: String?
     private var currentTask: Task<DiagnosticsInsightsRemoteResult, Never>?
 
-    func prepareForPendingPersonalizationLoad() {
+    func prepareForPendingPersonalizationLoad(showSkeleton: Bool = true) {
         guard insightCards.isEmpty else { return }
         insightsErrorMessage = nil
         troubleshootingMessage = nil
         isGeneratingInsights = false
-        isShowingSkeleton = true
+        isShowingSkeleton = showSkeleton
     }
 
     func refresh(
         snapshot: PersonalizationSnapshot?,
+        userKey: String? = nil,
         in modelContext: ModelContext,
         forceRefresh: Bool = false,
         preserveExistingOnFailure: Bool = false,
-        analysisCycleKey: String? = nil
+        analysisCycleKey: String? = nil,
+        showSkeletonWhileLoading: Bool = true,
+        animateCardUpdates: Bool = true
     ) async {
         guard let snapshot else {
+            AppDebugActivityLog.log("DiagnosticsInsights", "refresh skipped: missing personalization snapshot")
             cancelInFlight()
             insightCards = []
             insightsErrorMessage = Self.diagnosticsInsightsConnectionError
@@ -285,27 +290,49 @@ final class DiagnosticsInsightsViewModel: ObservableObject {
             return
         }
 
-        let userKey = PersonalizationUserIdentity.currentUserKey()
+        let resolvedUserKey = userKey ?? PersonalizationUserIdentity.currentUserKey()
         let diagnosticsHash = DiagnosticsInsightsHasher.hash(for: snapshot)
         let snapshotKey = DiagnosticsInsightsHasher.snapshotKey(
-            userKey: userKey,
+            userKey: resolvedUserKey,
             diagnosticsHash: diagnosticsHash
+        )
+        AppDebugActivityLog.log(
+            "DiagnosticsInsights",
+            "refresh start force=\(forceRefresh) snapshotKey=\(snapshotKey) cycle=\(analysisCycleKey ?? "none")"
         )
 
         if !forceRefresh,
            loadedSnapshotKey == snapshotKey,
            !insightCards.isEmpty {
+            AppDebugActivityLog.log("DiagnosticsInsights", "refresh short-circuit: already loaded in-memory cards")
             return
         }
 
         if !forceRefresh,
            failedSnapshotKey == snapshotKey {
+            AppDebugActivityLog.log("DiagnosticsInsights", "refresh short-circuit: prior failed snapshotKey")
             return
         }
 
         if !forceRefresh,
            let persisted = fetchStoredSnapshot(snapshotKey: snapshotKey, in: modelContext) {
+            AppDebugActivityLog.log("DiagnosticsInsights", "refresh using persisted snapshot")
             applyPersisted(persisted)
+            loadedSnapshotKey = snapshotKey
+            failedSnapshotKey = nil
+            currentDiagnosticsHash = diagnosticsHash
+            return
+        }
+
+        if !forceRefresh,
+           let cachedCards = Self.inMemoryCardsBySnapshotKey[snapshotKey],
+           !cachedCards.isEmpty {
+            AppDebugActivityLog.log("DiagnosticsInsights", "refresh using static in-memory cache")
+            insightCards = cachedCards
+            insightsErrorMessage = nil
+            troubleshootingMessage = nil
+            isGeneratingInsights = false
+            isShowingSkeleton = false
             loadedSnapshotKey = snapshotKey
             failedSnapshotKey = nil
             currentDiagnosticsHash = diagnosticsHash
@@ -314,6 +341,7 @@ final class DiagnosticsInsightsViewModel: ObservableObject {
 
         if let currentTask,
            currentDiagnosticsHash == diagnosticsHash {
+            AppDebugActivityLog.log("DiagnosticsInsights", "refresh waiting for in-flight request")
             _ = await currentTask.value
             return
         }
@@ -323,7 +351,7 @@ final class DiagnosticsInsightsViewModel: ObservableObject {
         let previousCards = insightCards
         let shouldPreserveExistingCards = preserveExistingOnFailure && !previousCards.isEmpty
 
-        isShowingSkeleton = !shouldPreserveExistingCards
+        isShowingSkeleton = showSkeletonWhileLoading && !shouldPreserveExistingCards
         isGeneratingInsights = true
         insightsErrorMessage = nil
         troubleshootingMessage = nil
@@ -331,6 +359,7 @@ final class DiagnosticsInsightsViewModel: ObservableObject {
             insightCards = []
         }
         currentDiagnosticsHash = diagnosticsHash
+        AppDebugActivityLog.log("DiagnosticsInsights", "refresh requesting remote insights")
 
         let requestID = UUID().uuidString
 
@@ -391,9 +420,13 @@ final class DiagnosticsInsightsViewModel: ObservableObject {
         currentTask = task
 
         let remote = await task.value
-        guard currentDiagnosticsHash == diagnosticsHash else { return }
+        guard currentDiagnosticsHash == diagnosticsHash else {
+            AppDebugActivityLog.log("DiagnosticsInsights", "refresh dropped stale response due hash mismatch")
+            return
+        }
 
         if remote.errorMessage != nil, shouldPreserveExistingCards {
+            AppDebugActivityLog.log("DiagnosticsInsights", "refresh failed; preserving existing cards")
             insightCards = previousCards
             insightsErrorMessage = nil
             troubleshootingMessage = remote.troubleshootingMessage
@@ -404,29 +437,38 @@ final class DiagnosticsInsightsViewModel: ObservableObject {
         }
 
         if remote.errorMessage == nil {
+            AppDebugActivityLog.log("DiagnosticsInsights", "refresh success; persisting cards")
             persist(
                 cards: remote.cards,
-                userKey: userKey,
+                userKey: resolvedUserKey,
                 diagnosticsHash: diagnosticsHash,
                 snapshotKey: snapshotKey,
                 purposeRefreshCycleKey: analysisCycleKey,
                 in: modelContext
             )
+            Self.inMemoryCardsBySnapshotKey[snapshotKey] = remote.cards
         }
 
-        withAnimation(.easeInOut(duration: 0.24)) {
-            insightCards = remote.cards
-            insightsErrorMessage = remote.errorMessage
-            troubleshootingMessage = remote.troubleshootingMessage
-            isGeneratingInsights = false
-            isShowingSkeleton = false
+        let applyStateChanges = {
+            self.insightCards = remote.cards
+            self.insightsErrorMessage = remote.errorMessage
+            self.troubleshootingMessage = remote.troubleshootingMessage
+            self.isGeneratingInsights = false
+            self.isShowingSkeleton = false
+        }
+        if animateCardUpdates {
+            withAnimation(.easeInOut(duration: 0.24), applyStateChanges)
+        } else {
+            applyStateChanges()
         }
         if remote.errorMessage == nil {
             loadedSnapshotKey = snapshotKey
             failedSnapshotKey = nil
+            AppDebugActivityLog.log("DiagnosticsInsights", "refresh complete success snapshotKey=\(snapshotKey)")
         } else {
             loadedSnapshotKey = nil
             failedSnapshotKey = snapshotKey
+            AppDebugActivityLog.log("DiagnosticsInsights", "refresh complete failure snapshotKey=\(snapshotKey)")
         }
         currentTask = nil
     }
@@ -448,18 +490,22 @@ final class DiagnosticsInsightsViewModel: ObservableObject {
         let descriptor = FetchDescriptor<DiagnosticsInsightsSnapshot>(
             predicate: #Predicate { $0.snapshotKey == key }
         )
-        return try? modelContext.fetch(descriptor).first
+        return (try? modelContext.fetch(descriptor))?
+            .sorted(by: { $0.generatedAt > $1.generatedAt })
+            .first
     }
 
     private func applyPersisted(_ snapshot: DiagnosticsInsightsSnapshot) {
         let fulfillment = snapshot.fulfillmentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? Self.fulfillmentAreasBody(from: [])
             : snapshot.fulfillmentText
-        insightCards = [
+        let cards = [
             DiagnosticInsightCard(kind: .rootCause, body: snapshot.rootCauseText),
             DiagnosticInsightCard(kind: .fulfillmentAreas, body: fulfillment),
             DiagnosticInsightCard(kind: .nextDirection, body: snapshot.nextDirectionText)
         ]
+        insightCards = cards
+        Self.inMemoryCardsBySnapshotKey[snapshot.snapshotKey] = cards
         insightsErrorMessage = nil
         troubleshootingMessage = nil
         isGeneratingInsights = false
@@ -503,6 +549,10 @@ final class DiagnosticsInsightsViewModel: ObservableObject {
         }
 
         try? modelContext.save()
+        AppDebugActivityLog.log(
+            "DiagnosticsInsights",
+            "persist snapshotKey=\(snapshotKey) diagnosticsHash=\(String(diagnosticsHash.prefix(8))) cycle=\(purposeRefreshCycleKey ?? "none")"
+        )
     }
 
     private static func fulfillmentAreasBody(from areas: [String]) -> String {
@@ -605,13 +655,19 @@ struct PersonalizationInsightsCards: View {
     @Environment(\.modelContext) private var modelContext
     @AppStorage(loomAITroubleshootingDefaultsKey) private var loomAITroubleshootingEnabled = true
     let snapshot: PersonalizationSnapshot
+    let userKey: String
     let purposeRefreshCycleKey: String?
     @StateObject private var viewModel = DiagnosticsInsightsViewModel()
+    @State private var lastForcedCycleRefreshToken: String?
 
     private var diagnosticsSignature: String {
-        let userKey = PersonalizationUserIdentity.currentUserKey()
         let diagnosticsHash = DiagnosticsInsightsHasher.hash(for: snapshot)
         return "\(userKey)|\(diagnosticsHash)|v\(DiagnosticsInsightsHasher.schemaVersion)"
+    }
+
+    private var accountRefreshSignature: String {
+        let cycle = normalizedPurposeCycleKey ?? "none"
+        return "\(diagnosticsSignature)|cycle:\(cycle)"
     }
 
     var body: some View {
@@ -657,9 +713,9 @@ struct PersonalizationInsightsCards: View {
             }
         }
         .onAppear {
-            viewModel.prepareForPendingPersonalizationLoad()
+            viewModel.prepareForPendingPersonalizationLoad(showSkeleton: false)
         }
-        .task(id: diagnosticsSignature) {
+        .task(id: accountRefreshSignature) {
             await refreshForAccountContext()
         }
     }
@@ -667,10 +723,13 @@ struct PersonalizationInsightsCards: View {
     private func refresh(forceRefresh: Bool = false) async {
         await viewModel.refresh(
             snapshot: snapshot,
+            userKey: userKey,
             in: modelContext,
             forceRefresh: forceRefresh,
-            preserveExistingOnFailure: forceRefresh,
-            analysisCycleKey: normalizedPurposeCycleKey
+            preserveExistingOnFailure: true,
+            analysisCycleKey: normalizedPurposeCycleKey,
+            showSkeletonWhileLoading: false,
+            animateCardUpdates: false
         )
     }
 
@@ -680,20 +739,40 @@ struct PersonalizationInsightsCards: View {
     }
 
     private func refreshForAccountContext() async {
-        let userKey = PersonalizationUserIdentity.currentUserKey()
         let diagnosticsHash = DiagnosticsInsightsHasher.hash(for: snapshot)
         let snapshotKey = DiagnosticsInsightsHasher.snapshotKey(userKey: userKey, diagnosticsHash: diagnosticsHash)
-        let storedSnapshot = fetchStoredSnapshot(snapshotKey: snapshotKey)
+        AppDebugActivityLog.log(
+            "DiagnosticsInsightsAccount",
+            "account refresh start snapshotKey=\(snapshotKey) cycle=\(normalizedPurposeCycleKey ?? "none")"
+        )
 
         // Always load persisted/current first so text remains stable in Account > Personalization.
         await refresh(forceRefresh: false)
 
-        guard let storedSnapshot else { return }
-        guard let desiredCycle = normalizedPurposeCycleKey else { return }
+        guard let desiredCycle = normalizedPurposeCycleKey else {
+            AppDebugActivityLog.log("DiagnosticsInsightsAccount", "account refresh exit: no desired cycle key")
+            return
+        }
+        // Re-read after baseline refresh so cycle comparison uses the latest persisted value.
+        guard let storedSnapshot = fetchStoredSnapshot(snapshotKey: snapshotKey) else {
+            AppDebugActivityLog.log("DiagnosticsInsightsAccount", "account refresh exit: no stored snapshot")
+            return
+        }
         let storedCycle = storedSnapshot.purposeRefreshCycleKey?.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard storedCycle != desiredCycle else { return }
+        guard storedCycle != desiredCycle else {
+            AppDebugActivityLog.log("DiagnosticsInsightsAccount", "account refresh exit: cycle unchanged")
+            return
+        }
 
-        // Re-analyze only when the monthly Purpose Insights cycle changes.
+        let forceRefreshToken = "\(snapshotKey)|\(desiredCycle)"
+        guard lastForcedCycleRefreshToken != forceRefreshToken else {
+            AppDebugActivityLog.log("DiagnosticsInsightsAccount", "account refresh exit: cycle already forced")
+            return
+        }
+        lastForcedCycleRefreshToken = forceRefreshToken
+
+        // Re-analyze only once when the monthly Purpose Insights cycle changes.
+        AppDebugActivityLog.log("DiagnosticsInsightsAccount", "account refresh forcing re-analysis for new cycle")
         await refresh(forceRefresh: true)
     }
 
@@ -702,7 +781,9 @@ struct PersonalizationInsightsCards: View {
         let descriptor = FetchDescriptor<DiagnosticsInsightsSnapshot>(
             predicate: #Predicate { $0.snapshotKey == key }
         )
-        return try? modelContext.fetch(descriptor).first
+        return (try? modelContext.fetch(descriptor))?
+            .sorted(by: { $0.generatedAt > $1.generatedAt })
+            .first
     }
 }
 

@@ -11,6 +11,7 @@ final class DiagnosticsInsightsSnapshot {
     var rootCauseText: String
     var fulfillmentText: String
     var nextDirectionText: String
+    var purposeRefreshCycleKey: String?
     var version: Int
 
     init(
@@ -21,6 +22,7 @@ final class DiagnosticsInsightsSnapshot {
         rootCauseText: String,
         fulfillmentText: String,
         nextDirectionText: String,
+        purposeRefreshCycleKey: String? = nil,
         version: Int = DiagnosticsInsightsHasher.schemaVersion
     ) {
         self.snapshotKey = snapshotKey
@@ -30,6 +32,7 @@ final class DiagnosticsInsightsSnapshot {
         self.rootCauseText = rootCauseText
         self.fulfillmentText = fulfillmentText
         self.nextDirectionText = nextDirectionText
+        self.purposeRefreshCycleKey = purposeRefreshCycleKey
         self.version = version
     }
 }
