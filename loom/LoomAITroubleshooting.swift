@@ -7,11 +7,10 @@ let loomAISlowResponseThresholdMS: Double = 5_000
 
 func registerLoomAITroubleshootingDefaultIfNeeded() {
     let defaults = UserDefaults.standard
-    if defaults.object(forKey: loomAITroubleshootingDefaultsKey) == nil {
-        defaults.set(true, forKey: loomAITroubleshootingDefaultsKey)
-    }
+    // Troubleshooting popups are disabled app-wide.
+    defaults.set(false, forKey: loomAITroubleshootingDefaultsKey)
     if defaults.object(forKey: loomAIDebugDefaultsKey) == nil {
-        defaults.set(false, forKey: loomAIDebugDefaultsKey)
+        defaults.set(true, forKey: loomAIDebugDefaultsKey)
     }
 }
 
@@ -62,18 +61,13 @@ func loomAIDuplicateSuggestionTroubleshootingDetails(
 }
 
 func loomAIReportTroubleshootingIfEnabled(details: String) {
-    let text = details.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !text.isEmpty else { return }
-    guard UserDefaults.standard.bool(forKey: loomAITroubleshootingDefaultsKey) else { return }
-    Task { @MainActor in
-        LoomAITroubleshootingCenter.shared.report(details: text)
-    }
+    _ = details
+    return
 }
 
 func loomAICopyTroubleshootingToClipboard(_ details: String) {
-    let trimmed = details.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty else { return }
-    UIPasteboard.general.string = trimmed
+    _ = details
+    return
 }
 
 @MainActor
@@ -104,39 +98,8 @@ final class LoomAITroubleshootingCenter: ObservableObject {
 }
 
 struct LoomAITroubleshootingBannerHost: View {
-    @AppStorage(loomAITroubleshootingDefaultsKey) private var loomAITroubleshootingEnabled = true
-    @ObservedObject private var center = LoomAITroubleshootingCenter.shared
-
     var body: some View {
-        if loomAITroubleshootingEnabled, let latest = center.entries.last {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
-                    Text("LoomAI Diagnostic")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.primary)
-                    Spacer(minLength: 8)
-                    Button {
-                        center.dismiss(latest.id)
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                LoomAITroubleshootingSection(details: latest.details)
-            }
-            .padding(10)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.white.opacity(0.30), lineWidth: 1)
-            )
-            .padding(.horizontal, 12)
-            .padding(.bottom, 12)
-            .transition(.move(edge: .bottom).combined(with: .opacity))
-        }
+        EmptyView()
     }
 }
 
@@ -230,32 +193,8 @@ struct LoomAITroubleshootingSection: View {
     let details: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("LoomAI Troubleshooting")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Text(details)
-                .font(.caption2.monospaced())
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .contentShape(Rectangle())
-        .contextMenu {
-            Button("Copy") {
-                UIPasteboard.general.string = details
-            }
-        }
-        .highPriorityGesture(
-            LongPressGesture(minimumDuration: 0.4)
-                .onEnded { _ in
-                    UIPasteboard.general.string = details
-                }
-        )
+        _ = details
+        return EmptyView()
     }
 }
 
@@ -263,19 +202,7 @@ struct LoomAIBottomCopyTroubleshootingButton: View {
     let details: String
 
     var body: some View {
-        Button("Copy troubleshooting") {
-            loomAICopyTroubleshootingToClipboard(details)
-        }
-        .font(.caption.weight(.semibold))
-        .buttonStyle(.plain)
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(Color.black.opacity(0.08), lineWidth: 1)
-        )
+        _ = details
+        return EmptyView()
     }
 }

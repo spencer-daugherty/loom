@@ -193,7 +193,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 struct loomApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     private let modelContainer = LoomPersistence.makeContainer()
-    @AppStorage(loomAIDebugDefaultsKey) private var enableLoomAIDebug = false
+    @AppStorage(loomAIDebugDefaultsKey) private var enableLoomAIDebug = true
 
     var body: some Scene {
         WindowGroup {

@@ -18,7 +18,7 @@ struct TemporaryVisionAutoWriteDebugView: View {
 
     @Environment(\.modelContext) private var modelContext
     @AppStorage("loom.ai.context.compact.enabled") private var compactContextEnabled = true
-    @AppStorage(loomAIDebugDefaultsKey) private var enableLoomAIDebug = false
+    @AppStorage(loomAIDebugDefaultsKey) private var enableLoomAIDebug = true
 
     @State private var currentVision: String = ""
     @State private var mode: DebugMode = .loomAI
