@@ -5983,13 +5983,14 @@ struct FulfillmentStartView: View {
         if isAddSingleAreaMode {
             addModeInitialActiveCategoryKeys = Set(categoriesFromFulfillment.map { categoryKey($0) })
         }
+        var diagnosticPrefillColorKeys: [String: String] = [:]
         if isAddSingleAreaMode {
             selectedCategoryNames = []
             customCategoryNames = existingCategories.filter { !fulfillmentStartSelectableDefaultCategories.contains($0) }
         } else {
             selectedCategoryNames = existingCategories
             customCategoryNames = existingCategories.filter { !fulfillmentStartSelectableDefaultCategories.contains($0) }
-            applyDiagnosticPrefillIfNeeded(existingCategories: existingCategories)
+            diagnosticPrefillColorKeys = applyDiagnosticPrefillIfNeeded(existingCategories: existingCategories)
         }
         var map = FulfillmentCategoryTheme.persistedColorKeys()
         let cycleKeys = onboardingColorCycleKeys
@@ -5997,6 +5998,10 @@ struct FulfillmentStartView: View {
             for (idx, category) in availableCategoryNames.enumerated() {
                 let trimmed = category.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmed.isEmpty else { continue }
+                if let diagnosticKey = diagnosticPrefillColorKeys[trimmed] {
+                    map[trimmed] = diagnosticKey
+                    continue
+                }
                 // Preserve user-managed color assignments from AccountView.
                 // Only assign a fallback color when none exists yet.
                 if map[trimmed] == nil {
@@ -6066,15 +6071,18 @@ struct FulfillmentStartView: View {
         passionIndex = min(passionIndex, max(roleCategoryIDs.count - 1, 0))
     }
 
-    private func applyDiagnosticPrefillIfNeeded(existingCategories: [String]) {
-        guard !isAddSingleAreaMode else { return }
-        guard existingCategories.isEmpty else { return }
-        guard selectedCategoryNames.isEmpty else { return }
-        guard let diagnosticAreas = PersonalizationStore.cachedContextForCurrentUser()?.current.lifeAreasSelected,
-              !diagnosticAreas.isEmpty else { return }
+    private func applyDiagnosticPrefillIfNeeded(existingCategories: [String]) -> [String: String] {
+        guard !isAddSingleAreaMode else { return [:] }
+        guard existingCategories.isEmpty else { return [:] }
+        guard selectedCategoryNames.isEmpty else { return [:] }
+        guard let personalizationSnapshot = PersonalizationStore.cachedContextForCurrentUser()?.current else { return [:] }
+        let diagnosticAreas = personalizationSnapshot.lifeAreasSelected
+        guard !diagnosticAreas.isEmpty else { return [:] }
+        let diagnosticColorKeys = personalizationSnapshot.lifeAreaColorKeys
 
         var preselected: [String] = []
         var custom = customCategoryNames
+        var mappedColorByCategory: [String: String] = [:]
         for area in diagnosticAreas {
             let mapped = mappedFulfillmentCategoryName(fromDiagnosticArea: area)
             let trimmed = mapped.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -6090,12 +6098,28 @@ struct FulfillmentStartView: View {
             if !isDefault && !hasCustom {
                 custom.append(trimmed)
             }
+
+            if let colorKey = diagnosticColorKey(for: area, in: diagnosticColorKeys) {
+                mappedColorByCategory[trimmed] = colorKey
+            }
         }
 
         let limited = Array(preselected.prefix(7))
-        guard !limited.isEmpty else { return }
+        guard !limited.isEmpty else { return [:] }
         selectedCategoryNames = limited
         customCategoryNames = custom
+        return mappedColorByCategory.filter { category, _ in
+            limited.contains(where: { $0.caseInsensitiveCompare(category) == .orderedSame })
+        }
+    }
+
+    private func diagnosticColorKey(for area: String, in map: [String: String]) -> String? {
+        let trimmed = area.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if let exact = map[trimmed] {
+            return exact
+        }
+        return map.first(where: { $0.key.caseInsensitiveCompare(trimmed) == .orderedSame })?.value
     }
 
     private func mappedFulfillmentCategoryName(fromDiagnosticArea area: String) -> String {

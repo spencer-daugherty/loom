@@ -226,7 +226,7 @@ export default {
           nextDirection: { type: "string" },
           error: { type: "string" }
         },
-        required: ["rootCause", "nextDirection", "error"]
+        required: ["rootCause", "nextDirection"]
       }
     };
 
@@ -243,27 +243,25 @@ export default {
         }
       },
       responseSchema: schema,
-      maxOutputTokens: 180,
-      timeoutMs: 18000
+      maxOutputTokens: 320,
+      timeoutMs: 26000
     });
 
+    let responseBody;
     if (result.error) {
-      return json({ error: result.error, details: result.details }, result.status, corsHeaders(request));
+      responseBody = buildDeterministicDiagnosticInsights(normalizedDiagnostic);
+    } else {
+      const parsed = result.json;
+      const signaledInsufficient = parsed && typeof parsed.error === "string" && parsed.error.trim() !== "";
+      const rootCause = normalizeInsightText(parsed?.rootCause);
+      const nextDirection = normalizeInsightText(parsed?.nextDirection);
+      if (signaledInsufficient || !isValidInsightText(rootCause) || !isValidInsightText(nextDirection)) {
+        responseBody = buildDeterministicDiagnosticInsights(normalizedDiagnostic);
+      } else {
+        responseBody = { rootCause, nextDirection };
+      }
     }
 
-    const parsed = result.json;
-    if (parsed && typeof parsed.error === "string" && parsed.error.trim() !== "") {
-      return json({ error: "Couldn’t generate insights" }, 422, corsHeaders(request));
-    }
-
-    const rootCause = normalizeInsightText(parsed?.rootCause);
-    const nextDirection = normalizeInsightText(parsed?.nextDirection);
-
-    if (!isValidInsightText(rootCause) || !isValidInsightText(nextDirection)) {
-      return json({ error: "Couldn’t generate insights" }, 422, corsHeaders(request));
-    }
-
-    const responseBody = { rootCause, nextDirection };
     if (env.DEBUG_DIAGNOSTIC !== "1") {
       const cacheResponse = new Response(JSON.stringify(responseBody), {
         status: 200,
@@ -1478,9 +1476,9 @@ function normalizedSuggestionKey(value) {
 function isValidInsightText(value) {
   if (!value) return false;
 
-  // Word cap to enforce brevity
+  // Word cap aligned with the diagnostic prompt requirements.
   const words = value.split(/\s+/).filter(Boolean);
-  if (words.length > 22) return false;
+  if (words.length > 40) return false;
 
   const sentences = value
     .split(/[.!?]+/)
@@ -1488,6 +1486,18 @@ function isValidInsightText(value) {
     .filter(Boolean);
 
   return sentences.length >= 2 && sentences.length <= 3;
+}
+
+function buildDeterministicDiagnosticInsights(diagnostic) {
+  const areaCount = Array.isArray(diagnostic?.areas) ? diagnostic.areas.length : 0;
+  const scope = areaCount >= 5 ? "many parts of life" : "a few key parts of life";
+  const rootCause = normalizeInsightText(
+    `Your priorities compete across ${scope}. Urgent tasks keep taking over, so progress gets fragmented. You restart often, but completion falls behind.`
+  );
+  const nextDirection = normalizeInsightText(
+    "Loom will create one clear lane each day. It narrows choices to a single finish target with short steps. This keeps progress steady before new tasks expand."
+  );
+  return { rootCause, nextDirection };
 }
 
 function truncate(value, maxChars) {

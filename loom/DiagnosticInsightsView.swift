@@ -58,35 +58,51 @@ struct DiagnosticInsightsView: View {
                     .font(.system(size: 38, weight: .bold))
                     .fixedSize(horizontal: false, vertical: true)
 
-                Text("This will shape your Loom experience.")
+                Text("This will shape your Loom experience and will only take a minute.")
                     .font(.title3.weight(.medium))
                     .foregroundStyle(.secondary)
 
-                if viewModel.isShowingSkeleton {
-                    DiagnosticInsightsSkeletonStack()
-                } else {
-                    DiagnosticInsightsCardsStack(
-                        cards: viewModel.insightCards,
-                        lifeAreas: currentSnapshot?.lifeAreasSelected ?? []
-                    )
+                Group {
+                    if viewModel.isShowingSkeleton || viewModel.insightCards.isEmpty {
+                        DiagnosticInsightsSkeletonStack()
+                            .transition(.opacity)
+                    } else {
+                        DiagnosticInsightsCardsStack(
+                            cards: viewModel.insightCards,
+                            lifeAreas: currentSnapshot?.lifeAreasSelected ?? [],
+                            lifeAreaColorKeys: currentSnapshot?.lifeAreaColorKeys ?? [:],
+                            showsAnimatedOutline: false
+                        )
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    }
                 }
-
-                if loomAITroubleshootingEnabled,
-                   let troubleshooting = viewModel.troubleshootingMessage,
-                   !troubleshooting.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    LoomAITroubleshootingSection(details: troubleshooting)
-                }
+                .animation(.easeInOut(duration: 0.24), value: viewModel.isShowingSkeleton)
+                .animation(.easeInOut(duration: 0.24), value: viewModel.insightCards.count)
 
                 if showInlineRetryButton {
-                    Button("Retry") {
-                        showInlineRetryButton = false
-                        restartTimeoutWindow()
-                        Task { await refreshInsights(forceRefresh: true) }
+                    if loomAITroubleshootingEnabled {
+                        Button("Copy troubleshooting") {
+                            let details = (viewModel.troubleshootingMessage ?? "")
+                                .trimmingCharacters(in: .whitespacesAndNewlines)
+                            UIPasteboard.general.string = details.isEmpty
+                                ? "[diagnostics_insights] troubleshooting details unavailable."
+                                : details
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.secondary)
+                        .controlSize(.large)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                    } else {
+                        Button("Retry") {
+                            showInlineRetryButton = false
+                            restartTimeoutWindow()
+                            Task { await refreshInsights(forceRefresh: true) }
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.secondary)
+                        .controlSize(.large)
+                        .frame(maxWidth: .infinity, alignment: .center)
                     }
-                    .buttonStyle(.bordered)
-                    .tint(.secondary)
-                    .controlSize(.large)
-                    .frame(maxWidth: .infinity, alignment: .center)
                 }
 
                 Button {
@@ -181,6 +197,7 @@ struct DiagnosticInsightsView: View {
             }
             Button("OK", role: .cancel) {
                 showInlineRetryButton = true
+                onContinue()
             }
         } message: {
             Text("Generate insights later in Account > Personalization.")
@@ -252,7 +269,9 @@ final class DiagnosticsInsightsViewModel: ObservableObject {
     func refresh(
         snapshot: PersonalizationSnapshot?,
         in modelContext: ModelContext,
-        forceRefresh: Bool = false
+        forceRefresh: Bool = false,
+        preserveExistingOnFailure: Bool = false,
+        analysisCycleKey: String? = nil
     ) async {
         guard let snapshot else {
             cancelInFlight()
@@ -301,11 +320,16 @@ final class DiagnosticsInsightsViewModel: ObservableObject {
 
         cancelInFlight()
 
-        isShowingSkeleton = true
+        let previousCards = insightCards
+        let shouldPreserveExistingCards = preserveExistingOnFailure && !previousCards.isEmpty
+
+        isShowingSkeleton = !shouldPreserveExistingCards
         isGeneratingInsights = true
         insightsErrorMessage = nil
         troubleshootingMessage = nil
-        insightCards = []
+        if !shouldPreserveExistingCards {
+            insightCards = []
+        }
         currentDiagnosticsHash = diagnosticsHash
 
         let requestID = UUID().uuidString
@@ -369,21 +393,34 @@ final class DiagnosticsInsightsViewModel: ObservableObject {
         let remote = await task.value
         guard currentDiagnosticsHash == diagnosticsHash else { return }
 
+        if remote.errorMessage != nil, shouldPreserveExistingCards {
+            insightCards = previousCards
+            insightsErrorMessage = nil
+            troubleshootingMessage = remote.troubleshootingMessage
+            isGeneratingInsights = false
+            isShowingSkeleton = false
+            currentTask = nil
+            return
+        }
+
         if remote.errorMessage == nil {
             persist(
                 cards: remote.cards,
                 userKey: userKey,
                 diagnosticsHash: diagnosticsHash,
                 snapshotKey: snapshotKey,
+                purposeRefreshCycleKey: analysisCycleKey,
                 in: modelContext
             )
         }
 
-        insightCards = remote.cards
-        insightsErrorMessage = remote.errorMessage
-        troubleshootingMessage = remote.troubleshootingMessage
-        isGeneratingInsights = false
-        isShowingSkeleton = false
+        withAnimation(.easeInOut(duration: 0.24)) {
+            insightCards = remote.cards
+            insightsErrorMessage = remote.errorMessage
+            troubleshootingMessage = remote.troubleshootingMessage
+            isGeneratingInsights = false
+            isShowingSkeleton = false
+        }
         if remote.errorMessage == nil {
             loadedSnapshotKey = snapshotKey
             failedSnapshotKey = nil
@@ -434,6 +471,7 @@ final class DiagnosticsInsightsViewModel: ObservableObject {
         userKey: String,
         diagnosticsHash: String,
         snapshotKey: String,
+        purposeRefreshCycleKey: String?,
         in modelContext: ModelContext
     ) {
         guard cards.count == 3 else { return }
@@ -446,6 +484,7 @@ final class DiagnosticsInsightsViewModel: ObservableObject {
             existing.rootCauseText = root
             existing.fulfillmentText = fulfillment
             existing.nextDirectionText = nextDirection
+            existing.purposeRefreshCycleKey = purposeRefreshCycleKey
             existing.version = DiagnosticsInsightsHasher.schemaVersion
         } else {
             modelContext.insert(
@@ -457,6 +496,7 @@ final class DiagnosticsInsightsViewModel: ObservableObject {
                     rootCauseText: root,
                     fulfillmentText: fulfillment,
                     nextDirectionText: nextDirection,
+                    purposeRefreshCycleKey: purposeRefreshCycleKey,
                     version: DiagnosticsInsightsHasher.schemaVersion
                 )
             )
@@ -512,17 +552,19 @@ private struct DiagnosticInsightCard: Identifiable, Hashable, Sendable {
 private struct DiagnosticInsightsCardsStack: View {
     let cards: [DiagnosticInsightCard]
     let lifeAreas: [String]
+    let lifeAreaColorKeys: [String: String]
+    var showsAnimatedOutline: Bool = true
 
     var body: some View {
         VStack(spacing: 12) {
             ForEach(cards) { card in
-                InsightsCard(title: card.kind.title) {
+                InsightsCard(title: card.kind.title, showsAnimatedOutline: showsAnimatedOutline) {
                     if card.kind == .fulfillmentAreas {
                         let areas = uniqueLifeAreas(from: lifeAreas)
                         if !areas.isEmpty {
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 8)], spacing: 8) {
                                 ForEach(areas, id: \.self) { area in
-                                    InsightsChip(title: area)
+                                    InsightsChip(title: area, colorKey: colorKey(for: area))
                                 }
                             }
                             .padding(.bottom, 2)
@@ -548,34 +590,111 @@ private struct DiagnosticInsightsCardsStack: View {
             .filter { !$0.isEmpty }
             .filter { seen.insert($0.lowercased()).inserted }
     }
+
+    private func colorKey(for area: String) -> String? {
+        let trimmed = area.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if let exact = lifeAreaColorKeys[trimmed] {
+            return exact
+        }
+        return lifeAreaColorKeys.first(where: { $0.key.caseInsensitiveCompare(trimmed) == .orderedSame })?.value
+    }
 }
 
 struct PersonalizationInsightsCards: View {
     @Environment(\.modelContext) private var modelContext
+    @AppStorage(loomAITroubleshootingDefaultsKey) private var loomAITroubleshootingEnabled = true
     let snapshot: PersonalizationSnapshot
+    let purposeRefreshCycleKey: String?
+    @StateObject private var viewModel = DiagnosticsInsightsViewModel()
+
+    private var diagnosticsSignature: String {
+        let userKey = PersonalizationUserIdentity.currentUserKey()
+        let diagnosticsHash = DiagnosticsInsightsHasher.hash(for: snapshot)
+        return "\(userKey)|\(diagnosticsHash)|v\(DiagnosticsInsightsHasher.schemaVersion)"
+    }
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if viewModel.isShowingSkeleton {
+                DiagnosticInsightsSkeletonStack()
+            } else if !viewModel.insightCards.isEmpty {
+                DiagnosticInsightsCardsStack(
+                    cards: viewModel.insightCards,
+                    lifeAreas: snapshot.lifeAreasSelected,
+                    lifeAreaColorKeys: snapshot.lifeAreaColorKeys,
+                    showsAnimatedOutline: false
+                )
+            } else {
+                InsightsCard(title: "Insights") {
+                    Text(viewModel.insightsErrorMessage ?? "Couldn’t personalize insights yet. Check your connection.")
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            if viewModel.insightsErrorMessage != nil {
+                HStack(spacing: 10) {
+                    Button("Retry") {
+                        Task { await refresh(forceRefresh: true) }
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.secondary)
+
+                    if loomAITroubleshootingEnabled,
+                       let details = viewModel.troubleshootingMessage,
+                       !details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Button("Copy troubleshooting") {
+                            #if canImport(UIKit)
+                            UIPasteboard.general.string = details
+                            #endif
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.secondary)
+                    }
+                }
+            }
+        }
+        .onAppear {
+            viewModel.prepareForPendingPersonalizationLoad()
+        }
+        .task(id: diagnosticsSignature) {
+            await refreshForAccountContext()
+        }
+    }
+
+    private func refresh(forceRefresh: Bool = false) async {
+        await viewModel.refresh(
+            snapshot: snapshot,
+            in: modelContext,
+            forceRefresh: forceRefresh,
+            preserveExistingOnFailure: forceRefresh,
+            analysisCycleKey: normalizedPurposeCycleKey
+        )
+    }
+
+    private var normalizedPurposeCycleKey: String? {
+        let trimmed = (purposeRefreshCycleKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func refreshForAccountContext() async {
         let userKey = PersonalizationUserIdentity.currentUserKey()
         let diagnosticsHash = DiagnosticsInsightsHasher.hash(for: snapshot)
         let snapshotKey = DiagnosticsInsightsHasher.snapshotKey(userKey: userKey, diagnosticsHash: diagnosticsHash)
+        let storedSnapshot = fetchStoredSnapshot(snapshotKey: snapshotKey)
 
-        if let stored = fetchStoredSnapshot(snapshotKey: snapshotKey) {
-            DiagnosticInsightsCardsStack(
-                cards: [
-                    DiagnosticInsightCard(kind: .rootCause, body: stored.rootCauseText),
-                    DiagnosticInsightCard(kind: .fulfillmentAreas, body: stored.fulfillmentText),
-                    DiagnosticInsightCard(kind: .nextDirection, body: stored.nextDirectionText)
-                ],
-                lifeAreas: snapshot.lifeAreasSelected
-            )
-        } else {
-            InsightsCard(title: "Insights") {
-                Text("Insights are generated after you finish the quick diagnostic.")
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
+        // Always load persisted/current first so text remains stable in Account > Personalization.
+        await refresh(forceRefresh: false)
+
+        guard let storedSnapshot else { return }
+        guard let desiredCycle = normalizedPurposeCycleKey else { return }
+        let storedCycle = storedSnapshot.purposeRefreshCycleKey?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard storedCycle != desiredCycle else { return }
+
+        // Re-analyze only when the monthly Purpose Insights cycle changes.
+        await refresh(forceRefresh: true)
     }
 
     private func fetchStoredSnapshot(snapshotKey: String) -> DiagnosticsInsightsSnapshot? {
@@ -672,6 +791,7 @@ private struct DiagnosticInsightsSkeletonStack: View {
 
 private struct InsightsCard<Content: View>: View {
     let title: String
+    var showsAnimatedOutline: Bool = true
     @ViewBuilder let content: () -> Content
 
     var body: some View {
@@ -695,17 +815,28 @@ private struct InsightsCard<Content: View>: View {
                 .stroke(Color.black.opacity(0.08), lineWidth: 1)
         )
         .overlay {
-            InsightsAnimatedOutlineBorder(cornerRadius: 14)
-                .opacity(0.55)
+            if showsAnimatedOutline {
+                InsightsAnimatedOutlineBorder(cornerRadius: 14)
+                    .opacity(0.55)
+            }
         }
     }
 }
 
 private struct InsightsChip: View {
     let title: String
+    let colorKey: String?
+
+    init(title: String, colorKey: String? = nil) {
+        self.title = title
+        self.colorKey = colorKey
+    }
 
     private var color: Color {
-        FulfillmentCategoryTheme.color(for: title)
+        if let colorKey, !colorKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return FulfillmentCategoryTheme.color(forKey: colorKey)
+        }
+        return FulfillmentCategoryTheme.color(for: title)
     }
 
     var body: some View {

@@ -13,13 +13,15 @@ struct TemporaryVisionAutoWriteDebugView: View {
         case newVision
         case rewordVision
         case loomAI
+        case diagnostic
     }
 
     @Environment(\.modelContext) private var modelContext
     @AppStorage("loom.ai.context.compact.enabled") private var compactContextEnabled = true
+    @AppStorage(loomAIDebugDefaultsKey) private var enableLoomAIDebug = false
 
     @State private var currentVision: String = ""
-    @State private var mode: DebugMode = .newVision
+    @State private var mode: DebugMode = .loomAI
     @State private var previousSuggestionsText: String = ""
     @State private var loomAIPrompt: String = ""
     @State private var isLoading = false
@@ -37,6 +39,43 @@ struct TemporaryVisionAutoWriteDebugView: View {
 
     private let autoWriteEndpointURL = URL(string: "https://loom-ai-minimal.spence0927.workers.dev/purpose/vision/autowrite")!
     private let chatEndpointURL = URL(string: "https://loom-ai-minimal.spence0927.workers.dev/chat")!
+    private let diagnosticInsightsEndpointURL = URL(string: "https://loom-ai-minimal.spence0927.workers.dev/diagnostic/insights")!
+
+    private static let diagnosticStressOptions: [String] = [
+        "Too many priorities competing",
+        "Feeling behind or disorganized",
+        "Distractions are stealing my focus",
+        "Work pressure",
+        "Money pressure",
+        "Low energy / health",
+        "Relationship tension",
+        "Not sure yet"
+    ]
+
+    private static let diagnosticBreakPointOptions: [String] = [
+        "I don’t start",
+        "I start, then lose momentum",
+        "I get distracted",
+        "I overthink it",
+        "I don’t finish what I start",
+        "I’m not sure"
+    ]
+
+    private static let diagnosticPlanningRealityOptions: [String] = [
+        "React to what’s urgent",
+        "Keep a simple to-do list",
+        "Plan, but get off track",
+        "Plan and follow through consistently",
+        "It depends on the day"
+    ]
+
+    private static let diagnosticDesiredChangeOptions: [String] = [
+        "I feel in control (less stress)",
+        "I know what matters (clear direction)",
+        "I follow through (consistency)",
+        "I make faster progress on big goals",
+        "I feel balanced across life"
+    ]
 
     var body: some View {
         NavigationStack {
@@ -48,8 +87,12 @@ struct TemporaryVisionAutoWriteDebugView: View {
                     Text("newVision").tag(DebugMode.newVision)
                     Text("rewordVision").tag(DebugMode.rewordVision)
                     Text("LoomAI").tag(DebugMode.loomAI)
+                    Text("Diagnostic").tag(DebugMode.diagnostic)
                 }
                 .pickerStyle(.segmented)
+
+                Toggle("LoomAI Debug mode", isOn: $enableLoomAIDebug)
+                    .toggleStyle(.switch)
 
                 Toggle("Compact", isOn: $compactContextEnabled)
                     .toggleStyle(.switch)
@@ -58,6 +101,10 @@ struct TemporaryVisionAutoWriteDebugView: View {
                     TextField("Prompt", text: $loomAIPrompt, axis: .vertical)
                         .textFieldStyle(.roundedBorder)
                         .focused($isInputFocused)
+                } else if mode == .diagnostic {
+                    Text("Sends random diagnostic answers (stress, break point, 3-7 life areas, planning style, and desired change) to the Diagnostic Insights endpoint.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                 } else {
                     TextField("Current vision (optional)", text: $currentVision, axis: .vertical)
                         .textFieldStyle(.roundedBorder)
@@ -76,7 +123,7 @@ struct TemporaryVisionAutoWriteDebugView: View {
                             ProgressView()
                                 .progressViewStyle(.circular)
                         }
-                        Text(isLoading ? "Loading..." : (mode == .loomAI ? "Send" : "AutoWrite"))
+                        Text(isLoading ? "Loading..." : buttonTitle)
                             .fontWeight(.semibold)
                     }
                     .frame(maxWidth: .infinity)
@@ -220,8 +267,21 @@ struct TemporaryVisionAutoWriteDebugView: View {
     private func sendRequest() async {
         if mode == .loomAI {
             await sendLoomAIChatRequest()
+        } else if mode == .diagnostic {
+            await sendDiagnosticInsightsRequest()
         } else {
             await sendAutoWriteRequest()
+        }
+    }
+
+    private var buttonTitle: String {
+        switch mode {
+        case .loomAI:
+            return "Send"
+        case .diagnostic:
+            return "Send Random"
+        case .newVision, .rewordVision:
+            return "AutoWrite"
         }
     }
 
@@ -269,11 +329,22 @@ struct TemporaryVisionAutoWriteDebugView: View {
             request.httpBody = bodyData
 
             responseStatus = "Sending..."
-            let (data, response) = try await URLSession.shared.data(for: request)
-            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-            let responseText = String(data: data, encoding: .utf8) ?? "<non-UTF8 \(data.count) bytes>"
+            let (firstData, firstResponse) = try await URLSession.shared.data(for: request)
+            let firstStatus = (firstResponse as? HTTPURLResponse)?.statusCode ?? -1
+
+            var finalData = firstData
+            var finalStatus = firstStatus
+
+            if shouldRetryDiagnosticInsightsDebugResponse(statusCode: firstStatus, data: firstData) {
+                responseStatus = "Retrying..."
+                let (retryData, retryResponse) = try await URLSession.shared.data(for: request)
+                finalData = retryData
+                finalStatus = (retryResponse as? HTTPURLResponse)?.statusCode ?? -1
+            }
+
+            let responseText = String(data: finalData, encoding: .utf8) ?? "<non-UTF8 \(finalData.count) bytes>"
             rawResponseText = responseText
-            responseStatus = "HTTP \(status)"
+            responseStatus = "HTTP \(finalStatus)"
             responseDurationText = formatDuration(Date().timeIntervalSince(startedAt))
         } catch {
             let nsError = error as NSError
@@ -359,6 +430,85 @@ struct TemporaryVisionAutoWriteDebugView: View {
             rawResponseText = String(describing: error)
             responseDurationText = formatDuration(Date().timeIntervalSince(startedAt))
         }
+    }
+
+    private func sendDiagnosticInsightsRequest() async {
+        isLoading = true
+        responseStatus = "Preparing request..."
+        responseDurationText = "-"
+        usageSummaryText = "-"
+        estimatedCostText = "-"
+        rawContextText = ""
+        defer { isLoading = false }
+        let startedAt = Date()
+
+        do {
+            let body = makeRandomDiagnosticRequestBody()
+            let bodyData = try JSONSerialization.data(withJSONObject: body, options: [.prettyPrinted, .sortedKeys])
+            rawRequestText = String(data: bodyData, encoding: .utf8) ?? "<request encoding failed>"
+
+            var request = URLRequest(url: diagnosticInsightsEndpointURL)
+            request.httpMethod = "POST"
+            request.timeoutInterval = 45
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = bodyData
+
+            responseStatus = "Sending..."
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            let responseText = String(data: data, encoding: .utf8) ?? "<non-UTF8 \(data.count) bytes>"
+            rawResponseText = responseText
+            responseStatus = "HTTP \(status)"
+            responseDurationText = formatDuration(Date().timeIntervalSince(startedAt))
+        } catch {
+            let nsError = error as NSError
+            if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorTimedOut {
+                responseStatus = "Request timed out"
+            } else {
+                responseStatus = "Request failed"
+            }
+            rawResponseText = String(describing: error)
+            responseDurationText = formatDuration(Date().timeIntervalSince(startedAt))
+        }
+    }
+
+    private func makeRandomDiagnosticRequestBody() -> [String: Any] {
+        let stress = Self.diagnosticStressOptions.randomElement() ?? "Not sure yet"
+        let breaksFirst = Self.diagnosticBreakPointOptions.randomElement() ?? "I’m not sure"
+        let planningStyle = Self.diagnosticPlanningRealityOptions.randomElement() ?? "It depends on the day"
+        let firstChange = Self.diagnosticDesiredChangeOptions.randomElement() ?? "I feel balanced across life"
+        let areas = randomDiagnosticLifeAreas()
+
+        return [
+            "diagnostic": [
+                "stress": stress,
+                "breaksFirst": breaksFirst,
+                "areas": areas,
+                "planningStyle": planningStyle,
+                "firstChange": firstChange
+            ],
+            "client": [
+                "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
+                "platform": "ios",
+                "screen": "diagnostic_insights_debug"
+            ]
+        ]
+    }
+
+    private func randomDiagnosticLifeAreas() -> [String] {
+        let options = fulfillmentStartSelectableDefaultCategories.shuffled()
+        let count = Int.random(in: 3...7)
+        return Array(options.prefix(min(count, options.count)))
+    }
+
+    private func shouldRetryDiagnosticInsightsDebugResponse(statusCode: Int, data: Data) -> Bool {
+        guard !(200...299).contains(statusCode) else { return false }
+        let text = String(data: data, encoding: .utf8)?.lowercased() ?? ""
+        let hasMissingModelOutput = text.contains("\"error\":\"missing model output\"")
+        let hasTokenCapSignal = text.contains("max_output_tokens")
+            || text.contains("\"status\": \"incomplete\"")
+            || text.contains("\"status\":\"incomplete\"")
+        return hasMissingModelOutput && hasTokenCapSignal
     }
 
     private func updateUsageEstimate(from data: Data) {

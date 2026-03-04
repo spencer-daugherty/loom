@@ -53,6 +53,7 @@ struct PurposeStartView: View {
     @State private var purposeInsightProfileName: String = ""
     @State private var isGeneratingPurposeInsights = false
     @State private var insightsOutlinePhase: CGFloat = 0
+    @State private var animatePurposeInsightOutline = false
     @State private var autoWriteOutlineAngle: Double = 0
     @State private var autoWriteIconAnimating: Bool = false
     @State private var autoWriteIconAnimationTask: Task<Void, Never>? = nil
@@ -456,8 +457,15 @@ struct PurposeStartView: View {
                 hasTimedOutPurposeInsights = false
                 purposeInsightsTimeoutTask?.cancel()
                 purposeInsightsTimeoutTask = nil
+                animatePurposeInsightOutline = false
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(220))
+                    guard !purposeInsightCards.isEmpty else { return }
+                    animatePurposeInsightOutline = true
+                }
             } else if step == .insights && !hasTimedOutPurposeInsights {
                 restartPurposeInsightsTimeoutWindow()
+                animatePurposeInsightOutline = false
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
@@ -1282,15 +1290,21 @@ struct PurposeStartView: View {
                 .font(.system(size: 38, weight: .bold))
                 .fixedSize(horizontal: false, vertical: true)
 
-            if isGeneratingPurposeInsights && purposeInsightCards.isEmpty {
-                ForEach(0..<1, id: \.self) { _ in
-                    purposeInsightsLoadingCard
-                }
-            } else {
-                ForEach(purposeInsightCards) { card in
-                    purposeInsightsCard(card)
+            Group {
+                if isGeneratingPurposeInsights && purposeInsightCards.isEmpty {
+                    ForEach(0..<1, id: \.self) { _ in
+                        purposeInsightsLoadingCard
+                    }
+                    .transition(.opacity)
+                } else {
+                    ForEach(purposeInsightCards) { card in
+                        purposeInsightsCard(card, animateOutline: animatePurposeInsightOutline)
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
             }
+            .animation(.easeInOut(duration: 0.24), value: isGeneratingPurposeInsights)
+            .animation(.easeInOut(duration: 0.24), value: purposeInsightCards.count)
 
             Text("This may change overtime and with different data. View anytime in Account > Personalization")
                 .font(.footnote)
@@ -1371,7 +1385,7 @@ struct PurposeStartView: View {
         return profile.isEmpty ? "How Loom sees you (so far)..." : profile
     }
 
-    private func purposeInsightsCard(_ card: PurposeInsightCard) -> some View {
+    private func purposeInsightsCard(_ card: PurposeInsightCard, animateOutline: Bool) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(card.title)
                 .font(.caption.weight(.bold))
@@ -1420,9 +1434,11 @@ struct PurposeStartView: View {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .stroke(autoWriteGradient.opacity(0.68), lineWidth: 1.2)
 
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .trim(from: insightsOutlinePhase, to: min(insightsOutlinePhase + 0.22, 1))
-                    .stroke(autoWriteGradient, style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
+                if animateOutline {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .trim(from: insightsOutlinePhase, to: min(insightsOutlinePhase + 0.22, 1))
+                        .stroke(autoWriteGradient, style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
+                }
             }
         )
     }
@@ -2218,9 +2234,10 @@ struct PurposeStartView: View {
         }
 
         isGeneratingPurposeInsights = true
-        if forceRefresh || purposeInsightCards.isEmpty {
+        if purposeInsightCards.isEmpty {
             purposeInsightCards = []
             purposeInsightProfileName = ""
+            animatePurposeInsightOutline = false
         }
         defer {
             isGeneratingPurposeInsights = false
@@ -2349,8 +2366,10 @@ struct PurposeStartView: View {
     }
 
     private func applyPurposeInsightRecord(_ record: PurposeProfileRecord) {
-        purposeInsightProfileName = record.profile
-        purposeInsightCards = purposeInsightCards(for: record)
+        withAnimation(.easeInOut(duration: 0.24)) {
+            purposeInsightProfileName = record.profile
+            purposeInsightCards = purposeInsightCards(for: record)
+        }
     }
 
     private func purposeInsightCards(for record: PurposeProfileRecord) -> [PurposeInsightCard] {

@@ -446,24 +446,28 @@ struct LoomAIService {
             }
         }
 
-        do {
-            let insights = try await performRequest(timeout: 45)
-            reportSlowDiagnosticInsightsIfNeeded(
-                insights: insights,
-                elapsedMS: (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
-            )
-            return insights
-        } catch {
-            guard shouldRetryWithMinimalContext(for: error) else {
-                throw error
+        var lastError: Error?
+        for timeout in [45.0, 75.0, 75.0] {
+            do {
+                let insights = try await performRequest(timeout: timeout)
+                reportSlowDiagnosticInsightsIfNeeded(
+                    insights: insights,
+                    elapsedMS: (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
+                )
+                return insights
+            } catch {
+                lastError = error
+                guard shouldRetryDiagnosticInsights(for: error) else {
+                    throw error
+                }
             }
-            let insights = try await performRequest(timeout: 75)
-            reportSlowDiagnosticInsightsIfNeeded(
-                insights: insights,
-                elapsedMS: (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
-            )
-            return insights
         }
+        throw lastError ?? LoomAIServiceError(
+            message: "Diagnostic insights request failed.",
+            statusCode: nil,
+            contentType: nil,
+            rawBody: nil
+        )
     }
 
     func sendChat(
@@ -905,6 +909,23 @@ struct LoomAIService {
             return statusCode == 408 || statusCode == 429 || statusCode == 502 || statusCode == 503 || statusCode == 504 || statusCode == 524
         }
         return false
+    }
+
+    private func shouldRetryDiagnosticInsights(for error: Error) -> Bool {
+        if shouldRetryWithMinimalContext(for: error) {
+            return true
+        }
+        guard let serviceError = error as? LoomAIServiceError else {
+            return false
+        }
+        let message = serviceError.message.lowercased()
+        let rawBody = (serviceError.rawBody ?? "").lowercased()
+        let hasMissingModelOutput = message.contains("missing model output") || rawBody.contains("\"error\":\"missing model output\"")
+        let hasTokenCapSignal = message.contains("max_output_tokens")
+            || rawBody.contains("max_output_tokens")
+            || rawBody.contains("\"status\": \"incomplete\"")
+            || rawBody.contains("\"status\":\"incomplete\"")
+        return hasMissingModelOutput && hasTokenCapSignal
     }
 
     private func reportSlowResponseIfNeeded(

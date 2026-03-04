@@ -6,6 +6,7 @@ struct PersonalizationSnapshot: Codable, Identifiable, Hashable, Sendable {
     var stressSource: String
     var breakPoint: String
     var lifeAreasSelected: [String]
+    var lifeAreaColorKeys: [String: String]
     var planningReality: String
     var desiredChange: String
     var derivedTags: [String]
@@ -16,6 +17,7 @@ struct PersonalizationSnapshot: Codable, Identifiable, Hashable, Sendable {
         stressSource: String,
         breakPoint: String,
         lifeAreasSelected: [String],
+        lifeAreaColorKeys: [String: String] = [:],
         planningReality: String,
         desiredChange: String,
         derivedTags: [String]? = nil
@@ -25,9 +27,42 @@ struct PersonalizationSnapshot: Codable, Identifiable, Hashable, Sendable {
         self.stressSource = stressSource
         self.breakPoint = breakPoint
         self.lifeAreasSelected = Self.uniqueOrdered(lifeAreasSelected)
+        self.lifeAreaColorKeys = Self.normalizedColorKeys(lifeAreaColorKeys, for: self.lifeAreasSelected)
         self.planningReality = planningReality
         self.desiredChange = desiredChange
         self.derivedTags = derivedTags ?? Self.deriveTags(
+            stressSource: stressSource,
+            breakPoint: breakPoint,
+            planningReality: planningReality,
+            desiredChange: desiredChange,
+            lifeAreasSelected: lifeAreasSelected
+        )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case createdAt
+        case stressSource
+        case breakPoint
+        case lifeAreasSelected
+        case lifeAreaColorKeys
+        case planningReality
+        case desiredChange
+        case derivedTags
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        stressSource = try container.decode(String.self, forKey: .stressSource)
+        breakPoint = try container.decode(String.self, forKey: .breakPoint)
+        lifeAreasSelected = Self.uniqueOrdered(try container.decode([String].self, forKey: .lifeAreasSelected))
+        let decodedColorKeys = try container.decodeIfPresent([String: String].self, forKey: .lifeAreaColorKeys) ?? [:]
+        lifeAreaColorKeys = Self.normalizedColorKeys(decodedColorKeys, for: lifeAreasSelected)
+        planningReality = try container.decode(String.self, forKey: .planningReality)
+        desiredChange = try container.decode(String.self, forKey: .desiredChange)
+        derivedTags = try container.decodeIfPresent([String].self, forKey: .derivedTags) ?? Self.deriveTags(
             stressSource: stressSource,
             breakPoint: breakPoint,
             planningReality: planningReality,
@@ -137,12 +172,28 @@ struct PersonalizationSnapshot: Codable, Identifiable, Hashable, Sendable {
             .filter { !$0.isEmpty }
             .filter { seen.insert($0.lowercased()).inserted }
     }
+
+    private static func normalizedColorKeys(_ map: [String: String], for areas: [String]) -> [String: String] {
+        let palette: Set<String> = ["blue", "indigo", "green", "purple", "red", "orange", "brown", "pink"]
+        guard !palette.isEmpty else { return [:] }
+        var out: [String: String] = [:]
+        for area in areas {
+            let trimmed = area.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            let key = map[trimmed]
+                ?? map.first(where: { $0.key.caseInsensitiveCompare(trimmed) == .orderedSame })?.value
+            guard let key, palette.contains(key) else { continue }
+            out[trimmed] = key
+        }
+        return out
+    }
 }
 
 struct PersonalizationDraft: Codable, Hashable, Sendable {
     var stressSource: String?
     var breakPoint: String?
     var lifeAreasSelected: [String]
+    var lifeAreaColorKeys: [String: String]
     var planningReality: String?
     var desiredChange: String?
 
@@ -150,12 +201,14 @@ struct PersonalizationDraft: Codable, Hashable, Sendable {
         stressSource: String? = nil,
         breakPoint: String? = nil,
         lifeAreasSelected: [String] = [],
+        lifeAreaColorKeys: [String: String] = [:],
         planningReality: String? = nil,
         desiredChange: String? = nil
     ) {
         self.stressSource = stressSource
         self.breakPoint = breakPoint
         self.lifeAreasSelected = lifeAreasSelected
+        self.lifeAreaColorKeys = lifeAreaColorKeys
         self.planningReality = planningReality
         self.desiredChange = desiredChange
     }
@@ -164,8 +217,28 @@ struct PersonalizationDraft: Codable, Hashable, Sendable {
         self.stressSource = snapshot.stressSource
         self.breakPoint = snapshot.breakPoint
         self.lifeAreasSelected = snapshot.lifeAreasSelected
+        self.lifeAreaColorKeys = snapshot.lifeAreaColorKeys
         self.planningReality = snapshot.planningReality
         self.desiredChange = snapshot.desiredChange
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case stressSource
+        case breakPoint
+        case lifeAreasSelected
+        case lifeAreaColorKeys
+        case planningReality
+        case desiredChange
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        stressSource = try container.decodeIfPresent(String.self, forKey: .stressSource)
+        breakPoint = try container.decodeIfPresent(String.self, forKey: .breakPoint)
+        lifeAreasSelected = try container.decodeIfPresent([String].self, forKey: .lifeAreasSelected) ?? []
+        lifeAreaColorKeys = try container.decodeIfPresent([String: String].self, forKey: .lifeAreaColorKeys) ?? [:]
+        planningReality = try container.decodeIfPresent(String.self, forKey: .planningReality)
+        desiredChange = try container.decodeIfPresent(String.self, forKey: .desiredChange)
     }
 
     var isComplete: Bool {
@@ -192,6 +265,7 @@ struct PersonalizationDraft: Codable, Hashable, Sendable {
             stressSource: stressSource,
             breakPoint: breakPoint,
             lifeAreasSelected: cleanAreas,
+            lifeAreaColorKeys: lifeAreaColorKeys,
             planningReality: planningReality,
             desiredChange: desiredChange
         )

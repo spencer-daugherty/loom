@@ -197,19 +197,20 @@ struct loomApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootGateView(presentationStyle: .fullScreen) {
-                ContentView()
-                    .autocorrectionDisabled(false)
-                    .textInputAutocapitalization(.sentences)
-            }
-            .sheet(isPresented: Binding(
-                get: { enableLoomAIDebug },
-                set: { enableLoomAIDebug = $0 }
-            )) {
-                TemporaryVisionAutoWriteDebugView()
+            Group {
+                if enableLoomAIDebug {
+                    TemporaryVisionAutoWriteDebugView()
+                } else {
+                    RootGateView(presentationStyle: .fullScreen) {
+                        ContentView()
+                            .autocorrectionDisabled(false)
+                            .textInputAutocapitalization(.sentences)
+                    }
+                }
             }
             .onOpenURL { url in
                 guard !LoomRuntime.isPreviewSafeModeEnabled else { return }
+                guard !enableLoomAIDebug else { return }
                 handleShareIntoLoomURLIfNeeded(url)
 #if canImport(GoogleSignIn)
                 _ = GIDSignIn.sharedInstance.handle(url)

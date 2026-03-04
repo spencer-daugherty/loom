@@ -100,7 +100,9 @@ struct DiagnosticFlowView: View {
         self.mode = mode
         self.initialDraft = initialDraft
         self.onComplete = onComplete
-        _draft = State(initialValue: initialDraft ?? PersonalizationDraft())
+        let startingDraft = initialDraft ?? PersonalizationDraft()
+        _draft = State(initialValue: startingDraft)
+        _lifeAreaColorKeys = State(initialValue: startingDraft.lifeAreaColorKeys)
     }
 
     var body: some View {
@@ -502,6 +504,8 @@ struct DiagnosticFlowView: View {
             guard !Task.isCancelled else { return }
             guard draft.isComplete else { return }
 
+            draft.lifeAreaColorKeys = selectedLifeAreaColorAssignments()
+
             hasCompletedFlow = true
             let elapsed = elapsedSeconds
             AnalyticsLogger.log(
@@ -526,6 +530,18 @@ struct DiagnosticFlowView: View {
                 dismiss()
             }
         }
+    }
+
+    private func selectedLifeAreaColorAssignments() -> [String: String] {
+        var result: [String: String] = [:]
+        for area in draft.lifeAreasSelected {
+            let trimmed = area.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            if let key = lifeAreaColorKey(for: trimmed, map: lifeAreaColorKeys) {
+                result[trimmed] = key
+            }
+        }
+        return result
     }
 
     private var elapsedSeconds: Int {
