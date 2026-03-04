@@ -16,9 +16,14 @@ struct TemporaryVisionAutoWriteDebugView: View {
         case diagnostic
     }
 
+    let onClose: () -> Void
+
+    init(onClose: @escaping () -> Void = {}) {
+        self.onClose = onClose
+    }
+
     @Environment(\.modelContext) private var modelContext
     @AppStorage("loom.ai.context.compact.enabled") private var compactContextEnabled = true
-    @AppStorage(loomAIDebugDefaultsKey) private var enableLoomAIDebug = true
 
     @State private var currentVision: String = ""
     @State private var mode: DebugMode = .loomAI
@@ -80,8 +85,23 @@ struct TemporaryVisionAutoWriteDebugView: View {
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Vision AutoWrite Debug")
-                    .font(.title2.weight(.bold))
+                HStack {
+                    Text("Vision AutoWrite Debug")
+                        .font(.title2.weight(.bold))
+                    Spacer(minLength: 0)
+                    Button(action: onClose) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(.primary)
+                            .frame(width: 30, height: 30)
+                            .background(
+                                Circle()
+                                    .fill(Color(.secondarySystemBackground))
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Close Debug")
+                }
 
                 Picker("Mode", selection: $mode) {
                     Text("newVision").tag(DebugMode.newVision)
@@ -90,9 +110,6 @@ struct TemporaryVisionAutoWriteDebugView: View {
                     Text("Diagnostic").tag(DebugMode.diagnostic)
                 }
                 .pickerStyle(.segmented)
-
-                Toggle("LoomAI Debug mode", isOn: $enableLoomAIDebug)
-                    .toggleStyle(.switch)
 
                 Toggle("Compact", isOn: $compactContextEnabled)
                     .toggleStyle(.switch)
@@ -206,7 +223,7 @@ struct TemporaryVisionAutoWriteDebugView: View {
                 .textSelection(.enabled)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 10)
-                .padding(.top, 26)
+                .padding(.top, 44)
         }
         .frame(minHeight: 120, maxHeight: 220)
         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
@@ -218,15 +235,26 @@ struct TemporaryVisionAutoWriteDebugView: View {
             Button {
                 markCopied(copied, value: value)
             } label: {
-                HStack(spacing: 4) {
+                HStack(spacing: 6) {
                     Image(systemName: copied.wrappedValue ? "checkmark.circle.fill" : "doc.on.doc")
                     Text(copied.wrappedValue ? "Copied" : "Copy")
                 }
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(copied.wrappedValue ? .green : .secondary)
-                .padding(8)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(copied.wrappedValue ? .green : .primary)
+                .padding(.horizontal, 12)
+                .frame(minHeight: 40)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color(.systemBackground).opacity(0.92))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(Color.black.opacity(0.12), lineWidth: 1)
+                )
             }
             .buttonStyle(.plain)
+            .padding(.top, 4)
+            .padding(.trailing, 4)
         }
         .contentShape(Rectangle())
         .contextMenu {

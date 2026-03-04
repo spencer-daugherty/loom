@@ -194,27 +194,57 @@ struct loomApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     private let modelContainer = LoomPersistence.makeContainer()
     @AppStorage(loomAIDebugDefaultsKey) private var enableLoomAIDebug = true
+    @AppStorage("loom.showLoomAIDebugPage") private var showLoomAIDebugPage = true
 
     var body: some Scene {
         WindowGroup {
-            Group {
-                if enableLoomAIDebug {
-                    TemporaryVisionAutoWriteDebugView()
-                } else {
-                    RootGateView(presentationStyle: .fullScreen) {
-                        ContentView()
-                            .autocorrectionDisabled(false)
-                            .textInputAutocapitalization(.sentences)
+            ZStack(alignment: .topLeading) {
+                Group {
+                    if enableLoomAIDebug && showLoomAIDebugPage {
+                        TemporaryVisionAutoWriteDebugView {
+                            showLoomAIDebugPage = false
+                        }
+                    } else {
+                        RootGateView(presentationStyle: .fullScreen) {
+                            ContentView()
+                                .autocorrectionDisabled(false)
+                                .textInputAutocapitalization(.sentences)
+                        }
                     }
+                }
+
+                if enableLoomAIDebug && !showLoomAIDebugPage {
+                    Button {
+                        showLoomAIDebugPage = true
+                    } label: {
+                        Text("Debug")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(
+                                Capsule(style: .continuous)
+                                    .fill(Color.blue.gradient)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.leading, 12)
+                    .padding(.top, 10)
+                    .zIndex(10)
                 }
             }
             .onOpenURL { url in
                 guard !LoomRuntime.isPreviewSafeModeEnabled else { return }
-                guard !enableLoomAIDebug else { return }
+                guard !(enableLoomAIDebug && showLoomAIDebugPage) else { return }
                 handleShareIntoLoomURLIfNeeded(url)
 #if canImport(GoogleSignIn)
                 _ = GIDSignIn.sharedInstance.handle(url)
 #endif
+            }
+            .onChange(of: enableLoomAIDebug) { _, isEnabled in
+                if isEnabled {
+                    showLoomAIDebugPage = true
+                }
             }
         }
         .modelContainer(modelContainer)

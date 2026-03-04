@@ -120,76 +120,77 @@ const PURPOSE_PROFILE_NAMES = PURPOSE_PROFILE_CATALOG.map((item) => item.profile
 
 export default {
   async fetch(request, env) {
-    const url = new URL(request.url);
-
-    if (request.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: corsHeaders(request) });
-    }
-
-    if (url.pathname === "/purpose/vision/autowrite") {
-      return handlePurposeVisionAutowrite(request, env);
-    }
-
-    if (url.pathname === "/purpose/insights/profile") {
-      return handlePurposeInsightsProfile(request, env);
-    }
-
-    if (url.pathname === "/chat") {
-      return handleChat(request, env);
-    }
-
-    if (url.pathname !== "/diagnostic/insights") {
-      return json({ error: "Not found" }, 404, corsHeaders(request));
-    }
-
-    if (request.method !== "POST") {
-      return json({ error: "Method not allowed" }, 405, corsHeaders(request));
-    }
-
-    const apiKey = typeof env.OPENAI_API_KEY === "string" ? env.OPENAI_API_KEY.trim() : "";
-    if (!apiKey) {
-      return json({ error: "Server misconfigured" }, 500, corsHeaders(request));
-    }
-
-    let payload;
     try {
-      payload = await request.json();
-    } catch {
-      return json({ error: "Invalid JSON body" }, 400, corsHeaders(request));
-    }
+      const url = new URL(request.url);
 
-    const validationError = validateDiagnosticPayload(payload);
-    if (validationError) {
-      return json({ error: "Invalid diagnostic payload", details: validationError }, 400, corsHeaders(request));
-    }
+      if (request.method === "OPTIONS") {
+        return new Response(null, { status: 204, headers: corsHeaders(request) });
+      }
 
-    const diagnostic = payload.diagnostic;
-    const client = payload.client || {};
-    const startedAt = Date.now();
+      if (url.pathname === "/purpose/vision/autowrite") {
+        return await handlePurposeVisionAutowrite(request, env);
+      }
 
-    const normalizedDiagnostic = canonicalizeDiagnostic({
-      stress: diagnostic.stress,
-      breaksFirst: diagnostic.breaksFirst,
-      areas: diagnostic.areas,
-      planningStyle: diagnostic.planningStyle,
-      firstChange: diagnostic.firstChange
-    });
-    const diagnosticHash = await sha256Hex(JSON.stringify(normalizedDiagnostic));
-    const cacheKey = new Request(`https://loom-cache.internal/diagnostic/${diagnosticHash}`);
+      if (url.pathname === "/purpose/insights/profile") {
+        return await handlePurposeInsightsProfile(request, env);
+      }
 
-    if (env.DEBUG_DIAGNOSTIC !== "1") {
-      const cached = await caches.default.match(cacheKey);
-      if (cached) {
-        try {
-          const cachedJSON = await cached.json();
-          if (cachedJSON && typeof cachedJSON === "object") {
-            return json(cachedJSON, 200, corsHeaders(request));
+      if (url.pathname === "/chat") {
+        return await handleChat(request, env);
+      }
+
+      if (url.pathname !== "/diagnostic/insights") {
+        return json({ error: "Not found" }, 404, corsHeaders(request));
+      }
+
+      if (request.method !== "POST") {
+        return json({ error: "Method not allowed" }, 405, corsHeaders(request));
+      }
+
+      const apiKey = typeof env.OPENAI_API_KEY === "string" ? env.OPENAI_API_KEY.trim() : "";
+      if (!apiKey) {
+        return json({ error: "Server misconfigured" }, 500, corsHeaders(request));
+      }
+
+      let payload;
+      try {
+        payload = await request.json();
+      } catch {
+        return json({ error: "Invalid JSON body" }, 400, corsHeaders(request));
+      }
+
+      const validationError = validateDiagnosticPayload(payload);
+      if (validationError) {
+        return json({ error: "Invalid diagnostic payload", details: validationError }, 400, corsHeaders(request));
+      }
+
+      const diagnostic = payload.diagnostic;
+      const client = payload.client || {};
+      const startedAt = Date.now();
+
+      const normalizedDiagnostic = canonicalizeDiagnostic({
+        stress: diagnostic.stress,
+        breaksFirst: diagnostic.breaksFirst,
+        areas: diagnostic.areas,
+        planningStyle: diagnostic.planningStyle,
+        firstChange: diagnostic.firstChange
+      });
+      const diagnosticHash = await sha256Hex(JSON.stringify(normalizedDiagnostic));
+      const cacheKey = new Request(`https://loom-cache.internal/diagnostic/${diagnosticHash}`);
+
+      if (env.DEBUG_DIAGNOSTIC !== "1") {
+        const cached = await caches.default.match(cacheKey);
+        if (cached) {
+          try {
+            const cachedJSON = await cached.json();
+            if (cachedJSON && typeof cachedJSON === "object") {
+              return json(cachedJSON, 200, corsHeaders(request));
+            }
+          } catch {
+            // Ignore cache decode issue and continue.
           }
-        } catch {
-          // Ignore cache decode issue and continue.
         }
       }
-    }
 
     const systemPrompt = [
       "You generate first-signup diagnostic insights for Loom.",
@@ -281,7 +282,26 @@ export default {
       };
     }
 
-    return json(responseBody, 200, corsHeaders(request));
+      return json(responseBody, 200, corsHeaders(request));
+    } catch (error) {
+      return json(
+        {
+          error: "Internal worker exception",
+          details: {
+            message: truncate(String(error?.message || error || "unknown_error"), 240),
+            path: (() => {
+              try {
+                return new URL(request.url).pathname;
+              } catch {
+                return "";
+              }
+            })()
+          }
+        },
+        500,
+        corsHeaders(request)
+      );
+    }
   }
 };
 
@@ -1356,8 +1376,8 @@ function filterNewVisionSuggestions(candidates, currentVision, previousSuggestio
 }
 
 function isNearDuplicateSuggestion(a, b) {
-  const aNorm = normalizedSuggestion(String(a || ""));
-  const bNorm = normalizedSuggestion(String(b || ""));
+  const aNorm = normalizeSuggestion(String(a || ""));
+  const bNorm = normalizeSuggestion(String(b || ""));
   if (!aNorm || !bNorm) return false;
   if (aNorm === bNorm) return true;
 
@@ -1401,10 +1421,11 @@ function uniqueOrdered(items) {
   const seen = new Set();
   const result = [];
   for (const item of items) {
-    const key = item.toLowerCase();
+    const normalized = String(item ?? "");
+    const key = normalized.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    result.push(item);
+    result.push(normalized);
   }
   return result;
 }
