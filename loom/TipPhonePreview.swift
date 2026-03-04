@@ -2,15 +2,12 @@ import SwiftUI
 
 private enum DeviceFrameConstants {
     static let screenAspectRatio: CGFloat = 9.0 / 19.5
-    static let screenSideInsetRatio: CGFloat = 0.015
-    static let screenTopInsetRatio: CGFloat = 0.030
-    static let screenBottomInsetRatio: CGFloat = 0.035
+    static let bezelRatio: CGFloat = 0.022
 
     static let deviceAspectRatio: CGFloat = {
         let heightPerWidth =
-            ((1 - (screenSideInsetRatio * 2)) / screenAspectRatio) +
-            screenTopInsetRatio +
-            screenBottomInsetRatio
+            ((1 - (bezelRatio * 2)) / screenAspectRatio) +
+            (bezelRatio * 2)
         return 1 / heightPerWidth
     }()
 }
@@ -28,39 +25,120 @@ struct DeviceFrameView<Content: View>: View {
     var body: some View {
         GeometryReader { proxy in
             let metrics = FrameMetrics.fitting(in: proxy.size)
+            let outerShape = RoundedRectangle(
+                cornerRadius: metrics.outerCornerRadius,
+                style: .continuous
+            )
             let screenShape = RoundedRectangle(
                 cornerRadius: metrics.screenCornerRadius,
                 style: .continuous
             )
+            let bezelShape = RoundedRectangle(
+                cornerRadius: metrics.bezelCornerRadius,
+                style: .continuous
+            )
 
             ZStack(alignment: .topLeading) {
-                RoundedRectangle(cornerRadius: metrics.outerCornerRadius, style: .continuous)
-                    .fill(Color.black.opacity(0.94))
+                outerShape
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.73, green: 0.75, blue: 0.79),
+                                Color(red: 0.86, green: 0.87, blue: 0.90),
+                                Color(red: 0.70, green: 0.72, blue: 0.77)
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .overlay {
+                        outerShape
+                            .stroke(Color.white.opacity(0.58), lineWidth: metrics.shellStrokeWidth * 0.8)
+                    }
+                    .overlay {
+                        outerShape
+                            .stroke(Color.black.opacity(0.16), lineWidth: metrics.shellStrokeWidth * 1.15)
+                            .padding(metrics.shellStrokeWidth * 0.75)
+                    }
+                    .overlay {
+                        outerShape
+                            .stroke(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(0.45),
+                                        Color.clear,
+                                        Color.black.opacity(0.22)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: metrics.shellStrokeWidth * 0.85
+                            )
+                            .padding(metrics.shellStrokeWidth * 0.45)
+                    }
+                    .shadow(color: .black.opacity(0.10), radius: metrics.shellStrokeWidth * 2.0, x: 0, y: metrics.shellStrokeWidth * 1.2)
 
-                RoundedRectangle(cornerRadius: metrics.outerCornerRadius * 0.96, style: .continuous)
-                    .stroke(Color.white.opacity(0.18), lineWidth: metrics.shellStrokeWidth)
-                    .padding(metrics.shellStrokeWidth * 0.85)
+                bezelShape
+                    .fill(Color.black)
+                    .frame(width: metrics.bezelSize.width, height: metrics.bezelSize.height)
+                    .offset(x: metrics.bezelOrigin.x, y: metrics.bezelOrigin.y)
 
                 screenShape
-                    .fill(Color(.systemBackground))
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.94, green: 0.95, blue: 0.97),
+                                Color(red: 0.91, green: 0.93, blue: 0.96)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
                     .frame(width: metrics.screenSize.width, height: metrics.screenSize.height)
                     .overlay {
-                        content(metrics.screenSize)
+                        content(metrics.contentSize)
                             .frame(
-                                width: metrics.screenSize.width,
-                                height: metrics.screenSize.height,
-                                alignment: .topLeading
+                                width: metrics.contentSize.width,
+                                height: metrics.contentSize.height,
+                                alignment: .center
                             )
-                            .clipShape(screenShape)
+                            .offset(y: metrics.contentTopInset)
+                    }
+                    .clipShape(screenShape)
+                    .overlay {
+                        screenShape
+                            .stroke(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(0.75),
+                                        Color.white.opacity(0.10),
+                                        Color.black.opacity(0.16)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: metrics.glassShineWidth
+                            )
                     }
                     .overlay(alignment: .top) {
-                        Capsule(style: .continuous)
-                            .fill(Color.black.opacity(0.92))
+                        RoundedRectangle(
+                            cornerRadius: metrics.dynamicIslandSize.height * 0.52,
+                            style: .continuous
+                        )
+                            .fill(Color.black.opacity(0.95))
+                            .overlay {
+                                RoundedRectangle(
+                                    cornerRadius: metrics.dynamicIslandSize.height * 0.52,
+                                    style: .continuous
+                                )
+                                .stroke(Color.white.opacity(0.14), lineWidth: metrics.shellStrokeWidth * 0.45)
+                            }
                             .frame(
                                 width: metrics.dynamicIslandSize.width,
                                 height: metrics.dynamicIslandSize.height
                             )
                             .padding(.top, metrics.dynamicIslandTopInset)
+                            .shadow(color: .black.opacity(0.20), radius: metrics.shellStrokeWidth * 1.2, x: 0, y: 1)
                             .allowsHitTesting(false)
                     }
                     .offset(x: metrics.screenOrigin.x, y: metrics.screenOrigin.y)
@@ -79,7 +157,14 @@ struct DeviceFrameView<Content: View>: View {
         let screenCornerRadius: CGFloat
         let dynamicIslandSize: CGSize
         let dynamicIslandTopInset: CGFloat
+        let contentTopInset: CGFloat
+        let contentBottomInset: CGFloat
+        let contentSize: CGSize
+        let bezelSize: CGSize
+        let bezelOrigin: CGPoint
+        let bezelCornerRadius: CGFloat
         let shellStrokeWidth: CGFloat
+        let glassShineWidth: CGFloat
 
         static func fitting(in availableSize: CGSize) -> FrameMetrics {
             let availableWidth = max(1, availableSize.width)
@@ -89,15 +174,40 @@ struct DeviceFrameView<Content: View>: View {
                 availableHeight * DeviceFrameConstants.deviceAspectRatio
             )
             let deviceHeight = deviceWidth / DeviceFrameConstants.deviceAspectRatio
-            let screenWidth = deviceWidth * (1 - (DeviceFrameConstants.screenSideInsetRatio * 2))
+            let screenWidth = deviceWidth * (1 - (DeviceFrameConstants.bezelRatio * 2))
             let screenHeight = screenWidth / DeviceFrameConstants.screenAspectRatio
             let screenOrigin = CGPoint(
                 x: (deviceWidth - screenWidth) / 2,
-                y: deviceWidth * DeviceFrameConstants.screenTopInsetRatio
+                y: (deviceHeight - screenHeight) / 2
             )
             let shellStrokeWidth = max(1, deviceWidth * 0.005)
-            let outerCornerRadius = deviceWidth * 0.112
-            let screenCornerRadius = screenWidth * 0.102
+            let outerCornerRadius = deviceWidth * 0.140
+            let screenCornerRadius = screenWidth * 0.136
+            let blackBezelThickness = max(1.0, min(4.0, deviceWidth * 0.014))
+            let bezelSize = CGSize(
+                width: min(deviceWidth, screenWidth + (blackBezelThickness * 2)),
+                height: min(deviceHeight, screenHeight + (blackBezelThickness * 2))
+            )
+            let bezelOrigin = CGPoint(
+                x: screenOrigin.x - ((bezelSize.width - screenWidth) / 2),
+                y: screenOrigin.y - ((bezelSize.height - screenHeight) / 2)
+            )
+            let bezelCornerRadius = screenCornerRadius + blackBezelThickness
+            let dynamicIslandSize = CGSize(
+                width: screenWidth * 0.360,
+                height: screenWidth * 0.084
+            )
+            let dynamicIslandTopInset = screenWidth * 0.026
+            let contentTopInset = min(
+                screenHeight - 2,
+                dynamicIslandTopInset + dynamicIslandSize.height + max(8, screenWidth * 0.018)
+            )
+            let contentBottomInset = max(8, screenWidth * 0.030)
+            let contentSize = CGSize(
+                width: screenWidth,
+                height: max(1, screenHeight - contentTopInset - contentBottomInset)
+            )
+            let glassShineWidth = max(1, screenWidth * 0.010)
 
             return FrameMetrics(
                 deviceSize: CGSize(width: deviceWidth, height: deviceHeight),
@@ -105,12 +215,16 @@ struct DeviceFrameView<Content: View>: View {
                 screenOrigin: screenOrigin,
                 outerCornerRadius: outerCornerRadius,
                 screenCornerRadius: screenCornerRadius,
-                dynamicIslandSize: CGSize(
-                    width: screenWidth * 0.320,
-                    height: screenWidth * 0.090
-                ),
-                dynamicIslandTopInset: screenWidth * 0.030,
-                shellStrokeWidth: shellStrokeWidth
+                dynamicIslandSize: dynamicIslandSize,
+                dynamicIslandTopInset: dynamicIslandTopInset,
+                contentTopInset: contentTopInset,
+                contentBottomInset: contentBottomInset,
+                contentSize: contentSize,
+                bezelSize: bezelSize,
+                bezelOrigin: bezelOrigin,
+                bezelCornerRadius: bezelCornerRadius,
+                shellStrokeWidth: shellStrokeWidth,
+                glassShineWidth: glassShineWidth
             )
         }
     }
@@ -127,10 +241,10 @@ struct TipPhonePreview: View {
     @State private var loopTask: Task<Void, Never>?
 
     var body: some View {
-        DeviceFrameView { screenSize in
-            let sceneScale = min(
-                screenSize.width / Self.previewDesignSize.width,
-                screenSize.height / Self.previewDesignSize.height
+        DeviceFrameView { contentSize in
+            let sceneScale = max(
+                contentSize.width / Self.previewDesignSize.width,
+                contentSize.height / Self.previewDesignSize.height
             )
 
             previewScene
@@ -139,12 +253,12 @@ struct TipPhonePreview: View {
                     height: Self.previewDesignSize.height,
                     alignment: .topLeading
                 )
-                .scaleEffect(sceneScale, anchor: .topLeading)
+                .scaleEffect(sceneScale, anchor: .center)
                 .dynamicTypeSize(.xSmall ... .medium)
                 .frame(
-                    width: screenSize.width,
-                    height: screenSize.height,
-                    alignment: .topLeading
+                    width: contentSize.width,
+                    height: contentSize.height,
+                    alignment: .center
                 )
         }
         .shadow(color: .black.opacity(0.18), radius: 14, x: 0, y: 8)

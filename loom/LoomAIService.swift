@@ -837,6 +837,11 @@ struct LoomAIService {
 
         let decoder = JSONDecoder()
         do {
+            if let synthesized = synthesizeAutoGroupMessage(from: data) {
+                log("Parsed assistant text (top-level autogroup fallback): \(synthesized)")
+                return LoomAIResponse(message: synthesized, chips: [], actions: [], debug: nil, elapsedMS: elapsed * 1000)
+            }
+
             if let synthesized = synthesizeSuggestionsMessage(from: data) {
                 log("Parsed assistant text (top-level suggestions fallback): \(synthesized)")
                 return LoomAIResponse(message: synthesized, chips: [], actions: [], debug: nil, elapsedMS: elapsed * 1000)
@@ -950,6 +955,59 @@ struct LoomAIService {
         let payload: [String: Any] = [
             "suggestions": suggestions,
             "confidence": (confidence?.isEmpty == false ? confidence! : "high")
+        ]
+        guard
+            let jsonData = try? JSONSerialization.data(withJSONObject: payload),
+            let jsonString = String(data: jsonData, encoding: .utf8)
+        else { return nil }
+        return jsonString
+    }
+
+    private func synthesizeAutoGroupMessage(from data: Data) -> String? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+
+        let confidenceRaw = (object["confidence"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard let confidenceRaw, !confidenceRaw.isEmpty else { return nil }
+        let confidence = (confidenceRaw == "high") ? "high" : "low"
+        let reasonRaw = (object["reason"] as? String)?
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let reason = (reasonRaw?.isEmpty == false)
+            ? String(reasonRaw!.prefix(220))
+            : (confidence == "high" ? "Grouped by topic." : "Could not confidently group actions.")
+
+        let groupsPayload: [[String: Any]]
+        if confidence == "high", let rawGroups = object["groups"] as? [Any] {
+            groupsPayload = rawGroups.compactMap { groupAny in
+                guard let group = groupAny as? [String: Any] else { return nil }
+                let name = ((group["name"] as? String) ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !name.isEmpty else { return nil }
+                let fulfillmentArea = ((group["fulfillmentArea"] as? String) ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let actionIDs = (group["actionIDs"] as? [Any] ?? [])
+                    .compactMap { $0 as? String }
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                guard !actionIDs.isEmpty else { return nil }
+                return [
+                    "name": String(name.prefix(64)),
+                    "fulfillmentArea": String(fulfillmentArea.prefix(64)),
+                    "actionIDs": Array(actionIDs.prefix(25))
+                ]
+            }
+        } else {
+            groupsPayload = []
+        }
+
+        let payload: [String: Any] = [
+            "confidence": confidence,
+            "reason": reason,
+            "groups": groupsPayload
         ]
         guard
             let jsonData = try? JSONSerialization.data(withJSONObject: payload),

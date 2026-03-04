@@ -2857,7 +2857,9 @@ struct PlanStepThreeView: View {
             return
         }
 
-        guard let plans = await buildAutoGroupPlansViaLoomAI(for: candidates) else {
+        let aiPlans = await buildAutoGroupPlansViaLoomAI(for: candidates)
+        let fallbackPlans = buildAutoGroupPlans(for: candidates)
+        guard let plans = aiPlans ?? fallbackPlans else {
             autoGroupFeedback = AutoGroupFeedback(
                 title: "Can't AutoGroup",
                 message: "AutoGroup couldn't confidently group actions. Try grouping them manually or reword to clarify.",

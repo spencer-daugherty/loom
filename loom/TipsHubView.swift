@@ -10,9 +10,11 @@ struct TipsHubView: View {
                     } label: {
                         TipHubCard(feature: feature)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .buttonStyle(.plain)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
             .padding(.vertical, 18)
         }
@@ -38,7 +40,6 @@ private struct TipHubCard: View {
                     Text(feature.title)
                         .font(.headline.weight(.semibold))
                         .foregroundStyle(.primary)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Text(feature.summary)
@@ -57,10 +58,13 @@ private struct TipHubCard: View {
                 }
             }
 
+            Spacer(minLength: 0)
+
             TipPhonePreview(feature: feature, animate: false)
                 .frame(width: previewWidth, height: previewHeight)
                 .accessibilityHidden(true)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -74,6 +78,7 @@ private struct TipHubCard: View {
                         endPoint: .bottomTrailing
                     )
                 )
+                .frame(maxWidth: .infinity)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)

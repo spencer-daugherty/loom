@@ -574,6 +574,10 @@ async function handleChat(request, env) {
   }
 
   const intent = String(payload?.client?.intent || "").trim().toLowerCase();
+  if (intent === "autogroup_plan") {
+    return handleAutoGroupPlan({ request, env, apiKey, payload });
+  }
+
   if (isPurposeVisionChatRequest(payload)) {
     const latestUserMessage = extractLatestUserMessage(payload);
     return purposeVisionAutowriteResponse({
@@ -586,14 +590,173 @@ async function handleChat(request, env) {
     });
   }
 
-  // All non-autowrite intents use the Loom chat pipeline (including autogroup_plan).
+  // All non-autowrite intents use the Loom chat pipeline.
   return handleLoomAIChat({ request, env, apiKey, payload });
+}
+
+async function handleAutoGroupPlan({ request, env, apiKey, payload }) {
+  const messages = Array.isArray(payload?.messages) ? payload.messages : [];
+  const client = payload?.client && typeof payload.client === "object" ? payload.client : {};
+  const context = compactAutoGroupContext(
+    payload?.context && typeof payload.context === "object" ? payload.context : {}
+  );
+  const instruction = extractLatestUserMessage(payload).trim();
+
+  const fallback = (reason) => ({
+    confidence: "low",
+    reason: nonEmptyString(reason) || "Could not confidently group actions.",
+    groups: []
+  });
+
+  if (!instruction) {
+    return json(fallback("Missing grouping instruction."), 200, corsHeaders(request));
+  }
+
+  const schema = {
+    name: "autogroup_plan_response",
+    strict: true,
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        confidence: { type: "string", enum: ["high", "low"] },
+        reason: { type: "string" },
+        groups: {
+          type: "array",
+          minItems: 0,
+          maxItems: 8,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              name: { type: "string" },
+              fulfillmentArea: { type: "string" },
+              actionIDs: {
+                type: "array",
+                minItems: 0,
+                maxItems: 25,
+                items: { type: "string" }
+              }
+            },
+            required: ["name", "fulfillmentArea", "actionIDs"]
+          }
+        }
+      },
+      required: ["confidence", "reason", "groups"]
+    }
+  };
+
+  const systemPrompt = [
+    "You are helping with Loom Plan Step 3 (Group).",
+    "Return ONLY valid JSON matching the schema.",
+    "Group actions by topical/domain similarity.",
+    "Use only the provided action IDs.",
+    "Never duplicate an action ID across groups.",
+    "If confidence is not high, return confidence='low' and groups=[]."
+  ].join("\n");
+
+  const userPayload = {
+    messages: messages.slice(-20).map((msg) => ({
+      role: String(msg?.role || ""),
+      content: String(msg?.content || "")
+    })),
+    instruction,
+    capture: context.capture,
+    captureItems: context.captureItems,
+    client: {
+      intent: nonEmptyString(client.intent) || "autogroup_plan",
+      appVersion: nonEmptyString(client.appVersion) || null,
+      userLocalDate: nonEmptyString(client.userLocalDate) || null,
+      timezone: nonEmptyString(client.timezone) || null
+    }
+  };
+
+  const preferredModel = "gpt-5-mini";
+  const modelCandidates = uniqueOrdered(
+    [preferredModel, nonEmptyString(env.OPENAI_MODEL), "gpt-5.1"]
+      .map((value) => nonEmptyString(value))
+      .filter(Boolean)
+  );
+
+  let result = null;
+  let usedModel = preferredModel;
+  for (const candidate of modelCandidates) {
+    usedModel = candidate;
+    const attempt = await callOpenAIResponsesJSON({
+      apiKey,
+      model: candidate,
+      systemPrompt,
+      userPayload,
+      responseSchema: schema,
+      maxOutputTokens: 800,
+      timeoutMs: 26000,
+      reasoningEffort: "low",
+      allowRetry: true
+    });
+    result = attempt;
+    if (!attempt?.error) break;
+    const normalizedError = String(attempt.error || "").toLowerCase();
+    const retryableByModel =
+      normalizedError.includes("upstream model error") ||
+      normalizedError.includes("invalid upstream json") ||
+      normalizedError.includes("missing model output");
+    if (!retryableByModel) break;
+  }
+
+  if (result?.error) {
+    const response = fallback("Could not confidently group actions.");
+    const usage = normalizeResponsesUsage(result.usage, usedModel || preferredModel);
+    if (usage) response.usage = usage;
+    return json(response, 200, corsHeaders(request));
+  }
+
+  const raw = result?.json && typeof result.json === "object" ? result.json : {};
+  const confidence = String(raw.confidence || "").trim().toLowerCase() === "high" ? "high" : "low";
+  const reason = truncate(
+    String(raw.reason || (confidence === "high" ? "Grouped by topic." : "Could not confidently group actions.")),
+    220
+  );
+  const groupsInput = Array.isArray(raw.groups) ? raw.groups : [];
+  const seenIDs = new Set();
+  const groups = [];
+
+  for (const group of groupsInput) {
+    const name = truncate(String(group?.name || "").trim(), 64);
+    const fulfillmentArea = truncate(String(group?.fulfillmentArea || "").trim(), 64);
+    const actionIDs = Array.isArray(group?.actionIDs)
+      ? group.actionIDs
+          .map((id) => String(id || "").trim())
+          .filter(Boolean)
+          .filter((id) => {
+            if (seenIDs.has(id)) return false;
+            seenIDs.add(id);
+            return true;
+          })
+      : [];
+    if (!name || actionIDs.length === 0) continue;
+    groups.push({
+      name,
+      fulfillmentArea: fulfillmentArea || "",
+      actionIDs
+    });
+    if (groups.length >= 8) break;
+  }
+
+  const response = {
+    confidence,
+    reason,
+    groups: confidence === "high" ? groups : []
+  };
+  const usage = normalizeResponsesUsage(result.usage, usedModel);
+  if (usage) response.usage = usage;
+  return json(response, 200, corsHeaders(request));
 }
 
 async function handleLoomAIChat({ request, env, apiKey, payload }) {
   const messages = Array.isArray(payload?.messages) ? payload.messages : [];
   const client = payload?.client && typeof payload.client === "object" ? payload.client : {};
   const normalizedIntent = String(client.intent || "").trim().toLowerCase();
+  const isAutoGroupIntent = normalizedIntent === "autogroup_plan";
   const rawContext = payload?.context && typeof payload.context === "object" ? payload.context : {};
   const context = normalizedIntent === "autogroup_plan"
     ? compactAutoGroupContext(rawContext)
@@ -608,6 +771,7 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
       safeChatFallback({
         hasContext,
         context,
+        intent: normalizedIntent,
         message:
           "I’m ready to help with Loom. Ask me about Purpose, Fulfillment, Outcomes, Capture, or Action Blocks."
       }),
@@ -617,6 +781,17 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
   }
 
   if (unrelatedPrompt) {
+    if (isAutoGroupIntent) {
+      return json(
+        safeChatFallback({
+          hasContext,
+          context,
+          intent: normalizedIntent
+        }),
+        200,
+        corsHeaders(request)
+      );
+    }
     return json(
       {
         message:
@@ -774,7 +949,7 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
   };
   const chatCacheEnabled = env.DISABLE_CHAT_CACHE !== "1";
   const cacheIdentity = {
-    version: "loom_chat_v2",
+    version: "loom_chat_v3",
     model: preferredModel,
     messages: userPayload.messages,
     APP_CONTEXT: userPayload.APP_CONTEXT,
@@ -829,7 +1004,8 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
   if (result.error) {
     const response = safeChatFallback({
       hasContext,
-      context
+      context,
+      intent: normalizedIntent
     });
     const usage = normalizeResponsesUsage(result.usage, usedModel || preferredModel);
     if (usage) {
@@ -841,7 +1017,8 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
   const response = sanitizeLoomChatResponse(result.json, {
     context,
     hasContext,
-    latestUserMessage
+    latestUserMessage,
+    intent: normalizedIntent
   });
   const usage = normalizeResponsesUsage(result.usage, usedModel);
   if (usage) {
@@ -1942,7 +2119,21 @@ function buildDefaultLoomChips(context) {
   return chips;
 }
 
-function safeChatFallback({ hasContext, context, message }) {
+function safeChatFallback({ hasContext, context, message, intent }) {
+  const normalizedIntent = String(intent || "").trim().toLowerCase();
+  if (normalizedIntent === "autogroup_plan") {
+    return {
+      message: '{"confidence":"low","reason":"Could not confidently group actions.","groups":[]}',
+      chips: [],
+      actions: [],
+      debug: {
+        usedContext: false,
+        confidence: "low",
+        evidence: []
+      }
+    };
+  }
+
   const fallbackMessage =
     nonEmptyString(message) ||
     "Couldn't generate response. Check your connection.";
@@ -2160,15 +2351,17 @@ function shouldCacheLoomAIResponse(response) {
   return true;
 }
 
-function sanitizeLoomChatResponse(raw, { context, hasContext, latestUserMessage }) {
+function sanitizeLoomChatResponse(raw, { context, hasContext, latestUserMessage, intent }) {
+  const normalizedIntent = String(intent || "").trim().toLowerCase();
+  const isAutoGroupIntent = normalizedIntent === "autogroup_plan";
   const base = raw && typeof raw === "object" ? raw : {};
   let message = String(base.message || "").trim();
   if (!message) {
-    return safeChatFallback({ hasContext, context });
+    return safeChatFallback({ hasContext, context, intent: normalizedIntent });
   }
 
   const details = extractConcreteDetails(context);
-  if (hasContext && details.length >= 2) {
+  if (!isAutoGroupIntent && hasContext && details.length >= 2) {
     const detailMentions = details.filter((d) =>
       message.toLowerCase().includes(String(d).toLowerCase())
     ).length;
@@ -2177,9 +2370,9 @@ function sanitizeLoomChatResponse(raw, { context, hasContext, latestUserMessage 
     }
   }
 
-  const chips = normalizeChips(base.chips, context);
+  const chips = isAutoGroupIntent ? [] : normalizeChips(base.chips, context);
   const debug = normalizeDebug(base.debug, context, hasContext);
-  const actions = normalizeActions(base.actions, {
+  const actions = isAutoGroupIntent ? [] : normalizeActions(base.actions, {
     confidence: debug.confidence,
     context,
     latestUserMessage
