@@ -469,6 +469,9 @@ struct AccountView: View {
     @AppStorage("has_seen_content_quickstart_v1") private var hasSeenContentQuickstart = false
     @AppStorage("force_show_content_quickstart_once") private var forceShowContentQuickstartOnce = false
     @AppStorage("developer_launch_paywall_once") private var developerLaunchPaywallOnce = false
+    @AppStorage("developer_demo_mode_enabled") private var developerDemoModeEnabled = false
+    @AppStorage(loomAITroubleshootingDefaultsKey) private var enableLoomAITroubleshooting = true
+    @AppStorage(loomAIDebugDefaultsKey) private var enableLoomAIDebug = false
     @AppStorage("dev_manual_warning_cards_enabled") private var devManualWarningCardsEnabled = false
     @AppStorage("dev_outcome_warning_target_passed") private var devOutcomeWarningTargetPassed = false
     @AppStorage("dev_outcome_warning_goal_achieved") private var devOutcomeWarningGoalAchieved = false
@@ -546,6 +549,14 @@ struct AccountView: View {
                 } label: {
                     HStack {
                         Text("Personalization")
+                    }
+                }
+
+                NavigationLink {
+                    TipsHubView()
+                } label: {
+                    HStack {
+                        Text("Tips")
                     }
                 }
 
@@ -724,13 +735,21 @@ struct AccountView: View {
                         .font(.headline)
                         .frame(maxWidth: .infinity, alignment: .center)
                     HStack(spacing: 8) {
-                        SecureField("Password", text: $developerPasswordInput)
+                        SecureField("Passcode", text: $developerPasswordInput)
                             .font(.system(size: 20, weight: .regular))
+                            .keyboardType(.numberPad)
                             .textFieldStyle(.roundedBorder)
                             .frame(height: 52)
+                            .onChange(of: developerPasswordInput) { _, newValue in
+                                let digitsOnly = newValue.filter(\.isNumber)
+                                let limited = String(digitsOnly.prefix(4))
+                                if limited != newValue {
+                                    developerPasswordInput = limited
+                                }
+                            }
 
                         Button {
-                            if developerPasswordInput == "Loom4All" {
+                            if developerPasswordInput == "0927" {
                                 showDeveloperPasswordError = false
                                 showDeveloperPasswordSheet = false
                                 showDeveloperPage = true
@@ -746,6 +765,7 @@ struct AccountView: View {
                         .frame(width: 52, height: 52)
                         .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                         .foregroundStyle(.white)
+                        .disabled(developerPasswordInput.count < 4)
                     }
 
                     if showDeveloperPasswordError {
@@ -797,7 +817,10 @@ struct AccountView: View {
                     }
 
                     Section("Feature Flags") {
+                        Toggle("Demo", isOn: $developerDemoModeEnabled)
                         Toggle("Enable LoomAI Insights Refresh", isOn: $enableLoomAIInsightsRefresh)
+                        Toggle("LoomAI Troubleshooting", isOn: $enableLoomAITroubleshooting)
+                        Toggle("LoomAI Debug", isOn: $enableLoomAIDebug)
                         Toggle("Enable Projects", isOn: $enableProjectsFeature)
                         Toggle("Onboarding", isOn: $onboardingResetOnNextLaunch)
                         Toggle("Blank Homepage", isOn: $blankHomepageMode)
@@ -851,6 +874,7 @@ struct AccountView: View {
             }
         }
         .onChange(of: blankHomepageMode) { _, isOn in
+            guard !developerDemoModeEnabled else { return }
             if isOn {
                 if setupHomepageMode {
                     setupHomepageMode = false
@@ -860,7 +884,18 @@ struct AccountView: View {
                 forceShowContentQuickstartOnce = true
             }
         }
+        .onChange(of: developerDemoModeEnabled) { _, isOn in
+            if isOn {
+                blankHomepageMode = false
+                setupHomepageMode = true
+                hasSeenContentQuickstart = true
+                forceShowContentQuickstartOnce = false
+            } else if setupHomepageMode {
+                setupHomepageMode = false
+            }
+        }
         .onChange(of: setupHomepageMode) { _, isOn in
+            guard !developerDemoModeEnabled else { return }
             guard isOn else { return }
             if blankHomepageMode {
                 blankHomepageMode = false
@@ -1374,6 +1409,12 @@ struct VacationModeView: View {
 }
 
 struct AccountDetailsView: View {
+    private enum AccountField: Hashable {
+        case name
+        case email
+        case phone
+    }
+
     @EnvironmentObject private var session: UserSessionStore
     @AppStorage("account_name") private var accountName = ""
     @AppStorage("account_email") private var accountEmail = ""
@@ -1386,6 +1427,7 @@ struct AccountDetailsView: View {
     @AppStorage("loom.subscription_plan") private var subscriptionPlanRaw = SubscriptionPlan.annual.rawValue
     @State private var showSubscriptionSheet = false
     @State private var accountError: String? = nil
+    @FocusState private var focusedAccountField: AccountField?
 
     var body: some View {
         List {
@@ -1396,6 +1438,7 @@ struct AccountDetailsView: View {
                     title: "Name",
                     placeholder: "Enter your name",
                     text: $accountName,
+                    field: .name,
                     keyboardType: .default,
                     capitalization: .words,
                     disableAutocorrection: false,
@@ -1409,6 +1452,7 @@ struct AccountDetailsView: View {
                     title: "Email",
                     placeholder: "name@example.com",
                     text: $accountEmail,
+                    field: .email,
                     keyboardType: .emailAddress,
                     capitalization: .never,
                     disableAutocorrection: true,
@@ -1422,6 +1466,7 @@ struct AccountDetailsView: View {
                     title: "Phone",
                     placeholder: "(555) 123-4567",
                     text: $accountPhone,
+                    field: .phone,
                     keyboardType: .phonePad,
                     capitalization: .never,
                     disableAutocorrection: true,
@@ -1475,6 +1520,36 @@ struct AccountDetailsView: View {
             }
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
+        }
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                if let field = focusedAccountField {
+                    Spacer(minLength: 0)
+                    Button {
+                        handleKeyboardAccessoryTap(for: field)
+                    } label: {
+                        Image(systemName: keyboardAccessoryShowsCheckmark ? "checkmark" : "keyboard.chevron.compact.down")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(keyboardAccessoryShowsCheckmark ? .white : .primary.opacity(0.85))
+                            .frame(width: 30, height: 30)
+                            .background(
+                                Circle().fill(
+                                    keyboardAccessoryShowsCheckmark
+                                        ? Color.blue
+                                        : Color(.secondarySystemBackground)
+                                )
+                            )
+                            .overlay(
+                                Circle()
+                                    .stroke(
+                                        Color.black.opacity(keyboardAccessoryShowsCheckmark ? 0 : 0.08),
+                                        lineWidth: 1
+                                    )
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
         }
     }
 
@@ -1534,6 +1609,7 @@ struct AccountDetailsView: View {
         title: String,
         placeholder: String,
         text: Binding<String>,
+        field: AccountField,
         keyboardType: UIKeyboardType,
         capitalization: TextInputAutocapitalization,
         disableAutocorrection: Bool,
@@ -1548,11 +1624,41 @@ struct AccountDetailsView: View {
                 .textInputAutocapitalization(capitalization)
                 .autocorrectionDisabled(disableAutocorrection)
                 .submitLabel(submitLabel)
+                .focused($focusedAccountField, equals: field)
                 .onSubmit {
                     onSubmit?()
                 }
                 .multilineTextAlignment(.trailing)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    private var keyboardAccessoryShowsCheckmark: Bool {
+        guard let field = focusedAccountField else { return false }
+        switch field {
+        case .name:
+            return !accountName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .email:
+            return !accountEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .phone:
+            return !accountPhone.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+    }
+
+    private func handleKeyboardAccessoryTap(for field: AccountField) {
+        guard keyboardAccessoryShowsCheckmark else {
+            focusedAccountField = nil
+            return
+        }
+
+        focusedAccountField = nil
+        switch field {
+        case .name:
+            Task { await saveDisplayNameToAuthIfNeeded() }
+        case .email:
+            Task { await saveEmailToAuthIfNeeded() }
+        case .phone:
+            break
         }
     }
 
@@ -2084,6 +2190,17 @@ struct ManagePeoplePlacesToolsView: View {
         focusedEntry == .resource && addingResource
     }
 
+    private var keyboardAccessoryShowsCheckmark: Bool {
+        switch focusedEntry {
+        case .place:
+            return !placeInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .resource:
+            return !resourceInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .none:
+            return false
+        }
+    }
+
     var body: some View {
         List {
             Section("Places") {
@@ -2167,33 +2284,99 @@ struct ManagePeoplePlacesToolsView: View {
                     .frame(maxWidth: .infinity)
                 }
             }
+            ToolbarItem(placement: .keyboard) {
+                if let focusedEntry {
+                    Button {
+                        guard keyboardAccessoryShowsCheckmark else {
+                            self.focusedEntry = nil
+                            return
+                        }
+                        switch focusedEntry {
+                        case .place:
+                            savePlace(keepEditing: true)
+                        case .resource:
+                            saveResource(keepEditing: true)
+                        }
+                    } label: {
+                        Image(systemName: keyboardAccessoryShowsCheckmark ? "checkmark" : "keyboard.chevron.compact.down")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(keyboardAccessoryShowsCheckmark ? .white : .primary.opacity(0.85))
+                            .frame(width: 30, height: 30)
+                            .background(
+                                Circle().fill(
+                                    keyboardAccessoryShowsCheckmark
+                                        ? Color.blue
+                                        : Color(.secondarySystemBackground)
+                                )
+                            )
+                            .overlay(
+                                Circle()
+                                    .stroke(
+                                        Color.black.opacity(keyboardAccessoryShowsCheckmark ? 0 : 0.08),
+                                        lineWidth: 1
+                                    )
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
         }
     }
 
-    private func savePlace() {
+    private func savePlace(keepEditing: Bool = false) {
         let trimmed = placeInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            addingPlace = false
+            if keepEditing {
+                addingPlace = true
+                placeInput = ""
+                DispatchQueue.main.async {
+                    focusedEntry = .place
+                }
+            } else {
+                addingPlace = false
+            }
             return
         }
 
         let normalized = trimmed.lowercased()
         guard !allPlaces.contains(where: { $0.place.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == normalized }) else {
-            addingPlace = false
             placeInput = ""
+            if keepEditing {
+                addingPlace = true
+                DispatchQueue.main.async {
+                    focusedEntry = .place
+                }
+            } else {
+                addingPlace = false
+            }
             return
         }
 
         context.insert(SensitivityPlaceCatalogItem(place: trimmed))
         try? context.save()
-        addingPlace = false
         placeInput = ""
+        if keepEditing {
+            addingPlace = true
+            DispatchQueue.main.async {
+                focusedEntry = .place
+            }
+        } else {
+            addingPlace = false
+        }
     }
 
-    private func saveResource() {
+    private func saveResource(keepEditing: Bool = false) {
         let trimmed = resourceInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            addingResource = false
+            if keepEditing {
+                addingResource = true
+                resourceInput = ""
+                DispatchQueue.main.async {
+                    focusedEntry = .resource
+                }
+            } else {
+                addingResource = false
+            }
             return
         }
 
@@ -2203,15 +2386,29 @@ struct ManagePeoplePlacesToolsView: View {
             $0.value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == normalized
         }
         guard !existing else {
-            addingResource = false
             resourceInput = ""
+            if keepEditing {
+                addingResource = true
+                DispatchQueue.main.async {
+                    focusedEntry = .resource
+                }
+            } else {
+                addingResource = false
+            }
             return
         }
 
         context.insert(LeverageResource(kindRaw: resourceKind.rawValue, value: trimmed))
         try? context.save()
-        addingResource = false
         resourceInput = ""
+        if keepEditing {
+            addingResource = true
+            DispatchQueue.main.async {
+                focusedEntry = .resource
+            }
+        } else {
+            addingResource = false
+        }
     }
 
     private func deletePlaces(at offsets: IndexSet) {
@@ -3073,6 +3270,10 @@ private struct FulfillmentCategoryLabelsView: View {
         return trimmed.caseInsensitiveCompare(currentCategory) != .orderedSame
     }
 
+    private var categoryNameKeyboardShowsCheckmark: Bool {
+        !editedCategoryName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     var body: some View {
         List {
             categorySection
@@ -3081,6 +3282,41 @@ private struct FulfillmentCategoryLabelsView: View {
         .navigationTitle(displayedCategoryTitle)
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(false)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                if isCategoryNameFieldFocused {
+                    Spacer(minLength: 0)
+                    Button {
+                        if categoryNameKeyboardShowsCheckmark && canSubmitCategoryRename {
+                            isCategoryNameFieldFocused = false
+                            beginCategorySaveFlow()
+                        } else {
+                            isCategoryNameFieldFocused = false
+                        }
+                    } label: {
+                        Image(systemName: categoryNameKeyboardShowsCheckmark ? "checkmark" : "keyboard.chevron.compact.down")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(categoryNameKeyboardShowsCheckmark ? .white : .primary.opacity(0.85))
+                            .frame(width: 30, height: 30)
+                            .background(
+                                Circle().fill(
+                                    categoryNameKeyboardShowsCheckmark
+                                        ? Color.blue
+                                        : Color(.secondarySystemBackground)
+                                )
+                            )
+                            .overlay(
+                                Circle()
+                                    .stroke(
+                                        Color.black.opacity(categoryNameKeyboardShowsCheckmark ? 0 : 0.08),
+                                        lineWidth: 1
+                                    )
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
         .alert("Unable to rename category", isPresented: $showCategoryRenameAlert) {
             Button("OK", role: .cancel) {}
         } message: {

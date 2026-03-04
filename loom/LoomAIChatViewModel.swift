@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import CryptoKit
 
 struct LoomAIContextSnapshot: Codable {
     static let maxPayloadBytes = 90_000
@@ -16,6 +17,7 @@ struct LoomAIContextSnapshot: Codable {
     struct FulfillmentCategorySummary: Codable {
         var id: String
         var name: String
+        var colorKey: String
         var mission: String
         var identity: [String]
         var littleWins: [String]
@@ -74,23 +76,96 @@ struct LoomAIContextSnapshot: Codable {
         var historyCount: Int
         var lastChangedAt: Date?
     }
+    struct ReflectionJournalSummary: Codable {
+        struct RecentEntry: Codable {
+            var completedAt: Date
+            var weekStart: Date
+            var text: String
+        }
+        struct MonthlyDigest: Codable {
+            var monthLabel: String
+            var from: Date
+            var to: Date
+            var entryCount: Int
+            var summary: String
+        }
+
+        var totalEntryCount: Int
+        var recentEntries: [RecentEntry]
+        var monthlyDigests: [MonthlyDigest]
+    }
+    struct ShareAttachmentPreview: Codable {
+        var sourceApp: String?
+        var sourceTitle: String?
+        var attachmentTypes: [String]
+        var textPreview: String?
+        var urlHostPath: String?
+    }
+    struct DiagnosticSummary: Codable {
+        var stress: String
+        var breaksFirst: String
+        var areas: [String]
+        var planningStyle: String
+        var firstChange: String
+        var rootCause: String
+        var nextDirection: String
+    }
+    struct CaptureSummary: Codable {
+        var totalCount: Int
+        var topItems: [String]
+        var quickCompletionsLast7Days: Int
+        var recurringRuleCount: Int
+    }
+    struct RecentlyDeletedSummary: Codable {
+        var totalCount: Int
+        var sourceCounts: [String]
+    }
+    struct SectionTimestamps: Codable {
+        var purpose: Date?
+        var fulfillment: Date?
+        var outcomes: Date?
+        var capture: Date?
+        var actionBlocks: Date?
+        var reflections: Date?
+        var diagnostics: Date?
+        var recentlyDeleted: Date?
+    }
 
     var generatedAt: Date
+    var personalizationHash: String
+    var diagnostic: DiagnosticSummary?
     var drivingForce: DrivingForceSummary?
     var fulfillmentCategories: [FulfillmentCategorySummary]
     var activeOutcomes: [OutcomeSummary]
     var currentWeekActionBlocks: [ActionBlockSummary]
     var recentActivity: RecentActivitySummary
+    var capture: CaptureSummary?
+    var recentlyDeleted: RecentlyDeletedSummary?
+    var sectionTimestamps: SectionTimestamps?
     var dataInventory: [KnowledgeSectionSummary]
     var appGuide: [GuideTopic]
     var notes: [String]
     var purposeDraft: PurposeDraftSummary?
     var fulfillmentSetup: FulfillmentSetupSummary?
     var personalization: PersonalizationSummary?
+    var reflectionJournal: ReflectionJournalSummary?
+    var shareAttachmentPreview: ShareAttachmentPreview?
 
     func minimalized() -> LoomAIContextSnapshot {
         LoomAIContextSnapshot(
             generatedAt: generatedAt,
+            personalizationHash: personalizationHash,
+            diagnostic: diagnostic.map {
+                .init(
+                    stress: String($0.stress.prefix(120)),
+                    breaksFirst: String($0.breaksFirst.prefix(120)),
+                    areas: Array($0.areas.prefix(7)),
+                    planningStyle: String($0.planningStyle.prefix(120)),
+                    firstChange: String($0.firstChange.prefix(120)),
+                    rootCause: String($0.rootCause.prefix(220)),
+                    nextDirection: String($0.nextDirection.prefix(220))
+                )
+            },
             drivingForce: drivingForce.map {
                 .init(
                     vision: String($0.vision.prefix(220)),
@@ -102,6 +177,7 @@ struct LoomAIContextSnapshot: Codable {
                 .init(
                     id: $0.id,
                     name: $0.name,
+                    colorKey: $0.colorKey,
                     mission: String($0.mission.prefix(140)),
                     identity: Array($0.identity.prefix(4)),
                     littleWins: Array($0.littleWins.prefix(4)),
@@ -113,6 +189,21 @@ struct LoomAIContextSnapshot: Codable {
             activeOutcomes: Array(activeOutcomes.prefix(6)),
             currentWeekActionBlocks: Array(currentWeekActionBlocks.prefix(4)),
             recentActivity: recentActivity,
+            capture: capture.map {
+                .init(
+                    totalCount: $0.totalCount,
+                    topItems: Array($0.topItems.prefix(6)).map { String($0.prefix(120)) },
+                    quickCompletionsLast7Days: $0.quickCompletionsLast7Days,
+                    recurringRuleCount: $0.recurringRuleCount
+                )
+            },
+            recentlyDeleted: recentlyDeleted.map {
+                .init(
+                    totalCount: $0.totalCount,
+                    sourceCounts: Array($0.sourceCounts.prefix(8))
+                )
+            },
+            sectionTimestamps: sectionTimestamps,
             dataInventory: Array(dataInventory.prefix(16)).map {
                 .init(
                     id: $0.id,
@@ -159,26 +250,94 @@ struct LoomAIContextSnapshot: Codable {
                     historyCount: value.historyCount,
                     lastChangedAt: value.lastChangedAt
                 )
+            },
+            reflectionJournal: reflectionJournal.map { summary in
+                .init(
+                    totalEntryCount: summary.totalEntryCount,
+                    recentEntries: Array(summary.recentEntries.prefix(6)).map { entry in
+                        .init(
+                            completedAt: entry.completedAt,
+                            weekStart: entry.weekStart,
+                            text: String(entry.text.prefix(260))
+                        )
+                    },
+                    monthlyDigests: Array(summary.monthlyDigests.prefix(6)).map { digest in
+                        .init(
+                            monthLabel: digest.monthLabel,
+                            from: digest.from,
+                            to: digest.to,
+                            entryCount: digest.entryCount,
+                            summary: String(digest.summary.prefix(220))
+                        )
+                    }
+                )
+            },
+            shareAttachmentPreview: shareAttachmentPreview.map { preview in
+                .init(
+                    sourceApp: preview.sourceApp.map { String($0.prefix(120)) },
+                    sourceTitle: preview.sourceTitle.map { String($0.prefix(220)) },
+                    attachmentTypes: Array(preview.attachmentTypes.prefix(8)),
+                    textPreview: preview.textPreview.map { String($0.prefix(500)) },
+                    urlHostPath: preview.urlHostPath.map { String($0.prefix(220)) }
+                )
             }
         )
     }
+
+    func compactedForLoomAI() -> LoomAIContextSnapshot {
+        var snapshot = minimalized()
+        snapshot.dataInventory = snapshot.dataInventory.map { compactedInventoryEntry($0) }
+        snapshot.appGuide = Array(snapshot.appGuide.prefix(6))
+        snapshot.notes = Array(snapshot.notes.prefix(3))
+        snapshot.recentlyDeleted = snapshot.recentlyDeleted.map {
+            .init(
+                totalCount: $0.totalCount,
+                sourceCounts: Array($0.sourceCounts.prefix(3))
+            )
+        }
+        return snapshot
+    }
+
+    private func compactedInventoryEntry(_ entry: KnowledgeSectionSummary) -> KnowledgeSectionSummary {
+        var compact = entry
+        let lowSignalSection = Self.compactedSectionIDs.contains(entry.id)
+        let emptyCurrent = (entry.currentCount ?? 0) == 0
+        if lowSignalSection || emptyCurrent {
+            compact.sampleItems = []
+            compact.keySignals = Array(entry.keySignals.prefix(3))
+            return compact
+        }
+        compact.keySignals = Array(entry.keySignals.prefix(4))
+        compact.sampleItems = Array(entry.sampleItems.prefix(2))
+        return compact
+    }
+
+    private static let compactedSectionIDs: Set<String> = [
+        "purpose_history",
+        "fulfillment_history",
+        "completed_outcomes",
+        "action_blocks_actions_detail",
+        "action_blocks_completed",
+        "vacation_mode",
+        "recently_deleted",
+        "supporting_catalogs"
+    ]
 }
 
 @MainActor
 final class LoomAIViewModel: ObservableObject {
-    private struct DailyAPICostLedger: Codable {
+    private struct DailyChatSpendLedger: Codable {
         var dayKey: String
+        var userKey: String
+        var sentCount: Int
         var spentUSD: Double
     }
 
-    private enum DailyBudgetConfig {
-        static let maxUSD: Double = 0.20
-        static let estimatedCharsPerToken: Double = 4.0
-        static let assumedInputUSDPer1KTokens: Double = 0.0015
-        static let assumedOutputUSDPer1KTokens: Double = 0.0060
-        static let expectedOutputTokensPerCall: Double = 420
-        static let safetyMultiplier: Double = 1.15
-        static let defaultsKey = "loomAI.chatDailyAPICost.v1"
+    private enum DailyChatLimitConfig {
+        static let maxDailyEstimatedCostUSD: Double = 0.10
+        static let warningThresholdRatio: Double = 0.75
+        static let fallbackEstimatedCostPerReplyUSD: Double = 0.01
+        static let defaultsKey = "loomAI.chatDailyMessageLimit.v1"
     }
 
     struct DebugFailureDetail {
@@ -194,6 +353,8 @@ final class LoomAIViewModel: ObservableObject {
     @Published var suggestedPromptChips: [String] = []
     @Published var followUpPromptChips: [String] = []
     @Published var debugFailureDetail: DebugFailureDetail?
+    @Published var remainingDailyResponses: Int = 10
+    @Published var dailyEstimatedSpendUSD: Double = 0
     #if DEBUG
     struct RequestDebugSummary {
         var contextBytes: Int
@@ -209,6 +370,23 @@ final class LoomAIViewModel: ObservableObject {
     private var sendTimestamps: [Date] = []
     private let defaultThreadKey = "default"
     private var lastFollowUpPromptSourceSignature: String?
+    private var promptChipShuffleCounter: UInt64 = 0
+    private var recentPromptChipHistory: [String] = []
+    private let maxPromptChipHistorySize = 36
+    private let compactContextDefaultsKey = "loom.ai.context.compact.enabled"
+
+    init() {
+        refreshRemainingDailyResponses()
+    }
+
+    var isDailyLimitReached: Bool {
+        dailyEstimatedSpendUSD >= DailyChatLimitConfig.maxDailyEstimatedCostUSD
+    }
+
+    var shouldShowFiveLeftWarning: Bool {
+        guard !isDailyLimitReached else { return false }
+        return dailyEstimatedSpendUSD >= (DailyChatLimitConfig.maxDailyEstimatedCostUSD * DailyChatLimitConfig.warningThresholdRatio)
+    }
 
     func refreshLatestActions(from messages: [LoomAIChatMessage]) {
         latestSuggestedActions = LoomAIChatMessageActionsCodec.decode(
@@ -229,6 +407,11 @@ final class LoomAIViewModel: ObservableObject {
     func sendCurrentMessage(in context: ModelContext, threadKey: String) async {
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !isSending else { return }
+        refreshRemainingDailyResponses()
+        guard remainingDailyResponses > 0 else {
+            errorMessage = "Daily LoomAI limit reached. Resets tomorrow."
+            return
+        }
 
         let now = Date()
         if let lastSendAt, let lastSendSignature, now.timeIntervalSince(lastSendAt) < 0.8, lastSendSignature == trimmed {
@@ -267,45 +450,11 @@ final class LoomAIViewModel: ObservableObject {
                 sortBy: [SortDescriptor(\LoomAIChatMessage.createdAt, order: .forward)]
             ))
             .filter { $0.threadKey == threadKey }
-            let contextSnapshot = try buildContextSnapshot(in: context)
+            let contextSnapshot = compactedSnapshotIfEnabled(try buildContextSnapshot(in: context))
 
-            let systemPrompt = """
-            You are LoomAI. Use the provided Loom context to answer questions and suggest practical next steps.
-            Loom structure: Purpose = who the user is (vision + passions). Fulfillment Areas = why they live (life domains).
-            Goals/Outcomes = what they want. Actions/Blocks = how they act weekly.
-            Prefer concise, actionable answers.
-            If you are confident (the context clearly supports a practical next step), return 1-3 CTA actions the app can render as buttons.
-            Prefer CTAs that directly modify Loom data when appropriate (for example a Little Win in a fulfillment area that is slipping).
-            You may also suggest high-confidence improvements to Fulfillment Missions, Fulfillment Identities, Purpose Vision, and Passions.
-            Only suggest adding a new Fulfillment Area when many actions/outcomes clearly do not fit existing active areas.
-            Target 2-3 high-quality Little Wins per Fulfillment Area.
-            You may suggest multiple Little Wins for the same category only when confidence is high that each is distinct and high-value.
-            Review any existing Little Wins in the relevant category and use logic: if one is weak, generic, placeholder, or clearly improvable, suggest revising/replacing it.
-            When suggesting a Little Win, return an action of type "createLittleWin" with payload keys:
-            - "categoryID" (preferred UUID string if known)
-            - "categoryName" (fallback category title)
-            - "activity" (the suggested Little Win text)
-            Respect Loom rules: each Fulfillment Area can only have up to 3 Little Wins.
-            If the target category already has 3 and a better Little Win is warranted, return "replaceLittleWin" with:
-            - "categoryID" / "categoryName"
-            - "replaceActivity" (existing Little Win text to replace)
-            - "activity" (new Little Win text)
-            Other supported actions:
-            - "replaceFulfillmentMission" {categoryID/categoryName, mission}
-            - "addFulfillmentIdentity" {categoryID/categoryName, identity}
-            - "replaceFulfillmentIdentity" {categoryID/categoryName, replaceIdentity, identity}
-            - "replacePurposeVision" {vision}
-            - "addPassion" {emotion: love|thrill|vows|hate, passion, optional categoryID/categoryName}
-            - "launchAddFulfillmentAreaPrefill" {categoryName, mission, identities, littleWins, connectedPassions}
-            Keep Little Win text card-friendly: target ~50 characters and never exceed 150 characters.
-            Example action:
-            {"id":"lw-1","title":"Add Little Win: 10-minute walk","type":"createLittleWin","payload":{"categoryName":"Health & Energy","activity":"10-minute walk after lunch"}}
-            If confidence is low or the best next step is unclear, return no actions.
-            """
-
-            let outgoing = ([LoomAIService.TransportMessage(role: "system", content: systemPrompt)] + history.suffix(20).map {
+            let outgoing = history.suffix(20).map {
                 LoomAIService.TransportMessage(role: $0.roleRaw, content: $0.content)
-            })
+            }
 
             #if DEBUG
             let requestDebug = makeRequestDebugSummary(context: contextSnapshot, messageCount: outgoing.count)
@@ -313,13 +462,17 @@ final class LoomAIViewModel: ObservableObject {
             print("[LoomAI] LoomAI contextBytes=\(requestDebug.contextBytes) keys=\(requestDebug.contextKeys) messageCount=\(requestDebug.messageCount)")
             #endif
 
-            guard reserveDailyBudgetForChatCall(messages: outgoing, context: contextSnapshot) else {
-                errorMessage = "LoomAI daily limit reached."
-                isSending = false
-                return
-            }
-
-            let response = try await service.sendChat(messages: outgoing, context: contextSnapshot)
+            let response = try await service.sendChat(
+                messages: outgoing,
+                context: contextSnapshot,
+                intent: "loomai_chat",
+                screen: "loomai_chat",
+                userLocalDate: Self.dayKeyFormatter.string(from: Date()),
+                timezone: TimeZone.current.identifier,
+                remainingDailyResponses: remainingDailyResponses
+            )
+            guard !Task.isCancelled else { return }
+            _ = incrementDailySpendLedger(with: response)
             let replyText = response.message.trimmingCharacters(in: .whitespacesAndNewlines)
             let finalReply = replyText.isEmpty ? "Empty response from LoomAI proxy." : replyText
             let assistantPreviewMessage = LoomAIChatMessage(
@@ -327,6 +480,7 @@ final class LoomAIViewModel: ObservableObject {
                 threadKey: thread.threadKey,
                 roleRaw: LoomAIChatRole.assistant.rawValue,
                 content: finalReply,
+                chipsJSON: LoomAIChatMessageChipsCodec.encode(response.chips),
                 actionsJSON: LoomAIChatMessageActionsCodec.encode(response.actions),
                 debugJSON: LoomAIDebugCodec.encode(response.debug)
             )
@@ -335,6 +489,7 @@ final class LoomAIViewModel: ObservableObject {
                 messages: updatedHistory,
                 contextSnapshot: contextSnapshot
             )
+            guard !Task.isCancelled else { return }
             await MainActor.run {
                 let assistant = assistantPreviewMessage
                 context.insert(assistant)
@@ -344,8 +499,15 @@ final class LoomAIViewModel: ObservableObject {
                 thread.updatedAt = .now
                 try? context.save()
                 latestSuggestedActions = response.actions
+                followUpPromptChips = response.chips.map(\.title)
+                refreshRemainingDailyResponses()
             }
-            await refreshFollowUpPromptChipsViaAI(in: context, threadMessages: updatedHistory)
+            guard !Task.isCancelled else { return }
+            if response.chips.isEmpty {
+                await refreshFollowUpPromptChipsViaAI(in: context, threadMessages: updatedHistory)
+            }
+        } catch is CancellationError {
+            // Refresh/new-thread cancellation should stop silently without inserting an error reply.
         } catch {
             let message = (error as NSError).localizedDescription
             let serviceError = error as? LoomAIService.LoomAIServiceError
@@ -377,6 +539,11 @@ final class LoomAIViewModel: ObservableObject {
         isSending = false
     }
 
+    private func compactedSnapshotIfEnabled(_ snapshot: LoomAIContextSnapshot) -> LoomAIContextSnapshot {
+        let isEnabled = UserDefaults.standard.object(forKey: compactContextDefaultsKey) as? Bool ?? true
+        return isEnabled ? snapshot.compactedForLoomAI() : snapshot
+    }
+
     #if DEBUG
     private func makeRequestDebugSummary(context: LoomAIContextSnapshot, messageCount: Int) -> RequestDebugSummary {
         let encoder = JSONEncoder()
@@ -399,14 +566,14 @@ final class LoomAIViewModel: ObservableObject {
     @discardableResult
     func executeSuggestedAction(_ action: LoomAISuggestedAction, in context: ModelContext) -> Bool {
         switch action.type {
-        case "createAction":
+        case "createAction", "createCaptureAction", "addPlanSuggestion":
             let title = action.payload["text"] ?? action.payload["title"] ?? action.title
             let item = RollingCaptureItem(text: title, isGhost: false)
             context.insert(item)
             try? context.save()
             errorMessage = nil
             return true
-        case "replaceFulfillmentMission":
+        case "replaceFulfillmentMission", "updateFulfillmentMission":
             let mission = (action.payload["mission"] ?? action.payload["text"] ?? action.payload["purpose"] ?? "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !mission.isEmpty else {
@@ -474,7 +641,7 @@ final class LoomAIViewModel: ObservableObject {
             try? context.save()
             errorMessage = nil
             return true
-        case "replacePurposeVision":
+        case "replacePurposeVision", "updatePurposeVision":
             let vision = (action.payload["vision"] ?? action.payload["text"] ?? "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !vision.isEmpty else {
@@ -492,10 +659,10 @@ final class LoomAIViewModel: ObservableObject {
             try? context.save()
             errorMessage = nil
             return true
-        case "addPassion":
+        case "addPassion", "addPassionItem":
             let passionText = (action.payload["passion"] ?? action.payload["title"] ?? action.payload["text"] ?? "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            let rawEmotion = (action.payload["emotion"] ?? "love")
+            let rawEmotion = (action.payload["emotion"] ?? action.payload["passionType"] ?? "love")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .lowercased()
             let emotion = ["love", "thrill", "vows", "hate"].contains(rawEmotion) ? rawEmotion : "love"
@@ -541,7 +708,7 @@ final class LoomAIViewModel: ObservableObject {
             NotificationCenter.default.post(name: .loomAIOpenAddFulfillmentAreaPrefill, object: nil)
             errorMessage = nil
             return true
-        case "createLittleWin":
+        case "createLittleWin", "addLittleWin":
             let activity = clampedLittleWinActivityText(action.payload["activity"] ?? action.payload["text"] ?? action.title)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !activity.isEmpty else {
@@ -552,7 +719,7 @@ final class LoomAIViewModel: ObservableObject {
             let categories = (try? context.fetch(FetchDescriptor<Fulfillment>())) ?? []
             let targetCategory: Fulfillment?
 
-            if let categoryIDString = action.payload["categoryID"],
+            if let categoryIDString = action.payload["categoryID"] ?? action.payload["categoryId"],
                let categoryID = UUID(uuidString: categoryIDString) {
                 targetCategory = categories.first(where: { $0.category_id == categoryID })
             } else if let categoryName = action.payload["categoryName"]?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -608,7 +775,7 @@ final class LoomAIViewModel: ObservableObject {
 
             let categories = (try? context.fetch(FetchDescriptor<Fulfillment>())) ?? []
             let targetCategory: Fulfillment?
-            if let categoryIDString = action.payload["categoryID"],
+            if let categoryIDString = action.payload["categoryID"] ?? action.payload["categoryId"],
                let categoryID = UUID(uuidString: categoryIDString) {
                 targetCategory = categories.first(where: { $0.category_id == categoryID })
             } else if let categoryName = action.payload["categoryName"]?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -650,11 +817,36 @@ final class LoomAIViewModel: ObservableObject {
             return true
         case "createOutcome":
             let title = action.payload["title"] ?? action.title
-            let category = action.payload["category"] ?? "Mind & Meaning"
+            let resolvedCategory: String = {
+                if let categoryIDString = action.payload["categoryID"] ?? action.payload["categoryId"],
+                   let categoryID = UUID(uuidString: categoryIDString),
+                   let category = ((try? context.fetch(FetchDescriptor<Fulfillment>())) ?? []).first(where: { $0.category_id == categoryID }) {
+                    return category.category
+                }
+                return action.payload["category"] ?? action.payload["categoryName"] ?? "Mind & Meaning"
+            }()
             let start = Calendar.current.startOfDay(for: .now)
             let end = Calendar.current.date(byAdding: .day, value: 30, to: start) ?? start
-            let outcome = Outcomes(category: category, outcome: title, reasons: "", start: start, end: end, rank: 0)
+            let outcome = Outcomes(category: resolvedCategory, outcome: title, reasons: "", start: start, end: end, rank: 0)
             context.insert(outcome)
+            let measurableFlag = (action.payload["measurable"] ?? "").lowercased()
+            let isMeasurable = measurableFlag == "true" || measurableFlag == "1" || measurableFlag == "yes"
+            if isMeasurable {
+                let unit = action.payload["unit"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+                context.insert(
+                    OutcomesMeasure(
+                        outcome_id: outcome.outcome_id,
+                        measure: 0,
+                        measuredAt: .now,
+                        measure_amt: 1,
+                        measure_updated: .now,
+                        direction: nil,
+                        format: "Number",
+                        unit: (unit?.isEmpty == false) ? unit : nil,
+                        decimalPlaces: 0
+                    )
+                )
+            }
             try? context.save()
             errorMessage = nil
             return true
@@ -671,14 +863,29 @@ final class LoomAIViewModel: ObservableObject {
         }
         do {
             let snapshot = try buildContextSnapshot(in: context)
-            suggestedPromptChips = makeDynamicPromptChips(from: snapshot, threadMessages: threadMessages)
+            promptChipShuffleCounter &+= 1
+            let dynamic = makeDynamicPromptChips(
+                from: snapshot,
+                threadMessages: threadMessages,
+                rotationSeed: promptChipShuffleCounter
+            )
+            let diversified = diversifyPromptChips(dynamic, maxCount: 12)
+            suggestedPromptChips = ensureFulfillmentSelectorChipInLeadingSlots(
+                diversified,
+                categories: snapshot.fulfillmentCategories.map(\.name),
+                maxCount: 12
+            )
             followUpPromptChips = []
         } catch {
-            suggestedPromptChips = [
+            suggestedPromptChips = diversifyPromptChips([
                 "What should I focus on this week?",
-                "Which fulfillment area is slipping?",
-                "What is my highest-impact next action?"
-            ].shuffled()
+                "Give me one high-impact move for today",
+                "Audit my action blocks for bottlenecks",
+                "Help me improve a weak Little Win",
+                "How aligned are my actions with my Purpose?",
+                "Turn my Capture list into priorities",
+                "Show me the next best Loom workflow"
+            ], maxCount: 10)
             followUpPromptChips = []
         }
     }
@@ -690,30 +897,6 @@ final class LoomAIViewModel: ObservableObject {
             return
         }
         await refreshFollowUpPromptChipsViaAI(in: context, threadMessages: threadMessages)
-    }
-
-    private struct FollowUpPromptSuggestionResponse: Decodable {
-        let showSuggestions: Bool?
-        let prompts: [String]
-        let confidence: String?
-
-        private enum CodingKeys: String, CodingKey {
-            case showSuggestions
-            case show
-            case prompts
-            case suggestions
-            case confidence
-        }
-
-        init(from decoder: Decoder) throws {
-            let c = try decoder.container(keyedBy: CodingKeys.self)
-            showSuggestions = (try? c.decode(Bool.self, forKey: .showSuggestions))
-                ?? (try? c.decode(Bool.self, forKey: .show))
-            prompts = (try? c.decode([String].self, forKey: .prompts))
-                ?? (try? c.decode([String].self, forKey: .suggestions))
-                ?? []
-            confidence = try? c.decode(String.self, forKey: .confidence)
-        }
     }
 
     private func refreshFollowUpPromptChipsViaAI(in context: ModelContext, threadMessages: [LoomAIChatMessage]) async {
@@ -733,77 +916,44 @@ final class LoomAIViewModel: ObservableObject {
 
         do {
             let snapshot = try buildContextSnapshot(in: context)
-            let transcriptLines = recent.map { message in
-                let role = message.roleRaw.capitalized
-                let content = message.content
-                    .replacingOccurrences(of: "\n", with: " ")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                return "\(role): \(content)"
-            }
-            let generatorInstruction = """
-            Generate 0-3 high-confidence follow-up prompts for the user to ask next in Loom.
-            Only suggest prompts if they are likely high-value based on:
-            1) the broader Loom app context
-            2) the most recent assistant response
-            3) the last few messages in this chat
-
-            Requirements:
-            - Return ONLY JSON
-            - If no strong follow-ups exist, set showSuggestions=false and prompts=[]
-            - Prompts should be concise, high-value, and actionable
-            - Prefer prompts that advance decision quality or execution
-            - Prefer prompts that help the user improve/edit something inside Loom (not generic lifestyle advice)
-            - Favor prompts that could lead to a clear Loom CTA (add/replace/revise) when confidence is high
-            - Use APP_CONTEXT dataInventory/appGuide to navigate what Loom tracks before suggesting prompts
-            - Only suggest prompts tied to tracked Loom areas such as Purpose, Vision, Passions, Fulfillment Areas, Missions, Identities, Little Wins, Outcomes, Capture, Action Blocks, Vacation Mode, or Recently Deleted
-            - If a concept is not explicitly tracked in APP_CONTEXT, do not suggest it as a follow-up chip
-            - Avoid repeating prompts already implied by the last assistant response
-            - Each prompt should be short (target under 80 chars)
-
-            Return JSON exactly:
-            {"showSuggestions":true,"prompts":["..."],"confidence":"high"}
-
-            Recent chat:
-            \(transcriptLines.joined(separator: "\n"))
-            """
-
-            guard reserveDailyBudgetForChatCall(
-                messages: [.init(role: "user", content: generatorInstruction)],
-                context: snapshot
-            ) else {
-                followUpPromptChips = []
-                return
-            }
-
-            let response = try await service.sendChat(
-                messages: [.init(role: "user", content: generatorInstruction)],
-                context: snapshot
+            promptChipShuffleCounter &+= 1
+            let fallback = makeDynamicPromptChips(
+                from: snapshot,
+                threadMessages: threadMessages,
+                rotationSeed: promptChipShuffleCounter
             )
-
-            let raw = response.message.trimmingCharacters(in: .whitespacesAndNewlines)
-            let data = Data(raw.utf8)
-            let parsed = try? JSONDecoder().decode(FollowUpPromptSuggestionResponse.self, from: data)
-            let prompts = (parsed?.prompts ?? [])
-                .map { $0.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-                .map { String($0.prefix(120)) }
-
-            let shouldShow = (parsed?.showSuggestions ?? false) && !(parsed?.confidence?.lowercased() == "low")
-            followUpPromptChips = shouldShow ? Array(prompts.prefix(3)) : []
+            let serverChips = LoomAIChatMessageChipsCodec.decode(
+                threadMessages.last(where: { $0.roleRaw == LoomAIChatRole.assistant.rawValue })?.chipsJSON
+            ).map(\.title)
+            let combined = diversifyPromptChips(serverChips + fallback, maxCount: 6)
+            followUpPromptChips = ensureFulfillmentSelectorChipInLeadingSlots(
+                combined,
+                categories: snapshot.fulfillmentCategories.map(\.name),
+                maxCount: 6
+            )
             lastFollowUpPromptSourceSignature = signature
         } catch {
-            // Fail closed: hide post-chat suggestions if we can't generate them confidently.
             followUpPromptChips = []
         }
     }
 
-    private func makeDynamicPromptChips(from snapshot: LoomAIContextSnapshot, threadMessages: [LoomAIChatMessage]) -> [String] {
-        var chips: [String] = []
+    private func makeDynamicPromptChips(
+        from snapshot: LoomAIContextSnapshot,
+        threadMessages: [LoomAIChatMessage],
+        rotationSeed: UInt64 = 0
+    ) -> [String] {
+        var grouped: [String: [String]] = [:]
         let now = Date()
 
         func normalized(_ text: String) -> String {
             text.trimmingCharacters(in: .whitespacesAndNewlines)
                 .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        }
+
+        func add(_ group: String, _ chip: String) {
+            let value = normalized(chip)
+            guard !value.isEmpty else { return }
+            grouped[group, default: []].append(value)
         }
 
         func isLowSignal(_ text: String) -> Bool {
@@ -877,10 +1027,36 @@ final class LoomAIViewModel: ObservableObject {
         let passionGapCandidates = fulfillments.filter { category in
             category.connectedPassions.isEmpty
         }
+        let rotatingCategoryNames: [String] = {
+            var names: [String] = []
+            func appendUnique(_ value: String?) {
+                guard let value else { return }
+                let trimmed = value
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+                guard !trimmed.isEmpty else { return }
+                if !names.contains(where: { $0.caseInsensitiveCompare(trimmed) == .orderedSame }) {
+                    names.append(trimmed)
+                }
+            }
+            appendUnique(weakestFulfillment?.name)
+            appendUnique(secondaryFulfillment?.name)
+            for category in fulfillments.shuffled() {
+                appendUnique(category.name)
+                if names.count >= 4 { break }
+            }
+            return Array(names.prefix(4))
+        }()
+
+        for categoryName in rotatingCategoryNames {
+            add("category_rotate", "How can I improve \(categoryName) this week?")
+            add("category_rotate", "Give me one next step for \(categoryName)")
+            add("category_rotate", "Which action block best supports \(categoryName)?")
+        }
 
         if let weakestFulfillment {
-            chips.append("How can I improve \(weakestFulfillment.name) this week?")
-            chips.append("Why is \(weakestFulfillment.name) slipping?")
+            add("fulfillment", "How can I improve \(weakestFulfillment.name) this week?")
+            add("insight", "What is causing \(weakestFulfillment.name) to slip?")
         }
 
         if let littleWinCategory = pickOne(
@@ -889,23 +1065,23 @@ final class LoomAIViewModel: ObservableObject {
             }.prefix(4))
         ) {
             if littleWinCategory.littleWins.filter({ !normalized($0).isEmpty }).count >= 3 {
-                chips.append("Which \(littleWinCategory.name) Little Win should I replace?")
+                add("little_wins", "Which \(littleWinCategory.name) Little Win should I replace?")
             } else {
-                chips.append("What daily Little Wins would improve \(littleWinCategory.name)?")
+                add("little_wins", "What daily Little Wins would improve \(littleWinCategory.name)?")
             }
         } else if let secondaryFulfillment,
                   secondaryFulfillment.name.caseInsensitiveCompare(weakestFulfillment?.name ?? "") != .orderedSame {
-            chips.append("What daily Little Wins would improve \(secondaryFulfillment.name)?")
+            add("little_wins", "What daily Little Wins would improve \(secondaryFulfillment.name)?")
         }
 
         if let category = pickOne(Array(missionCandidates.prefix(4))) {
             if normalized(category.mission).isEmpty || isLowSignal(category.mission) {
-                chips.append("Help me write a better Mission for \(category.name)")
+                add("fulfillment", "Help me write a better Mission for \(category.name)")
             } else {
-                chips.append("How could I improve the Mission for \(category.name)?")
+                add("fulfillment", "How could I improve the Mission for \(category.name)?")
             }
         } else if let weak = weakestFulfillment {
-            chips.append("How could I improve the Mission for \(weak.name)?")
+            add("fulfillment", "How could I improve the Mission for \(weak.name)?")
         }
 
         if let category = pickOne(Array(identityCandidates.sorted {
@@ -913,26 +1089,35 @@ final class LoomAIViewModel: ObservableObject {
         }.prefix(4))) {
             let existing = category.identity.map(normalized).filter { !$0.isEmpty }
             if existing.isEmpty {
-                chips.append("What Identity should I add for \(category.name)?")
+                add("fulfillment", "What Identity should I add for \(category.name)?")
             } else {
-                chips.append("Which Identity in \(category.name) should I improve?")
+                add("fulfillment", "Which Identity in \(category.name) should I improve?")
             }
         }
 
         if let category = pickOne(Array(maxedLittleWinCandidates.sorted {
             (($0.weeklyScore ?? 999) < ($1.weeklyScore ?? 999))
         }.prefix(4))) {
-            chips.append("Should I replace a weak Little Win in \(category.name)?")
+            add("little_wins", "Should I replace a weak Little Win in \(category.name)?")
         }
 
         let nearTermOutcomes = snapshot.activeOutcomes
             .filter { $0.endDate >= now }
             .sorted { $0.endDate < $1.endDate }
         if let nextOutcome = pickOne(Array(nearTermOutcomes.prefix(4))) {
-            chips.append("What should I do next for \(nextOutcome.title)?")
+            add("outcomes", "What should I do next for \(nextOutcome.title)?")
         }
         if let alternateOutcome = pickOne(Array(nearTermOutcomes.dropFirst().prefix(5))) {
-            chips.append("What is the highest-impact move for \(alternateOutcome.title)?")
+            add("outcomes", "What is the highest-impact move for \(alternateOutcome.title)?")
+        }
+        let rotatingOutcomeTitles = nearTermOutcomes
+            .map(\.title)
+            .map(normalized)
+            .filter { !$0.isEmpty && !isLowSignal($0) }
+            .prefix(3)
+        for outcomeTitle in rotatingOutcomeTitles {
+            add("outcome_rotate", "What should I do next for \(outcomeTitle)?")
+            add("outcome_rotate", "Give me a plan for \(outcomeTitle)")
         }
 
         if let lowestBlock = snapshot.currentWeekActionBlocks
@@ -940,11 +1125,11 @@ final class LoomAIViewModel: ObservableObject {
             .prefix(3)
             .shuffled()
             .first, lowestBlock.completionRatio < 0.6 {
-            chips.append("How do I get unstuck on \(chipLabelForActionBlock(lowestBlock))?")
+            add("action_blocks", "How do I get unstuck on \(chipLabelForActionBlock(lowestBlock))?")
         }
 
         if snapshot.recentActivity.carryoversLast7Days > 0 {
-            chips.append("What patterns are causing my carryovers?")
+            add("action_blocks", "What patterns are causing my carryovers?")
         }
 
         let purposeVisionMissingOrWeak =
@@ -958,73 +1143,207 @@ final class LoomAIViewModel: ObservableObject {
             isLowSignal(snapshot.drivingForce?.purpose ?? "")
 
         if purposeVisionMissingOrWeak && purposePurposeMissingOrWeak {
-            chips.append("Help me clarify my Purpose and Vision")
+            add("purpose", "Help me clarify my Purpose and Vision")
         } else if purposeVisionMissingOrWeak {
-            chips.append("How could I improve my Purpose Vision?")
+            add("purpose", "How could I improve my Purpose Vision?")
         } else {
-            chips.append("How do my actions align with my Purpose this week?")
+            add("purpose", "How do my actions align with my Purpose this week?")
         }
 
         if let drivingForce = snapshot.drivingForce {
             let hasFewPassions = drivingForce.passions.count < 4
             if hasFewPassions {
-                chips.append("What passions should I add based on my current data?")
+                add("purpose", "What passions should I add based on my current data?")
             } else if let category = pickOne(Array(passionGapCandidates.prefix(4))) {
-                chips.append("What passions should I connect to \(category.name)?")
+                add("purpose", "What passions should I connect to \(category.name)?")
             } else {
-                chips.append("What Love/Thrill/Vows/Hate passions should I add next?")
+                add("purpose", "What Love/Thrill/Vows/Hate passions should I add next?")
             }
         }
 
         if let inventory = snapshot.dataInventory.first(where: { $0.id == "action_blocks_actions_detail" }),
            (inventory.currentCount ?? 0) > 15 {
-            chips.append("Do my actions fit my current Fulfillment Areas?")
-            chips.append("Should I add another Fulfillment Area based on my actions?")
+            add("fulfillment", "Do my actions fit my current Fulfillment Areas?")
+            add("fulfillment", "Should I add another Fulfillment Area based on my actions?")
         }
 
         if let inventory = snapshot.dataInventory.first(where: { $0.id == "capture" }),
            (inventory.currentCount ?? 0) > 12 {
-            chips.append("What in Capture should I turn into real execution next?")
+            add("capture", "What in Capture should I turn into real execution next?")
         }
 
         if let inventory = snapshot.dataInventory.first(where: { $0.id == "recently_deleted" }),
            (inventory.currentCount ?? 0) > 0 {
-            chips.append("Anything worth restoring from Recently Deleted?")
+            add("capture", "Anything worth restoring from Recently Deleted?")
         }
 
         if let inventory = snapshot.dataInventory.first(where: { $0.id == "vacation_mode" }),
            inventory.keySignals.contains(where: { $0.localizedCaseInsensitiveContains("enabled") }) {
-            chips.append("How should I plan around Vacation Mode?")
+            add("insight", "How should I plan around Vacation Mode?")
         }
 
         if !threadMessages.isEmpty {
-            chips.append("Summarize my current priorities from this chat")
+            add("response_modes", "Summarize my current priorities from this chat")
         }
 
-        chips.append(contentsOf: [
-            "Which fulfillment area is slipping?",
-            "What should I focus on this week?",
-            "What data am I not tracking enough?"
-        ])
-
-        var seen = Set<String>()
-        let deduped = chips.filter { seen.insert($0).inserted }
-
-        let priorityPrefixes = [
-            "How can I improve ",
-            "What daily Little Wins would improve ",
-            "What should I do next for ",
-            "Help me write a better Mission for ",
-            "What Identity should I add for ",
-            "How could I improve my Purpose Vision?"
+        let showcaseChips: [(String, String)] = [
+            ("response_modes", "Answer in 3 options with tradeoffs"),
+            ("response_modes", "Give me one bold move and one safe move"),
+            ("response_modes", "Give me a 3-step execution plan"),
+            ("action_blocks", "Rank my action blocks by leverage"),
+            ("action_blocks", "What should I deprioritize right now?"),
+            ("capture", "Turn my captures into next actions"),
+            ("capture", "What can I delete from Capture with low risk?"),
+            ("outcomes", "Which outcome should get priority this week?"),
+            ("outcomes", "What metric should I track for my top outcome?"),
+            ("purpose", "Rewrite my Vision in a clearer tone"),
+            ("purpose", "Do my passions match how I spend time?"),
+            ("fulfillment", "Audit my Fulfillment Areas for overlap"),
+            ("fulfillment", "Where is my structure weakest right now?"),
+            ("little_wins", "Suggest one better Little Win I can apply"),
+            ("little_wins", "Which Little Win gives the best momentum?"),
+            ("insight", "What pattern is creating the most stress?"),
+            ("insight", "Where is my biggest consistency gap?")
         ]
-        let priority = deduped.filter { chip in
-            priorityPrefixes.contains(where: { chip.hasPrefix($0) })
+        for (group, chip) in showcaseChips {
+            add(group, chip)
         }
-        let remainder = deduped.filter { chip in
-            !priority.contains(chip)
-        }.shuffled()
-        return Array((priority + remainder).prefix(10))
+
+        let universalFallbacks: [(String, String)] = [
+            ("insight", "Which fulfillment area is slipping?"),
+            ("action_blocks", "What should I focus on this week?"),
+            ("insight", "What data am I not tracking enough?")
+        ]
+        for (group, chip) in universalFallbacks {
+            add(group, chip)
+        }
+
+        let preferredGroupOrder = [
+            "insight",
+            "category_rotate",
+            "outcome_rotate",
+            "action_blocks",
+            "outcomes",
+            "fulfillment",
+            "purpose",
+            "little_wins",
+            "capture",
+            "response_modes"
+        ]
+
+        var buckets: [(group: String, values: [String])] = []
+        var usedGroupNames = Set<String>()
+        for group in preferredGroupOrder {
+            let values = grouped[group] ?? []
+            guard !values.isEmpty else { continue }
+            var seenLocal = Set<String>()
+            let deduped = values.filter { seenLocal.insert($0.lowercased()).inserted }
+            guard !deduped.isEmpty else { continue }
+            let seed = rotationSeed &+ UInt64(bitPattern: Int64(group.hashValue))
+            let rotated = rotatedChips(deduped.shuffled(), seed: seed)
+            buckets.append((group: group, values: rotated))
+            usedGroupNames.insert(group)
+        }
+        for (group, values) in grouped where !usedGroupNames.contains(group) {
+            var seenLocal = Set<String>()
+            let deduped = values.filter { seenLocal.insert($0.lowercased()).inserted }
+            guard !deduped.isEmpty else { continue }
+            let seed = rotationSeed &+ UInt64(bitPattern: Int64(group.hashValue))
+            buckets.append((group: group, values: rotatedChips(deduped.shuffled(), seed: seed)))
+        }
+
+        var selected: [String] = []
+        let maxCount = threadMessages.isEmpty ? 14 : 8
+        var bucketIndex = 0
+        while selected.count < maxCount && !buckets.isEmpty {
+            if bucketIndex >= buckets.count { bucketIndex = 0 }
+            if buckets[bucketIndex].values.isEmpty {
+                buckets.remove(at: bucketIndex)
+                continue
+            }
+            let next = buckets[bucketIndex].values.removeFirst()
+            selected.append(next)
+            bucketIndex += 1
+        }
+
+        return selected
+    }
+
+    private func rotatedChips(_ chips: [String], seed: UInt64) -> [String] {
+        guard chips.count > 1 else { return chips }
+        let offset = Int(seed % UInt64(chips.count))
+        guard offset > 0 else { return chips }
+        return Array(chips[offset...] + chips[..<offset])
+    }
+
+    private func diversifyPromptChips(_ chips: [String], maxCount: Int) -> [String] {
+        guard !chips.isEmpty else { return [] }
+        var seen = Set<String>()
+        let deduped = chips.filter { seen.insert($0.lowercased()).inserted }
+        guard !deduped.isEmpty else { return [] }
+
+        let historySet = Set(recentPromptChipHistory.suffix(20).map { $0.lowercased() })
+        let shuffled = deduped.shuffled()
+        let fresh = shuffled.filter { !historySet.contains($0.lowercased()) }
+        let repeated = shuffled.filter { historySet.contains($0.lowercased()) }
+        let chosen = Array((fresh + repeated).prefix(maxCount))
+
+        if !chosen.isEmpty {
+            recentPromptChipHistory.append(contentsOf: chosen)
+            if recentPromptChipHistory.count > maxPromptChipHistorySize {
+                recentPromptChipHistory.removeFirst(recentPromptChipHistory.count - maxPromptChipHistorySize)
+            }
+        }
+
+        return chosen
+    }
+
+    private func ensureFulfillmentSelectorChipInLeadingSlots(
+        _ chips: [String],
+        categories: [String],
+        maxCount: Int
+    ) -> [String] {
+        guard !chips.isEmpty else { return chips }
+
+        let cleanedCategories: [String] = {
+            var seen = Set<String>()
+            return categories
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .filter { seen.insert($0.lowercased()).inserted }
+        }()
+        guard !cleanedCategories.isEmpty else { return chips }
+
+        func chipHasCategory(_ chip: String) -> Bool {
+            let normalizedChip = chip.lowercased()
+            return cleanedCategories.contains { category in
+                normalizedChip.contains(category.lowercased())
+            }
+        }
+
+        var arranged = chips
+        let leadingCount = min(2, arranged.count)
+        if arranged.prefix(leadingCount).contains(where: chipHasCategory) {
+            return arranged
+        }
+
+        if let existingIndex = arranged.firstIndex(where: chipHasCategory) {
+            let chip = arranged.remove(at: existingIndex)
+            let insertIndex = min(1, arranged.count)
+            arranged.insert(chip, at: insertIndex)
+            return arranged
+        }
+
+        let fallbackChip = "How can I improve \(cleanedCategories[0]) this week?"
+        if !arranged.contains(where: { $0.caseInsensitiveCompare(fallbackChip) == .orderedSame }) {
+            let insertIndex = min(1, arranged.count)
+            arranged.insert(fallbackChip, at: insertIndex)
+        }
+
+        if arranged.count > maxCount {
+            arranged = Array(arranged.prefix(maxCount))
+        }
+        return arranged
     }
 
     func buildContextSnapshot(in context: ModelContext) throws -> LoomAIContextSnapshot {
@@ -1085,6 +1404,7 @@ final class LoomAIViewModel: ObservableObject {
         let fulfillmentScores = try context.fetch(FetchDescriptor<FulfillmentCategoryScoreSnapshot>())
         let passionScoreSnapshots = try context.fetch(FetchDescriptor<PassionScoreSnapshot>())
         let weeklyMindsetEntries = try context.fetch(FetchDescriptor<WeeklyMindsetEntry.Fields>())
+        let diagnosticSnapshots = try context.fetch(FetchDescriptor<DiagnosticsInsightsSnapshot>())
 
         let passionByID = Dictionary(uniqueKeysWithValues: passions.map { ($0.passion_id, $0) })
         let rolesByCategory = Dictionary(grouping: roles, by: \.category_id)
@@ -1102,6 +1422,11 @@ final class LoomAIViewModel: ObservableObject {
                 return "\(p.emotion): \(p.passion)"
             }
         }
+
+        let userKey = PersonalizationUserIdentity.currentUserKey()
+        let latestDiagnosticSnapshot = diagnosticSnapshots
+            .filter { $0.userKey == userKey }
+            .max(by: { $0.generatedAt < $1.generatedAt })
 
         let measureByOutcome = Dictionary(uniqueKeysWithValues: outcomeMeasures.map { ($0.outcome_id, $0) })
         let measureEntriesByOutcome = Dictionary(grouping: outcomeMeasureEntries, by: \.outcome_id)
@@ -1160,6 +1485,7 @@ final class LoomAIViewModel: ObservableObject {
                 LoomAIContextSnapshot.FulfillmentCategorySummary(
                     id: row.category_id.uuidString,
                     name: row.category,
+                    colorKey: FulfillmentCategoryTheme.colorKey(for: row.category),
                     mission: row.category_purpose,
                     identity: Array((rolesByCategory[row.category_id] ?? []).sorted { $0.rank < $1.rank }.map(\.role).prefix(5)),
                     littleWins: Array((fociByCategory[row.category_id] ?? []).sorted { $0.rank < $1.rank }.map(\.activity).prefix(5)),
@@ -1192,6 +1518,45 @@ final class LoomAIViewModel: ObservableObject {
         )
         .compactMap { $0 }
         .max()
+        let diagnosticSummary: LoomAIContextSnapshot.DiagnosticSummary? = personalizationContext.map { personalization in
+            .init(
+                stress: personalization.current.stressSource,
+                breaksFirst: personalization.current.breakPoint,
+                areas: personalization.current.lifeAreasSelected,
+                planningStyle: personalization.current.planningReality,
+                firstChange: personalization.current.desiredChange,
+                rootCause: latestDiagnosticSnapshot?.rootCauseText ?? "",
+                nextDirection: latestDiagnosticSnapshot?.nextDirectionText ?? ""
+            )
+        }
+        let reflectionJournalSummary = buildReflectionJournalSummary(from: reflectionArchives)
+        let captureSummary = LoomAIContextSnapshot.CaptureSummary(
+            totalCount: captureItems.count,
+            topItems: Array(
+                captureItems
+                    .sorted { $0.createdAt > $1.createdAt }
+                    .prefix(8)
+                    .map { String($0.text.prefix(120)) }
+            ),
+            quickCompletionsLast7Days: quickCompletes.filter { $0.completedAt >= last7Start }.count,
+            recurringRuleCount: recurringCaptureRules.count
+        )
+        let recentlyDeletedSummary = LoomAIContextSnapshot.RecentlyDeletedSummary(
+            totalCount: recentlyDeletedItems.count,
+            sourceCounts: Dictionary(grouping: recentlyDeletedItems, by: \.source)
+                .map { key, value in "\(key)=\(value.count)" }
+                .sorted()
+        )
+        let sectionTimestamps = LoomAIContextSnapshot.SectionTimestamps(
+            purpose: drivingForces.map(\.updatedAt).max(),
+            fulfillment: fulfillments.map(\.updatedAt).max(),
+            outcomes: outcomes.map(\.updatedAt).max(),
+            capture: captureItems.map(\.createdAt).max(),
+            actionBlocks: plannedChunkActions.map(\.createdAt).max(),
+            reflections: reflectionArchives.map(\.completedAt).max(),
+            diagnostics: latestDiagnosticSnapshot?.generatedAt,
+            recentlyDeleted: recentlyDeletedItems.map(\.deletedAt).max()
+        )
         var inventory = buildDataInventory(
             now: now,
             weekStart: weekStart,
@@ -1244,6 +1609,7 @@ final class LoomAIViewModel: ObservableObject {
             reflectionActions: reflectionActions,
             reflectionOutcomes: reflectionOutcomes,
             reflectionOutcomeContributions: reflectionOutcomeContributions,
+            reflectionJournalSummary: reflectionJournalSummary,
             weeklyMindsetEntries: weeklyMindsetEntries,
             littleWinsCompletions: littleWinsCompletions,
             vacationArchives: vacationArchives
@@ -1295,9 +1661,31 @@ final class LoomAIViewModel: ObservableObject {
                 .prefix(3)
                 .map(\.name)
         )
+        let currentPersonalization = personalizationContext?.current
+        let personalizationStress = currentPersonalization?.stressSource ?? ""
+        let personalizationBreakPoint = currentPersonalization?.breakPoint ?? ""
+        let personalizationPlanning = currentPersonalization?.planningReality ?? ""
+        let personalizationDesiredChange = currentPersonalization?.desiredChange ?? ""
+        let drivingVision = drivingForce?.vision ?? ""
+        let drivingPurpose = drivingForce?.purpose ?? ""
+        let categoryNamesJoined = categories.map(\.name).joined(separator: "|")
+        let categoryMissionsJoined = categories.map(\.mission).joined(separator: "|")
+        let hashParts: [String] = [
+            personalizationStress,
+            personalizationBreakPoint,
+            personalizationPlanning,
+            personalizationDesiredChange,
+            drivingVision,
+            drivingPurpose,
+            categoryNamesJoined,
+            categoryMissionsJoined
+        ]
+        let personalizationHash = Self.sha256Hex(hashParts.joined(separator: "\n"))
 
         let snapshot = LoomAIContextSnapshot(
             generatedAt: now,
+            personalizationHash: personalizationHash,
+            diagnostic: diagnosticSummary,
             drivingForce: drivingForce,
             fulfillmentCategories: categories,
             activeOutcomes: activeOutcomes,
@@ -1314,6 +1702,9 @@ final class LoomAIViewModel: ObservableObject {
                 littleWinsCompletionsLast7Days: littleWinsCompletions.filter { $0.completedAt >= last7Start }.count,
                 carryoversLast7Days: carryoverCount
             ),
+            capture: captureSummary,
+            recentlyDeleted: recentlyDeletedSummary,
+            sectionTimestamps: sectionTimestamps,
             dataInventory: inventory,
             appGuide: buildAppGuideTopics(),
             notes: [
@@ -1331,11 +1722,124 @@ final class LoomAIViewModel: ObservableObject {
                     historyCount: personalizationHistoryCount,
                     lastChangedAt: personalizationLastChangedAt
                 )
-            }
+            },
+            reflectionJournal: reflectionJournalSummary,
+            shareAttachmentPreview: nil
         )
 
         return snapshot
     }
+
+    private func buildReflectionJournalSummary(
+        from archives: [ActionBlocksReflectionArchive]
+    ) -> LoomAIContextSnapshot.ReflectionJournalSummary? {
+        let entries = archives
+            .sorted { $0.completedAt > $1.completedAt }
+            .compactMap { archive -> LoomAIContextSnapshot.ReflectionJournalSummary.RecentEntry? in
+                let text = normalizedReflectionJournalText(from: archive)
+                guard !text.isEmpty else { return nil }
+                return .init(
+                    completedAt: archive.completedAt,
+                    weekStart: archive.weekStart,
+                    text: text
+                )
+            }
+
+        guard !entries.isEmpty else { return nil }
+
+        let recentEntries = Array(entries.prefix(30))
+        let olderEntries = Array(entries.dropFirst(30))
+        let monthlyDigests = buildMonthlyJournalDigests(from: olderEntries)
+
+        return .init(
+            totalEntryCount: entries.count,
+            recentEntries: recentEntries,
+            monthlyDigests: monthlyDigests
+        )
+    }
+
+    private func normalizedReflectionJournalText(from archive: ActionBlocksReflectionArchive) -> String {
+        let journal = archive.achievementsText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let magic = archive.magicMomentsText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let power = archive.powerQuestionText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        var pieces: [String] = []
+        if !journal.isEmpty { pieces.append(journal) }
+        if !magic.isEmpty { pieces.append("Magic moments: \(magic)") }
+        if !power.isEmpty { pieces.append("Power question: \(power)") }
+
+        return pieces.joined(separator: " | ").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func buildMonthlyJournalDigests(
+        from olderEntries: [LoomAIContextSnapshot.ReflectionJournalSummary.RecentEntry]
+    ) -> [LoomAIContextSnapshot.ReflectionJournalSummary.MonthlyDigest] {
+        guard !olderEntries.isEmpty else { return [] }
+
+        let calendar = Calendar.current
+        let grouped = Dictionary(grouping: olderEntries) { entry in
+            let comps = calendar.dateComponents([.year, .month], from: entry.completedAt)
+            return "\(comps.year ?? 0)-\(comps.month ?? 0)"
+        }
+
+        let monthFormatter = DateFormatter()
+        monthFormatter.locale = Locale.current
+        monthFormatter.setLocalizedDateFormatFromTemplate("MMMM yyyy")
+
+        return grouped.compactMap { _, entries -> LoomAIContextSnapshot.ReflectionJournalSummary.MonthlyDigest? in
+            guard !entries.isEmpty else { return nil }
+            let sorted = entries.sorted { $0.completedAt < $1.completedAt }
+            guard let from = sorted.first?.completedAt, let to = sorted.last?.completedAt else { return nil }
+            let monthLabel = monthFormatter.string(from: from)
+
+            let terms = topReflectionTerms(from: sorted.map(\.text), maxCount: 3)
+            let summary: String
+            if terms.isEmpty {
+                summary = "\(sorted.count) journal entries focused on execution reflection and follow-through."
+            } else {
+                summary = "\(sorted.count) journal entries emphasized \(terms.joined(separator: ", "))."
+            }
+
+            return .init(
+                monthLabel: monthLabel,
+                from: from,
+                to: to,
+                entryCount: sorted.count,
+                summary: summary
+            )
+        }
+        .sorted { $0.from > $1.from }
+    }
+
+    private func topReflectionTerms(from texts: [String], maxCount: Int) -> [String] {
+        guard maxCount > 0 else { return [] }
+        var counts: [String: Int] = [:]
+
+        for text in texts {
+            let tokens = text.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted)
+            for token in tokens {
+                let cleaned = token.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard cleaned.count >= 4 else { continue }
+                guard !Self.reflectionSummaryStopwords.contains(cleaned) else { continue }
+                counts[cleaned, default: 0] += 1
+            }
+        }
+
+        return counts
+            .sorted { lhs, rhs in
+                if lhs.value == rhs.value { return lhs.key < rhs.key }
+                return lhs.value > rhs.value
+            }
+            .prefix(maxCount)
+            .map { $0.key }
+    }
+
+    private static let reflectionSummaryStopwords: Set<String> = [
+        "about", "after", "again", "been", "being", "came", "could", "didn", "done",
+        "each", "felt", "from", "have", "just", "more", "need", "next", "really",
+        "still", "that", "them", "then", "they", "this", "those", "very", "want",
+        "what", "when", "where", "which", "with", "would", "your"
+    ]
 
     private func buildDataInventory(
         now: Date,
@@ -1389,6 +1893,7 @@ final class LoomAIViewModel: ObservableObject {
         reflectionActions: [ActionBlocksReflectionArchiveAction],
         reflectionOutcomes: [ActionBlocksReflectionArchiveOutcome],
         reflectionOutcomeContributions: [ActionBlocksReflectionOutcomeContribution],
+        reflectionJournalSummary: LoomAIContextSnapshot.ReflectionJournalSummary?,
         weeklyMindsetEntries: [WeeklyMindsetEntry.Fields],
         littleWinsCompletions: [LittleWinsDailyCompletion],
         vacationArchives: [VacationModeArchive]
@@ -1417,6 +1922,12 @@ final class LoomAIViewModel: ObservableObject {
         let goalChangeEvents = outcomeAnalyticsEvents.filter { $0.eventType == "goal_changed" }
         let targetChangeEvents = outcomeAnalyticsEvents.filter { $0.eventType == "target_changed" }
         let recentDeletedSources = Array(Set(recentlyDeletedItems.map(\.source))).sorted().prefix(6)
+        let reflectionRecentSamples = reflectionJournalSummary?.recentEntries.prefix(2).map {
+            "\(Self.shortDateText($0.completedAt)): \(String($0.text.prefix(82)))"
+        } ?? []
+        let reflectionMonthlySamples = reflectionJournalSummary?.monthlyDigests.prefix(2).map {
+            "\($0.monthLabel): \($0.summary)"
+        } ?? []
 
         return [
             .init(
@@ -1569,11 +2080,15 @@ final class LoomAIViewModel: ObservableObject {
                     "completedActionBlockArchives=\(reflectionArchives.count)",
                     "completedActionRows=\(reflectionActions.count)",
                     "outcomeLinks=\(reflectionOutcomes.count)",
-                    "outcomeContributions=\(reflectionOutcomeContributions.count)"
+                    "outcomeContributions=\(reflectionOutcomeContributions.count)",
+                    "journalEntries=\(reflectionJournalSummary?.totalEntryCount ?? 0)",
+                    "journalMonthlySummaries=\(reflectionJournalSummary?.monthlyDigests.count ?? 0)"
                 ],
-                sampleItems: reflectionArchives.sorted { $0.completedAt > $1.completedAt }.prefix(4).map {
-                    "Week of \(Self.shortDateText($0.weekStart))"
-                }
+                sampleItems: Array(
+                    (reflectionRecentSamples + reflectionMonthlySamples + reflectionArchives.sorted { $0.completedAt > $1.completedAt }.prefix(4).map {
+                        "Week of \(Self.shortDateText($0.weekStart))"
+                    }).prefix(6)
+                )
             ),
             .init(
                 id: "vacation_mode",
@@ -1698,52 +2213,81 @@ final class LoomAIViewModel: ObservableObject {
         (value * 10).rounded() / 10
     }
 
-    private func reserveDailyBudgetForChatCall(
-        messages: [LoomAIService.TransportMessage],
-        context: LoomAIContextSnapshot,
-        now: Date = Date()
-    ) -> Bool {
-        let estimatedCost = estimatedChatCallCostUSD(messages: messages, context: context)
-        var ledger = dailyCostLedger(for: now)
-        guard ledger.spentUSD + estimatedCost <= DailyBudgetConfig.maxUSD else { return false }
-        ledger.spentUSD += estimatedCost
-        saveDailyCostLedger(ledger)
-        return true
+    private static func sha256Hex(_ value: String) -> String {
+        let digest = SHA256.hash(data: Data(value.utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
     }
 
-    private func remainingDailyBudgetUSD(now: Date = Date()) -> Double {
-        max(0, DailyBudgetConfig.maxUSD - dailyCostLedger(for: now).spentUSD)
-    }
-
-    private func estimatedChatCallCostUSD(
-        messages: [LoomAIService.TransportMessage],
-        context: LoomAIContextSnapshot
-    ) -> Double {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        let contextBytes = (try? encoder.encode(context).count) ?? 0
-        let messageChars = messages.reduce(0) { total, item in
-            total + item.role.count + item.content.count
-        }
-        let estimatedInputTokens = Double(contextBytes + messageChars) / DailyBudgetConfig.estimatedCharsPerToken
-        let inputCost = (estimatedInputTokens / 1000.0) * DailyBudgetConfig.assumedInputUSDPer1KTokens
-        let outputCost = (DailyBudgetConfig.expectedOutputTokensPerCall / 1000.0) * DailyBudgetConfig.assumedOutputUSDPer1KTokens
-        return (inputCost + outputCost) * DailyBudgetConfig.safetyMultiplier
-    }
-
-    private func dailyCostLedger(for now: Date = Date()) -> DailyAPICostLedger {
+    private func dailySpendLedger(for now: Date = Date()) -> DailyChatSpendLedger {
         let dayKey = Self.dayKeyFormatter.string(from: now)
-        guard let data = UserDefaults.standard.data(forKey: DailyBudgetConfig.defaultsKey),
-              let decoded = try? JSONDecoder().decode(DailyAPICostLedger.self, from: data),
-              decoded.dayKey == dayKey else {
-            return DailyAPICostLedger(dayKey: dayKey, spentUSD: 0)
+        let userKey = PersonalizationUserIdentity.currentUserKey()
+        guard let data = UserDefaults.standard.data(forKey: DailyChatLimitConfig.defaultsKey),
+              let decoded = try? JSONDecoder().decode(DailyChatSpendLedger.self, from: data),
+              decoded.dayKey == dayKey,
+              decoded.userKey == userKey else {
+            return DailyChatSpendLedger(dayKey: dayKey, userKey: userKey, sentCount: 0, spentUSD: 0)
         }
         return decoded
     }
 
-    private func saveDailyCostLedger(_ ledger: DailyAPICostLedger) {
+    private func saveDailySpendLedger(_ ledger: DailyChatSpendLedger) {
         guard let data = try? JSONEncoder().encode(ledger) else { return }
-        UserDefaults.standard.set(data, forKey: DailyBudgetConfig.defaultsKey)
+        UserDefaults.standard.set(data, forKey: DailyChatLimitConfig.defaultsKey)
+    }
+
+    func refreshRemainingDailyResponses(now: Date = Date()) {
+        let ledger = dailySpendLedger(for: now)
+        dailyEstimatedSpendUSD = max(0, ledger.spentUSD)
+        let remainingBudget = max(0, DailyChatLimitConfig.maxDailyEstimatedCostUSD - dailyEstimatedSpendUSD)
+        remainingDailyResponses = max(
+            0,
+            Int((remainingBudget / DailyChatLimitConfig.fallbackEstimatedCostPerReplyUSD).rounded(.down))
+        )
+    }
+
+    @discardableResult
+    private func incrementDailySpendLedger(with response: LoomAIService.LoomAIResponse, now: Date = Date()) -> Bool {
+        var ledger = dailySpendLedger(for: now)
+        guard ledger.spentUSD < DailyChatLimitConfig.maxDailyEstimatedCostUSD else {
+            refreshRemainingDailyResponses(now: now)
+            return false
+        }
+        ledger.sentCount += 1
+        ledger.spentUSD += estimatedCostUSD(for: response)
+        saveDailySpendLedger(ledger)
+        refreshRemainingDailyResponses(now: now)
+        return true
+    }
+
+    private func estimatedCostUSD(for response: LoomAIService.LoomAIResponse) -> Double {
+        guard let usage = response.usage else {
+            return DailyChatLimitConfig.fallbackEstimatedCostPerReplyUSD
+        }
+        let model = (usage.model ?? "gpt-5.2").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let pricing = pricingForModel(model)
+        let inputTokens = max(0, usage.inputTokens)
+        let cachedInputTokens = max(0, usage.cachedInputTokens)
+        let nonCachedInputTokens = max(0, inputTokens - cachedInputTokens)
+        let outputTokens = max(0, usage.outputTokens)
+
+        let inputCost = (Double(nonCachedInputTokens) / 1_000_000.0) * pricing.inputPerM
+        let cachedInputCost = (Double(cachedInputTokens) / 1_000_000.0) * pricing.cachedInputPerM
+        let outputCost = (Double(outputTokens) / 1_000_000.0) * pricing.outputPerM
+        let total = inputCost + cachedInputCost + outputCost
+        return total.isFinite && total > 0 ? total : DailyChatLimitConfig.fallbackEstimatedCostPerReplyUSD
+    }
+
+    private func pricingForModel(_ model: String) -> (inputPerM: Double, cachedInputPerM: Double, outputPerM: Double) {
+        switch model {
+        case "gpt-5.2":
+            return (0.875, 0.0875, 7.00)
+        case "gpt-5.1":
+            return (1.25, 0.125, 10.00)
+        case "gpt-5-mini":
+            return (0.25, 0.025, 2.00)
+        default:
+            return (0.875, 0.0875, 7.00)
+        }
     }
 
     private static let dayKeyFormatter: DateFormatter = {
@@ -1754,10 +2298,6 @@ final class LoomAIViewModel: ObservableObject {
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter
     }()
-
-    private func formatUSD(_ value: Double) -> String {
-        String(format: "%.2f", max(0, value))
-    }
 
     private func requestThreadTitleFromAI(
         messages: [LoomAIChatMessage],
@@ -1791,16 +2331,11 @@ final class LoomAIViewModel: ObservableObject {
         """
 
         do {
-            guard reserveDailyBudgetForChatCall(
-                messages: [.init(role: "user", content: titleInstruction)],
-                context: contextSnapshot
-            ) else {
-                return nil
-            }
-
             let response = try await service.sendChat(
                 messages: [.init(role: "user", content: titleInstruction)],
-                context: contextSnapshot
+                context: contextSnapshot,
+                intent: "chat_thread_title",
+                screen: "loomai_chat_title"
             )
             return sanitizeAPISummarizedThreadTitle(response.message)
         } catch {
@@ -1921,11 +2456,11 @@ final class LoomAIViewModel: ObservableObject {
 
     private func resolveFulfillmentCategory(for action: LoomAISuggestedAction, in context: ModelContext) -> Fulfillment? {
         let categories = (try? context.fetch(FetchDescriptor<Fulfillment>())) ?? []
-        if let categoryIDString = action.payload["categoryID"],
+        if let categoryIDString = action.payload["categoryID"] ?? action.payload["categoryId"],
            let categoryID = UUID(uuidString: categoryIDString) {
             if let match = categories.first(where: { $0.category_id == categoryID }) { return match }
         }
-        if let categoryName = action.payload["categoryName"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+        if let categoryName = (action.payload["categoryName"] ?? action.payload["category"])?.trimmingCharacters(in: .whitespacesAndNewlines),
            !categoryName.isEmpty {
             return categories.first { $0.category.caseInsensitiveCompare(categoryName) == .orderedSame }
         }

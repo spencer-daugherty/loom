@@ -2,12 +2,16 @@ import SwiftUI
 import UIKit
 
 let loomAITroubleshootingDefaultsKey = "loom.enableLoomAITroubleshooting"
+let loomAIDebugDefaultsKey = "loom.enableLoomAIDebug"
 let loomAISlowResponseThresholdMS: Double = 5_000
 
 func registerLoomAITroubleshootingDefaultIfNeeded() {
     let defaults = UserDefaults.standard
     if defaults.object(forKey: loomAITroubleshootingDefaultsKey) == nil {
-        defaults.set(false, forKey: loomAITroubleshootingDefaultsKey)
+        defaults.set(true, forKey: loomAITroubleshootingDefaultsKey)
+    }
+    if defaults.object(forKey: loomAIDebugDefaultsKey) == nil {
+        defaults.set(false, forKey: loomAIDebugDefaultsKey)
     }
 }
 
@@ -64,6 +68,12 @@ func loomAIReportTroubleshootingIfEnabled(details: String) {
     Task { @MainActor in
         LoomAITroubleshootingCenter.shared.report(details: text)
     }
+}
+
+func loomAICopyTroubleshootingToClipboard(_ details: String) {
+    let trimmed = details.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return }
+    UIPasteboard.general.string = trimmed
 }
 
 @MainActor
@@ -245,6 +255,27 @@ struct LoomAITroubleshootingSection: View {
                 .onEnded { _ in
                     UIPasteboard.general.string = details
                 }
+        )
+    }
+}
+
+struct LoomAIBottomCopyTroubleshootingButton: View {
+    let details: String
+
+    var body: some View {
+        Button("Copy troubleshooting") {
+            loomAICopyTroubleshootingToClipboard(details)
+        }
+        .font(.caption.weight(.semibold))
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color.black.opacity(0.08), lineWidth: 1)
         )
     }
 }

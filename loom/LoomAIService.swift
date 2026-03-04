@@ -1,7 +1,7 @@
 import Foundation
 
 struct LoomAIService {
-    private let baseURL = URL(string: "https://loom-ai-proxy.spence0927.workers.dev")!
+    private let baseURL = URL(string: "https://loom-ai-minimal.spence0927.workers.dev")!
     private let diagnosticBaseURL = URL(string: "https://loom-ai-minimal.spence0927.workers.dev")!
     private let session: URLSession
     private let useMockLoomAIResponse = false
@@ -18,6 +18,9 @@ struct LoomAIService {
         var screen: String?
         var requestId: String?
         var requestHash: String?
+        var userLocalDate: String? = nil
+        var timezone: String? = nil
+        var remainingDailyResponses: Int? = nil
     }
 
     struct TransportMessage: Codable {
@@ -31,6 +34,32 @@ struct LoomAIService {
         var client: ClientInfo
     }
 
+    struct PurposeVisionAutoWriteRequest: Codable {
+        var currentVision: String
+        var previousSuggestions: [String]
+        var mode: String
+        var context: LoomAIContextSnapshot
+        var client: ClientInfo
+    }
+
+    struct PurposeProfileInsightsRequest: Codable {
+        var diagnostic: DiagnosticAnswers
+        var rootCause: String
+        var nextDirection: String
+        var vision: String
+        var passions: [String]
+        var client: ClientInfo
+    }
+
+    struct PurposeProfileInsightsResponse: Codable {
+        var profile: String
+        var strength: String
+        var weakness: String
+        var stressTrigger: String
+        var breakingPoint: String
+        var debug: LoomAIDebug?
+    }
+
     struct DiagnosticInsightsRequest: Codable {
         var diagnostic: DiagnosticAnswers
         var client: DiagnosticInsightsClient
@@ -38,26 +67,34 @@ struct LoomAIService {
 
     struct LoomAIResponse: Decodable {
         let message: String
+        let chips: [LoomAIPromptChip]
         let actions: [LoomAIAction]
         let debug: LoomAIDebug?
+        let usage: LoomAIUsage?
         let elapsedMS: Double
 
         private enum CodingKeys: String, CodingKey {
             case message
             case reply
+            case chips
             case actions
             case debug
+            case usage
         }
 
         init(
             message: String,
+            chips: [LoomAIPromptChip] = [],
             actions: [LoomAIAction] = [],
             debug: LoomAIDebug? = nil,
+            usage: LoomAIUsage? = nil,
             elapsedMS: Double = 0
         ) {
             self.message = message
+            self.chips = chips
             self.actions = actions
             self.debug = debug
+            self.usage = usage
             self.elapsedMS = elapsedMS
         }
 
@@ -67,8 +104,10 @@ struct LoomAIService {
                 ?? (try? container.decode(String.self, forKey: .reply))
                 ?? ""
             self.message = message
+            self.chips = (try? container.decode([LoomAIPromptChip].self, forKey: .chips)) ?? []
             self.actions = (try? container.decode([LoomAIAction].self, forKey: .actions)) ?? []
             self.debug = try? container.decode(LoomAIDebug.self, forKey: .debug)
+            self.usage = try? container.decode(LoomAIUsage.self, forKey: .usage)
             self.elapsedMS = 0
         }
     }
@@ -90,8 +129,10 @@ struct LoomAIService {
 
     private struct LoomAIEnvelope: Decodable {
         var message: String
+        var chips: [LoomAIPromptChip]?
         var actions: [LoomAISuggestedAction]?
         var debug: LoomAIDebug?
+        var usage: LoomAIUsage?
     }
 
     private struct RawResponse: Decodable {
@@ -101,7 +142,9 @@ struct LoomAIService {
         var choices: [Choice]?
         var error: ErrorContainer?
         var actions: [RawAction]?
+        var chips: [LoomAIPromptChip]?
         var debug: LoomAIDebug?
+        var usage: LoomAIUsage?
 
         struct Choice: Decodable {
             var message: ChoiceMessage?
@@ -147,6 +190,37 @@ struct LoomAIService {
             var title: String?
             var type: String?
             var payload: [String: String]?
+
+            init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                id = try? container.decode(String.self, forKey: .id)
+                title = try? container.decode(String.self, forKey: .title)
+                type = try? container.decode(String.self, forKey: .type)
+                payload = Self.decodePayloadAsStringMap(from: container)
+            }
+
+            private enum CodingKeys: String, CodingKey {
+                case id
+                case title
+                case type
+                case payload
+            }
+
+            private static func decodePayloadAsStringMap(
+                from container: KeyedDecodingContainer<CodingKeys>
+            ) -> [String: String]? {
+                if let direct = try? container.decode([String: String].self, forKey: .payload) {
+                    return direct
+                }
+                guard let object = try? container.decode([String: JSONValue].self, forKey: .payload) else {
+                    return nil
+                }
+                var out: [String: String] = [:]
+                for (key, value) in object {
+                    out[key] = value.stringified
+                }
+                return out
+            }
         }
 
         var assistantText: String? {
@@ -160,6 +234,83 @@ struct LoomAIService {
 
         var errorMessage: String? {
             error?.messageValue?.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+
+    private enum JSONValue: Decodable {
+        case string(String)
+        case number(Double)
+        case bool(Bool)
+        case null
+        case object([String: JSONValue])
+        case array([JSONValue])
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.singleValueContainer()
+            if container.decodeNil() {
+                self = .null
+            } else if let value = try? container.decode(String.self) {
+                self = .string(value)
+            } else if let value = try? container.decode(Bool.self) {
+                self = .bool(value)
+            } else if let value = try? container.decode(Double.self) {
+                self = .number(value)
+            } else if let value = try? container.decode([String: JSONValue].self) {
+                self = .object(value)
+            } else if let value = try? container.decode([JSONValue].self) {
+                self = .array(value)
+            } else {
+                self = .null
+            }
+        }
+
+        var stringified: String {
+            switch self {
+            case .string(let value):
+                return value
+            case .number(let value):
+                if value.rounded() == value {
+                    return String(Int(value))
+                }
+                return String(value)
+            case .bool(let value):
+                return value ? "true" : "false"
+            case .null:
+                return ""
+            case .object, .array:
+                let encoder = JSONEncoder()
+                if let data = try? encoder.encode(AnyCodable(self)),
+                   let text = String(data: data, encoding: .utf8) {
+                    return text
+                }
+                return ""
+            }
+        }
+    }
+
+    private struct AnyCodable: Encodable {
+        let value: JSONValue
+
+        init(_ value: JSONValue) {
+            self.value = value
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.singleValueContainer()
+            switch value {
+            case .string(let value):
+                try container.encode(value)
+            case .number(let value):
+                try container.encode(value)
+            case .bool(let value):
+                try container.encode(value)
+            case .null:
+                try container.encodeNil()
+            case .object(let value):
+                try container.encode(value.mapValues { AnyCodable($0) })
+            case .array(let value):
+                try container.encode(value.map(AnyCodable.init))
+            }
         }
     }
 
@@ -321,7 +472,10 @@ struct LoomAIService {
         intent: String? = nil,
         screen: String? = nil,
         requestID: String? = nil,
-        requestHash: String? = nil
+        requestHash: String? = nil,
+        userLocalDate: String? = nil,
+        timezone: String? = nil,
+        remainingDailyResponses: Int? = nil
     ) async throws -> LoomAIResponse {
         if useMockLoomAIResponse {
             let mock = """
@@ -344,7 +498,10 @@ struct LoomAIService {
             intent: intent,
             screen: screen,
             requestId: sanitizedClientValue(requestID),
-            requestHash: sanitizedClientValue(requestHash)
+            requestHash: sanitizedClientValue(requestHash),
+            userLocalDate: sanitizedClientValue(userLocalDate),
+            timezone: sanitizedClientValue(timezone),
+            remainingDailyResponses: remainingDailyResponses
         )
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -388,6 +545,153 @@ struct LoomAIService {
             )
             return retryResponse
         }
+    }
+
+    func fetchPurposeProfileInsights(
+        diagnostic: DiagnosticAnswers,
+        rootCause: String,
+        nextDirection: String,
+        vision: String,
+        passions: [String],
+        requestID: String? = nil,
+        requestHash: String? = nil
+    ) async throws -> PurposeProfileInsightsResponse {
+        let client = ClientInfo(
+            appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
+            platform: "iOS",
+            locale: Locale.current.identifier,
+            intent: "purpose_profile_insights",
+            screen: "purpose_start_insights",
+            requestId: sanitizedClientValue(requestID),
+            requestHash: sanitizedClientValue(requestHash)
+        )
+
+        let requestBody = PurposeProfileInsightsRequest(
+            diagnostic: diagnostic,
+            rootCause: rootCause.trimmingCharacters(in: .whitespacesAndNewlines),
+            nextDirection: nextDirection.trimmingCharacters(in: .whitespacesAndNewlines),
+            vision: vision.trimmingCharacters(in: .whitespacesAndNewlines),
+            passions: passions
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty },
+            client: client
+        )
+
+        let encoder = JSONEncoder()
+        let body = try encoder.encode(requestBody)
+        var request = URLRequest(url: baseURL.appendingPathComponent("purpose/insights/profile"))
+        request.httpMethod = "POST"
+        request.timeoutInterval = 25
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+
+        let startedAt = CFAbsoluteTimeGetCurrent()
+        let (data, response) = try await session.data(for: request)
+        let elapsedMS = (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
+        guard let http = response as? HTTPURLResponse else {
+            throw LoomAIServiceError(message: "Bad server response.", statusCode: nil, contentType: nil, rawBody: nil)
+        }
+
+        let rawBody = String(data: data, encoding: .utf8) ?? "<non-UTF8 \(data.count) bytes>"
+        guard (200...299).contains(http.statusCode) else {
+            throw LoomAIServiceError(
+                message: "HTTP \(http.statusCode): \(rawBody)",
+                statusCode: http.statusCode,
+                contentType: http.value(forHTTPHeaderField: "Content-Type"),
+                rawBody: rawBody
+            )
+        }
+
+        let decoded: PurposeProfileInsightsResponse
+        do {
+            decoded = try JSONDecoder().decode(PurposeProfileInsightsResponse.self, from: data)
+        } catch {
+            throw LoomAIServiceError(
+                message: "Invalid purpose insights JSON.",
+                statusCode: http.statusCode,
+                contentType: http.value(forHTTPHeaderField: "Content-Type"),
+                rawBody: rawBody
+            )
+        }
+
+        let profile = decoded.profile.trimmingCharacters(in: .whitespacesAndNewlines)
+        let strength = decoded.strength.trimmingCharacters(in: .whitespacesAndNewlines)
+        let weakness = decoded.weakness.trimmingCharacters(in: .whitespacesAndNewlines)
+        let stress = decoded.stressTrigger.trimmingCharacters(in: .whitespacesAndNewlines)
+        let breaking = decoded.breakingPoint.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !profile.isEmpty, !strength.isEmpty, !weakness.isEmpty else {
+            throw LoomAIServiceError(
+                message: "Invalid purpose insights payload.",
+                statusCode: http.statusCode,
+                contentType: http.value(forHTTPHeaderField: "Content-Type"),
+                rawBody: rawBody
+            )
+        }
+
+        let responseModel = PurposeProfileInsightsResponse(
+            profile: profile,
+            strength: strength,
+            weakness: weakness,
+            stressTrigger: stress,
+            breakingPoint: breaking,
+            debug: decoded.debug
+        )
+
+        let preview = """
+        {"profile":"\(profile)","strength":"\(strength)","weakness":"\(weakness)"}
+        """
+        if let details = loomAISlowResponseTroubleshootingDetailsIfNeeded(
+            feature: "purpose_start_insights_profile",
+            elapsedMS: elapsedMS,
+            responsePreview: preview,
+            intent: "purpose_profile_insights",
+            screen: "purpose_start_insights",
+            requestID: requestID,
+            requestHash: requestHash
+        ) {
+            loomAIReportTroubleshootingIfEnabled(details: details)
+        }
+
+        return responseModel
+    }
+
+    func sendPurposeVisionAutoWrite(
+        currentVision: String,
+        previousSuggestions: [String],
+        mode: String,
+        context: LoomAIContextSnapshot,
+        requestID: String? = nil,
+        requestHash: String? = nil
+    ) async throws -> LoomAIResponse {
+        let client = ClientInfo(
+            appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
+            platform: "iOS",
+            locale: Locale.current.identifier,
+            intent: "autowrite_purpose",
+            screen: "purpose_vision",
+            requestId: sanitizedClientValue(requestID),
+            requestHash: sanitizedClientValue(requestHash)
+        )
+        let requestBody = PurposeVisionAutoWriteRequest(
+            currentVision: currentVision,
+            previousSuggestions: previousSuggestions,
+            mode: mode,
+            context: context,
+            client: client
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let bodyData = try encoder.encode(requestBody)
+
+        let response = try await post(path: "/purpose/vision/autowrite", bodyData: bodyData, timeout: 35)
+        reportSlowResponseIfNeeded(
+            response,
+            intent: "autowrite_purpose",
+            screen: "purpose_vision",
+            requestID: requestID,
+            requestHash: requestHash
+        )
+        return response
     }
 
     private func sanitizedClientValue(_ value: String?) -> String? {
@@ -454,14 +758,21 @@ struct LoomAIService {
 
         let decoder = JSONDecoder()
         do {
+            if let synthesized = synthesizeSuggestionsMessage(from: data) {
+                log("Parsed assistant text (top-level suggestions fallback): \(synthesized)")
+                return LoomAIResponse(message: synthesized, chips: [], actions: [], debug: nil, elapsedMS: elapsed * 1000)
+            }
+
             if let normalized = try? decoder.decode(LoomAIEnvelope.self, from: data) {
                 let text = normalized.message.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !text.isEmpty {
                     log("Parsed assistant text (normalized): \(text)")
                     return LoomAIResponse(
                         message: text,
+                        chips: normalized.chips ?? [],
                         actions: normalized.actions ?? [],
                         debug: normalized.debug,
+                        usage: normalized.usage,
                         elapsedMS: elapsed * 1000
                     )
                 }
@@ -473,8 +784,10 @@ struct LoomAIService {
                     log("Parsed assistant text (direct LoomAIResponse): \(text)")
                     return LoomAIResponse(
                         message: text,
+                        chips: direct.chips,
                         actions: direct.actions,
                         debug: direct.debug,
+                        usage: direct.usage,
                         elapsedMS: elapsed * 1000
                     )
                 }
@@ -483,19 +796,19 @@ struct LoomAIService {
             if let openAIChat = try? decoder.decode(OpenAIChatCompletionsFallback.self, from: data),
                let text = openAIChat.assistantText {
                 log("Parsed assistant text (OpenAI Chat Completions): \(text)")
-                return LoomAIResponse(message: text, actions: [], debug: nil, elapsedMS: elapsed * 1000)
+                return LoomAIResponse(message: text, chips: [], actions: [], debug: nil, usage: nil, elapsedMS: elapsed * 1000)
             }
 
             if let openAIResponses = try? decoder.decode(OpenAIResponsesAPIFallback.self, from: data),
                let text = openAIResponses.assistantText {
                 log("Parsed assistant text (OpenAI Responses API): \(text)")
-                return LoomAIResponse(message: text, actions: [], debug: nil, elapsedMS: elapsed * 1000)
+                return LoomAIResponse(message: text, chips: [], actions: [], debug: nil, usage: nil, elapsedMS: elapsed * 1000)
             }
 
             let raw = try decoder.decode(RawResponse.self, from: data)
             if let apiError = raw.errorMessage, !apiError.isEmpty {
                 log("Parsed API error: \(apiError)")
-                return LoomAIResponse(message: apiError, actions: [], debug: raw.debug, elapsedMS: elapsed * 1000)
+                return LoomAIResponse(message: apiError, chips: [], actions: [], debug: raw.debug, usage: raw.usage, elapsedMS: elapsed * 1000)
             }
             guard let reply = raw.assistantText, !reply.isEmpty else {
                 throw LoomAIServiceError(
@@ -515,7 +828,7 @@ struct LoomAIService {
                 )
             }
             log("Parsed assistant text: \(reply)")
-            return LoomAIResponse(message: reply, actions: actions, debug: raw.debug, elapsedMS: elapsed * 1000)
+            return LoomAIResponse(message: reply, chips: raw.chips ?? [], actions: actions, debug: raw.debug, usage: raw.usage, elapsedMS: elapsed * 1000)
         } catch let decodeError as LoomAIServiceError {
             log("Parse guardrail error: \(decodeError.message)")
             #if DEBUG
@@ -540,8 +853,37 @@ struct LoomAIService {
         }
     }
 
+    private func synthesizeSuggestionsMessage(from data: Data) -> String? {
+        guard
+            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let rawSuggestions = object["suggestions"] as? [Any]
+        else { return nil }
+
+        let suggestions = rawSuggestions
+            .compactMap { $0 as? String }
+            .map { $0.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !suggestions.isEmpty else { return nil }
+
+        let confidence = (object["confidence"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let payload: [String: Any] = [
+            "suggestions": suggestions,
+            "confidence": (confidence?.isEmpty == false ? confidence! : "high")
+        ]
+        guard
+            let jsonData = try? JSONSerialization.data(withJSONObject: payload),
+            let jsonString = String(data: jsonData, encoding: .utf8)
+        else { return nil }
+        return jsonString
+    }
+
     private func requestTimeout(for intent: String?, usingMinimalContext: Bool) -> TimeInterval {
         let normalizedIntent = intent?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        if normalizedIntent == "autowrite_purpose" {
+            return usingMinimalContext ? 45 : 60
+        }
         if normalizedIntent.hasPrefix("autowrite_") || normalizedIntent == "plan_result_autowrite" {
             return usingMinimalContext ? 20 : 25
         }
@@ -595,11 +937,16 @@ struct LoomAIService {
     func debugManualWorkerTest() async {
         let minimal = LoomAIContextSnapshot(
             generatedAt: .now,
+            personalizationHash: "",
+            diagnostic: nil,
             drivingForce: nil,
             fulfillmentCategories: [],
             activeOutcomes: [],
             currentWeekActionBlocks: [],
             recentActivity: .init(quickCompletesLast7Days: 0, littleWinsCompletionsLast7Days: 0, carryoversLast7Days: 0),
+            capture: nil,
+            recentlyDeleted: nil,
+            sectionTimestamps: nil,
             dataInventory: [],
             appGuide: [],
             notes: ["Manual LoomAIService test"],
@@ -654,3 +1001,10 @@ struct LoomAIService {
         loomAIReportTroubleshootingIfEnabled(details: details)
     }
 }
+    struct LoomAIUsage: Codable {
+        var model: String?
+        var inputTokens: Int
+        var cachedInputTokens: Int
+        var outputTokens: Int
+        var totalTokens: Int
+    }

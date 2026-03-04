@@ -67,6 +67,7 @@ private enum LoomPersistence {
         LoomAIChatThread.self,
         LoomAIChatMessage.self,
         DiagnosticsInsightsSnapshot.self,
+        PurposeProfileInsightsSnapshot.self,
         RecentlyDeletedItem.self,
         PlannedChunkActionAdHocMarker.self,
         ActionBlocksReflectionArchive.self,
@@ -169,6 +170,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         #endif
 #endif
         UNUserNotificationCenter.current().delegate = self
+        registerLoomAITroubleshootingDefaultIfNeeded()
         return true
     }
 
@@ -191,6 +193,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 struct loomApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     private let modelContainer = LoomPersistence.makeContainer()
+    @AppStorage(loomAIDebugDefaultsKey) private var enableLoomAIDebug = false
 
     var body: some Scene {
         WindowGroup {
@@ -199,13 +202,57 @@ struct loomApp: App {
                     .autocorrectionDisabled(false)
                     .textInputAutocapitalization(.sentences)
             }
-#if canImport(GoogleSignIn)
+            .sheet(isPresented: Binding(
+                get: { enableLoomAIDebug },
+                set: { enableLoomAIDebug = $0 }
+            )) {
+                TemporaryVisionAutoWriteDebugView()
+            }
             .onOpenURL { url in
                 guard !LoomRuntime.isPreviewSafeModeEnabled else { return }
+                handleShareIntoLoomURLIfNeeded(url)
+#if canImport(GoogleSignIn)
                 _ = GIDSignIn.sharedInstance.handle(url)
-            }
 #endif
+            }
         }
         .modelContainer(modelContainer)
+    }
+
+    private func handleShareIntoLoomURLIfNeeded(_ url: URL) {
+        guard url.scheme?.lowercased() == "loom" else { return }
+        let host = (url.host ?? "").lowercased()
+        guard host == "share" else { return }
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return
+        }
+        if let payloadID = components.queryItems?.first(where: { $0.name == "payload" })?.value,
+           !payloadID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            NotificationCenter.default.post(name: .loomSharePayloadReceived, object: payloadID)
+            return
+        }
+        if let inlineValue = components.queryItems?.first(where: { $0.name == "inline" })?.value,
+           let payload = decodeInlineSharePayload(from: inlineValue) {
+            let inlineID = "inline-\(payload.id.uuidString)"
+            ShareIntoLoomBridge.storeInlinePayload(payload, id: inlineID)
+            NotificationCenter.default.post(name: .loomSharePayloadReceived, object: inlineID)
+        }
+    }
+
+    private func decodeInlineSharePayload(from encoded: String) -> ShareIntoLoomPayload? {
+        let base64 = base64URLToBase64(encoded)
+        guard let data = Data(base64Encoded: base64) else { return nil }
+        return try? JSONDecoder().decode(ShareIntoLoomPayload.self, from: data)
+    }
+
+    private func base64URLToBase64(_ value: String) -> String {
+        var base64 = value
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        let pad = base64.count % 4
+        if pad > 0 {
+            base64 += String(repeating: "=", count: 4 - pad)
+        }
+        return base64
     }
 }

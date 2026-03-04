@@ -1,5 +1,122 @@
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
+const DEFAULT_CHAT_MODEL = "gpt-5.2";
 const DIAGNOSTIC_CACHE_TTL_SECONDS = 60 * 60 * 24 * 14; // 14 days
+const CHAT_CACHE_TTL_SECONDS = 60 * 10; // 10 minutes
+const PURPOSE_PROFILE_CATALOG = [
+  {
+    profile: "Strategic Integrator",
+    strength: "Translates ambitious direction into shared structure others can execute.",
+    weakness: "Over-integration risk; excessive synthesis and stakeholder harmony can slow decisive tradeoffs.",
+    stressTrigger: "Competing stakeholder priorities",
+    breakingPoint: "Decision velocity (alignment continues past usefulness)"
+  },
+  {
+    profile: "Structured Clarity Driver",
+    strength: "Forces clarity early and turns fuzzy ideas into sharp priorities and standards.",
+    weakness: "May prematurely close exploration and create resistance if others feel bulldozed.",
+    stressTrigger: "Ambiguity and slow consensus",
+    breakingPoint: "Interpersonal smoothness (communication becomes blunt)"
+  },
+  {
+    profile: "Adaptive Catalyst",
+    strength: "Generates momentum through experimentation and social energy.",
+    weakness: "Follow-through can weaken when novelty fades without external structure.",
+    stressTrigger: "Rigid plans and gatekeeping",
+    breakingPoint: "Execution consistency (many starts, uneven finishes)"
+  },
+  {
+    profile: "Rapid Experimenter",
+    strength: "Challenges assumptions quickly and converts uncertainty into data through action.",
+    weakness: "Can create churn if direction changes too frequently.",
+    stressTrigger: "Slow decision cycles",
+    breakingPoint: "Context continuity (frequent pivots disrupt shared direction)"
+  },
+  {
+    profile: "Momentum Builder",
+    strength: "Builds sustainable cadence through clear plans and human buy-in.",
+    weakness: "May prioritize feasibility over bold upside.",
+    stressTrigger: "Resource constraints and morale dips",
+    breakingPoint: "Ambition (scope narrows to maintain stability)"
+  },
+  {
+    profile: "Operational Commander",
+    strength: "Executes effectively under constraints; prioritizes, assigns, and enforces standards.",
+    weakness: "Relationship debt accumulates if pressure becomes constant critique.",
+    stressTrigger: "Missed commitments",
+    breakingPoint: "Patience (tolerance for variance collapses)"
+  },
+  {
+    profile: "Adaptive Stabilizer",
+    strength: "Maintains progress when conditions shift through flexible coordination.",
+    weakness: "Absorbs too much responsibility and becomes an informal buffer.",
+    stressTrigger: "Last-minute changes and interpersonal conflict",
+    breakingPoint: "Boundary clarity (over-commitment reduces consistency)"
+  },
+  {
+    profile: "Crisis Navigator",
+    strength: "Cuts through noise during chaos with strong triage and improvisation.",
+    weakness: "Long-term systems may be neglected; urgency becomes the default mode.",
+    stressTrigger: "Bureaucracy and slow escalation paths",
+    breakingPoint: "Long-horizon planning (defaults to firefighting)"
+  },
+  {
+    profile: "Purpose-Led Planner",
+    strength: "Maintains long-term direction through disciplined planning tied to values.",
+    weakness: "Initiation friction; preparation can delay execution.",
+    stressTrigger: "Noisy inputs and constant context switching",
+    breakingPoint: "Start energy (stalling at launch)"
+  },
+  {
+    profile: "Analytical Architect",
+    strength: "Builds rigorous systems and frameworks that withstand scrutiny.",
+    weakness: "Under-communication can create misunderstanding.",
+    stressTrigger: "Sloppy reasoning or vague definitions",
+    breakingPoint: "Collaboration flow (withdraws rather than translating ideas)"
+  },
+  {
+    profile: "Reflective Synthesizer",
+    strength: "Connects disparate ideas into coherent insight without seeking attention.",
+    weakness: "Structure avoidance may prevent insights from becoming outcomes.",
+    stressTrigger: "Tight deadlines and forced specificity",
+    breakingPoint: "Deliverable packaging (refining replaces shipping)"
+  },
+  {
+    profile: "Independent Pathfinder",
+    strength: "Explores difficult problems autonomously with high learning velocity.",
+    weakness: "Independence may create coordination costs for teams.",
+    stressTrigger: "Micromanagement",
+    breakingPoint: "Team predictability (disappears into solo iteration)"
+  },
+  {
+    profile: "Steady Alignment Builder",
+    strength: "Builds trust through reliability, consistency, and steady relationships.",
+    weakness: "Avoids hard conversations too long to preserve harmony.",
+    stressTrigger: "Interpersonal tension",
+    breakingPoint: "Truth-telling (issues get smoothed over until they erupt)"
+  },
+  {
+    profile: "Quality Sentinel",
+    strength: "Protects standards and identifies risks before failure occurs.",
+    weakness: "Excess scrutiny can slow progress.",
+    stressTrigger: "Unclear ownership and sloppy execution",
+    breakingPoint: "Speed (momentum sacrificed for certainty)"
+  },
+  {
+    profile: "Supportive Adapter",
+    strength: "Maintains stability through calm responsiveness and quiet problem solving.",
+    weakness: "Becomes invisible if priorities are not self-defined.",
+    stressTrigger: "Unclear expectations",
+    breakingPoint: "Self-prioritization (work fragments across others' needs)"
+  },
+  {
+    profile: "Pragmatic Realist",
+    strength: "Identifies what will work now and communicates it plainly.",
+    weakness: "May neglect inspiration and relationship repair.",
+    stressTrigger: "Emotionally driven decisions",
+    breakingPoint: "Influence (truth delivered without adoption)"
+  }
+];
+const PURPOSE_PROFILE_NAMES = PURPOSE_PROFILE_CATALOG.map((item) => item.profile);
 
 export default {
   async fetch(request, env) {
@@ -11,6 +128,10 @@ export default {
 
     if (url.pathname === "/purpose/vision/autowrite") {
       return handlePurposeVisionAutowrite(request, env);
+    }
+
+    if (url.pathname === "/purpose/insights/profile") {
+      return handlePurposeInsightsProfile(request, env);
     }
 
     if (url.pathname === "/chat") {
@@ -221,6 +342,119 @@ async function callOpenAIResponsesJSON({
   return lastError;
 }
 
+async function handlePurposeInsightsProfile(request, env) {
+  if (request.method !== "POST") {
+    return json({ error: "Method not allowed" }, 405, corsHeaders(request));
+  }
+  const apiKey = typeof env.OPENAI_API_KEY === "string" ? env.OPENAI_API_KEY.trim() : "";
+  if (!apiKey) {
+    return json({ error: "Server misconfigured" }, 500, corsHeaders(request));
+  }
+
+  let payload;
+  try {
+    payload = await request.json();
+  } catch {
+    return json({ error: "Invalid JSON body" }, 400, corsHeaders(request));
+  }
+
+  if (!payload || typeof payload !== "object") {
+    return json({ error: "Invalid payload" }, 400, corsHeaders(request));
+  }
+
+  const validationError = validateDiagnosticPayload({ diagnostic: payload.diagnostic });
+  if (validationError) {
+    return json({ error: "Invalid diagnostic payload", details: validationError }, 400, corsHeaders(request));
+  }
+
+  const normalizedDiagnostic = canonicalizeDiagnostic(payload.diagnostic || {});
+  const rootCause = nonEmptyString(payload.rootCause) || "";
+  const nextDirection = nonEmptyString(payload.nextDirection) || "";
+  const vision = nonEmptyString(payload.vision) || "";
+  const passions = uniqueOrdered(
+    (Array.isArray(payload.passions) ? payload.passions : [])
+      .map((item) => String(item ?? "").trim())
+      .filter(Boolean)
+  ).slice(0, 16);
+
+  const profileCatalogPrompt = PURPOSE_PROFILE_CATALOG.map((item, index) => {
+    return `${index + 1}. ${item.profile} | strength=${item.strength} | weakness=${item.weakness} | stressTrigger=${item.stressTrigger} | breakingPoint=${item.breakingPoint}`;
+  }).join("\n");
+
+  const systemPrompt = [
+    "You select one Loom behavioral profile that best fits the user.",
+    "Use only these inputs: diagnostic answers, rootCause, nextDirection, vision, and passions.",
+    "Compare evidence against each profile's strength, weakness, stressTrigger, and breakingPoint.",
+    "Pick the closest overall fit, not a blend.",
+    "Return JSON only with profile, confidence, and reason.",
+    "confidence must be high, medium, or low.",
+    "reason must be one short sentence under 22 words."
+  ].join("\n");
+
+  const schema = {
+    name: "loom_purpose_profile_match",
+    strict: true,
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        profile: { type: "string", enum: PURPOSE_PROFILE_NAMES },
+        confidence: { type: "string", enum: ["high", "medium", "low"] },
+        reason: { type: "string" }
+      },
+      required: ["profile", "confidence", "reason"]
+    }
+  };
+
+  const result = await callOpenAIResponsesJSON({
+    apiKey,
+    model: "gpt-5-mini",
+    systemPrompt,
+    userPayload: {
+      diagnostic: normalizedDiagnostic,
+      rootCause,
+      nextDirection,
+      vision,
+      passions,
+      profileCatalog: profileCatalogPrompt
+    },
+    responseSchema: schema,
+    maxOutputTokens: 80,
+    timeoutMs: 9000,
+    reasoningEffort: "low",
+    allowRetry: true
+  });
+
+  if (result.error) {
+    return json({ error: result.error, details: result.details }, result.status, corsHeaders(request));
+  }
+
+  const profileName = nonEmptyString(result.json?.profile);
+  const matched = PURPOSE_PROFILE_CATALOG.find(
+    (item) => item.profile.toLowerCase() === profileName.toLowerCase()
+  );
+  if (!matched) {
+    return json({ error: "Could not map profile" }, 502, corsHeaders(request));
+  }
+
+  return json(
+    {
+      profile: matched.profile,
+      strength: matched.strength,
+      weakness: matched.weakness,
+      stressTrigger: matched.stressTrigger,
+      breakingPoint: matched.breakingPoint,
+      debug: {
+        model: "gpt-5-mini",
+        confidence: nonEmptyString(result.json?.confidence) || "medium",
+        evidence: [truncate(String(result.json?.reason || ""), 180)]
+      }
+    },
+    200,
+    corsHeaders(request)
+  );
+}
+
 async function handleChat(request, env) {
   if (request.method !== "POST") {
     return json({ error: "Method not allowed" }, 405, corsHeaders(request));
@@ -237,8 +471,13 @@ async function handleChat(request, env) {
     return json({ error: "Invalid JSON body" }, 400, corsHeaders(request));
   }
 
+  const intent = String(payload?.client?.intent || "").trim().toLowerCase();
+  if (intent === "loomai_chat") {
+    return handleLoomAIChat({ request, env, apiKey, payload });
+  }
+
   if (!isPurposeVisionChatRequest(payload)) {
-    return json({ error: "Unsupported chat intent on minimal worker." }, 400, corsHeaders(request));
+    return json({ error: "Unsupported chat intent." }, 400, corsHeaders(request));
   }
 
   const latestUserMessage = extractLatestUserMessage(payload);
@@ -250,6 +489,266 @@ async function handleChat(request, env) {
     previousSuggestions: [],
     mode: extractVisionModeFromInstruction(latestUserMessage)
   });
+}
+
+async function handleLoomAIChat({ request, env, apiKey, payload }) {
+  const messages = Array.isArray(payload?.messages) ? payload.messages : [];
+  const context = payload?.context && typeof payload.context === "object" ? payload.context : {};
+  const client = payload?.client && typeof payload.client === "object" ? payload.client : {};
+  const latestUserMessage = extractLatestUserMessage(payload).trim();
+  const hasContext = hasMeaningfulLoomContext(context);
+  const unrelatedPrompt = isLikelyUnrelatedPrompt(latestUserMessage);
+
+  if (!latestUserMessage) {
+    return json(
+      safeChatFallback({
+        hasContext,
+        context,
+        message:
+          "I’m ready to help with Loom. Ask me about Purpose, Fulfillment, Outcomes, Capture, or Action Blocks."
+      }),
+      200,
+      corsHeaders(request)
+    );
+  }
+
+  if (unrelatedPrompt) {
+    return json(
+      {
+        message:
+          "I can’t help with that, but I can help you with Loom planning and execution right now.",
+        chips: buildUnrelatedRedirectChips(context),
+        actions: [],
+        debug: {
+          usedContext: false,
+          confidence: "low",
+          evidence: []
+        }
+      },
+      200,
+      corsHeaders(request)
+    );
+  }
+
+  const preferredModel = nonEmptyString(env.OPENAI_MODEL) || DEFAULT_CHAT_MODEL;
+  const modelCandidates = uniqueOrdered(
+    [preferredModel, "gpt-5.1", "gpt-5-mini"]
+      .map((value) => nonEmptyString(value))
+      .filter(Boolean)
+  );
+  const schema = {
+    name: "loom_chat_response",
+    strict: true,
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        message: { type: "string" },
+        chips: {
+          type: "array",
+          minItems: 0,
+          maxItems: 6,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              id: { type: "string" },
+              title: { type: "string" },
+              prompt: { type: "string" }
+            },
+            required: ["id", "title", "prompt"]
+          }
+        },
+        actions: {
+          type: "array",
+          minItems: 0,
+          maxItems: 8,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              id: { type: "string" },
+              title: { type: "string" },
+              type: { type: "string" },
+              payload: { type: "object", additionalProperties: true }
+            },
+            required: ["id", "title", "type", "payload"]
+          }
+        },
+        debug: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            usedContext: { type: "boolean" },
+            confidence: { type: "string", enum: ["high", "medium", "low"] },
+            evidence: {
+              type: "array",
+              items: { type: "string" },
+              minItems: 0,
+              maxItems: 8
+            }
+          },
+          required: ["usedContext", "confidence", "evidence"]
+        }
+      },
+      required: ["message", "chips", "actions", "debug"]
+    }
+  };
+
+  const systemPrompt = [
+    "You are LoomAI for the iOS app Loom.",
+    "Mission: End stress. Live fulfilled.",
+    "",
+    "Loom architecture:",
+    "- Purpose (vision + passions): why the user is moving in this direction.",
+    "- Fulfillment Areas (mission + identities + little wins): life domains to strengthen continuously.",
+    "- Outcomes: concrete targets tied to fulfillment.",
+    "- Capture: incoming actions and ideas.",
+    "- Action Blocks: weekly execution plan.",
+    "- Reflect: completed work and learning signals.",
+    "",
+    "Rules:",
+    "- Ground your answer in APP_CONTEXT when available.",
+    "- When APP_CONTEXT exists and the user asks a Loom-related question, reference at least 2 concrete context details.",
+    "- Never invent stats, values, goals, dates, or progress.",
+    "- If data is missing, say that briefly and continue with the best next step.",
+    "- Do NOT parrot diagnostic option text verbatim; interpret patterns in your own words.",
+    "- Keep answers concise: 2-8 short paragraphs max, with bullets when helpful.",
+    "- Avoid generic productivity filler.",
+    "- Produce action cards only when confidence is high or medium and payload is executable.",
+    "- If confidence is low, actions must be [].",
+    "",
+    "Formatting tokens in `message`:",
+    "- [[P:...]] for purpose/passion emphasis",
+    "- [[F:...]] for fulfillment category references",
+    "- [[O:...]] for outcomes",
+    "- [[A:...]] for actions",
+    "- Use newlines intentionally. Use bullets with `•` when helpful.",
+    "",
+    "Output JSON only in this exact shape:",
+    '{"message":"string","chips":[{"id":"string","title":"string","prompt":"string"}],"actions":[{"id":"string","title":"string","type":"string","payload":{}}],"debug":{"usedContext":true,"confidence":"high","evidence":["path.like.context.purpose.vision"]}}',
+    "",
+    "Action whitelist:",
+    '- updatePurposeVision {"text":"..."}',
+    '- addPassionItem {"passionType":"love|vows|thrill|hate","text":"..."}',
+    '- updateFulfillmentMission {"categoryId":"uuid","text":"..."}',
+    '- addLittleWin {"categoryId":"uuid","activity":"...","appleHealthEligible":true|false}',
+    '- createOutcome {"categoryId":"uuid","title":"...","measurable":true|false,"unit":"steps|minutes|..."}',
+    '- createCaptureAction {"text":"..."}',
+    '- addPlanSuggestion {"text":"..."}',
+    "",
+    "Little Wins rule:",
+    "- Default to daily-doable 5-20 minute actions unless user explicitly asks for weekly cadence.",
+    "- For health/energy, prefer measurable Apple Health-aligned options when appropriate (steps, workouts, active minutes, sleep, mindfulness minutes).",
+    "",
+    "If user prompt is unrelated to Loom, respond gently:",
+    '- "I can’t help with that, but I can help you with..." and provide 2-3 Loom-relevant chips.',
+    "- For unrelated prompts, return actions as []."
+  ].join("\n");
+
+  const modelContext = compactChatContextForModel(context);
+  const userPayload = {
+    messages: messages.slice(-20).map((msg) => ({
+      role: String(msg?.role || ""),
+      content: String(msg?.content || "")
+    })),
+    APP_CONTEXT: modelContext,
+    client: {
+      intent: nonEmptyString(client.intent) || "loomai_chat",
+      appVersion: nonEmptyString(client.appVersion) || null,
+      userLocalDate: nonEmptyString(client.userLocalDate) || null,
+      timezone: nonEmptyString(client.timezone) || null,
+      remainingDailyResponses:
+        Number.isFinite(Number(client.remainingDailyResponses))
+          ? Number(client.remainingDailyResponses)
+          : null
+      }
+  };
+  const chatCacheEnabled = env.DISABLE_CHAT_CACHE !== "1";
+  const cacheIdentity = {
+    version: "loom_chat_v2",
+    model: preferredModel,
+    messages: userPayload.messages,
+    APP_CONTEXT: userPayload.APP_CONTEXT,
+    client: {
+      intent: userPayload.client.intent,
+      userLocalDate: userPayload.client.userLocalDate,
+      timezone: userPayload.client.timezone
+    }
+  };
+  const chatCacheHash = await sha256Hex(JSON.stringify(cacheIdentity));
+  const chatCacheKey = new Request(`https://loom-cache.internal/chat/${chatCacheHash}`);
+
+  if (chatCacheEnabled) {
+    const cached = await caches.default.match(chatCacheKey);
+    if (cached) {
+      try {
+        const cachedJSON = await cached.json();
+        if (cachedJSON && typeof cachedJSON === "object") {
+          return json(cachedJSON, 200, corsHeaders(request));
+        }
+      } catch {
+        // Ignore cache decode errors and continue to live generation.
+      }
+    }
+  }
+
+  let result = null;
+  let usedModel = preferredModel;
+  for (const candidate of modelCandidates) {
+    usedModel = candidate;
+    const attempt = await callOpenAIResponsesJSON({
+      apiKey,
+      model: candidate,
+      systemPrompt,
+      userPayload,
+      responseSchema: schema,
+      maxOutputTokens: 1100,
+      timeoutMs: 26000,
+      reasoningEffort: "low",
+      allowRetry: true
+    });
+    result = attempt;
+    if (!attempt?.error) break;
+    const normalizedError = String(attempt.error || "").toLowerCase();
+    const retryableByModel =
+      normalizedError.includes("upstream model error") ||
+      normalizedError.includes("invalid upstream json") ||
+      normalizedError.includes("missing model output");
+    if (!retryableByModel) break;
+  }
+
+  if (result.error) {
+    return json(
+      safeChatFallback({
+        hasContext,
+        context
+      }),
+      200,
+      corsHeaders(request)
+    );
+  }
+
+  const response = sanitizeLoomChatResponse(result.json, {
+    context,
+    hasContext,
+    latestUserMessage
+  });
+  const usage = normalizeResponsesUsage(result.usage, usedModel);
+  if (usage) {
+    response.usage = usage;
+  }
+  if (chatCacheEnabled && shouldCacheLoomAIResponse(response)) {
+    const cacheResponse = new Response(JSON.stringify(response), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": `public, max-age=0, s-maxage=${CHAT_CACHE_TTL_SECONDS}`
+      }
+    });
+    await caches.default.put(chatCacheKey, cacheResponse);
+  }
+  return json(response, 200, corsHeaders(request));
 }
 
 async function handlePurposeVisionAutowrite(request, env) {
@@ -393,6 +892,11 @@ async function purposeVisionAutowriteResponse({
 
   const currentVisionSentence = extractFirstSentence(currentVision || "");
   const areaThemeTerms = deriveAreaThemeTerms(normalizedDiagnostic.areas);
+  const previousSuggestionSamples = uniqueOrdered(
+    (Array.isArray(previousSuggestions) ? previousSuggestions : [])
+      .map((item) => normalizeSuggestion(String(item || "")))
+      .filter(Boolean)
+  ).slice(0, 6);
   const systemPrompt = [
     "You generate Purpose Vision suggestions for Loom users.",
     "Use simple 5th-grade language: clear words, short sentences, no jargon.",
@@ -405,6 +909,8 @@ async function purposeVisionAutowriteResponse({
     "Do not mention Loom, AI, diagnostics, root cause, or next direction.",
     "If mode is rewordVision, preserve the core meaning of the current vision.",
     "If mode is newVision, generate directionally fresh alternatives.",
+    "In newVision mode, avoid reusing the same opening and wording from current vision.",
+    "In newVision mode, keep lexical overlap low with current vision and prior suggestions.",
     "If a finance/wealth theme exists, include 'financial independence'.",
     "Return JSON only:",
     '{"visions":["option1","option2"],"error":""}',
@@ -415,9 +921,16 @@ async function purposeVisionAutowriteResponse({
     mode === "rewordVision"
       ? "Mode: rewordVision."
       : "Mode: newVision.",
-    currentVisionSentence
-      ? `Current vision sentence to preserve exactly: "${currentVisionSentence}"`
-      : "No current vision sentence available to preserve.",
+    mode === "rewordVision"
+      ? (currentVisionSentence
+        ? `Current vision sentence to preserve exactly: "${currentVisionSentence}"`
+        : "No current vision sentence available to preserve.")
+      : (currentVisionSentence
+        ? `Current vision sentence to avoid echoing: "${currentVisionSentence}"`
+        : "No current vision sentence available."),
+    previousSuggestionSamples.length > 0
+      ? `Prior suggestions to avoid repeating: ${previousSuggestionSamples.join(" || ")}`
+      : "No prior suggestions provided.",
     areaThemeTerms.length > 0
       ? `Fulfillment-area theme terms to incorporate in sentence 2: ${areaThemeTerms.join(", ")}`
       : "No fulfillment-area theme terms available."
@@ -450,6 +963,7 @@ async function purposeVisionAutowriteResponse({
       mode,
       currentVision: currentVision || "",
       currentVisionSentence,
+      previousSuggestions: previousSuggestionSamples,
       areaThemeTerms,
       rootCause: hasStrongDiagnosticContext ? rootCause : "",
       nextDirection: hasStrongDiagnosticContext ? nextDirection : "",
@@ -485,12 +999,16 @@ async function purposeVisionAutowriteResponse({
     }, 422, corsHeaders(request));
   }
 
-  const suggestions = Array.isArray(visionResult.json?.visions)
+  const rawSuggestions = Array.isArray(visionResult.json?.visions)
     ? visionResult.json.visions
       .map((x) => normalizeSuggestion(String(x ?? "")))
       .filter(Boolean)
-      .slice(0, 2)
+      .slice(0, 4)
     : [];
+  const suggestions = (mode === "newVision"
+    ? filterNewVisionSuggestions(rawSuggestions, currentVision, previousSuggestions)
+    : uniqueOrdered(rawSuggestions)
+  ).slice(0, 2);
   if (suggestions.length === 0) {
     return json({
       error: "Couldn’t generate insights",
@@ -589,12 +1107,30 @@ async function performOpenAIResponsesAttempt({
   const upstreamText = await openAIResponse.text();
 
   if (!openAIResponse.ok) {
+    if (openAIResponse.status === 400) {
+      const unstructured = await performOpenAIResponsesAttemptWithoutSchema({
+        apiKey,
+        model,
+        systemPrompt,
+        userPayload,
+        maxOutputTokens,
+        timeoutMs,
+        reasoningEffort
+      });
+      if (unstructured.ok) {
+        return unstructured;
+      }
+    }
+    const upstreamError = extractUpstreamErrorSignature(upstreamText);
     return {
       ok: false,
       retryable: false,
       result: {
         error: "Upstream model error",
-        details: truncate(upstreamText, 1000),
+        details: truncate(
+          `status=${openAIResponse.status}${upstreamError ? ` ${upstreamError}` : ""}`,
+          1000
+        ),
         status: 502
       }
     };
@@ -613,13 +1149,128 @@ async function performOpenAIResponsesAttempt({
 
   const obj = extractResponsesParsedObject(parsed);
   if (obj && typeof obj === "object") {
-    return { ok: true, retryable: false, result: { json: obj, status: 200 } };
+    return {
+      ok: true,
+      retryable: false,
+      result: {
+        json: obj,
+        status: 200,
+        usage: extractResponsesUsage(parsed)
+      }
+    };
   }
 
   const retryableMissingOutput = shouldRetryMissingOutput(parsed);
   return {
     ok: false,
     retryable: retryableMissingOutput,
+    result: {
+      error: "Missing model output",
+      details: truncate(upstreamText, 1000),
+      status: 502
+    }
+  };
+}
+
+async function performOpenAIResponsesAttemptWithoutSchema({
+  apiKey,
+  model,
+  systemPrompt,
+  userPayload,
+  maxOutputTokens,
+  timeoutMs,
+  reasoningEffort
+}) {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), Math.max(1000, timeoutMs | 0));
+
+  let openAIResponse;
+  try {
+    openAIResponse = await fetch(OPENAI_RESPONSES_URL, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model,
+        input: [
+          {
+            role: "system",
+            content: [
+              { type: "input_text", text: `${systemPrompt}\n\nReturn valid JSON only.` }
+            ]
+          },
+          {
+            role: "user",
+            content: [
+              { type: "input_text", text: JSON.stringify(userPayload) }
+            ]
+          }
+        ],
+        reasoning: {
+          effort: reasoningEffort
+        },
+        max_output_tokens: maxOutputTokens
+      })
+    });
+  } catch (e) {
+    clearTimeout(t);
+    return {
+      ok: false,
+      retryable: false,
+      result: {
+        error: "Upstream request failed",
+        details: e && typeof e === "object" ? String(e.message || e.name || "request_failed") : "request_failed",
+        status: 502
+      }
+    };
+  } finally {
+    clearTimeout(t);
+  }
+
+  const upstreamText = await openAIResponse.text();
+  if (!openAIResponse.ok) {
+    const upstreamError = extractUpstreamErrorSignature(upstreamText);
+    return {
+      ok: false,
+      retryable: false,
+      result: {
+        error: "Upstream model error",
+        details: truncate(`status=${openAIResponse.status}${upstreamError ? ` ${upstreamError}` : ""}`, 1000),
+        status: 502
+      }
+    };
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(upstreamText);
+  } catch {
+    return {
+      ok: false,
+      retryable: false,
+      result: { error: "Invalid upstream JSON", status: 502 }
+    };
+  }
+
+  const obj = extractResponsesParsedObject(parsed);
+  if (obj && typeof obj === "object") {
+    return {
+      ok: true,
+      retryable: false,
+      result: {
+        json: obj,
+        status: 200,
+        usage: extractResponsesUsage(parsed)
+      }
+    };
+  }
+
+  return {
+    ok: false,
+    retryable: false,
     result: {
       error: "Missing model output",
       details: truncate(upstreamText, 1000),
@@ -680,6 +1331,53 @@ function shouldRetryMissingOutput(parsed) {
     const onlyReasoning = outputItems.every((item) => String(item?.type || "").toLowerCase() === "reasoning");
     if (onlyReasoning) return true;
   }
+
+  return false;
+}
+
+function filterNewVisionSuggestions(candidates, currentVision, previousSuggestions) {
+  const blocked = new Set(
+    [
+      String(currentVision || ""),
+      ...(Array.isArray(previousSuggestions) ? previousSuggestions : [])
+    ]
+      .map((item) => normalizedSuggestionKey(item))
+      .filter(Boolean)
+  );
+
+  const kept = [];
+  for (const candidate of (Array.isArray(candidates) ? candidates : [])) {
+    const key = normalizedSuggestionKey(candidate);
+    if (!key) continue;
+    if (blocked.has(key)) continue;
+    if (currentVision && isNearDuplicateSuggestion(candidate, currentVision)) continue;
+    if (kept.some((existing) => isNearDuplicateSuggestion(existing, candidate))) continue;
+    kept.push(candidate);
+  }
+  return kept;
+}
+
+function isNearDuplicateSuggestion(a, b) {
+  const aNorm = normalizedSuggestion(String(a || ""));
+  const bNorm = normalizedSuggestion(String(b || ""));
+  if (!aNorm || !bNorm) return false;
+  if (aNorm === bNorm) return true;
+
+  const aSet = new Set(aNorm.split(/\s+/).filter((word) => word.length > 2));
+  const bSet = new Set(bNorm.split(/\s+/).filter((word) => word.length > 2));
+  if (aSet.size === 0 || bSet.size === 0) return false;
+
+  let intersection = 0;
+  for (const token of aSet) {
+    if (bSet.has(token)) intersection += 1;
+  }
+  const union = aSet.size + bSet.size - intersection;
+  const jaccard = union > 0 ? intersection / union : 0;
+  if (jaccard >= 0.72) return true;
+
+  const shorter = aNorm.length <= bNorm.length ? aNorm : bNorm;
+  const longer = aNorm.length > bNorm.length ? aNorm : bNorm;
+  if (shorter.length >= 42 && longer.includes(shorter)) return true;
 
   return false;
 }
@@ -808,6 +1506,525 @@ function buildVisionTroubleshootingDetails(code, details = {}) {
     code: String(code || "unknown"),
     ...cleaned
   };
+}
+
+function hasMeaningfulLoomContext(context) {
+  if (!context || typeof context !== "object") return false;
+  const fulfillmentCount = Array.isArray(context.fulfillmentCategories)
+    ? context.fulfillmentCategories.length
+    : 0;
+  const outcomesCount = Array.isArray(context.activeOutcomes) ? context.activeOutcomes.length : 0;
+  const actionBlocksCount = Array.isArray(context.currentWeekActionBlocks)
+    ? context.currentWeekActionBlocks.length
+    : 0;
+  const hasPurpose =
+    nonEmptyString(context?.drivingForce?.vision) || nonEmptyString(context?.drivingForce?.purpose);
+  const hasDiagnostic = nonEmptyString(context?.diagnostic?.stress) || nonEmptyString(context?.diagnostic?.rootCause);
+  return Boolean(
+    hasPurpose ||
+      hasDiagnostic ||
+      fulfillmentCount > 0 ||
+      outcomesCount > 0 ||
+      actionBlocksCount > 0
+  );
+}
+
+function isLikelyUnrelatedPrompt(text) {
+  const value = String(text || "").toLowerCase();
+  if (!value) return false;
+  const loomSignals = [
+    "loom",
+    "purpose",
+    "passion",
+    "fulfillment",
+    "mission",
+    "identity",
+    "little win",
+    "outcome",
+    "capture",
+    "action block",
+    "reflect",
+    "stress",
+    "planning"
+  ];
+  if (loomSignals.some((term) => value.includes(term))) return false;
+
+  const likelyUnrelatedSignals = [
+    "stock price",
+    "bitcoin",
+    "weather",
+    "sports score",
+    "movie",
+    "recipe",
+    "lyrics",
+    "translate",
+    "code bug",
+    "javascript",
+    "swiftui"
+  ];
+  return likelyUnrelatedSignals.some((term) => value.includes(term));
+}
+
+function buildUnrelatedRedirectChips(context) {
+  const fallback = buildDefaultLoomChips(context);
+  return fallback.slice(0, 3);
+}
+
+function buildDefaultLoomChips(context) {
+  const categories = Array.isArray(context?.fulfillmentCategories)
+    ? context.fulfillmentCategories.map((x) => String(x?.name || "").trim()).filter(Boolean)
+    : [];
+  const topCategory = categories[0] || "my key fulfillment area";
+  const outcomes = Array.isArray(context?.activeOutcomes)
+    ? context.activeOutcomes.map((x) => String(x?.title || "").trim()).filter(Boolean)
+    : [];
+  const topOutcome = outcomes[0] || "my outcomes";
+
+  const chips = [
+    {
+      id: "loom-focus-week",
+      title: "Focus this week",
+      prompt: "What should I focus on this week in Loom based on my current data?"
+    },
+    {
+      id: "loom-improve-mission",
+      title: `Improve ${truncate(topCategory, 32)}`,
+      prompt: `How can I improve the mission and little wins for ${topCategory}?`
+    },
+    {
+      id: "loom-outcome-next-step",
+      title: "Next best outcome step",
+      prompt: `What is the next best action for ${topOutcome}?`
+    },
+    {
+      id: "loom-capture-prioritize",
+      title: "Prioritize capture",
+      prompt: "Turn my capture items into the highest-leverage next actions."
+    }
+  ];
+  return chips;
+}
+
+function safeChatFallback({ hasContext, context, message }) {
+  const fallbackMessage =
+    nonEmptyString(message) ||
+    "Couldn't generate response. Check your connection.";
+  return {
+    message: fallbackMessage,
+    chips: buildDefaultLoomChips(context).slice(0, hasContext ? 4 : 3),
+    actions: [],
+    debug: {
+      usedContext: Boolean(hasContext),
+      confidence: "low",
+      evidence: hasContext ? extractEvidencePathsFromContext(context, 2) : []
+    }
+  };
+}
+
+function compactChatContextForModel(context) {
+  const src = context && typeof context === "object" ? context : {};
+  const categories = Array.isArray(src.fulfillmentCategories) ? src.fulfillmentCategories : [];
+  const outcomes = Array.isArray(src.activeOutcomes) ? src.activeOutcomes : [];
+  const blocks = Array.isArray(src.currentWeekActionBlocks) ? src.currentWeekActionBlocks : [];
+  const appGuide = Array.isArray(src.appGuide) ? src.appGuide : [];
+  const inventory = Array.isArray(src.dataInventory) ? src.dataInventory : [];
+  const passions = Array.isArray(src?.drivingForce?.passions) ? src.drivingForce.passions : [];
+  const captureItems = Array.isArray(src?.capture?.topItems) ? src.capture.topItems : [];
+
+  return {
+    generatedAt: src.generatedAt || null,
+    personalizationHash: nonEmptyString(src.personalizationHash) || null,
+    diagnostic: src.diagnostic
+      ? {
+          stress: truncate(String(src.diagnostic.stress || ""), 100),
+          breaksFirst: truncate(String(src.diagnostic.breaksFirst || ""), 100),
+          planningStyle: truncate(String(src.diagnostic.planningStyle || ""), 100),
+          firstChange: truncate(String(src.diagnostic.firstChange || ""), 120),
+          rootCause: truncate(String(src.diagnostic.rootCause || ""), 180),
+          nextDirection: truncate(String(src.diagnostic.nextDirection || ""), 180),
+          areas: Array.isArray(src.diagnostic.areas)
+            ? src.diagnostic.areas.map((v) => truncate(String(v || ""), 48)).slice(0, 5)
+            : []
+        }
+      : null,
+    drivingForce: src.drivingForce
+      ? {
+          vision: truncate(String(src.drivingForce.vision || ""), 240),
+          purpose: truncate(String(src.drivingForce.purpose || ""), 240),
+          passions: passions
+            .map((item) => ({
+              emotion: truncate(String(item?.emotion || ""), 24),
+              title: truncate(String(item?.title || ""), 80)
+            }))
+            .slice(0, 6)
+        }
+      : null,
+    fulfillmentCategories: categories
+      .map((item) => ({
+        id: truncate(String(item?.id || ""), 40),
+        name: truncate(String(item?.name || ""), 64),
+        mission: truncate(String(item?.mission || ""), 140),
+        identity: Array.isArray(item?.identity)
+          ? item.identity.map((v) => truncate(String(v || ""), 50)).slice(0, 2)
+          : [],
+        littleWins: Array.isArray(item?.littleWins)
+          ? item.littleWins.map((v) => truncate(String(v || ""), 60)).slice(0, 3)
+          : [],
+        weeklyScore: Number.isFinite(Number(item?.weeklyScore)) ? Number(item.weeklyScore) : null
+      }))
+      .slice(0, 4),
+    activeOutcomes: outcomes
+      .map((item) => ({
+        id: truncate(String(item?.id || ""), 40),
+        title: truncate(String(item?.title || ""), 90),
+        category: truncate(String(item?.category || ""), 60),
+        measurable: Boolean(item?.measurable),
+        progressSummary: truncate(String(item?.progressSummary || ""), 120)
+      }))
+      .slice(0, 4),
+    currentWeekActionBlocks: blocks
+      .map((item) => ({
+        category: truncate(String(item?.category || ""), 60),
+        title: truncate(String(item?.title || ""), 90),
+        completionRatio: Number.isFinite(Number(item?.completionRatio)) ? Number(item.completionRatio) : 0,
+        actions: Array.isArray(item?.actions)
+          ? item.actions.map((v) => truncate(String(v || ""), 70)).slice(0, 3)
+          : []
+      }))
+      .slice(0, 4),
+    capture: src.capture
+      ? {
+          totalCount: Number.isFinite(Number(src.capture.totalCount)) ? Number(src.capture.totalCount) : 0,
+          topItems: captureItems.map((v) => truncate(String(v || ""), 70)).slice(0, 5),
+          quickCompletionsLast7Days: Number.isFinite(Number(src.capture.quickCompletionsLast7Days))
+            ? Number(src.capture.quickCompletionsLast7Days)
+            : 0
+        }
+      : null,
+    dataInventory: inventory
+      .map((item) => ({
+        id: truncate(String(item?.id || ""), 48),
+        title: truncate(String(item?.title || ""), 90),
+        currentCount: Number.isFinite(Number(item?.currentCount)) ? Number(item.currentCount) : null,
+        historicalCount: Number.isFinite(Number(item?.historicalCount)) ? Number(item.historicalCount) : null,
+        keySignals: Array.isArray(item?.keySignals)
+          ? item.keySignals.map((v) => truncate(String(v || ""), 80)).slice(0, 3)
+          : []
+      }))
+      .slice(0, 10),
+    appGuide: appGuide
+      .map((item) => ({
+        id: truncate(String(item?.id || ""), 48),
+        title: truncate(String(item?.title || ""), 80),
+        summary: truncate(String(item?.summary || ""), 120)
+      }))
+      .slice(0, 6)
+  };
+}
+
+function extractUpstreamErrorSignature(upstreamText) {
+  const text = String(upstreamText || "").trim();
+  if (!text) return "";
+  try {
+    const parsed = JSON.parse(text);
+    const error = parsed?.error && typeof parsed.error === "object" ? parsed.error : null;
+    if (!error) return truncate(text, 300);
+    const code = nonEmptyString(error.code);
+    const type = nonEmptyString(error.type);
+    const message = nonEmptyString(error.message);
+    const parts = [];
+    if (code) parts.push(`code=${code}`);
+    if (type) parts.push(`type=${type}`);
+    if (message) parts.push(`message=${truncate(message, 180)}`);
+    return parts.join(" ");
+  } catch {
+    return truncate(text, 300);
+  }
+}
+
+function extractResponsesUsage(parsed) {
+  const usage = parsed?.usage && typeof parsed.usage === "object" ? parsed.usage : null;
+  if (!usage) return null;
+  const inputTokens = Number(usage.input_tokens);
+  const outputTokens = Number(usage.output_tokens);
+  const totalTokens = Number(usage.total_tokens);
+  const cachedInputTokens = Number(
+    usage?.input_tokens_details?.cached_tokens ??
+    usage?.input_tokens_details?.cached_input_tokens ??
+    0
+  );
+  return {
+    inputTokens: Number.isFinite(inputTokens) ? Math.max(0, Math.floor(inputTokens)) : 0,
+    cachedInputTokens: Number.isFinite(cachedInputTokens) ? Math.max(0, Math.floor(cachedInputTokens)) : 0,
+    outputTokens: Number.isFinite(outputTokens) ? Math.max(0, Math.floor(outputTokens)) : 0,
+    totalTokens: Number.isFinite(totalTokens) ? Math.max(0, Math.floor(totalTokens)) : null
+  };
+}
+
+function normalizeResponsesUsage(usage, model) {
+  if (!usage || typeof usage !== "object") return null;
+  const inputTokens = Number(usage.inputTokens);
+  const cachedInputTokens = Number(usage.cachedInputTokens);
+  const outputTokens = Number(usage.outputTokens);
+  const totalTokens = Number(usage.totalTokens);
+  if (!Number.isFinite(inputTokens) && !Number.isFinite(outputTokens)) return null;
+  return {
+    model: nonEmptyString(model) || DEFAULT_CHAT_MODEL,
+    inputTokens: Number.isFinite(inputTokens) ? Math.max(0, Math.floor(inputTokens)) : 0,
+    cachedInputTokens: Number.isFinite(cachedInputTokens) ? Math.max(0, Math.floor(cachedInputTokens)) : 0,
+    outputTokens: Number.isFinite(outputTokens) ? Math.max(0, Math.floor(outputTokens)) : 0,
+    totalTokens: Number.isFinite(totalTokens)
+      ? Math.max(0, Math.floor(totalTokens))
+      : Math.max(
+          0,
+          (Number.isFinite(inputTokens) ? Math.floor(inputTokens) : 0) +
+            (Number.isFinite(outputTokens) ? Math.floor(outputTokens) : 0)
+        )
+  };
+}
+
+function shouldCacheLoomAIResponse(response) {
+  if (!response || typeof response !== "object") return false;
+  const message = nonEmptyString(response.message);
+  if (!message) return false;
+  if (message === "Couldn't generate response. Check your connection.") return false;
+  return true;
+}
+
+function sanitizeLoomChatResponse(raw, { context, hasContext, latestUserMessage }) {
+  const base = raw && typeof raw === "object" ? raw : {};
+  let message = String(base.message || "").trim();
+  if (!message) {
+    return safeChatFallback({ hasContext, context });
+  }
+
+  const details = extractConcreteDetails(context);
+  if (hasContext && details.length >= 2) {
+    const detailMentions = details.filter((d) =>
+      message.toLowerCase().includes(String(d).toLowerCase())
+    ).length;
+    if (detailMentions < 2) {
+      message += `\n\n• I’m grounding this in ${details[0]} and ${details[1]}.`;
+    }
+  }
+
+  const chips = normalizeChips(base.chips, context);
+  const debug = normalizeDebug(base.debug, context, hasContext);
+  const actions = normalizeActions(base.actions, {
+    confidence: debug.confidence,
+    context,
+    latestUserMessage
+  });
+
+  return {
+    message: truncate(message, 2400),
+    chips,
+    actions,
+    debug
+  };
+}
+
+function normalizeChips(input, context) {
+  const source = Array.isArray(input) ? input : [];
+  const cleaned = [];
+  const seen = new Set();
+
+  for (const item of source) {
+    const title = String(item?.title || "").replace(/\s+/g, " ").trim();
+    const prompt = String(item?.prompt || "").replace(/\s+/g, " ").trim();
+    if (!title || !prompt) continue;
+    const id = String(item?.id || slug(title));
+    const key = `${title.toLowerCase()}|${prompt.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    cleaned.push({
+      id: truncate(id, 64),
+      title: truncate(title, 64),
+      prompt: truncate(prompt, 180)
+    });
+    if (cleaned.length >= 4) break;
+  }
+
+  if (cleaned.length >= 2) return cleaned;
+  return buildDefaultLoomChips(context).slice(0, 3);
+}
+
+function normalizeDebug(input, context, hasContext) {
+  const confidenceRaw = String(input?.confidence || "").trim().toLowerCase();
+  const confidence = ["high", "medium", "low"].includes(confidenceRaw)
+    ? confidenceRaw
+    : hasContext
+      ? "medium"
+      : "low";
+  const evidenceInput = Array.isArray(input?.evidence) ? input.evidence : [];
+  const evidence = uniqueOrdered(
+    evidenceInput
+      .map((item) => String(item || "").trim())
+      .filter(Boolean)
+  ).slice(0, 8);
+  const usedContext = Boolean(input?.usedContext) && hasContext;
+  const repairedEvidence =
+    usedContext && evidence.length < 2
+      ? uniqueOrdered([...evidence, ...extractEvidencePathsFromContext(context, 2)]).slice(0, 8)
+      : evidence;
+  return {
+    usedContext,
+    confidence,
+    evidence: repairedEvidence
+  };
+}
+
+function extractEvidencePathsFromContext(context, maxCount = 2) {
+  const paths = [];
+  if (nonEmptyString(context?.drivingForce?.vision)) paths.push("drivingForce.vision");
+  if (nonEmptyString(context?.drivingForce?.purpose)) paths.push("drivingForce.purpose");
+  if (Array.isArray(context?.fulfillmentCategories) && context.fulfillmentCategories.length > 0) {
+    paths.push("fulfillmentCategories[0].name");
+  }
+  if (Array.isArray(context?.activeOutcomes) && context.activeOutcomes.length > 0) {
+    paths.push("activeOutcomes[0].title");
+  }
+  if (Array.isArray(context?.currentWeekActionBlocks) && context.currentWeekActionBlocks.length > 0) {
+    paths.push("currentWeekActionBlocks[0].title");
+  }
+  if (nonEmptyString(context?.diagnostic?.rootCause)) paths.push("diagnostic.rootCause");
+  if (nonEmptyString(context?.diagnostic?.nextDirection)) paths.push("diagnostic.nextDirection");
+  return paths.slice(0, maxCount);
+}
+
+function extractConcreteDetails(context) {
+  const details = [];
+  const purposeVision = nonEmptyString(context?.drivingForce?.vision);
+  const purpose = nonEmptyString(context?.drivingForce?.purpose);
+  if (purposeVision) details.push(`your purpose vision "${truncate(purposeVision, 46)}"`);
+  if (purpose) details.push(`your purpose "${truncate(purpose, 46)}"`);
+  const categories = Array.isArray(context?.fulfillmentCategories) ? context.fulfillmentCategories : [];
+  if (categories.length > 0) {
+    details.push(`fulfillment area "${truncate(String(categories[0]?.name || ""), 34)}"`);
+  }
+  const outcomes = Array.isArray(context?.activeOutcomes) ? context.activeOutcomes : [];
+  if (outcomes.length > 0) {
+    details.push(`outcome "${truncate(String(outcomes[0]?.title || ""), 40)}"`);
+  }
+  return uniqueOrdered(details).slice(0, 4);
+}
+
+const ACTION_WHITELIST = new Set([
+  "updatePurposeVision",
+  "addPassionItem",
+  "updateFulfillmentMission",
+  "addLittleWin",
+  "createOutcome",
+  "createCaptureAction",
+  "addPlanSuggestion"
+]);
+
+function normalizeActions(input, { confidence, context }) {
+  if (String(confidence || "").toLowerCase() === "low") return [];
+  const source = Array.isArray(input) ? input : [];
+  const cleaned = [];
+  const seen = new Set();
+
+  for (const action of source) {
+    const type = String(action?.type || "").trim();
+    if (!ACTION_WHITELIST.has(type)) continue;
+
+    const title = String(action?.title || "").replace(/\s+/g, " ").trim();
+    const payload = normalizeActionPayload(type, action?.payload, context);
+    if (!title || !payload) continue;
+    const id = String(action?.id || `${type}-${cleaned.length + 1}`).trim();
+    const dedupeKey = `${type}|${JSON.stringify(payload)}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    cleaned.push({
+      id: truncate(id, 72),
+      title: truncate(title, 120),
+      type,
+      payload
+    });
+    if (cleaned.length >= 4) break;
+  }
+
+  return cleaned;
+}
+
+function normalizeActionPayload(type, payload, context) {
+  const src = payload && typeof payload === "object" ? payload : {};
+  const text = nonEmptyString(src.text);
+  const categoryId = nonEmptyString(src.categoryId || src.categoryID);
+  const categoryName = nonEmptyString(src.categoryName || src.category);
+
+  switch (type) {
+    case "updatePurposeVision":
+      return text ? { text: truncate(text, 260) } : null;
+    case "addPassionItem": {
+      const passionType = String(src.passionType || src.emotion || "").trim().toLowerCase();
+      if (!["love", "vows", "thrill", "hate"].includes(passionType) || !text) return null;
+      return { passionType, text: truncate(text, 120) };
+    }
+    case "updateFulfillmentMission": {
+      const validCategoryId = normalizeCategoryId(categoryId, categoryName, context);
+      if (!validCategoryId || !text) return null;
+      return { categoryId: validCategoryId, text: truncate(text, 240) };
+    }
+    case "addLittleWin": {
+      const validCategoryId = normalizeCategoryId(categoryId, categoryName, context);
+      const activity = nonEmptyString(src.activity || src.text);
+      if (!validCategoryId || !activity) return null;
+      const eligibleRaw = src.appleHealthEligible;
+      const appleHealthEligible =
+        typeof eligibleRaw === "boolean"
+          ? eligibleRaw
+          : String(eligibleRaw || "").toLowerCase() === "true";
+      return {
+        categoryId: validCategoryId,
+        activity: truncate(activity, 140),
+        appleHealthEligible
+      };
+    }
+    case "createOutcome": {
+      const validCategoryId = normalizeCategoryId(categoryId, categoryName, context);
+      const title = nonEmptyString(src.title || src.text);
+      if (!validCategoryId || !title) return null;
+      const measurable =
+        typeof src.measurable === "boolean"
+          ? src.measurable
+          : String(src.measurable || "").toLowerCase() === "true";
+      const unit = nonEmptyString(src.unit);
+      return {
+        categoryId: validCategoryId,
+        title: truncate(title, 120),
+        measurable,
+        unit: unit ? truncate(unit, 24) : ""
+      };
+    }
+    case "createCaptureAction":
+    case "addPlanSuggestion":
+      return text ? { text: truncate(text, 160) } : null;
+    default:
+      return null;
+  }
+}
+
+function normalizeCategoryId(categoryId, categoryName, context) {
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(categoryId)) {
+    return categoryId;
+  }
+  if (!categoryName) return "";
+  const categories = Array.isArray(context?.fulfillmentCategories) ? context.fulfillmentCategories : [];
+  const found = categories.find(
+    (item) => String(item?.name || "").trim().toLowerCase() === categoryName.toLowerCase()
+  );
+  const mapped = String(found?.id || "").trim();
+  return /^[0-9a-f-]{36}$/i.test(mapped) ? mapped : "";
+}
+
+function slug(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
 }
 
 function corsHeaders(request) {
