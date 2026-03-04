@@ -30,12 +30,1227 @@ let fulfillmentStartSelectableDefaultCategories: [String] = [
     "Home & Life"
 ]
 
+fileprivate let fulfillmentStartMissionSuggestionCorpusByCategory: [String: String] = [
+    "Career & Business": """
+I build work that uses my abilities well and creates real value for others. Progress here strengthens my independence and confidence. When this area grows, I gain momentum and opportunity across my life.
+My work allows me to apply my strengths to meaningful challenges. Improving here gives me stability and direction instead of uncertainty. When this area is strong, I feel capable and purposeful in how I spend my time.
+I contribute value through the work I choose to pursue. Strengthening this area expands my opportunities and my ability to shape my future. When this area grows, I move through life with greater control and confidence.
+My career allows me to build skills that compound over time. Improving here strengthens my ability to support myself and those I care about. When this area is strong, progress in other parts of life becomes easier.
+I use my work to create meaningful impact and long-term progress. Strengthening this area builds stability, freedom, and opportunity. When this area grows, I gain the ability to shape my life more intentionally.
+My work reflects my abilities and the value I bring to the world. Improving here strengthens my confidence and sense of direction. When this area is strong, I feel energized instead of drained by how I spend my time.
+I develop skills that allow me to solve meaningful problems. Strengthening this area expands both my impact and my opportunities. When this area grows, I create momentum that benefits every part of my life.
+My career gives structure to how I grow and contribute. Improving here increases my independence and long-term stability. When this area is strong, I can focus on building a life that feels intentional and rewarding.
+I build work that challenges me to improve while creating value for others. Strengthening this area increases my confidence and resilience. When this area grows, I move forward with greater clarity and momentum.
+My work allows me to grow, contribute, and create lasting value. Improving here builds both stability and opportunity for the future. When this area is strong, I feel capable of handling whatever challenges arise.
+I use my career to develop skills that compound over time. Strengthening this area expands my ability to contribute and create opportunities. When this area grows, I gain both confidence and freedom in my life.
+My work allows me to apply my talents toward meaningful outcomes. Improving here strengthens my sense of progress and self-reliance. When this area is strong, I move through life with greater confidence and clarity.
+I pursue work that challenges me and allows me to grow. Strengthening this area increases my resilience and ability to solve problems. When this area grows, I create stability and opportunity for the future.
+My career is a place where effort turns into progress and value. Improving here builds both competence and independence. When this area is strong, I feel confident shaping my direction in life.
+I develop skills and experiences that expand what I am capable of achieving. Strengthening this area increases both my impact and my stability. When this area grows, the rest of life becomes easier to navigate.
+I build a career that reflects both my strengths and my values. Strengthening this area increases my freedom to choose how I spend my time and energy. When this area grows, I feel aligned with the life I am building.
+My work helps me create stability, progress, and opportunity over time. Improving here increases my confidence in my ability to navigate challenges. When this area is strong, I move through life with greater clarity and momentum.
+I develop work that allows my abilities to create meaningful results. Strengthening this area expands my opportunities and my influence. When this area grows, I gain the freedom to build the life I want.
+My career is where effort becomes progress and ideas become real outcomes. Improving here strengthens my independence and long-term stability. When this area is strong, I feel confident building a future I believe in.
+My work allows me to contribute meaningfully while continuing to grow. Improving here strengthens my sense of capability and purpose. When this area is strong, I gain momentum that carries into every other part of life.
+""",
+    "Faith & Spirituality": """
+My faith keeps my life anchored in something greater than myself. It reminds me that my actions, struggles, and growth all have meaning beyond the moment. Strengthening this area keeps me grounded, humble, and directed toward what truly matters.
+My spiritual life helps me live with purpose instead of drifting through daily pressures. It reminds me that my character and choices matter more than temporary outcomes. When this area is strong, I feel centered and guided.
+Faith gives me perspective when life feels uncertain or overwhelming. It reminds me that I am not carrying everything alone and that challenges can shape me. Strengthening this area brings calm, clarity, and resilience.
+My spiritual life helps align my values, decisions, and actions. It keeps me honest about who I want to be and how I treat others. When this area grows stronger, my life feels more consistent and meaningful.
+Faith keeps my priorities in the right order. It reminds me that success without meaning is empty and that character matters more than status. Strengthening this area keeps my life balanced and purposeful.
+My spirituality reminds me to live with gratitude instead of entitlement. It helps me notice the good in life and appreciate the people around me. When this area grows stronger, I feel more peace and contentment.
+Faith strengthens my ability to face hardship with courage. It reminds me that growth often comes through difficulty and that perseverance matters. When this area is strong, I respond to challenges with steadiness.
+My spiritual life reminds me that my life is meant to serve something beyond myself. It encourages me to care for others and contribute positively to the world. Strengthening this area gives my life deeper meaning.
+Faith helps me pause and reflect instead of reacting impulsively. It encourages patience, humility, and thoughtful choices. When this area grows stronger, I respond to life with greater wisdom.
+My spiritual foundation keeps me grounded when life becomes busy or chaotic. It creates space for reflection and connection with what truly matters. Strengthening this area brings clarity and stability.
+Faith reminds me that my identity is deeper than achievements or failures. It helps me see my worth beyond external success. When this area is strong, I feel more secure and centered.
+My spirituality encourages me to live with integrity and compassion. It shapes how I treat others and how I respond to challenges. Strengthening this area helps me become the person I want to be.
+Faith helps me stay hopeful even when circumstances are uncertain. It reminds me that setbacks do not define my future. When this area grows stronger, I carry a deeper sense of trust and optimism.
+My spiritual life keeps me connected to reflection and stillness. It gives me space to slow down and listen instead of constantly reacting. Strengthening this area helps me live with greater awareness.
+Faith reminds me that life is about more than personal gain. It encourages generosity, humility, and service to others. When this area is strong, my actions feel more meaningful.
+My spirituality helps me see life through a lens of purpose rather than pressure. It reminds me that growth, learning, and compassion are part of a larger journey. Strengthening this area deepens my sense of direction.
+Faith helps me find peace in moments that feel uncertain or difficult. It reminds me that I can trust the process of growth and change. When this area grows stronger, I feel calmer and more grounded.
+My spiritual life encourages reflection on who I am becoming. It helps me step back from distractions and focus on what truly matters. Strengthening this area brings clarity to my values and direction.
+Faith keeps me connected to gratitude, humility, and perspective. It reminds me that every day offers opportunities to grow and serve. When this area is strong, I experience deeper fulfillment.
+My spirituality reminds me to live intentionally instead of drifting through life. It keeps my actions aligned with deeper meaning and purpose. Strengthening this area brings peace, direction, and fulfillment.
+""",
+    "Wealth & Finance": """
+I build financial stability so daily decisions are not controlled by stress or scarcity. When my finances are strong, I have the freedom to focus on what matters most.
+I strengthen my finances so I can live with greater independence and peace of mind. Financial strength allows me to make choices based on values instead of pressure.
+I develop financial discipline so my future becomes more secure and flexible. Each improvement creates more freedom in how I live and work.
+I grow my financial resources so I can create opportunities instead of reacting to limitations. Stability here strengthens every other area of life.
+I manage money wisely so my life becomes more stable and less reactive. Strong finances allow me to move forward with confidence.
+I strengthen my financial foundation so unexpected problems do not control my life. Stability here gives me calm and long-term security.
+I build financial resilience so challenges do not derail my progress. When this area is strong, I can focus on growth instead of survival.
+I improve my financial habits so my life becomes more stable and intentional. Progress here removes pressure and expands my options.
+I grow financial discipline so my future becomes more predictable and secure. Strength in this area creates freedom and momentum.
+I strengthen my finances so I can support the life I truly want to build. When money is managed well, everything else becomes easier.
+I build financial clarity so decisions about money become simple and confident. Strong finances allow me to focus on long-term progress.
+I develop consistent financial habits so my resources steadily grow over time. Stability here creates lasting peace of mind.
+I strengthen my financial position so I can handle uncertainty without fear. Progress in this area makes life more stable and flexible.
+I improve how I manage money so my life becomes more organized and secure. Financial stability supports everything I want to achieve.
+I grow my financial capacity so I can create opportunities for myself and others. When this area improves, my impact expands.
+I strengthen financial discipline so my future is built on stability rather than chance. Progress here supports every other priority.
+I manage my finances intentionally so my life becomes more secure and less stressful. Strong financial systems create freedom.
+I build financial strength so I can pursue meaningful goals without constant pressure. Stability here unlocks long-term progress.
+I develop financial wisdom so my resources grow and support the life I am building. Progress here brings confidence and clarity.
+I strengthen my finances so I can live with greater freedom, stability, and generosity. When this area improves, everything else becomes easier.
+""",
+    "Learning & Education": """
+I continuously grow my understanding of the world and how it works. Learning expands my perspective and helps me make better decisions. A curious mind keeps my life evolving instead of standing still.
+I actively develop knowledge and skills that make me more capable. Each thing I learn strengthens my confidence and independence. Growth keeps my mind sharp and adaptable.
+I challenge myself to keep learning and improving. Expanding my knowledge helps me navigate complexity with clarity. Progress in learning creates momentum across every part of my life.
+I stay curious and open to new ideas. Learning helps me see opportunities others might miss. A growing mind allows me to keep evolving throughout life.
+I invest time into understanding new concepts and perspectives. Knowledge gives me tools to think clearly and act wisely. The more I learn, the more capable I become.
+I strengthen my mind through continuous learning. Each new insight helps me understand people, systems, and the world more deeply. Intellectual growth keeps life interesting and meaningful.
+I build knowledge that helps me think critically and independently. Learning gives me confidence in my decisions and direction. A strong foundation of understanding supports everything else I pursue.
+I commit to developing new skills and expanding my thinking. Learning allows me to solve problems and adapt when challenges arise. Growth in knowledge unlocks new possibilities.
+I remain curious about the world and eager to understand it. Learning broadens my perspective and improves my judgment. When my mind grows, my life grows with it.
+I actively seek knowledge that sharpens my thinking. Understanding how things work helps me move through life with clarity and purpose. Learning keeps my mind engaged and alive.
+I strengthen my ability to think, question, and understand. Learning helps me make wiser choices and avoid repeating mistakes. A growing mind makes the future more open.
+I continuously explore ideas, skills, and perspectives. Learning expands my awareness and improves how I approach challenges. Knowledge becomes a tool I carry through life.
+I build a habit of curiosity and discovery. Learning helps me see patterns, connections, and possibilities. A curious mind keeps life engaging and meaningful.
+I develop knowledge that empowers me to think clearly and act wisely. Learning strengthens my confidence and independence. Each insight adds to my ability to navigate life well.
+I commit to understanding more about the world and my place in it. Learning deepens my awareness and sharpens my thinking. Growth in knowledge keeps my life moving forward.
+I strengthen my ability to learn, adapt, and improve. Each new skill or idea expands what I am capable of doing. Learning turns uncertainty into opportunity.
+I seek knowledge that expands my perspective and sharpens my mind. Learning helps me see beyond assumptions and think more clearly. A growing mind keeps my life dynamic.
+I cultivate curiosity and intellectual growth every day. Learning gives me the ability to understand complex ideas and make thoughtful decisions. A strong mind supports every area of my life.
+I actively expand my understanding through new knowledge and skills. Learning helps me grow beyond limitations and stay adaptable. Each insight builds momentum for the future.
+I build a life shaped by curiosity and continuous improvement. Learning helps me understand the world more deeply and navigate it more wisely. A growing mind makes every experience richer.
+""",
+    "Health & Energy": """
+I maintain my health and energy so I can show up fully in every part of life. When my body and mind are strong, everything else becomes easier to handle. This foundation allows me to live with focus, resilience, and confidence.
+I care for my physical and mental energy so I can think clearly and act with intention. When my energy is steady, I avoid reacting to stress and instead move through life with control and clarity. This keeps my daily life stable and productive.
+I prioritize my health because it supports every other area of my life. When my body feels strong and my energy is balanced, I can pursue my goals with consistency. This allows me to live with strength and longevity.
+I build habits that protect my health and energy every day. When I care for my body and mind, I gain the stamina needed to handle challenges. This keeps me capable and resilient over the long term.
+I treat my health as a core foundation of my life. When my energy is strong, I can focus on what matters most without constant fatigue or stress. This allows me to move through life with stability and strength.
+I invest in my health so my life is not limited by low energy or preventable problems. When my body and mind function well, I gain freedom to pursue opportunities. This helps me live a more capable and active life.
+I strengthen my health so I can handle life's responsibilities with confidence. When my energy is steady, I approach challenges with clarity instead of exhaustion. This helps me stay dependable and effective.
+I protect my physical and mental well-being so I can sustain progress in every area of life. When my energy is balanced, I avoid burnout and remain consistent. This allows me to maintain momentum over time.
+I care for my body and mind so I can stay present and engaged in daily life. When my health is strong, I experience life with greater clarity and enjoyment. This creates a more grounded and fulfilling life.
+I build a strong health foundation so I can handle both opportunities and challenges. When my energy is reliable, I can take action instead of hesitating from fatigue. This keeps me capable and ready for what life brings.
+I maintain my health because it shapes how I experience each day. When my energy is stable, I move through life with focus and calm instead of constant strain. This helps me feel balanced and capable.
+I strengthen my health so I can bring my best self to the people and responsibilities in my life. When my energy is high and my mind is clear, I contribute more effectively. This improves both my performance and my relationships.
+I take care of my health so I can live with strength and independence. When my body and mind are supported, I avoid many problems that limit my freedom later. This keeps my life stable and self-directed.
+I prioritize my health because it determines the quality of my daily life. When my energy is consistent, I can focus on meaningful goals instead of managing constant fatigue. This creates a more productive and satisfying life.
+I support my health so I can stay resilient through stress and change. When my body and mind are well cared for, I recover faster and adapt more easily. This keeps me steady through challenges.
+I maintain strong health habits so my energy supports my ambitions. When I feel physically and mentally capable, I take action with greater confidence. This allows me to move forward without unnecessary limits.
+I care for my health because it allows me to enjoy life fully. When my energy is high and my body feels strong, everyday experiences become more rewarding. This creates a life that feels vibrant and engaged.
+I strengthen my health so I can sustain long-term progress in life. When my energy is balanced, I avoid the cycles of burnout and recovery. This helps me stay consistent and reliable.
+I invest in my health because it multiplies my ability to live well. When my body and mind are supported, I perform better and feel better. This creates stability across every part of my life.
+I treat my health as a responsibility to myself and my future. When my energy is strong and my body functions well, I have greater freedom and opportunity. This allows me to live a longer, stronger, and more capable life.
+""",
+    "Love & Relationships": """
+Strong relationships give my life meaning and depth. When I invest in the people I care about, I feel supported and connected instead of isolated. These bonds shape the quality of my life.
+Healthy relationships help me grow into a better person. When I communicate honestly and show up with care, trust deepens and conflict becomes constructive. This area strengthens the foundation of my life.
+Connection with others keeps my life balanced and grounded. When my relationships are strong, I face challenges with more resilience and perspective. The people around me make life richer and more meaningful.
+Investing in my relationships creates belonging and stability. When I nurture these connections, life feels less stressful and more supportive. Strong relationships help everything else in life work better.
+Meaningful relationships bring joy, support, and shared experience. When I care for the people in my life, I create memories and trust that last far beyond individual moments. This area shapes the emotional quality of my life.
+Healthy relationships help me feel understood and valued. When I listen well and communicate clearly, trust grows and problems become easier to solve. This creates stability across my life.
+The people I care about shape who I become. When I invest in these relationships with intention, I build a circle of trust, support, and encouragement. These connections strengthen every part of my life.
+Strong relationships reduce loneliness and create lasting support. When I consistently show up for others, I build trust that grows over time. This area gives my life deeper meaning.
+My relationships influence my happiness and well-being. When I nurture connection and resolve conflict with care, life feels calmer and more fulfilling. These bonds make life more resilient.
+Healthy relationships create emotional security and belonging. When I invest time and care into them, I build trust that supports me through both good times and challenges. This area anchors my life.
+The strength of my relationships shapes the quality of my daily life. When I communicate openly and support others, connection becomes deeper and more rewarding. This makes life feel richer.
+Relationships help me grow, learn, and stay grounded. When I invest in them intentionally, I create a network of trust and encouragement. This strengthens my sense of belonging.
+Connection with others gives life warmth and meaning. When I nurture relationships consistently, trust grows and challenges feel easier to navigate. This area supports my emotional well-being.
+Strong relationships create support that no achievement can replace. When I prioritize connection, I build bonds that make life more stable and fulfilling. These relationships enrich every season of life.
+Healthy relationships help me show up fully in life. When I care for the people around me, trust grows and conflict becomes manageable. This strengthens my sense of belonging.
+Relationships bring perspective and shared experience. When I invest time and care into them, I build bonds that deepen my life and strengthen my resilience. These connections make life meaningful.
+Connection helps me stay grounded in what truly matters. When I nurture relationships with honesty and attention, trust and understanding grow. This area improves the emotional quality of my life.
+Strong relationships help me feel supported and valued. When I consistently show care and attention, I create trust that lasts through challenges. These bonds shape the strength of my life.
+My relationships influence my happiness more than almost anything else. When I nurture them intentionally, connection deepens and life feels less reactive. This area keeps my life balanced.
+Healthy relationships help me live with more empathy and understanding. When I invest in connection and communication, trust grows and life becomes more fulfilling. These bonds strengthen every part of my life.
+""",
+    "Lifestyle & Experiences": """
+I make space in my life for exploration and new experiences. Trying new things keeps life interesting and prevents my days from feeling repetitive. When this area is strong, I feel energized, curious, and fully engaged in the world around me.
+I actively seek experiences that expand my perspective. Exploring new places, ideas, and activities keeps my mind open and my life dynamic. This reminds me that life is meant to be lived, not just managed.
+I create a life that includes discovery and adventure. Even small experiences bring variety and meaning to everyday life. When I prioritize this area, my life feels richer and more memorable.
+I choose to experience life instead of simply moving through routines. New environments, people, and activities help me stay curious and engaged. This keeps my life vibrant rather than predictable.
+I keep curiosity alive through exploration and meaningful experiences. Trying new things strengthens creativity and keeps my perspective fresh. When I invest in this area, life feels expansive instead of narrow.
+I regularly step outside familiar routines to experience something new. These moments of discovery bring excitement and inspiration into my life. They remind me that growth often begins with exploration.
+I prioritize experiences that make life feel meaningful and memorable. Exploring the world around me strengthens my appreciation for everyday life. This keeps my life balanced between responsibility and enjoyment.
+I intentionally create moments that make life enjoyable and interesting. Exploring new places, hobbies, and activities keeps my perspective fresh. This helps me build a life filled with stories and meaningful memories.
+I give myself permission to experience life fully. Exploring new environments and activities helps me stay energized and inspired. When this area grows, my life feels more alive and fulfilling.
+I invest time in experiences that broaden my understanding of the world. New perspectives deepen my appreciation for life and the people around me. This keeps my thinking flexible and my life interesting.
+I keep my life dynamic by exploring ideas, places, and experiences. Each new experience adds depth and perspective to my life. When I nurture this area, life feels exciting instead of repetitive.
+I make curiosity and discovery part of my everyday life. Small experiences create momentum toward a more vibrant and meaningful life. This helps me stay engaged with the world around me.
+I build a life filled with experiences that inspire and energize me. Exploring new opportunities keeps my perspective fresh and creative. This strengthens both my mindset and my sense of adventure.
+I stay open to new experiences that bring variety and meaning into my life. Trying new things keeps me growing and prevents life from becoming stagnant. This area keeps my life feeling expansive and alive.
+I make exploration a regular part of my life. New experiences challenge my assumptions and expand my perspective. When this area is strong, life feels more interesting and rewarding.
+I pursue experiences that create memorable moments and personal growth. Exploring new activities and environments keeps life engaging. This reminds me that meaningful living includes both progress and enjoyment.
+I choose to remain curious about the world around me. New experiences help me see life from different perspectives. This keeps my life interesting, balanced, and full of possibility.
+I create a lifestyle that includes exploration, creativity, and discovery. New experiences stimulate my mind and bring variety into my life. When this area grows, I feel more energized and inspired.
+I allow space in my life for experiences that expand my perspective. Trying new things strengthens curiosity and personal growth. This helps me build a life that feels full rather than routine.
+I intentionally seek experiences that bring joy, learning, and discovery. Exploring new places, ideas, and activities keeps life meaningful. When I strengthen this area, my life becomes richer and more fulfilling.
+""",
+    "Mindset & Resilience": """
+I maintain a steady mindset so I can respond to challenges with clarity instead of reaction. When my thinking stays grounded, my decisions improve and my life feels more stable.
+I strengthen my resilience so pressure does not control my behavior. When my mindset is strong, setbacks become lessons instead of barriers.
+I cultivate calm thinking so I can handle uncertainty with confidence. A stable mindset allows me to move forward even when conditions are difficult.
+I build emotional resilience so stress does not dictate my actions. When I stay balanced internally, I navigate challenges with greater clarity and strength.
+I develop a mindset that adapts and grows through difficulty. When I respond thoughtfully instead of reactively, progress becomes consistent.
+I strengthen my mental discipline so distractions and negative thinking do not derail my progress. A focused mindset allows me to keep moving forward.
+I maintain perspective so temporary setbacks do not feel permanent. When I stay grounded, I make better decisions and recover faster.
+I train my thinking to stay constructive during pressure. When my mindset remains steady, my actions become more effective.
+I reinforce resilience so I can handle both success and failure with balance. This steadiness allows me to stay consistent over time.
+I practice self-awareness so I recognize patterns in my thoughts and reactions. When I understand my mindset, I can guide it instead of being controlled by it.
+I strengthen my inner stability so external events do not constantly disrupt my direction. A resilient mindset keeps my progress steady.
+I develop patience with challenges so growth happens without unnecessary stress. When my mindset remains calm, solutions appear more clearly.
+I maintain a thoughtful mindset so I respond with intention instead of impulse. This clarity allows me to move through challenges with confidence.
+I cultivate resilience so difficult moments strengthen rather than weaken my progress. A strong mindset allows me to continue forward with purpose.
+I strengthen my ability to recover from setbacks quickly. When my mindset stays adaptable, obstacles lose their power to stop progress.
+I reinforce optimism grounded in reality so I can see opportunities within challenges. This perspective keeps momentum moving forward.
+I maintain emotional balance so stress does not spread into every part of my life. When my mindset stays centered, everything else becomes easier to manage.
+I train my thinking to remain constructive and solution-focused. This mindset turns challenges into problems that can be solved.
+I develop resilience so uncertainty does not create paralysis. When my mindset stays strong, I continue moving forward with clarity.
+I strengthen my mindset so I remain calm, thoughtful, and capable under pressure. This stability allows me to make better choices and sustain progress.
+""",
+    "Service & Impact": """
+I use my time, skills, and resources to help others and improve the communities around me. Contributing beyond myself gives my life deeper meaning and reminds me that my actions can create real change.
+I show up for others and look for ways to make life better for the people around me. When I contribute and serve, my life feels more purposeful and connected.
+I use what I have to create positive impact where I can. Helping others grow, succeed, or overcome challenges strengthens both my community and my own sense of purpose.
+I choose to contribute instead of just consume. By helping others and supporting meaningful causes, my actions create ripple effects that extend beyond my own life.
+I make a difference through small acts of service and support. When I invest in people and communities, I help create a world that is stronger, kinder, and more resilient.
+I use my abilities and opportunities to lift others when I can. Contributing to something bigger than myself brings deeper fulfillment and perspective.
+I look for ways each day to help, support, or encourage someone else. Living this way reminds me that impact is built through consistent small actions.
+I choose to leave people and places better than I found them. Contributing to the wellbeing of others creates a lasting sense of meaning and responsibility.
+I invest my energy in causes and people that matter. When I contribute beyond myself, my life gains direction and purpose that goes beyond personal success.
+I use my voice, effort, and influence to create positive change. Helping others move forward strengthens the communities and systems we all depend on.
+I support others in ways that help them grow, succeed, and feel valued. When I contribute to someone else's progress, I help build a stronger and more connected world.
+I take responsibility for contributing where I can instead of waiting for someone else to act. Service gives my life purpose and connects my daily actions to something meaningful.
+I bring generosity, support, and encouragement into the lives of others. By contributing in small ways each day, I help create lasting positive impact.
+I invest in people and communities that need support. When I contribute with intention, I help build a future that benefits more than just myself.
+I use my time and abilities to create opportunities for others. Helping people succeed gives my life a deeper sense of purpose and meaning.
+I contribute my effort to causes that improve lives and strengthen communities. Knowing that my actions help others gives my work greater significance.
+I choose to give back instead of only moving forward for myself. Supporting others creates balance, perspective, and fulfillment in my life.
+I look for ways to help others overcome challenges or move closer to their goals. When I serve others, I create meaning that goes far beyond personal achievement.
+I take pride in contributing to something bigger than my own success. Helping others thrive strengthens both my community and my sense of purpose.
+I use my daily actions to create positive influence in the lives of others. Contributing consistently reminds me that meaningful impact is built one step at a time.
+""",
+    "Home & Life": """
+My home supports my clarity and peace. When my environment is organized and cared for, my mind is calmer and daily life feels lighter.
+My home is a place of stability and order. Maintaining it well helps everything else in life run more smoothly.
+I take care of the place where my life happens. A well-maintained home creates calm, focus, and energy for the things that matter most.
+My environment reflects how I live. When my space is clean, functional, and intentional, my days feel more grounded and productive.
+I maintain a home that supports rest and clarity. When my surroundings are in order, I can think clearly and move through the day with ease.
+My living space works for me, not against me. Keeping it organized and functional reduces friction and frees my energy for more important things.
+I care for my home as the foundation of daily life. A steady environment gives me the stability to focus on growth and progress.
+My home is a place that restores me. When it is calm and cared for, it helps me recharge and show up better in every part of life.
+I create an environment that makes life easier. Order and simplicity at home allow me to focus on what truly matters.
+I take pride in the place where I live. Caring for it builds discipline and creates a space that supports my well-being.
+My home supports both rest and productivity. Maintaining it well helps my days start and end with clarity and calm.
+I keep my environment intentional and supportive. A well-run home creates stability that carries into every other part of life.
+My space reflects the life I am building. When I maintain it with care, everything else feels more aligned and manageable.
+I create a home that feels welcoming and steady. This foundation helps me stay grounded even when life becomes busy.
+I maintain a space that supports both focus and recovery. A healthy environment makes it easier to sustain progress every day.
+My home is the base from which my life moves forward. Keeping it in order strengthens my ability to live intentionally.
+I value the systems that make daily life work. Maintaining my home creates stability that reduces stress and confusion.
+My environment shapes how I feel and think. When I care for it well, I feel calmer, clearer, and more capable.
+My home is a place where life can unfold smoothly. Keeping it organized and maintained helps each day flow more naturally.
+I treat my home as a foundation for a well-lived life. When it is stable and cared for, everything else becomes easier to manage.
+"""
+]
+
+fileprivate let fulfillmentStartIdentitySuggestionCSV = """
+fulfillment_area,identity
+Career & Business,Strategic Leader
+Career & Business,Visionary Builder
+Career & Business,Disciplined Professional
+Career & Business,Impactful Executive
+Career & Business,Entrepreneurial Thinker
+Career & Business,Empowering Manager
+Career & Business,Decisive Operator
+Career & Business,Results Driver
+Career & Business,Creative Innovator
+Career & Business,Focused Producer
+Career & Business,Respected Professional
+Career & Business,Opportunity Creator
+Career & Business,Market Builder
+Career & Business,Team Champion
+Career & Business,Trusted Advisor
+Career & Business,Problem Solver
+Career & Business,Strategic Planner
+Career & Business,Value Creator
+Career & Business,High Performer
+Career & Business,Efficient Operator
+Career & Business,Innovative Thinker
+Career & Business,Relentless Executor
+Career & Business,Growth Architect
+Career & Business,Productive Builder
+Career & Business,Industry Leader
+Career & Business,Forward Thinker
+Career & Business,Operational Expert
+Career & Business,Decision Maker
+Career & Business,Outcome Producer
+Career & Business,Opportunity Finder
+Career & Business,Smart Negotiator
+Career & Business,Influential Communicator
+Career & Business,Brand Builder
+Career & Business,Revenue Generator
+Career & Business,Strategic Networker
+Career & Business,Confident Presenter
+Career & Business,Skilled Operator
+Career & Business,Disciplined Builder
+Career & Business,Thoughtful Leader
+Career & Business,Trusted Partner
+Career & Business,Opportunity Maximizer
+Career & Business,Impact Driver
+Career & Business,Creative Builder
+Career & Business,Focused Achiever
+Career & Business,Vision Executor
+Career & Business,Professional Craftsman
+Career & Business,Organized Operator
+Career & Business,Market Strategist
+Career & Business,Execution Expert
+Career & Business,Influential Leader
+
+Faith & Spirituality,Prayer Warrior
+Faith & Spirituality,Faithful Servant
+Faith & Spirituality,Devoted Believer
+Faith & Spirituality,Scripture Student
+Faith & Spirituality,Spiritual Seeker
+Faith & Spirituality,Faith Builder
+Faith & Spirituality,Hope Carrier
+Faith & Spirituality,Prayerful Leader
+Faith & Spirituality,Humble Follower
+Faith & Spirituality,Servant Leader
+Faith & Spirituality,Faithful Steward
+Faith & Spirituality,Compassionate Helper
+Faith & Spirituality,Spiritual Disciple
+Faith & Spirituality,Worshipper
+Faith & Spirituality,Faith Mentor
+Faith & Spirituality,Scripture Learner
+Faith & Spirituality,Faithful Witness
+Faith & Spirituality,Prayerful Friend
+Faith & Spirituality,Encouraging Believer
+Faith & Spirituality,Faithful Listener
+Faith & Spirituality,Faithful Disciple
+Faith & Spirituality,Spiritual Builder
+Faith & Spirituality,Hopeful Follower
+Faith & Spirituality,Prayerful Thinker
+Faith & Spirituality,Faithful Encourager
+Faith & Spirituality,Devoted Servant
+Faith & Spirituality,Spiritual Guide
+Faith & Spirituality,Faithful Student
+Faith & Spirituality,Grateful Believer
+Faith & Spirituality,Faithful Companion
+Faith & Spirituality,Prayerful Steward
+Faith & Spirituality,Spirit Led Leader
+Faith & Spirituality,Faith Builder
+Faith & Spirituality,Compassionate Disciple
+Faith & Spirituality,Faithful Friend
+Faith & Spirituality,Faithful Teacher
+Faith & Spirituality,Spiritual Explorer
+Faith & Spirituality,Faithful Encourager
+Faith & Spirituality,Prayerful Seeker
+Faith & Spirituality,Faithful Supporter
+Faith & Spirituality,Hopeful Leader
+Faith & Spirituality,Faithful Listener
+Faith & Spirituality,Faithful Witness
+Faith & Spirituality,Spiritual Student
+Faith & Spirituality,Faithful Servant
+Faith & Spirituality,Prayerful Helper
+Faith & Spirituality,Faithful Follower
+Faith & Spirituality,Spirit Guided Thinker
+Faith & Spirituality,Faith Builder
+Faith & Spirituality,Faithful Intercessor
+
+Wealth & Finance,Wealth Builder
+Wealth & Finance,Disciplined Investor
+Wealth & Finance,Smart Saver
+Wealth & Finance,Financial Planner
+Wealth & Finance,Opportunity Investor
+Wealth & Finance,Capital Builder
+Wealth & Finance,Strategic Earner
+Wealth & Finance,Money Steward
+Wealth & Finance,Wealth Architect
+Wealth & Finance,Financial Optimizer
+Wealth & Finance,Disciplined Saver
+Wealth & Finance,Asset Builder
+Wealth & Finance,Financial Strategist
+Wealth & Finance,Opportunity Buyer
+Wealth & Finance,Smart Investor
+Wealth & Finance,Capital Allocator
+Wealth & Finance,Income Builder
+Wealth & Finance,Debt Eliminator
+Wealth & Finance,Future Planner
+Wealth & Finance,Financial Guardian
+Wealth & Finance,Value Investor
+Wealth & Finance,Opportunity Seeker
+Wealth & Finance,Wealth Creator
+Wealth & Finance,Financial Organizer
+Wealth & Finance,Money Multiplier
+Wealth & Finance,Strategic Spender
+Wealth & Finance,Financial Builder
+Wealth & Finance,Financial Learner
+Wealth & Finance,Portfolio Builder
+Wealth & Finance,Wealth Strategist
+Wealth & Finance,Smart Allocator
+Wealth & Finance,Income Optimizer
+Wealth & Finance,Future Builder
+Wealth & Finance,Financial Protector
+Wealth & Finance,Capital Grower
+Wealth & Finance,Financial Thinker
+Wealth & Finance,Opportunity Planner
+Wealth & Finance,Money Manager
+Wealth & Finance,Wealth Designer
+Wealth & Finance,Investment Student
+Wealth & Finance,Financial Executor
+Wealth & Finance,Strategic Investor
+Wealth & Finance,Financial Builder
+Wealth & Finance,Income Architect
+Wealth & Finance,Wealth Planner
+Wealth & Finance,Capital Builder
+Wealth & Finance,Financial Navigator
+Wealth & Finance,Money Strategist
+Wealth & Finance,Investment Thinker
+Wealth & Finance,Financial Stewardfulfillment_area,identity
+Learning & Education,Focused Student
+Learning & Education,Curious Learner
+Learning & Education,Knowledge Seeker
+Learning & Education,Thoughtful Scholar
+Learning & Education,Lifelong Learner
+Learning & Education,Deep Thinker
+Learning & Education,Insight Hunter
+Learning & Education,Idea Explorer
+Learning & Education,Curiosity Driver
+Learning & Education,Skill Builder
+Learning & Education,Knowledge Builder
+Learning & Education,Concept Master
+Learning & Education,Learning Strategist
+Learning & Education,Academic Builder
+Learning & Education,Idea Synthesizer
+Learning & Education,Reflective Learner
+Learning & Education,Analytical Thinker
+Learning & Education,Concept Explorer
+Learning & Education,Curious Researcher
+Learning & Education,Learning Architect
+Learning & Education,Idea Connector
+Learning & Education,Knowledge Architect
+Learning & Education,Learning Optimizer
+Learning & Education,Skill Developer
+Learning & Education,Knowledge Practitioner
+Learning & Education,Insight Builder
+Learning & Education,Curious Investigator
+Learning & Education,Idea Researcher
+Learning & Education,Learning Builder
+Learning & Education,Concept Strategist
+Learning & Education,Idea Analyst
+Learning & Education,Knowledge Expander
+Learning & Education,Focused Scholar
+Learning & Education,Learning Explorer
+Learning & Education,Knowledge Integrator
+Learning & Education,Learning Executor
+Learning & Education,Insight Seeker
+Learning & Education,Learning Innovator
+Learning & Education,Intellectual Builder
+Learning & Education,Knowledge Creator
+Learning & Education,Thoughtful Researcher
+Learning & Education,Learning Synthesizer
+Learning & Education,Idea Builder
+Learning & Education,Curiosity Explorer
+Learning & Education,Knowledge Strategist
+Learning & Education,Skill Explorer
+Learning & Education,Knowledge Analyst
+Learning & Education,Insight Creator
+Learning & Education,Concept Builder
+Learning & Education,Learning Thinker
+
+Love & Relationships,Loving Partner
+Love & Relationships,Supportive Partner
+Love & Relationships,Loyal Friend
+Love & Relationships,Present Listener
+Love & Relationships,Encouraging Partner
+Love & Relationships,Compassionate Friend
+Love & Relationships,Attentive Listener
+Love & Relationships,Trust Builder
+Love & Relationships,Relationship Builder
+Love & Relationships,Family Champion
+Love & Relationships,Empathetic Friend
+Love & Relationships,Respectful Communicator
+Love & Relationships,Caring Partner
+Love & Relationships,Patient Listener
+Love & Relationships,Connection Builder
+Love & Relationships,Relationship Nurturer
+Love & Relationships,Kind Companion
+Love & Relationships,Honest Communicator
+Love & Relationships,Dependable Partner
+Love & Relationships,Trustworthy Friend
+Love & Relationships,Affectionate Partner
+Love & Relationships,Supportive Listener
+Love & Relationships,Thoughtful Friend
+Love & Relationships,Respectful Partner
+Love & Relationships,Encouraging Companion
+Love & Relationships,Loyal Companion
+Love & Relationships,Relationship Investor
+Love & Relationships,Kind Listener
+Love & Relationships,Empathetic Partner
+Love & Relationships,Compassionate Listener
+Love & Relationships,Family Builder
+Love & Relationships,Present Partner
+Love & Relationships,Connection Creator
+Love & Relationships,Relationship Guardian
+Love & Relationships,Understanding Friend
+Love & Relationships,Affirming Partner
+Love & Relationships,Thoughtful Companion
+Love & Relationships,Encouraging Listener
+Love & Relationships,Trust Cultivator
+Love & Relationships,Connection Champion
+Love & Relationships,Kindhearted Friend
+Love & Relationships,Patient Partner
+Love & Relationships,Relationship Steward
+Love & Relationships,Supportive Companion
+Love & Relationships,Family Supporter
+Love & Relationships,Respectful Listener
+Love & Relationships,Connection Nurturer
+Love & Relationships,Compassionate Partner
+Love & Relationships,Loving Companion
+Love & Relationships,Relationship Builder
+
+Health & Energy,Disciplined Athlete
+Health & Energy,Energized Mover
+Health & Energy,Healthy Eater
+Health & Energy,Strong Body Builder
+Health & Energy,Daily Exerciser
+Health & Energy,Endurance Builder
+Health & Energy,Strength Builder
+Health & Energy,Active Lifestyle
+Health & Energy,Rest Prioritizer
+Health & Energy,Hydration Champion
+Health & Energy,Healthy Sleeper
+Health & Energy,Body Optimizer
+Health & Energy,Energetic Performer
+Health & Energy,Movement Advocate
+Health & Energy,Health Builder
+Health & Energy,Wellness Strategist
+Health & Energy,Resilient Athlete
+Health & Energy,Daily Walker
+Health & Energy,Fit Professional
+Health & Energy,Energy Guardian
+Health & Energy,Healthy Routine Builder
+Health & Energy,Strong Performer
+Health & Energy,Body Steward
+Health & Energy,Recovery Prioritizer
+Health & Energy,Movement Builder
+Health & Energy,Endurance Athlete
+Health & Energy,Strength Seeker
+Health & Energy,Health Investor
+Health & Energy,Daily Trainer
+Health & Energy,Wellness Builder
+Health & Energy,Body Maintainer
+Health & Energy,Active Explorer
+Health & Energy,Energy Optimizer
+Health & Energy,Healthy Performer
+Health & Energy,Movement Leader
+Health & Energy,Strength Developer
+Health & Energy,Body Protector
+Health & Energy,Energy Builder
+Health & Energy,Wellness Champion
+Health & Energy,Healthy Thinker
+Health & Energy,Performance Builder
+Health & Energy,Resilient Performer
+Health & Energy,Daily Mover
+Health & Energy,Healthy Habit Builder
+Health & Energy,Energy Architect
+Health & Energy,Active Builder
+Health & Energy,Body Builder
+Health & Energy,Wellness Practitioner
+Health & Energy,Strength Strategist
+Health & Energy,Energized Achiever
+
+Lifestyle & Experiences,Experience Explorer
+Lifestyle & Experiences,Life Adventurer
+Lifestyle & Experiences,Curious Explorer
+Lifestyle & Experiences,Creative Hobbyist
+Lifestyle & Experiences,Travel Explorer
+Lifestyle & Experiences,Experience Builder
+Lifestyle & Experiences,Adventure Seeker
+Lifestyle & Experiences,Joy Creator
+Lifestyle & Experiences,Curious Adventurer
+Lifestyle & Experiences,Life Explorer
+Lifestyle & Experiences,Experience Designer
+Lifestyle & Experiences,Creative Explorer
+Lifestyle & Experiences,Leisure Creator
+Lifestyle & Experiences,Joyful Explorer
+Lifestyle & Experiences,Experience Collector
+Lifestyle & Experiences,Life Enthusiast
+Lifestyle & Experiences,Adventure Builder
+Lifestyle & Experiences,Curious Traveler
+Lifestyle & Experiences,Creative Adventurer
+Lifestyle & Experiences,Joy Builder
+Lifestyle & Experiences,Life Designer
+Lifestyle & Experiences,Experience Seeker
+Lifestyle & Experiences,Curiosity Explorer
+Lifestyle & Experiences,Creative Discoverer
+Lifestyle & Experiences,Life Optimizer
+Lifestyle & Experiences,Experience Architect
+Lifestyle & Experiences,Joy Explorer
+Lifestyle & Experiences,Creative Hobbyist
+Lifestyle & Experiences,Adventure Creator
+Lifestyle & Experiences,Life Explorer
+Lifestyle & Experiences,Experience Innovator
+Lifestyle & Experiences,Curiosity Builder
+Lifestyle & Experiences,Joyful Adventurer
+Lifestyle & Experiences,Experience Planner
+Lifestyle & Experiences,Creative Traveler
+Lifestyle & Experiences,Life Creator
+Lifestyle & Experiences,Adventure Explorer
+Lifestyle & Experiences,Experience Enthusiast
+Lifestyle & Experiences,Joy Seeker
+Lifestyle & Experiences,Curious Discoverer
+Lifestyle & Experiences,Creative Experience
+Lifestyle & Experiences,Life Adventurer
+Lifestyle & Experiences,Experience Builder
+Lifestyle & Experiences,Joy Architect
+Lifestyle & Experiences,Curious Life Explorer
+Lifestyle & Experiences,Adventure Enthusiast
+Lifestyle & Experiences,Experience Creator
+Lifestyle & Experiences,Creative Adventurer
+Lifestyle & Experiences,Life Discoverer
+Lifestyle & Experiences,Joy Builderfulfillment_area,identity
+Mindset & Resilience,Calm Thinker
+Mindset & Resilience,Resilient Builder
+Mindset & Resilience,Optimistic Realist
+Mindset & Resilience,Focused Thinker
+Mindset & Resilience,Steady Mind
+Mindset & Resilience,Disciplined Mind
+Mindset & Resilience,Growth Thinker
+Mindset & Resilience,Reflective Thinker
+Mindset & Resilience,Perspective Builder
+Mindset & Resilience,Emotional Navigator
+Mindset & Resilience,Inner Stabilizer
+Mindset & Resilience,Clarity Seeker
+Mindset & Resilience,Mindful Observer
+Mindset & Resilience,Thought Architect
+Mindset & Resilience,Calm Strategist
+Mindset & Resilience,Patient Thinker
+Mindset & Resilience,Focused Mind
+Mindset & Resilience,Resilient Optimist
+Mindset & Resilience,Perspective Keeper
+Mindset & Resilience,Steady Builder
+Mindset & Resilience,Reflective Builder
+Mindset & Resilience,Calm Decision Maker
+Mindset & Resilience,Disciplined Thinker
+Mindset & Resilience,Resilience Builder
+Mindset & Resilience,Clear Thinker
+Mindset & Resilience,Mindset Builder
+Mindset & Resilience,Thoughtful Observer
+Mindset & Resilience,Inner Architect
+Mindset & Resilience,Clarity Builder
+Mindset & Resilience,Steady Optimist
+Mindset & Resilience,Composed Thinker
+Mindset & Resilience,Perspective Architect
+Mindset & Resilience,Focused Observer
+Mindset & Resilience,Emotional Strategist
+Mindset & Resilience,Resilient Navigator
+Mindset & Resilience,Steady Reflector
+Mindset & Resilience,Patient Builder
+Mindset & Resilience,Thoughtful Strategist
+Mindset & Resilience,Clear Mind
+Mindset & Resilience,Calm Observer
+Mindset & Resilience,Resilient Thinker
+Mindset & Resilience,Inner Stabilizer
+Mindset & Resilience,Focused Responder
+Mindset & Resilience,Clarity Architect
+Mindset & Resilience,Steady Executor
+Mindset & Resilience,Reflective Strategist
+Mindset & Resilience,Grounded Thinker
+Mindset & Resilience,Mindful Builder
+Mindset & Resilience,Perspective Navigator
+Mindset & Resilience,Composed Leader
+
+Service & Impact,Community Contributor
+Service & Impact,Generous Giver
+Service & Impact,Helpful Neighbor
+Service & Impact,Encouraging Voice
+Service & Impact,Impact Builder
+Service & Impact,Service Leader
+Service & Impact,Community Builder
+Service & Impact,Opportunity Sharer
+Service & Impact,Supportive Ally
+Service & Impact,Kindness Carrier
+Service & Impact,Positive Influence
+Service & Impact,Community Supporter
+Service & Impact,Encouragement Giver
+Service & Impact,Impact Creator
+Service & Impact,Helpful Contributor
+Service & Impact,Community Helper
+Service & Impact,Impact Advocate
+Service & Impact,Encouraging Leader
+Service & Impact,Generosity Builder
+Service & Impact,Service Contributor
+Service & Impact,Positive Builder
+Service & Impact,Community Champion
+Service & Impact,Helpful Guide
+Service & Impact,Kindness Builder
+Service & Impact,Opportunity Connector
+Service & Impact,Service Partner
+Service & Impact,Community Ally
+Service & Impact,Impact Supporter
+Service & Impact,Encouragement Builder
+Service & Impact,Service Advocate
+Service & Impact,Helpful Mentor
+Service & Impact,Community Uplifter
+Service & Impact,Kindness Advocate
+Service & Impact,Service Champion
+Service & Impact,Impact Mentor
+Service & Impact,Generous Supporter
+Service & Impact,Positive Mentor
+Service & Impact,Community Steward
+Service & Impact,Service Builder
+Service & Impact,Encouraging Mentor
+Service & Impact,Impact Steward
+Service & Impact,Community Connector
+Service & Impact,Kindness Leader
+Service & Impact,Service Helper
+Service & Impact,Impact Contributor
+Service & Impact,Encouragement Champion
+Service & Impact,Generosity Leader
+Service & Impact,Community Mentor
+Service & Impact,Positive Contributor
+Service & Impact,Service Steward
+
+Home & Life,Organized Homemaker
+Home & Life,Home Steward
+Home & Life,Space Organizer
+Home & Life,Life Organizer
+Home & Life,Calm Environment Builder
+Home & Life,Home Systems Builder
+Home & Life,Household Manager
+Home & Life,Order Creator
+Home & Life,Home Maintainer
+Home & Life,Clutter Eliminator
+Home & Life,Environment Designer
+Home & Life,Life Systems Builder
+Home & Life,Home Caretaker
+Home & Life,Order Builder
+Home & Life,Household Organizer
+Home & Life,Intentional Homemaker
+Home & Life,Home Optimizer
+Home & Life,Environment Builder
+Home & Life,Space Curator
+Home & Life,Order Steward
+Home & Life,Home Architect
+Home & Life,Household Builder
+Home & Life,Life Stabilizer
+Home & Life,Environment Maintainer
+Home & Life,Home Guardian
+Home & Life,Clarity Creator
+Home & Life,Space Maintainer
+Home & Life,Home Organizer
+Home & Life,Life Simplifier
+Home & Life,Household Steward
+Home & Life,Environment Curator
+Home & Life,Space Optimizer
+Home & Life,Life Architect
+Home & Life,Home Systems Manager
+Home & Life,Order Designer
+Home & Life,Household Stabilizer
+Home & Life,Space Builder
+Home & Life,Home Manager
+Home & Life,Environment Organizer
+Home & Life,Life Maintainer
+Home & Life,Household Architect
+Home & Life,Home Stabilizer
+Home & Life,Space Steward
+Home & Life,Order Guardian
+Home & Life,Environment Simplifier
+Home & Life,Home Builder
+Home & Life,Household Curator
+Home & Life,Life Organizer
+Home & Life,Space Designer
+Home & Life,Home Designer
+"""
+
+fileprivate let fulfillmentStartIdentitySuggestionMap: [String: [String]] = {
+    var map: [String: [String]] = [:]
+
+    for rawLine in fulfillmentStartIdentitySuggestionCSV.components(separatedBy: .newlines) {
+        var line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        if line.isEmpty { continue }
+        line = line
+            .replacingOccurrences(of: "fulfillment_area,identity", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if line.isEmpty { continue }
+        guard let commaIndex = line.firstIndex(of: ",") else { continue }
+
+        let area = String(line[..<commaIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let identity = String(line[line.index(after: commaIndex)...])
+            .replacingOccurrences(of: "\"", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !area.isEmpty, !identity.isEmpty else { continue }
+
+        var bucket = map[area, default: []]
+        if !bucket.contains(where: { $0.caseInsensitiveCompare(identity) == .orderedSame }) {
+            bucket.append(identity)
+        }
+        map[area] = bucket
+    }
+
+    return map
+}()
+
+fileprivate let fulfillmentStartLittleWinCorpusByCategory: [String: String] = [
+    "Career & Business": """
+Plan top priorities
+Review weekly goals
+Deep work session
+Clear email backlog
+Follow up contact
+Reach out connection
+Send thank you note
+Share useful idea
+Post professional insight
+Read industry article
+Study new skill
+Watch expert talk
+Practice core skill
+Improve work system
+Organize task list
+Update project plan
+Document key process
+Solve one problem
+Make progress project
+Finish small task
+Prepare meeting notes
+Schedule key meeting
+Ask thoughtful question
+Offer helpful feedback
+Request feedback
+Help teammate succeed
+Mentor someone
+Learn from mistake
+Reflect on progress
+Track key metric
+Update resume
+Update portfolio
+Improve LinkedIn profile
+Write new idea
+Capture business idea
+Research opportunity
+Analyze competitor
+Improve workflow
+Automate small task
+Declutter workspace
+Review calendar
+Protect focus block
+Start earlier task
+End day reflection
+Plan tomorrow priorities
+Learn from leader
+Practice communication
+Strengthen relationship
+Support team member
+Celebrate progress
+""",
+    "Faith & Spirituality": """
+Morning prayer
+Daily gratitude prayer
+Scripture reading
+Reflect on scripture
+Write prayer intention
+Quiet meditation
+Practice stillness
+Evening prayer
+Gratitude reflection
+Journal spiritual insight
+Memorize verse
+Listen faith podcast
+Read spiritual book
+Attend worship
+Watch faith teaching
+Serve someone
+Encourage someone
+Forgive someone
+Practice humility
+Practice patience
+Practice compassion
+Reflect on purpose
+Ask for guidance
+Confess mistakes
+Express gratitude
+Practice generosity
+Reflect on blessings
+Pray for others
+Practice silence
+End day reflection
+""",
+    "Wealth & Finance": """
+Review daily spending
+Track one expense
+Log transactions
+Check account balances
+Review monthly budget
+Reduce one expense
+Skip unnecessary purchase
+Transfer small savings
+Round up savings
+Automate savings
+Review investment account
+Read finance article
+Learn investing concept
+Review financial goal
+Update net worth
+Review subscriptions
+Cancel unused subscription
+Compare prices
+Research investment idea
+Plan future purchase
+Reflect spending habits
+Prepare weekly budget
+Check credit score
+Pay extra debt
+Review financial plan
+Capture business idea
+Research income idea
+Improve money system
+Organize financial documents
+Plan tomorrow spending
+""",
+    "Learning & Education": """
+Read 10 pages
+Study new concept
+Review notes
+Watch educational video
+Listen learning podcast
+Write key insight
+Summarize lesson
+Practice new skill
+Research one topic
+Ask thoughtful question
+Save useful resource
+Highlight key idea
+Teach someone concept
+Reflect learning
+Review past lesson
+Study vocabulary
+Practice writing
+Solve practice problem
+Capture new idea
+Explore new subject
+Improve study system
+Organize learning notes
+Connect two ideas
+Write learning summary
+Practice memory recall
+Review key principle
+Read research article
+Analyze expert thinkingx
+Journal insight
+Plan next learning
+""",
+    "Love & Relationships": """
+Send thoughtful message
+Express appreciation
+Ask meaningful question
+Listen fully
+Give sincere compliment
+Check in with friend
+Plan quality time
+Share encouragement
+Write gratitude note
+Reflect on relationship
+Apologize sincerely
+Celebrate small win
+Offer support
+Show physical affection
+Pray for someone
+Express love openly
+Reconnect with friend
+Remember important date
+Share positive memory
+Give undivided attention
+Ask how they feel
+Practice patience
+Offer help
+Resolve small tension
+Reach out to family
+Encourage someone's goal
+Share honest feeling
+Plan future activity
+Practice empathy
+Reflect on connection
+""",
+    "Lifestyle & Experiences": """
+Try a new recipe
+Explore new place
+Take scenic walk
+Watch inspiring film
+Listen new music
+Read fiction chapter
+Visit local cafe
+Try new hobby
+Sketch something
+Take photos outside
+Plan weekend activity
+Visit park
+Learn simple recipe
+Practice creative skill
+Write travel idea
+Explore new neighborhood
+Visit museum online
+Try new workout class
+Journal about day
+Declutter small area
+Rearrange living space
+Add plant to space
+Light candle evening
+Cook meal from scratch
+Listen new podcast
+Start small project
+Practice photography
+Visit local event
+Learn dance move
+Write creative idea
+Take relaxing bath
+Spend time outdoors
+Try new tea or coffee
+Practice instrument
+Explore nature trail
+Create playlist
+Write bucket list idea
+Plan day trip
+Explore new bookstore
+Sketch travel idea
+Watch documentary
+Try new art style
+Practice cooking skill
+Learn fun fact
+Start hobby research
+Walk somewhere new
+Visit scenic view
+Capture moment photo
+Reflect on experience
+Share experience story
+""",
+    "Mindset & Resilience": """
+Write one gratitude
+Reflect on small win
+Reframe negative thought
+Take five deep breaths
+Pause before reacting
+Write one affirmation
+Journal one insight
+Notice one positive moment
+Accept one imperfection
+Practice patience moment
+Step away from stress
+Focus on present moment
+Name current emotion
+Release one worry
+Reflect on lesson learned
+Let go of small frustration
+Practice calm breathing
+Choose optimistic thought
+Take mindful pause
+Recognize personal progress
+Write one encouraging note
+Focus on controllable action
+Acknowledge personal strength
+Practice self compassion
+Observe thoughts quietly
+Identify stress trigger
+Write one perspective shift
+Forgive small mistake
+Celebrate effort today
+Accept what cannot change
+Find meaning in challenge
+Note one personal value
+Choose calm response
+Reset mindset after setback
+Pause to reflect
+Take mental reset break
+Write short reflection
+Observe reaction pattern
+Appreciate small progress
+Focus on solution step
+Encourage yourself kindly
+Release unnecessary pressure
+Notice mental habit
+Practice mindful awareness
+Slow down breathing
+Reconnect with purpose
+Choose growth mindset
+Accept uncertainty calmly
+Focus on next step
+End day with reflection
+""",
+    "Service & Impact": """
+Help someone today
+Offer encouragement
+Share helpful advice
+Volunteer small task
+Donate small amount
+Support local business
+Recommend helpful resource
+Mentor briefly
+Answer someone's question
+Share useful knowledge
+Introduce two people
+Offer to assist coworker
+Write thank you message
+Check in on someone
+Give thoughtful feedback
+Share inspiring idea
+Encourage someone's goal
+Offer genuine praise
+Teach small skill
+Share opportunity
+Promote someone's work
+Participate in community group
+Support charitable cause
+Pick up litter
+Help neighbor
+Share helpful article
+Connect someone to resource
+Listen to someone's problem
+Offer time to help
+Support community event
+Spread positive message
+Encourage someone struggling
+Give credit publicly
+Amplify important cause
+Offer guidance
+Participate in service project
+Donate useful item
+Write appreciation note
+Share learning with others
+Support small creator
+Help organize group effort
+Share job opportunity
+Encourage team morale
+Advocate for fairness
+Offer practical help
+Teach helpful concept
+Recognize someone's effort
+Share community resource
+Help someone solve problem
+Reflect on how you helped
+""",
+    "Home & Life": """
+Make the bed
+Tidy one surface
+Wash a few dishes
+Empty trash bin
+Start laundry load
+Fold clean clothes
+Put items back in place
+Clean kitchen counter
+Wipe bathroom sink
+Sweep small area
+Vacuum one room
+Organize one drawer
+Declutter five items
+Sort incoming mail
+Restock household item
+Clean refrigerator shelf
+Water house plants
+Open windows for fresh air
+Replace used towels
+Clean dining table
+Wipe light switches
+Clean door handles
+Organize entryway
+Prepare tomorrow's outfit
+Prep simple meal
+Refill water bottles
+Review household schedule
+Plan weekly groceries
+Create simple meal plan
+Write quick to do list
+Put laundry away
+Clean small spill
+Organize digital files
+Backup important file
+Review calendar events
+Prepare bag for tomorrow
+Restock pantry item
+Check household supplies
+Reset living room
+Clean mirror
+Dust small surface
+Replace burned out bulb
+Check smoke detector
+Prepare coffee setup
+Sort recycling
+Review bills
+Pay small bill
+Schedule needed errand
+Prepare tomorrow's plan
+End day home reset
+"""
+]
+
+fileprivate let fulfillmentStartHealthEnergyLittleWinFlags: [(activity: String, appleHealth: Bool)] = [
+    ("10,000 steps", true),
+    ("15 minute walk", true),
+    ("30 minute workout", true),
+    ("Morning stretch routine", false),
+    ("Drink full glass of water", true),
+    ("Eat a healthy breakfast", false),
+    ("5 minute mobility work", false),
+    ("10 minute yoga session", true),
+    ("Short outdoor walk", true),
+    ("Stand for 1 minute each hour", true),
+    ("Take stairs instead of elevator", true),
+    ("Log your meals", true),
+    ("Eat a serving of vegetables", false),
+    ("Eat a serving of fruit", false),
+    ("15 minute cardio", true),
+    ("HIIT workout", true),
+    ("Strength training session", true),
+    ("Light stretching before bed", false),
+    ("5 minutes deep breathing", false),
+    ("10 minutes meditation", true),
+    ("Practice good posture", false),
+    ("Take a hydration break", false),
+    ("Drink 8 glasses of water", true),
+    ("Walk after a meal", true),
+    ("Avoid sugary snack", false),
+    ("Healthy lunch choice", false),
+    ("Cook a healthy meal", false),
+    ("Spend time outside", false),
+    ("Limit caffeine after afternoon", false),
+    ("Sleep 7+ hours", true),
+    ("Wind down before bed", false),
+    ("Evening walk", true),
+    ("Short bodyweight workout", true),
+    ("Take movement break", true),
+    ("Desk stretch break", false),
+    ("Drink herbal tea instead of soda", false),
+    ("Log body weight", true),
+    ("Check resting heart rate", true),
+    ("Track sleep quality", true),
+    ("Cold shower or rinse", false),
+    ("Foam roll muscles", false),
+    ("Short bike ride", true),
+    ("Light jog", true),
+    ("Play recreational sport", true),
+    ("Practice balance exercise", false),
+    ("Reduce screen time before bed", false),
+    ("Deep stretch session", false),
+    ("Walk while on phone call", true),
+    ("Park farther away and walk", true),
+    ("Reflect on energy levels", false)
+]
+
+fileprivate let fulfillmentStartHealthEnergyAppleHealthLittleWins: Set<String> = {
+    Set(
+        fulfillmentStartHealthEnergyLittleWinFlags
+            .filter { $0.appleHealth }
+            .map { $0.activity.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+    )
+}()
+
 struct FulfillmentStartView: View {
     private static let draftStorageKey = "fulfillment_start_onboarding_draft_v1"
     private static let fulfillmentInsightsPromptVersion = "onboarding_fulfillment_insights_v3"
     enum EntryMode {
         case onboarding
         case addSingleArea
+        case lifeOSInsights
     }
 
     private struct DraftFulfillmentRow: Codable {
@@ -107,6 +1322,7 @@ struct FulfillmentStartView: View {
     @Query private var resources: [FulfillmentResources]
     @Query private var passions: [Passion]
     @Query private var passionJoins: [PassionFulfillmentJoin]
+    @Query(sort: \PassionScoreSnapshot.monthStartDate, order: .reverse) private var passionScoreSnapshots: [PassionScoreSnapshot]
     @Query(sort: \DrivingForce.updatedAt, order: .reverse) private var drivingForces: [DrivingForce]
     @Query(sort: \ActivePlanState.id, order: .forward) private var activePlanStates: [ActivePlanState]
     @Query(sort: \PlannedChunk.updatedAt, order: .reverse) private var allPlannedChunks: [PlannedChunk]
@@ -114,6 +1330,7 @@ struct FulfillmentStartView: View {
     @Query(sort: \Outcomes.updatedAt, order: .reverse) private var allOutcomes: [Outcomes]
     @Query(sort: \PlanLabel.category, order: .forward) private var planLabels: [PlanLabel]
     @AppStorage("fulfillment_start_insights_cache_v3") private var fulfillmentInsightsCacheStorage: String = ""
+    @AppStorage(loomAITroubleshootingDefaultsKey) private var loomAITroubleshootingEnabled = true
 
     private let entryMode: EntryMode
     private let showsProgressStrip: Bool
@@ -168,22 +1385,26 @@ struct FulfillmentStartView: View {
     @State private var autoWriteMissionSuggestionsByCategoryID: [UUID: [String]] = [:]
     @State private var autoWritingMissionCategoryID: UUID? = nil
     @State private var autoWriteMissionErrorByCategoryID: [UUID: String] = [:]
+    @State private var autoWriteMissionTroubleshootingByCategoryID: [UUID: String] = [:]
     @State private var autoWriteMissionLoadedKeys = Set<String>()
     @State private var autoWriteMissionSuggestionsCache: [String: [String]] = [:]
     @State private var autoWriteIdentitySuggestionsByCategoryID: [UUID: [IdentityAutoWriteSuggestion]] = [:]
     @State private var autoWritingIdentityCategoryID: UUID? = nil
     @State private var autoWriteIdentityErrorByCategoryID: [UUID: String] = [:]
+    @State private var autoWriteIdentityTroubleshootingByCategoryID: [UUID: String] = [:]
     @State private var autoWriteIdentityLoadedKeys = Set<String>()
     @State private var autoWriteIdentitySuggestionsCache: [String: [IdentityAutoWriteSuggestion]] = [:]
     @State private var autoWriteLittleWinSuggestionsByCategoryID: [UUID: [LittleWinAutoWriteSuggestion]] = [:]
     @State private var autoWritingLittleWinCategoryID: UUID? = nil
     @State private var autoWriteLittleWinErrorByCategoryID: [UUID: String] = [:]
+    @State private var autoWriteLittleWinTroubleshootingByCategoryID: [UUID: String] = [:]
     @State private var autoWriteLittleWinLoadedKeys = Set<String>()
     @State private var autoWriteLittleWinSuggestionsCache: [String: [LittleWinAutoWriteSuggestion]] = [:]
     @State private var fulfillmentInsightCards: [FulfillmentInsightCard] = []
     @State private var isGeneratingFulfillmentInsights = false
     @State private var fulfillmentInsightsErrorMessage: String? = nil
     @State private var fulfillmentInsightsNudgeMessage: String? = nil
+    @State private var fulfillmentInsightsTroubleshootingMessage: String? = nil
     @State private var fulfillmentInsightsCache: [String: [FulfillmentInsightCard]] = [:]
     @State private var fulfillmentInsightsNudgeCache: [String: String] = [:]
     @State private var fulfillmentInsightsActiveRequestKey: String? = nil
@@ -243,7 +1464,7 @@ struct FulfillmentStartView: View {
             case .resources: return "Note Resources"
             case .passions: return "Passions"
             case .summary: return "Summary"
-            case .insights: return "Insights"
+            case .insights: return "LifeOS: Connecting the Dots"
             }
         }
     }
@@ -255,6 +1476,7 @@ struct FulfillmentStartView: View {
     }
 
     private var isAddSingleAreaMode: Bool { entryMode == .addSingleArea }
+    private var isLifeOSInsightsMode: Bool { entryMode == .lifeOSInsights }
 
     private var orderedFulfillments: [Fulfillment] {
         let baseRows = fulfillmentSnapshot.isEmpty ? fulfillments : fulfillmentSnapshot
@@ -318,10 +1540,6 @@ struct FulfillmentStartView: View {
         PersonalizationStore.cachedContextForCurrentUser()?.current
     }
 
-    private var hasPersonalizationSnapshot: Bool {
-        personalizationSnapshot != nil
-    }
-
     private var progressCurrentStep: Int {
         if isAddSingleAreaMode {
             switch step {
@@ -370,6 +1588,8 @@ struct FulfillmentStartView: View {
             return false
         }
     }
+
+    private var currentScrollAxes: Axis.Set { .vertical }
 
     private var isNextDisabled: Bool {
         switch step {
@@ -594,8 +1814,9 @@ struct FulfillmentStartView: View {
     private var mainContentContainer: some View {
         if isScrollableStep {
             ScrollViewReader { proxy in
-                ScrollView {
+                ScrollView(currentScrollAxes) {
                     mainContent
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
                 .onChange(of: focusedField) { _, newValue in
                     guard step == .createCategories, newValue == .category, keyboardHeight > 0 else { return }
@@ -629,7 +1850,7 @@ struct FulfillmentStartView: View {
 
     @ViewBuilder
     private var bottomInsetContent: some View {
-        if step != .intro {
+        if step != .intro && !isLifeOSInsightsMode {
             VStack(spacing: 6) {
                 if step == .createCategories, shouldShowRefreshButton {
                     Button("refresh") {
@@ -681,9 +1902,9 @@ struct FulfillmentStartView: View {
             .ignoresSafeArea(.keyboard, edges: .bottom)
             .navigationTitle(currentStepDisplayTitle)
             .navigationBarTitleDisplayMode(.inline)
-            .navigationBarBackButtonHidden(step != .intro)
+            .navigationBarBackButtonHidden(isLifeOSInsightsMode ? false : (step != .intro))
             .toolbar {
-                if step != .intro {
+                if step != .intro && !isLifeOSInsightsMode {
                     ToolbarItem(placement: .navigationBarLeading) {
                         Button {
                             goBack()
@@ -810,7 +2031,11 @@ struct FulfillmentStartView: View {
         // Nothing should be committed to shared app data until Summary -> Continue.
         usesDraftPersistence = true
         modelContext.autosaveEnabled = false
-        if isAddSingleAreaMode {
+        if isLifeOSInsightsMode {
+            usesDraftPersistence = false
+            loadFromPersistentData()
+            step = .insights
+        } else if isAddSingleAreaMode {
             usesDraftPersistence = false
             step = .createCategories
             loadFromPersistentData()
@@ -880,7 +2105,7 @@ struct FulfillmentStartView: View {
             }
         }
         .padding(.horizontal)
-        .padding(.bottom, (step == .intro ? introFooterReserve : (step == .summary ? 100 : 0)) + keyboardScrollableBottomPadding)
+        .padding(.bottom, (step == .intro ? introFooterReserve : ((step == .summary || step == .insights) ? 100 : 0)) + keyboardScrollableBottomPadding)
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
@@ -1640,7 +2865,9 @@ struct FulfillmentStartView: View {
                 )
 
                 VStack(alignment: .leading, spacing: 6) {
-                    if let suggestions = autoWriteIdentitySuggestionsByCategoryID[record.category_id], !suggestions.isEmpty {
+                    if isSelectableDefaultCategory(record.category),
+                       let suggestions = autoWriteIdentitySuggestionsByCategoryID[record.category_id],
+                       !suggestions.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
                             ForEach(suggestions, id: \.id) { suggestion in
                                 let isApplied = isIdentitySuggestionApplied(suggestion, for: record)
@@ -1703,17 +2930,15 @@ struct FulfillmentStartView: View {
                         }
                     }
 
-                    if let error = autoWriteIdentityErrorByCategoryID[record.category_id] {
+                    if isSelectableDefaultCategory(record.category),
+                       let error = autoWriteIdentityErrorByCategoryID[record.category_id] {
                         fulfillmentRetryRow(
                             message: error,
+                            troubleshooting: autoWriteIdentityTroubleshootingByCategoryID[record.category_id],
                             buttonTitle: "Try again"
                         ) {
                             Task { await requestAutoWriteIdentitySuggestions(for: record, forceRefresh: true) }
                         }
-                    } else if !hasPersonalizationSnapshot {
-                        Text("Add Personalization in Account for more tailored identity suggestions.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                     }
 
                     Button {
@@ -1830,7 +3055,11 @@ struct FulfillmentStartView: View {
             }
 
             ForEach(fociItems, id: \.id) { item in
-                HStack {
+                HStack(spacing: 8) {
+                    if isAppleHealthIntegrationFriendlyLittleWin(item.activity, category: record.category) {
+                        Image(systemName: "heart.fill")
+                            .foregroundStyle(.red)
+                    }
                     Text(item.activity)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     Button(role: .destructive) {
@@ -1854,8 +3083,21 @@ struct FulfillmentStartView: View {
                 .stroke(isInvalid ? Color.red.opacity(0.85) : Color.clear, lineWidth: 1.5)
         )
 
+        if isHealthEnergyCategory(record.category) {
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: "heart.fill")
+                    .foregroundStyle(.red)
+                    .padding(.top, 1)
+                Text("Apple Health: integration-friendly Little Wins that can be set to automatically verify in \"Advanced\", no manual completion if set up.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+
         VStack(alignment: .leading, spacing: 6) {
-            if let suggestions = autoWriteLittleWinSuggestionsByCategoryID[record.category_id], !suggestions.isEmpty {
+            if isSelectableDefaultCategory(record.category),
+               let suggestions = autoWriteLittleWinSuggestionsByCategoryID[record.category_id],
+               !suggestions.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(suggestions, id: \.id) { suggestion in
                         let isApplied = isLittleWinSuggestionApplied(suggestion, for: record)
@@ -1884,10 +3126,17 @@ struct FulfillmentStartView: View {
                                         .font(.subheadline.italic())
                                         .foregroundStyle(autoWriteSuggestionPrimaryColor(isApplied: isApplied).opacity(isApplied ? 0.88 : 0.95))
                                         .multilineTextAlignment(.leading)
-                                    Text(suggestion.activity)
-                                        .font(.subheadline.weight(.bold))
-                                        .foregroundStyle(autoWriteSuggestionPrimaryColor(isApplied: isApplied))
-                                        .multilineTextAlignment(.leading)
+                                    HStack(alignment: .top, spacing: 6) {
+                                        if isAppleHealthIntegrationFriendlyLittleWin(suggestion.activity, category: record.category) {
+                                            Image(systemName: "heart.fill")
+                                                .foregroundStyle(.red)
+                                                .padding(.top, 1)
+                                        }
+                                        Text(suggestion.activity)
+                                            .font(.subheadline.weight(.bold))
+                                            .foregroundStyle(autoWriteSuggestionPrimaryColor(isApplied: isApplied))
+                                            .multilineTextAlignment(.leading)
+                                    }
                                     if fociItems.count >= 3,
                                        let replacing = suggestion.replaceActivity?.trimmingCharacters(in: .whitespacesAndNewlines),
                                        !replacing.isEmpty {
@@ -1918,17 +3167,15 @@ struct FulfillmentStartView: View {
                 }
             }
 
-            if let error = autoWriteLittleWinErrorByCategoryID[record.category_id] {
+            if isSelectableDefaultCategory(record.category),
+               let error = autoWriteLittleWinErrorByCategoryID[record.category_id] {
                 fulfillmentRetryRow(
                     message: error,
+                    troubleshooting: autoWriteLittleWinTroubleshootingByCategoryID[record.category_id],
                     buttonTitle: "Try again"
                 ) {
                     Task { await requestAutoWriteLittleWinSuggestions(for: record, forceRefresh: true) }
                 }
-            } else if !hasPersonalizationSnapshot {
-                Text("Add Personalization in Account for more tailored Little Win suggestions.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
 
             if !fociItems.isEmpty {
@@ -2229,72 +3476,587 @@ struct FulfillmentStartView: View {
     }
 
     private var insightsStep: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            FulfillmentInsightsThinkingHeader(
-                title: "LoomAI",
-                progress: 1.0
-            )
+        VStack(alignment: .leading, spacing: lifeOSInsightsVerticalSpacing) {
+            Text("PURPOSE")
+                .font(.caption.weight(.bold))
+                .textCase(.uppercase)
+                .foregroundStyle(.secondary)
+                .tracking(0.45)
 
-            Text("Loom sees…")
-                .font(.system(size: 38, weight: .bold))
+            Text("Your passions reveal who you are and what drives you.")
+                .font(.subheadline)
+                .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if let error = fulfillmentInsightsErrorMessage {
-                fulfillmentRetryRow(
-                    message: error,
-                    buttonTitle: "Try again"
-                ) {
-                    Task { await generateFulfillmentInsights(forceRefresh: true) }
+            HStack(spacing: 16) {
+                ForEach(lifeOSPassionCircleModels, id: \.emotionKey) { item in
+                    lifeOSPassionCircle(item)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .center)
 
-            if let nudge = fulfillmentInsightsNudgeMessage, !nudge.isEmpty {
-                Text(nudge)
+            lifeOSVerticalConnectorLine(height: 48)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("FULFILLMENT")
+                    .font(.caption.weight(.bold))
+                    .textCase(.uppercase)
+                    .foregroundStyle(.secondary)
+                    .tracking(0.45)
+
+                Text("These areas makeup your life.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
+                lifeOSFulfillmentRadarCluster
+                    .frame(height: lifeOSRadarClusterHeight)
+            }
+            .zIndex(50)
+
+            lifeOSSystemsConnectorCluster
+                .zIndex(1)
+
+            Text("These all live inside of each Fulfillment Area. Activity and progress gradually increases your Fulfillment over time.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 2)
+                Text("3.0 out of 5 is your starting baseline score. As Loom observes your goals, actions, and progress, it estimates fulfillment across each area.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+            )
 
-            if isGeneratingFulfillmentInsights && fulfillmentInsightCards.isEmpty {
-                ForEach(0..<2, id: \.self) { _ in
-                    fulfillmentInsightsLoadingCard
-                }
-            } else {
-                ForEach(Array(fulfillmentInsightCards.prefix(2))) { card in
-                    fulfillmentInsightsCard(card)
-                }
-            }
+            Text("This page is viewable anytime in Account > Personalization")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(14)
-        .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
-        .onAppear {
-            if autoWriteOutlineAngle == 0 {
-                withAnimation(.linear(duration: 8).repeatForever(autoreverses: false)) {
-                    autoWriteOutlineAngle = 360
+        .padding(.horizontal, 2)
+    }
+
+    private struct LifeOSPassionCircleModel: Hashable {
+        let iconName: String
+        let label: String
+        let emotionKey: String
+        let value: Int
+    }
+
+    private var lifeOSRadarClusterHeight: CGFloat {
+        let chipHeight: CGFloat = 30
+        let chipSpacing: CGFloat = 8
+        let count = max(1, lifeOSFulfillmentRadarMetrics.count)
+        let chipStackHeight = (CGFloat(count) * chipHeight) + (CGFloat(max(0, count - 1)) * chipSpacing)
+        return max(248, chipStackHeight + 14)
+    }
+    private var lifeOSInsightsVerticalSpacing: CGFloat { 12 }
+
+    private var lifeOSPassionCircleModels: [LifeOSPassionCircleModel] {
+        [
+            .init(iconName: "heart.fill", label: "love", emotionKey: "love", value: lifeOSPassionValue(for: "love")),
+            .init(iconName: "lock.fill", label: "vows", emotionKey: "vows", value: lifeOSPassionValue(for: "vows")),
+            .init(iconName: "bolt.fill", label: "thrill", emotionKey: "thrill", value: lifeOSPassionValue(for: "thrill")),
+            .init(iconName: "shield.fill", label: "hate", emotionKey: "just", value: lifeOSPassionValue(for: "just"))
+        ]
+    }
+
+    private func lifeOSPassionValue(for emotionKey: String) -> Int {
+        if let score = lifeOSLatestMonthlyPassionScore(forEmotionKey: emotionKey)
+            ?? lifeOSLatestAvailablePassionScore(forEmotionKey: emotionKey) {
+            return Int(PassionScoringMath.clamp(score.rounded(), min: 0, max: 4))
+        }
+
+        let ids = Set(
+            passions
+                .filter { $0.emotion == emotionKey }
+                .map(\.passion_id)
+        )
+        let count = draftPassionJoins.filter { ids.contains($0.passionID) }.count
+        return min(4, count)
+    }
+
+    private func lifeOSLatestMonthlyPassionScore(forEmotionKey emotionKey: String) -> Double? {
+        guard let type = lifeOSPassionType(forEmotionKey: emotionKey) else { return nil }
+        let monthStart = PassionScoringMath.monthWindow(for: .now).monthStart
+        return lifeOSLatestPassionSnapshot(for: type, monthStart: monthStart)?.score
+    }
+
+    private func lifeOSLatestAvailablePassionScore(forEmotionKey emotionKey: String) -> Double? {
+        guard let type = lifeOSPassionType(forEmotionKey: emotionKey) else { return nil }
+        return lifeOSLatestAvailablePassionSnapshot(for: type)?.score
+    }
+
+    private func lifeOSLatestPassionSnapshot(for type: PassionType, monthStart: Date) -> PassionScoreSnapshot? {
+        passionScoreSnapshots
+            .filter {
+                $0.passionTypeRaw == type.rawValue &&
+                Calendar.current.isDate($0.monthStartDate, inSameDayAs: monthStart)
+            }
+            .max(by: { $0.updatedAt < $1.updatedAt })
+    }
+
+    private func lifeOSLatestAvailablePassionSnapshot(for type: PassionType) -> PassionScoreSnapshot? {
+        passionScoreSnapshots
+            .filter { $0.passionTypeRaw == type.rawValue }
+            .max { lhs, rhs in
+                let lhsMonth = Calendar.current.startOfDay(for: lhs.monthStartDate)
+                let rhsMonth = Calendar.current.startOfDay(for: rhs.monthStartDate)
+                if lhsMonth == rhsMonth {
+                    return lhs.updatedAt < rhs.updatedAt
+                }
+                return lhsMonth < rhsMonth
+            }
+    }
+
+    private func lifeOSPassionType(forEmotionKey emotionKey: String) -> PassionType? {
+        switch emotionKey {
+        case "love": return .love
+        case "vows": return .vows
+        case "thrill": return .thrill
+        case "just": return .hate
+        default: return nil
+        }
+    }
+
+    private func lifeOSPassionCircle(_ item: LifeOSPassionCircleModel) -> some View {
+        ZStack {
+            let gap: Double = 4
+            let halfGap = gap / 2
+            let radius: CGFloat = 25
+            let center = CGPoint(x: radius, y: radius)
+            let quadrantAngles: [(start: Double, end: Double)] = [
+                (-90, 0), (0, 90), (90, 180), (180, 270)
+            ]
+
+            ZStack {
+                ForEach(0..<4, id: \.self) { index in
+                    let angles = quadrantAngles[index]
+                    Path { path in
+                        path.addArc(
+                            center: center,
+                            radius: radius,
+                            startAngle: .degrees(angles.start + halfGap),
+                            endAngle: .degrees(angles.end - halfGap),
+                            clockwise: false
+                        )
+                    }
+                    .stroke((index + 1) <= item.value ? Color.primary : Color(.tertiaryLabel), lineWidth: 2)
                 }
             }
-            if insightsOutlinePhase == 0 {
-                withAnimation(.linear(duration: 2.1).repeatForever(autoreverses: false)) {
-                    insightsOutlinePhase = 1
-                }
+            .frame(width: radius * 2, height: radius * 2)
+
+            VStack(spacing: 2) {
+                Image(systemName: item.iconName)
+                    .font(.caption)
+                    .foregroundColor(.primary)
+                Text(item.label)
+                    .font(.caption2)
+                    .fontWeight(.bold)
+                    .foregroundColor(.primary)
             }
         }
     }
 
+    private func lifeOSVerticalConnectorLine(height: CGFloat) -> some View {
+        GeometryReader { proxy in
+            let midX = proxy.size.width / 2
+            let start = CGPoint(x: midX, y: 0)
+            let end = CGPoint(x: midX, y: proxy.size.height)
+            lifeOSRouteLineCanvas(
+                start: start,
+                end: end,
+                colors: [Color.secondary.opacity(0.72), Color.secondary.opacity(0.90)],
+                curveLift: 0,
+                lineCount: 2,
+                laneSpread: 1.4
+            )
+        }
+        .frame(height: height)
+    }
+
+    private var lifeOSFulfillmentCategories: [String] {
+        var seen = Set<String>()
+        let fromRecords = orderedFulfillments
+            .map(\.category)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .filter { seen.insert($0.lowercased()).inserted }
+        if !fromRecords.isEmpty { return fromRecords }
+
+        var fallbackSeen = Set<String>()
+        return selectedCategoryNames
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .filter { fallbackSeen.insert($0.lowercased()).inserted }
+    }
+
+    private var lifeOSFulfillmentRadarMetrics: [(String, Color, Double)] {
+        let base = lifeOSFulfillmentCategories
+        let categories = base.isEmpty ? Array(fulfillmentStartSelectableDefaultCategories.prefix(4)) : base
+        return categories.map { category in
+            (category, fulfillmentCategoryColor(for: category), 60)
+        }
+    }
+
+    private var lifeOSConnectorPalette: [Color] {
+        let colors = lifeOSFulfillmentRadarMetrics.map(\.1)
+        return colors.isEmpty ? [Color.gray.opacity(0.7)] : colors
+    }
+
+    private var lifeOSConnectorGradientColors: [Color] {
+        let palette = lifeOSConnectorPalette
+        return palette.count > 1 ? palette : [palette[0], palette[0]]
+    }
+
+    private var lifeOSLittleWinsAccentColor: Color {
+        if let category = orderedFulfillments.first(where: { !getFoci(for: $0).isEmpty })?.category {
+            return fulfillmentCategoryColor(for: category)
+        }
+        return lifeOSFulfillmentRadarMetrics.first?.1 ?? .blue
+    }
+
+    private var lifeOSFulfillmentRadarCluster: some View {
+        GeometryReader { geo in
+            let metrics = lifeOSFulfillmentRadarMetrics
+            let chipHeight: CGFloat = 30
+            let chipSpacing: CGFloat = 8
+            let leftWidth = min(max(geo.size.width * 0.43, 128), 220)
+            let rightWidth = max(150, geo.size.width - leftWidth)
+            let radarSize = min(max(186, rightWidth - 8), geo.size.height - 8)
+            let radarCenter = CGPoint(x: leftWidth + (rightWidth / 2), y: geo.size.height / 2)
+            let totalChipHeight = CGFloat(metrics.count) * chipHeight + CGFloat(max(0, metrics.count - 1)) * chipSpacing
+            let startY = max(6, (geo.size.height - totalChipHeight) / 2)
+            // Keep fulfillment chips visually above the rest of the cluster.
+            let chipVerticalLift: CGFloat = min(42, max(18, geo.size.height * 0.14))
+
+            ZStack {
+                Group {
+                    lifeOSCurvedConnectorLine(
+                        start: CGPoint(x: radarCenter.x, y: 0),
+                        end: radarCenter,
+                        movingColor: Color.secondary.opacity(0.80),
+                        curveLift: 0
+                    )
+
+                    ForEach(Array(metrics.enumerated()), id: \.offset) { idx, metric in
+                        let chipCenterY = startY + CGFloat(idx) * (chipHeight + chipSpacing) + (chipHeight / 2) - chipVerticalLift
+                        lifeOSCurvedConnectorLine(
+                            start: CGPoint(x: leftWidth - 10, y: chipCenterY),
+                            end: radarCenter,
+                            movingColor: metric.1,
+                            curveLift: max(0, abs(radarCenter.y - chipCenterY) * 0.22)
+                        )
+                    }
+                }
+                .zIndex(0)
+
+                HStack(alignment: .center, spacing: 10) {
+                    VStack(alignment: .leading, spacing: chipSpacing) {
+                        ForEach(metrics, id: \.0) { metric in
+                            Text(metric.0)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(metric.1)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                                .frame(maxWidth: .infinity, minHeight: chipHeight, alignment: .leading)
+                                .padding(.horizontal, 10)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                        .fill(metric.1.opacity(0.18))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                        .stroke(metric.1.opacity(0.35), lineWidth: 1)
+                                )
+                        }
+                    }
+                    .frame(width: leftWidth, alignment: .leading)
+                    .offset(y: -chipVerticalLift)
+                    .zIndex(2100)
+
+                    FulfillmentInteractiveRadar(
+                        metrics: metrics,
+                        selectedIndex: .constant(0),
+                        onManualSelect: {},
+                        enableInteraction: false,
+                        useOriginalDotStyle: true,
+                        emphasizeSelectedSlice: false
+                    )
+                    .frame(width: radarSize, height: radarSize)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    .zIndex(100)
+                }
+                .zIndex(1000)
+            }
+        }
+    }
+
+    private var lifeOSSystemsConnectorCluster: some View {
+        let connectorLift = (lifeOSRadarClusterHeight / 2) + lifeOSInsightsVerticalSpacing
+        let connectorGap: CGFloat = 8
+        let connectorCanvasHeight = connectorLift + connectorGap + 2
+
+        return HStack(spacing: 26) {
+            VStack(spacing: 6) {
+                Image(systemName: "scope")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(.primary)
+                Text("Goals")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+
+            VStack(spacing: 6) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(lifeOSLittleWinsAccentColor.opacity(0.30))
+                        .frame(width: 26, height: 34)
+                        .offset(x: -6, y: 4)
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(lifeOSLittleWinsAccentColor.opacity(0.46))
+                        .frame(width: 26, height: 34)
+                        .offset(x: 0, y: 2)
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(lifeOSLittleWinsAccentColor.opacity(0.62))
+                        .frame(width: 26, height: 34)
+                        .overlay(
+                            Circle()
+                                .fill(Color.white.opacity(0.88))
+                                .frame(width: 5, height: 5)
+                                .offset(y: 8)
+                        )
+                        .offset(x: 6, y: 0)
+                }
+                .frame(height: 34)
+                Text("Little Wins")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+
+            VStack(spacing: 6) {
+                Image(systemName: "play.fill")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(.primary)
+                Text("Action Plans")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, connectorGap)
+        .background(alignment: .top) {
+            GeometryReader { geo in
+                let leftWidth = min(max(geo.size.width * 0.43, 128), 220)
+                let rightWidth = max(150, geo.size.width - leftWidth)
+                let radarCenterX = leftWidth + (rightWidth / 2)
+                let origin = CGPoint(x: radarCenterX, y: 0)
+                let iconCenters: [CGFloat] = [
+                    geo.size.width * 0.16,
+                    geo.size.width * 0.50,
+                    geo.size.width * 0.84
+                ]
+                // Each icon now emits connectors from a band that's ~4x wider than a single-point origin.
+                let columnWidth = geo.size.width / 3
+                let originBandWidth = min(max(columnWidth * 0.64, 56), 124)
+                let linesPerIcon = 4
+
+                let targetsByIcon: [[CGPoint]] = iconCenters.map { centerX in
+                    guard linesPerIcon > 1 else {
+                        return [CGPoint(x: centerX, y: connectorCanvasHeight - 2)]
+                    }
+                    return (0..<linesPerIcon).map { idx in
+                        let t = CGFloat(idx) / CGFloat(linesPerIcon - 1)
+                        let x = centerX - (originBandWidth / 2) + (originBandWidth * t)
+                        return CGPoint(x: x, y: connectorCanvasHeight - 2)
+                    }
+                }
+
+                ZStack {
+                    ForEach(0..<targetsByIcon.count, id: \.self) { iconIndex in
+                        ForEach(0..<targetsByIcon[iconIndex].count, id: \.self) { laneIndex in
+                            let start = targetsByIcon[iconIndex][laneIndex]
+                            let laneLift = 14 + (CGFloat(laneIndex) * 2.2)
+                            if iconIndex == 1 {
+                                lifeOSCurvedConnectorLine(
+                                    start: start,
+                                    end: origin,
+                                    movingColor: lifeOSLittleWinsAccentColor,
+                                    curveLift: laneLift
+                                )
+                            } else {
+                                lifeOSCurvedConnectorLineGradient(
+                                    start: start,
+                                    end: origin,
+                                    curveLift: laneLift
+                                )
+                            }
+                        }
+                    }
+                }
+                .frame(width: geo.size.width, height: connectorCanvasHeight, alignment: .top)
+                .frame(maxWidth: .infinity, alignment: .top)
+                .allowsHitTesting(false)
+                .zIndex(0)
+            }
+            .frame(height: connectorCanvasHeight)
+            .offset(y: -connectorLift)
+            .allowsHitTesting(false)
+        }
+        .zIndex(1000)
+    }
+
+    private func lifeOSCurvedConnectorLine(
+        start: CGPoint,
+        end: CGPoint,
+        movingColor: Color,
+        curveLift: CGFloat
+    ) -> some View {
+        lifeOSRouteLineCanvas(
+            start: start,
+            end: end,
+            colors: [movingColor],
+            curveLift: curveLift,
+            lineCount: 1,
+            laneSpread: 1.2
+        )
+        .opacity(0.62)
+    }
+
+    private func lifeOSCurvedConnectorLineGradient(
+        start: CGPoint,
+        end: CGPoint,
+        curveLift: CGFloat
+    ) -> some View {
+        lifeOSRouteLineCanvas(
+            start: start,
+            end: end,
+            colors: lifeOSConnectorGradientColors,
+            curveLift: curveLift,
+            lineCount: min(2, max(1, lifeOSConnectorGradientColors.count)),
+            laneSpread: 0.8
+        )
+        .opacity(0.52)
+    }
+
+    private func lifeOSRouteLineCanvas(
+        start: CGPoint,
+        end: CGPoint,
+        colors: [Color],
+        curveLift: CGFloat,
+        lineCount: Int,
+        laneSpread: CGFloat
+    ) -> some View {
+        let resolvedColors = colors.isEmpty ? [Color.secondary] : colors
+        let resolvedLineCount = max(1, lineCount)
+        return TimelineView(.animation) { context in
+            Canvas { ctx, _ in
+                let now = context.date.timeIntervalSinceReferenceDate
+
+                for index in 0..<resolvedLineCount {
+                    let laneOffset: CGFloat = {
+                        guard resolvedLineCount > 1 else { return 0 }
+                        let t = CGFloat(index) / CGFloat(resolvedLineCount - 1)
+                        return (t * 2 - 1) * laneSpread
+                    }()
+                    let baseColor = resolvedColors[index % resolvedColors.count]
+                    let p0 = CGPoint(x: start.x, y: start.y + laneOffset * 0.22)
+                    let p2 = CGPoint(x: end.x, y: end.y + laneOffset * 0.22)
+                    let control = CGPoint(
+                        x: (p0.x + p2.x) / 2 + laneOffset * 0.08,
+                        y: min(p0.y, p2.y) - curveLift + laneOffset * 0.06
+                    )
+
+                    var curvePath = Path()
+                    let samples = 56
+                    for step in 0...samples {
+                        let t = CGFloat(step) / CGFloat(samples)
+                        let point = lifeOSQuadraticPoint(start: p0, control: control, end: p2, t: t)
+                        if step == 0 {
+                            curvePath.move(to: point)
+                        } else {
+                            curvePath.addLine(to: point)
+                        }
+                    }
+
+                    ctx.stroke(curvePath, with: .color(baseColor.opacity(0.30)), lineWidth: 1.8)
+
+                    // Lightweight moving highlight; avoids heavy blur/compositing flicker.
+                    let speed = 0.11 + Double(index) * 0.013
+                    let phase = (now * speed + Double(index) * 0.17).truncatingRemainder(dividingBy: 1.0)
+                    let headT = CGFloat(phase)
+                    let tailT = max(0, headT - 0.09)
+                    let tailPoint = lifeOSQuadraticPoint(start: p0, control: control, end: p2, t: tailT)
+                    let headPoint = lifeOSQuadraticPoint(start: p0, control: control, end: p2, t: headT)
+
+                    var highlightPath = Path()
+                    highlightPath.move(to: tailPoint)
+                    highlightPath.addLine(to: headPoint)
+                    ctx.stroke(highlightPath, with: .color(baseColor.opacity(0.86)), lineWidth: 2.6)
+                }
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    private func lifeOSQuadraticPoint(start: CGPoint, control: CGPoint, end: CGPoint, t: CGFloat) -> CGPoint {
+        let invT = 1 - t
+        let x = (invT * invT * start.x) + (2 * invT * t * control.x) + (t * t * end.x)
+        let y = (invT * invT * start.y) + (2 * invT * t * control.y) + (t * t * end.y)
+        return CGPoint(x: x, y: y)
+    }
+
     private func fulfillmentRetryRow(
         message: String,
+        troubleshooting: String? = nil,
         buttonTitle: String,
         action: @escaping () -> Void
     ) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Text(message)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 6)
-            Button(buttonTitle, action: action)
-                .font(.caption.weight(.semibold))
-                .buttonStyle(.plain)
-                .foregroundStyle(.blue)
+        let hasTroubleshooting = loomAITroubleshootingEnabled && !(troubleshooting ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 6)
+                HStack(spacing: 10) {
+                    Button(buttonTitle, action: action)
+                        .font(.caption.weight(.semibold))
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.blue)
+                    if hasTroubleshooting, let troubleshooting {
+                        Button("Copy troubleshooting") {
+                            loomAICopyTroubleshootingToClipboard(troubleshooting)
+                        }
+                        .font(.caption.weight(.semibold))
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            if hasTroubleshooting, let troubleshooting {
+                LoomAITroubleshootingSection(details: troubleshooting)
+            }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
@@ -2311,6 +4073,8 @@ struct FulfillmentStartView: View {
             Text(card.body)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.primary)
+                .lineLimit(nil)
+                .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 12)
@@ -2596,14 +4360,11 @@ struct FulfillmentStartView: View {
                let error = autoWriteMissionErrorByCategoryID[record.category_id] {
                 fulfillmentRetryRow(
                     message: error,
+                    troubleshooting: autoWriteMissionTroubleshootingByCategoryID[record.category_id],
                     buttonTitle: "Try again"
                 ) {
                     Task { await requestAutoWriteMissionSuggestions(for: record, forceRefresh: true) }
                 }
-            } else if !hasPersonalizationSnapshot {
-                Text("Add Personalization in Account for more tailored mission suggestions.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
 
             Button {
@@ -2652,11 +4413,6 @@ struct FulfillmentStartView: View {
         }
     }
 
-    private struct MissionAutoWriteResponse: Decodable {
-        let suggestions: [String]?
-        let confidence: String?
-    }
-
     private struct IdentityAutoWriteSuggestion: Hashable, Codable {
         let id: UUID
         let identity: String
@@ -2667,20 +4423,6 @@ struct FulfillmentStartView: View {
             self.identity = identity
             self.replaceIdentity = replaceIdentity
         }
-    }
-
-    private struct IdentityAutoWriteResponse: Decodable {
-        let suggestions: [IdentityAutoWriteSuggestionDTO]?
-        let confidence: String?
-    }
-
-    private struct IdentityAutoWriteSuggestionDTO: Decodable {
-        let identity: String?
-        let role: String?
-        let text: String?
-        let replaceIdentity: String?
-        let replace: String?
-        let weakestIdentity: String?
     }
 
     private struct LittleWinAutoWriteSuggestion: Hashable, Codable {
@@ -2695,116 +4437,108 @@ struct FulfillmentStartView: View {
         }
     }
 
-    private struct LittleWinAutoWriteResponse: Decodable {
-        let suggestions: [LittleWinAutoWriteSuggestionDTO]?
-        let confidence: String?
-    }
-
-    private struct LittleWinAutoWriteSuggestionDTO: Decodable {
-        let activity: String?
-        let littleWin: String?
-        let text: String?
-        let replaceActivity: String?
-        let replace: String?
-        let weakestLittleWin: String?
-    }
-
     private func requestAutoWriteMissionSuggestions(for record: Fulfillment, forceRefresh: Bool = false) async {
+        guard isSelectableDefaultCategory(record.category) else {
+            autoWriteMissionSuggestionsByCategoryID[record.category_id] = []
+            autoWriteMissionErrorByCategoryID[record.category_id] = nil
+            autoWriteMissionTroubleshootingByCategoryID[record.category_id] = nil
+            return
+        }
+
         let requestKey = missionAutoWriteCacheKey(for: record)
         if !forceRefresh, let cached = autoWriteMissionSuggestionsCache[requestKey], !cached.isEmpty {
             autoWriteMissionSuggestionsByCategoryID[record.category_id] = cached
             autoWriteMissionErrorByCategoryID[record.category_id] = nil
+            autoWriteMissionTroubleshootingByCategoryID[record.category_id] = nil
             return
         }
         if !forceRefresh, autoWriteMissionLoadedKeys.contains(requestKey) {
             return
         }
         autoWriteMissionLoadedKeys.insert(requestKey)
+        let markFailed = { _ = autoWriteMissionLoadedKeys.remove(requestKey) }
 
         let previousSuggestions = autoWriteMissionSuggestionsByCategoryID[record.category_id] ?? []
         autoWriteMissionErrorByCategoryID[record.category_id] = nil
+        autoWriteMissionTroubleshootingByCategoryID[record.category_id] = nil
         autoWritingMissionCategoryID = record.category_id
         defer { autoWritingMissionCategoryID = nil }
         if forceRefresh || autoWriteMissionSuggestionsCache[requestKey] == nil {
             autoWriteMissionSuggestionsByCategoryID[record.category_id] = []
         }
 
+        let delaySeconds = Int.random(in: 2...5)
         do {
-            let contextSnapshot = try LoomAIViewModel().buildContextSnapshot(in: modelContext)
-            let existingMission = (purposeDrafts[record.category_id] ?? record.category_purpose)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let previousSuggestionsLine = previousSuggestions.isEmpty
-                ? "No prior suggestions."
-                : "Prior suggestions to avoid repeating: \(previousSuggestions.joined(separator: " | "))"
-            let instruction = """
-            You are helping with Loom Fulfillment Define Mission (AutoWrite).
-            Fulfillment Area: \(record.category)
-            Current Mission: \(existingMission.isEmpty ? "<empty>" : existingMission)
-            \(previousSuggestionsLine)
-
-            Need ideas guidance to follow:
-            - Mission is your deeper reason. It keeps you consistent when motivation fades.
-            - Think about why this matters and how your life improves when this area strengthens.
-            - Keep it simple and practical.
-
-            Return JSON only:
-            {"suggestions":["string"],"confidence":"high|medium|low","nudge":"optional string"}
-
-            Rules:
-            - 1-2 suggestions
-            - each suggestion must be <=120 characters
-            - suggestions should be specific to the Fulfillment Area
-            - no numbering, no bullets
-            """
-
-            let response = try await LoomAIService().sendChat(
-                messages: [.init(role: "user", content: instruction)],
-                context: contextSnapshot,
-                intent: "autowrite_fulfillment",
-                screen: "fulfillment_mission"
-            )
-            let suggestions = decodeAutoWriteMissionSuggestions(from: response.message)
-            guard !suggestions.isEmpty else {
-                autoWriteMissionErrorByCategoryID[record.category_id] = "No suggestions yet."
-                return
-            }
-            let filtered = suggestions.filter { suggestion in
-                let normalized = normalizedIdentitySuggestion(suggestion)
-                return !previousSuggestions.contains { normalizedIdentitySuggestion($0) == normalized }
-            }
-            let nextSuggestions = Array((filtered.isEmpty ? suggestions : filtered).prefix(2))
-            guard !nextSuggestions.isEmpty else {
-                autoWriteMissionErrorByCategoryID[record.category_id] = "No suggestions yet."
-                return
-            }
-            autoWriteMissionSuggestionsByCategoryID[record.category_id] = nextSuggestions
-            autoWriteMissionSuggestionsCache[requestKey] = nextSuggestions
-            autoWriteMissionErrorByCategoryID[record.category_id] = nil
+            try await Task.sleep(nanoseconds: UInt64(delaySeconds) * 1_000_000_000)
         } catch {
-            autoWriteMissionErrorByCategoryID[record.category_id] = "Couldn’t generate mission suggestions."
+            markFailed()
+            return
         }
+        if Task.isCancelled {
+            markFailed()
+            return
+        }
+
+        let candidates = missionSuggestionPool(for: record.category)
+        guard !candidates.isEmpty else {
+            autoWriteMissionErrorByCategoryID[record.category_id] = "No suggestions yet."
+            autoWriteMissionTroubleshootingByCategoryID[record.category_id] = nil
+            markFailed()
+            return
+        }
+
+        let existingMission = normalizedIdentitySuggestion(
+            (purposeDrafts[record.category_id] ?? record.category_purpose)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+        let seen = Set(previousSuggestions.map(normalizedIdentitySuggestion))
+        let filtered = candidates.filter { suggestion in
+            let normalized = normalizedIdentitySuggestion(suggestion)
+            if normalized.isEmpty { return false }
+            if !existingMission.isEmpty && normalized == existingMission { return false }
+            return !seen.contains(normalized)
+        }
+        let selectionPool = filtered.isEmpty ? candidates : filtered
+        guard let selected = selectionPool.randomElement() else {
+            autoWriteMissionErrorByCategoryID[record.category_id] = "No suggestions yet."
+            autoWriteMissionTroubleshootingByCategoryID[record.category_id] = nil
+            markFailed()
+            return
+        }
+
+        let nextSuggestions = [selected]
+        autoWriteMissionSuggestionsByCategoryID[record.category_id] = nextSuggestions
+        autoWriteMissionSuggestionsCache[requestKey] = nextSuggestions
+        autoWriteMissionErrorByCategoryID[record.category_id] = nil
+        autoWriteMissionTroubleshootingByCategoryID[record.category_id] = nil
     }
 
-    private func decodeAutoWriteMissionSuggestions(from raw: String) -> [String] {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let data = trimmed.data(using: .utf8),
-           let parsed = try? JSONDecoder().decode(MissionAutoWriteResponse.self, from: data) {
-            let normalized = (parsed.suggestions ?? [])
-                .map { $0.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-                .map { truncateMissionSuggestion($0, maxLength: 120) }
-            return Array(normalized.prefix(2))
+    private func missionSuggestionPool(for category: String) -> [String] {
+        guard let corpus = fulfillmentStartMissionSuggestionCorpusByCategory.first(where: {
+            $0.key.caseInsensitiveCompare(category) == .orderedSame
+        })?.value else {
+            return []
         }
 
-        let fallback = trimmed
-            .components(separatedBy: "\n")
-            .map { $0.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines) }
+        return corpus
+            .components(separatedBy: .newlines)
+            .map(sanitizeMissionSuggestion(_:))
             .filter { !$0.isEmpty }
-            .map { $0.replacingOccurrences(of: #"^\d+[\.\)]\s*"#, with: "", options: .regularExpression) }
-            .map { $0.replacingOccurrences(of: #"^[-•]\s*"#, with: "", options: .regularExpression) }
-            .filter { !$0.isEmpty }
-            .map { truncateMissionSuggestion($0, maxLength: 120) }
-        return Array(fallback.prefix(2))
+    }
+
+    private func sanitizeMissionSuggestion(_ raw: String) -> String {
+        raw
+            .replacingOccurrences(of: "\"", with: "")
+            .replacingOccurrences(of: "“", with: "")
+            .replacingOccurrences(of: "”", with: "")
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func isSelectableDefaultCategory(_ category: String) -> Bool {
+        fulfillmentStartSelectableDefaultCategories.contains(where: {
+            $0.caseInsensitiveCompare(category) == .orderedSame
+        })
     }
 
     private func truncateMissionSuggestion(_ text: String, maxLength: Int) -> String {
@@ -2817,126 +4551,153 @@ struct FulfillmentStartView: View {
     }
 
     private func requestAutoWriteIdentitySuggestions(for record: Fulfillment, forceRefresh: Bool = false) async {
+        guard isSelectableDefaultCategory(record.category) else {
+            autoWriteIdentitySuggestionsByCategoryID[record.category_id] = []
+            autoWriteIdentityErrorByCategoryID[record.category_id] = nil
+            autoWriteIdentityTroubleshootingByCategoryID[record.category_id] = nil
+            return
+        }
+
         let requestKey = identityAutoWriteCacheKey(for: record)
         if !forceRefresh, let cached = autoWriteIdentitySuggestionsCache[requestKey], !cached.isEmpty {
             autoWriteIdentitySuggestionsByCategoryID[record.category_id] = cached
             autoWriteIdentityErrorByCategoryID[record.category_id] = nil
+            autoWriteIdentityTroubleshootingByCategoryID[record.category_id] = nil
             return
         }
         if !forceRefresh, autoWriteIdentityLoadedKeys.contains(requestKey) {
             return
         }
         autoWriteIdentityLoadedKeys.insert(requestKey)
+        let markFailed = { _ = autoWriteIdentityLoadedKeys.remove(requestKey) }
 
         let previousSuggestions = autoWriteIdentitySuggestionsByCategoryID[record.category_id] ?? []
         autoWriteIdentityErrorByCategoryID[record.category_id] = nil
+        autoWriteIdentityTroubleshootingByCategoryID[record.category_id] = nil
         autoWritingIdentityCategoryID = record.category_id
         defer { autoWritingIdentityCategoryID = nil }
         if forceRefresh || autoWriteIdentitySuggestionsCache[requestKey] == nil {
             autoWriteIdentitySuggestionsByCategoryID[record.category_id] = []
         }
 
+        let delaySeconds = Int.random(in: 2...4)
         do {
-            let contextSnapshot = try LoomAIViewModel().buildContextSnapshot(in: modelContext)
-            let rolesNow = getRoles(for: record).map(\.role)
-            let roleList = rolesNow.isEmpty ? "<none>" : rolesNow.joined(separator: ", ")
-            let previousSuggestionsContext = previousSuggestions.isEmpty
-                ? "No prior suggestions."
-                : "Prior suggestions to avoid repeating: \(previousSuggestions.map(\.identity).joined(separator: " | "))"
-
-            let instruction = """
-            You are helping with Loom Fulfillment Set Identity (AutoWrite).
-            Fulfillment Area: \(record.category)
-            Current Identities: \(roleList)
-            \(previousSuggestionsContext)
-
-            Need ideas guidance to follow:
-            - Roles define your identity.
-            - They guide how you think, act, and make decisions before results show up.
-            - Focus on identities that are clear, empowering, and practical in this area.
-            - Avoid repeating or lightly rewording current identities.
-            - Suggestions should be clearly distinct from Current Identities.
-
-            Return JSON only:
-            {"suggestions":[{"identity":"string","replaceIdentity":"string optional"}],"confidence":"high|medium|low","nudge":"optional string"}
-
-            Rules:
-            - Return 1-2 suggestions.
-            - identity must be 1-3 words.
-            - identity must be <=40 characters.
-            - If Current Identities already has 3 items, include replaceIdentity for each suggestion.
-            - replaceIdentity should be the weakest current identity to replace.
-            - No numbering, no bullets, no markdown.
-            - Suggestions must be specific to the Fulfillment Area.
-            """
-
-            let response = try await LoomAIService().sendChat(
-                messages: [.init(role: "user", content: instruction)],
-                context: contextSnapshot,
-                intent: "autowrite_fulfillment",
-                screen: "fulfillment_identity"
-            )
-            let suggestions = decodeAutoWriteIdentitySuggestions(from: response.message)
-            guard !suggestions.isEmpty else {
-                autoWriteIdentityErrorByCategoryID[record.category_id] = "No suggestions yet."
-                return
-            }
-            let filtered = suggestions.filter { suggestion in
-                let normalized = normalizedIdentitySuggestion(suggestion.identity)
-                return !previousSuggestions.contains { normalizedIdentitySuggestion($0.identity) == normalized }
-            }
-            let similarityFiltered = (filtered.isEmpty ? suggestions : filtered).filter { suggestion in
-                !isIdentitySuggestionTooSimilarToExisting(suggestion, for: record)
-            }
-            let nextSuggestions = Array((similarityFiltered.isEmpty ? (filtered.isEmpty ? suggestions : filtered) : similarityFiltered).prefix(2))
-            guard !nextSuggestions.isEmpty else {
-                autoWriteIdentityErrorByCategoryID[record.category_id] = "No suggestions yet."
-                return
-            }
-            autoWriteIdentitySuggestionsByCategoryID[record.category_id] = nextSuggestions
-            autoWriteIdentitySuggestionsCache[requestKey] = nextSuggestions
-            autoWriteIdentityErrorByCategoryID[record.category_id] = nil
+            try await Task.sleep(nanoseconds: UInt64(delaySeconds) * 1_000_000_000)
         } catch {
-            autoWriteIdentityErrorByCategoryID[record.category_id] = "Couldn’t generate identity suggestions."
+            markFailed()
+            return
         }
+        if Task.isCancelled {
+            markFailed()
+            return
+        }
+
+        let candidates = identitySuggestionPool(for: record.category)
+        guard !candidates.isEmpty else {
+            autoWriteIdentityErrorByCategoryID[record.category_id] = "No suggestions yet."
+            autoWriteIdentityTroubleshootingByCategoryID[record.category_id] = nil
+            markFailed()
+            return
+        }
+
+        let rolesNow = getRoles(for: record)
+        var existingRoleNames = rolesNow.map(\.role)
+        if addingRole {
+            let pending = roleEntry.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !pending.isEmpty {
+                existingRoleNames.append(pending)
+            }
+        }
+        let existingRoleSet = Set(existingRoleNames.map(normalizedIdentitySuggestion).filter { !$0.isEmpty })
+        let priorSuggestionSet = Set(previousSuggestions.map { normalizedIdentitySuggestion($0.identity) }.filter { !$0.isEmpty })
+
+        let filtered = candidates.filter { identity in
+            let normalized = normalizedIdentitySuggestion(identity)
+            if normalized.isEmpty { return false }
+            return !existingRoleSet.contains(normalized) && !priorSuggestionSet.contains(normalized)
+        }
+        let nonExisting = candidates.filter { identity in
+            let normalized = normalizedIdentitySuggestion(identity)
+            if normalized.isEmpty { return false }
+            return !existingRoleSet.contains(normalized)
+        }
+
+        let primaryPool: [String]
+        if filtered.count >= 2 {
+            primaryPool = filtered
+        } else if nonExisting.count >= 2 {
+            primaryPool = nonExisting
+        } else {
+            primaryPool = candidates
+        }
+
+        var picked: [String] = []
+        var pickedSet = Set<String>()
+        for candidate in primaryPool.shuffled() {
+            let normalized = normalizedIdentitySuggestion(candidate)
+            if normalized.isEmpty || pickedSet.contains(normalized) { continue }
+            picked.append(candidate)
+            pickedSet.insert(normalized)
+            if picked.count == 2 { break }
+        }
+        if picked.count < 2 {
+            for candidate in candidates.shuffled() {
+                let normalized = normalizedIdentitySuggestion(candidate)
+                if normalized.isEmpty || pickedSet.contains(normalized) { continue }
+                picked.append(candidate)
+                pickedSet.insert(normalized)
+                if picked.count == 2 { break }
+            }
+        }
+
+        guard picked.count == 2 else {
+            autoWriteIdentityErrorByCategoryID[record.category_id] = "No suggestions yet."
+            autoWriteIdentityTroubleshootingByCategoryID[record.category_id] = nil
+            markFailed()
+            return
+        }
+
+        let replaceIdentity = rolesNow.count >= 3 ? weakestIdentityNameForAutoWrite(in: rolesNow) : nil
+        let nextSuggestions = picked.compactMap { item -> IdentityAutoWriteSuggestion? in
+            let clamped = clampedIdentitySuggestion(item)
+            guard !clamped.isEmpty else { return nil }
+            return IdentityAutoWriteSuggestion(identity: clamped, replaceIdentity: replaceIdentity)
+        }
+
+        guard nextSuggestions.count == 2 else {
+            autoWriteIdentityErrorByCategoryID[record.category_id] = "No suggestions yet."
+            autoWriteIdentityTroubleshootingByCategoryID[record.category_id] = nil
+            markFailed()
+            return
+        }
+
+        autoWriteIdentitySuggestionsByCategoryID[record.category_id] = nextSuggestions
+        autoWriteIdentitySuggestionsCache[requestKey] = nextSuggestions
+        autoWriteIdentityErrorByCategoryID[record.category_id] = nil
+        autoWriteIdentityTroubleshootingByCategoryID[record.category_id] = nil
     }
 
-    private func decodeAutoWriteIdentitySuggestions(from raw: String) -> [IdentityAutoWriteSuggestion] {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if let data = trimmed.data(using: .utf8),
-           let parsed = try? JSONDecoder().decode(IdentityAutoWriteResponse.self, from: data) {
-            let normalized = (parsed.suggestions ?? [])
-                .compactMap { dto -> IdentityAutoWriteSuggestion? in
-                    let identityRaw = (dto.identity ?? dto.role ?? dto.text ?? "")
-                        .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !identityRaw.isEmpty else { return nil }
-                    let replaceRaw = (dto.replaceIdentity ?? dto.replace ?? dto.weakestIdentity ?? "")
-                        .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                    let identity = clampedIdentitySuggestion(identityRaw)
-                    guard !identity.isEmpty else { return nil }
-                    return IdentityAutoWriteSuggestion(
-                        identity: identity,
-                        replaceIdentity: replaceRaw.isEmpty ? nil : truncateMissionSuggestion(replaceRaw, maxLength: 120)
-                    )
-                }
-            return Array(normalized.prefix(2))
+    private func identitySuggestionPool(for category: String) -> [String] {
+        guard let values = fulfillmentStartIdentitySuggestionMap.first(where: {
+            $0.key.caseInsensitiveCompare(category) == .orderedSame
+        })?.value else {
+            return []
         }
 
-        let fallback = trimmed
-            .components(separatedBy: "\n")
-            .map { $0.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines) }
-            .map { $0.replacingOccurrences(of: #"^\d+[\.\)]\s*"#, with: "", options: .regularExpression) }
-            .map { $0.replacingOccurrences(of: #"^[-•]\s*"#, with: "", options: .regularExpression) }
+        return values
+            .map { $0.replacingOccurrences(of: "\"", with: "") }
+            .map { $0.replacingOccurrences(of: "fulfillment_area,identity", with: "") }
+            .map { $0.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression) }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-            .compactMap { line -> IdentityAutoWriteSuggestion? in
-                let identity = clampedIdentitySuggestion(line)
-                guard !identity.isEmpty else { return nil }
-                return IdentityAutoWriteSuggestion(identity: identity, replaceIdentity: nil)
-            }
-        return Array(fallback.prefix(2))
+    }
+
+    private func weakestIdentityNameForAutoWrite(in roles: [DraftRoleRow]) -> String? {
+        guard let weakestID = weakestRoleReplacementID(in: roles) else { return nil }
+        return roles
+            .first(where: { $0.id == weakestID })?
+            .role
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func clampedIdentitySuggestion(_ text: String) -> String {
@@ -2959,9 +4720,11 @@ struct FulfillmentStartView: View {
 
     private func normalizedIdentitySuggestion(_ text: String) -> String {
         text
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .lowercased()
+            .replacingOccurrences(of: #"[^\p{L}\p{N}\s]"#, with: " ", options: .regularExpression)
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
     }
 
     private func isSuggestionTextTooSimilarToExisting(_ candidate: String, existing: [String]) -> Bool {
@@ -3118,127 +4881,172 @@ struct FulfillmentStartView: View {
     }
 
     private func requestAutoWriteLittleWinSuggestions(for record: Fulfillment, forceRefresh: Bool = false) async {
+        guard isSelectableDefaultCategory(record.category) else {
+            autoWriteLittleWinSuggestionsByCategoryID[record.category_id] = []
+            autoWriteLittleWinErrorByCategoryID[record.category_id] = nil
+            autoWriteLittleWinTroubleshootingByCategoryID[record.category_id] = nil
+            return
+        }
+
         let requestKey = littleWinAutoWriteCacheKey(for: record)
         if !forceRefresh, let cached = autoWriteLittleWinSuggestionsCache[requestKey], !cached.isEmpty {
             autoWriteLittleWinSuggestionsByCategoryID[record.category_id] = cached
             autoWriteLittleWinErrorByCategoryID[record.category_id] = nil
+            autoWriteLittleWinTroubleshootingByCategoryID[record.category_id] = nil
             return
         }
         if !forceRefresh, autoWriteLittleWinLoadedKeys.contains(requestKey) {
             return
         }
         autoWriteLittleWinLoadedKeys.insert(requestKey)
+        let markFailed = { _ = autoWriteLittleWinLoadedKeys.remove(requestKey) }
 
         let previousSuggestions = autoWriteLittleWinSuggestionsByCategoryID[record.category_id] ?? []
         autoWriteLittleWinErrorByCategoryID[record.category_id] = nil
+        autoWriteLittleWinTroubleshootingByCategoryID[record.category_id] = nil
         autoWritingLittleWinCategoryID = record.category_id
         defer { autoWritingLittleWinCategoryID = nil }
         if forceRefresh || autoWriteLittleWinSuggestionsCache[requestKey] == nil {
             autoWriteLittleWinSuggestionsByCategoryID[record.category_id] = []
         }
 
+        let delaySeconds = Int.random(in: 2...4)
         do {
-            let contextSnapshot = try LoomAIViewModel().buildContextSnapshot(in: modelContext)
-            let littleWinsNow = getFoci(for: record).map(\.activity)
-            let list = littleWinsNow.isEmpty ? "<none>" : littleWinsNow.joined(separator: ", ")
-            let mission = (purposeDrafts[record.category_id] ?? record.category_purpose)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let identitiesNow = getRoles(for: record).map(\.role)
-            let identities = identitiesNow.isEmpty ? "<none>" : identitiesNow.joined(separator: ", ")
-            let previousSuggestionsLine = previousSuggestions.isEmpty
-                ? "No prior suggestions."
-                : "Prior suggestions to avoid repeating: \(previousSuggestions.map(\.activity).joined(separator: " | "))"
-
-            let instruction = """
-            You are helping with Loom Fulfillment Little Wins (AutoWrite).
-            Fulfillment Area: \(record.category)
-            Mission: \(mission.isEmpty ? "<none>" : mission)
-            Identities: \(identities)
-            Current Little Wins: \(list)
-            \(previousSuggestionsLine)
-
-            Need ideas guidance to follow:
-            - Small actions create momentum.
-            - Focus on easy, repeatable 1-3 little wins that are practical in this area.
-            - Align suggestions to the Mission and Identities when provided.
-            - Keep wording clear, actionable, and brief.
-            - Style target: concise phrases like "10,000 steps", "60 min workout", "Follow diet".
-            - Avoid repeating or lightly rewording current little wins.
-            - Suggestions should be clearly distinct from Current Little Wins.
-
-            Return JSON only:
-            {"suggestions":[{"activity":"string","replaceActivity":"string optional"}],"confidence":"high|medium|low","nudge":"optional string"}
-
-            Rules:
-            - Return 1-2 suggestions.
-            - activity must be <=7 words and <=80 characters.
-            - If Current Little Wins already has 3 items, include replaceActivity for each suggestion.
-            - replaceActivity should be the weakest current little win to replace.
-            - No numbering, no bullets, no markdown.
-            - Suggestions must be specific to the Fulfillment Area.
-            """
-
-            let response = try await LoomAIService().sendChat(
-                messages: [.init(role: "user", content: instruction)],
-                context: contextSnapshot,
-                intent: "autowrite_fulfillment",
-                screen: "fulfillment_littlewins"
-            )
-            let suggestions = decodeAutoWriteLittleWinSuggestions(from: response.message)
-            guard !suggestions.isEmpty else {
-                autoWriteLittleWinErrorByCategoryID[record.category_id] = "No suggestions yet."
-                return
-            }
-            let filtered = suggestions.filter { suggestion in
-                let normalized = normalizedIdentitySuggestion(suggestion.activity)
-                return !previousSuggestions.contains { normalizedIdentitySuggestion($0.activity) == normalized }
-            }
-            let similarityFiltered = (filtered.isEmpty ? suggestions : filtered).filter { suggestion in
-                !isLittleWinSuggestionTooSimilarToExisting(suggestion, for: record)
-            }
-            let nextSuggestions = Array((similarityFiltered.isEmpty ? (filtered.isEmpty ? suggestions : filtered) : similarityFiltered).prefix(2))
-            guard !nextSuggestions.isEmpty else {
-                autoWriteLittleWinErrorByCategoryID[record.category_id] = "No suggestions yet."
-                return
-            }
-            autoWriteLittleWinSuggestionsByCategoryID[record.category_id] = nextSuggestions
-            autoWriteLittleWinSuggestionsCache[requestKey] = nextSuggestions
-            autoWriteLittleWinErrorByCategoryID[record.category_id] = nil
+            try await Task.sleep(nanoseconds: UInt64(delaySeconds) * 1_000_000_000)
         } catch {
-            autoWriteLittleWinErrorByCategoryID[record.category_id] = "Couldn’t generate Little Win suggestions."
+            markFailed()
+            return
         }
+        if Task.isCancelled {
+            markFailed()
+            return
+        }
+
+        let candidates = littleWinSuggestionPool(for: record.category)
+        guard !candidates.isEmpty else {
+            autoWriteLittleWinErrorByCategoryID[record.category_id] = "No suggestions yet."
+            autoWriteLittleWinTroubleshootingByCategoryID[record.category_id] = nil
+            markFailed()
+            return
+        }
+
+        let littleWinsNow = getFoci(for: record)
+        var existingLittleWinNames = littleWinsNow.map(\.activity)
+        if addingFocus {
+            let pending = focusEntry.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !pending.isEmpty {
+                existingLittleWinNames.append(pending)
+            }
+        }
+        let existingSet = Set(existingLittleWinNames.map(normalizedIdentitySuggestion).filter { !$0.isEmpty })
+        let priorSuggestionSet = Set(previousSuggestions.map { normalizedIdentitySuggestion($0.activity) }.filter { !$0.isEmpty })
+
+        let filtered = candidates.filter { activity in
+            let normalized = normalizedIdentitySuggestion(activity)
+            if normalized.isEmpty { return false }
+            return !existingSet.contains(normalized) && !priorSuggestionSet.contains(normalized)
+        }
+        let nonExisting = candidates.filter { activity in
+            let normalized = normalizedIdentitySuggestion(activity)
+            if normalized.isEmpty { return false }
+            return !existingSet.contains(normalized)
+        }
+
+        let primaryPool: [String]
+        if filtered.count >= 2 {
+            primaryPool = filtered
+        } else if nonExisting.count >= 2 {
+            primaryPool = nonExisting
+        } else {
+            primaryPool = candidates
+        }
+
+        var picked: [String] = []
+        var pickedSet = Set<String>()
+        for candidate in primaryPool.shuffled() {
+            let normalized = normalizedIdentitySuggestion(candidate)
+            if normalized.isEmpty || pickedSet.contains(normalized) { continue }
+            picked.append(candidate)
+            pickedSet.insert(normalized)
+            if picked.count == 2 { break }
+        }
+        if picked.count < 2 {
+            for candidate in candidates.shuffled() {
+                let normalized = normalizedIdentitySuggestion(candidate)
+                if normalized.isEmpty || pickedSet.contains(normalized) { continue }
+                picked.append(candidate)
+                pickedSet.insert(normalized)
+                if picked.count == 2 { break }
+            }
+        }
+
+        guard picked.count == 2 else {
+            autoWriteLittleWinErrorByCategoryID[record.category_id] = "No suggestions yet."
+            autoWriteLittleWinTroubleshootingByCategoryID[record.category_id] = nil
+            markFailed()
+            return
+        }
+
+        let replaceActivity = littleWinsNow.count >= 3 ? weakestLittleWinNameForAutoWrite(in: littleWinsNow) : nil
+        let nextSuggestions = picked.compactMap { item -> LittleWinAutoWriteSuggestion? in
+            let clamped = clampedLittleWinSuggestion(item)
+            guard !clamped.isEmpty else { return nil }
+            return LittleWinAutoWriteSuggestion(activity: clamped, replaceActivity: replaceActivity)
+        }
+
+        guard nextSuggestions.count == 2 else {
+            autoWriteLittleWinErrorByCategoryID[record.category_id] = "No suggestions yet."
+            autoWriteLittleWinTroubleshootingByCategoryID[record.category_id] = nil
+            markFailed()
+            return
+        }
+
+        autoWriteLittleWinSuggestionsByCategoryID[record.category_id] = nextSuggestions
+        autoWriteLittleWinSuggestionsCache[requestKey] = nextSuggestions
+        autoWriteLittleWinErrorByCategoryID[record.category_id] = nil
+        autoWriteLittleWinTroubleshootingByCategoryID[record.category_id] = nil
     }
 
-    private func decodeAutoWriteLittleWinSuggestions(from raw: String) -> [LittleWinAutoWriteSuggestion] {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if let data = trimmed.data(using: .utf8),
-           let parsed = try? JSONDecoder().decode(LittleWinAutoWriteResponse.self, from: data) {
-            let normalized = (parsed.suggestions ?? [])
-                .compactMap { dto -> LittleWinAutoWriteSuggestion? in
-                    let activityRaw = (dto.activity ?? dto.littleWin ?? dto.text ?? "")
-                        .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !activityRaw.isEmpty else { return nil }
-                    let replaceRaw = (dto.replaceActivity ?? dto.replace ?? dto.weakestLittleWin ?? "")
-                        .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                    return LittleWinAutoWriteSuggestion(
-                        activity: clampedLittleWinSuggestion(activityRaw),
-                        replaceActivity: replaceRaw.isEmpty ? nil : truncateMissionSuggestion(replaceRaw, maxLength: 120)
-                    )
-                }
-            return Array(normalized.prefix(2))
+    private func littleWinSuggestionPool(for category: String) -> [String] {
+        if isHealthEnergyCategory(category) {
+            return fulfillmentStartHealthEnergyLittleWinFlags
+                .map(\.activity)
+                .map { $0.replacingOccurrences(of: "\"", with: "") }
+                .map { $0.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression) }
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
         }
 
-        let fallback = trimmed
-            .components(separatedBy: "\n")
-            .map { $0.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines) }
-            .map { $0.replacingOccurrences(of: #"^\d+[\.\)]\s*"#, with: "", options: .regularExpression) }
-            .map { $0.replacingOccurrences(of: #"^[-•]\s*"#, with: "", options: .regularExpression) }
+        guard let corpus = fulfillmentStartLittleWinCorpusByCategory.first(where: {
+            $0.key.caseInsensitiveCompare(category) == .orderedSame
+        })?.value else {
+            return []
+        }
+
+        return corpus
+            .components(separatedBy: .newlines)
+            .map { $0.replacingOccurrences(of: "\"", with: "") }
+            .map { $0.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression) }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-            .map { LittleWinAutoWriteSuggestion(activity: clampedLittleWinSuggestion($0), replaceActivity: nil) }
-        return Array(fallback.prefix(2))
+    }
+
+    private func isHealthEnergyCategory(_ category: String) -> Bool {
+        category.caseInsensitiveCompare("Health & Energy") == .orderedSame
+    }
+
+    private func isAppleHealthIntegrationFriendlyLittleWin(_ activity: String, category: String) -> Bool {
+        guard isHealthEnergyCategory(category) else { return false }
+        let normalized = activity.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return fulfillmentStartHealthEnergyAppleHealthLittleWins.contains(normalized)
+    }
+
+    private func weakestLittleWinNameForAutoWrite(in littleWins: [DraftFocusRow]) -> String? {
+        guard let weakestID = weakestLittleWinReplacementID(in: littleWins) else { return nil }
+        return littleWins
+            .first(where: { $0.id == weakestID })?
+            .activity
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private struct FulfillmentInsightsResponse: Decodable {
@@ -3268,17 +5076,16 @@ struct FulfillmentStartView: View {
     private func handleAutoStartForStep(_ targetStep: Step) {
         switch targetStep {
         case .purposeSweep:
-            guard let record = currentPurposeRecord else { return }
+            guard let record = currentPurposeRecord, isSelectableDefaultCategory(record.category) else { return }
             Task { await requestAutoWriteMissionSuggestions(for: record) }
         case .roles:
-            guard let record = currentRoleRecord else { return }
+            guard let record = currentRoleRecord, isSelectableDefaultCategory(record.category) else { return }
             Task { await requestAutoWriteIdentitySuggestions(for: record) }
         case .littleWins:
-            guard let record = currentDeepRecord else { return }
+            guard let record = currentDeepRecord, isSelectableDefaultCategory(record.category) else { return }
             Task { await requestAutoWriteLittleWinSuggestions(for: record) }
         case .insights:
-            guard !isAddSingleAreaMode else { return }
-            Task { await generateFulfillmentInsights() }
+            break
         default:
             break
         }
@@ -3393,6 +5200,7 @@ struct FulfillmentStartView: View {
             fulfillmentInsightCards = cached
             fulfillmentInsightsNudgeMessage = fulfillmentInsightsNudgeCache[requestKey]
             fulfillmentInsightsErrorMessage = nil
+            fulfillmentInsightsTroubleshootingMessage = nil
             return
         }
         if !forceRefresh,
@@ -3400,6 +5208,7 @@ struct FulfillmentStartView: View {
             fulfillmentInsightCards = persisted.cards
             fulfillmentInsightsNudgeMessage = persisted.nudge
             fulfillmentInsightsErrorMessage = nil
+            fulfillmentInsightsTroubleshootingMessage = nil
             fulfillmentInsightsCache[requestKey] = persisted.cards
             if let nudge = persisted.nudge {
                 fulfillmentInsightsNudgeCache[requestKey] = nudge
@@ -3412,6 +5221,7 @@ struct FulfillmentStartView: View {
 
         fulfillmentInsightsErrorMessage = nil
         fulfillmentInsightsNudgeMessage = nil
+        fulfillmentInsightsTroubleshootingMessage = nil
         fulfillmentInsightsActiveRequestKey = requestKey
         isGeneratingFulfillmentInsights = true
         if fulfillmentInsightCards.isEmpty || forceRefresh {
@@ -3439,7 +5249,7 @@ struct FulfillmentStartView: View {
             - Do not list selected category names and do not say "You selected".
             - Do not rename or re-label selected fulfillment areas.
             - Ground cards in diagnostics + purpose + fulfillment setup evidence only.
-            - Keep each card to 1-3 sentences with calm, practical language.
+            - Keep each card to 2-3 sentences with calm, practical language.
             - If diagnostics or purpose are missing, say that briefly and provide a useful fallback without inventing claims.
             - Next direction must end with a final sentence that starts with "Loom will help you".
             """
@@ -3457,11 +5267,18 @@ struct FulfillmentStartView: View {
                 guard requestKey == fulfillmentInsightsCacheKey else { return }
                 fulfillmentInsightCards = defaultFulfillmentInsightsCards()
                 fulfillmentInsightsErrorMessage = "Couldn’t generate insights yet."
+                fulfillmentInsightsTroubleshootingMessage = loomAITroubleshootingLocalDetails(
+                    feature: "fulfillment_start_insights",
+                    reason: "No insight cards could be parsed from the response.",
+                    responsePreview: response.message,
+                    requestHash: requestKey
+                )
                 return
             }
             guard requestKey == fulfillmentInsightsCacheKey else { return }
             fulfillmentInsightCards = decoded.cards
             fulfillmentInsightsNudgeMessage = decoded.nudge
+            fulfillmentInsightsTroubleshootingMessage = nil
             fulfillmentInsightsCache[requestKey] = decoded.cards
             if let nudge = decoded.nudge {
                 fulfillmentInsightsNudgeCache[requestKey] = nudge
@@ -3477,6 +5294,11 @@ struct FulfillmentStartView: View {
             guard requestKey == fulfillmentInsightsCacheKey else { return }
             fulfillmentInsightCards = defaultFulfillmentInsightsCards()
             fulfillmentInsightsErrorMessage = "Couldn’t generate insights yet."
+            fulfillmentInsightsTroubleshootingMessage = loomAITroubleshootingDetails(
+                feature: "fulfillment_start_insights",
+                error: error,
+                requestHash: requestKey
+            )
         }
     }
 
@@ -3635,15 +5457,27 @@ struct FulfillmentStartView: View {
         if matchedCategoryCount >= 1 {
             return fallback
         }
-        return truncateMissionSuggestion(normalized, maxLength: 340)
+        return clampedInsightSentences(
+            normalized,
+            fallback: fallback,
+            minSentences: 2,
+            maxSentences: 3,
+            maxLength: 520
+        )
     }
 
     private func validatedNextDirectionBody(candidate: String, fallback: String) -> String {
         let normalized = candidate
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalized.isEmpty else { return ensureNextDirectionEnding(fallback) }
-        return ensureNextDirectionEnding(normalized)
+        let base = normalized.isEmpty ? ensureNextDirectionEnding(fallback) : ensureNextDirectionEnding(normalized)
+        return clampedInsightSentences(
+            base,
+            fallback: ensureNextDirectionEnding(fallback),
+            minSentences: 2,
+            maxSentences: 3,
+            maxLength: 540
+        )
     }
 
     private func ensureNextDirectionEnding(_ raw: String) -> String {
@@ -3677,7 +5511,60 @@ struct FulfillmentStartView: View {
             sentence.hasSuffix(".") ? sentence : "\(sentence)."
         }
         .joined(separator: " ")
-        return truncateMissionSuggestion(joined, maxLength: 360)
+        return truncateMissionSuggestion(joined, maxLength: 540)
+    }
+
+    private func clampedInsightSentences(
+        _ raw: String,
+        fallback: String,
+        minSentences: Int,
+        maxSentences: Int,
+        maxLength: Int
+    ) -> String {
+        let trimmed = raw
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallbackTrimmed = fallback
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return fallbackTrimmed }
+
+        var sentences = trimmed
+            .split(whereSeparator: { ".!?".contains($0) })
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        if sentences.isEmpty {
+            sentences = [trimmed]
+        }
+
+        if sentences.count > maxSentences {
+            sentences = Array(sentences.prefix(maxSentences))
+        }
+
+        let fallbackSentences = fallbackTrimmed
+            .split(whereSeparator: { ".!?".contains($0) })
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        while sentences.count < minSentences, let extra = fallbackSentences.dropFirst(sentences.count).first {
+            sentences.append(extra)
+        }
+
+        var output = sentences
+            .map { $0.hasSuffix(".") ? $0 : "\($0)." }
+            .joined(separator: " ")
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if output.count > maxLength {
+            output = truncateMissionSuggestion(output, maxLength: maxLength)
+            if !output.hasSuffix(".") {
+                output += "."
+            }
+        }
+
+        return output
     }
 
     private func defaultFulfillmentAreasBody(categoryCountHint: String) -> String {
@@ -5398,15 +7285,18 @@ private struct FulfillmentStartColorPickerSheet: View {
 
 private extension FulfillmentStartView {
     private var shouldShowMissionAutoWriteControls: Bool {
-        step == .purposeSweep && currentPurposeRecord != nil
+        guard step == .purposeSweep, let record = currentPurposeRecord else { return false }
+        return isSelectableDefaultCategory(record.category)
     }
 
     private var shouldShowIdentityAutoWriteControls: Bool {
-        step == .roles && currentRoleRecord != nil
+        guard step == .roles, let record = currentRoleRecord else { return false }
+        return isSelectableDefaultCategory(record.category)
     }
 
     private var shouldShowLittleWinAutoWriteControls: Bool {
-        step == .littleWins && currentDeepRecord != nil
+        guard step == .littleWins, let record = currentDeepRecord else { return false }
+        return isSelectableDefaultCategory(record.category)
     }
 
     private var autoWriteGradient: AngularGradient {
