@@ -3222,6 +3222,15 @@ struct PlanStepThreeView: View {
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 return (item.id, cleanText)
             }
+            let availableAreas = Array(
+                Set(
+                    selectableLabels
+                        .map { $0.label.trimmingCharacters(in: .whitespacesAndNewlines) }
+                        .filter { !$0.isEmpty }
+                )
+            )
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+            let availableAreaList = availableAreas.joined(separator: ", ")
             let actionLines = normalizedItems.enumerated().map { index, item in
                 "\(index + 1). id=\(item.id.uuidString) | text=\(item.text)"
             }
@@ -3239,7 +3248,9 @@ struct PlanStepThreeView: View {
             - Use only the provided actionIDs
             - Do not duplicate an actionID across groups
             - Prefer grouping by what the actions are related to (topic/domain), not by effort level or urgency
-            - Set fulfillmentArea to an empty string unless an action explicitly names one
+            - For each group, set fulfillmentArea to one available fulfillment area from this list when possible: [\(availableAreaList)]
+            - If a group clearly does not fit any available fulfillment area, use fulfillmentArea="Other"
+            - Use fulfillmentArea="Other" at most once total
             - It is OK to leave low-confidence/ambiguous actions ungrouped if needed
             - If leaving actions ungrouped, still satisfy the minimum grouping rules with the grouped subset
 
@@ -3272,10 +3283,30 @@ struct PlanStepThreeView: View {
             }
 
             let itemIDSet = Set(items.map(\.id))
-            let labelByNameLower = Dictionary(uniqueKeysWithValues: selectableLabels.map { ($0.label.lowercased(), $0.id) })
+            let normalizeAreaKey: (String) -> String = { raw in
+                raw
+                    .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+                    .lowercased()
+                    .components(separatedBy: CharacterSet.alphanumerics.inverted)
+                    .filter { !$0.isEmpty }
+                    .joined(separator: " ")
+            }
+            var labelByNormalizedArea: [String: UUID] = [:]
+            for label in selectableLabels {
+                let labelKey = normalizeAreaKey(label.label)
+                if !labelKey.isEmpty {
+                    labelByNormalizedArea[labelKey] = label.id
+                }
+                let categoryKey = normalizeAreaKey(label.category)
+                if !categoryKey.isEmpty {
+                    labelByNormalizedArea[categoryKey] = label.id
+                }
+            }
+            labelByNormalizedArea[normalizeAreaKey(PlanOtherLabel.title)] = PlanOtherLabel.id
 
             var seenActionIDs = Set<UUID>()
             var plans: [AutoGroupAssignmentPlan] = []
+            var otherAssignedCount = 0
 
             for group in parsed.groups {
                 let ids = (group.actionIDs ?? []).compactMap(UUID.init(uuidString:))
@@ -3284,15 +3315,29 @@ struct PlanStepThreeView: View {
                 guard !validIDs.contains(where: { seenActionIDs.contains($0) }) else { return nil }
                 seenActionIDs.formUnion(validIDs)
 
-                let fulfillmentLabelID: UUID?
-                if let area = group.fulfillmentArea?.trimmingCharacters(in: .whitespacesAndNewlines),
-                   !area.isEmpty {
-                    fulfillmentLabelID = labelByNameLower[area.lowercased()]
-                } else {
-                    fulfillmentLabelID = nil
+                let name = (group.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                let areaRaw = (group.fulfillmentArea ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                let areaKey = normalizeAreaKey(areaRaw)
+                let nameKey = normalizeAreaKey(name)
+
+                var fulfillmentLabelID: UUID? = nil
+                if !areaKey.isEmpty, let matched = labelByNormalizedArea[areaKey] {
+                    if matched == PlanOtherLabel.id {
+                        if otherAssignedCount == 0 {
+                            fulfillmentLabelID = matched
+                            otherAssignedCount += 1
+                        }
+                    } else {
+                        fulfillmentLabelID = matched
+                    }
+                } else if !nameKey.isEmpty, let matched = labelByNormalizedArea[nameKey], matched != PlanOtherLabel.id {
+                    fulfillmentLabelID = matched
+                } else if otherAssignedCount == 0 {
+                    // Use "Other" once for a group that doesn't fit any available fulfillment area.
+                    fulfillmentLabelID = PlanOtherLabel.id
+                    otherAssignedCount += 1
                 }
 
-                let name = (group.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 plans.append(
                     AutoGroupAssignmentPlan(
                         title: name.isEmpty ? "Related Actions" : name,
