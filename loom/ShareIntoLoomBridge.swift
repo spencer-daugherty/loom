@@ -33,12 +33,17 @@ struct ShareIntoLoomPayload: Codable, Hashable {
     var text: String?
     var urlString: String?
     var attachments: [ShareIntoLoomAttachmentPayload]
+    var hasDueDate: Bool? = nil
+    var dueDate: Date? = nil
+    var dueDateAttentionDays: Int? = nil
+    var confirmedInExtension: Bool? = nil
 }
 
 enum ShareIntoLoomBridge {
     static let appGroupID = "group.srd.loom"
     private static let payloadDirectoryName = "SharedInbox"
     private static let payloadPrefix = "payload_"
+    private static let payloadSuffix = ".json"
     private static var inlinePayloads: [String: ShareIntoLoomPayload] = [:]
     private static let inlinePayloadsQueue = DispatchQueue(label: "ShareIntoLoomBridge.inlinePayloads")
 
@@ -61,6 +66,28 @@ enum ShareIntoLoomBridge {
     static func payloadURL(for payloadID: String) -> URL? {
         guard let base = payloadDirectoryURL(createIfNeeded: false) else { return nil }
         return base.appendingPathComponent("\(payloadPrefix)\(payloadID).json")
+    }
+
+    static func newestPendingPayloadID() -> String? {
+        guard let base = payloadDirectoryURL(createIfNeeded: false),
+              let urls = try? FileManager.default.contentsOfDirectory(
+                at: base,
+                includingPropertiesForKeys: [.contentModificationDateKey],
+                options: [.skipsHiddenFiles]
+              ) else {
+            return nil
+        }
+
+        let candidates: [(id: String, modifiedAt: Date)] = urls.compactMap { url in
+            let name = url.lastPathComponent
+            guard name.hasPrefix(payloadPrefix), name.hasSuffix(payloadSuffix) else { return nil }
+            let id = String(name.dropFirst(payloadPrefix.count).dropLast(payloadSuffix.count))
+            guard !id.isEmpty else { return nil }
+            let modifiedAt = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            return (id: id, modifiedAt: modifiedAt)
+        }
+
+        return candidates.max(by: { $0.modifiedAt < $1.modifiedAt })?.id
     }
 
     static func consumePayload(id payloadID: String) -> ShareIntoLoomPayload? {

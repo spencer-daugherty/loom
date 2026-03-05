@@ -3444,9 +3444,11 @@ struct CaptureView: View {
         sharedDraftSourceExternalID = payload.id.uuidString
         sharedDraftSourceApp = payload.sourceApp
         sharedDraftSourceTitle = payload.sourceTitle
-        sharedDraftHasDueDate = false
-        sharedDraftDueDate = Calendar.current.startOfDay(for: Date())
-        sharedDraftAttentionDays = 7
+        let resolvedDueDate = payload.dueDate.map { Calendar.current.startOfDay(for: $0) } ?? Calendar.current.startOfDay(for: Date())
+        let resolvedAttentionDays = min(max(payload.dueDateAttentionDays ?? 7, 7), 30)
+        sharedDraftHasDueDate = payload.hasDueDate ?? false
+        sharedDraftDueDate = resolvedDueDate
+        sharedDraftAttentionDays = resolvedAttentionDays
         sharedAutoWriteSuggestion = nil
         sharedAutoWriteErrorMessage = nil
         isGeneratingSharedAutoWrite = false
@@ -3456,13 +3458,76 @@ struct CaptureView: View {
         let textTrimmed = payload.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let textPreview = String(textTrimmed.prefix(500))
         let fallback = payload.urlString.flatMap { URL(string: $0)?.host } ?? ""
-        sharedDraftActionText = [baseTitle, textPreview.components(separatedBy: .newlines).first ?? ""]
+        let resolvedActionText = [baseTitle, textPreview.components(separatedBy: .newlines).first ?? ""]
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .first(where: { !$0.isEmpty }) ?? fallback
+        let resolvedAttachments = buildSharedDraftAttachments(from: payload)
 
+        if payload.confirmedInExtension == true {
+            saveConfirmedSharedPayload(
+                payload: payload,
+                actionText: resolvedActionText,
+                noteText: textTrimmed,
+                attachments: resolvedAttachments,
+                hasDueDate: sharedDraftHasDueDate,
+                dueDate: sharedDraftDueDate,
+                attentionDays: sharedDraftAttentionDays
+            )
+            return
+        }
+
+        sharedDraftActionText = resolvedActionText
         sharedDraftNoteText = textTrimmed
-        sharedDraftAttachments = buildSharedDraftAttachments(from: payload)
+        sharedDraftAttachments = resolvedAttachments
         showSharedCreateSheet = true
+    }
+
+    private func saveConfirmedSharedPayload(
+        payload: ShareIntoLoomPayload,
+        actionText: String,
+        noteText: String,
+        attachments: [CaptureSharedDraftAttachment],
+        hasDueDate: Bool,
+        dueDate: Date,
+        attentionDays: Int
+    ) {
+        let trimmedAction = actionText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedAction.isEmpty else { return }
+        guard allItems.first(where: { normalizedActionText($0.text) == normalizedActionText(trimmedAction) }) == nil else {
+            return
+        }
+
+        let resolvedDueDate = hasDueDate ? Calendar.current.startOfDay(for: dueDate) : nil
+        let resolvedAttentionDays = min(max(attentionDays, 7), 30)
+
+        let newItem = RollingCaptureItem(
+            text: trimmedAction,
+            isGhost: false,
+            createdAt: .now,
+            dueDate: resolvedDueDate,
+            dueDateAttentionDays: resolvedAttentionDays,
+            sourceType: LoomShareSourceType.sharedIn,
+            sourceExternalID: payload.id.uuidString,
+            unhideDate: nil,
+            unhiddenAt: nil
+        )
+        modelContext.insert(newItem)
+
+        let profile = CarriedActionProfile(
+            isMust: false,
+            timeEstimateMinutes: nil,
+            sensitiveMorning: true,
+            sensitiveAfternoon: true,
+            sensitiveEvening: true,
+            leverageKindRaw: nil,
+            leverageValue: nil,
+            placeNames: [],
+            noteText: noteText,
+            attachments: attachments.map(\.asCarriedAttachment),
+            updatedAtUnix: Date().timeIntervalSince1970
+        )
+        ActionCarryProfileStore.save(for: trimmedAction, profile: profile)
+        try? modelContext.save()
     }
 
     private func buildSharedDraftAttachments(from payload: ShareIntoLoomPayload) -> [CaptureSharedDraftAttachment] {

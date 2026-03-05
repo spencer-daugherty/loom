@@ -382,7 +382,7 @@ final class LoomAIViewModel: ObservableObject {
     }
 
     var isDailyLimitReached: Bool {
-        dailyEstimatedSpendUSD >= DailyChatLimitConfig.maxDailyEstimatedCostUSD
+        remainingDailyResponses <= 0
     }
 
     var shouldShowFiveLeftWarning: Bool {
@@ -417,7 +417,7 @@ final class LoomAIViewModel: ObservableObject {
         guard !trimmedDisplay.isEmpty, !trimmedTransport.isEmpty, !isSending else { return }
         refreshRemainingDailyResponses()
         guard remainingDailyResponses > 0 else {
-            errorMessage = "Daily LoomAI limit reached. Resets tomorrow."
+            errorMessage = nil
             return
         }
 
@@ -554,6 +554,10 @@ final class LoomAIViewModel: ObservableObject {
         } catch is CancellationError {
             // Refresh/new-thread cancellation should stop silently without inserting an error reply.
         } catch {
+            if isCancellationLikeError(error) {
+                // User-initiated cancel should only show the transient top "Cancelled" notice.
+                return
+            }
             let message = (error as NSError).localizedDescription
             let serviceError = error as? LoomAIService.LoomAIServiceError
             await MainActor.run {
@@ -581,6 +585,29 @@ final class LoomAIViewModel: ObservableObject {
             }
         }
 
+    }
+
+    private func isCancellationLikeError(_ error: Error) -> Bool {
+        if error is CancellationError { return true }
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled {
+            return true
+        }
+        let serviceError = error as? LoomAIService.LoomAIServiceError
+        let joined = [
+            nsError.localizedDescription,
+            serviceError?.message ?? "",
+            serviceError?.rawBody ?? ""
+        ]
+        .joined(separator: "\n")
+        .lowercased()
+        if joined.contains("nsurlerrordomain error -999") {
+            return true
+        }
+        if joined.contains("cancelled") || joined.contains("canceled") {
+            return true
+        }
+        return false
     }
 
     private func compactedSnapshotIfEnabled(_ snapshot: LoomAIContextSnapshot) -> LoomAIContextSnapshot {
@@ -709,14 +736,28 @@ final class LoomAIViewModel: ObservableObject {
             let rawEmotion = (action.payload["emotion"] ?? action.payload["passionType"] ?? "love")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .lowercased()
-            let emotion = ["love", "thrill", "vows", "hate"].contains(rawEmotion) ? rawEmotion : "love"
+            func normalizedEmotionBucket(_ value: String) -> String {
+                switch value {
+                case "love":
+                    return "love"
+                case "vow", "vows":
+                    return "vows"
+                case "thrill":
+                    return "thrill"
+                case "hate", "just":
+                    return "just"
+                default:
+                    return "love"
+                }
+            }
+            let emotion = normalizedEmotionBucket(rawEmotion)
             guard !passionText.isEmpty else {
                 errorMessage = "Passion suggestion is missing the passion text."
                 return false
             }
             let allPassions = (try? context.fetch(FetchDescriptor<Passion>())) ?? []
             if allPassions.contains(where: {
-                $0.emotion.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare(emotion) == .orderedSame &&
+                normalizedEmotionBucket($0.emotion.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) == emotion &&
                 $0.passion.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare(passionText) == .orderedSame
             }) {
                 errorMessage = "That passion already exists."
