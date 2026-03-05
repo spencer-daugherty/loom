@@ -471,7 +471,7 @@ struct AccountView: View {
     @AppStorage("developer_launch_paywall_once") private var developerLaunchPaywallOnce = false
     @AppStorage("developer_demo_mode_enabled") private var developerDemoModeEnabled = false
     @AppStorage(loomAITroubleshootingDefaultsKey) private var enableLoomAITroubleshooting = true
-    @AppStorage(loomAIDebugDefaultsKey) private var enableLoomAIDebug = true
+    @AppStorage(loomAIDebugDefaultsKey) private var enableLoomAIDebug = false
     @AppStorage("loomAI.dev.disableDailyLimiter") private var disableLoomAIDailyLimiter = false
     @AppStorage("dev_manual_warning_cards_enabled") private var devManualWarningCardsEnabled = false
     @AppStorage("dev_outcome_warning_target_passed") private var devOutcomeWarningTargetPassed = false

@@ -5,6 +5,9 @@ import UserNotifications
 #if canImport(FirebaseCore)
 import FirebaseCore
 #endif
+#if canImport(FirebaseAnalytics)
+import FirebaseAnalytics
+#endif
 #if canImport(FirebaseCrashlytics)
 import FirebaseCrashlytics
 #endif
@@ -162,6 +165,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
             FirebaseApp.configure()
         }
 #endif
+#if canImport(FirebaseAnalytics)
+        Analytics.setAnalyticsCollectionEnabled(AnalyticsCollectionPolicy.shouldCollectAnalytics)
+#endif
 #if canImport(FirebaseCrashlytics)
         #if DEBUG
         // TODO: Set this from a remote/consent policy if you need runtime control during betas.
@@ -194,8 +200,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 struct loomApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     private let modelContainer = LoomPersistence.makeContainer()
-    @AppStorage(loomAIDebugDefaultsKey) private var enableLoomAIDebug = true
-    @AppStorage("loom.showLoomAIDebugPage") private var showLoomAIDebugPage = true
+    @AppStorage(loomAIDebugDefaultsKey) private var enableLoomAIDebug = false
+    @AppStorage("loom.showLoomAIDebugPage") private var showLoomAIDebugPage = false
 
     var body: some Scene {
         WindowGroup {
