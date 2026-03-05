@@ -615,8 +615,9 @@ struct LoadingSplashView: View {
                 .matchedGeometryEffect(
                     id: "fulfillmentGraph",
                     in: namespace,
-                    properties: .position,
-                    anchor: .center
+                    properties: .frame,
+                    anchor: .center,
+                    isSource: true
                 )
             }
             .position(x: geo.size.width / 2, y: geo.size.height / 2)
@@ -674,7 +675,7 @@ struct LoadingSplashView: View {
         }
         .ignoresSafeArea()
         .overlay(alignment: .bottom) {
-            Text("Version: 0.1.0-alpha.6")
+            Text("Version: 0.1.0-alpha.7")
                 .font(.caption2)
                 .foregroundColor(.secondary)
                 .padding(.bottom, 10) // sits above the home indicator
@@ -703,6 +704,12 @@ struct LoadingSplashView: View {
                     isPresented.wrappedValue = false
                 }
             } else {
+                // Keep dismissal behavior consistent with binding-based teardown:
+                // settle the animated radar first so matched geometry can snapshot cleanly.
+                withAnimation(.linear(duration: 0.22)) {
+                    isTransitioningOut = true
+                }
+                try? await Task.sleep(nanoseconds: 220_000_000)
                 onMinimumElapsed?()
             }
         }
