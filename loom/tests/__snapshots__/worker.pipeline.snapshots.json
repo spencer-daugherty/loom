@@ -1,0 +1,166 @@
+{
+  "Daily Little Wins for Health & Vitality": {
+    "routeID": 1,
+    "routeKey": "daily_little_wins",
+    "suggestionCardCount": 1,
+    "suggestionCardTitle": "Little Wins for Health & Vitality",
+    "optionTypes": [
+      "addLittleWin",
+      "addLittleWin",
+      "addLittleWin"
+    ],
+    "nextActionType": "addLittleWin",
+    "groundingFields": [
+      "Fulfillment|fulfillmentCategories[0].name",
+      "Fulfillment|fulfillmentCategories[0].mission",
+      "Purpose|drivingForce.purpose",
+      "Action Blocks|currentWeekActionBlocks[0].title",
+      "Capture|capture.totalCount",
+      "Data Inventory|dataInventory[0].title"
+    ],
+    "message": "You can make focused progress this week."
+  },
+  "New Mission for Health & Vitality": {
+    "routeID": 2,
+    "routeKey": "new_mission",
+    "suggestionCardCount": 1,
+    "suggestionCardTitle": "Mission options for Health & Vitality",
+    "optionTypes": [
+      "updateFulfillmentMission",
+      "updateFulfillmentMission",
+      "updateFulfillmentMission"
+    ],
+    "nextActionType": "updateFulfillmentMission",
+    "groundingFields": [
+      "Fulfillment|fulfillmentCategories[0].name",
+      "Fulfillment|fulfillmentCategories[0].mission",
+      "Purpose|drivingForce.purpose",
+      "Action Blocks|currentWeekActionBlocks[0].title",
+      "Capture|capture.totalCount",
+      "Data Inventory|dataInventory[0].title"
+    ],
+    "message": "You can make focused progress this week."
+  },
+  "New Identity for Health & Vitality": {
+    "routeID": 3,
+    "routeKey": "new_identity",
+    "suggestionCardCount": 1,
+    "suggestionCardTitle": "Identity options for Health & Vitality",
+    "optionTypes": [
+      "addPlanSuggestion",
+      "addPlanSuggestion",
+      "addPlanSuggestion"
+    ],
+    "nextActionType": "addPlanSuggestion",
+    "groundingFields": [
+      "Fulfillment|fulfillmentCategories[0].name",
+      "Fulfillment|fulfillmentCategories[0].mission",
+      "Purpose|drivingForce.purpose",
+      "Action Blocks|currentWeekActionBlocks[0].title",
+      "Capture|capture.totalCount",
+      "Data Inventory|dataInventory[0].title"
+    ],
+    "message": "You can make focused progress this week."
+  },
+  "Next step for Sleep 7+ hours": {
+    "routeID": 4,
+    "routeKey": "goal_next_step",
+    "suggestionCardCount": 1,
+    "suggestionCardTitle": "Next steps for Sleep 7+ hours",
+    "optionTypes": [
+      "addPlanSuggestion",
+      "addPlanSuggestion",
+      "addPlanSuggestion"
+    ],
+    "nextActionType": "addPlanSuggestion",
+    "groundingFields": [
+      "Goals|activeOutcomes[0].title",
+      "Goals|activeOutcomes[0].progressSummary",
+      "Purpose|drivingForce.purpose",
+      "Action Blocks|currentWeekActionBlocks[0].title",
+      "Capture|capture.totalCount",
+      "Data Inventory|dataInventory[0].title"
+    ],
+    "message": "You can make focused progress this week."
+  },
+  "Plan for Sleep 7+ hours": {
+    "routeID": 5,
+    "routeKey": "goal_plan",
+    "suggestionCardCount": 1,
+    "suggestionCardTitle": "Plan options for Sleep 7+ hours",
+    "optionTypes": [
+      "addPlanSuggestion",
+      "addPlanSuggestion",
+      "addPlanSuggestion"
+    ],
+    "nextActionType": "addPlanSuggestion",
+    "groundingFields": [
+      "Goals|activeOutcomes[0].title",
+      "Goals|activeOutcomes[0].progressSummary",
+      "Purpose|drivingForce.purpose",
+      "Action Blocks|currentWeekActionBlocks[0].title",
+      "Capture|capture.totalCount",
+      "Data Inventory|dataInventory[0].title"
+    ],
+    "message": "You can make focused progress this week."
+  },
+  "New passions for Love": {
+    "routeID": 6,
+    "routeKey": "new_passions",
+    "suggestionCardCount": 1,
+    "suggestionCardTitle": "New passions for love",
+    "optionTypes": [
+      "addPassionItem",
+      "addPassionItem",
+      "addPassionItem"
+    ],
+    "nextActionType": "addPassionItem",
+    "groundingFields": [
+      "Purpose|drivingForce.passions[0].title",
+      "Purpose|drivingForce.purpose",
+      "Action Blocks|currentWeekActionBlocks[0].title",
+      "Capture|capture.totalCount",
+      "Data Inventory|dataInventory[0].title",
+      "App Guide|appGuide[0].title"
+    ],
+    "message": "You can make focused progress this week."
+  },
+  "Improve my Purpose Vision": {
+    "routeID": 7,
+    "routeKey": "improve_purpose_vision",
+    "suggestionCardCount": 1,
+    "suggestionCardTitle": "Purpose Vision options",
+    "optionTypes": [
+      "updatePurposeVision",
+      "updatePurposeVision",
+      "updatePurposeVision"
+    ],
+    "nextActionType": "updatePurposeVision",
+    "groundingFields": [
+      "Purpose|drivingForce.vision",
+      "Purpose|drivingForce.purpose",
+      "Action Blocks|currentWeekActionBlocks[0].title",
+      "Capture|capture.totalCount",
+      "Data Inventory|dataInventory[0].title",
+      "App Guide|appGuide[0].title"
+    ],
+    "message": "You can make focused progress this week."
+  },
+  "How can I best use Loom?": {
+    "routeID": 8,
+    "routeKey": "best_use_loom",
+    "suggestionCardCount": 0,
+    "suggestionCardTitle": "",
+    "optionTypes": [],
+    "nextActionType": "",
+    "groundingFields": [
+      "Purpose|drivingForce.vision",
+      "Purpose|drivingForce.purpose",
+      "Purpose|drivingForce.passions[0].title",
+      "Fulfillment|fulfillmentCategories[0].name",
+      "Goals|activeOutcomes[0].title",
+      "Action Blocks|currentWeekActionBlocks[0].title"
+    ],
+    "message": "You can make focused progress this week."
+  }
+}

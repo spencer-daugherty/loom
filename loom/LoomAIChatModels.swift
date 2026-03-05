@@ -40,6 +40,9 @@ final class LoomAIChatMessage {
     var chipsJSON: String?
     var actionsJSON: String?
     var debugJSON: String?
+    var groundingJSON: String?
+    var suggestionCardsJSON: String?
+    var nextActionJSON: String?
 
     init(
         id: UUID = .init(),
@@ -50,7 +53,10 @@ final class LoomAIChatMessage {
         createdAt: Date = .now,
         chipsJSON: String? = nil,
         actionsJSON: String? = nil,
-        debugJSON: String? = nil
+        debugJSON: String? = nil,
+        groundingJSON: String? = nil,
+        suggestionCardsJSON: String? = nil,
+        nextActionJSON: String? = nil
     ) {
         self.id = id
         self.threadID = threadID
@@ -61,6 +67,9 @@ final class LoomAIChatMessage {
         self.chipsJSON = chipsJSON
         self.actionsJSON = actionsJSON
         self.debugJSON = debugJSON
+        self.groundingJSON = groundingJSON
+        self.suggestionCardsJSON = suggestionCardsJSON
+        self.nextActionJSON = nextActionJSON
     }
 }
 
@@ -82,9 +91,89 @@ struct LoomAISuggestedAction: Codable, Identifiable, Hashable {
         self.type = type
         self.payload = payload
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case type
+        case payload
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? container.decode(String.self, forKey: .id)) ?? UUID().uuidString
+        title = (try? container.decode(String.self, forKey: .title)) ?? ""
+        type = (try? container.decode(String.self, forKey: .type)) ?? ""
+        payload = decodePayloadStringMap(from: container)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(title, forKey: .title)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
 }
 
 typealias LoomAIAction = LoomAISuggestedAction
+
+struct LoomAIGroundingItem: Codable, Identifiable, Hashable {
+    var section: String
+    var field: String
+    var timestamp: String
+
+    var id: String { "\(section.lowercased())|\(field.lowercased())|\(timestamp)" }
+}
+
+struct LoomAISuggestionOption: Codable, Identifiable, Hashable {
+    var id: String
+    var label: String
+    var title: String
+    var type: String
+    var payload: [String: String]
+
+    init(id: String = UUID().uuidString, label: String, title: String, type: String, payload: [String: String] = [:]) {
+        self.id = id
+        self.label = label
+        self.title = title
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case label
+        case title
+        case type
+        case payload
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? container.decode(String.self, forKey: .id)) ?? UUID().uuidString
+        label = (try? container.decode(String.self, forKey: .label)) ?? ""
+        title = (try? container.decode(String.self, forKey: .title)) ?? ""
+        type = (try? container.decode(String.self, forKey: .type)) ?? ""
+        payload = decodePayloadStringMap(from: container)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(label, forKey: .label)
+        try container.encode(title, forKey: .title)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+struct LoomAISuggestionCard: Codable, Identifiable, Hashable {
+    var id: String
+    var title: String
+    var description: String
+    var options: [LoomAISuggestionOption]
+}
 
 struct LoomAIPromptChip: Codable, Identifiable, Hashable {
     var id: String
@@ -150,6 +239,48 @@ enum LoomAIChatMessageActionsCodec {
     }
 }
 
+enum LoomAIChatMessageGroundingCodec {
+    static func encode(_ grounding: [LoomAIGroundingItem]) -> String? {
+        guard !grounding.isEmpty else { return nil }
+        let encoder = JSONEncoder()
+        guard let data = try? encoder.encode(grounding) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func decode(_ json: String?) -> [LoomAIGroundingItem] {
+        guard let json, let data = json.data(using: .utf8) else { return [] }
+        return (try? JSONDecoder().decode([LoomAIGroundingItem].self, from: data)) ?? []
+    }
+}
+
+enum LoomAIChatMessageSuggestionCardsCodec {
+    static func encode(_ cards: [LoomAISuggestionCard]) -> String? {
+        guard !cards.isEmpty else { return nil }
+        let encoder = JSONEncoder()
+        guard let data = try? encoder.encode(cards) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func decode(_ json: String?) -> [LoomAISuggestionCard] {
+        guard let json, let data = json.data(using: .utf8) else { return [] }
+        return (try? JSONDecoder().decode([LoomAISuggestionCard].self, from: data)) ?? []
+    }
+}
+
+enum LoomAIChatMessageNextActionCodec {
+    static func encode(_ action: LoomAISuggestedAction?) -> String? {
+        guard let action else { return nil }
+        let encoder = JSONEncoder()
+        guard let data = try? encoder.encode(action) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func decode(_ json: String?) -> LoomAISuggestedAction? {
+        guard let json, let data = json.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(LoomAISuggestedAction.self, from: data)
+    }
+}
+
 enum LoomAIChatMessageChipsCodec {
     static func encode(_ chips: [LoomAIPromptChip]) -> String? {
         guard !chips.isEmpty else { return nil }
@@ -193,6 +324,64 @@ enum LoomAIDebugCodec {
         guard let json, let data = json.data(using: .utf8) else { return nil }
         return try? JSONDecoder().decode(LoomAIDebug.self, from: data)
     }
+}
+
+private enum LoomAIPayloadValue: Codable {
+    case string(String)
+    case number(Double)
+    case bool(Bool)
+    case null
+    case object([String: LoomAIPayloadValue])
+    case array([LoomAIPayloadValue])
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() {
+            self = .null
+        } else if let value = try? container.decode(String.self) {
+            self = .string(value)
+        } else if let value = try? container.decode(Bool.self) {
+            self = .bool(value)
+        } else if let value = try? container.decode(Double.self) {
+            self = .number(value)
+        } else if let value = try? container.decode([String: LoomAIPayloadValue].self) {
+            self = .object(value)
+        } else if let value = try? container.decode([LoomAIPayloadValue].self) {
+            self = .array(value)
+        } else {
+            self = .null
+        }
+    }
+
+    var stringified: String {
+        switch self {
+        case .string(let value):
+            return value
+        case .number(let value):
+            return value.rounded() == value ? String(Int(value)) : String(value)
+        case .bool(let value):
+            return value ? "true" : "false"
+        case .null:
+            return ""
+        case .object, .array:
+            return ""
+        }
+    }
+}
+
+private func decodePayloadStringMap<Key: CodingKey>(from container: KeyedDecodingContainer<Key>) -> [String: String] {
+    guard let payloadKey = Key(stringValue: "payload") else { return [:] }
+    if let direct = try? container.decode([String: String].self, forKey: payloadKey) {
+        return direct
+    }
+    if let object = try? container.decode([String: LoomAIPayloadValue].self, forKey: payloadKey) {
+        var out: [String: String] = [:]
+        for (key, value) in object {
+            out[key] = value.stringified
+        }
+        return out
+    }
+    return [:]
 }
 
 enum LoomAIChatThreadSelectionStore {

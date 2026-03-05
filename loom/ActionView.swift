@@ -4782,7 +4782,7 @@ private struct SensitivitySheet: View {
                 }
 
                 HStack {
-                    Text("Attention")
+                    Text("Reminder")
                     Spacer()
                     Menu {
                         ForEach(7...30, id: \.self) { value in
@@ -4799,7 +4799,7 @@ private struct SensitivitySheet: View {
                     }
                 }
 
-                Text("Attention triggers countdown to display before due date and intelligently brings it into your attention.")
+                Text("Reminder starts the countdown before the due date and brings it into view at the right time.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)

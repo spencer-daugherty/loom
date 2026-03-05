@@ -88,6 +88,9 @@ struct LoomAIService {
 
     struct LoomAIResponse: Decodable {
         let message: String
+        let grounding: [LoomAIGroundingItem]
+        let suggestionCards: [LoomAISuggestionCard]
+        let nextAction: LoomAISuggestedAction?
         let chips: [LoomAIPromptChip]
         let actions: [LoomAIAction]
         let debug: LoomAIDebug?
@@ -97,6 +100,9 @@ struct LoomAIService {
         private enum CodingKeys: String, CodingKey {
             case message
             case reply
+            case grounding
+            case suggestionCards
+            case nextAction
             case chips
             case actions
             case debug
@@ -105,6 +111,9 @@ struct LoomAIService {
 
         init(
             message: String,
+            grounding: [LoomAIGroundingItem] = [],
+            suggestionCards: [LoomAISuggestionCard] = [],
+            nextAction: LoomAISuggestedAction? = nil,
             chips: [LoomAIPromptChip] = [],
             actions: [LoomAIAction] = [],
             debug: LoomAIDebug? = nil,
@@ -112,6 +121,9 @@ struct LoomAIService {
             elapsedMS: Double = 0
         ) {
             self.message = message
+            self.grounding = grounding
+            self.suggestionCards = suggestionCards
+            self.nextAction = nextAction
             self.chips = chips
             self.actions = actions
             self.debug = debug
@@ -125,6 +137,9 @@ struct LoomAIService {
                 ?? (try? container.decode(String.self, forKey: .reply))
                 ?? ""
             self.message = message
+            self.grounding = (try? container.decode([LoomAIGroundingItem].self, forKey: .grounding)) ?? []
+            self.suggestionCards = (try? container.decode([LoomAISuggestionCard].self, forKey: .suggestionCards)) ?? []
+            self.nextAction = try? container.decode(LoomAISuggestedAction.self, forKey: .nextAction)
             self.chips = (try? container.decode([LoomAIPromptChip].self, forKey: .chips)) ?? []
             self.actions = (try? container.decode([LoomAIAction].self, forKey: .actions)) ?? []
             self.debug = try? container.decode(LoomAIDebug.self, forKey: .debug)
@@ -150,6 +165,9 @@ struct LoomAIService {
 
     private struct LoomAIEnvelope: Decodable {
         var message: String
+        var grounding: [LoomAIGroundingItem]?
+        var suggestionCards: [LoomAISuggestionCard]?
+        var nextAction: LoomAISuggestedAction?
         var chips: [LoomAIPromptChip]?
         var actions: [LoomAISuggestedAction]?
         var debug: LoomAIDebug?
@@ -163,6 +181,9 @@ struct LoomAIService {
         var choices: [Choice]?
         var error: ErrorContainer?
         var actions: [RawAction]?
+        var grounding: [LoomAIGroundingItem]?
+        var suggestionCards: [LoomAISuggestionCard]?
+        var nextAction: RawAction?
         var chips: [LoomAIPromptChip]?
         var debug: LoomAIDebug?
         var usage: LoomAIUsage?
@@ -853,6 +874,9 @@ struct LoomAIService {
                     log("Parsed assistant text (normalized): \(text)")
                     return LoomAIResponse(
                         message: text,
+                        grounding: normalized.grounding ?? [],
+                        suggestionCards: normalized.suggestionCards ?? [],
+                        nextAction: normalized.nextAction,
                         chips: normalized.chips ?? [],
                         actions: normalized.actions ?? [],
                         debug: normalized.debug,
@@ -868,6 +892,9 @@ struct LoomAIService {
                     log("Parsed assistant text (direct LoomAIResponse): \(text)")
                     return LoomAIResponse(
                         message: text,
+                        grounding: direct.grounding,
+                        suggestionCards: direct.suggestionCards,
+                        nextAction: direct.nextAction,
                         chips: direct.chips,
                         actions: direct.actions,
                         debug: direct.debug,
@@ -911,8 +938,27 @@ struct LoomAIService {
                     payload: item.payload ?? [:]
                 )
             }
+            let nextAction: LoomAISuggestedAction? = raw.nextAction.flatMap { item in
+                guard let title = item.title, let type = item.type else { return nil }
+                return LoomAISuggestedAction(
+                    id: item.id ?? UUID().uuidString,
+                    title: title,
+                    type: type,
+                    payload: item.payload ?? [:]
+                )
+            }
             log("Parsed assistant text: \(reply)")
-            return LoomAIResponse(message: reply, chips: raw.chips ?? [], actions: actions, debug: raw.debug, usage: raw.usage, elapsedMS: elapsed * 1000)
+            return LoomAIResponse(
+                message: reply,
+                grounding: raw.grounding ?? [],
+                suggestionCards: raw.suggestionCards ?? [],
+                nextAction: nextAction,
+                chips: raw.chips ?? [],
+                actions: actions,
+                debug: raw.debug,
+                usage: raw.usage,
+                elapsedMS: elapsed * 1000
+            )
         } catch let decodeError as LoomAIServiceError {
             log("Parse guardrail error: \(decodeError.message)")
             #if DEBUG

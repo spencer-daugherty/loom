@@ -287,8 +287,8 @@ enum LoomNotificationScheduler {
                         appendOneShot(
                             to: &requests,
                             id: "\(idPrefix)captureActionAttention.\(item.id.uuidString).\(dayKey(attentionDay))",
-                            title: "Capture Action Attention",
-                            body: "\(item.text) is now in your due date attention window.",
+                            title: "Capture Action Reminder",
+                            body: "\(item.text) is now in your due date reminder window.",
                             fireDate: fireDate,
                             now: now,
                             calendar: calendar
@@ -361,7 +361,7 @@ enum LoomNotificationScheduler {
                     appendOneShot(
                         to: &requests,
                         id: "\(idPrefix)vacationModeAttention.\(dayKey(attentionDay))",
-                        title: "Vacation Mode Attention",
+                        title: "Vacation Mode Reminder",
                         body: "Vacation Mode is coming up soon.",
                         fireDate: fireDate,
                         now: now,

@@ -76,7 +76,7 @@ const PURPOSE_PROFILE_CATALOG = [
   {
     profile: "Reflective Synthesizer",
     strength: "Connects disparate ideas into coherent insight without seeking attention.",
-    weakness: "Structure avoidance may prevent insights from becoming outcomes.",
+    weakness: "Structure avoidance may prevent insights from becoming goals.",
     stressTrigger: "Tight deadlines and forced specificity",
     breakingPoint: "Deliverable packaging (refining replaces shipping)"
   },
@@ -765,6 +765,7 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
   const latestUserMessage = extractLatestUserMessage(payload).trim();
   const hasContext = hasMeaningfulLoomContext(context);
   const unrelatedPrompt = isLikelyUnrelatedPrompt(latestUserMessage);
+  const chipIntentRoute = resolveChipIntentRoute(latestUserMessage);
 
   if (!latestUserMessage) {
     return json(
@@ -773,7 +774,7 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
         context,
         intent: normalizedIntent,
         message:
-          "I’m ready to help with Loom. Ask me about Purpose, Fulfillment, Outcomes, Capture, or Action Blocks."
+          "I’m ready to help with Loom. Ask me about Purpose, Fulfillment, Goals, Capture, or Action Blocks."
       }),
       200,
       corsHeaders(request)
@@ -796,6 +797,9 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
       {
         message:
           "I can’t help with that, but I can help you with Loom planning and execution right now.",
+        grounding: collectGrounding([], context, { maxItems: 2 }),
+        suggestionCards: [],
+        nextAction: null,
         chips: buildUnrelatedRedirectChips(context),
         actions: [],
         debug: {
@@ -827,6 +831,69 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
       additionalProperties: false,
       properties: {
         message: { type: "string" },
+        grounding: {
+          type: "array",
+          minItems: 0,
+          maxItems: 8,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              section: { type: "string" },
+              field: { type: "string" },
+              timestamp: { type: "string" }
+            },
+            required: ["section", "field", "timestamp"]
+          }
+        },
+        suggestionCards: {
+          type: "array",
+          minItems: 0,
+          maxItems: 6,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              id: { type: "string" },
+              title: { type: "string" },
+              description: { type: "string" },
+              options: {
+                type: "array",
+                minItems: 0,
+                maxItems: 3,
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    id: { type: "string" },
+                    label: { type: "string" },
+                    title: { type: "string" },
+                    type: { type: "string" },
+                    payload: { type: "object", additionalProperties: true }
+                  },
+                  required: ["id", "label", "title", "type", "payload"]
+                }
+              }
+            },
+            required: ["id", "title", "description", "options"]
+          }
+        },
+        nextAction: {
+          anyOf: [
+            { type: "null" },
+            {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                id: { type: "string" },
+                title: { type: "string" },
+                type: { type: "string" },
+                payload: { type: "object", additionalProperties: true }
+              },
+              required: ["id", "title", "type", "payload"]
+            }
+          ]
+        },
         chips: {
           type: "array",
           minItems: 0,
@@ -877,6 +944,15 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
       required: ["message", "chips", "actions", "debug"]
     }
   };
+  schema.schema.required = [
+    "message",
+    "grounding",
+    "suggestionCards",
+    "nextAction",
+    "chips",
+    "actions",
+    "debug"
+  ];
 
   const systemPrompt = [
     "You are LoomAI for the iOS app Loom.",
@@ -885,31 +961,38 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
     "Loom architecture:",
     "- Purpose (vision + passions): why the user is moving in this direction.",
     "- Fulfillment Areas (mission + identities + little wins): life domains to strengthen continuously.",
-    "- Outcomes: concrete targets tied to fulfillment.",
+    "- Goals: concrete targets tied to fulfillment.",
     "- Capture: incoming actions and ideas.",
     "- Action Blocks: weekly execution plan.",
     "- Reflect: completed work and learning signals.",
     "",
     "Rules:",
     "- Ground your answer in APP_CONTEXT when available.",
+    "- APP_CONTEXT uses an intent-based context pack with layers: identity, currentReality, targetObject.",
     "- When APP_CONTEXT exists and the user asks a Loom-related question, reference at least 2 concrete context details.",
     "- Never invent stats, values, goals, dates, or progress.",
+    "- Never invent user history or user behavior not present in APP_CONTEXT.",
     "- If data is missing, say that briefly and continue with the best next step.",
     "- Do NOT parrot diagnostic option text verbatim; interpret patterns in your own words.",
-    "- Keep answers concise: 2-8 short paragraphs max, with bullets when helpful.",
+    "- Message must feel like 'Loom knows me': concise, specific, and personalized.",
+    "- Message can be 2-6 short paragraphs maximum. No filler. No hardcoded preambles.",
+    "- Never include a sources block, A/B/C option comparisons, or 'which should I add/edit/replace' in message.",
     "- Avoid generic productivity filler.",
-    "- Produce action cards only when confidence is high or medium and payload is executable.",
-    "- If confidence is low, actions must be [].",
+    "- Put recommendations in suggestionCards only (never inline in message).",
+    "- suggestionCards may include A/B/C options when relevant.",
+    "- Produce executable options only when confidence is high or medium and payload is executable.",
+    "- NEVER put add/edit/improve/update/replace/create suggestions in `message`.",
+    "- If confidence is low, suggestionCards must be [] and actions must be [].",
     "",
     "Formatting tokens in `message`:",
     "- [[P:...]] for purpose/passion emphasis",
     "- [[F:...]] for fulfillment category references",
-    "- [[O:...]] for outcomes",
+    "- [[O:...]] for goals",
     "- [[A:...]] for actions",
     "- Use newlines intentionally. Use bullets with `•` when helpful.",
     "",
     "Output JSON only in this exact shape:",
-    '{"message":"string","chips":[{"id":"string","title":"string","prompt":"string"}],"actions":[{"id":"string","title":"string","type":"string","payload":{}}],"debug":{"usedContext":true,"confidence":"high","evidence":["path.like.context.purpose.vision"]}}',
+    '{"message":"string","grounding":[{"section":"string","field":"string","timestamp":"ISO_OR_EMPTY"}],"suggestionCards":[{"id":"string","title":"string","description":"string","options":[{"id":"string","label":"A|B|C","title":"string","type":"string","payload":{}}]}],"nextAction":{"id":"string","title":"string","type":"string","payload":{}},"chips":[{"id":"string","title":"string","prompt":"string"}],"actions":[{"id":"string","title":"string","type":"string","payload":{}}],"debug":{"usedContext":true,"confidence":"high","evidence":["path.like.context.purpose.vision"]}}',
     "",
     "Action whitelist:",
     '- updatePurposeVision {"text":"..."}',
@@ -920,6 +1003,16 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
     '- createCaptureAction {"text":"..."}',
     '- addPlanSuggestion {"text":"..."}',
     "",
+    "Chip intent routing (if APP_CONTEXT.intent.routeID exists):",
+    "- 1 Daily Little Wins for {category}: return little-win suggestion cards.",
+    "- 2 New Mission for {category}: return mission rewrite cards.",
+    "- 3 New Identity for {category}: return identity suggestion cards.",
+    "- 4 Next step for {goal}: return immediate next-step cards.",
+    "- 5 Plan for {goal}: return short plan cards.",
+    "- 6 New passions for {emotion}: return passion cards.",
+    "- 7 Improve my Purpose Vision: return purpose-vision cards.",
+    "- 8 How can I best use Loom?: return a single high-leverage recommendation grounded in current context.",
+    "",
     "Little Wins rule:",
     "- Default to daily-doable 5-20 minute actions unless user explicitly asks for weekly cadence.",
     "- For health/energy, prefer measurable Apple Health-aligned options when appropriate (steps, workouts, active minutes, sleep, mindfulness minutes).",
@@ -929,7 +1022,11 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
     "- For unrelated prompts, return actions as []."
   ].join("\n");
 
-  const modelContext = compactChatContextForModel(context);
+  const { modelContext, payloadContextMeta } = await compactChatContextForModel(context, {
+    route: chipIntentRoute,
+    latestUserMessage,
+    client
+  });
   const userPayload = {
     messages: messages.slice(-20).map((msg) => ({
       role: String(msg?.role || ""),
@@ -947,9 +1044,22 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
           : null
       }
   };
+  const payloadSizing = estimatePayloadSize(userPayload);
+  logLoomAIPayloadStats({
+    intent: normalizedIntent || "loomai_chat",
+    routeKey: nonEmptyString(chipIntentRoute?.key) || "none",
+    routeID: Number.isFinite(Number(chipIntentRoute?.id)) ? Number(chipIntentRoute.id) : null,
+    messageCount: userPayload.messages.length,
+    includedSections: payloadContextMeta.includedSections,
+    payloadBytes: payloadSizing.bytes,
+    payloadApproxTokens: payloadSizing.approxTokens,
+    stableHash: payloadContextMeta.stableContextHash,
+    stableBlocksSent: payloadContextMeta.stableContextSent,
+    stableBlocksChanged: payloadContextMeta.stableContextChanged
+  });
   const chatCacheEnabled = env.DISABLE_CHAT_CACHE !== "1";
   const cacheIdentity = {
-    version: "loom_chat_v3",
+    version: "loom_chat_v5",
     model: preferredModel,
     messages: userPayload.messages,
     APP_CONTEXT: userPayload.APP_CONTEXT,
@@ -1018,7 +1128,8 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
     context,
     hasContext,
     latestUserMessage,
-    intent: normalizedIntent
+    intent: normalizedIntent,
+    chipIntentRoute
   });
   const usage = normalizeResponsesUsage(result.usage, usedModel);
   if (usage) {
@@ -2124,6 +2235,9 @@ function safeChatFallback({ hasContext, context, message, intent }) {
   if (normalizedIntent === "autogroup_plan") {
     return {
       message: '{"confidence":"low","reason":"Could not confidently group actions.","groups":[]}',
+      grounding: [],
+      suggestionCards: [],
+      nextAction: null,
       chips: [],
       actions: [],
       debug: {
@@ -2137,9 +2251,13 @@ function safeChatFallback({ hasContext, context, message, intent }) {
   const fallbackMessage =
     nonEmptyString(message) ||
     "Couldn't generate response. Check your connection.";
+  const fallbackGrounding = hasContext ? collectGrounding([], context, { maxItems: 3 }) : [];
   return {
     message: fallbackMessage,
-    chips: buildDefaultLoomChips(context).slice(0, hasContext ? 4 : 3),
+    grounding: fallbackGrounding,
+    suggestionCards: [],
+    nextAction: null,
+    chips: [],
     actions: [],
     debug: {
       usedContext: Boolean(hasContext),
@@ -2149,105 +2267,684 @@ function safeChatFallback({ hasContext, context, message, intent }) {
   };
 }
 
-function compactChatContextForModel(context) {
+const CONTEXT_PACK_LIMITS = {
+  identityPassions: 4,
+  fulfillmentAreas: 4,
+  goals: 4,
+  actionBlocks: 4,
+  actionBlockActions: 3,
+  captureTopItems: 4,
+  dataInventory: 8,
+  dataInventorySignals: 2,
+  appGuide: 6,
+  appGuideSummaryMax: 180,
+  missionMax: 220
+};
+
+async function compactChatContextForModel(context, { route = null, latestUserMessage = "", client = {} } = {}) {
   const src = context && typeof context === "object" ? context : {};
-  const categories = Array.isArray(src.fulfillmentCategories) ? src.fulfillmentCategories : [];
-  const outcomes = Array.isArray(src.activeOutcomes) ? src.activeOutcomes : [];
-  const blocks = Array.isArray(src.currentWeekActionBlocks) ? src.currentWeekActionBlocks : [];
-  const appGuide = Array.isArray(src.appGuide) ? src.appGuide : [];
-  const inventory = Array.isArray(src.dataInventory) ? src.dataInventory : [];
-  const passions = Array.isArray(src?.drivingForce?.passions) ? src.drivingForce.passions : [];
-  const captureItems = Array.isArray(src?.capture?.topItems) ? src.capture.topItems : [];
+  const cleaned = normalizeContextForIntentPack(src);
+  const identity = buildIdentityContextLayer(src, cleaned);
+  const targetObject = buildTargetObjectContextLayer({ route, cleaned, latestUserMessage });
+  const currentReality = buildCurrentRealityContextLayer({ route, cleaned, targetObject });
+  const stableBlocks = {
+    appGuide: cleaned.appGuide,
+    dataInventory: cleaned.dataInventory
+  };
+  const stableEnvelope = await resolveStableContextEnvelope({
+    context: src,
+    client,
+    stableBlocks,
+    includeStableBlocksByIntent: shouldIncludeStableBlocksForIntent(route)
+  });
+
+  const modelContext = {
+    generatedAt: normalizeCompactTimestamp(src.generatedAt),
+    personalizationHash: nonEmptyString(src.personalizationHash) || null,
+    intent: {
+      routeID: Number.isFinite(Number(route?.id)) ? Number(route.id) : null,
+      routeKey: nonEmptyString(route?.key) || null,
+      target: nonEmptyString(route?.target) || null
+    },
+    layers: {
+      identity,
+      currentReality,
+      targetObject
+    },
+    stableContext: stableEnvelope.payload
+  };
+
+  const payloadContextMeta = {
+    includedSections: summarizeIncludedContextSections(modelContext),
+    stableContextHash: stableEnvelope.hash,
+    stableContextChanged: stableEnvelope.changed,
+    stableContextSent: stableEnvelope.includeFull
+  };
+  return { modelContext, payloadContextMeta };
+}
+
+function normalizeContextForIntentPack(src) {
+  return {
+    diagnostic: cleanDiagnosticSummary(src?.diagnostic),
+    drivingForce: cleanDrivingForceSummary(src?.drivingForce),
+    fulfillmentCategories: cleanFulfillmentCategories(src?.fulfillmentCategories),
+    activeGoals: cleanActiveGoals(src?.activeOutcomes),
+    currentWeekActionBlocks: cleanActionBlocks(src?.currentWeekActionBlocks),
+    capture: cleanCaptureSummary(src?.capture),
+    dataInventory: cleanDataInventory(src?.dataInventory),
+    appGuide: cleanAppGuide(src?.appGuide),
+    sectionTimestamps: src?.sectionTimestamps && typeof src.sectionTimestamps === "object" ? src.sectionTimestamps : null
+  };
+}
+
+function buildIdentityContextLayer(src, cleaned) {
+  const profileLabel = cleanCompactTitle(
+    src?.purposeProfile?.profile ||
+      src?.personalityProfile?.profile ||
+      src?.behaviorProfile?.profile ||
+      src?.profile?.profile,
+    72
+  );
+  const layer = {
+    diagnostic: cleaned.diagnostic,
+    purpose: cleaned.drivingForce,
+    personalityProfile: profileLabel || null
+  };
+  return pruneEmptyObject(layer);
+}
+
+function buildTargetObjectContextLayer({ route, cleaned, latestUserMessage }) {
+  const routeID = Number(route?.id);
+  const targetText = nonEmptyString(route?.target);
+
+  if ([1, 2, 3].includes(routeID)) {
+    const category =
+      findCategoryByName(cleaned.fulfillmentCategories, targetText) ||
+      cleaned.fulfillmentCategories[0] ||
+      null;
+    if (!category) return null;
+    return {
+      type: "fulfillment_area",
+      id: category.id || "",
+      name: category.name,
+      mission: category.mission || "",
+      identity: category.identity || [],
+      littleWins: category.littleWins || []
+    };
+  }
+
+  if ([4, 5].includes(routeID)) {
+    const goal =
+      findGoalByTitle(cleaned.activeGoals, targetText) ||
+      cleaned.activeGoals[0] ||
+      null;
+    if (!goal) return null;
+    return {
+      type: "goal",
+      id: goal.id || "",
+      title: goal.title,
+      category: goal.category || "",
+      measurable: Boolean(goal.measurable),
+      progressSummary: goal.progressSummary || ""
+    };
+  }
+
+  if (routeID === 6) {
+    const emotion = normalizePassionType(targetText || "love");
+    const related = cleaned.drivingForce?.passions || [];
+    return {
+      type: "passion_type",
+      emotion,
+      relatedPassions: related
+        .filter((item) => String(item?.emotion || "").toLowerCase() === emotion)
+        .slice(0, 3)
+    };
+  }
+
+  if (routeID === 7) {
+    return cleaned.drivingForce
+      ? {
+          type: "purpose_vision",
+          vision: cleaned.drivingForce.vision || "",
+          purpose: cleaned.drivingForce.purpose || ""
+        }
+      : null;
+  }
+
+  if (routeID === 8) {
+    return {
+      type: "loom_usage",
+      prompt: truncate(nonEmptyString(latestUserMessage) || "How can I best use Loom?", 220)
+    };
+  }
+
+  return null;
+}
+
+function buildCurrentRealityContextLayer({ route, cleaned, targetObject }) {
+  const routeID = Number(route?.id);
+  const targetCategoryName = nonEmptyString(targetObject?.name || targetObject?.category || route?.target);
+  const targetGoalTitle = nonEmptyString(targetObject?.title || route?.target);
+
+  let categories = cleaned.fulfillmentCategories;
+  let goals = cleaned.activeGoals;
+  let blocks = cleaned.currentWeekActionBlocks;
+
+  if ([1, 2, 3].includes(routeID)) {
+    categories = targetCategoryName
+      ? categories.filter((item) => equalsFold(item.name, targetCategoryName)).slice(0, 2)
+      : categories.slice(0, 1);
+    goals = targetCategoryName
+      ? goals.filter((item) => equalsFold(item.category, targetCategoryName)).slice(0, 2)
+      : goals.slice(0, 1);
+    blocks = targetCategoryName
+      ? filterActionBlocksByTarget(blocks, targetCategoryName).slice(0, 2)
+      : blocks.slice(0, 1);
+  } else if ([4, 5].includes(routeID)) {
+    goals = targetGoalTitle
+      ? goals.filter((item) => equalsFold(item.title, targetGoalTitle)).slice(0, 2)
+      : goals.slice(0, 2);
+    const goalCategory = nonEmptyString(goals[0]?.category || targetCategoryName);
+    categories = goalCategory
+      ? categories.filter((item) => equalsFold(item.name, goalCategory)).slice(0, 1)
+      : [];
+    blocks = filterActionBlocksByTarget(blocks, targetGoalTitle || goalCategory).slice(0, 2);
+  } else if (routeID === 8) {
+    categories = categories.slice(0, 2);
+    goals = goals.slice(0, 3);
+    blocks = blocks.slice(0, 3);
+  } else {
+    categories = categories.slice(0, 1);
+    goals = goals.slice(0, 2);
+    blocks = blocks.slice(0, 2);
+  }
+
+  if (targetObject?.type === "fulfillment_area") {
+    categories = categories.filter((item) => !equalsFold(item.name, targetObject.name));
+  }
+  if (targetObject?.type === "goal") {
+    goals = goals.filter((item) => !equalsFold(item.title, targetObject.title));
+  }
+
+  const layer = {
+    fulfillment: categories.length > 0 ? categories : null,
+    goals: goals.length > 0 ? goals : null,
+    week: blocks.length > 0 ? { currentWeekActionBlocks: blocks } : null,
+    capture:
+      cleaned.capture && (routeID === 8 || routeID === 4 || routeID === 5 || !Number.isFinite(routeID))
+        ? cleaned.capture
+        : null
+  };
+  return pruneEmptyObject(layer);
+}
+
+function cleanDiagnosticSummary(input) {
+  const src = input && typeof input === "object" ? input : {};
+  const areas = cleanStringList(src.areas, { maxItems: 5, maxChars: 48, minLength: 2, allowJunkTitles: false });
+  const diagnostic = {
+    stress: cleanCompactText(src.stress, 100),
+    breaksFirst: cleanCompactText(src.breaksFirst, 100),
+    planningStyle: cleanCompactText(src.planningStyle, 100),
+    firstChange: cleanCompactText(src.firstChange, 120),
+    rootCause: cleanCompactText(src.rootCause, 180),
+    nextDirection: cleanCompactText(src.nextDirection, 180),
+    areas
+  };
+  return pruneEmptyObject(diagnostic);
+}
+
+function cleanDrivingForceSummary(input) {
+  const src = input && typeof input === "object" ? input : {};
+  const passions = cleanPassions(src.passions);
+  const drivingForce = {
+    vision: cleanCompactText(src.vision, 240),
+    purpose: cleanCompactText(src.purpose, 240),
+    passions: passions.length > 0 ? passions : null
+  };
+  return pruneEmptyObject(drivingForce);
+}
+
+function cleanPassions(input) {
+  const source = Array.isArray(input) ? input : [];
+  const deduped = [];
+  const seen = new Set();
+  for (const item of source) {
+    const emotion = normalizePassionType(nonEmptyString(item?.emotion || item?.passionType || "love"));
+    const title = cleanCompactTitle(item?.title, 96);
+    if (!title) continue;
+    const key = `${emotion}|${title.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push({ emotion, title });
+    if (deduped.length >= CONTEXT_PACK_LIMITS.identityPassions) break;
+  }
+  return deduped;
+}
+
+function cleanFulfillmentCategories(input) {
+  const source = Array.isArray(input) ? input : [];
+  const cleaned = [];
+  const seen = new Set();
+  for (const item of source) {
+    const id = cleanCompactText(item?.id, 40);
+    const name = cleanCompactTitle(item?.name, 72);
+    if (!name) continue;
+    const mission = normalizeMissionText(item?.mission);
+    const identity = cleanStringList(item?.identity, { maxItems: 3, maxChars: 64, minLength: 2, allowJunkTitles: false });
+    const littleWins = cleanStringList(item?.littleWins, { maxItems: 3, maxChars: 72, minLength: 2, allowJunkTitles: false });
+    const weeklyScoreRaw = Number(item?.weeklyScore);
+    const weeklyScore = Number.isFinite(weeklyScoreRaw) ? Number(weeklyScoreRaw.toFixed(1)) : null;
+    const key = `${id || ""}|${name.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    cleaned.push({
+      id,
+      name,
+      mission,
+      identity,
+      littleWins,
+      weeklyScore
+    });
+    if (cleaned.length >= CONTEXT_PACK_LIMITS.fulfillmentAreas) break;
+  }
+  return cleaned;
+}
+
+function cleanActiveGoals(input) {
+  const source = Array.isArray(input) ? input : [];
+  const cleaned = [];
+  const seen = new Set();
+  for (const item of source) {
+    const id = cleanCompactText(item?.id, 40);
+    const title = cleanCompactTitle(item?.title, 96);
+    if (!title) continue;
+    const category = cleanCompactTitle(item?.category, 72);
+    const progressSummary = cleanCompactText(item?.progressSummary, 140);
+    const measurable = Boolean(item?.measurable);
+    const key = `${id || ""}|${title.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    cleaned.push({
+      id,
+      title,
+      category,
+      measurable,
+      progressSummary
+    });
+    if (cleaned.length >= CONTEXT_PACK_LIMITS.goals) break;
+  }
+  return cleaned;
+}
+
+function cleanActionBlocks(input) {
+  const source = Array.isArray(input) ? input : [];
+  const cleaned = [];
+  const seen = new Set();
+  for (const item of source) {
+    const category = cleanCompactTitle(item?.category, 72);
+    let title = cleanCompactTitle(item?.title, 96);
+    const actions = cleanStringList(item?.actions, {
+      maxItems: CONTEXT_PACK_LIMITS.actionBlockActions,
+      maxChars: 90,
+      minLength: 2,
+      allowJunkTitles: false
+    });
+    if (!title && actions.length > 0) {
+      title = actions[0];
+    }
+    if (!title && actions.length === 0) continue;
+    const ratioRaw = Number(item?.completionRatio);
+    const completionRatio = Number.isFinite(ratioRaw)
+      ? Math.max(0, Math.min(1, Number(ratioRaw.toFixed(3))))
+      : 0;
+    const key = `${category.toLowerCase()}|${title.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    cleaned.push({
+      category,
+      title,
+      completionRatio,
+      actions
+    });
+    if (cleaned.length >= CONTEXT_PACK_LIMITS.actionBlocks) break;
+  }
+  return cleaned;
+}
+
+function cleanCaptureSummary(input) {
+  const src = input && typeof input === "object" ? input : {};
+  const totalCountRaw = Number(src.totalCount);
+  const totalCount = Number.isFinite(totalCountRaw) ? Math.max(0, Math.floor(totalCountRaw)) : 0;
+  const quickCompletionsRaw = Number(src.quickCompletionsLast7Days);
+  const quickCompletionsLast7Days = Number.isFinite(quickCompletionsRaw)
+    ? Math.max(0, Math.floor(quickCompletionsRaw))
+    : 0;
+  const topItems = cleanStringList(src.topItems, {
+    maxItems: CONTEXT_PACK_LIMITS.captureTopItems,
+    maxChars: 90,
+    minLength: 2,
+    allowJunkTitles: false
+  });
+  if (totalCount === 0 && quickCompletionsLast7Days === 0 && topItems.length === 0) return null;
+  return {
+    totalCount,
+    quickCompletionsLast7Days,
+    topItems
+  };
+}
+
+function cleanDataInventory(input) {
+  const source = Array.isArray(input) ? input : [];
+  const cleaned = [];
+  const seen = new Set();
+  for (const item of source) {
+    const id = cleanCompactText(item?.id, 48);
+    const title = cleanCompactTitle(item?.title, 96);
+    if (!title) continue;
+    const currentCountRaw = Number(item?.currentCount);
+    const historicalCountRaw = Number(item?.historicalCount);
+    const currentCount = Number.isFinite(currentCountRaw) ? Math.max(0, Math.floor(currentCountRaw)) : null;
+    const historicalCount = Number.isFinite(historicalCountRaw) ? Math.max(0, Math.floor(historicalCountRaw)) : null;
+    const keySignals = cleanStringList(item?.keySignals, {
+      maxItems: CONTEXT_PACK_LIMITS.dataInventorySignals,
+      maxChars: 96,
+      minLength: 2,
+      allowJunkTitles: false
+    });
+    const key = `${id || ""}|${title.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    cleaned.push({
+      id,
+      title,
+      currentCount,
+      historicalCount,
+      keySignals
+    });
+    if (cleaned.length >= CONTEXT_PACK_LIMITS.dataInventory) break;
+  }
+  return cleaned;
+}
+
+function cleanAppGuide(input) {
+  const source = Array.isArray(input) ? input : [];
+  const cleaned = [];
+  const seen = new Set();
+  for (const item of source) {
+    const id = cleanCompactText(item?.id, 48);
+    const title = cleanCompactTitle(item?.title, 88);
+    if (!title) continue;
+    const summary = cleanCompactText(item?.summary, CONTEXT_PACK_LIMITS.appGuideSummaryMax);
+    const key = `${id || ""}|${title.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    cleaned.push({
+      id,
+      title,
+      summary
+    });
+    if (cleaned.length >= CONTEXT_PACK_LIMITS.appGuide) break;
+  }
+  return cleaned;
+}
+
+function cleanStringList(input, { maxItems = 4, maxChars = 80, minLength = 1, allowJunkTitles = true } = {}) {
+  const source = Array.isArray(input) ? input : [];
+  const result = [];
+  const seen = new Set();
+  for (const raw of source) {
+    const clean = cleanCompactText(raw, maxChars);
+    if (!clean || clean.length < minLength) continue;
+    if (!allowJunkTitles && isLikelyJunkTitle(clean)) continue;
+    const key = clean.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(clean);
+    if (result.length >= maxItems) break;
+  }
+  return result;
+}
+
+function cleanCompactText(value, maxChars = 120) {
+  const text = String(value || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) return "";
+  if (text.length <= maxChars) return text;
+  return text.slice(0, maxChars).trim();
+}
+
+function cleanCompactTitle(value, maxChars = 90) {
+  const text = cleanCompactText(value, maxChars);
+  if (!text) return "";
+  if (isLikelyJunkTitle(text)) return "";
+  return text;
+}
+
+function isLikelyJunkTitle(value) {
+  const text = String(value || "").trim();
+  if (!text) return true;
+  const lower = text.toLowerCase();
+  if (text.length <= 1) return true;
+  if (/^[^a-z0-9]+$/i.test(text)) return true;
+  const junkSet = new Set(["t", "tt", "x", "n/a", "na", "none", "test", "todo", "tmp", "draft"]);
+  return junkSet.has(lower);
+}
+
+function normalizeMissionText(value) {
+  const text = cleanCompactText(value, 1000);
+  if (!text) return "";
+  if (isLikelyJunkTitle(text)) return "";
+  if (/[…]$/.test(text) || /\.\.\.$/.test(text)) return "";
+  if (text.length <= CONTEXT_PACK_LIMITS.missionMax) return text;
+  const firstSentence = extractFirstSentence(text);
+  if (firstSentence && firstSentence.length <= CONTEXT_PACK_LIMITS.missionMax) return firstSentence;
+  return text.slice(0, CONTEXT_PACK_LIMITS.missionMax).trim();
+}
+
+function findCategoryByName(categories, target) {
+  const source = Array.isArray(categories) ? categories : [];
+  const normalizedTarget = nonEmptyString(target).toLowerCase();
+  if (!normalizedTarget) return null;
+  return source.find((item) => String(item?.name || "").trim().toLowerCase() === normalizedTarget) || null;
+}
+
+function findGoalByTitle(goals, target) {
+  const source = Array.isArray(goals) ? goals : [];
+  const normalizedTarget = nonEmptyString(target).toLowerCase();
+  if (!normalizedTarget) return null;
+  return source.find((item) => String(item?.title || "").trim().toLowerCase() === normalizedTarget) || null;
+}
+
+function filterActionBlocksByTarget(blocks, target) {
+  const source = Array.isArray(blocks) ? blocks : [];
+  const needle = nonEmptyString(target).toLowerCase();
+  if (!needle) return source;
+  const filtered = source.filter((item) => {
+    const title = String(item?.title || "").toLowerCase();
+    const category = String(item?.category || "").toLowerCase();
+    const actions = Array.isArray(item?.actions) ? item.actions.join(" ").toLowerCase() : "";
+    return title.includes(needle) || category.includes(needle) || actions.includes(needle);
+  });
+  return filtered.length > 0 ? filtered : source;
+}
+
+function equalsFold(a, b) {
+  const left = String(a || "").trim().toLowerCase();
+  const right = String(b || "").trim().toLowerCase();
+  return Boolean(left) && Boolean(right) && left === right;
+}
+
+function shouldIncludeStableBlocksForIntent(route) {
+  const routeID = Number(route?.id);
+  return !Number.isFinite(routeID) || routeID === 8;
+}
+
+async function resolveStableContextEnvelope({
+  context,
+  client,
+  stableBlocks,
+  includeStableBlocksByIntent
+}) {
+  const payload = stableBlocks && typeof stableBlocks === "object"
+    ? {
+        appGuide: Array.isArray(stableBlocks.appGuide) ? stableBlocks.appGuide : [],
+        dataInventory: Array.isArray(stableBlocks.dataInventory) ? stableBlocks.dataInventory : []
+      }
+    : { appGuide: [], dataInventory: [] };
+  const hash = await sha256Hex(JSON.stringify(payload));
+  const scopeHash = await resolveStableContextScopeHash(context, payload);
+  const clientHintHash = nonEmptyString(
+    client?.stableContextHash ||
+      client?.contextStableHash ||
+      client?.lastStableContextHash
+  );
+  const cachedHash = await readStableContextHash(scopeHash);
+  const previousHash = clientHintHash || cachedHash;
+  const changed = previousHash !== hash;
+  const includeFull = Boolean(includeStableBlocksByIntent && changed);
+
+  await writeStableContextHash(scopeHash, hash);
+  if (includeFull) {
+    await cacheStableContextBlocks(hash, payload);
+  }
 
   return {
-    generatedAt: src.generatedAt || null,
-    personalizationHash: nonEmptyString(src.personalizationHash) || null,
-    diagnostic: src.diagnostic
-      ? {
-          stress: truncate(String(src.diagnostic.stress || ""), 100),
-          breaksFirst: truncate(String(src.diagnostic.breaksFirst || ""), 100),
-          planningStyle: truncate(String(src.diagnostic.planningStyle || ""), 100),
-          firstChange: truncate(String(src.diagnostic.firstChange || ""), 120),
-          rootCause: truncate(String(src.diagnostic.rootCause || ""), 180),
-          nextDirection: truncate(String(src.diagnostic.nextDirection || ""), 180),
-          areas: Array.isArray(src.diagnostic.areas)
-            ? src.diagnostic.areas.map((v) => truncate(String(v || ""), 48)).slice(0, 5)
-            : []
-        }
-      : null,
-    drivingForce: src.drivingForce
-      ? {
-          vision: truncate(String(src.drivingForce.vision || ""), 240),
-          purpose: truncate(String(src.drivingForce.purpose || ""), 240),
-          passions: passions
-            .map((item) => ({
-              emotion: truncate(String(item?.emotion || ""), 24),
-              title: truncate(String(item?.title || ""), 80)
-            }))
-            .slice(0, 6)
-        }
-      : null,
-    fulfillmentCategories: categories
-      .map((item) => ({
-        id: truncate(String(item?.id || ""), 40),
-        name: truncate(String(item?.name || ""), 64),
-        mission: truncate(String(item?.mission || ""), 140),
-        identity: Array.isArray(item?.identity)
-          ? item.identity.map((v) => truncate(String(v || ""), 50)).slice(0, 2)
-          : [],
-        littleWins: Array.isArray(item?.littleWins)
-          ? item.littleWins.map((v) => truncate(String(v || ""), 60)).slice(0, 3)
-          : [],
-        weeklyScore: Number.isFinite(Number(item?.weeklyScore)) ? Number(item.weeklyScore) : null
-      }))
-      .slice(0, 4),
-    activeOutcomes: outcomes
-      .map((item) => ({
-        id: truncate(String(item?.id || ""), 40),
-        title: truncate(String(item?.title || ""), 90),
-        category: truncate(String(item?.category || ""), 60),
-        measurable: Boolean(item?.measurable),
-        progressSummary: truncate(String(item?.progressSummary || ""), 120)
-      }))
-      .slice(0, 4),
-    currentWeekActionBlocks: blocks
-      .map((item) => ({
-        category: truncate(String(item?.category || ""), 60),
-        title: truncate(String(item?.title || ""), 90),
-        completionRatio: Number.isFinite(Number(item?.completionRatio)) ? Number(item.completionRatio) : 0,
-        actions: Array.isArray(item?.actions)
-          ? item.actions.map((v) => truncate(String(v || ""), 70)).slice(0, 3)
-          : []
-      }))
-      .slice(0, 4),
-    capture: src.capture
-      ? {
-          totalCount: Number.isFinite(Number(src.capture.totalCount)) ? Number(src.capture.totalCount) : 0,
-          topItems: captureItems.map((v) => truncate(String(v || ""), 70)).slice(0, 5),
-          quickCompletionsLast7Days: Number.isFinite(Number(src.capture.quickCompletionsLast7Days))
-            ? Number(src.capture.quickCompletionsLast7Days)
-            : 0
-        }
-      : null,
-    dataInventory: inventory
-      .map((item) => ({
-        id: truncate(String(item?.id || ""), 48),
-        title: truncate(String(item?.title || ""), 90),
-        currentCount: Number.isFinite(Number(item?.currentCount)) ? Number(item.currentCount) : null,
-        historicalCount: Number.isFinite(Number(item?.historicalCount)) ? Number(item.historicalCount) : null,
-        keySignals: Array.isArray(item?.keySignals)
-          ? item.keySignals.map((v) => truncate(String(v || ""), 80)).slice(0, 3)
-          : []
-      }))
-      .slice(0, 10),
-    appGuide: appGuide
-      .map((item) => ({
-        id: truncate(String(item?.id || ""), 48),
-        title: truncate(String(item?.title || ""), 80),
-        summary: truncate(String(item?.summary || ""), 120)
-      }))
-      .slice(0, 6)
+    hash,
+    changed,
+    includeFull,
+    payload: {
+      hash,
+      changed,
+      appGuide: includeFull ? payload.appGuide : [],
+      dataInventory: includeFull ? payload.dataInventory : [],
+      counts: {
+        appGuide: payload.appGuide.length,
+        dataInventory: payload.dataInventory.length
+      }
+    }
   };
+}
+
+async function resolveStableContextScopeHash(context, payload) {
+  const src = context && typeof context === "object" ? context : {};
+  const base =
+    nonEmptyString(src.personalizationHash) ||
+    nonEmptyString(src?.drivingForce?.vision) ||
+    nonEmptyString(src?.drivingForce?.purpose) ||
+    JSON.stringify({
+      appGuideCount: Array.isArray(payload?.appGuide) ? payload.appGuide.length : 0,
+      dataInventoryCount: Array.isArray(payload?.dataInventory) ? payload.dataInventory.length : 0
+    });
+  return sha256Hex(base);
+}
+
+async function readStableContextHash(scopeHash) {
+  if (!scopeHash) return "";
+  const key = new Request(`https://loom-cache.internal/stable-context/state/${scopeHash}`);
+  try {
+    const cached = await caches.default.match(key);
+    if (!cached) return "";
+    const json = await cached.json();
+    return nonEmptyString(json?.hash);
+  } catch {
+    return "";
+  }
+}
+
+async function writeStableContextHash(scopeHash, hash) {
+  if (!scopeHash || !hash) return;
+  const key = new Request(`https://loom-cache.internal/stable-context/state/${scopeHash}`);
+  try {
+    const response = new Response(JSON.stringify({ hash }), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "public, max-age=0, s-maxage=2592000"
+      }
+    });
+    await caches.default.put(key, response);
+  } catch {
+    // Ignore cache write failures.
+  }
+}
+
+async function cacheStableContextBlocks(hash, payload) {
+  if (!hash) return;
+  const key = new Request(`https://loom-cache.internal/stable-context/blocks/${hash}`);
+  try {
+    const response = new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "public, max-age=0, s-maxage=2592000"
+      }
+    });
+    await caches.default.put(key, response);
+  } catch {
+    // Ignore cache write failures.
+  }
+}
+
+function summarizeIncludedContextSections(modelContext) {
+  const sections = [];
+  const add = (name, condition) => {
+    if (condition) sections.push(name);
+  };
+  add("identity.diagnostic", Boolean(modelContext?.layers?.identity?.diagnostic));
+  add("identity.purpose", Boolean(modelContext?.layers?.identity?.purpose));
+  add("identity.personalityProfile", Boolean(modelContext?.layers?.identity?.personalityProfile));
+  add("currentReality.fulfillment", Array.isArray(modelContext?.layers?.currentReality?.fulfillment) && modelContext.layers.currentReality.fulfillment.length > 0);
+  add("currentReality.goals", Array.isArray(modelContext?.layers?.currentReality?.goals) && modelContext.layers.currentReality.goals.length > 0);
+  add("currentReality.week", Boolean(modelContext?.layers?.currentReality?.week));
+  add("currentReality.capture", Boolean(modelContext?.layers?.currentReality?.capture));
+  add("targetObject", Boolean(modelContext?.layers?.targetObject));
+  add("stableContext.appGuide", Array.isArray(modelContext?.stableContext?.appGuide) && modelContext.stableContext.appGuide.length > 0);
+  add("stableContext.dataInventory", Array.isArray(modelContext?.stableContext?.dataInventory) && modelContext.stableContext.dataInventory.length > 0);
+  return sections;
+}
+
+function pruneEmptyObject(input) {
+  const src = input && typeof input === "object" ? input : null;
+  if (!src) return null;
+  const cleaned = {};
+  for (const [key, value] of Object.entries(src)) {
+    if (value === null || value === undefined) continue;
+    if (typeof value === "string" && !value.trim()) continue;
+    if (Array.isArray(value) && value.length === 0) continue;
+    if (typeof value === "object" && !Array.isArray(value)) {
+      const nested = pruneEmptyObject(value);
+      if (!nested) continue;
+      cleaned[key] = nested;
+      continue;
+    }
+    cleaned[key] = value;
+  }
+  return Object.keys(cleaned).length > 0 ? cleaned : null;
+}
+
+function normalizeCompactTimestamp(value) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (!Number.isFinite(parsed.getTime())) return null;
+  return parsed.toISOString();
+}
+
+function estimatePayloadSize(payload) {
+  const text = JSON.stringify(payload || {});
+  const bytes = new TextEncoder().encode(text).length;
+  return {
+    bytes,
+    approxTokens: Math.max(1, Math.ceil(text.length / 4))
+  };
+}
+
+function logLoomAIPayloadStats(stats) {
+  try {
+    console.log(`[loom.chat.payload] ${JSON.stringify(stats || {})}`);
+  } catch {
+    // Ignore logging failures.
+  }
 }
 
 function extractUpstreamErrorSignature(upstreamText) {
@@ -2351,39 +3048,720 @@ function shouldCacheLoomAIResponse(response) {
   return true;
 }
 
-function sanitizeLoomChatResponse(raw, { context, hasContext, latestUserMessage, intent }) {
+const CHIP_INTENT_ROUTES = [
+  {
+    id: 1,
+    key: "daily_little_wins",
+    pattern: /^daily little wins for\s+(.+)$/i
+  },
+  {
+    id: 2,
+    key: "new_mission",
+    pattern: /^new mission for\s+(.+)$/i
+  },
+  {
+    id: 3,
+    key: "new_identity",
+    pattern: /^new identity for\s+(.+)$/i
+  },
+  {
+    id: 4,
+    key: "goal_next_step",
+    pattern: /^next step for\s+(.+)$/i
+  },
+  {
+    id: 5,
+    key: "goal_plan",
+    pattern: /^plan for\s+(.+)$/i
+  },
+  {
+    id: 6,
+    key: "new_passions",
+    pattern: /^new passions for\s+(.+)$/i
+  },
+  {
+    id: 7,
+    key: "improve_purpose_vision",
+    pattern: /^improve my purpose vision$/i
+  },
+  {
+    id: 8,
+    key: "best_use_loom",
+    pattern: /^(how can i best use loom\??|based on everything loom knows about me\b.*single most effective way for me to use loom right now to reduce stress and live fulfilled\.?)$/i
+  }
+];
+
+function resolveChipIntentRoute(latestUserMessage) {
+  const text = String(latestUserMessage || "").replace(/\s+/g, " ").trim();
+  if (!text) return null;
+  for (const route of CHIP_INTENT_ROUTES) {
+    const match = text.match(route.pattern);
+    if (!match) continue;
+    const targetRaw = nonEmptyString(match[1] || "");
+    const normalizedTarget =
+      route.id === 6
+        ? normalizePassionType(targetRaw || "love")
+        : truncate(targetRaw, 120);
+    return {
+      id: route.id,
+      key: route.key,
+      label: truncate(text, 180),
+      target: normalizedTarget
+    };
+  }
+  return null;
+}
+
+function normalizePassionType(value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (["love", "vows", "thrill", "hate"].includes(text)) return text;
+  return "love";
+}
+
+function sanitizeLoomChatResponse(raw, { context, hasContext, latestUserMessage, intent, chipIntentRoute }) {
   const normalizedIntent = String(intent || "").trim().toLowerCase();
   const isAutoGroupIntent = normalizedIntent === "autogroup_plan";
   const base = raw && typeof raw === "object" ? raw : {};
-  let message = String(base.message || "").trim();
-  if (!message) {
+  if (!nonEmptyString(base.message)) {
     return safeChatFallback({ hasContext, context, intent: normalizedIntent });
   }
 
-  const details = extractConcreteDetails(context);
-  if (!isAutoGroupIntent && hasContext && details.length >= 2) {
-    const detailMentions = details.filter((d) =>
-      message.toLowerCase().includes(String(d).toLowerCase())
-    ).length;
-    if (detailMentions < 2) {
-      message += `\n\n• I’m grounding this in ${details[0]} and ${details[1]}.`;
-    }
-  }
-
-  const chips = isAutoGroupIntent ? [] : normalizeChips(base.chips, context);
+  const route = chipIntentRoute || resolveChipIntentRoute(latestUserMessage);
   const debug = normalizeDebug(base.debug, context, hasContext);
-  const actions = isAutoGroupIntent ? [] : normalizeActions(base.actions, {
+  const chips = normalizeChips(base.chips, context);
+  const normalizedActions = isAutoGroupIntent ? [] : normalizeActions(base.actions, {
     confidence: debug.confidence,
     context,
     latestUserMessage
   });
 
-  return {
-    message: truncate(message, 2400),
+  const recommendationSignal = stripRecommendationContentFromMessage(String(base.message || ""));
+  const fallbackExtractedActions = (!isAutoGroupIntent && recommendationSignal.hadRecommendations && normalizedActions.length === 0)
+    ? inferFallbackActionsFromRecommendationLines(recommendationSignal.extractedLines, context)
+    : [];
+  const rawCards = Array.isArray(base.suggestionCards) ? base.suggestionCards : [];
+  const suggestionCards = buildSuggestionCards(rawCards, [...normalizedActions, ...fallbackExtractedActions], {
+    context,
+    confidence: debug.confidence,
+    route
+  });
+  const grounding = collectGrounding(base.grounding, context, {
+    maxItems: 6,
+    route
+  });
+  const nextAction = normalizeNextAction(base.nextAction, suggestionCards, {
+    context,
+    confidence: debug.confidence
+  });
+  const message = composeMessage(recommendationSignal.message, {
+    context,
+    route
+  });
+
+  return validateOutput({
+    message,
+    grounding,
+    suggestionCards,
+    nextAction,
     chips,
-    actions,
+    actions: normalizedActions,
     debug
+  }, {
+    context,
+    hasContext,
+    route
+  });
+}
+
+function composeMessage(message, { context, route }) {
+  const source = String(message || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .trim();
+  if (!source) return composeFallbackMessage(context, route);
+
+  const forbiddenInteraction = [
+    /\bsources?\b/i,
+    /\bwhich should i (add|edit|replace|pick)\b/i,
+    /\boption [abc]\b/i,
+    /\bchoose (a|b|c)\b/i
+  ];
+
+  const cleanedLines = source
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => line.replace(/^(?:[•\-*]|\d+[.)])\s+/, ""))
+    .filter((line) => !forbiddenInteraction.some((pattern) => pattern.test(line)));
+
+  const cleanedText = cleanedLines.join("\n")
+    .replace(/\b(Here('|’)s|Based on your data|From your data)\b[:\s-]*/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleanedText) return composeFallbackMessage(context, route);
+
+  const paragraphCandidates = cleanedText
+    .split(/(?:\n{2,}|(?<=[.!?])\s+(?=[A-Z\[]))/)
+    .map((p) => p.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .map((p) => truncate(p, 220))
+    .slice(0, 6);
+
+  if (paragraphCandidates.length === 0) {
+    return composeFallbackMessage(context, route);
+  }
+
+  return paragraphCandidates.join("\n\n");
+}
+
+function composeFallbackMessage(context, route) {
+  const details = extractConcreteDetails(context);
+  const routeText = nonEmptyString(route?.target);
+  if (details.length >= 2) {
+    return truncate(`I’m grounding this in ${details[0]} and ${details[1]}. I’ll keep this specific to your current Loom data.`, 220);
+  }
+  if (routeText) {
+    return truncate(`I’m focusing this on ${routeText} using your current Loom context.`, 220);
+  }
+  return "I’m using your current Loom context for this response.";
+}
+
+function collectGrounding(input, context, { maxItems = 5, route = null } = {}) {
+  const rawItems = Array.isArray(input) ? input : [];
+  const normalized = [];
+  const seen = new Set();
+
+  for (const item of rawItems) {
+    const section = truncate(nonEmptyString(item?.section), 64);
+    const field = truncate(nonEmptyString(item?.field), 96);
+    const timestamp = normalizeGroundingTimestamp(item?.timestamp);
+    if (!section || !field) continue;
+    const key = `${section.toLowerCase()}|${field.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    normalized.push({ section, field, timestamp });
+    if (normalized.length >= maxItems) break;
+  }
+
+  const fallback = buildFallbackGrounding(context, route);
+  for (const item of fallback) {
+    if (normalized.length >= maxItems) break;
+    const key = `${item.section.toLowerCase()}|${item.field.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    normalized.push(item);
+  }
+  return normalized.slice(0, maxItems);
+}
+
+function buildFallbackGrounding(context, route) {
+  const items = [];
+  const add = (section, field, timestamp) => {
+    if (!section || !field) return;
+    items.push({
+      section: truncate(String(section), 64),
+      field: truncate(String(field), 96),
+      timestamp: normalizeGroundingTimestamp(timestamp)
+    });
   };
+
+  if (route?.id === 7 && nonEmptyString(context?.drivingForce?.vision)) {
+    add("Purpose", "drivingForce.vision", context?.sectionTimestamps?.purpose);
+  }
+  if (route?.id === 8) {
+    if (nonEmptyString(context?.drivingForce?.vision)) {
+      add("Purpose", "drivingForce.vision", context?.sectionTimestamps?.purpose);
+    }
+    if (nonEmptyString(context?.drivingForce?.purpose)) {
+      add("Purpose", "drivingForce.purpose", context?.sectionTimestamps?.purpose);
+    }
+    if (Array.isArray(context?.drivingForce?.passions) && context.drivingForce.passions.length > 0) {
+      add("Purpose", "drivingForce.passions[0].title", context?.sectionTimestamps?.purpose);
+    }
+    if (Array.isArray(context?.fulfillmentCategories) && context.fulfillmentCategories.length > 0) {
+      add("Fulfillment", "fulfillmentCategories[0].name", context?.sectionTimestamps?.fulfillment);
+    }
+    if (Array.isArray(context?.activeOutcomes) && context.activeOutcomes.length > 0) {
+      add("Goals", "activeOutcomes[0].title", context?.sectionTimestamps?.outcomes);
+    }
+    if (Array.isArray(context?.currentWeekActionBlocks) && context.currentWeekActionBlocks.length > 0) {
+      add("Action Blocks", "currentWeekActionBlocks[0].title", context?.sectionTimestamps?.actionBlocks);
+    }
+    if (context?.capture && Number.isFinite(Number(context.capture.totalCount))) {
+      add("Capture", "capture.totalCount", context?.sectionTimestamps?.capture);
+    }
+    if (nonEmptyString(context?.diagnostic?.rootCause)) {
+      add("Diagnostic", "diagnostic.rootCause", context?.sectionTimestamps?.diagnostic);
+    }
+  }
+  if (route?.id === 6 && Array.isArray(context?.drivingForce?.passions) && context.drivingForce.passions.length > 0) {
+    add("Purpose", "drivingForce.passions[0].title", context?.sectionTimestamps?.purpose);
+  }
+  if ([1, 2, 3].includes(route?.id) && Array.isArray(context?.fulfillmentCategories) && context.fulfillmentCategories.length > 0) {
+    add("Fulfillment", "fulfillmentCategories[0].name", context?.sectionTimestamps?.fulfillment);
+    add("Fulfillment", "fulfillmentCategories[0].mission", context?.sectionTimestamps?.fulfillment);
+  }
+  if ([4, 5].includes(route?.id) && Array.isArray(context?.activeOutcomes) && context.activeOutcomes.length > 0) {
+    add("Goals", "activeOutcomes[0].title", context?.sectionTimestamps?.outcomes);
+    add("Goals", "activeOutcomes[0].progressSummary", context?.sectionTimestamps?.outcomes);
+  }
+
+  if (nonEmptyString(context?.drivingForce?.purpose)) {
+    add("Purpose", "drivingForce.purpose", context?.sectionTimestamps?.purpose);
+  }
+  if (Array.isArray(context?.currentWeekActionBlocks) && context.currentWeekActionBlocks.length > 0) {
+    add("Action Blocks", "currentWeekActionBlocks[0].title", context?.sectionTimestamps?.actionBlocks);
+  }
+  if (context?.capture && Number.isFinite(Number(context.capture.totalCount))) {
+    add("Capture", "capture.totalCount", context?.sectionTimestamps?.capture);
+  }
+  if (Array.isArray(context?.dataInventory) && context.dataInventory.length > 0) {
+    add("Data Inventory", "dataInventory[0].title", context?.generatedAt);
+  }
+  if (Array.isArray(context?.appGuide) && context.appGuide.length > 0) {
+    add("App Guide", "appGuide[0].title", context?.generatedAt);
+  }
+
+  return items;
+}
+
+function normalizeGroundingTimestamp(value) {
+  if (value instanceof Date && Number.isFinite(value.getTime())) {
+    return value.toISOString();
+  }
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const parsed = new Date(text);
+  if (!Number.isFinite(parsed.getTime())) return "";
+  return parsed.toISOString();
+}
+
+function buildSuggestionCards(inputCards, inputActions, { context, confidence, route }) {
+  const level = String(confidence || "").trim().toLowerCase();
+  if (level === "low") return [];
+
+  const normalizedCards = normalizeSuggestionCards(inputCards, context);
+  if (normalizedCards.length > 0) return normalizedCards;
+
+  const routeCards = buildRouteSuggestionCards(route, context);
+  if (routeCards.length > 0) return routeCards;
+
+  return actionsToSuggestionCards(inputActions, context);
+}
+
+function normalizeSuggestionCards(inputCards, context) {
+  const source = Array.isArray(inputCards) ? inputCards : [];
+  const cards = [];
+  const seen = new Set();
+
+  for (const card of source) {
+    const title = truncate(nonEmptyString(card?.title), 120);
+    if (!title) continue;
+    const description = truncate(nonEmptyString(card?.description) || "Suggestion options", 180);
+    const options = normalizeSuggestionOptions(card?.options, context);
+    if (options.length === 0) continue;
+    const id = truncate(nonEmptyString(card?.id) || slug(title), 72);
+    const key = `${title.toLowerCase()}|${options.map((opt) => `${opt.type}:${JSON.stringify(opt.payload)}`).join("|")}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    cards.push({ id, title, description, options: options.slice(0, 3) });
+    if (cards.length >= 3) break;
+  }
+  return cards;
+}
+
+function normalizeSuggestionOptions(inputOptions, context) {
+  const source = Array.isArray(inputOptions) ? inputOptions : [];
+  const options = [];
+  const seen = new Set();
+  const labels = ["A", "B", "C"];
+
+  for (let i = 0; i < source.length; i += 1) {
+    const option = source[i];
+    const type = nonEmptyString(option?.type);
+    if (!ACTION_WHITELIST.has(type)) continue;
+    const payload = normalizeActionPayload(type, option?.payload, context);
+    if (!payload) continue;
+    const title = truncate(nonEmptyString(option?.title), 120);
+    if (!title) continue;
+    const key = `${type}|${JSON.stringify(payload)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    options.push({
+      id: truncate(nonEmptyString(option?.id) || `${type}-${options.length + 1}`, 72),
+      label: labels[options.length] || "C",
+      title,
+      type,
+      payload
+    });
+    if (options.length >= 3) break;
+  }
+  return options;
+}
+
+function actionsToSuggestionCards(actions, context) {
+  const normalized = normalizeActions(actions, { confidence: "high", context });
+  if (normalized.length === 0) return [];
+  return normalized.slice(0, 3).map((action, index) => ({
+    id: `card-${index + 1}`,
+    title: truncate(action.title, 120),
+    description: "Apply this Loom suggestion",
+    options: [{
+      id: action.id,
+      label: "A",
+      title: truncate(action.title, 120),
+      type: action.type,
+      payload: action.payload
+    }]
+  }));
+}
+
+function buildRouteSuggestionCards(route, context) {
+  if (!route || typeof route !== "object") return [];
+  const target = nonEmptyString(route.target);
+  const categoryId = resolveCategoryIdFromRouteTarget(target, context);
+
+  if (route.id === 1 && categoryId) {
+    const options = [
+      { title: "10-minute daily focus sprint", type: "addLittleWin", payload: { categoryId, activity: "10-minute focused sprint", appleHealthEligible: false } },
+      { title: "15-minute cleanup and reset", type: "addLittleWin", payload: { categoryId, activity: "15-minute reset and cleanup", appleHealthEligible: false } },
+      { title: "20-minute completion block", type: "addLittleWin", payload: { categoryId, activity: "20-minute completion block", appleHealthEligible: false } }
+    ];
+    return [buildCardFromOptions(`Little Wins for ${target || "this area"}`, "Pick one short daily action.", options, context)];
+  }
+
+  if (route.id === 2 && categoryId) {
+    const options = [
+      { title: "Mission option A", type: "updateFulfillmentMission", payload: { categoryId, text: `I strengthen ${target} with steady weekly execution and clear standards.` } },
+      { title: "Mission option B", type: "updateFulfillmentMission", payload: { categoryId, text: `I use ${target} to build consistency, reduce stress, and increase follow-through.` } },
+      { title: "Mission option C", type: "updateFulfillmentMission", payload: { categoryId, text: `I treat ${target} as a system I can improve through simple repeatable actions.` } }
+    ];
+    return [buildCardFromOptions(`Mission options for ${target || "this area"}`, "Choose one mission rewrite.", options, context)];
+  }
+
+  if (route.id === 3) {
+    const options = [
+      { title: "Identity option A", type: "addPlanSuggestion", payload: { text: `Identity: I am consistent in ${target || "this area"}.` } },
+      { title: "Identity option B", type: "addPlanSuggestion", payload: { text: `Identity: I finish what I start in ${target || "this area"}.` } },
+      { title: "Identity option C", type: "addPlanSuggestion", payload: { text: `Identity: I prioritize high-leverage actions in ${target || "this area"}.` } }
+    ];
+    return [buildCardFromOptions(`Identity options for ${target || "this area"}`, "Add one identity suggestion to Capture.", options, context)];
+  }
+
+  if (route.id === 4) {
+    const goalName = target || "this goal";
+    const options = [
+      { title: "Next step A", type: "addPlanSuggestion", payload: { text: `Next step for ${goalName}: define one measurable checkpoint for this week.` } },
+      { title: "Next step B", type: "addPlanSuggestion", payload: { text: `Next step for ${goalName}: schedule one focused 30-minute execution block.` } },
+      { title: "Next step C", type: "addPlanSuggestion", payload: { text: `Next step for ${goalName}: identify and remove one blocker before execution.` } }
+    ];
+    return [buildCardFromOptions(`Next steps for ${goalName}`, "Choose one immediate step.", options, context)];
+  }
+
+  if (route.id === 5) {
+    const goalName = target || "this goal";
+    const options = [
+      { title: "Plan option A", type: "addPlanSuggestion", payload: { text: `Plan for ${goalName}: define 3 checkpoints across this week.` } },
+      { title: "Plan option B", type: "addPlanSuggestion", payload: { text: `Plan for ${goalName}: batch similar tasks into two focused sessions.` } },
+      { title: "Plan option C", type: "addPlanSuggestion", payload: { text: `Plan for ${goalName}: set one daily minimum action and review each evening.` } }
+    ];
+    return [buildCardFromOptions(`Plan options for ${goalName}`, "Choose one short plan template.", options, context)];
+  }
+
+  if (route.id === 6) {
+    const passionType = normalizePassionType(target || "love");
+    const options = [
+      { title: "Passion option A", type: "addPassionItem", payload: { passionType, text: `Building consistent progress in ${passionType} aligned work.` } },
+      { title: "Passion option B", type: "addPassionItem", payload: { passionType, text: `Creating calm structure in daily planning and execution.` } },
+      { title: "Passion option C", type: "addPassionItem", payload: { passionType, text: `Learning through weekly experiments with clear follow-through.` } }
+    ];
+    return [buildCardFromOptions(`New passions for ${passionType}`, "Choose one passion to add.", options, context)];
+  }
+
+  if (route.id === 7) {
+    const options = [
+      { title: "Vision option A", type: "updatePurposeVision", payload: { text: "I build a life where my daily actions match my long-term values and commitments." } },
+      { title: "Vision option B", type: "updatePurposeVision", payload: { text: "I create steady progress across the areas that matter most by finishing the right work each week." } },
+      { title: "Vision option C", type: "updatePurposeVision", payload: { text: "I live with clear direction, focused execution, and systems that support meaningful growth." } }
+    ];
+    return [buildCardFromOptions("Purpose Vision options", "Choose one vision rewrite.", options, context)];
+  }
+
+  return [];
+}
+
+function buildCardFromOptions(title, description, options, context) {
+  const normalizedOptions = normalizeSuggestionOptions(options.map((option, index) => ({
+    id: `${slug(title)}-${index + 1}`,
+    label: String.fromCharCode(65 + index),
+    title: option.title,
+    type: option.type,
+    payload: option.payload
+  })), context);
+  return {
+    id: slug(title),
+    title: truncate(title, 120),
+    description: truncate(description, 180),
+    options: normalizedOptions
+  };
+}
+
+function resolveCategoryIdFromRouteTarget(target, context) {
+  if (!target) return firstCategoryIdFromContext(context);
+  const categories = Array.isArray(context?.fulfillmentCategories) ? context.fulfillmentCategories : [];
+  const found = categories.find(
+    (item) => String(item?.name || "").trim().toLowerCase() === target.toLowerCase()
+  );
+  const id = nonEmptyString(found?.id);
+  return /^[0-9a-f-]{36}$/i.test(id) ? id : firstCategoryIdFromContext(context);
+}
+
+function normalizeNextAction(input, suggestionCards, { context, confidence }) {
+  if (String(confidence || "").toLowerCase() === "low") return null;
+  const option = input && typeof input === "object" ? input : null;
+  if (option) {
+    const type = nonEmptyString(option.type);
+    if (ACTION_WHITELIST.has(type)) {
+      const payload = normalizeActionPayload(type, option.payload, context);
+      const title = truncate(nonEmptyString(option.title), 120);
+      if (payload && title) {
+        return {
+          id: truncate(nonEmptyString(option.id) || `${type}-next`, 72),
+          title,
+          type,
+          payload
+        };
+      }
+    }
+  }
+  const firstOption = Array.isArray(suggestionCards) && suggestionCards.length > 0
+    ? suggestionCards[0]?.options?.[0]
+    : null;
+  if (!firstOption) return null;
+  return {
+    id: truncate(nonEmptyString(firstOption.id) || "next-1", 72),
+    title: truncate(nonEmptyString(firstOption.title), 120),
+    type: nonEmptyString(firstOption.type),
+    payload: firstOption.payload && typeof firstOption.payload === "object" ? firstOption.payload : {}
+  };
+}
+
+function validateOutput(output, { context, hasContext, route }) {
+  const message = composeMessage(output?.message, { context, route });
+  const sanitizedMessage = removeInteractionText(message);
+  const safeMessage = containsSuspiciousFactPattern(sanitizedMessage, context)
+    ? composeFallbackMessage(context, route)
+    : sanitizedMessage;
+
+  let suggestionCards = Array.isArray(output?.suggestionCards) ? output.suggestionCards : [];
+  if (suggestionCards.length === 0 && Array.isArray(output?.actions) && output.actions.length > 0) {
+    suggestionCards = actionsToSuggestionCards(output.actions, context);
+  }
+  suggestionCards = suggestionCards.slice(0, 3);
+
+  const flattenedActions = flattenSuggestionCardsToActions(suggestionCards, context);
+  const mergedActions = mergeActions(flattenedActions, output?.actions, context);
+
+  const grounding = collectGrounding(output?.grounding, context, {
+    maxItems: hasContext ? 6 : 2,
+    route
+  });
+
+  const nextAction = normalizeNextAction(output?.nextAction, suggestionCards, {
+    context,
+    confidence: output?.debug?.confidence || "medium"
+  });
+
+  return {
+    message: truncate(safeMessage, 2400),
+    grounding,
+    suggestionCards,
+    nextAction,
+    chips: Array.isArray(output?.chips) ? output.chips.slice(0, 4) : [],
+    actions: mergedActions,
+    debug: output?.debug || {
+      usedContext: Boolean(hasContext),
+      confidence: hasContext ? "medium" : "low",
+      evidence: hasContext ? extractEvidencePathsFromContext(context, 2) : []
+    }
+  };
+}
+
+function flattenSuggestionCardsToActions(cards, context) {
+  const actions = [];
+  const source = Array.isArray(cards) ? cards : [];
+  for (const card of source) {
+    const options = Array.isArray(card?.options) ? card.options : [];
+    for (const option of options) {
+      const type = nonEmptyString(option?.type);
+      if (!ACTION_WHITELIST.has(type)) continue;
+      const payload = normalizeActionPayload(type, option?.payload, context);
+      const title = truncate(nonEmptyString(option?.title), 120);
+      if (!payload || !title) continue;
+      actions.push({
+        id: truncate(nonEmptyString(option?.id) || `${type}-${actions.length + 1}`, 72),
+        title,
+        type,
+        payload
+      });
+      if (actions.length >= 8) return actions;
+    }
+  }
+  return actions;
+}
+
+function mergeActions(primary, secondary, context) {
+  const first = normalizeActions(primary, { confidence: "high", context });
+  const second = normalizeActions(secondary, { confidence: "high", context });
+  const merged = [];
+  const seen = new Set();
+  for (const action of [...first, ...second]) {
+    const key = `${action.type}|${JSON.stringify(action.payload)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(action);
+    if (merged.length >= 8) break;
+  }
+  return merged;
+}
+
+function removeInteractionText(message) {
+  const text = String(message || "").trim();
+  if (!text) return "";
+  const lines = text.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  const blocked = [
+    /\bsources?\b/i,
+    /\bwhich should i (add|edit|replace|choose)\b/i,
+    /\boption [abc]\b/i,
+    /\bchoose (a|b|c)\b/i
+  ];
+  const kept = lines.filter((line) => !blocked.some((pattern) => pattern.test(line)));
+  return kept.join("\n\n").trim();
+}
+
+function containsSuspiciousFactPattern(message, context) {
+  const text = String(message || "");
+  if (!text) return false;
+  const hardClaims = [
+    /\byou (completed|finished|hit|missed)\b/i,
+    /\byour (completion|streak|score|progress) (is|was)\b/i
+  ];
+  if (!hardClaims.some((pattern) => pattern.test(text))) return false;
+  const allowed = buildAllowedNumberTokenSet(context);
+  const found = text.match(/\b\d+(?:\.\d+)?\b/g) || [];
+  return found.some((token) => !allowed.has(token));
+}
+
+function buildAllowedNumberTokenSet(context) {
+  const tokens = new Set();
+  const collect = (value) => {
+    const text = String(value || "");
+    const matches = text.match(/\b\d+(?:\.\d+)?\b/g) || [];
+    for (const token of matches) tokens.add(token);
+  };
+  collect(context?.capture?.totalCount);
+  collect(context?.capture?.quickCompletionsLast7Days);
+  const categories = Array.isArray(context?.fulfillmentCategories) ? context.fulfillmentCategories : [];
+  for (const item of categories) collect(item?.weeklyScore);
+  const goals = Array.isArray(context?.activeOutcomes) ? context.activeOutcomes : [];
+  for (const item of goals) collect(item?.progressSummary);
+  const blocks = Array.isArray(context?.currentWeekActionBlocks) ? context.currentWeekActionBlocks : [];
+  for (const item of blocks) collect(item?.completionRatio);
+  return tokens;
+}
+
+function stripRecommendationContentFromMessage(message) {
+  const source = String(message || "").trim();
+  if (!source) {
+    return { message: "", hadRecommendations: false, strippedCount: 0, extractedLines: [] };
+  }
+
+  const rawLines = source.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  const kept = [];
+  const removed = [];
+  for (const line of rawLines) {
+    if (isRecommendationLine(line)) {
+      removed.push(line);
+    } else {
+      kept.push(line);
+    }
+  }
+
+  let cleaned = kept.join("\n\n").trim();
+  if (!cleaned && removed.length > 0) {
+    cleaned = "I prepared suggestions below.";
+  }
+  return {
+    message: cleaned,
+    hadRecommendations: removed.length > 0,
+    strippedCount: removed.length,
+    extractedLines: removed
+  };
+}
+
+function isRecommendationLine(line) {
+  const value = String(line || "").trim().toLowerCase();
+  if (!value) return false;
+  if (/^[a-z]\s*[\)\.\:\-]\s+/.test(value)) return true;
+  if (/^\d+\.\s+/.test(value)) return true;
+  if (value.startsWith("try ") || value.startsWith("you should ") || value.startsWith("i suggest ")) return true;
+  const recommendationPatterns = [
+    /\b(add|edit|improve|update|replace|create|rewrite|refine|change|remove)\b/,
+    /\b(new mission|new identity|little win|next step|plan for)\b/,
+    /\b(i can|i could|i recommend)\b.*\b(add|edit|improve|update|replace|create)\b/
+  ];
+  return recommendationPatterns.some((pattern) => pattern.test(value));
+}
+
+function inferFallbackActionsFromRecommendationLines(lines, context) {
+  const source = Array.isArray(lines) ? lines : [];
+  const cleaned = source
+    .map((line) => String(line || "").replace(/^[•\-]\s*/, "").trim())
+    .filter(Boolean)
+    .slice(0, 4);
+  if (cleaned.length === 0) return [];
+
+  const categoryId = firstCategoryIdFromContext(context);
+  const generated = [];
+  for (let i = 0; i < cleaned.length; i += 1) {
+    const line = truncate(cleaned[i], 160);
+    const lower = line.toLowerCase();
+    if (/\bmission\b/.test(lower) && categoryId) {
+      generated.push({
+        id: `fallback-updateFulfillmentMission-${i + 1}`,
+        title: "Update mission",
+        type: "updateFulfillmentMission",
+        payload: { categoryId, text: line }
+      });
+      continue;
+    }
+    if (/\bidentity\b/.test(lower) && categoryId) {
+      generated.push({
+        id: `fallback-addPlanSuggestion-${i + 1}`,
+        title: "Identity suggestion",
+        type: "addPlanSuggestion",
+        payload: { text: line }
+      });
+      continue;
+    }
+    generated.push({
+      id: `fallback-addPlanSuggestion-${i + 1}`,
+      title: "Suggestion",
+      type: "addPlanSuggestion",
+      payload: { text: line }
+    });
+  }
+  return normalizeActions(generated, {
+    confidence: "medium",
+    context
+  });
+}
+
+function firstCategoryIdFromContext(context) {
+  const categories = Array.isArray(context?.fulfillmentCategories) ? context.fulfillmentCategories : [];
+  const first = categories.find((item) => nonEmptyString(item?.id));
+  const id = nonEmptyString(first?.id);
+  return /^[0-9a-f-]{36}$/i.test(id) ? id : "";
 }
 
 function normalizeChips(input, context) {
@@ -2751,3 +4129,12 @@ function canonicalizeDiagnosticForVision(input) {
     firstChange: normalized.firstChange || "unknown"
   };
 }
+
+export const __test = {
+  resolveChipIntentRoute,
+  composeMessage,
+  collectGrounding,
+  buildSuggestionCards,
+  validateOutput,
+  sanitizeLoomChatResponse
+};

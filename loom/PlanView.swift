@@ -4267,7 +4267,7 @@ struct PlanStepFourResultView: View {
 
     private var resultTopCautionCard: some View {
         HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "clock.fill")
+            Image(systemName: "exclamationmark.triangle.fill")
                 .font(.subheadline)
                 .foregroundStyle(Color.black.opacity(0.7))
                 .padding(.top, 1)
@@ -7849,7 +7849,7 @@ private struct SensitivitySheet: View {
                             }
 
                             HStack {
-                                Text("Attention")
+                                Text("Reminder")
                                 Spacer()
                                 Menu {
                                     ForEach(7...30, id: \.self) { value in
@@ -7866,7 +7866,7 @@ private struct SensitivitySheet: View {
                                 }
                             }
 
-                            Text("Attention triggers countdown to display.")
+                            Text("Reminder starts the countdown before the due date.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .leading)

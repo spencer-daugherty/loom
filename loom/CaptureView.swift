@@ -1094,7 +1094,7 @@ struct CaptureView: View {
 
                 if captureIntroShowsSettingsDemoRow {
                     captureIntroDemoSwipeRow(
-                        text: "Set recurring actions, set due date attentions, and integrate in settings.",
+                        text: "Set recurring actions, set due date reminders, and integrate in settings.",
                         trailingActionLabel: nil,
                         trailingTint: nil,
                         leadingActionLabel: nil,
@@ -1110,7 +1110,7 @@ struct CaptureView: View {
                 }
 
                 captureIntroDemoSwipeRow(
-                    text: "Hide and see hidden tasks that need attention later by clicking the toggle.",
+                    text: "Hide and see hidden tasks that need a reminder later by clicking the toggle.",
                     trailingActionLabel: nil,
                     trailingTint: nil,
                     leadingActionLabel: nil,
@@ -1401,7 +1401,7 @@ struct CaptureView: View {
                         }
 
                         HStack {
-                            Text("Attention")
+                            Text("Reminder")
                             Spacer()
                             Menu {
                                 ForEach(7...30, id: \.self) { value in
@@ -1418,7 +1418,7 @@ struct CaptureView: View {
                             }
                         }
 
-                        Text("Attention triggers countdown to display before due date and intelligently brings it into your attention.")
+                        Text("Reminder starts the countdown before the due date and brings it into view at the right time.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -2167,7 +2167,7 @@ struct CaptureView: View {
     private func dueDatesSection() -> some View {
         Section {
             HStack {
-                Text("Default Due Date Attention")
+                Text("Default Due Date Reminder")
                 Spacer()
                 Menu {
                     ForEach(7...30, id: \.self) { value in
@@ -3365,7 +3365,7 @@ struct CaptureView: View {
                             displayedComponents: .date
                         )
                         Stepper(value: $sharedDraftAttentionDays, in: 7...30) {
-                            Text("Attention: \(sharedDraftAttentionDays) days")
+                            Text("Reminder: \(sharedDraftAttentionDays) days")
                         }
                     }
                 }
@@ -3454,8 +3454,9 @@ struct CaptureView: View {
 
         let baseTitle = payload.sourceTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let textTrimmed = payload.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let textPreview = String(textTrimmed.prefix(500))
         let fallback = payload.urlString.flatMap { URL(string: $0)?.host } ?? ""
-        sharedDraftActionText = [baseTitle, textTrimmed.components(separatedBy: .newlines).first ?? ""]
+        sharedDraftActionText = [baseTitle, textPreview.components(separatedBy: .newlines).first ?? ""]
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .first(where: { !$0.isEmpty }) ?? fallback
 

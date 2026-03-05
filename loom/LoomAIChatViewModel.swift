@@ -374,6 +374,8 @@ final class LoomAIViewModel: ObservableObject {
     private var recentPromptChipHistory: [String] = []
     private let maxPromptChipHistorySize = 36
     private let compactContextDefaultsKey = "loom.ai.context.compact.enabled"
+    private let whatIsLoomPromptTitle = "What is Loom?"
+    private let whatIsLoomResponseText = "Loom is a life management app that connects your purpose, life areas, goals, and daily actions into one system so you can end stress and live fulfilled."
 
     init() {
         refreshRemainingDailyResponses()
@@ -404,9 +406,15 @@ final class LoomAIViewModel: ObservableObject {
         return thread
     }
 
-    func sendCurrentMessage(in context: ModelContext, threadKey: String) async {
-        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !isSending else { return }
+    func sendCurrentMessage(
+        in context: ModelContext,
+        threadKey: String,
+        displayedUserMessage: String? = nil,
+        transportMessageOverride: String? = nil
+    ) async {
+        let trimmedDisplay = (displayedUserMessage ?? draft).trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedTransport = (transportMessageOverride ?? draft).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedDisplay.isEmpty, !trimmedTransport.isEmpty, !isSending else { return }
         refreshRemainingDailyResponses()
         guard remainingDailyResponses > 0 else {
             errorMessage = "Daily LoomAI limit reached. Resets tomorrow."
@@ -414,7 +422,10 @@ final class LoomAIViewModel: ObservableObject {
         }
 
         let now = Date()
-        if let lastSendAt, let lastSendSignature, now.timeIntervalSince(lastSendAt) < 0.8, lastSendSignature == trimmed {
+        if let lastSendAt,
+           let lastSendSignature,
+           now.timeIntervalSince(lastSendAt) < 0.8,
+           lastSendSignature == trimmedTransport {
             return
         }
 
@@ -425,10 +436,11 @@ final class LoomAIViewModel: ObservableObject {
         }
 
         isSending = true
+        defer { isSending = false }
         errorMessage = nil
         debugFailureDetail = nil
         lastSendAt = now
-        lastSendSignature = trimmed
+        lastSendSignature = trimmedTransport
         sendTimestamps.append(now)
 
         do {
@@ -437,7 +449,7 @@ final class LoomAIViewModel: ObservableObject {
                 threadID: thread.id,
                 threadKey: thread.threadKey,
                 roleRaw: LoomAIChatRole.user.rawValue,
-                content: trimmed
+                content: trimmedDisplay
             )
             await MainActor.run {
                 context.insert(userMessage)
@@ -452,8 +464,34 @@ final class LoomAIViewModel: ObservableObject {
             .filter { $0.threadKey == threadKey }
             let contextSnapshot = compactedSnapshotIfEnabled(try buildContextSnapshot(in: context))
 
-            let outgoing = history.suffix(20).map {
+            var outgoing = history.suffix(20).map {
                 LoomAIService.TransportMessage(role: $0.roleRaw, content: $0.content)
+            }
+            if trimmedTransport != trimmedDisplay,
+               let lastIndex = outgoing.lastIndex(where: { $0.role == LoomAIChatRole.user.rawValue }) {
+                outgoing[lastIndex] = LoomAIService.TransportMessage(
+                    role: LoomAIChatRole.user.rawValue,
+                    content: trimmedTransport
+                )
+            }
+
+            if isWhatIsLoomPrompt(trimmedTransport) || isWhatIsLoomPrompt(trimmedDisplay) {
+                let delayNanoseconds = UInt64.random(in: 2_000_000_000...4_000_000_000)
+                try await Task.sleep(nanoseconds: delayNanoseconds)
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    let assistant = LoomAIChatMessage(
+                        threadID: thread.id,
+                        threadKey: thread.threadKey,
+                        roleRaw: LoomAIChatRole.assistant.rawValue,
+                        content: whatIsLoomResponseText
+                    )
+                    context.insert(assistant)
+                    thread.updatedAt = .now
+                    try? context.save()
+                    latestSuggestedActions = []
+                }
+                return
             }
 
             #if DEBUG
@@ -482,20 +520,14 @@ final class LoomAIViewModel: ObservableObject {
                 content: finalReply,
                 chipsJSON: LoomAIChatMessageChipsCodec.encode(response.chips),
                 actionsJSON: LoomAIChatMessageActionsCodec.encode(response.actions),
-                debugJSON: LoomAIDebugCodec.encode(response.debug)
+                debugJSON: LoomAIDebugCodec.encode(response.debug),
+                groundingJSON: LoomAIChatMessageGroundingCodec.encode(response.grounding),
+                suggestionCardsJSON: LoomAIChatMessageSuggestionCardsCodec.encode(response.suggestionCards),
+                nextActionJSON: LoomAIChatMessageNextActionCodec.encode(response.nextAction)
             )
-            let updatedHistory = history + [assistantPreviewMessage]
-            let apiSummaryTitle = await requestThreadTitleFromAI(
-                messages: updatedHistory,
-                contextSnapshot: contextSnapshot
-            )
-            guard !Task.isCancelled else { return }
             await MainActor.run {
                 let assistant = assistantPreviewMessage
                 context.insert(assistant)
-                if let summaryTitle = apiSummaryTitle, !summaryTitle.isEmpty {
-                    thread.title = summaryTitle
-                }
                 thread.updatedAt = .now
                 try? context.save()
                 latestSuggestedActions = response.actions
@@ -503,6 +535,19 @@ final class LoomAIViewModel: ObservableObject {
                 refreshRemainingDailyResponses()
             }
             guard !Task.isCancelled else { return }
+            let updatedHistory = history + [assistantPreviewMessage]
+            let apiSummaryTitle = await requestThreadTitleFromAI(
+                messages: updatedHistory,
+                contextSnapshot: contextSnapshot
+            )
+            guard !Task.isCancelled else { return }
+            if let summaryTitle = apiSummaryTitle, !summaryTitle.isEmpty {
+                await MainActor.run {
+                    thread.title = summaryTitle
+                    thread.updatedAt = .now
+                    try? context.save()
+                }
+            }
             if response.chips.isEmpty {
                 await refreshFollowUpPromptChipsViaAI(in: context, threadMessages: updatedHistory)
             }
@@ -536,7 +581,6 @@ final class LoomAIViewModel: ObservableObject {
             }
         }
 
-        isSending = false
     }
 
     private func compactedSnapshotIfEnabled(_ snapshot: LoomAIContextSnapshot) -> LoomAIContextSnapshot {
@@ -870,22 +914,20 @@ final class LoomAIViewModel: ObservableObject {
                 rotationSeed: promptChipShuffleCounter
             )
             let diversified = diversifyPromptChips(dynamic, maxCount: 12)
-            suggestedPromptChips = ensureFulfillmentSelectorChipInLeadingSlots(
+            let arranged = ensureFulfillmentSelectorChipInLeadingSlots(
                 diversified,
                 categories: snapshot.fulfillmentCategories.map(\.name),
                 maxCount: 12
             )
+            suggestedPromptChips = filterChipsWithSelectableLists(
+                arranged,
+                categories: snapshot.fulfillmentCategories.map(\.name),
+                outcomes: snapshot.activeOutcomes.map(\.title),
+                maxCount: 12
+            )
             followUpPromptChips = []
         } catch {
-            suggestedPromptChips = diversifyPromptChips([
-                "What should I focus on this week?",
-                "Give me one high-impact move for today",
-                "Audit my action blocks for bottlenecks",
-                "Help me improve a weak Little Win",
-                "How aligned are my actions with my Purpose?",
-                "Turn my Capture list into priorities",
-                "Show me the next best Loom workflow"
-            ], maxCount: 10)
+            suggestedPromptChips = []
             followUpPromptChips = []
         }
     }
@@ -926,9 +968,15 @@ final class LoomAIViewModel: ObservableObject {
                 threadMessages.last(where: { $0.roleRaw == LoomAIChatRole.assistant.rawValue })?.chipsJSON
             ).map(\.title)
             let combined = diversifyPromptChips(serverChips + fallback, maxCount: 6)
-            followUpPromptChips = ensureFulfillmentSelectorChipInLeadingSlots(
+            let arranged = ensureFulfillmentSelectorChipInLeadingSlots(
                 combined,
                 categories: snapshot.fulfillmentCategories.map(\.name),
+                maxCount: 6
+            )
+            followUpPromptChips = filterChipsWithSelectableLists(
+                arranged,
+                categories: snapshot.fulfillmentCategories.map(\.name),
+                outcomes: snapshot.activeOutcomes.map(\.title),
                 maxCount: 6
             )
             lastFollowUpPromptSourceSignature = signature
@@ -1006,27 +1054,6 @@ final class LoomAIViewModel: ObservableObject {
         let weakestFulfillment = pickOne(Array(scoredFulfillments.prefix(3)))
         let secondaryFulfillment = pickOne(Array(scoredFulfillments.dropFirst().prefix(4)))
 
-        let missionCandidates = fulfillments.filter { category in
-            let mission = normalized(category.mission)
-            return mission.isEmpty || isLowSignal(mission) || mission.count < 24
-        }
-        let identityCandidates = fulfillments.filter { category in
-            let identities = category.identity.map(normalized).filter { !$0.isEmpty }
-            return identities.isEmpty || identities.contains(where: isLowSignal)
-        }
-        let lowLittleWinQualityCandidates = fulfillments.filter { category in
-            let wins = category.littleWins.map(normalized).filter { !$0.isEmpty }
-            if wins.isEmpty { return true }
-            if wins.count < 2 { return true }
-            return wins.contains(where: isLowSignal)
-        }
-        let maxedLittleWinCandidates = fulfillments.filter { category in
-            let wins = category.littleWins.map(normalized).filter { !$0.isEmpty }
-            return wins.count >= 3
-        }
-        let passionGapCandidates = fulfillments.filter { category in
-            category.connectedPassions.isEmpty
-        }
         let rotatingCategoryNames: [String] = {
             var names: [String] = []
             func appendUnique(_ value: String?) {
@@ -1047,188 +1074,48 @@ final class LoomAIViewModel: ObservableObject {
             }
             return Array(names.prefix(4))
         }()
+        let rotatingPassionAreas = PassionType.allCases.map(\.rawValue).shuffled()
 
         for categoryName in rotatingCategoryNames {
-            add("category_rotate", "How can I improve \(categoryName) this week?")
-            add("category_rotate", "Give me one next step for \(categoryName)")
-            add("category_rotate", "Which action block best supports \(categoryName)?")
+            add("category_rotate", "Daily Little Wins for \(categoryName)")
+            add("category_rotate", "New Mission for \(categoryName)")
+            add("category_rotate", "New Identity for \(categoryName)")
         }
-
-        if let weakestFulfillment {
-            add("fulfillment", "How can I improve \(weakestFulfillment.name) this week?")
-            add("insight", "What is causing \(weakestFulfillment.name) to slip?")
-        }
-
-        if let littleWinCategory = pickOne(
-            Array(lowLittleWinQualityCandidates.sorted {
-                (($0.weeklyScore ?? 999) < ($1.weeklyScore ?? 999))
-            }.prefix(4))
-        ) {
-            if littleWinCategory.littleWins.filter({ !normalized($0).isEmpty }).count >= 3 {
-                add("little_wins", "Which \(littleWinCategory.name) Little Win should I replace?")
-            } else {
-                add("little_wins", "What daily Little Wins would improve \(littleWinCategory.name)?")
-            }
-        } else if let secondaryFulfillment,
-                  secondaryFulfillment.name.caseInsensitiveCompare(weakestFulfillment?.name ?? "") != .orderedSame {
-            add("little_wins", "What daily Little Wins would improve \(secondaryFulfillment.name)?")
-        }
-
-        if let category = pickOne(Array(missionCandidates.prefix(4))) {
-            if normalized(category.mission).isEmpty || isLowSignal(category.mission) {
-                add("fulfillment", "Help me write a better Mission for \(category.name)")
-            } else {
-                add("fulfillment", "How could I improve the Mission for \(category.name)?")
-            }
-        } else if let weak = weakestFulfillment {
-            add("fulfillment", "How could I improve the Mission for \(weak.name)?")
-        }
-
-        if let category = pickOne(Array(identityCandidates.sorted {
-            (($0.weeklyScore ?? 999) < ($1.weeklyScore ?? 999))
-        }.prefix(4))) {
-            let existing = category.identity.map(normalized).filter { !$0.isEmpty }
-            if existing.isEmpty {
-                add("fulfillment", "What Identity should I add for \(category.name)?")
-            } else {
-                add("fulfillment", "Which Identity in \(category.name) should I improve?")
-            }
-        }
-
-        if let category = pickOne(Array(maxedLittleWinCandidates.sorted {
-            (($0.weeklyScore ?? 999) < ($1.weeklyScore ?? 999))
-        }.prefix(4))) {
-            add("little_wins", "Should I replace a weak Little Win in \(category.name)?")
+        for passionArea in rotatingPassionAreas {
+            add("passions_rotate", "New passions for \(passionArea)")
         }
 
         let nearTermOutcomes = snapshot.activeOutcomes
-            .filter { $0.endDate >= now }
+            .filter {
+                $0.endDate >= now &&
+                normalized($0.title).count >= 5 &&
+                !isLowSignal($0.title)
+            }
             .sorted { $0.endDate < $1.endDate }
         if let nextOutcome = pickOne(Array(nearTermOutcomes.prefix(4))) {
-            add("outcomes", "What should I do next for \(nextOutcome.title)?")
-        }
-        if let alternateOutcome = pickOne(Array(nearTermOutcomes.dropFirst().prefix(5))) {
-            add("outcomes", "What is the highest-impact move for \(alternateOutcome.title)?")
+            add("outcomes", "Next step for \(nextOutcome.title)")
         }
         let rotatingOutcomeTitles = nearTermOutcomes
             .map(\.title)
             .map(normalized)
-            .filter { !$0.isEmpty && !isLowSignal($0) }
-            .prefix(3)
+                .filter { $0.count >= 5 && !isLowSignal($0) }
+                .prefix(3)
         for outcomeTitle in rotatingOutcomeTitles {
-            add("outcome_rotate", "What should I do next for \(outcomeTitle)?")
-            add("outcome_rotate", "Give me a plan for \(outcomeTitle)")
+            add("outcome_rotate", "Next step for \(outcomeTitle)")
+            add("outcome_rotate", "Plan for \(outcomeTitle)")
         }
 
-        if let lowestBlock = snapshot.currentWeekActionBlocks
-            .sorted(by: { $0.completionRatio < $1.completionRatio })
-            .prefix(3)
-            .shuffled()
-            .first, lowestBlock.completionRatio < 0.6 {
-            add("action_blocks", "How do I get unstuck on \(chipLabelForActionBlock(lowestBlock))?")
-        }
-
-        if snapshot.recentActivity.carryoversLast7Days > 0 {
-            add("action_blocks", "What patterns are causing my carryovers?")
-        }
-
-        let purposeVisionMissingOrWeak =
-            snapshot.drivingForce == nil ||
-            (snapshot.drivingForce?.vision.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) ||
-            isLowSignal(snapshot.drivingForce?.vision ?? "")
-
-        let purposePurposeMissingOrWeak =
-            snapshot.drivingForce == nil ||
-            (snapshot.drivingForce?.purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) ||
-            isLowSignal(snapshot.drivingForce?.purpose ?? "")
-
-        if purposeVisionMissingOrWeak && purposePurposeMissingOrWeak {
-            add("purpose", "Help me clarify my Purpose and Vision")
-        } else if purposeVisionMissingOrWeak {
-            add("purpose", "How could I improve my Purpose Vision?")
-        } else {
-            add("purpose", "How do my actions align with my Purpose this week?")
-        }
-
-        if let drivingForce = snapshot.drivingForce {
-            let hasFewPassions = drivingForce.passions.count < 4
-            if hasFewPassions {
-                add("purpose", "What passions should I add based on my current data?")
-            } else if let category = pickOne(Array(passionGapCandidates.prefix(4))) {
-                add("purpose", "What passions should I connect to \(category.name)?")
-            } else {
-                add("purpose", "What Love/Thrill/Vows/Hate passions should I add next?")
-            }
-        }
-
-        if let inventory = snapshot.dataInventory.first(where: { $0.id == "action_blocks_actions_detail" }),
-           (inventory.currentCount ?? 0) > 15 {
-            add("fulfillment", "Do my actions fit my current Fulfillment Areas?")
-            add("fulfillment", "Should I add another Fulfillment Area based on my actions?")
-        }
-
-        if let inventory = snapshot.dataInventory.first(where: { $0.id == "capture" }),
-           (inventory.currentCount ?? 0) > 12 {
-            add("capture", "What in Capture should I turn into real execution next?")
-        }
-
-        if let inventory = snapshot.dataInventory.first(where: { $0.id == "recently_deleted" }),
-           (inventory.currentCount ?? 0) > 0 {
-            add("capture", "Anything worth restoring from Recently Deleted?")
-        }
-
-        if let inventory = snapshot.dataInventory.first(where: { $0.id == "vacation_mode" }),
-           inventory.keySignals.contains(where: { $0.localizedCaseInsensitiveContains("enabled") }) {
-            add("insight", "How should I plan around Vacation Mode?")
-        }
-
-        if !threadMessages.isEmpty {
-            add("response_modes", "Summarize my current priorities from this chat")
-        }
-
-        let showcaseChips: [(String, String)] = [
-            ("response_modes", "Answer in 3 options with tradeoffs"),
-            ("response_modes", "Give me one bold move and one safe move"),
-            ("response_modes", "Give me a 3-step execution plan"),
-            ("action_blocks", "Rank my action blocks by leverage"),
-            ("action_blocks", "What should I deprioritize right now?"),
-            ("capture", "Turn my captures into next actions"),
-            ("capture", "What can I delete from Capture with low risk?"),
-            ("outcomes", "Which outcome should get priority this week?"),
-            ("outcomes", "What metric should I track for my top outcome?"),
-            ("purpose", "Rewrite my Vision in a clearer tone"),
-            ("purpose", "Do my passions match how I spend time?"),
-            ("fulfillment", "Audit my Fulfillment Areas for overlap"),
-            ("fulfillment", "Where is my structure weakest right now?"),
-            ("little_wins", "Suggest one better Little Win I can apply"),
-            ("little_wins", "Which Little Win gives the best momentum?"),
-            ("insight", "What pattern is creating the most stress?"),
-            ("insight", "Where is my biggest consistency gap?")
-        ]
-        for (group, chip) in showcaseChips {
-            add(group, chip)
-        }
-
-        let universalFallbacks: [(String, String)] = [
-            ("insight", "Which fulfillment area is slipping?"),
-            ("action_blocks", "What should I focus on this week?"),
-            ("insight", "What data am I not tracking enough?")
-        ]
-        for (group, chip) in universalFallbacks {
-            add(group, chip)
-        }
+        add("loom_usage", "How can I best use Loom?")
+        add("loom_usage", whatIsLoomPromptTitle)
+        add("purpose", "Improve my Purpose Vision")
 
         let preferredGroupOrder = [
-            "insight",
+            "loom_usage",
             "category_rotate",
+            "passions_rotate",
             "outcome_rotate",
-            "action_blocks",
             "outcomes",
-            "fulfillment",
             "purpose",
-            "little_wins",
-            "capture",
-            "response_modes"
         ]
 
         var buckets: [(group: String, values: [String])] = []
@@ -1344,6 +1231,99 @@ final class LoomAIViewModel: ObservableObject {
             arranged = Array(arranged.prefix(maxCount))
         }
         return arranged
+    }
+
+    private func filterChipsWithSelectableLists(
+        _ chips: [String],
+        categories: [String],
+        outcomes: [String],
+        maxCount: Int
+    ) -> [String] {
+        let cleanedCategories: [String] = {
+            var seen = Set<String>()
+            return categories
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .filter { seen.insert($0.lowercased()).inserted }
+        }()
+        let cleanedOutcomes: [String] = {
+            var seen = Set<String>()
+            return outcomes
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { $0.count >= 5 }
+                .filter { seen.insert($0.lowercased()).inserted }
+        }()
+        let passionAreas = PassionType.allCases.map(\.rawValue)
+
+        func hasAllowedSuffix(_ chip: String, prefix: String, options: [String]) -> Bool {
+            let trimmed = chip.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.lowercased().hasPrefix(prefix.lowercased()) else { return false }
+            let suffix = trimmed.dropFirst(prefix.count).trimmingCharacters(in: .whitespacesAndNewlines)
+            return options.contains { String(suffix).caseInsensitiveCompare($0) == .orderedSame }
+        }
+
+        func isAllowedChip(_ chip: String) -> Bool {
+            let trimmed = chip.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.caseInsensitiveCompare("How can I best use Loom?") == .orderedSame {
+                return true
+            }
+            if trimmed.caseInsensitiveCompare(whatIsLoomPromptTitle) == .orderedSame {
+                return true
+            }
+            if trimmed.caseInsensitiveCompare("Improve my Purpose Vision") == .orderedSame {
+                return true
+            }
+            if hasAllowedSuffix(trimmed, prefix: "Daily Little Wins for ", options: cleanedCategories) {
+                return true
+            }
+            if hasAllowedSuffix(trimmed, prefix: "New Mission for ", options: cleanedCategories) {
+                return true
+            }
+            if hasAllowedSuffix(trimmed, prefix: "New Identity for ", options: cleanedCategories) {
+                return true
+            }
+            if hasAllowedSuffix(trimmed, prefix: "Next step for ", options: cleanedOutcomes) {
+                return true
+            }
+            if hasAllowedSuffix(trimmed, prefix: "Plan for ", options: cleanedOutcomes) {
+                return true
+            }
+            if hasAllowedSuffix(trimmed, prefix: "New passions for ", options: passionAreas) {
+                return true
+            }
+            return false
+        }
+
+        var seenSignatures = Set<String>()
+        let filtered = chips
+            .filter(isAllowedChip)
+            .filter { chip in
+                seenSignatures.insert(chipTemplateSignature(for: chip)).inserted
+            }
+
+        return Array(filtered.prefix(maxCount))
+    }
+
+    private func chipTemplateSignature(for chip: String) -> String {
+        let trimmed = chip.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let templatedPrefixes = [
+            "daily little wins for ",
+            "new mission for ",
+            "new identity for ",
+            "new passions for ",
+            "next step for ",
+            "plan for "
+        ]
+        if let prefix = templatedPrefixes.first(where: { trimmed.hasPrefix($0) }) {
+            return prefix
+        }
+        return trimmed
+    }
+
+    private func isWhatIsLoomPrompt(_ value: String) -> Bool {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .caseInsensitiveCompare(whatIsLoomPromptTitle) == .orderedSame
     }
 
     func buildContextSnapshot(in context: ModelContext) throws -> LoomAIContextSnapshot {
@@ -2186,7 +2166,7 @@ final class LoomAIViewModel: ObservableObject {
             .init(
                 id: "vacation_mode_behavior",
                 title: "Vacation Mode",
-                summary: "Vacation Mode preserves scoring/streak integrity during breaks, supports attention windows and passion scoping, and maintains a historical archive of vacations.",
+                summary: "Vacation Mode preserves scoring/streak integrity during breaks, supports reminder windows and passion scoping, and maintains a historical archive of vacations.",
                 relatedSections: ["vacation_mode"]
             )
         ]

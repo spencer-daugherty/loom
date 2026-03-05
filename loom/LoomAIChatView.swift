@@ -28,10 +28,17 @@ struct LoomAIChatView: View {
     @State private var needsRefreshWhenActive = true
     @State private var inputAutoFocusTask: Task<Void, Never>? = nil
     @State private var sendCurrentMessageTask: Task<Void, Never>? = nil
+    @State private var showCancelledNotice = false
+    @State private var cancelledNoticeOpacity: Double = 1
+    @State private var cancelledNoticeWorkItem: DispatchWorkItem? = nil
+    @State private var cancelledNoticeToken = UUID()
     @FocusState private var isInputFocused: Bool
     private let keyboardTopGap: CGFloat = 12
+    private let bestUseLoomChipTitle = "How can I best use Loom?"
+    private let bestUseLoomPrompt = "Based on everything Loom knows about me - my purpose vision, passions, fulfillment areas, goals, personality profile, current activity-explain the single most effective way for me to use Loom right now to reduce stress and live fulfilled."
 
     private var messages: [LoomAIChatMessage] { threadMessages }
+    private var chatBubbleMaxWidth: CGFloat { UIScreen.main.bounds.width * 0.72 }
 
     private var latestAssistantMessageID: UUID? { latestAssistantMessageIDCache }
 
@@ -41,6 +48,21 @@ struct LoomAIChatView: View {
 
     var body: some View {
         VStack(spacing: 10) {
+            if viewModel.isDailyLimitReached {
+                LoomAIInlineLimitNotice(text: "Daily LoomAI limit reached. Resets tomorrow.")
+                    .padding(.horizontal, 12)
+                    .padding(.top, 8)
+            } else if viewModel.shouldShowFiveLeftWarning {
+                LoomAIInlineLimitNotice(text: "You're approaching your daily limit.")
+                    .padding(.horizontal, 12)
+                    .padding(.top, 8)
+            }
+            if showCancelledNotice {
+                LoomAICancelNotice(text: "Cancelled")
+                    .padding(.horizontal, 12)
+                    .opacity(cancelledNoticeOpacity)
+            }
+
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 10) {
@@ -51,8 +73,13 @@ struct LoomAIChatView: View {
                         ForEach(messages) { message in
                             VStack(alignment: .leading, spacing: 8) {
                                 messageBubble(message)
-                                if message.id == latestAssistantMessageID {
-                                    suggestedActionsView(actions: LoomAIChatMessageActionsCodec.decode(message.actionsJSON))
+                                if message.roleRaw == LoomAIChatRole.assistant.rawValue {
+                                    groundingSectionView(items: LoomAIChatMessageGroundingCodec.decode(message.groundingJSON))
+                                    suggestionCardsSectionView(
+                                        cards: LoomAIChatMessageSuggestionCardsCodec.decode(message.suggestionCardsJSON),
+                                        fallbackActions: LoomAIChatMessageActionsCodec.decode(message.actionsJSON),
+                                        nextAction: LoomAIChatMessageNextActionCodec.decode(message.nextActionJSON)
+                                    )
                                 }
                             }
                             .id(message.id)
@@ -181,11 +208,6 @@ struct LoomAIChatView: View {
         .background(Color(.systemGroupedBackground))
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 8) {
-                if viewModel.isDailyLimitReached {
-                    LoomAIInlineLimitNotice(text: "Daily LoomAI limit reached. Resets tomorrow.")
-                } else if viewModel.shouldShowFiveLeftWarning {
-                    LoomAIInlineLimitNotice(text: "You're approaching your daily limit.")
-                }
                 if !visiblePromptChips.isEmpty {
                     suggestedPromptChipBar
                 }
@@ -224,6 +246,8 @@ struct LoomAIChatView: View {
             inputAutoFocusTask = nil
             sendCurrentMessageTask?.cancel()
             sendCurrentMessageTask = nil
+            cancelledNoticeWorkItem?.cancel()
+            cancelledNoticeWorkItem = nil
             isInputFocused = false
             dismissKeyboard()
         }
@@ -240,6 +264,11 @@ struct LoomAIChatView: View {
         .onReceive(NotificationCenter.default.publisher(for: .loomAIChatThreadSelectionDidChange)) { _ in
             let newKey = LoomAIChatThreadSelectionStore.currentThreadKey()
             guard newKey != activeThreadKey else { return }
+            if sendCurrentMessageTask != nil || viewModel.isSending {
+                sendCurrentMessageTask?.cancel()
+                sendCurrentMessageTask = nil
+                showCancelledNoticeTemporarily()
+            }
             activeThreadKey = newKey
             refreshThreadMessageCache()
             if isActivePage {
@@ -281,15 +310,21 @@ struct LoomAIChatView: View {
         let resolvedChip = resolvedPromptChipText(for: chip)
         let promptToSend = resolvedPromptChipPrompt(for: chip, resolvedTitle: resolvedChip)
         let matchedCategory = fulfillmentCategoryMatch(in: resolvedChip)
-        let matchedOutcome = matchedCategory == nil ? outcomeTitleMatch(in: resolvedChip) : nil
-        let highlightedToken = matchedCategory ?? matchedOutcome
-        let highlightColor = matchedCategory.map { FulfillmentCategoryTheme.color(for: $0) }
+        let matchedPassionArea = matchedCategory == nil ? passionAreaMatch(in: resolvedChip) : nil
+        let matchedOutcome = (matchedPassionArea == nil && matchedCategory == nil) ? outcomeTitleMatch(in: resolvedChip) : nil
+        let highlightedToken = matchedPassionArea ?? matchedCategory ?? matchedOutcome
+        let highlightColor = matchedPassionArea.map { _ in Color.secondary }
+            ?? matchedCategory.map { FulfillmentCategoryTheme.color(for: $0) }
             ?? matchedOutcome.map { outcomeChipColor(for: $0) }
             ?? .primary
 
         return HStack(spacing: 0) {
             Button {
-                sendPrompt(promptToSend)
+                let shouldMaskPromptInBubble = isBestUseLoomChip(resolvedChip) || isBestUseLoomChip(chip)
+                sendPrompt(
+                    promptToSend,
+                    displayedAs: shouldMaskPromptInBubble ? resolvedChip : nil
+                )
             } label: {
                 promptChipLabelText(
                     chipText: resolvedChip,
@@ -383,10 +418,32 @@ struct LoomAIChatView: View {
             .sorted()
     }
 
+    private var passionAreaNamesForChipSelection: [String] {
+        PassionType.allCases.map(\.rawValue)
+    }
+
+    private func isPassionSelectorChip(_ chipText: String) -> Bool {
+        chipText.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .hasPrefix("new passions for ")
+    }
+
     private func outcomeTitleMatch(in chipText: String) -> String? {
         outcomeTitlesForChipSelection
             .sorted { $0.count > $1.count }
             .first(where: { chipText.localizedCaseInsensitiveContains($0) })
+    }
+
+    private func passionAreaMatch(in chipText: String) -> String? {
+        guard isPassionSelectorChip(chipText) else { return nil }
+        return passionAreaNamesForChipSelection
+            .first(where: { option in
+                let suffix = chipText
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .dropFirst("new passions for ".count)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                return String(suffix).caseInsensitiveCompare(option) == .orderedSame
+            })
     }
 
     private func outcomeChipColor(for outcomeTitle: String) -> Color {
@@ -399,6 +456,11 @@ struct LoomAIChatView: View {
     }
 
     private func replacementOptions(for highlightedToken: String, in chipText: String) -> [String] {
+        if isPassionSelectorChip(chipText),
+           let matchedPassionArea = passionAreaMatch(in: chipText),
+           matchedPassionArea.caseInsensitiveCompare(highlightedToken) == .orderedSame {
+            return passionAreaNamesForChipSelection
+        }
         if let matchedCategory = fulfillmentCategoryMatch(in: chipText),
            matchedCategory.caseInsensitiveCompare(highlightedToken) == .orderedSame {
             return fulfillmentCategoryNamesForChipSelection
@@ -415,6 +477,9 @@ struct LoomAIChatView: View {
     }
 
     private func resolvedPromptChipPrompt(for originalChip: String, resolvedTitle: String) -> String {
+        if isBestUseLoomChip(originalChip) || isBestUseLoomChip(resolvedTitle) {
+            return bestUseLoomPrompt
+        }
         guard !messages.isEmpty else { return resolvedTitle }
         let latestAssistant = messages.last(where: { $0.roleRaw == LoomAIChatRole.assistant.rawValue })
         let chips = LoomAIChatMessageChipsCodec.decode(latestAssistant?.chipsJSON)
@@ -422,6 +487,11 @@ struct LoomAIChatView: View {
             return chipCategoryOverrides[originalChip] ?? match.prompt
         }
         return resolvedTitle
+    }
+
+    private func isBestUseLoomChip(_ text: String) -> Bool {
+        text.trimmingCharacters(in: .whitespacesAndNewlines)
+            .caseInsensitiveCompare(bestUseLoomChipTitle) == .orderedSame
     }
 
     private func replacingPromptToken(in chip: String, currentToken: String, with newValue: String) -> String {
@@ -438,7 +508,7 @@ struct LoomAIChatView: View {
                     .resizable()
                     .scaledToFit()
                     .frame(width: 22, height: 22)
-                Text("Ask Loom to analyze and improve your Purpose, Passions, Fulfillment Areas, Little Wins, Outcomes, Actions, Capture List, Action Blocks, and more.")
+                Text("Ask LoomAI to analyze and improve your Purpose Vision, Passions, Fulfillment Areas, Little Wins, Goals, Actions, Capture List, and any questions about Loom.")
                     .font(.subheadline.weight(.semibold))
             }
         }
@@ -456,7 +526,7 @@ struct LoomAIChatView: View {
     private func messageBubble(_ message: LoomAIChatMessage) -> some View {
         let isUser = message.roleRaw == LoomAIChatRole.user.rawValue
         return HStack {
-            if isUser { Spacer(minLength: 30) }
+            if isUser { Spacer(minLength: 0) }
             VStack(alignment: .leading, spacing: 4) {
                 messageBubbleText(message, isUser: isUser)
                     .padding(.horizontal, 12)
@@ -478,8 +548,6 @@ struct LoomAIChatView: View {
                                 lineWidth: 1
                             )
                     )
-                    .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
-                    .fixedSize(horizontal: false, vertical: true)
                     .contextMenu {
                         Button {
                             UIPasteboard.general.string = copyableMessageText(for: message)
@@ -487,13 +555,6 @@ struct LoomAIChatView: View {
                             Label("Copy", systemImage: "doc.on.doc")
                         }
                     }
-
-                if !isUser, (LoomAIDebugCodec.decode(message.debugJSON)?.usedContext ?? false) {
-                    Text("Grounded in your Loom data")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 4)
-                }
 
                 #if DEBUG
                 if !isUser {
@@ -504,8 +565,10 @@ struct LoomAIChatView: View {
                 }
                 #endif
             }
-            if !isUser { Spacer(minLength: 30) }
+            .frame(maxWidth: chatBubbleMaxWidth, alignment: isUser ? .trailing : .leading)
+            if !isUser { Spacer(minLength: 0) }
         }
+        .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
     }
 
     @ViewBuilder
@@ -514,9 +577,11 @@ struct LoomAIChatView: View {
             Text(message.content)
                 .font(.subheadline)
                 .foregroundStyle(.white)
+                .multilineTextAlignment(.leading)
                 .textSelection(.enabled)
         } else {
             LoomAITokenizedMessageView(content: message.content)
+                .multilineTextAlignment(.leading)
                 .textSelection(.enabled)
         }
     }
@@ -635,6 +700,162 @@ struct LoomAIChatView: View {
         return formatter.string(from: date).uppercased()
     }
     #endif
+
+    @ViewBuilder
+    private func groundingSectionView(items: [LoomAIGroundingItem]) -> some View {
+        if !items.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Grounding")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(items.prefix(6)) { item in
+                        HStack(alignment: .top, spacing: 6) {
+                            Circle()
+                                .fill(Color.secondary.opacity(0.45))
+                                .frame(width: 4, height: 4)
+                                .padding(.top, 6)
+                            Text(groundingLineText(item))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.leading)
+                        }
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(colorScheme == .dark ? Color(.secondarySystemBackground) : Color(.systemGray6))
+                )
+            }
+            .padding(.top, 2)
+        }
+    }
+
+    private func groundingLineText(_ item: LoomAIGroundingItem) -> String {
+        let section = item.section.trimmingCharacters(in: .whitespacesAndNewlines)
+        let field = item.field.trimmingCharacters(in: .whitespacesAndNewlines)
+        let timestamp = normalizedGroundingTimestampText(item.timestamp)
+        if !timestamp.isEmpty {
+            return "\(section) • \(field) • \(timestamp)"
+        }
+        return "\(section) • \(field)"
+    }
+
+    private func normalizedGroundingTimestampText(_ raw: String) -> String {
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return "" }
+        let formatter = ISO8601DateFormatter()
+        guard let date = formatter.date(from: value) else { return value }
+        return date.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    @ViewBuilder
+    private func suggestionCardsSectionView(
+        cards: [LoomAISuggestionCard],
+        fallbackActions: [LoomAISuggestedAction],
+        nextAction: LoomAISuggestedAction?
+    ) -> some View {
+        let cardsActions = suggestionCardActions(from: cards)
+        let hasCards = !cards.isEmpty
+        let hasFallback = !fallbackActions.isEmpty
+        let dedupedFallback = deduplicatedActions(fallbackActions)
+        let next = deduplicatedNextAction(nextAction, existing: cardsActions + dedupedFallback)
+
+        if hasCards || hasFallback || next != nil {
+            VStack(alignment: .leading, spacing: 8) {
+                if hasCards {
+                    Text("Suggestions")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    ForEach(cards) { card in
+                        suggestionCardView(card)
+                    }
+                } else if hasFallback {
+                    suggestedActionsView(actions: dedupedFallback)
+                }
+
+                if let next {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Next Action")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        suggestedActionButton(next)
+                    }
+                }
+            }
+            .padding(.top, 2)
+        }
+    }
+
+    private func suggestionCardView(_ card: LoomAISuggestionCard) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(card.title)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.primary)
+            if !card.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(card.description)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            let options = card.options.map(suggestionOptionToAction)
+            ForEach(options) { action in
+                suggestedActionButton(action)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(colorScheme == .dark ? Color(.secondarySystemBackground) : Color(.systemGray6))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color.primary.opacity(colorScheme == .dark ? 0.12 : 0.08), lineWidth: 1)
+        )
+    }
+
+    private func suggestionOptionToAction(_ option: LoomAISuggestionOption) -> LoomAISuggestedAction {
+        let label = option.label.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = label.isEmpty ? option.title : "\(label). \(option.title)"
+        return LoomAISuggestedAction(
+            id: option.id,
+            title: title,
+            type: option.type,
+            payload: option.payload
+        )
+    }
+
+    private func suggestionCardActions(from cards: [LoomAISuggestionCard]) -> [LoomAISuggestedAction] {
+        cards.flatMap(\.options).map(suggestionOptionToAction)
+    }
+
+    private func deduplicatedActions(_ actions: [LoomAISuggestedAction]) -> [LoomAISuggestedAction] {
+        var seen = Set<String>()
+        var unique: [LoomAISuggestedAction] = []
+        for action in actions {
+            let key = "\(action.type.lowercased())|\(action.payload.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "&"))"
+            if seen.insert(key).inserted {
+                unique.append(action)
+            }
+        }
+        return unique
+    }
+
+    private func deduplicatedNextAction(
+        _ action: LoomAISuggestedAction?,
+        existing: [LoomAISuggestedAction]
+    ) -> LoomAISuggestedAction? {
+        guard let action else { return nil }
+        let key = "\(action.type.lowercased())|\(action.payload.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "&"))"
+        let hasMatch = existing.contains { candidate in
+            let candidateKey = "\(candidate.type.lowercased())|\(candidate.payload.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "&"))"
+            return candidateKey == key
+        }
+        return hasMatch ? nil : action
+    }
 
     @ViewBuilder
     private func suggestedActionsView(actions: [LoomAISuggestedAction]) -> some View {
@@ -1097,23 +1318,41 @@ struct LoomAIChatView: View {
         }
     }
 
-    private func sendPrompt(_ prompt: String) {
+    private func sendPrompt(_ prompt: String, displayedAs: String? = nil) {
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !viewModel.isSending, !viewModel.isDailyLimitReached else { return }
-        viewModel.draft = trimmed
-        startSendingCurrentMessage()
+        let displayTrimmed = (displayedAs ?? prompt).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              !displayTrimmed.isEmpty,
+              !viewModel.isSending,
+              !viewModel.isDailyLimitReached else { return }
+        viewModel.draft = displayTrimmed
+        startSendingCurrentMessage(
+            displayedUserMessage: displayTrimmed,
+            transportMessageOverride: trimmed
+        )
     }
 
-    private func startSendingCurrentMessage() {
+    private func startSendingCurrentMessage(
+        displayedUserMessage: String? = nil,
+        transportMessageOverride: String? = nil
+    ) {
         guard !viewModel.isSending else { return }
         sendCurrentMessageTask?.cancel()
         sendCurrentMessageTask = Task { @MainActor in
-            await viewModel.sendCurrentMessage(in: modelContext, threadKey: activeThreadKey)
+            await viewModel.sendCurrentMessage(
+                in: modelContext,
+                threadKey: activeThreadKey,
+                displayedUserMessage: displayedUserMessage,
+                transportMessageOverride: transportMessageOverride
+            )
             sendCurrentMessageTask = nil
         }
     }
 
     private func createNewChatFromPullDown() {
+        if sendCurrentMessageTask != nil || viewModel.isSending {
+            showCancelledNoticeTemporarily()
+        }
         sendCurrentMessageTask?.cancel()
         sendCurrentMessageTask = nil
         let thread = LoomAIChatThread(
@@ -1125,6 +1364,27 @@ struct LoomAIChatView: View {
         modelContext.insert(thread)
         try? modelContext.save()
         LoomAIChatThreadSelectionStore.setCurrentThreadKey(thread.threadKey)
+    }
+
+    private func showCancelledNoticeTemporarily() {
+        cancelledNoticeWorkItem?.cancel()
+        let token = UUID()
+        cancelledNoticeToken = token
+        cancelledNoticeOpacity = 1
+        showCancelledNotice = true
+        let workItem = DispatchWorkItem {
+            withAnimation(.easeOut(duration: 0.25)) {
+                cancelledNoticeOpacity = 0
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                guard cancelledNoticeToken == token else { return }
+                showCancelledNotice = false
+                cancelledNoticeOpacity = 1
+                cancelledNoticeWorkItem = nil
+            }
+        }
+        cancelledNoticeWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: workItem)
     }
 
     private func updateKeyboardHeight(_ note: Notification) {
@@ -1292,6 +1552,28 @@ private struct LoomAIInlineLimitNotice: View {
     }
 }
 
+private struct LoomAICancelNotice: View {
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(Color.white.opacity(0.88))
+            Text(text)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color.white.opacity(0.92))
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.gray.opacity(0.8))
+        )
+    }
+}
+
 private struct LoomAITokenizedMessageView: View {
     private enum Segment: Hashable {
         case text(String)
@@ -1361,28 +1643,53 @@ private struct LoomAITokenizedMessageView: View {
         case .token(let kind, let value):
             switch kind {
             case "P":
-                Text(value)
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(.primary)
+                if isPassionReferenceToken(value) {
+                    Text(value)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(passionTokenForegroundColor)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(passionTokenBackgroundColor)
+                        )
+                        .overlay(
+                            Capsule(style: .continuous)
+                                .stroke(passionTokenBorderColor, lineWidth: 1)
+                        )
+                } else {
+                    Text(value)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.primary)
+                }
             case "F":
+                let base = fixedColor(FulfillmentCategoryTheme.color(for: value))
                 Text(value)
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(FulfillmentCategoryTheme.color(for: value))
+                    .foregroundStyle(base)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background(
                         Capsule(style: .continuous)
-                            .fill(FulfillmentCategoryTheme.lightColor(for: value).opacity(0.9))
+                            .fill(lightened(base, amount: 0.82))
+                    )
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .stroke(base.opacity(0.42), lineWidth: 1)
                     )
             case "O":
                 Text(value)
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.primary.opacity(0.85))
+                    .foregroundStyle(outcomeTokenForegroundColor)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background(
                         Capsule(style: .continuous)
-                            .fill(Color.primary.opacity(0.08))
+                            .fill(outcomeTokenBackgroundColor)
+                    )
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .stroke(outcomeTokenBorderColor, lineWidth: 1)
                     )
             case "A":
                 Text(value)
@@ -1398,6 +1705,86 @@ private struct LoomAITokenizedMessageView: View {
                 Text(value).font(.subheadline)
             }
         }
+    }
+
+    private var outcomeTokenForegroundColor: Color {
+        Color(red: 0.16, green: 0.28, blue: 0.53)
+    }
+
+    private var outcomeTokenBackgroundColor: Color {
+        Color(red: 0.87, green: 0.92, blue: 0.99)
+    }
+
+    private var outcomeTokenBorderColor: Color {
+        Color(red: 0.46, green: 0.63, blue: 0.90)
+    }
+
+    private var passionTokenForegroundColor: Color {
+        Color(red: 0.26, green: 0.26, blue: 0.28)
+    }
+
+    private var passionTokenBackgroundColor: Color {
+        Color(red: 0.92, green: 0.92, blue: 0.93)
+    }
+
+    private var passionTokenBorderColor: Color {
+        Color(red: 0.72, green: 0.72, blue: 0.74)
+    }
+
+    private func isPassionReferenceToken(_ value: String) -> Bool {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !trimmed.isEmpty else { return false }
+
+        let passionAreas = ["love", "vows", "thrill", "hate"]
+        if passionAreas.contains(trimmed) { return true }
+        if let first = trimmed.split(separator: ":", maxSplits: 1).first {
+            if passionAreas.contains(String(first).trimmingCharacters(in: .whitespacesAndNewlines)) {
+                return true
+            }
+        }
+        if trimmed.hasPrefix("love ") || trimmed.hasPrefix("vows ") || trimmed.hasPrefix("thrill ") || trimmed.hasPrefix("hate ") {
+            return true
+        }
+        return false
+    }
+
+    private func fixedColor(_ color: Color) -> Color {
+        #if canImport(UIKit)
+        let resolved = UIColor(color).resolvedColor(with: UITraitCollection(userInterfaceStyle: .light))
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        guard resolved.getRed(&red, green: &green, blue: &blue, alpha: &alpha) else { return color }
+        return Color(
+            red: Double(red),
+            green: Double(green),
+            blue: Double(blue),
+            opacity: Double(alpha)
+        )
+        #else
+        return color
+        #endif
+    }
+
+    private func lightened(_ color: Color, amount: CGFloat) -> Color {
+        #if canImport(UIKit)
+        let ui = UIColor(color)
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        guard ui.getRed(&red, green: &green, blue: &blue, alpha: &alpha) else { return color }
+        let clamped = max(0, min(amount, 1))
+        return Color(
+            red: Double(red + (1 - red) * clamped),
+            green: Double(green + (1 - green) * clamped),
+            blue: Double(blue + (1 - blue) * clamped),
+            opacity: Double(alpha)
+        )
+        #else
+        return color
+        #endif
     }
 
     private func parseSegments(in line: String) -> [Segment] {

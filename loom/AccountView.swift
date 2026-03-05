@@ -1097,9 +1097,9 @@ struct VacationModeView: View {
             }
 
             if !startToday {
-                Section("Attention") {
+                Section("Reminder") {
                     HStack {
-                        Text("Vacation Attention")
+                        Text("Vacation Reminder")
                         Spacer()
                         Picker("", selection: $attentionDays) {
                             ForEach(7...60, id: \.self) { dayCount in
@@ -1156,7 +1156,7 @@ struct VacationModeView: View {
             }
 
             Section {
-                Text("Vacation mode ensures your Purpose and Fulfillment score, as well as your Little Wins completion streaks, are not damaged from low activity when you’re taking a break. Temporarily freeze your progress until you come back.\n\nNote: Actions with due dates and attentions will continue to operate as scheduled.")
+                Text("Vacation mode ensures your Purpose and Fulfillment score, as well as your Little Wins completion streaks, are not damaged from low activity when you’re taking a break. Temporarily freeze your progress until you come back.\n\nNote: Actions with due dates and reminders will continue to operate as scheduled.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -4371,14 +4371,14 @@ private struct NotificationsPlaceholderView: View {
 
                     Section("Capture & Actions") {
                         toggleRow("Action Captured", keyPath: \.actionCaptured)
-                        toggleRow("Capture Action Attention", keyPath: \.captureActionAttention)
+                        toggleRow("Capture Action Reminder", keyPath: \.captureActionAttention)
                         toggleRow("Action Due", keyPath: \.actionDue)
                         toggleRow("Action Block Aging", keyPath: \.actionBlockAging)
                         toggleRow("Little Wins", keyPath: \.littleWins)
                     }
 
                     Section("Vacation Mode") {
-                        toggleRow("Vacation Mode Attention", keyPath: \.vacationModeAttention)
+                        toggleRow("Vacation Mode Reminder", keyPath: \.vacationModeAttention)
                         toggleRow("Vacation Mode Starting", keyPath: \.vacationModeStarting)
                     }
                 }
