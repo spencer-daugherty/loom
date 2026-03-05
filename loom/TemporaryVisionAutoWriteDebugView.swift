@@ -16,6 +16,7 @@ struct TemporaryVisionAutoWriteDebugView: View {
         case diagnostic
         case personalities
         case autoGroup
+        case resultAutoWrite
         case all
 
         var id: String { rawValue }
@@ -34,6 +35,8 @@ struct TemporaryVisionAutoWriteDebugView: View {
                 return "Personalities"
             case .autoGroup:
                 return "AutoGroup"
+            case .resultAutoWrite:
+                return "Result AutoWrite"
             case .all:
                 return "All"
             }
@@ -61,6 +64,8 @@ struct TemporaryVisionAutoWriteDebugView: View {
     @State private var rawContextText: String = ""
     @State private var usageSummaryText: String = "-"
     @State private var estimatedCostText: String = "-"
+    @State private var loomAIDebugChips: [LoomAIPromptChip] = []
+    @State private var loomAIDebugEvidence: [String] = []
     @State private var requestCopied = false
     @State private var responseCopied = false
     @State private var contextCopied = false
@@ -71,6 +76,7 @@ struct TemporaryVisionAutoWriteDebugView: View {
     private let chatEndpointURL = URL(string: "https://loom-ai-minimal.spence0927.workers.dev/chat")!
     private let diagnosticInsightsEndpointURL = URL(string: "https://loom-ai-minimal.spence0927.workers.dev/diagnostic/insights")!
     private let purposeProfileInsightsEndpointURL = URL(string: "https://loom-ai-minimal.spence0927.workers.dev/purpose/insights/profile")!
+    private let encoder = JSONEncoder()
 
     private static let diagnosticStressOptions: [String] = [
         "Too many priorities competing",
@@ -197,6 +203,54 @@ struct TemporaryVisionAutoWriteDebugView: View {
                         TextField("Prompt", text: $loomAIPrompt, axis: .vertical)
                             .textFieldStyle(.roundedBorder)
                             .focused($isInputFocused)
+
+                        if !loomAIDebugChips.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Debug Chips")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(spacing: 8) {
+                                        ForEach(loomAIDebugChips) { chip in
+                                            Button {
+                                                guard !isLoading else { return }
+                                                loomAIPrompt = chip.prompt
+                                                Task { await sendLoomAIChatRequest() }
+                                            } label: {
+                                                Text(chip.title)
+                                                    .font(.caption.weight(.semibold))
+                                                    .foregroundStyle(.primary)
+                                                    .padding(.horizontal, 10)
+                                                    .padding(.vertical, 7)
+                                                    .background(
+                                                        Capsule(style: .continuous)
+                                                            .fill(Color(.secondarySystemBackground))
+                                                    )
+                                                    .overlay(
+                                                        Capsule(style: .continuous)
+                                                            .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                                                    )
+                                            }
+                                            .buttonStyle(.plain)
+                                        }
+                                    }
+                                    .padding(.vertical, 2)
+                                }
+                            }
+                        }
+
+                        if !loomAIDebugEvidence.isEmpty {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Worker Debug Evidence")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                ForEach(Array(loomAIDebugEvidence.enumerated()), id: \.offset) { _, item in
+                                    Text("• \(item)")
+                                        .font(.caption.monospaced())
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
                     } else if mode == .diagnostic {
                         Text("Sends random diagnostic answers (stress, break point, 3-7 life areas, planning style, and desired change) to the Diagnostic Insights endpoint.")
                             .font(.subheadline)
@@ -207,6 +261,10 @@ struct TemporaryVisionAutoWriteDebugView: View {
                             .foregroundStyle(.secondary)
                     } else if mode == .autoGroup {
                         Text("Sends your existing Capture list (latest up to 25) to AutoGroup using intent autogroup_plan.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    } else if mode == .resultAutoWrite {
+                        Text("Sends Plan Result AutoWrite payload JSON (area + actions) as a user message with intent plan_result_autowrite.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     } else if mode == .all {
@@ -276,7 +334,7 @@ struct TemporaryVisionAutoWriteDebugView: View {
                             copyableCodeBlock(rawRequestText, copied: $requestCopied)
                         }
 
-                        if mode == .loomAI || mode == .autoGroup {
+                        if mode == .loomAI || mode == .autoGroup || mode == .resultAutoWrite {
                             Group {
                                 Text("Raw Context JSON")
                                     .font(.caption.weight(.semibold))
@@ -296,6 +354,13 @@ struct TemporaryVisionAutoWriteDebugView: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .navigationBarTitleDisplayMode(.inline)
+            .task(id: mode) {
+                if mode == .loomAI {
+                    await refreshLoomAIDebugChips()
+                } else {
+                    loomAIDebugEvidence = []
+                }
+            }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if isInputFocused {
@@ -410,6 +475,8 @@ struct TemporaryVisionAutoWriteDebugView: View {
             await sendPurposeProfileInsightsRequest()
         } else if mode == .autoGroup {
             await sendAutoGroupRequest()
+        } else if mode == .resultAutoWrite {
+            await sendResultAutoWriteRequest()
         } else if mode == .all {
             return
         } else {
@@ -427,6 +494,8 @@ struct TemporaryVisionAutoWriteDebugView: View {
             return "Send Random"
         case .autoGroup:
             return "AutoGroup"
+        case .resultAutoWrite:
+            return "Send"
         case .all:
             return "Refresh"
         case .newVision, .rewordVision:
@@ -514,6 +583,7 @@ struct TemporaryVisionAutoWriteDebugView: View {
         responseDurationText = "-"
         usageSummaryText = "-"
         estimatedCostText = "-"
+        loomAIDebugEvidence = []
         defer { isLoading = false }
         let startedAt = Date()
 
@@ -530,46 +600,57 @@ struct TemporaryVisionAutoWriteDebugView: View {
         do {
             let fullSnapshot = try LoomAIViewModel().buildContextSnapshot(in: modelContext)
             let contextSnapshot = fullSnapshot.compactedForLoomAI()
-            let context = try contextSnapshot.toDictionary()
-            let contextData = try JSONSerialization.data(withJSONObject: context, options: [.prettyPrinted, .sortedKeys])
-            rawContextText = String(data: contextData, encoding: .utf8) ?? "<context encoding failed>"
+            loomAIDebugChips = buildAllLoomAIDebugChips(from: contextSnapshot)
+            let messages = [LoomAIService.TransportMessage(role: "user", content: prompt)]
+            let userLocalDate = Self.localDayKey()
+            let timezone = TimeZone.current.identifier
+            let service = LoomAIService()
 
-            let body: [String: Any] = [
-                "messages": [
-                    [
-                        "role": "user",
-                        "content": prompt
-                    ]
-                ],
-                "context": context,
-                "client": [
-                    "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
-                    "platform": "iOS",
-                    "locale": Locale.current.identifier,
-                    "intent": "loomai_chat",
-                    "screen": "loomai_chat_debug",
-                    "userLocalDate": Self.localDayKey(),
-                    "timezone": TimeZone.current.identifier
-                ]
-            ]
+            let preview = try service.buildChatRequestPreview(
+                messages: messages,
+                context: contextSnapshot,
+                intent: "loomai_chat",
+                screen: "loomai_chat_debug",
+                userLocalDate: userLocalDate,
+                timezone: timezone
+            )
 
-            let bodyData = try JSONSerialization.data(withJSONObject: body, options: [.prettyPrinted, .sortedKeys])
-            rawRequestText = String(data: bodyData, encoding: .utf8) ?? "<request encoding failed>"
-
-            var request = URLRequest(url: chatEndpointURL)
-            request.httpMethod = "POST"
-            request.timeoutInterval = 60
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = bodyData
+            rawRequestText = try prettyJSONText(from: preview.bodyData)
+            rawContextText = try encodePrettyJSONText(preview.request.context)
 
             responseStatus = "Sending..."
-            let (data, response) = try await URLSession.shared.data(for: request)
-            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-            let responseText = String(data: data, encoding: .utf8) ?? "<non-UTF8 \(data.count) bytes>"
-            rawResponseText = responseText
-            responseStatus = "HTTP \(status)"
+            let response = try await service.sendChat(
+                messages: messages,
+                context: contextSnapshot,
+                intent: "loomai_chat",
+                screen: "loomai_chat_debug",
+                userLocalDate: userLocalDate,
+                timezone: timezone
+            )
+            let responseEnvelope = DebugLoomAIResponseEnvelope(
+                message: response.message,
+                grounding: response.grounding,
+                suggestionCards: response.suggestionCards,
+                nextAction: response.nextAction,
+                chips: response.chips,
+                actions: response.actions,
+                debug: response.debug,
+                usage: response.usage
+            )
+            loomAIDebugEvidence = response.debug?.evidence ?? []
+            loomAIDebugChips = mergedDebugChips(
+                preferred: buildAllLoomAIDebugChips(from: contextSnapshot),
+                server: response.chips
+            )
+            let responseData = try encodePrettyJSONData(responseEnvelope)
+            rawResponseText = String(data: responseData, encoding: .utf8) ?? "<response encoding failed>"
+            responseStatus = "HTTP 200"
             responseDurationText = formatDuration(Date().timeIntervalSince(startedAt))
-            updateUsageEstimate(from: data, requestData: bodyData, fallbackModel: "gpt-5.2")
+            updateUsageEstimate(
+                from: responseData,
+                requestData: preview.bodyData,
+                fallbackModel: response.usage?.model ?? "gpt-5.2"
+            )
         } catch {
             let nsError = error as NSError
             if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorTimedOut {
@@ -577,8 +658,19 @@ struct TemporaryVisionAutoWriteDebugView: View {
             } else {
                 responseStatus = "Request failed"
             }
+            loomAIDebugEvidence = []
             rawResponseText = String(describing: error)
             responseDurationText = formatDuration(Date().timeIntervalSince(startedAt))
+        }
+    }
+
+    @MainActor
+    private func refreshLoomAIDebugChips() async {
+        do {
+            let snapshot = try LoomAIViewModel().buildContextSnapshot(in: modelContext).compactedForLoomAI()
+            loomAIDebugChips = buildAllLoomAIDebugChips(from: snapshot)
+        } catch {
+            loomAIDebugChips = []
         }
     }
 
@@ -799,6 +891,181 @@ struct TemporaryVisionAutoWriteDebugView: View {
         }
     }
 
+    private struct PlanResultAutoWriteRequestPayload: Encodable {
+        let areaName: String
+        let actions: [String]
+    }
+
+    private func sendResultAutoWriteRequest() async {
+        isLoading = true
+        responseStatus = "Preparing request..."
+        responseDurationText = "-"
+        usageSummaryText = "-"
+        estimatedCostText = "-"
+        defer { isLoading = false }
+        let startedAt = Date()
+
+        guard let target = loadResultAutoWriteTarget() else {
+            responseStatus = "No Result data"
+            rawRequestText = "<no request sent>"
+            rawContextText = ""
+            rawResponseText = "Result AutoWrite debug needs at least one Result block with actions in the current plan week."
+            responseDurationText = formatDuration(Date().timeIntervalSince(startedAt))
+            return
+        }
+
+        do {
+            let payload = PlanResultAutoWriteRequestPayload(areaName: target.areaName, actions: target.actions)
+            let payloadData = try encoder.encode(payload)
+            let payloadJSON = String(data: payloadData, encoding: .utf8) ?? "{}"
+
+            let contextSnapshot = minimalPlanResultContextSnapshot()
+            let context = try contextSnapshot.toDictionary()
+            let contextData = try JSONSerialization.data(withJSONObject: context, options: [.prettyPrinted, .sortedKeys])
+            rawContextText = String(data: contextData, encoding: .utf8) ?? "<context encoding failed>"
+
+            let body: [String: Any] = [
+                "messages": [
+                    [
+                        "role": "user",
+                        "content": payloadJSON
+                    ]
+                ],
+                "context": context,
+                "client": [
+                    "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
+                    "platform": "iOS",
+                    "locale": Locale.current.identifier,
+                    "intent": "plan_result_autowrite",
+                    "screen": "plan_result",
+                    "userLocalDate": Self.localDayKey(),
+                    "timezone": TimeZone.current.identifier
+                ]
+            ]
+
+            let bodyData = try JSONSerialization.data(withJSONObject: body, options: [.prettyPrinted, .sortedKeys])
+            rawRequestText = String(data: bodyData, encoding: .utf8) ?? "<request encoding failed>"
+
+            var request = URLRequest(url: chatEndpointURL)
+            request.httpMethod = "POST"
+            request.timeoutInterval = 60
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = bodyData
+
+            responseStatus = "Sending..."
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            let responseText = String(data: data, encoding: .utf8) ?? "<non-UTF8 \(data.count) bytes>"
+            rawResponseText = responseText
+            responseStatus = "HTTP \(status)"
+            responseDurationText = formatDuration(Date().timeIntervalSince(startedAt))
+            updateUsageEstimate(from: data, requestData: bodyData, fallbackModel: "gpt-5-mini")
+        } catch {
+            let nsError = error as NSError
+            if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorTimedOut {
+                responseStatus = "Request timed out"
+            } else {
+                responseStatus = "Request failed"
+            }
+            rawResponseText = String(describing: error)
+            responseDurationText = formatDuration(Date().timeIntervalSince(startedAt))
+        }
+    }
+
+    private func loadResultAutoWriteTarget() -> (areaName: String, actions: [String])? {
+        do {
+            let weekStart = WeeklyMindsetEntry.weekStart(for: Date())
+            let chunks = try modelContext.fetch(
+                FetchDescriptor<PlannedChunk>(sortBy: [SortDescriptor(\.chunkIndex, order: .forward)])
+            )
+            .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: weekStart) }
+
+            guard !chunks.isEmpty else { return nil }
+
+            let actions = try modelContext.fetch(
+                FetchDescriptor<PlannedChunkAction>(sortBy: [SortDescriptor(\.sortOrder, order: .forward)])
+            )
+            .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: weekStart) }
+
+            let actionsByChunk = Dictionary(grouping: actions, by: \.plannedChunkId)
+            var grouped: [(areaName: String, actions: [String])] = []
+            var seenAreaKeys: Set<String> = []
+
+            for chunk in chunks {
+                let areaName = chunk.label.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !areaName.isEmpty else { continue }
+                let areaKey = areaName.lowercased()
+                guard seenAreaKeys.insert(areaKey).inserted else { continue }
+
+                let chunkActions = chunks
+                    .filter { $0.label.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare(areaName) == .orderedSame }
+                    .flatMap { groupedChunk -> [PlannedChunkAction] in
+                        actionsByChunk[groupedChunk.id] ?? []
+                    }
+                    .map {
+                        $0.text
+                            .replacingOccurrences(of: "\n", with: " ")
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                    }
+                    .filter { !$0.isEmpty }
+
+                let uniqueActions = uniqueOrdered(chunkActions)
+                if !uniqueActions.isEmpty {
+                    grouped.append((areaName: areaName, actions: uniqueActions))
+                }
+            }
+
+            if let preferred = grouped.first(where: { $0.actions.count >= 2 }) {
+                return preferred
+            }
+            return grouped.first
+        } catch {
+            AppDebugActivityLog.log("Debug", "Result AutoWrite target fetch failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private func uniqueOrdered(_ items: [String]) -> [String] {
+        var seen = Set<String>()
+        var output: [String] = []
+        for item in items {
+            let normalized = item.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !normalized.isEmpty else { continue }
+            let key = normalized.lowercased()
+            guard seen.insert(key).inserted else { continue }
+            output.append(normalized)
+        }
+        return output
+    }
+
+    private func minimalPlanResultContextSnapshot() -> LoomAIContextSnapshot {
+        LoomAIContextSnapshot(
+            generatedAt: .now,
+            personalizationHash: "",
+            diagnostic: nil,
+            drivingForce: nil,
+            fulfillmentCategories: [],
+            activeOutcomes: [],
+            currentWeekActionBlocks: [],
+            recentActivity: .init(
+                quickCompletesLast7Days: 0,
+                littleWinsCompletionsLast7Days: 0,
+                carryoversLast7Days: 0
+            ),
+            capture: nil,
+            recentlyDeleted: nil,
+            sectionTimestamps: nil,
+            dataInventory: [],
+            appGuide: [],
+            notes: [],
+            purposeDraft: nil,
+            fulfillmentSetup: nil,
+            personalization: nil,
+            reflectionJournal: nil,
+            shareAttachmentPreview: nil
+        )
+    }
+
     private func makeRandomDiagnosticRequestBody() -> [String: Any] {
         let diagnostic = makeRandomDiagnosticAnswers()
 
@@ -951,6 +1218,24 @@ struct TemporaryVisionAutoWriteDebugView: View {
         }
     }
 
+    private func prettyJSONText(from data: Data) throws -> String {
+        let object = try JSONSerialization.jsonObject(with: data, options: [])
+        let prettyData = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+        return String(data: prettyData, encoding: .utf8) ?? "<json encoding failed>"
+    }
+
+    private func encodePrettyJSONData<T: Encodable>(_ value: T) throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return try encoder.encode(value)
+    }
+
+    private func encodePrettyJSONText<T: Encodable>(_ value: T) throws -> String {
+        let data = try encodePrettyJSONData(value)
+        return String(data: data, encoding: .utf8) ?? "<json encoding failed>"
+    }
+
     private static func localDayKey() -> String {
         let formatter = DateFormatter()
         formatter.calendar = Calendar.current
@@ -963,6 +1248,75 @@ struct TemporaryVisionAutoWriteDebugView: View {
     private func formatDuration(_ seconds: TimeInterval) -> String {
         String(format: "%.2fs", max(0, seconds))
     }
+
+    private func buildAllLoomAIDebugChips(from snapshot: LoomAIContextSnapshot) -> [LoomAIPromptChip] {
+        var chips: [LoomAIPromptChip] = []
+        var seen = Set<String>()
+        func add(_ title: String, _ prompt: String) {
+            let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedTitle.isEmpty, !trimmedPrompt.isEmpty else { return }
+            let key = "\(trimmedTitle.lowercased())|\(trimmedPrompt.lowercased())"
+            guard seen.insert(key).inserted else { return }
+            chips.append(.init(id: "debug-chip-\(seen.count)", title: trimmedTitle, prompt: trimmedPrompt))
+        }
+
+        add("How can I best use Loom?", "How can I best use Loom?")
+        add("What is Loom?", "What is Loom?")
+        add("Improve my Purpose Vision", "Improve my Purpose Vision")
+
+        let categories = snapshot.fulfillmentCategories
+            .map { $0.name.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        for category in categories {
+            add("Daily Little Wins for \(category)", "Daily Little Wins for \(category)")
+            add("New Mission for \(category)", "New Mission for \(category)")
+            add("New Identity for \(category)", "New Identity for \(category)")
+        }
+
+        let goals = snapshot.activeOutcomes
+            .map { $0.title.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.count >= 5 }
+        for goal in goals {
+            add("Next step for \(goal)", "Next step for \(goal)")
+            add("Plan for \(goal)", "Plan for \(goal)")
+        }
+
+        for passion in ["Love", "Vows", "Thrill", "Hate"] {
+            add("New passions for \(passion)", "New passions for \(passion)")
+        }
+
+        return chips
+    }
+
+    private func mergedDebugChips(
+        preferred: [LoomAIPromptChip],
+        server: [LoomAIPromptChip]
+    ) -> [LoomAIPromptChip] {
+        var merged: [LoomAIPromptChip] = []
+        var seen = Set<String>()
+        let source = preferred + server
+        for chip in source {
+            let title = chip.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let prompt = chip.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty, !prompt.isEmpty else { continue }
+            let key = "\(title.lowercased())|\(prompt.lowercased())"
+            guard seen.insert(key).inserted else { continue }
+            merged.append(.init(id: chip.id, title: title, prompt: prompt))
+        }
+        return merged
+    }
+}
+
+private struct DebugLoomAIResponseEnvelope: Encodable {
+    var message: String
+    var grounding: [LoomAIGroundingItem]
+    var suggestionCards: [LoomAISuggestionCard]
+    var nextAction: LoomAISuggestedAction?
+    var chips: [LoomAIPromptChip]
+    var actions: [LoomAIAction]
+    var debug: LoomAIDebug?
+    var usage: LoomAIUsage?
 }
 
 private extension LoomAIContextSnapshot {

@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 struct LoomAIService {
     private let baseURL = URL(string: "https://loom-ai-minimal.spence0927.workers.dev")!
@@ -21,6 +22,7 @@ struct LoomAIService {
         var userLocalDate: String? = nil
         var timezone: String? = nil
         var remainingDailyResponses: Int? = nil
+        var stableContextHash: String? = nil
     }
 
     struct TransportMessage: Codable {
@@ -30,8 +32,86 @@ struct LoomAIService {
 
     struct ChatRequest: Codable {
         var messages: [TransportMessage]
-        var context: LoomAIContextSnapshot
+        var context: LoomAIIntentContextPack
         var client: ClientInfo
+    }
+
+    struct ChatRequestPreview {
+        var request: ChatRequest
+        var bodyData: Data
+        var usedMinimalContext: Bool
+        var routeID: Int?
+        var routeKey: String?
+        var routeTarget: String?
+    }
+
+    struct LoomAIIntentContextPack: Codable {
+        struct IntentSummary: Codable {
+            var routeID: Int?
+            var routeKey: String?
+            var target: String?
+        }
+
+        struct Layers: Codable {
+            struct IdentityLayer: Codable {
+                var diagnostic: LoomAIContextSnapshot.DiagnosticSummary?
+                var purpose: LoomAIContextSnapshot.DrivingForceSummary?
+                var personalityProfile: String?
+            }
+
+            struct CurrentRealityLayer: Codable {
+                struct WeekLayer: Codable {
+                    var currentWeekActionBlocks: [LoomAIContextSnapshot.ActionBlockSummary]
+                }
+
+                var fulfillment: [LoomAIContextSnapshot.FulfillmentCategorySummary]?
+                var goals: [LoomAIContextSnapshot.OutcomeSummary]?
+                var week: WeekLayer?
+                var capture: LoomAIContextSnapshot.CaptureSummary?
+            }
+
+            struct TargetObjectLayer: Codable {
+                var type: String
+                var id: String? = nil
+                var name: String? = nil
+                var mission: String? = nil
+                var identity: [String]? = nil
+                var littleWins: [String]? = nil
+                var title: String? = nil
+                var category: String? = nil
+                var measurable: Bool? = nil
+                var progressSummary: String? = nil
+                var emotion: String? = nil
+                var relatedPassions: [LoomAIContextSnapshot.PassionSummary]? = nil
+                var vision: String? = nil
+                var purpose: String? = nil
+                var prompt: String? = nil
+            }
+
+            var identity: IdentityLayer?
+            var currentReality: CurrentRealityLayer?
+            var targetObject: TargetObjectLayer?
+        }
+
+        struct StableContext: Codable {
+            struct StableCounts: Codable {
+                var appGuide: Int
+                var dataInventory: Int
+            }
+
+            var hash: String
+            var changed: Bool
+            var appGuide: [LoomAIContextSnapshot.GuideTopic]
+            var dataInventory: [LoomAIContextSnapshot.KnowledgeSectionSummary]
+            var counts: StableCounts
+        }
+
+        var contextVersion: String
+        var generatedAt: Date?
+        var personalizationHash: String?
+        var intent: IntentSummary
+        var layers: Layers
+        var stableContext: StableContext
     }
 
     struct AutoGroupContext: Codable {
@@ -549,21 +629,21 @@ struct LoomAIService {
             timezone: sanitizedClientValue(timezone),
             remainingDailyResponses: remainingDailyResponses
         )
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
 
-        var requestBody = ChatRequest(messages: messages, context: context, client: client)
-        var bodyData = try encoder.encode(requestBody)
-        var isUsingMinimalContext = false
-        if bodyData.count > LoomAIContextSnapshot.maxPayloadBytes {
-            requestBody.context = context.minimalized()
-            bodyData = try encoder.encode(requestBody)
-            isUsingMinimalContext = true
-        }
-
-        let timeout = requestTimeout(for: intent, usingMinimalContext: isUsingMinimalContext)
+        var prepared = try prepareChatRequestPayload(
+            messages: messages,
+            context: context,
+            client: client,
+            intent: intent,
+            forceMinimalContext: false
+        )
+        let timeout = requestTimeout(for: intent, usingMinimalContext: prepared.usedMinimalContext)
+        log(
+            "sendChat intent=\(intent ?? "loomai_chat") messages=\(messages.count) contextBytes=\(prepared.bodyData.count) minimal=\(prepared.usedMinimalContext) timeout=\(Int(timeout))s"
+        )
         do {
-            let response = try await post(path: "/chat", bodyData: bodyData, timeout: timeout)
+            let response = try await post(path: "/chat", bodyData: prepared.bodyData, timeout: timeout)
+            LoomAICostLedger.record(response: response, intent: intent)
             reportSlowResponseIfNeeded(
                 response,
                 intent: intent,
@@ -575,13 +655,24 @@ struct LoomAIService {
         } catch {
             // If the first request timed out before we already switched to minimal context,
             // retry once with a compact snapshot to keep AI features responsive.
-            guard shouldRetryWithMinimalContext(for: error), !isUsingMinimalContext else {
+            guard
+                shouldRetryWithMinimalContext(for: error),
+                shouldRetryWithMinimalContext(for: intent),
+                !prepared.usedMinimalContext
+            else {
                 throw error
             }
-            requestBody.context = context.minimalized()
-            bodyData = try encoder.encode(requestBody)
+            log("Retrying /chat once with minimal context after transient failure: \(String(describing: error))")
+            prepared = try prepareChatRequestPayload(
+                messages: messages,
+                context: context,
+                client: client,
+                intent: intent,
+                forceMinimalContext: true
+            )
             let retryTimeout = requestTimeout(for: intent, usingMinimalContext: true)
-            let retryResponse = try await post(path: "/chat", bodyData: bodyData, timeout: retryTimeout)
+            let retryResponse = try await post(path: "/chat", bodyData: prepared.bodyData, timeout: retryTimeout)
+            LoomAICostLedger.record(response: retryResponse, intent: intent)
             reportSlowResponseIfNeeded(
                 retryResponse,
                 intent: intent,
@@ -591,6 +682,114 @@ struct LoomAIService {
             )
             return retryResponse
         }
+    }
+
+    func buildChatRequestPreview(
+        messages: [TransportMessage],
+        context: LoomAIContextSnapshot,
+        intent: String? = nil,
+        screen: String? = nil,
+        requestID: String? = nil,
+        requestHash: String? = nil,
+        userLocalDate: String? = nil,
+        timezone: String? = nil,
+        remainingDailyResponses: Int? = nil,
+        forceMinimalContext: Bool = false
+    ) throws -> ChatRequestPreview {
+        let client = ClientInfo(
+            appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
+            platform: "iOS",
+            locale: Locale.current.identifier,
+            intent: intent,
+            screen: screen,
+            requestId: sanitizedClientValue(requestID),
+            requestHash: sanitizedClientValue(requestHash),
+            userLocalDate: sanitizedClientValue(userLocalDate),
+            timezone: sanitizedClientValue(timezone),
+            remainingDailyResponses: remainingDailyResponses
+        )
+        let prepared = try prepareChatRequestPayload(
+            messages: messages,
+            context: context,
+            client: client,
+            intent: intent,
+            forceMinimalContext: forceMinimalContext
+        )
+        return ChatRequestPreview(
+            request: prepared.requestBody,
+            bodyData: prepared.bodyData,
+            usedMinimalContext: prepared.usedMinimalContext,
+            routeID: prepared.route?.id,
+            routeKey: prepared.route?.key,
+            routeTarget: prepared.route?.target
+        )
+    }
+
+    private struct PreparedChatPayload {
+        var requestBody: ChatRequest
+        var bodyData: Data
+        var route: ChipIntentRoute?
+        var usedMinimalContext: Bool
+    }
+
+    private func prepareChatRequestPayload(
+        messages: [TransportMessage],
+        context: LoomAIContextSnapshot,
+        client: ClientInfo,
+        intent: String?,
+        forceMinimalContext: Bool
+    ) throws -> PreparedChatPayload {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+
+        let latestUserMessage = messages.last(where: { $0.role.lowercased() == "user" })?.content ?? ""
+        let route = resolveChipIntentRoute(from: latestUserMessage)
+        var requestClient = client
+        var sourceContext = forceMinimalContext
+            ? context.minimalized().compactedForLoomAI()
+            : context.compactedForLoomAI()
+
+        var packedContext = try buildIntentContextPack(
+            from: sourceContext,
+            route: route,
+            latestUserMessage: latestUserMessage
+        )
+        tuneContextPackForIntent(&packedContext, intent: intent)
+        requestClient.stableContextHash = packedContext.stableContext.hash
+
+        var requestBody = ChatRequest(messages: messages, context: packedContext, client: requestClient)
+        var bodyData = try encoder.encode(requestBody)
+        var usedMinimalContext = forceMinimalContext
+
+        if bodyData.count > LoomAIContextSnapshot.maxPayloadBytes && !usedMinimalContext {
+            usedMinimalContext = true
+            sourceContext = context.minimalized().compactedForLoomAI()
+            packedContext = try buildIntentContextPack(
+                from: sourceContext,
+                route: route,
+                latestUserMessage: latestUserMessage
+            )
+            tuneContextPackForIntent(&packedContext, intent: intent)
+            requestClient.stableContextHash = packedContext.stableContext.hash
+            requestBody = ChatRequest(messages: messages, context: packedContext, client: requestClient)
+            bodyData = try encoder.encode(requestBody)
+        }
+
+        if bodyData.count > LoomAIContextSnapshot.maxPayloadBytes,
+           (!packedContext.stableContext.appGuide.isEmpty || !packedContext.stableContext.dataInventory.isEmpty) {
+            packedContext.stableContext.appGuide = []
+            packedContext.stableContext.dataInventory = []
+            packedContext.stableContext.changed = false
+            requestBody = ChatRequest(messages: messages, context: packedContext, client: requestClient)
+            bodyData = try encoder.encode(requestBody)
+        }
+
+        return PreparedChatPayload(
+            requestBody: requestBody,
+            bodyData: bodyData,
+            route: route,
+            usedMinimalContext: usedMinimalContext
+        )
     }
 
     func sendAutoGroupChat(
@@ -637,6 +836,7 @@ struct LoomAIService {
 
         let timeout = requestTimeout(for: intent, usingMinimalContext: true)
         let response = try await post(path: "/chat", bodyData: bodyData, timeout: timeout)
+        LoomAICostLedger.record(response: response, intent: intent)
         reportSlowResponseIfNeeded(
             response,
             intent: intent,
@@ -784,6 +984,7 @@ struct LoomAIService {
         let bodyData = try encoder.encode(requestBody)
 
         let response = try await post(path: "/purpose/vision/autowrite", bodyData: bodyData, timeout: 35)
+        LoomAICostLedger.record(response: response, intent: "autowrite_purpose")
         reportSlowResponseIfNeeded(
             response,
             intent: "autowrite_purpose",
@@ -799,6 +1000,614 @@ struct LoomAIService {
             return nil
         }
         return String(trimmed.prefix(128))
+    }
+
+    private struct ChipIntentRoute {
+        var id: Int
+        var key: String
+        var target: String?
+    }
+
+    private func resolveChipIntentRoute(from latestUserMessage: String) -> ChipIntentRoute? {
+        let text = latestUserMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return nil }
+        let lower = text.lowercased()
+
+        if let target = parseChipTarget(prefix: "daily little wins for ", text: text) {
+            return .init(id: 1, key: "daily_little_wins", target: target)
+        }
+        if let target = parseChipTarget(prefix: "new mission for ", text: text) {
+            return .init(id: 2, key: "new_mission", target: target)
+        }
+        if let target = parseChipTarget(prefix: "new identity for ", text: text) {
+            return .init(id: 3, key: "new_identity", target: target)
+        }
+        if let target = parseChipTarget(prefix: "next step for ", text: text) {
+            return .init(id: 4, key: "goal_next_step", target: target)
+        }
+        if let target = parseChipTarget(prefix: "plan for ", text: text) {
+            return .init(id: 5, key: "goal_plan", target: target)
+        }
+        if let target = parseChipTarget(prefix: "new passions for ", text: text) {
+            return .init(id: 6, key: "new_passions", target: normalizedPassionType(target))
+        }
+        if lower == "improve my purpose vision" {
+            return .init(id: 7, key: "improve_purpose_vision", target: nil)
+        }
+        if lower == "how can i best use loom?"
+            || lower == "how can i best use loom"
+            || lower.contains("single most effective way for me to use loom right now")
+        {
+            return .init(id: 8, key: "best_use_loom", target: nil)
+        }
+        return nil
+    }
+
+    private func parseChipTarget(prefix: String, text: String) -> String? {
+        let lower = text.lowercased()
+        guard lower.hasPrefix(prefix) else { return nil }
+        let start = text.index(text.startIndex, offsetBy: prefix.count)
+        let target = text[start...].trimmingCharacters(in: .whitespacesAndNewlines)
+        return target.isEmpty ? nil : String(target.prefix(120))
+    }
+
+    private func buildIntentContextPack(
+        from snapshot: LoomAIContextSnapshot,
+        route: ChipIntentRoute?,
+        latestUserMessage: String
+    ) throws -> LoomAIIntentContextPack {
+        let diagnostic = cleanDiagnosticSummary(snapshot.diagnostic)
+        let drivingForce = cleanDrivingForceSummary(snapshot.drivingForce)
+        let fulfillment = cleanFulfillmentCategories(snapshot.fulfillmentCategories)
+        let goals = cleanActiveGoals(snapshot.activeOutcomes)
+        let weekBlocks = cleanActionBlocks(snapshot.currentWeekActionBlocks)
+        let capture = cleanCaptureSummary(snapshot.capture)
+        let appGuide = cleanAppGuide(snapshot.appGuide)
+        let dataInventory = cleanDataInventory(snapshot.dataInventory)
+
+        let targetObject = buildTargetObjectLayer(
+            route: route,
+            latestUserMessage: latestUserMessage,
+            fulfillment: fulfillment,
+            goals: goals,
+            drivingForce: drivingForce
+        )
+        let currentReality = buildCurrentRealityLayer(
+            route: route,
+            targetObject: targetObject,
+            fulfillment: fulfillment,
+            goals: goals,
+            weekBlocks: weekBlocks,
+            capture: capture
+        )
+
+        let stableHash = try stableContextHash(appGuide: appGuide, dataInventory: dataInventory)
+        let stableScopeKey = stableContextScopeKey(
+            snapshot: snapshot,
+            appGuideCount: appGuide.count,
+            dataInventoryCount: dataInventory.count
+        )
+        let previousHash = UserDefaults.standard.string(forKey: stableHashDefaultsKey(scope: stableScopeKey)) ?? ""
+        let stableChanged = previousHash != stableHash
+        let includeStableByIntent = shouldIncludeStableBlocks(for: route?.id)
+        let includeStableFull = includeStableByIntent && stableChanged
+        let reportedStableChanged = includeStableByIntent ? stableChanged : false
+        UserDefaults.standard.set(stableHash, forKey: stableHashDefaultsKey(scope: stableScopeKey))
+
+        let routeID = route?.id
+        return LoomAIIntentContextPack(
+            contextVersion: "intent_pack_v1",
+            generatedAt: snapshot.generatedAt,
+            personalizationHash: trimmedOrNil(snapshot.personalizationHash, max: 128),
+            intent: .init(
+                routeID: routeID,
+                routeKey: route?.key,
+                target: trimmedOrNil(route?.target, max: 120)
+            ),
+            layers: .init(
+                identity: {
+                    let personalityProfile = trimmedOrNil(snapshot.purposeProfile?.profile, max: 72)
+                    if diagnostic == nil && drivingForce == nil && personalityProfile == nil { return nil }
+                    return .init(
+                        diagnostic: diagnostic,
+                        purpose: drivingForce,
+                        personalityProfile: personalityProfile
+                    )
+                }(),
+                currentReality: currentReality,
+                targetObject: targetObject
+            ),
+            stableContext: .init(
+                hash: stableHash,
+                changed: reportedStableChanged,
+                appGuide: includeStableFull ? appGuide : [],
+                dataInventory: includeStableFull ? dataInventory : [],
+                counts: .init(
+                    appGuide: includeStableFull ? appGuide.count : 0,
+                    dataInventory: includeStableFull ? dataInventory.count : 0
+                )
+            )
+        )
+    }
+
+    private func tuneContextPackForIntent(
+        _ pack: inout LoomAIIntentContextPack,
+        intent: String?
+    ) {
+        let normalizedIntent = intent?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        guard normalizedIntent == "chat_thread_title" else { return }
+        pack.stableContext.appGuide = []
+        pack.stableContext.dataInventory = []
+        pack.stableContext.changed = false
+    }
+
+    private func buildTargetObjectLayer(
+        route: ChipIntentRoute?,
+        latestUserMessage: String,
+        fulfillment: [LoomAIContextSnapshot.FulfillmentCategorySummary],
+        goals: [LoomAIContextSnapshot.OutcomeSummary],
+        drivingForce: LoomAIContextSnapshot.DrivingForceSummary?
+    ) -> LoomAIIntentContextPack.Layers.TargetObjectLayer? {
+        guard let route else { return nil }
+        switch route.id {
+        case 1, 2, 3:
+            let category = findCategoryByName(fulfillment, target: route.target) ?? fulfillment.first
+            guard let category else { return nil }
+            return .init(
+                type: "fulfillment_area",
+                id: trimmedOrNil(category.id, max: 40),
+                name: trimmedOrNil(category.name, max: 72),
+                mission: trimmedOrNil(normalizeMissionText(category.mission), max: 220),
+                identity: cleanStringList(category.identity, maxItems: 3, maxChars: 64, minLength: 2, allowJunk: false),
+                littleWins: cleanStringList(category.littleWins, maxItems: 3, maxChars: 72, minLength: 2, allowJunk: false)
+            )
+        case 4, 5:
+            let goal = findGoalByTitle(goals, target: route.target) ?? goals.first
+            guard let goal else { return nil }
+            return .init(
+                type: "goal",
+                id: trimmedOrNil(goal.id, max: 40),
+                title: trimmedOrNil(goal.title, max: 96),
+                category: trimmedOrNil(goal.category, max: 72),
+                measurable: goal.measurable,
+                progressSummary: trimmedOrNil(goal.progressSummary, max: 140)
+            )
+        case 6:
+            let emotion = normalizedPassionType(route.target ?? "love")
+            let related = (drivingForce?.passions ?? [])
+                .filter { normalizedPassionType($0.emotion) == emotion }
+                .prefix(3)
+            return .init(
+                type: "passion_type",
+                emotion: emotion,
+                relatedPassions: Array(related)
+            )
+        case 7:
+            guard let drivingForce else { return nil }
+            return .init(
+                type: "purpose_vision",
+                vision: trimmedOrNil(drivingForce.vision, max: 240),
+                purpose: trimmedOrNil(drivingForce.purpose, max: 240)
+            )
+        case 8:
+            let fallbackPrompt = "How can I best use Loom?"
+            return .init(
+                type: "loom_usage",
+                prompt: trimmedOrNil(latestUserMessage, max: 220) ?? fallbackPrompt
+            )
+        default:
+            return nil
+        }
+    }
+
+    private func buildCurrentRealityLayer(
+        route: ChipIntentRoute?,
+        targetObject: LoomAIIntentContextPack.Layers.TargetObjectLayer?,
+        fulfillment: [LoomAIContextSnapshot.FulfillmentCategorySummary],
+        goals: [LoomAIContextSnapshot.OutcomeSummary],
+        weekBlocks: [LoomAIContextSnapshot.ActionBlockSummary],
+        capture: LoomAIContextSnapshot.CaptureSummary?
+    ) -> LoomAIIntentContextPack.Layers.CurrentRealityLayer? {
+        var scopedFulfillment = fulfillment
+        var scopedGoals = goals
+        var scopedBlocks = weekBlocks
+        let routeID = route?.id
+        let targetCategory = targetObject?.name ?? targetObject?.category ?? route?.target ?? ""
+        let targetGoal = targetObject?.title ?? route?.target ?? ""
+
+        switch routeID {
+        case 1, 2, 3:
+            if !targetCategory.isEmpty {
+                scopedFulfillment = fulfillment.filter { equalsFold($0.name, targetCategory) }
+                scopedGoals = goals.filter { equalsFold($0.category, targetCategory) }
+                scopedBlocks = filterActionBlocks(weekBlocks, target: targetCategory)
+            }
+            scopedFulfillment = Array(scopedFulfillment.prefix(2))
+            scopedGoals = Array(scopedGoals.prefix(2))
+            scopedBlocks = Array(scopedBlocks.prefix(2))
+        case 4, 5:
+            if !targetGoal.isEmpty {
+                scopedGoals = goals.filter { equalsFold($0.title, targetGoal) }
+            }
+            if scopedGoals.isEmpty { scopedGoals = goals }
+            scopedGoals = Array(scopedGoals.prefix(2))
+            let goalCategory = scopedGoals.first?.category.trimmingCharacters(in: .whitespacesAndNewlines) ?? targetCategory
+            if !goalCategory.isEmpty {
+                scopedFulfillment = fulfillment.filter { equalsFold($0.name, goalCategory) }
+            } else {
+                scopedFulfillment = []
+            }
+            scopedFulfillment = Array(scopedFulfillment.prefix(1))
+            scopedBlocks = filterActionBlocks(weekBlocks, target: targetGoal.isEmpty ? goalCategory : targetGoal)
+            scopedBlocks = Array(scopedBlocks.prefix(2))
+        case 8:
+            scopedFulfillment = Array(fulfillment.prefix(2))
+            scopedGoals = Array(goals.prefix(3))
+            scopedBlocks = Array(weekBlocks.prefix(3))
+        default:
+            scopedFulfillment = Array(fulfillment.prefix(1))
+            scopedGoals = Array(goals.prefix(2))
+            scopedBlocks = Array(weekBlocks.prefix(2))
+        }
+
+        if targetObject?.type == "fulfillment_area", let targetName = targetObject?.name {
+            scopedFulfillment.removeAll(where: { equalsFold($0.name, targetName) })
+        }
+        if targetObject?.type == "goal", let targetTitle = targetObject?.title {
+            scopedGoals.removeAll(where: { equalsFold($0.title, targetTitle) })
+        }
+
+        let weekLayer: LoomAIIntentContextPack.Layers.CurrentRealityLayer.WeekLayer? = scopedBlocks.isEmpty
+            ? nil
+            : .init(currentWeekActionBlocks: scopedBlocks)
+        let includeCapture = routeID == nil || routeID == 4 || routeID == 5 || routeID == 8
+        let layer = LoomAIIntentContextPack.Layers.CurrentRealityLayer(
+            fulfillment: scopedFulfillment.isEmpty ? nil : scopedFulfillment,
+            goals: scopedGoals.isEmpty ? nil : scopedGoals,
+            week: weekLayer,
+            capture: includeCapture ? capture : nil
+        )
+        if layer.fulfillment == nil && layer.goals == nil && layer.week == nil && layer.capture == nil {
+            return nil
+        }
+        return layer
+    }
+
+    private func shouldIncludeStableBlocks(for routeID: Int?) -> Bool {
+        guard let routeID else { return true }
+        return routeID == 8
+    }
+
+    private func stableContextHash(
+        appGuide: [LoomAIContextSnapshot.GuideTopic],
+        dataInventory: [LoomAIContextSnapshot.KnowledgeSectionSummary]
+    ) throws -> String {
+        struct HashPayload: Codable {
+            var appGuide: [LoomAIContextSnapshot.GuideTopic]
+            var dataInventory: [LoomAIContextSnapshot.KnowledgeSectionSummary]
+        }
+        let payload = HashPayload(appGuide: appGuide, dataInventory: dataInventory)
+        let encoder = JSONEncoder()
+        let data = try encoder.encode(payload)
+        return sha256Hex(data)
+    }
+
+    private func stableContextScopeKey(
+        snapshot: LoomAIContextSnapshot,
+        appGuideCount: Int,
+        dataInventoryCount: Int
+    ) -> String {
+        if let personalizationHash = trimmedOrNil(snapshot.personalizationHash, max: 128) {
+            return personalizationHash
+        }
+        if let vision = trimmedOrNil(snapshot.drivingForce?.vision, max: 240) {
+            return vision
+        }
+        if let purpose = trimmedOrNil(snapshot.drivingForce?.purpose, max: 240) {
+            return purpose
+        }
+        return "appGuide=\(appGuideCount)|dataInventory=\(dataInventoryCount)"
+    }
+
+    private func stableHashDefaultsKey(scope: String) -> String {
+        "loom.ai.chat.stableContext.hash.v1.\(sha256Hex(Data(scope.utf8)))"
+    }
+
+    private func sha256Hex(_ data: Data) -> String {
+        let digest = SHA256.hash(data: data)
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    private func cleanDiagnosticSummary(_ input: LoomAIContextSnapshot.DiagnosticSummary?) -> LoomAIContextSnapshot.DiagnosticSummary? {
+        guard let src = input else { return nil }
+        let stress = trimmedOrEmpty(src.stress, max: 100)
+        let breaksFirst = trimmedOrEmpty(src.breaksFirst, max: 100)
+        let planningStyle = trimmedOrEmpty(src.planningStyle, max: 100)
+        let firstChange = trimmedOrEmpty(src.firstChange, max: 120)
+        let rootCause = trimmedOrEmpty(src.rootCause, max: 180)
+        let nextDirection = trimmedOrEmpty(src.nextDirection, max: 180)
+        let areas = cleanStringList(src.areas, maxItems: 5, maxChars: 48, minLength: 2, allowJunk: false)
+        guard !stress.isEmpty || !breaksFirst.isEmpty || !planningStyle.isEmpty || !firstChange.isEmpty || !rootCause.isEmpty || !nextDirection.isEmpty || !areas.isEmpty else {
+            return nil
+        }
+        return .init(
+            stress: stress,
+            breaksFirst: breaksFirst,
+            areas: areas,
+            planningStyle: planningStyle,
+            firstChange: firstChange,
+            rootCause: rootCause,
+            nextDirection: nextDirection
+        )
+    }
+
+    private func cleanDrivingForceSummary(_ input: LoomAIContextSnapshot.DrivingForceSummary?) -> LoomAIContextSnapshot.DrivingForceSummary? {
+        guard let src = input else { return nil }
+        let vision = trimmedOrEmpty(src.vision, max: 240)
+        let purpose = trimmedOrEmpty(src.purpose, max: 240)
+        var passions: [LoomAIContextSnapshot.PassionSummary] = []
+        var seen = Set<String>()
+        for item in src.passions {
+            let emotion = normalizedPassionType(item.emotion)
+            let title = cleanTitle(item.title, max: 96)
+            guard let title, !title.isEmpty else { continue }
+            let key = "\(emotion)|\(title.lowercased())"
+            guard seen.insert(key).inserted else { continue }
+            passions.append(.init(emotion: emotion, title: title))
+            if passions.count >= 4 { break }
+        }
+        guard !vision.isEmpty || !purpose.isEmpty || !passions.isEmpty else { return nil }
+        return .init(vision: vision, purpose: purpose, passions: passions)
+    }
+
+    private func cleanFulfillmentCategories(_ input: [LoomAIContextSnapshot.FulfillmentCategorySummary]) -> [LoomAIContextSnapshot.FulfillmentCategorySummary] {
+        var output: [LoomAIContextSnapshot.FulfillmentCategorySummary] = []
+        var seen = Set<String>()
+        for item in input {
+            guard let name = cleanTitle(item.name, max: 72) else { continue }
+            let id = trimmedOrEmpty(item.id, max: 40)
+            let mission = normalizeMissionText(item.mission)
+            let identity = cleanStringList(item.identity, maxItems: 3, maxChars: 64, minLength: 2, allowJunk: false)
+            let littleWins = cleanStringList(item.littleWins, maxItems: 3, maxChars: 72, minLength: 2, allowJunk: false)
+            let key = "\(id.lowercased())|\(name.lowercased())"
+            guard seen.insert(key).inserted else { continue }
+            output.append(
+                .init(
+                    id: id,
+                    name: name,
+                    colorKey: "",
+                    mission: mission,
+                    identity: identity,
+                    littleWins: littleWins,
+                    resources: [],
+                    connectedPassions: [],
+                    weeklyScore: item.weeklyScore
+                )
+            )
+            if output.count >= 4 { break }
+        }
+        return output
+    }
+
+    private func cleanActiveGoals(_ input: [LoomAIContextSnapshot.OutcomeSummary]) -> [LoomAIContextSnapshot.OutcomeSummary] {
+        var output: [LoomAIContextSnapshot.OutcomeSummary] = []
+        var seen = Set<String>()
+        for item in input {
+            guard let title = cleanTitle(item.title, max: 96), title.count >= 5 else { continue }
+            let id = trimmedOrEmpty(item.id, max: 40)
+            let category = trimmedOrEmpty(item.category, max: 72)
+            let progressSummary = trimmedOrEmpty(item.progressSummary, max: 140)
+            let key = "\(id.lowercased())|\(title.lowercased())"
+            guard seen.insert(key).inserted else { continue }
+            output.append(
+                .init(
+                    id: id,
+                    title: title,
+                    category: category,
+                    endDate: item.endDate,
+                    measurable: item.measurable,
+                    progressSummary: progressSummary
+                )
+            )
+            if output.count >= 4 { break }
+        }
+        return output
+    }
+
+    private func cleanActionBlocks(_ input: [LoomAIContextSnapshot.ActionBlockSummary]) -> [LoomAIContextSnapshot.ActionBlockSummary] {
+        var output: [LoomAIContextSnapshot.ActionBlockSummary] = []
+        var seen = Set<String>()
+        for item in input {
+            let category = cleanTitle(item.category, max: 72) ?? ""
+            var title = cleanTitle(item.title, max: 96) ?? ""
+            let actions = cleanStringList(item.actions, maxItems: 3, maxChars: 90, minLength: 2, allowJunk: false)
+            if title.isEmpty, let fallback = actions.first {
+                title = fallback
+            }
+            guard !title.isEmpty || !actions.isEmpty else { continue }
+            let key = "\(category.lowercased())|\(title.lowercased())"
+            guard seen.insert(key).inserted else { continue }
+            output.append(
+                .init(
+                    category: category,
+                    title: title,
+                    completionRatio: max(0, min(1, item.completionRatio)),
+                    actions: actions
+                )
+            )
+            if output.count >= 4 { break }
+        }
+        return output
+    }
+
+    private func cleanCaptureSummary(_ input: LoomAIContextSnapshot.CaptureSummary?) -> LoomAIContextSnapshot.CaptureSummary? {
+        guard let input else { return nil }
+        let topItems = cleanStringList(input.topItems, maxItems: 4, maxChars: 90, minLength: 2, allowJunk: false)
+        let totalCount = max(0, input.totalCount)
+        let quick = max(0, input.quickCompletionsLast7Days)
+        if totalCount == 0 && quick == 0 && topItems.isEmpty {
+            return nil
+        }
+        return .init(
+            totalCount: totalCount,
+            topItems: topItems,
+            quickCompletionsLast7Days: quick,
+            recurringRuleCount: max(0, input.recurringRuleCount)
+        )
+    }
+
+    private func cleanDataInventory(_ input: [LoomAIContextSnapshot.KnowledgeSectionSummary]) -> [LoomAIContextSnapshot.KnowledgeSectionSummary] {
+        var output: [LoomAIContextSnapshot.KnowledgeSectionSummary] = []
+        var seen = Set<String>()
+        for item in input {
+            guard let title = cleanTitle(item.title, max: 96) else { continue }
+            let id = trimmedOrEmpty(item.id, max: 48)
+            let key = "\(id.lowercased())|\(title.lowercased())"
+            guard seen.insert(key).inserted else { continue }
+            output.append(
+                .init(
+                    id: id,
+                    title: title,
+                    currentCount: item.currentCount,
+                    historicalCount: item.historicalCount,
+                    keySignals: cleanStringList(item.keySignals, maxItems: 2, maxChars: 96, minLength: 2, allowJunk: false),
+                    sampleItems: []
+                )
+            )
+            if output.count >= 8 { break }
+        }
+        return output
+    }
+
+    private func cleanAppGuide(_ input: [LoomAIContextSnapshot.GuideTopic]) -> [LoomAIContextSnapshot.GuideTopic] {
+        var output: [LoomAIContextSnapshot.GuideTopic] = []
+        var seen = Set<String>()
+        for item in input {
+            guard let title = cleanTitle(item.title, max: 88) else { continue }
+            let id = trimmedOrEmpty(item.id, max: 48)
+            let key = "\(id.lowercased())|\(title.lowercased())"
+            guard seen.insert(key).inserted else { continue }
+            output.append(
+                .init(
+                    id: id,
+                    title: title,
+                    summary: trimmedOrEmpty(item.summary, max: 180),
+                    relatedSections: Array(item.relatedSections.prefix(4))
+                )
+            )
+            if output.count >= 6 { break }
+        }
+        return output
+    }
+
+    private func findCategoryByName(
+        _ categories: [LoomAIContextSnapshot.FulfillmentCategorySummary],
+        target: String?
+    ) -> LoomAIContextSnapshot.FulfillmentCategorySummary? {
+        guard let target = target?.trimmingCharacters(in: .whitespacesAndNewlines), !target.isEmpty else {
+            return nil
+        }
+        return categories.first(where: { equalsFold($0.name, target) })
+    }
+
+    private func findGoalByTitle(
+        _ goals: [LoomAIContextSnapshot.OutcomeSummary],
+        target: String?
+    ) -> LoomAIContextSnapshot.OutcomeSummary? {
+        guard let target = target?.trimmingCharacters(in: .whitespacesAndNewlines), !target.isEmpty else {
+            return nil
+        }
+        return goals.first(where: { equalsFold($0.title, target) })
+    }
+
+    private func filterActionBlocks(
+        _ blocks: [LoomAIContextSnapshot.ActionBlockSummary],
+        target: String
+    ) -> [LoomAIContextSnapshot.ActionBlockSummary] {
+        let needle = target.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !needle.isEmpty else { return blocks }
+        let filtered = blocks.filter { item in
+            let title = item.title.lowercased()
+            let category = item.category.lowercased()
+            let actions = item.actions.joined(separator: " ").lowercased()
+            return title.contains(needle) || category.contains(needle) || actions.contains(needle)
+        }
+        return filtered.isEmpty ? blocks : filtered
+    }
+
+    private func equalsFold(_ lhs: String, _ rhs: String) -> Bool {
+        lhs.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == rhs.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private func normalizedPassionType(_ value: String) -> String {
+        let lower = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch lower {
+        case "love":
+            return "love"
+        case "vow", "vows":
+            return "vows"
+        case "thrill":
+            return "thrill"
+        case "hate", "hates", "just":
+            return "hate"
+        default:
+            return "love"
+        }
+    }
+
+    private func cleanStringList(
+        _ input: [String],
+        maxItems: Int,
+        maxChars: Int,
+        minLength: Int,
+        allowJunk: Bool
+    ) -> [String] {
+        var output: [String] = []
+        var seen = Set<String>()
+        for value in input {
+            let compact = trimmedOrEmpty(value, max: maxChars)
+            guard compact.count >= minLength else { continue }
+            if !allowJunk && isLikelyJunkTitle(compact) { continue }
+            let key = compact.lowercased()
+            guard seen.insert(key).inserted else { continue }
+            output.append(compact)
+            if output.count >= maxItems { break }
+        }
+        return output
+    }
+
+    private func cleanTitle(_ value: String, max: Int) -> String? {
+        let compact = trimmedOrEmpty(value, max: max)
+        guard !compact.isEmpty, !isLikelyJunkTitle(compact) else { return nil }
+        return compact
+    }
+
+    private func isLikelyJunkTitle(_ value: String) -> Bool {
+        let text = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if text.count <= 1 { return true }
+        if ["t", "tt", "x", "n/a", "na", "none", "test", "todo", "tmp", "draft"].contains(text) { return true }
+        if text.range(of: #"^[^a-z0-9]+$"#, options: .regularExpression) != nil { return true }
+        return false
+    }
+
+    private func normalizeMissionText(_ value: String) -> String {
+        let text = trimmedOrEmpty(value, max: 1000)
+        guard !text.isEmpty else { return "" }
+        if text.hasSuffix("…") || text.hasSuffix("...") { return "" }
+        if text.count <= 220 { return text }
+        return String(text.prefix(220)).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func trimmedOrEmpty(_ value: String?, max: Int) -> String {
+        let trimmed = value?.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if trimmed.isEmpty { return "" }
+        return String(trimmed.prefix(max))
+    }
+
+    private func trimmedOrNil(_ value: String?, max: Int) -> String? {
+        let compact = trimmedOrEmpty(value, max: max)
+        return compact.isEmpty ? nil : compact
     }
 
     private func post(path: String, bodyData: Data, timeout: TimeInterval) async throws -> LoomAIResponse {
@@ -1064,6 +1873,14 @@ struct LoomAIService {
 
     private func requestTimeout(for intent: String?, usingMinimalContext: Bool) -> TimeInterval {
         let normalizedIntent = intent?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        if normalizedIntent == "chat_thread_title" {
+            return usingMinimalContext ? 8 : 10
+        }
+        if normalizedIntent == "loomai_chat" {
+            // Worker chat routing can spend up to ~18s including model-attempt budgeting.
+            // Keep client timeout above that budget to avoid premature client-side timeouts.
+            return usingMinimalContext ? 24 : 30
+        }
         if normalizedIntent == "autowrite_purpose" {
             return usingMinimalContext ? 45 : 60
         }
@@ -1072,6 +1889,14 @@ struct LoomAIService {
         }
         // gpt-5.2 paths can take longer, especially with larger context snapshots.
         return usingMinimalContext ? 60 : 90
+    }
+
+    private func shouldRetryWithMinimalContext(for intent: String?) -> Bool {
+        let normalizedIntent = intent?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        if normalizedIntent == "chat_thread_title" {
+            return false
+        }
+        return true
     }
 
     private func shouldRetryWithMinimalContext(for error: Error) -> Bool {
@@ -1213,3 +2038,138 @@ struct LoomAIService {
         var outputTokens: Int
         var totalTokens: Int
     }
+
+struct LoomAIDailyCostSnapshot {
+    var chatSpentUSD: Double
+    var chatLimitUSD: Double
+    var autoWriteSpentUSD: Double
+    var autoWriteLimitUSD: Double
+}
+
+enum LoomAICostLedger {
+    private struct DailyLedger: Codable {
+        var dayKey: String
+        var userKey: String
+        var chatSpentUSD: Double
+        var autoWriteSpentUSD: Double
+    }
+
+    private enum Bucket {
+        case chat
+        case autoWrite
+    }
+
+    private static let defaultsKey = "loom.ai.dailyCostLedger.v1"
+    private static let chatLimitUSD: Double = 0.10
+    private static let autoWriteLimitUSD: Double = 0.10
+    private static let fallbackEstimatedCostPerReplyUSD: Double = 0.01
+
+    static func record(response: LoomAIService.LoomAIResponse, intent: String?) {
+        guard let bucket = bucket(for: intent) else { return }
+        var ledger = dailyLedger()
+        let cost = estimatedCostUSD(for: response.usage)
+        switch bucket {
+        case .chat:
+            ledger.chatSpentUSD += cost
+        case .autoWrite:
+            ledger.autoWriteSpentUSD += cost
+        }
+        save(ledger)
+    }
+
+    static func dailySnapshot() -> LoomAIDailyCostSnapshot {
+        let ledger = dailyLedger()
+        return LoomAIDailyCostSnapshot(
+            chatSpentUSD: max(0, ledger.chatSpentUSD),
+            chatLimitUSD: chatLimitUSD,
+            autoWriteSpentUSD: max(0, ledger.autoWriteSpentUSD),
+            autoWriteLimitUSD: autoWriteLimitUSD
+        )
+    }
+
+    static func resetToday() {
+        let now = Date()
+        let dayKey = dayKeyFormatter.string(from: now)
+        let userKey = PersonalizationUserIdentity.currentUserKey()
+        let ledger = DailyLedger(
+            dayKey: dayKey,
+            userKey: userKey,
+            chatSpentUSD: 0,
+            autoWriteSpentUSD: 0
+        )
+        save(ledger)
+    }
+
+    private static func bucket(for intent: String?) -> Bucket? {
+        let normalized = intent?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() ?? ""
+        guard !normalized.isEmpty else { return nil }
+        if normalized == "loomai_chat" || normalized == "chat_thread_title" {
+            return .chat
+        }
+        if normalized == "autogroup_plan" || normalized.contains("autowrite") {
+            return .autoWrite
+        }
+        return nil
+    }
+
+    private static func dailyLedger(now: Date = Date()) -> DailyLedger {
+        let dayKey = dayKeyFormatter.string(from: now)
+        let userKey = PersonalizationUserIdentity.currentUserKey()
+        guard let data = UserDefaults.standard.data(forKey: defaultsKey),
+              let decoded = try? JSONDecoder().decode(DailyLedger.self, from: data),
+              decoded.dayKey == dayKey,
+              decoded.userKey == userKey else {
+            return DailyLedger(dayKey: dayKey, userKey: userKey, chatSpentUSD: 0, autoWriteSpentUSD: 0)
+        }
+        return decoded
+    }
+
+    private static func save(_ ledger: DailyLedger) {
+        guard let data = try? JSONEncoder().encode(ledger) else { return }
+        UserDefaults.standard.set(data, forKey: defaultsKey)
+    }
+
+    private static func estimatedCostUSD(for usage: LoomAIUsage?) -> Double {
+        guard let usage else {
+            return fallbackEstimatedCostPerReplyUSD
+        }
+        let model = (usage.model ?? "gpt-5.2")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let pricing = pricingForModel(model)
+        let inputTokens = max(0, usage.inputTokens)
+        let cachedInputTokens = max(0, usage.cachedInputTokens)
+        let nonCachedInputTokens = max(0, inputTokens - cachedInputTokens)
+        let outputTokens = max(0, usage.outputTokens)
+
+        let inputCost = (Double(nonCachedInputTokens) / 1_000_000.0) * pricing.inputPerM
+        let cachedInputCost = (Double(cachedInputTokens) / 1_000_000.0) * pricing.cachedInputPerM
+        let outputCost = (Double(outputTokens) / 1_000_000.0) * pricing.outputPerM
+        let total = inputCost + cachedInputCost + outputCost
+        return total.isFinite && total > 0 ? total : fallbackEstimatedCostPerReplyUSD
+    }
+
+    private static func pricingForModel(_ model: String) -> (inputPerM: Double, cachedInputPerM: Double, outputPerM: Double) {
+        switch model {
+        case "gpt-5.2":
+            return (0.875, 0.0875, 7.00)
+        case "gpt-5.1":
+            return (1.25, 0.125, 10.00)
+        case "gpt-5-mini":
+            return (0.25, 0.025, 2.00)
+        default:
+            return (0.875, 0.0875, 7.00)
+        }
+    }
+
+    private static let dayKeyFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+}

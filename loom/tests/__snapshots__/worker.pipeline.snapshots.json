@@ -11,12 +11,12 @@
     ],
     "nextActionType": "addLittleWin",
     "groundingFields": [
-      "Fulfillment|fulfillmentCategories[0].name",
-      "Fulfillment|fulfillmentCategories[0].mission",
-      "Purpose|drivingForce.purpose",
-      "Action Blocks|currentWeekActionBlocks[0].title",
-      "Capture|capture.totalCount",
-      "Data Inventory|dataInventory[0].title"
+      "Fulfillment|Fulfillment Area",
+      "Fulfillment|Mission",
+      "Purpose|Purpose",
+      "Action Blocks|Action Blocks",
+      "Action Blocks|Current Week Actions",
+      "Capture|Capture Count"
     ],
     "message": "You can make focused progress this week."
   },
@@ -32,12 +32,12 @@
     ],
     "nextActionType": "updateFulfillmentMission",
     "groundingFields": [
-      "Fulfillment|fulfillmentCategories[0].name",
-      "Fulfillment|fulfillmentCategories[0].mission",
-      "Purpose|drivingForce.purpose",
-      "Action Blocks|currentWeekActionBlocks[0].title",
-      "Capture|capture.totalCount",
-      "Data Inventory|dataInventory[0].title"
+      "Fulfillment|Fulfillment Area",
+      "Fulfillment|Mission",
+      "Purpose|Purpose",
+      "Action Blocks|Action Blocks",
+      "Action Blocks|Current Week Actions",
+      "Capture|Capture Count"
     ],
     "message": "You can make focused progress this week."
   },
@@ -47,18 +47,18 @@
     "suggestionCardCount": 1,
     "suggestionCardTitle": "Identity options for Health & Vitality",
     "optionTypes": [
-      "addPlanSuggestion",
-      "addPlanSuggestion",
-      "addPlanSuggestion"
+      "addFulfillmentIdentity",
+      "addFulfillmentIdentity",
+      "addFulfillmentIdentity"
     ],
-    "nextActionType": "addPlanSuggestion",
+    "nextActionType": "addFulfillmentIdentity",
     "groundingFields": [
-      "Fulfillment|fulfillmentCategories[0].name",
-      "Fulfillment|fulfillmentCategories[0].mission",
-      "Purpose|drivingForce.purpose",
-      "Action Blocks|currentWeekActionBlocks[0].title",
-      "Capture|capture.totalCount",
-      "Data Inventory|dataInventory[0].title"
+      "Fulfillment|Fulfillment Area",
+      "Fulfillment|Mission",
+      "Purpose|Purpose",
+      "Action Blocks|Action Blocks",
+      "Action Blocks|Current Week Actions",
+      "Capture|Capture Count"
     ],
     "message": "You can make focused progress this week."
   },
@@ -74,12 +74,12 @@
     ],
     "nextActionType": "addPlanSuggestion",
     "groundingFields": [
-      "Goals|activeOutcomes[0].title",
-      "Goals|activeOutcomes[0].progressSummary",
-      "Purpose|drivingForce.purpose",
-      "Action Blocks|currentWeekActionBlocks[0].title",
-      "Capture|capture.totalCount",
-      "Data Inventory|dataInventory[0].title"
+      "Goals|Goals",
+      "Purpose|Purpose",
+      "Action Blocks|Action Blocks",
+      "Capture|Capture",
+      "Action Blocks|Current Week Actions",
+      "Capture|Capture Count"
     ],
     "message": "You can make focused progress this week."
   },
@@ -95,12 +95,12 @@
     ],
     "nextActionType": "addPlanSuggestion",
     "groundingFields": [
-      "Goals|activeOutcomes[0].title",
-      "Goals|activeOutcomes[0].progressSummary",
-      "Purpose|drivingForce.purpose",
-      "Action Blocks|currentWeekActionBlocks[0].title",
-      "Capture|capture.totalCount",
-      "Data Inventory|dataInventory[0].title"
+      "Goals|Goals",
+      "Purpose|Purpose",
+      "Action Blocks|Action Blocks",
+      "Capture|Capture",
+      "Action Blocks|Current Week Actions",
+      "Capture|Capture Count"
     ],
     "message": "You can make focused progress this week."
   },
@@ -116,12 +116,12 @@
     ],
     "nextActionType": "addPassionItem",
     "groundingFields": [
-      "Purpose|drivingForce.passions[0].title",
-      "Purpose|drivingForce.purpose",
-      "Action Blocks|currentWeekActionBlocks[0].title",
-      "Capture|capture.totalCount",
-      "Data Inventory|dataInventory[0].title",
-      "App Guide|appGuide[0].title"
+      "Purpose|Purpose",
+      "Action Blocks|Action Blocks",
+      "Capture|Capture",
+      "Data Inventory|Data Inventory",
+      "Action Blocks|Current Week Actions",
+      "Capture|Capture Count"
     ],
     "message": "You can make focused progress this week."
   },
@@ -137,12 +137,12 @@
     ],
     "nextActionType": "updatePurposeVision",
     "groundingFields": [
-      "Purpose|drivingForce.vision",
-      "Purpose|drivingForce.purpose",
-      "Action Blocks|currentWeekActionBlocks[0].title",
-      "Capture|capture.totalCount",
-      "Data Inventory|dataInventory[0].title",
-      "App Guide|appGuide[0].title"
+      "Purpose|Vision",
+      "Purpose|Purpose",
+      "Action Blocks|Action Blocks",
+      "Capture|Capture",
+      "Action Blocks|Current Week Actions",
+      "Capture|Capture Count"
     ],
     "message": "You can make focused progress this week."
   },
@@ -154,12 +154,12 @@
     "optionTypes": [],
     "nextActionType": "",
     "groundingFields": [
-      "Purpose|drivingForce.vision",
-      "Purpose|drivingForce.purpose",
-      "Purpose|drivingForce.passions[0].title",
-      "Fulfillment|fulfillmentCategories[0].name",
-      "Goals|activeOutcomes[0].title",
-      "Action Blocks|currentWeekActionBlocks[0].title"
+      "Purpose|Vision",
+      "Purpose|Purpose",
+      "Fulfillment|Fulfillment Area",
+      "Goals|Goals",
+      "Action Blocks|Current Week Actions",
+      "Capture|Capture Count"
     ],
     "message": "You can make focused progress this week."
   }

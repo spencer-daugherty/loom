@@ -96,3 +96,31 @@ test("worker pipeline snapshots for chip intents 1-8", () => {
   const expected = JSON.parse(fs.readFileSync(snapshotPath, "utf8"));
   assert.deepEqual(actual, expected);
 });
+
+test("route 6 normalizes legacy 'just' emotion alias", () => {
+  const route = __test.resolveChipIntentRoute("New passions for just");
+  assert.equal(route?.id, 6);
+  assert.equal(route?.target, "hate");
+});
+
+test("route 6 still returns suggestion cards when model confidence is low", () => {
+  const output = __test.sanitizeLoomChatResponse({
+    message: "Use one of these options.",
+    grounding: [],
+    suggestionCards: [],
+    nextAction: null,
+    chips: [],
+    actions: [],
+    debug: { usedContext: true, confidence: "low", evidence: ["drivingForce.vision"] }
+  }, {
+    context: mockContext,
+    hasContext: true,
+    latestUserMessage: "New passions for Love",
+    intent: "loomai_chat"
+  });
+
+  assert.equal(output.suggestionCards.length, 1);
+  assert.equal(output.suggestionCards[0].options.length, 3);
+  assert.ok(output.suggestionCards[0].options.every((item) => item.type === "addPassionItem"));
+  assert.equal(output.suggestionCards[0].options[0]?.payload?.passionType, "love");
+});

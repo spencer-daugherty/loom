@@ -577,6 +577,9 @@ async function handleChat(request, env) {
   if (intent === "autogroup_plan") {
     return handleAutoGroupPlan({ request, env, apiKey, payload });
   }
+  if (intent === "plan_result_autowrite") {
+    return handlePlanResultAutoWrite({ request, env, apiKey, payload });
+  }
 
   if (isPurposeVisionChatRequest(payload)) {
     const latestUserMessage = extractLatestUserMessage(payload);
@@ -590,7 +593,7 @@ async function handleChat(request, env) {
     });
   }
 
-  // All non-autowrite intents use the Loom chat pipeline.
+  // All remaining intents use the Loom chat pipeline.
   return handleLoomAIChat({ request, env, apiKey, payload });
 }
 
@@ -752,18 +755,119 @@ async function handleAutoGroupPlan({ request, env, apiKey, payload }) {
   return json(response, 200, corsHeaders(request));
 }
 
+async function handlePlanResultAutoWrite({ request, env, apiKey, payload }) {
+  const latestUserMessage = extractLatestUserMessage(payload).trim();
+  const parsedInput = parsePlanResultAutoWriteInput(latestUserMessage);
+  const actions = normalizePlanResultActions(parsedInput.actions);
+  if (actions.length === 0) {
+    return json(
+      buildPlanResultAutoWriteResponse({
+        message: "",
+        confidence: "low",
+        evidence: ["No valid actions were provided for inference."]
+      }),
+      200,
+      corsHeaders(request)
+    );
+  }
+
+  const schema = {
+    name: "plan_result_autowrite_response",
+    strict: true,
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        message: { type: "string" }
+      },
+      required: ["message"]
+    }
+  };
+
+  const systemPrompt = [
+    "You generate Loom Plan Step 4 Result AutoWrite output.",
+    "Return a short abstract result that all provided actions contribute to.",
+    "Hard rules:",
+    "- Use ONLY the provided actions as grounding.",
+    "- Output a single phrase of 2-6 words.",
+    "- Keep it abstract and outcome-focused, not a task list or instruction.",
+    "- No quotes, bullets, colons, or trailing punctuation.",
+    "Output JSON only:",
+    '{"message":"2-6 word abstract shared outcome phrase"}'
+  ].join("\n");
+
+  const userPayload = {
+    areaName: nonEmptyString(parsedInput.areaName) || "",
+    actions
+  };
+
+  const preferredModel = "gpt-5-mini";
+  const modelCandidates = [preferredModel];
+
+  let result = null;
+  let usedModel = preferredModel;
+  for (const candidate of modelCandidates) {
+    usedModel = candidate;
+    const attempt = await callOpenAIResponsesJSON({
+      apiKey,
+      model: candidate,
+      systemPrompt,
+      userPayload,
+      responseSchema: schema,
+      maxOutputTokens: 120,
+      timeoutMs: 20000,
+      reasoningEffort: "none",
+      allowRetry: true
+    });
+    result = attempt;
+    if (!attempt?.error) break;
+    const normalizedError = String(attempt.error || "").toLowerCase();
+    const retryableByModel =
+      normalizedError.includes("upstream model error") ||
+      normalizedError.includes("invalid upstream json") ||
+      normalizedError.includes("missing model output");
+    if (!retryableByModel) break;
+  }
+
+  const modelMessage = normalizePlanResultPhrase(result?.json?.message || "");
+  const heuristicMessage = heuristicPlanResultFromActions(actions, parsedInput.areaName);
+  const suggestion = isAcceptablePlanResultPhrase(modelMessage)
+    ? modelMessage
+    : normalizePlanResultPhrase(heuristicMessage);
+  const confidence = isAcceptablePlanResultPhrase(modelMessage)
+    ? "high"
+    : "medium";
+  const evidence = isAcceptablePlanResultPhrase(modelMessage)
+    ? ["Generated from provided action list."]
+    : ["Used deterministic action-keyword fallback after model output normalization."];
+
+  const response = buildPlanResultAutoWriteResponse({
+    message: suggestion,
+    confidence,
+    evidence
+  });
+  const usage = normalizeResponsesUsage(result?.usage, usedModel);
+  if (usage) response.usage = usage;
+  return json(response, 200, corsHeaders(request));
+}
+
 async function handleLoomAIChat({ request, env, apiKey, payload }) {
   const messages = Array.isArray(payload?.messages) ? payload.messages : [];
   const client = payload?.client && typeof payload.client === "object" ? payload.client : {};
   const normalizedIntent = String(client.intent || "").trim().toLowerCase();
   const isAutoGroupIntent = normalizedIntent === "autogroup_plan";
   const rawContext = payload?.context && typeof payload.context === "object" ? payload.context : {};
+  const contextIsPacked = isIntentContextPack(rawContext);
   const context = normalizedIntent === "autogroup_plan"
     ? compactAutoGroupContext(rawContext)
+    : contextIsPacked
+      ? legacyContextFromIntentPack(rawContext)
     : rawContext;
   const shouldForceMiniModel = normalizedIntent === "autogroup_plan";
   const latestUserMessage = extractLatestUserMessage(payload).trim();
-  const hasContext = hasMeaningfulLoomContext(context);
+  const hasContext = contextIsPacked
+    ? hasMeaningfulPackedLoomContext(rawContext) || hasMeaningfulLoomContext(context)
+    : hasMeaningfulLoomContext(context);
   const unrelatedPrompt = isLikelyUnrelatedPrompt(latestUserMessage);
   const chipIntentRoute = resolveChipIntentRoute(latestUserMessage);
 
@@ -772,6 +876,7 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
       safeChatFallback({
         hasContext,
         context,
+        route: chipIntentRoute,
         intent: normalizedIntent,
         message:
           "I’m ready to help with Loom. Ask me about Purpose, Fulfillment, Goals, Capture, or Action Blocks."
@@ -787,6 +892,7 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
         safeChatFallback({
           hasContext,
           context,
+          route: chipIntentRoute,
           intent: normalizedIntent
         }),
         200,
@@ -819,10 +925,10 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
   const modelCandidates = shouldForceMiniModel
     ? ["gpt-5-mini"]
     : uniqueOrdered(
-      [preferredModel, "gpt-5.1", "gpt-5-mini"]
+      [preferredModel, "gpt-5-mini"]
         .map((value) => nonEmptyString(value))
         .filter(Boolean)
-    );
+    ).slice(0, 2);
   const schema = {
     name: "loom_chat_response",
     strict: true,
@@ -998,6 +1104,8 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
     '- updatePurposeVision {"text":"..."}',
     '- addPassionItem {"passionType":"love|vows|thrill|hate","text":"..."}',
     '- updateFulfillmentMission {"categoryId":"uuid","text":"..."}',
+    '- addFulfillmentIdentity {"categoryId":"uuid","categoryName":"...","identity":"..."}',
+    '- replaceFulfillmentIdentity {"categoryId":"uuid","categoryName":"...","replaceIdentity":"...","identity":"..."}',
     '- addLittleWin {"categoryId":"uuid","activity":"...","appleHealthEligible":true|false}',
     '- createOutcome {"categoryId":"uuid","title":"...","measurable":true|false,"unit":"steps|minutes|..."}',
     '- createCaptureAction {"text":"..."}',
@@ -1022,13 +1130,23 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
     "- For unrelated prompts, return actions as []."
   ].join("\n");
 
-  const { modelContext, payloadContextMeta } = await compactChatContextForModel(context, {
-    route: chipIntentRoute,
-    latestUserMessage,
-    client
-  });
+  let contextPackResult = contextIsPacked
+    ? compactPackedContextForModel(rawContext, { route: chipIntentRoute })
+    : await compactChatContextForModel(context, {
+      route: chipIntentRoute,
+      latestUserMessage,
+      client
+    });
+  if (contextIsPacked) {
+    contextPackResult = await hydratePackedStableContextForModel(contextPackResult, {
+      route: chipIntentRoute
+    });
+  }
+  const modelContext = contextPackResult.modelContext;
+  const payloadContextMeta = contextPackResult.payloadContextMeta;
+  const CHAT_HISTORY_LIMIT = 10;
   const userPayload = {
-    messages: messages.slice(-20).map((msg) => ({
+    messages: messages.slice(-CHAT_HISTORY_LIMIT).map((msg) => ({
       role: String(msg?.role || ""),
       content: String(msg?.content || "")
     })),
@@ -1058,17 +1176,10 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
     stableBlocksChanged: payloadContextMeta.stableContextChanged
   });
   const chatCacheEnabled = env.DISABLE_CHAT_CACHE !== "1";
-  const cacheIdentity = {
-    version: "loom_chat_v5",
+  const cacheIdentity = buildChatCacheIdentity({
     model: preferredModel,
-    messages: userPayload.messages,
-    APP_CONTEXT: userPayload.APP_CONTEXT,
-    client: {
-      intent: userPayload.client.intent,
-      userLocalDate: userPayload.client.userLocalDate,
-      timezone: userPayload.client.timezone
-    }
-  };
+    userPayload
+  });
   const chatCacheHash = await sha256Hex(JSON.stringify(cacheIdentity));
   const chatCacheKey = new Request(`https://loom-cache.internal/chat/${chatCacheHash}`);
 
@@ -1088,7 +1199,20 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
 
   let result = null;
   let usedModel = preferredModel;
+  const CHAT_ATTEMPT_BUDGET_MS = 18000;
+  const CHAT_MAX_ATTEMPT_TIMEOUT_MS = 10000;
+  const CHAT_MIN_ATTEMPT_TIMEOUT_MS = 3000;
+  const attemptsStartedAt = Date.now();
   for (const candidate of modelCandidates) {
+    const elapsedMs = Date.now() - attemptsStartedAt;
+    const remainingBudgetMs = CHAT_ATTEMPT_BUDGET_MS - elapsedMs;
+    if (remainingBudgetMs < CHAT_MIN_ATTEMPT_TIMEOUT_MS) {
+      break;
+    }
+    const attemptTimeoutMs = Math.max(
+      CHAT_MIN_ATTEMPT_TIMEOUT_MS,
+      Math.min(CHAT_MAX_ATTEMPT_TIMEOUT_MS, remainingBudgetMs - 250)
+    );
     usedModel = candidate;
     const attempt = await callOpenAIResponsesJSON({
       apiKey,
@@ -1096,27 +1220,60 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
       systemPrompt,
       userPayload,
       responseSchema: schema,
-      maxOutputTokens: 1100,
-      timeoutMs: 26000,
+      maxOutputTokens: 700,
+      timeoutMs: attemptTimeoutMs,
       reasoningEffort: "low",
-      allowRetry: true
+      allowRetry: false
     });
     result = attempt;
     if (!attempt?.error) break;
     const normalizedError = String(attempt.error || "").toLowerCase();
     const retryableByModel =
+      normalizedError.includes("upstream timeout") ||
+      normalizedError.includes("upstream request failed") ||
       normalizedError.includes("upstream model error") ||
       normalizedError.includes("invalid upstream json") ||
       normalizedError.includes("missing model output");
     if (!retryableByModel) break;
   }
+  if (!result) {
+    result = {
+      error: "Upstream timeout",
+      details: "Chat model attempts exceeded response budget.",
+      status: 502
+    };
+  }
 
   if (result.error) {
+    console.error("[LoomAI] Chat upstream failure", {
+      error: result.error,
+      details: nonEmptyString(result.details) || null,
+      model: usedModel || preferredModel,
+      routeKey: nonEmptyString(chipIntentRoute?.key) || null,
+      intent: normalizedIntent || "loomai_chat"
+    });
     const response = safeChatFallback({
       hasContext,
       context,
-      intent: normalizedIntent
+      route: chipIntentRoute,
+      allowRouteSuggestionCards: false,
+      intent: normalizedIntent,
+      message: buildUserFacingChatErrorMessage(result)
     });
+    const debugScreen = nonEmptyString(client.screen).toLowerCase().includes("debug");
+    if (debugScreen) {
+      const detailSnippet = truncate(nonEmptyString(result.details), 220);
+      response.debug = {
+        ...response.debug,
+        evidence: uniqueOrdered(
+          [
+            ...(Array.isArray(response?.debug?.evidence) ? response.debug.evidence : []),
+            `upstream_error:${nonEmptyString(result.error) || "unknown"}`,
+            detailSnippet ? `upstream_details:${detailSnippet}` : ""
+          ].filter(Boolean)
+        ).slice(0, 8)
+      };
+    }
     const usage = normalizeResponsesUsage(result.usage, usedModel || preferredModel);
     if (usage) {
       response.usage = usage;
@@ -1146,6 +1303,48 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
     await caches.default.put(chatCacheKey, cacheResponse);
   }
   return json(response, 200, corsHeaders(request));
+}
+
+function buildChatCacheIdentity({ model, userPayload }) {
+  const payload = userPayload && typeof userPayload === "object" ? userPayload : {};
+  const appContext = payload.APP_CONTEXT && typeof payload.APP_CONTEXT === "object"
+    ? payload.APP_CONTEXT
+    : {};
+  const stable = appContext.stableContext && typeof appContext.stableContext === "object"
+    ? appContext.stableContext
+    : {};
+
+  return {
+    version: "loom_chat_v6",
+    model: nonEmptyString(model) || DEFAULT_CHAT_MODEL,
+    messages: Array.isArray(payload.messages) ? payload.messages : [],
+    APP_CONTEXT: {
+      personalizationHash: nonEmptyString(appContext.personalizationHash) || null,
+      intent: appContext.intent && typeof appContext.intent === "object" ? appContext.intent : null,
+      layers: appContext.layers && typeof appContext.layers === "object" ? appContext.layers : null,
+      stableContext: {
+        hash: nonEmptyString(stable.hash) || "",
+        counts: stable.counts && typeof stable.counts === "object"
+          ? {
+              appGuide: Number.isFinite(Number(stable.counts.appGuide))
+                ? Math.max(0, Math.floor(Number(stable.counts.appGuide)))
+                : 0,
+              dataInventory: Number.isFinite(Number(stable.counts.dataInventory))
+                ? Math.max(0, Math.floor(Number(stable.counts.dataInventory)))
+                : 0
+            }
+          : {
+              appGuide: 0,
+              dataInventory: 0
+            }
+      }
+    },
+    client: {
+      intent: nonEmptyString(payload?.client?.intent) || "loomai_chat",
+      userLocalDate: nonEmptyString(payload?.client?.userLocalDate) || null,
+      timezone: nonEmptyString(payload?.client?.timezone) || null
+    }
+  };
 }
 
 function compactAutoGroupContext(context) {
@@ -2011,6 +2210,120 @@ function stableHash64(value) {
   return Number(hash & 0x1fffffffffffffn);
 }
 
+function parsePlanResultAutoWriteInput(rawText) {
+  const fallback = { areaName: "", actions: [] };
+  const text = String(rawText || "").trim();
+  if (!text) return fallback;
+  try {
+    const parsed = JSON.parse(text);
+    if (!parsed || typeof parsed !== "object") return fallback;
+    return {
+      areaName: nonEmptyString(parsed.areaName) || "",
+      actions: Array.isArray(parsed.actions) ? parsed.actions : []
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function normalizePlanResultActions(actions) {
+  return uniqueOrdered(
+    (Array.isArray(actions) ? actions : [])
+      .map((item) => String(item || "").replace(/\s+/g, " ").trim())
+      .filter(Boolean)
+  ).slice(0, 30);
+}
+
+function normalizePlanResultPhrase(value) {
+  const compact = String(value || "")
+    .replace(/\[\[[^\]]*]]/g, " ")
+    .replace(/^[•\-–—\d\.\)\s]+/, "")
+    .replace(/["“”]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!compact) return "";
+
+  const sanitized = compact.replace(/[^a-zA-Z0-9/&'+\-\s]/g, " ");
+  const words = sanitized
+    .split(/\s+/)
+    .map((word) => word.trim())
+    .filter(Boolean)
+    .slice(0, 6);
+  return words.join(" ").trim();
+}
+
+function isAcceptablePlanResultPhrase(value) {
+  const phrase = normalizePlanResultPhrase(value);
+  if (!phrase) return false;
+  const wordCount = phrase.split(/\s+/).filter(Boolean).length;
+  return wordCount >= 2 && wordCount <= 6;
+}
+
+function heuristicPlanResultFromActions(actions, areaName) {
+  const keywords = planResultKeywordCandidates(actions);
+  if (keywords.length >= 2) {
+    return `Consistent ${keywords[0]} ${keywords[1]}`;
+  }
+  if (keywords.length === 1) {
+    return `Consistent ${keywords[0]} progress`;
+  }
+  const areaToken = String(areaName || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .find((token) => token.length >= 3);
+  if (areaToken) {
+    return `Consistent ${areaToken} progress`;
+  }
+  return "Consistent weekly progress";
+}
+
+function planResultKeywordCandidates(actions) {
+  const stopWords = new Set([
+    "the", "and", "for", "with", "from", "that", "this", "into", "through",
+    "about", "your", "you", "our", "their", "then", "than", "just", "also",
+    "will", "what", "when", "where", "have", "has", "had", "plan", "planned",
+    "task", "action", "work", "week", "weekly", "daily", "today", "tomorrow"
+  ]);
+  const counts = new Map();
+  for (const action of Array.isArray(actions) ? actions : []) {
+    const tokens = String(action || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .map((token) => token.trim())
+      .filter((token) => token.length >= 3 && !stopWords.has(token) && !/^\d+$/.test(token))
+      .map((token) => (token.endsWith("s") && token.length > 4 ? token.slice(0, -1) : token));
+    for (const token of tokens) {
+      counts.set(token, (counts.get(token) || 0) + 1);
+    }
+  }
+
+  return Array.from(counts.entries())
+    .sort((a, b) => {
+      if (b[1] !== a[1]) return b[1] - a[1];
+      if (b[0].length !== a[0].length) return b[0].length - a[0].length;
+      return a[0].localeCompare(b[0]);
+    })
+    .slice(0, 3)
+    .map(([token]) => token);
+}
+
+function buildPlanResultAutoWriteResponse({ message, confidence, evidence }) {
+  const cleanedMessage = normalizePlanResultPhrase(message);
+  return {
+    message: cleanedMessage,
+    chips: [],
+    actions: [],
+    debug: {
+      usedContext: false,
+      confidence: confidence === "high" ? "high" : (confidence === "medium" ? "medium" : "low"),
+      evidence: Array.isArray(evidence) ? evidence.slice(0, 4).map((item) => String(item || "")).filter(Boolean) : []
+    }
+  };
+}
+
 function uniqueOrdered(items) {
   const seen = new Set();
   const result = [];
@@ -2230,7 +2543,7 @@ function buildDefaultLoomChips(context) {
   return chips;
 }
 
-function safeChatFallback({ hasContext, context, message, intent }) {
+function safeChatFallback({ hasContext, context, message, intent, route, allowRouteSuggestionCards = true }) {
   const normalizedIntent = String(intent || "").trim().toLowerCase();
   if (normalizedIntent === "autogroup_plan") {
     return {
@@ -2252,10 +2565,13 @@ function safeChatFallback({ hasContext, context, message, intent }) {
     nonEmptyString(message) ||
     "Couldn't generate response. Check your connection.";
   const fallbackGrounding = hasContext ? collectGrounding([], context, { maxItems: 3 }) : [];
+  const fallbackSuggestionCards = (hasContext && allowRouteSuggestionCards)
+    ? buildRouteSuggestionCards(route, context)
+    : [];
   return {
     message: fallbackMessage,
     grounding: fallbackGrounding,
-    suggestionCards: [],
+    suggestionCards: fallbackSuggestionCards,
     nextAction: null,
     chips: [],
     actions: [],
@@ -2265,6 +2581,26 @@ function safeChatFallback({ hasContext, context, message, intent }) {
       evidence: hasContext ? extractEvidencePathsFromContext(context, 2) : []
     }
   };
+}
+
+function buildUserFacingChatErrorMessage(result) {
+  const errorText = nonEmptyString(result?.error).toLowerCase();
+  if (!errorText) {
+    return "Couldn’t generate a LoomAI response right now. Please try again.";
+  }
+  if (errorText.includes("upstream timeout")) {
+    return "LoomAI timed out while generating this response. Please try again.";
+  }
+  if (errorText.includes("upstream request failed")) {
+    return "LoomAI couldn’t reach the model service. Please try again.";
+  }
+  if (errorText.includes("upstream model error")) {
+    return "LoomAI hit a model error while generating this response. Please try again.";
+  }
+  if (errorText.includes("invalid upstream json") || errorText.includes("missing model output")) {
+    return "LoomAI returned an invalid response. Please try again.";
+  }
+  return "Couldn’t generate a LoomAI response right now. Please try again.";
 }
 
 const CONTEXT_PACK_LIMITS = {
@@ -2280,6 +2616,290 @@ const CONTEXT_PACK_LIMITS = {
   appGuideSummaryMax: 180,
   missionMax: 220
 };
+
+function isIntentContextPack(context) {
+  const src = context && typeof context === "object" ? context : null;
+  if (!src) return false;
+  const version = nonEmptyString(src.contextVersion || src.version).toLowerCase();
+  return version === "intent_pack_v1" && src.layers && typeof src.layers === "object";
+}
+
+function hasMeaningfulPackedLoomContext(contextPack) {
+  const src = contextPack && typeof contextPack === "object" ? contextPack : null;
+  if (!src) return false;
+  const layers = src.layers && typeof src.layers === "object" ? src.layers : {};
+  const identity = layers.identity && typeof layers.identity === "object" ? layers.identity : {};
+  const currentReality = layers.currentReality && typeof layers.currentReality === "object" ? layers.currentReality : {};
+  const targetObject = layers.targetObject && typeof layers.targetObject === "object" ? layers.targetObject : {};
+  return Boolean(
+    identity.diagnostic ||
+      identity.purpose ||
+      identity.personalityProfile ||
+      currentReality.fulfillment ||
+      currentReality.goals ||
+      currentReality.week ||
+      currentReality.capture ||
+      targetObject.type
+  );
+}
+
+function compactPackedContextForModel(contextPack, { route = null } = {}) {
+  const src = contextPack && typeof contextPack === "object" ? contextPack : {};
+  const layers = src.layers && typeof src.layers === "object" ? src.layers : {};
+  const identitySrc = layers.identity && typeof layers.identity === "object" ? layers.identity : {};
+  const currentRealitySrc = layers.currentReality && typeof layers.currentReality === "object" ? layers.currentReality : {};
+  const targetObjectSrc = layers.targetObject && typeof layers.targetObject === "object" ? layers.targetObject : {};
+  const stableSrc = src.stableContext && typeof src.stableContext === "object" ? src.stableContext : {};
+
+  const routeID = Number.isFinite(Number(src?.intent?.routeID))
+    ? Number(src.intent.routeID)
+    : (Number.isFinite(Number(route?.id)) ? Number(route.id) : null);
+  const routeKey = nonEmptyString(src?.intent?.routeKey) || nonEmptyString(route?.key) || null;
+  const routeTarget = nonEmptyString(src?.intent?.target) || nonEmptyString(route?.target) || null;
+
+  const modelContext = {
+    generatedAt: normalizeCompactTimestamp(src.generatedAt),
+    personalizationHash: nonEmptyString(src.personalizationHash) || null,
+    intent: {
+      routeID,
+      routeKey,
+      target: routeTarget
+    },
+    layers: {
+      identity: pruneEmptyObject({
+        diagnostic: cleanDiagnosticSummary(identitySrc?.diagnostic),
+        purpose: cleanDrivingForceSummary(identitySrc?.purpose),
+        personalityProfile: cleanCompactTitle(identitySrc?.personalityProfile, 72) || null
+      }),
+      currentReality: pruneEmptyObject({
+        fulfillment: cleanFulfillmentCategories(currentRealitySrc?.fulfillment),
+        goals: cleanActiveGoals(currentRealitySrc?.goals),
+        week: (() => {
+          const blocks = cleanActionBlocks(currentRealitySrc?.week?.currentWeekActionBlocks);
+          return blocks.length > 0 ? { currentWeekActionBlocks: blocks } : null;
+        })(),
+        capture: cleanCaptureSummary(currentRealitySrc?.capture)
+      }),
+      targetObject: pruneEmptyObject(normalizeTargetObjectLayer(targetObjectSrc))
+    },
+    stableContext: {
+      hash: nonEmptyString(stableSrc.hash) || "",
+      changed: Boolean(stableSrc.changed),
+      appGuide: cleanAppGuide(stableSrc.appGuide),
+      dataInventory: cleanDataInventory(stableSrc.dataInventory),
+      counts: {
+        appGuide: Number.isFinite(Number(stableSrc?.counts?.appGuide))
+          ? Math.max(0, Math.floor(Number(stableSrc.counts.appGuide)))
+          : (Array.isArray(stableSrc.appGuide) ? stableSrc.appGuide.length : 0),
+        dataInventory: Number.isFinite(Number(stableSrc?.counts?.dataInventory))
+          ? Math.max(0, Math.floor(Number(stableSrc.counts.dataInventory)))
+          : (Array.isArray(stableSrc.dataInventory) ? stableSrc.dataInventory.length : 0)
+      }
+    }
+  };
+
+  return {
+    modelContext,
+    payloadContextMeta: {
+      includedSections: summarizeIncludedContextSections(modelContext),
+      stableContextHash: nonEmptyString(modelContext?.stableContext?.hash) || null,
+      stableContextChanged: Boolean(modelContext?.stableContext?.changed),
+      stableContextSent:
+        (Array.isArray(modelContext?.stableContext?.appGuide) && modelContext.stableContext.appGuide.length > 0) ||
+        (Array.isArray(modelContext?.stableContext?.dataInventory) && modelContext.stableContext.dataInventory.length > 0)
+    }
+  };
+}
+
+async function hydratePackedStableContextForModel(result, { route = null } = {}) {
+  const src = result && typeof result === "object" ? result : {};
+  const modelContext = src.modelContext && typeof src.modelContext === "object" ? src.modelContext : {};
+  const stable = modelContext.stableContext && typeof modelContext.stableContext === "object"
+    ? modelContext.stableContext
+    : {};
+  const includeStableBlocksByIntent = shouldIncludeStableBlocksForIntent(route);
+
+  let appGuide = cleanAppGuide(stable.appGuide);
+  let dataInventory = cleanDataInventory(stable.dataInventory);
+  const hash = nonEmptyString(stable.hash);
+  const changed = includeStableBlocksByIntent ? Boolean(stable.changed) : false;
+  const sentInline = appGuide.length > 0 || dataInventory.length > 0;
+
+  if (hash && sentInline) {
+    await cacheStableContextBlocks(hash, { appGuide, dataInventory });
+  } else if (includeStableBlocksByIntent && hash) {
+    const cached = await readStableContextBlocks(hash);
+    if (cached) {
+      appGuide = cached.appGuide;
+      dataInventory = cached.dataInventory;
+    }
+  }
+
+  if (!includeStableBlocksByIntent) {
+    appGuide = [];
+    dataInventory = [];
+  }
+
+  const countsFromSource = stable?.counts && typeof stable.counts === "object" ? stable.counts : {};
+  const nextStableContext = {
+    hash,
+    changed,
+    appGuide,
+    dataInventory,
+    counts: {
+      appGuide: Number.isFinite(Number(countsFromSource.appGuide))
+        ? Math.max(0, Math.floor(Number(countsFromSource.appGuide)))
+        : appGuide.length,
+      dataInventory: Number.isFinite(Number(countsFromSource.dataInventory))
+        ? Math.max(0, Math.floor(Number(countsFromSource.dataInventory)))
+        : dataInventory.length
+    }
+  };
+  const nextModelContext = {
+    ...modelContext,
+    stableContext: nextStableContext
+  };
+
+  return {
+    modelContext: nextModelContext,
+    payloadContextMeta: {
+      includedSections: summarizeIncludedContextSections(nextModelContext),
+      stableContextHash: nonEmptyString(nextStableContext.hash) || null,
+      stableContextChanged: nextStableContext.changed,
+      stableContextSent: appGuide.length > 0 || dataInventory.length > 0
+    }
+  };
+}
+
+function normalizeTargetObjectLayer(input) {
+  const src = input && typeof input === "object" ? input : {};
+  const type = cleanCompactText(src.type, 40);
+  if (!type) return null;
+  const base = { type };
+  if (type === "fulfillment_area") {
+    return {
+      ...base,
+      id: cleanCompactText(src.id, 40),
+      name: cleanCompactTitle(src.name, 72),
+      mission: normalizeMissionText(src.mission),
+      identity: cleanStringList(src.identity, { maxItems: 3, maxChars: 64, minLength: 2, allowJunkTitles: false }),
+      littleWins: cleanStringList(src.littleWins, { maxItems: 3, maxChars: 72, minLength: 2, allowJunkTitles: false })
+    };
+  }
+  if (type === "goal") {
+    return {
+      ...base,
+      id: cleanCompactText(src.id, 40),
+      title: cleanCompactTitle(src.title, 96),
+      category: cleanCompactTitle(src.category, 72),
+      measurable: Boolean(src.measurable),
+      progressSummary: cleanCompactText(src.progressSummary, 140)
+    };
+  }
+  if (type === "passion_type") {
+    return {
+      ...base,
+      emotion: normalizePassionType(src.emotion),
+      relatedPassions: cleanPassions(src.relatedPassions)
+    };
+  }
+  if (type === "purpose_vision") {
+    return {
+      ...base,
+      vision: cleanCompactText(src.vision, 240),
+      purpose: cleanCompactText(src.purpose, 240)
+    };
+  }
+  if (type === "loom_usage") {
+    return {
+      ...base,
+      prompt: cleanCompactText(src.prompt, 220)
+    };
+  }
+  return base;
+}
+
+function legacyContextFromIntentPack(contextPack) {
+  const compacted = compactPackedContextForModel(contextPack, { route: null });
+  const modelContext = compacted?.modelContext && typeof compacted.modelContext === "object"
+    ? compacted.modelContext
+    : {};
+  const identity = modelContext?.layers?.identity && typeof modelContext.layers.identity === "object"
+    ? modelContext.layers.identity
+    : {};
+  const currentReality = modelContext?.layers?.currentReality && typeof modelContext.layers.currentReality === "object"
+    ? modelContext.layers.currentReality
+    : {};
+  const targetObject = modelContext?.layers?.targetObject && typeof modelContext.layers.targetObject === "object"
+    ? modelContext.layers.targetObject
+    : {};
+  const stableContext = modelContext?.stableContext && typeof modelContext.stableContext === "object"
+    ? modelContext.stableContext
+    : {};
+
+  const fulfillment = Array.isArray(currentReality.fulfillment) ? currentReality.fulfillment : [];
+  const goals = Array.isArray(currentReality.goals) ? currentReality.goals : [];
+  const blocks = Array.isArray(currentReality?.week?.currentWeekActionBlocks)
+    ? currentReality.week.currentWeekActionBlocks
+    : [];
+
+  const mergedFulfillment = targetObject.type === "fulfillment_area"
+    ? mergeUniqueByKey([{
+      id: cleanCompactText(targetObject.id, 40),
+      name: cleanCompactTitle(targetObject.name, 72),
+      mission: normalizeMissionText(targetObject.mission),
+      identity: cleanStringList(targetObject.identity, { maxItems: 3, maxChars: 64, minLength: 2, allowJunkTitles: false }),
+      littleWins: cleanStringList(targetObject.littleWins, { maxItems: 3, maxChars: 72, minLength: 2, allowJunkTitles: false }),
+      weeklyScore: null
+    }, ...fulfillment], (item) => `${String(item?.id || "").toLowerCase()}|${String(item?.name || "").toLowerCase()}`)
+    : fulfillment;
+
+  const mergedGoals = targetObject.type === "goal"
+    ? mergeUniqueByKey([{
+      id: cleanCompactText(targetObject.id, 40),
+      title: cleanCompactTitle(targetObject.title, 96),
+      category: cleanCompactTitle(targetObject.category, 72),
+      measurable: Boolean(targetObject.measurable),
+      progressSummary: cleanCompactText(targetObject.progressSummary, 140)
+    }, ...goals], (item) => `${String(item?.id || "").toLowerCase()}|${String(item?.title || "").toLowerCase()}`)
+    : goals;
+
+  return {
+    generatedAt: modelContext.generatedAt || null,
+    personalizationHash: nonEmptyString(modelContext.personalizationHash) || null,
+    diagnostic: identity.diagnostic || null,
+    drivingForce: identity.purpose || null,
+    fulfillmentCategories: mergedFulfillment,
+    activeOutcomes: mergedGoals,
+    currentWeekActionBlocks: blocks,
+    capture: currentReality.capture || null,
+    appGuide: Array.isArray(stableContext.appGuide) ? stableContext.appGuide : [],
+    dataInventory: Array.isArray(stableContext.dataInventory) ? stableContext.dataInventory : [],
+    sectionTimestamps: {
+      purpose: modelContext.generatedAt || "",
+      fulfillment: modelContext.generatedAt || "",
+      outcomes: modelContext.generatedAt || "",
+      actionBlocks: modelContext.generatedAt || "",
+      capture: modelContext.generatedAt || "",
+      diagnostic: modelContext.generatedAt || "",
+      diagnostics: modelContext.generatedAt || ""
+    }
+  };
+}
+
+function mergeUniqueByKey(items, keyFn) {
+  const source = Array.isArray(items) ? items : [];
+  const seen = new Set();
+  const out = [];
+  for (const item of source) {
+    if (!item || typeof item !== "object") continue;
+    const key = String(keyFn(item) || "").toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out;
+}
 
 async function compactChatContextForModel(context, { route = null, latestUserMessage = "", client = {} } = {}) {
   const src = context && typeof context === "object" ? context : {};
@@ -2803,6 +3423,15 @@ async function resolveStableContextEnvelope({
   const previousHash = clientHintHash || cachedHash;
   const changed = previousHash !== hash;
   const includeFull = Boolean(includeStableBlocksByIntent && changed);
+  const hydratedBlocks = (!includeFull && includeStableBlocksByIntent && hash)
+    ? await readStableContextBlocks(hash)
+    : null;
+  const effectiveAppGuide = includeFull
+    ? payload.appGuide
+    : (hydratedBlocks?.appGuide || []);
+  const effectiveDataInventory = includeFull
+    ? payload.dataInventory
+    : (hydratedBlocks?.dataInventory || []);
 
   await writeStableContextHash(scopeHash, hash);
   if (includeFull) {
@@ -2816,14 +3445,30 @@ async function resolveStableContextEnvelope({
     payload: {
       hash,
       changed,
-      appGuide: includeFull ? payload.appGuide : [],
-      dataInventory: includeFull ? payload.dataInventory : [],
+      appGuide: effectiveAppGuide,
+      dataInventory: effectiveDataInventory,
       counts: {
-        appGuide: payload.appGuide.length,
-        dataInventory: payload.dataInventory.length
+        appGuide: effectiveAppGuide.length,
+        dataInventory: effectiveDataInventory.length
       }
     }
   };
+}
+
+async function readStableContextBlocks(hash) {
+  if (!hash) return null;
+  const key = new Request(`https://loom-cache.internal/stable-context/blocks/${hash}`);
+  try {
+    const cached = await caches.default.match(key);
+    if (!cached) return null;
+    const json = await cached.json();
+    return {
+      appGuide: cleanAppGuide(json?.appGuide),
+      dataInventory: cleanDataInventory(json?.dataInventory)
+    };
+  } catch {
+    return null;
+  }
 }
 
 async function resolveStableContextScopeHash(context, payload) {
@@ -3044,7 +3689,18 @@ function shouldCacheLoomAIResponse(response) {
   if (!response || typeof response !== "object") return false;
   const message = nonEmptyString(response.message);
   if (!message) return false;
-  if (message === "Couldn't generate response. Check your connection.") return false;
+  const lowered = message.toLowerCase();
+  if (
+    lowered.includes("couldn’t generate a loomai response") ||
+    lowered.includes("couldn't generate a loomai response") ||
+    lowered.includes("timed out while generating") ||
+    lowered.includes("couldn’t reach the model service") ||
+    lowered.includes("couldn't reach the model service") ||
+    lowered.includes("hit a model error") ||
+    lowered.includes("returned an invalid response")
+  ) {
+    return false;
+  }
   return true;
 }
 
@@ -3114,7 +3770,10 @@ function resolveChipIntentRoute(latestUserMessage) {
 
 function normalizePassionType(value) {
   const text = String(value || "").trim().toLowerCase();
-  if (["love", "vows", "thrill", "hate"].includes(text)) return text;
+  if (!text) return "love";
+  if (text === "vow") return "vows";
+  if (text === "just" || text === "hate" || text === "hates") return "hate";
+  if (["love", "vows", "thrill"].includes(text)) return text;
   return "love";
 }
 
@@ -3173,18 +3832,47 @@ function sanitizeLoomChatResponse(raw, { context, hasContext, latestUserMessage,
   });
 }
 
+function normalizeModelCopy(value, { preserveNewlines = false } = {}) {
+  let text = String(value || "");
+  if (!text) return "";
+
+  text = text
+    .replace(/\u00a0/g, " ")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/[“”]/g, "\"")
+    .replace(/[‘’]/g, "'")
+    .replace(/[–—]/g, " - ")
+    .replace(/[‐‑‒−]/g, "-")
+    .replace(/…/g, "...")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/(^|[\s(])\*{1,3}([^*]+)\*{1,3}(?=[\s).,!?]|$)/g, "$1$2")
+    .replace(/(^|[\s(])_{1,3}([^_]+)_{1,3}(?=[\s).,!?]|$)/g, "$1$2");
+
+  if (preserveNewlines) {
+    text = text
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n")
+      .replace(/[ \t\f\v]+/g, " ")
+      .replace(/\n{3,}/g, "\n\n");
+  } else {
+    text = text.replace(/\s+/g, " ");
+  }
+
+  return text.trim();
+}
+
 function composeMessage(message, { context, route }) {
-  const source = String(message || "")
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n")
-    .trim();
+  const source = normalizeModelCopy(message, { preserveNewlines: true });
   if (!source) return composeFallbackMessage(context, route);
 
   const forbiddenInteraction = [
     /\bsources?\b/i,
     /\bwhich should i (add|edit|replace|pick)\b/i,
     /\boption [abc]\b/i,
-    /\bchoose (a|b|c)\b/i
+    /\bchoose (a|b|c)\b/i,
+    /\bhere (are|is)\b.*\boptions?\b/i,
+    /\b(the )?(options|suggestions) below\b/i,
+    /\b(pick|choose) (one|an option)\b/i
   ];
 
   const cleanedLines = source
@@ -3204,14 +3892,42 @@ function composeMessage(message, { context, route }) {
     .split(/(?:\n{2,}|(?<=[.!?])\s+(?=[A-Z\[]))/)
     .map((p) => p.replace(/\s+/g, " ").trim())
     .filter(Boolean)
-    .map((p) => truncate(p, 220))
-    .slice(0, 6);
+    .map((p) => truncateParagraphCleanly(p, 280))
+    .slice(0, 3);
 
   if (paragraphCandidates.length === 0) {
     return composeFallbackMessage(context, route);
   }
 
-  return paragraphCandidates.join("\n\n");
+  return paragraphCandidates
+    .join("\n\n")
+    .replace(/:\s*$/, ".")
+    .trim();
+}
+
+function truncateParagraphCleanly(value, maxChars = 280) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  if (text.length <= maxChars) return text;
+
+  const window = text.slice(0, maxChars + 1);
+  const sentenceBreak = Math.max(
+    window.lastIndexOf(". "),
+    window.lastIndexOf("! "),
+    window.lastIndexOf("? ")
+  );
+  if (sentenceBreak >= Math.floor(maxChars * 0.55)) {
+    return window.slice(0, sentenceBreak + 1).trim();
+  }
+
+  const wordBreak = window.lastIndexOf(" ");
+  if (wordBreak >= Math.floor(maxChars * 0.7)) {
+    const cut = window.slice(0, wordBreak).trim();
+    return /[.!?]$/.test(cut) ? cut : `${cut}.`;
+  }
+
+  const hardCut = text.slice(0, maxChars).trim();
+  return /[.!?]$/.test(hardCut) ? hardCut : `${hardCut}.`;
 }
 
 function composeFallbackMessage(context, route) {
@@ -3232,8 +3948,12 @@ function collectGrounding(input, context, { maxItems = 5, route = null } = {}) {
   const seen = new Set();
 
   for (const item of rawItems) {
-    const section = truncate(nonEmptyString(item?.section), 64);
-    const field = truncate(nonEmptyString(item?.field), 96);
+    const rawSection = nonEmptyString(item?.section);
+    const rawField = nonEmptyString(item?.field);
+    if (!rawSection || !rawField) continue;
+    const labels = normalizeGroundingLabels(rawSection, rawField);
+    const section = truncate(labels.section, 64);
+    const field = truncate(labels.field, 96);
     const timestamp = normalizeGroundingTimestamp(item?.timestamp);
     if (!section || !field) continue;
     const key = `${section.toLowerCase()}|${field.toLowerCase()}`;
@@ -3246,12 +3966,86 @@ function collectGrounding(input, context, { maxItems = 5, route = null } = {}) {
   const fallback = buildFallbackGrounding(context, route);
   for (const item of fallback) {
     if (normalized.length >= maxItems) break;
-    const key = `${item.section.toLowerCase()}|${item.field.toLowerCase()}`;
+    const labels = normalizeGroundingLabels(item.section, item.field);
+    const key = `${labels.section.toLowerCase()}|${labels.field.toLowerCase()}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    normalized.push(item);
+    normalized.push({
+      section: truncate(labels.section, 64),
+      field: truncate(labels.field, 96),
+      timestamp: normalizeGroundingTimestamp(item.timestamp)
+    });
   }
   return normalized.slice(0, maxItems);
+}
+
+function normalizeGroundingLabels(section, field) {
+  const rawSection = String(section || "").trim();
+  const rawField = String(field || "").trim();
+  const combined = `${rawSection}.${rawField}`.toLowerCase();
+
+  const mapField = () => {
+    if (combined.includes("fulfillmentcategories") && combined.includes(".name")) return "Fulfillment Area";
+    if (combined.includes("currentweekactionblocks")) return "Current Week Actions";
+    if (combined.includes("capture.totalcount")) return "Capture Count";
+    if (combined.includes("datainventory")) return "Data Inventory";
+    if (combined.includes("appguide")) return "App Guide";
+    if (combined.includes("mission")) return "Mission";
+    if (combined.includes("vision")) return "Vision";
+    if (combined.includes("purpose")) return "Purpose";
+    if (combined.includes("passion")) return "Passions";
+    if (combined.includes("identity")) return "Identity";
+    if (combined.includes("littlewin") || combined.includes("little_win")) return "Little Wins";
+    if (combined.includes("outcome") || combined.includes("goal")) return "Goals";
+    if (combined.includes("actionblock") || combined.includes("currentweekactionblocks") || combined.includes("actions")) {
+      return "Action Blocks";
+    }
+    if (combined.includes("capture")) return "Capture";
+    if (combined.includes("diagnostic") || combined.includes("personalization")) return "Diagnostic";
+    if (combined.includes("inventory")) return "Data Inventory";
+    if (combined.includes("guide")) return "App Guide";
+    return humanizeGroundingPath(rawField) || "Context";
+  };
+
+  const mapSection = () => {
+    if (combined.includes("purpose") || combined.includes("vision") || combined.includes("passion")) return "Purpose";
+    if (combined.includes("fulfillment") || combined.includes("mission") || combined.includes("identity") || combined.includes("littlewin")) {
+      return "Fulfillment";
+    }
+    if (combined.includes("outcome") || combined.includes("goal")) return "Goals";
+    if (combined.includes("actionblock") || combined.includes("currentweekactionblocks")) return "Action Blocks";
+    if (combined.includes("capture")) return "Capture";
+    if (combined.includes("diagnostic") || combined.includes("personalization")) return "Diagnostic";
+    if (combined.includes("inventory")) return "Data Inventory";
+    if (combined.includes("guide")) return "App Guide";
+    return humanizeGroundingPath(rawSection) || "Context";
+  };
+
+  return {
+    section: mapSection(),
+    field: mapField()
+  };
+}
+
+function humanizeGroundingPath(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const noIndexes = text
+    .replace(/\[[0-9]+\]/g, "")
+    .replace(/\[[^\]]*\]/g, "");
+  const segments = noIndexes.split(".").map((part) => part.trim()).filter(Boolean);
+  const tail = segments.length > 0 ? segments[segments.length - 1] : "";
+  if (!tail) return "";
+  const spaced = tail
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!spaced) return "";
+  return spaced
+    .split(" ")
+    .map((word) => (word ? `${word.charAt(0).toUpperCase()}${word.slice(1)}` : ""))
+    .join(" ");
 }
 
 function buildFallbackGrounding(context, route) {
@@ -3338,12 +4132,14 @@ function normalizeGroundingTimestamp(value) {
 
 function buildSuggestionCards(inputCards, inputActions, { context, confidence, route }) {
   const level = String(confidence || "").trim().toLowerCase();
-  if (level === "low") return [];
+  const routeCards = buildRouteSuggestionCards(route, context);
+  if (level === "low") {
+    return routeCards;
+  }
 
   const normalizedCards = normalizeSuggestionCards(inputCards, context);
   if (normalizedCards.length > 0) return normalizedCards;
 
-  const routeCards = buildRouteSuggestionCards(route, context);
   if (routeCards.length > 0) return routeCards;
 
   return actionsToSuggestionCards(inputActions, context);
@@ -3355,9 +4151,9 @@ function normalizeSuggestionCards(inputCards, context) {
   const seen = new Set();
 
   for (const card of source) {
-    const title = truncate(nonEmptyString(card?.title), 120);
+    const title = truncate(normalizeModelCopy(nonEmptyString(card?.title)), 120);
     if (!title) continue;
-    const description = truncate(nonEmptyString(card?.description) || "Suggestion options", 180);
+    const description = "";
     const options = normalizeSuggestionOptions(card?.options, context);
     if (options.length === 0) continue;
     const id = truncate(nonEmptyString(card?.id) || slug(title), 72);
@@ -3382,7 +4178,7 @@ function normalizeSuggestionOptions(inputOptions, context) {
     if (!ACTION_WHITELIST.has(type)) continue;
     const payload = normalizeActionPayload(type, option?.payload, context);
     if (!payload) continue;
-    const title = truncate(nonEmptyString(option?.title), 120);
+    const title = truncate(normalizeModelCopy(nonEmptyString(option?.title)), 120);
     if (!title) continue;
     const key = `${type}|${JSON.stringify(payload)}`;
     if (seen.has(key)) continue;
@@ -3405,7 +4201,7 @@ function actionsToSuggestionCards(actions, context) {
   return normalized.slice(0, 3).map((action, index) => ({
     id: `card-${index + 1}`,
     title: truncate(action.title, 120),
-    description: "Apply this Loom suggestion",
+    description: "",
     options: [{
       id: action.id,
       label: "A",
@@ -3440,12 +4236,26 @@ function buildRouteSuggestionCards(route, context) {
   }
 
   if (route.id === 3) {
+    const category = target || "this area";
+    const categoryIdForIdentity = categoryId || firstCategoryIdFromContext(context);
     const options = [
-      { title: "Identity option A", type: "addPlanSuggestion", payload: { text: `Identity: I am consistent in ${target || "this area"}.` } },
-      { title: "Identity option B", type: "addPlanSuggestion", payload: { text: `Identity: I finish what I start in ${target || "this area"}.` } },
-      { title: "Identity option C", type: "addPlanSuggestion", payload: { text: `Identity: I prioritize high-leverage actions in ${target || "this area"}.` } }
+      {
+        title: "Clear Communicator",
+        type: "addFulfillmentIdentity",
+        payload: { categoryId: categoryIdForIdentity, categoryName: category, identity: "Clear Communicator" }
+      },
+      {
+        title: "Consistent Connector",
+        type: "addFulfillmentIdentity",
+        payload: { categoryId: categoryIdForIdentity, categoryName: category, identity: "Consistent Connector" }
+      },
+      {
+        title: "Calm Finisher",
+        type: "addFulfillmentIdentity",
+        payload: { categoryId: categoryIdForIdentity, categoryName: category, identity: "Calm Finisher" }
+      }
     ];
-    return [buildCardFromOptions(`Identity options for ${target || "this area"}`, "Add one identity suggestion to Capture.", options, context)];
+    return [buildCardFromOptions(`Identity options for ${category}`, "", options, context)];
   }
 
   if (route.id === 4) {
@@ -3501,9 +4311,17 @@ function buildCardFromOptions(title, description, options, context) {
   return {
     id: slug(title),
     title: truncate(title, 120),
-    description: truncate(description, 180),
+    description: "",
     options: normalizedOptions
   };
+}
+
+function stripSuggestionCardCommentary(cards) {
+  const source = Array.isArray(cards) ? cards : [];
+  return source.map((card) => ({
+    ...card,
+    description: ""
+  }));
 }
 
 function resolveCategoryIdFromRouteTarget(target, context) {
@@ -3557,7 +4375,7 @@ function validateOutput(output, { context, hasContext, route }) {
   if (suggestionCards.length === 0 && Array.isArray(output?.actions) && output.actions.length > 0) {
     suggestionCards = actionsToSuggestionCards(output.actions, context);
   }
-  suggestionCards = suggestionCards.slice(0, 3);
+  suggestionCards = stripSuggestionCardCommentary(suggestionCards.slice(0, 3));
 
   const flattenedActions = flattenSuggestionCardsToActions(suggestionCards, context);
   const mergedActions = mergeActions(flattenedActions, output?.actions, context);
@@ -3626,17 +4444,20 @@ function mergeActions(primary, secondary, context) {
 }
 
 function removeInteractionText(message) {
-  const text = String(message || "").trim();
+  const text = normalizeModelCopy(message, { preserveNewlines: true });
   if (!text) return "";
   const lines = text.split(/\n+/).map((line) => line.trim()).filter(Boolean);
   const blocked = [
     /\bsources?\b/i,
     /\bwhich should i (add|edit|replace|choose)\b/i,
     /\boption [abc]\b/i,
-    /\bchoose (a|b|c)\b/i
+    /\bchoose (a|b|c)\b/i,
+    /\bhere (are|is)\b.*\boptions?\b/i,
+    /\b(the )?(options|suggestions) below\b/i,
+    /\b(pick|choose) (one|an option)\b/i
   ];
   const kept = lines.filter((line) => !blocked.some((pattern) => pattern.test(line)));
-  return kept.join("\n\n").trim();
+  return kept.join("\n\n").replace(/:\s*$/, ".").trim();
 }
 
 function containsSuspiciousFactPattern(message, context) {
@@ -3853,6 +4674,8 @@ const ACTION_WHITELIST = new Set([
   "updatePurposeVision",
   "addPassionItem",
   "updateFulfillmentMission",
+  "addFulfillmentIdentity",
+  "replaceFulfillmentIdentity",
   "addLittleWin",
   "createOutcome",
   "createCaptureAction",
@@ -3869,7 +4692,7 @@ function normalizeActions(input, { confidence, context }) {
     const type = String(action?.type || "").trim();
     if (!ACTION_WHITELIST.has(type)) continue;
 
-    const title = String(action?.title || "").replace(/\s+/g, " ").trim();
+    const title = normalizeModelCopy(String(action?.title || "").replace(/\s+/g, " ").trim());
     const payload = normalizeActionPayload(type, action?.payload, context);
     if (!title || !payload) continue;
     const id = String(action?.id || `${type}-${cleaned.length + 1}`).trim();
@@ -3890,7 +4713,7 @@ function normalizeActions(input, { confidence, context }) {
 
 function normalizeActionPayload(type, payload, context) {
   const src = payload && typeof payload === "object" ? payload : {};
-  const text = nonEmptyString(src.text);
+  const text = normalizeModelCopy(nonEmptyString(src.text));
   const categoryId = nonEmptyString(src.categoryId || src.categoryID);
   const categoryName = nonEmptyString(src.categoryName || src.category);
 
@@ -3898,8 +4721,8 @@ function normalizeActionPayload(type, payload, context) {
     case "updatePurposeVision":
       return text ? { text: truncate(text, 260) } : null;
     case "addPassionItem": {
-      const passionType = String(src.passionType || src.emotion || "").trim().toLowerCase();
-      if (!["love", "vows", "thrill", "hate"].includes(passionType) || !text) return null;
+      const passionType = normalizePassionType(src.passionType || src.emotion || "love");
+      if (!text) return null;
       return { passionType, text: truncate(text, 120) };
     }
     case "updateFulfillmentMission": {
@@ -3907,9 +4730,33 @@ function normalizeActionPayload(type, payload, context) {
       if (!validCategoryId || !text) return null;
       return { categoryId: validCategoryId, text: truncate(text, 240) };
     }
+    case "addFulfillmentIdentity": {
+      const validCategoryId = normalizeCategoryId(categoryId, categoryName, context);
+      const identity = normalizeModelCopy(nonEmptyString(src.identity || src.role || src.text));
+      if (!validCategoryId || !identity) return null;
+      const resolvedCategoryName = resolveCategoryNameById(validCategoryId, context);
+      return {
+        categoryId: validCategoryId,
+        categoryName: truncate(nonEmptyString(categoryName) || resolvedCategoryName, 72),
+        identity: truncate(identity, 120)
+      };
+    }
+    case "replaceFulfillmentIdentity": {
+      const validCategoryId = normalizeCategoryId(categoryId, categoryName, context);
+      const identity = normalizeModelCopy(nonEmptyString(src.identity || src.role || src.text));
+      const replaceIdentity = normalizeModelCopy(nonEmptyString(src.replaceIdentity || src.oldIdentity));
+      if (!validCategoryId || !identity || !replaceIdentity) return null;
+      const resolvedCategoryName = resolveCategoryNameById(validCategoryId, context);
+      return {
+        categoryId: validCategoryId,
+        categoryName: truncate(nonEmptyString(categoryName) || resolvedCategoryName, 72),
+        replaceIdentity: truncate(replaceIdentity, 120),
+        identity: truncate(identity, 120)
+      };
+    }
     case "addLittleWin": {
       const validCategoryId = normalizeCategoryId(categoryId, categoryName, context);
-      const activity = nonEmptyString(src.activity || src.text);
+      const activity = normalizeModelCopy(nonEmptyString(src.activity || src.text));
       if (!validCategoryId || !activity) return null;
       const eligibleRaw = src.appleHealthEligible;
       const appleHealthEligible =
@@ -3924,13 +4771,13 @@ function normalizeActionPayload(type, payload, context) {
     }
     case "createOutcome": {
       const validCategoryId = normalizeCategoryId(categoryId, categoryName, context);
-      const title = nonEmptyString(src.title || src.text);
+      const title = normalizeModelCopy(nonEmptyString(src.title || src.text));
       if (!validCategoryId || !title) return null;
       const measurable =
         typeof src.measurable === "boolean"
           ? src.measurable
           : String(src.measurable || "").toLowerCase() === "true";
-      const unit = nonEmptyString(src.unit);
+      const unit = normalizeModelCopy(nonEmptyString(src.unit));
       return {
         categoryId: validCategoryId,
         title: truncate(title, 120),
@@ -3957,6 +4804,14 @@ function normalizeCategoryId(categoryId, categoryName, context) {
   );
   const mapped = String(found?.id || "").trim();
   return /^[0-9a-f-]{36}$/i.test(mapped) ? mapped : "";
+}
+
+function resolveCategoryNameById(categoryId, context) {
+  const id = nonEmptyString(categoryId);
+  if (!id) return "";
+  const categories = Array.isArray(context?.fulfillmentCategories) ? context.fulfillmentCategories : [];
+  const found = categories.find((item) => nonEmptyString(item?.id).toLowerCase() === id.toLowerCase());
+  return nonEmptyString(found?.name);
 }
 
 function slug(value) {

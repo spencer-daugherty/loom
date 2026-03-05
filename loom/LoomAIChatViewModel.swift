@@ -76,6 +76,10 @@ struct LoomAIContextSnapshot: Codable {
         var historyCount: Int
         var lastChangedAt: Date?
     }
+    struct PurposeProfileSummary: Codable {
+        var profile: String
+        var generatedAt: Date?
+    }
     struct ReflectionJournalSummary: Codable {
         struct RecentEntry: Codable {
             var completedAt: Date
@@ -142,6 +146,7 @@ struct LoomAIContextSnapshot: Codable {
     var capture: CaptureSummary?
     var recentlyDeleted: RecentlyDeletedSummary?
     var sectionTimestamps: SectionTimestamps?
+    var purposeProfile: PurposeProfileSummary? = nil
     var dataInventory: [KnowledgeSectionSummary]
     var appGuide: [GuideTopic]
     var notes: [String]
@@ -204,6 +209,12 @@ struct LoomAIContextSnapshot: Codable {
                 )
             },
             sectionTimestamps: sectionTimestamps,
+            purposeProfile: purposeProfile.map {
+                .init(
+                    profile: String($0.profile.prefix(72)),
+                    generatedAt: $0.generatedAt
+                )
+            },
             dataInventory: Array(dataInventory.prefix(16)).map {
                 .init(
                     id: $0.id,
@@ -464,7 +475,7 @@ final class LoomAIViewModel: ObservableObject {
             .filter { $0.threadKey == threadKey }
             let contextSnapshot = compactedSnapshotIfEnabled(try buildContextSnapshot(in: context))
 
-            var outgoing = history.suffix(20).map {
+            var outgoing = history.suffix(10).map {
                 LoomAIService.TransportMessage(role: $0.roleRaw, content: $0.content)
             }
             if trimmedTransport != trimmedDisplay,
@@ -499,6 +510,46 @@ final class LoomAIViewModel: ObservableObject {
             lastRequestDebugSummary = requestDebug
             print("[LoomAI] LoomAI contextBytes=\(requestDebug.contextBytes) keys=\(requestDebug.contextKeys) messageCount=\(requestDebug.messageCount)")
             #endif
+
+            if let visionMode = purposeVisionAutoWriteMode(for: trimmedTransport, displayText: trimmedDisplay) {
+                let currentVision = contextSnapshot.drivingForce?.vision ?? ""
+                let previousSuggestions = previousPurposeVisionSuggestions(from: history)
+                let autowriteResponse = try await service.sendPurposeVisionAutoWrite(
+                    currentVision: currentVision,
+                    previousSuggestions: previousSuggestions,
+                    mode: visionMode,
+                    context: contextSnapshot
+                )
+                guard !Task.isCancelled else { return }
+                _ = incrementDailySpendLedger(with: autowriteResponse)
+
+                let enrichedAutowriteResponse = enrichPurposeVisionAutowriteResponse(
+                    autowriteResponse,
+                    mode: visionMode
+                )
+                let finalReply = enrichedAutowriteResponse.message.trimmingCharacters(in: .whitespacesAndNewlines)
+                let assistantPreviewMessage = LoomAIChatMessage(
+                    threadID: thread.id,
+                    threadKey: thread.threadKey,
+                    roleRaw: LoomAIChatRole.assistant.rawValue,
+                    content: finalReply.isEmpty ? "I generated Purpose Vision options below." : finalReply,
+                    chipsJSON: LoomAIChatMessageChipsCodec.encode(enrichedAutowriteResponse.chips),
+                    actionsJSON: LoomAIChatMessageActionsCodec.encode(enrichedAutowriteResponse.actions),
+                    debugJSON: LoomAIDebugCodec.encode(enrichedAutowriteResponse.debug),
+                    groundingJSON: LoomAIChatMessageGroundingCodec.encode(enrichedAutowriteResponse.grounding),
+                    suggestionCardsJSON: LoomAIChatMessageSuggestionCardsCodec.encode(enrichedAutowriteResponse.suggestionCards),
+                    nextActionJSON: LoomAIChatMessageNextActionCodec.encode(enrichedAutowriteResponse.nextAction)
+                )
+                await MainActor.run {
+                    context.insert(assistantPreviewMessage)
+                    thread.updatedAt = .now
+                    try? context.save()
+                    latestSuggestedActions = enrichedAutowriteResponse.actions
+                    followUpPromptChips = enrichedAutowriteResponse.chips.map(\.title)
+                    refreshRemainingDailyResponses()
+                }
+                return
+            }
 
             let response = try await service.sendChat(
                 messages: outgoing,
@@ -536,17 +587,13 @@ final class LoomAIViewModel: ObservableObject {
             }
             guard !Task.isCancelled else { return }
             let updatedHistory = history + [assistantPreviewMessage]
-            let apiSummaryTitle = await requestThreadTitleFromAI(
-                messages: updatedHistory,
-                contextSnapshot: contextSnapshot
-            )
-            guard !Task.isCancelled else { return }
-            if let summaryTitle = apiSummaryTitle, !summaryTitle.isEmpty {
-                await MainActor.run {
-                    thread.title = summaryTitle
-                    thread.updatedAt = .now
-                    try? context.save()
-                }
+            if shouldRequestThreadTitle(after: finalReply) {
+                scheduleThreadTitleRefresh(
+                    in: context,
+                    threadKey: thread.threadKey,
+                    messages: updatedHistory,
+                    contextSnapshot: contextSnapshot
+                )
             }
             if response.chips.isEmpty {
                 await refreshFollowUpPromptChipsViaAI(in: context, threadMessages: updatedHistory)
@@ -1426,6 +1473,7 @@ final class LoomAIViewModel: ObservableObject {
         let passionScoreSnapshots = try context.fetch(FetchDescriptor<PassionScoreSnapshot>())
         let weeklyMindsetEntries = try context.fetch(FetchDescriptor<WeeklyMindsetEntry.Fields>())
         let diagnosticSnapshots = try context.fetch(FetchDescriptor<DiagnosticsInsightsSnapshot>())
+        let purposeProfileSnapshots = try context.fetch(FetchDescriptor<PurposeProfileInsightsSnapshot>())
 
         let passionByID = Dictionary(uniqueKeysWithValues: passions.map { ($0.passion_id, $0) })
         let rolesByCategory = Dictionary(grouping: roles, by: \.category_id)
@@ -1446,6 +1494,9 @@ final class LoomAIViewModel: ObservableObject {
 
         let userKey = PersonalizationUserIdentity.currentUserKey()
         let latestDiagnosticSnapshot = diagnosticSnapshots
+            .filter { $0.userKey == userKey }
+            .max(by: { $0.generatedAt < $1.generatedAt })
+        let latestPurposeProfileSnapshot = purposeProfileSnapshots
             .filter { $0.userKey == userKey }
             .max(by: { $0.generatedAt < $1.generatedAt })
 
@@ -1551,6 +1602,12 @@ final class LoomAIViewModel: ObservableObject {
             )
         }
         let reflectionJournalSummary = buildReflectionJournalSummary(from: reflectionArchives)
+        let purposeProfileSummary = latestPurposeProfileSnapshot.map { snapshot in
+            LoomAIContextSnapshot.PurposeProfileSummary(
+                profile: snapshot.profile,
+                generatedAt: snapshot.generatedAt
+            )
+        }
         let captureSummary = LoomAIContextSnapshot.CaptureSummary(
             totalCount: captureItems.count,
             topItems: Array(
@@ -1726,6 +1783,7 @@ final class LoomAIViewModel: ObservableObject {
             capture: captureSummary,
             recentlyDeleted: recentlyDeletedSummary,
             sectionTimestamps: sectionTimestamps,
+            purposeProfile: purposeProfileSummary,
             dataInventory: inventory,
             appGuide: buildAppGuideTopics(),
             notes: [
@@ -2364,6 +2422,199 @@ final class LoomAIViewModel: ObservableObject {
         }
     }
 
+    private func purposeVisionAutoWriteMode(for transportText: String, displayText: String) -> String? {
+        let value = "\(transportText) \(displayText)"
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard !value.isEmpty else { return nil }
+        if value.contains("reword vision")
+            || value.contains("reword my vision")
+            || value.contains("rewrite my vision")
+            || value.contains("rewrite vision")
+        {
+            return "rewordVision"
+        }
+        if value.contains("new vision")
+            || value.contains("create a new vision")
+            || value.contains("create new vision")
+            || value.contains("create a vision")
+            || value.contains("create vision")
+            || value.contains("improve my purpose vision")
+            || value.contains("improve purpose vision")
+        {
+            return "newVision"
+        }
+        return nil
+    }
+
+    private func previousPurposeVisionSuggestions(from history: [LoomAIChatMessage]) -> [String] {
+        var seen = Set<String>()
+        var results: [String] = []
+
+        for message in history.reversed() where message.roleRaw == LoomAIChatRole.assistant.rawValue {
+            let cards = LoomAIChatMessageSuggestionCardsCodec.decode(message.suggestionCardsJSON)
+            for card in cards {
+                for option in card.options where option.type == "updatePurposeVision" || option.type == "replacePurposeVision" {
+                    let text = (option.payload["text"] ?? option.payload["vision"] ?? option.title)
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    if text.isEmpty { continue }
+                    let key = text.lowercased()
+                    if seen.insert(key).inserted {
+                        results.append(text)
+                    }
+                    if results.count >= 8 { return results }
+                }
+            }
+
+            if let data = message.content.data(using: .utf8),
+               let payload = try? JSONDecoder().decode(PurposeVisionMessagePayload.self, from: data) {
+                for suggestion in payload.suggestions {
+                    let text = suggestion.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if text.isEmpty { continue }
+                    let key = text.lowercased()
+                    if seen.insert(key).inserted {
+                        results.append(text)
+                    }
+                    if results.count >= 8 { return results }
+                }
+            }
+        }
+
+        return results
+    }
+
+    private func enrichPurposeVisionAutowriteResponse(
+        _ response: LoomAIService.LoomAIResponse,
+        mode: String
+    ) -> LoomAIService.LoomAIResponse {
+        let suggestions = extractPurposeVisionSuggestions(from: response).prefix(3).map { $0 }
+        guard !suggestions.isEmpty else { return response }
+
+        let labels = ["A", "B", "C"]
+        let options = suggestions.enumerated().map { index, suggestion in
+            LoomAISuggestionOption(
+                id: "purpose-vision-option-\(index + 1)",
+                label: labels[min(index, labels.count - 1)],
+                title: suggestion,
+                type: "updatePurposeVision",
+                payload: ["text": suggestion]
+            )
+        }
+        let cardTitle = mode.lowercased() == "rewordvision"
+            ? "Reworded Purpose Vision options"
+            : "New Purpose Vision options"
+        let suggestionCards = [
+            LoomAISuggestionCard(
+                id: "purpose-vision-autowrite",
+                title: cardTitle,
+                description: "",
+                options: options
+            )
+        ]
+        let actions = options.map { option in
+            LoomAISuggestedAction(
+                id: option.id,
+                title: option.title,
+                type: option.type,
+                payload: option.payload
+            )
+        }
+        let message = mode.lowercased() == "rewordvision"
+            ? "I generated reworded Purpose Vision options below."
+            : "I generated new Purpose Vision options below."
+        return LoomAIService.LoomAIResponse(
+            message: message,
+            grounding: response.grounding,
+            suggestionCards: suggestionCards,
+            nextAction: nil,
+            chips: response.chips,
+            actions: actions,
+            debug: response.debug,
+            usage: response.usage,
+            elapsedMS: response.elapsedMS
+        )
+    }
+
+    private func extractPurposeVisionSuggestions(from response: LoomAIService.LoomAIResponse) -> [String] {
+        var suggestions: [String] = []
+        var seen = Set<String>()
+
+        for card in response.suggestionCards {
+            for option in card.options where option.type == "updatePurposeVision" || option.type == "replacePurposeVision" {
+                let text = (option.payload["text"] ?? option.payload["vision"] ?? option.title)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if text.isEmpty { continue }
+                let key = text.lowercased()
+                if seen.insert(key).inserted {
+                    suggestions.append(text)
+                }
+            }
+        }
+
+        for action in response.actions where action.type == "updatePurposeVision" || action.type == "replacePurposeVision" {
+            let text = (action.payload["text"] ?? action.payload["vision"] ?? action.title)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if text.isEmpty { continue }
+            let key = text.lowercased()
+            if seen.insert(key).inserted {
+                suggestions.append(text)
+            }
+        }
+
+        if let data = response.message.data(using: .utf8),
+           let payload = try? JSONDecoder().decode(PurposeVisionMessagePayload.self, from: data) {
+            for suggestion in payload.suggestions {
+                let text = suggestion.trimmingCharacters(in: .whitespacesAndNewlines)
+                if text.isEmpty { continue }
+                let key = text.lowercased()
+                if seen.insert(key).inserted {
+                    suggestions.append(text)
+                }
+            }
+        }
+
+        return suggestions
+    }
+
+    private struct PurposeVisionMessagePayload: Decodable {
+        var suggestions: [String]
+    }
+
+    private func shouldRequestThreadTitle(after assistantReply: String) -> Bool {
+        let value = assistantReply
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard !value.isEmpty else { return false }
+        if value.contains("couldn’t generate response") || value.contains("couldn't generate response") {
+            return false
+        }
+        if value.contains("check your connection") || value.contains("i can’t help with that") || value.contains("i can't help with that") {
+            return false
+        }
+        return true
+    }
+
+    private func scheduleThreadTitleRefresh(
+        in context: ModelContext,
+        threadKey: String,
+        messages: [LoomAIChatMessage],
+        contextSnapshot: LoomAIContextSnapshot
+    ) {
+        let minimalContext = contextSnapshot.minimalized()
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let apiSummaryTitle = await self.requestThreadTitleFromAI(
+                messages: messages,
+                contextSnapshot: minimalContext
+            )
+            guard let summaryTitle = apiSummaryTitle, !summaryTitle.isEmpty else { return }
+            guard let thread = try? self.ensureThread(in: context, threadKey: threadKey) else { return }
+            thread.title = summaryTitle
+            thread.updatedAt = .now
+            try? context.save()
+        }
+    }
+
     private func sanitizeAPISummarizedThreadTitle(_ raw: String) -> String? {
         var title = raw
             .replacingOccurrences(of: "\n", with: " ")
@@ -2396,8 +2647,16 @@ final class LoomAIViewModel: ObservableObject {
         }
         let invalidPrefixes = ["how ", "what ", "can ", "should ", "help "]
         let invalidExact: Set<String> = ["loom", "new chat", "chat summary", "summary", "conversation"]
+        let invalidContains: [String] = [
+            "couldn't generate response",
+            "couldn’t generate response",
+            "check your connection",
+            "i can't help with that",
+            "i can’t help with that"
+        ]
         if title.isEmpty || title.count < 4 || invalidExact.contains(lower) { return nil }
         if invalidPrefixes.contains(where: { lower.hasPrefix($0) }) { return nil }
+        if invalidContains.contains(where: { lower.contains($0) }) { return nil }
 
         if title.count > 52 {
             title = truncateAtWordBoundary(title, maxLength: 52)
