@@ -70,6 +70,7 @@ struct TemporaryVisionAutoWriteDebugView: View {
     @State private var responseCopied = false
     @State private var contextCopied = false
     @State private var allCopied = false
+    @State private var copyAllCopied = false
     @FocusState private var isInputFocused: Bool
 
     private let autoWriteEndpointURL = URL(string: "https://loom-ai-minimal.spence0927.workers.dev/purpose/vision/autowrite")!
@@ -168,6 +169,10 @@ struct TemporaryVisionAutoWriteDebugView: View {
                         Text("Vision AutoWrite Debug")
                             .font(.title2.weight(.bold))
                         Spacer(minLength: 0)
+                        Button(copyAllCopied ? "Copied" : "Copy All") {
+                            markCopied($copyAllCopied, value: comprehensiveDebugExportText())
+                        }
+                        .buttonStyle(.bordered)
                         Button(action: onClose) {
                             Image(systemName: "xmark")
                                 .font(.system(size: 14, weight: .bold))
@@ -1247,6 +1252,80 @@ struct TemporaryVisionAutoWriteDebugView: View {
 
     private func formatDuration(_ seconds: TimeInterval) -> String {
         String(format: "%.2fs", max(0, seconds))
+    }
+
+    private func comprehensiveDebugExportText() -> String {
+        let sectionDivider = "\n\n------------------------------\n\n"
+        let modeDescription = mode.title
+        let prompt = loomAIPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let previousSuggestions = previousSuggestionsText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let chipsText: String = {
+            guard !loomAIDebugChips.isEmpty else { return "<none>" }
+            return loomAIDebugChips.map { "• \($0.title) => \($0.prompt)" }.joined(separator: "\n")
+        }()
+        let evidenceText: String = {
+            guard !loomAIDebugEvidence.isEmpty else { return "<none>" }
+            return loomAIDebugEvidence.map { "• \($0)" }.joined(separator: "\n")
+        }()
+
+        let header = """
+        Loom Debug Export
+        timestamp: \(ISO8601DateFormatter().string(from: Date()))
+        mode: \(modeDescription)
+        status: \(responseStatus)
+        duration: \(responseDurationText)
+        usage: \(usageSummaryText)
+        estimatedCost: \(estimatedCostText)
+        """
+
+        let inputs = """
+        Inputs
+        prompt: \(prompt.isEmpty ? "<empty>" : prompt)
+        currentVision: \(currentVision.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "<empty>" : currentVision.trimmingCharacters(in: .whitespacesAndNewlines))
+        previousSuggestions:
+        \(previousSuggestions.isEmpty ? "<empty>" : previousSuggestions)
+        """
+
+        let chips = """
+        Debug Chips
+        \(chipsText)
+        """
+
+        let evidence = """
+        Worker Debug Evidence
+        \(evidenceText)
+        """
+
+        let request = """
+        Raw Request JSON
+        \(rawRequestText.isEmpty ? "<empty>" : rawRequestText)
+        """
+
+        let context = """
+        Raw Context JSON
+        \(rawContextText.isEmpty ? "<empty>" : rawContextText)
+        """
+
+        let response = """
+        Raw Response JSON
+        \(rawResponseText.isEmpty ? "<empty>" : rawResponseText)
+        """
+
+        let appLog = """
+        App Activity Log
+        \(appActivityLog.exportText().isEmpty ? "<empty>" : appActivityLog.exportText())
+        """
+
+        return [
+            header,
+            inputs,
+            chips,
+            evidence,
+            request,
+            context,
+            response,
+            appLog
+        ].joined(separator: sectionDivider)
     }
 
     private func buildAllLoomAIDebugChips(from snapshot: LoomAIContextSnapshot) -> [LoomAIPromptChip] {
