@@ -919,6 +919,31 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
     );
   }
 
+  // Chip action routes are deterministic and should never block on upstream model latency.
+  if (!isAutoGroupIntent && shouldUseDeterministicRouteResponse(chipIntentRoute)) {
+    if (chipIntentRoute?.id === 8) {
+      return json(
+        buildBestUseLoomDeterministicResponse({
+          hasContext,
+          context,
+          route: chipIntentRoute
+        }),
+        200,
+        corsHeaders(request)
+      );
+    }
+    return json(
+      buildDeterministicRouteResponse({
+        hasContext,
+        context,
+        route: chipIntentRoute,
+        message: buildDeterministicRouteMessage(chipIntentRoute)
+      }),
+      200,
+      corsHeaders(request)
+    );
+  }
+
   const preferredModel = shouldForceMiniModel
     ? "gpt-5-mini"
     : (nonEmptyString(env.OPENAI_MODEL) || DEFAULT_CHAT_MODEL);
@@ -929,6 +954,86 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
         .map((value) => nonEmptyString(value))
         .filter(Boolean)
     ).slice(0, 2);
+  const actionPayloadSchema = {
+    anyOf: [
+      {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          text: { type: "string" }
+        },
+        required: ["text"]
+      },
+      {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          passionType: { type: "string", enum: ["love", "vows", "thrill", "hate"] },
+          text: { type: "string" }
+        },
+        required: ["passionType", "text"]
+      },
+      {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          categoryId: { type: "string" },
+          text: { type: "string" }
+        },
+        required: ["categoryId", "text"]
+      },
+      {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          categoryId: { type: "string" },
+          identity: { type: "string" }
+        },
+        required: ["categoryId", "identity"]
+      },
+      {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          categoryId: { type: "string" },
+          replaceIdentity: { type: "string" },
+          identity: { type: "string" }
+        },
+        required: ["categoryId", "replaceIdentity", "identity"]
+      },
+      {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          categoryId: { type: "string" },
+          activity: { type: "string" },
+          appleHealthEligible: { type: "boolean" }
+        },
+        required: ["categoryId", "activity", "appleHealthEligible"]
+      },
+      {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          categoryId: { type: "string" },
+          activity: { type: "string" },
+          replaceActivity: { type: "string" }
+        },
+        required: ["categoryId", "activity", "replaceActivity"]
+      },
+      {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          categoryId: { type: "string" },
+          title: { type: "string" },
+          measurable: { type: "boolean" },
+          unit: { type: "string" }
+        },
+        required: ["categoryId", "title", "measurable", "unit"]
+      }
+    ]
+  };
   const schema = {
     name: "loom_chat_response",
     strict: true,
@@ -975,7 +1080,7 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
                     label: { type: "string" },
                     title: { type: "string" },
                     type: { type: "string" },
-                    payload: { type: "object", additionalProperties: true }
+                    payload: actionPayloadSchema
                   },
                   required: ["id", "label", "title", "type", "payload"]
                 }
@@ -994,7 +1099,7 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
                 id: { type: "string" },
                 title: { type: "string" },
                 type: { type: "string" },
-                payload: { type: "object", additionalProperties: true }
+                payload: actionPayloadSchema
               },
               required: ["id", "title", "type", "payload"]
             }
@@ -1026,7 +1131,7 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
               id: { type: "string" },
               title: { type: "string" },
               type: { type: "string" },
-              payload: { type: "object", additionalProperties: true }
+              payload: actionPayloadSchema
             },
             required: ["id", "title", "type", "payload"]
           }
@@ -1107,6 +1212,7 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
     '- addFulfillmentIdentity {"categoryId":"uuid","categoryName":"...","identity":"..."}',
     '- replaceFulfillmentIdentity {"categoryId":"uuid","categoryName":"...","replaceIdentity":"...","identity":"..."}',
     '- addLittleWin {"categoryId":"uuid","activity":"...","appleHealthEligible":true|false}',
+    '- replaceLittleWin {"categoryId":"uuid","activity":"...","replaceActivity":"..."}',
     '- createOutcome {"categoryId":"uuid","title":"...","measurable":true|false,"unit":"steps|minutes|..."}',
     '- createCaptureAction {"text":"..."}',
     '- addPlanSuggestion {"text":"..."}',
@@ -1256,7 +1362,7 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
       hasContext,
       context,
       route: chipIntentRoute,
-      allowRouteSuggestionCards: false,
+      allowRouteSuggestionCards: true,
       intent: normalizedIntent,
       message: buildUserFacingChatErrorMessage(result)
     });
@@ -2581,6 +2687,162 @@ function safeChatFallback({ hasContext, context, message, intent, route, allowRo
       evidence: hasContext ? extractEvidencePathsFromContext(context, 2) : []
     }
   };
+}
+
+function shouldUseDeterministicRouteResponse(route) {
+  const routeID = Number(route?.id);
+  return Number.isFinite(routeID) && routeID >= 1 && routeID <= 8;
+}
+
+function buildDeterministicRouteMessage(route) {
+  const routeID = Number(route?.id);
+  const target = nonEmptyString(route?.target);
+  if (routeID === 1) {
+    return `I generated Daily Little Wins options${target ? ` for ${target}` : ""} below based on your current context.`;
+  }
+  if (routeID === 2) {
+    return `I generated mission rewrite options${target ? ` for ${target}` : ""} below based on your current context.`;
+  }
+  if (routeID === 3) {
+    return `I generated identity options${target ? ` for ${target}` : ""} below based on your current context.`;
+  }
+  if (routeID === 4) {
+    return `I generated next-step options${target ? ` for ${target}` : ""} below based on your current context.`;
+  }
+  if (routeID === 5) {
+    return `I generated plan options${target ? ` for ${target}` : ""} below based on your current context.`;
+  }
+  if (routeID === 6) {
+    return `I generated passion options${target ? ` for ${target}` : ""} below based on your current context.`;
+  }
+  if (routeID === 7) {
+    return "I generated Purpose Vision options below based on your current context.";
+  }
+  return "I prepared suggestions below.";
+}
+
+function buildDeterministicRouteResponse({ hasContext, context, route, message }) {
+  const fallbackSuggestionCards = (hasContext && route)
+    ? buildRouteSuggestionCards(route, context)
+    : [];
+  const flattenedActions = flattenSuggestionCardsToActions(fallbackSuggestionCards, context);
+  return {
+    message: nonEmptyString(message) || "I prepared suggestions below.",
+    grounding: hasContext ? collectGrounding([], context, { maxItems: 3 }) : [],
+    suggestionCards: fallbackSuggestionCards,
+    nextAction: normalizeNextAction(null, fallbackSuggestionCards, {
+      context,
+      confidence: fallbackSuggestionCards.length > 0 ? "medium" : "low"
+    }),
+    chips: [],
+    actions: flattenedActions,
+    debug: {
+      usedContext: Boolean(hasContext),
+      confidence: fallbackSuggestionCards.length > 0 ? "medium" : "low",
+      evidence: hasContext ? extractEvidencePathsFromContext(context, 3) : []
+    }
+  };
+}
+
+function buildBestUseLoomDeterministicResponse({ hasContext, context, route }) {
+  const message = buildBestUseLoomGuidanceMessage(context);
+  const recommendationText = buildBestUseLoomRecommendation(context);
+  const suggestionCards = recommendationText
+    ? [{
+        id: "best-use-loom-recommendation",
+        title: "Best next move in Loom",
+        description: "",
+        options: [{
+          id: "best-use-loom-recommendation-1",
+          label: "A",
+          title: "Run this now",
+          type: "addPlanSuggestion",
+          payload: { text: recommendationText }
+        }]
+      }]
+    : [];
+  const actions = flattenSuggestionCardsToActions(suggestionCards, context);
+  return {
+    message,
+    grounding: hasContext ? collectGrounding([], context, { maxItems: 5, route }) : [],
+    suggestionCards,
+    nextAction: normalizeNextAction(null, suggestionCards, {
+      context,
+      confidence: suggestionCards.length > 0 ? "high" : "medium"
+    }),
+    chips: [],
+    actions,
+    debug: {
+      usedContext: Boolean(hasContext),
+      confidence: suggestionCards.length > 0 ? "high" : "medium",
+      evidence: hasContext ? extractEvidencePathsFromContext(context, 5) : []
+    }
+  };
+}
+
+function buildBestUseLoomGuidanceMessage(context) {
+  const purpose = nonEmptyString(context?.drivingForce?.purpose);
+  const vision = nonEmptyString(context?.drivingForce?.vision);
+  const captureCount = Number.isFinite(Number(context?.capture?.totalCount))
+    ? Number(context.capture.totalCount)
+    : 0;
+  const quickCompletions = Number.isFinite(Number(context?.capture?.quickCompletionsLast7Days))
+    ? Number(context.capture.quickCompletionsLast7Days)
+    : 0;
+  const actionBlocks = Array.isArray(context?.currentWeekActionBlocks) ? context.currentWeekActionBlocks : [];
+  const firstBlock = actionBlocks[0] || null;
+  const firstBlockTitle = nonEmptyString(firstBlock?.title || firstBlock?.category);
+  const firstBlockActions = Array.isArray(firstBlock?.actions) ? firstBlock.actions.map((item) => nonEmptyString(item)).filter(Boolean) : [];
+  const topFulfillment = Array.isArray(context?.fulfillmentCategories) ? context.fulfillmentCategories.slice(0, 2) : [];
+  const firstArea = topFulfillment[0] || null;
+  const firstAreaName = nonEmptyString(firstArea?.name);
+  const firstAreaLittleWins = Array.isArray(firstArea?.littleWins) ? firstArea.littleWins.map((x) => nonEmptyString(x)).filter(Boolean).slice(0, 3) : [];
+  const goals = Array.isArray(context?.activeOutcomes) ? context.activeOutcomes : [];
+  const firstGoal = goals[0] || null;
+  const goalTitle = nonEmptyString(firstGoal?.title);
+  const goalProgress = nonEmptyString(firstGoal?.progressSummary);
+  const diagnosticRoot = nonEmptyString(context?.diagnostic?.rootCause);
+  const diagnosticDirection = nonEmptyString(context?.diagnostic?.nextDirection);
+
+  const p1 = purpose || vision
+    ? `Your best use of Loom is to treat it as a daily execution system for [[P:${truncate(purpose || vision, 120)}]], not as a place to collect more tasks.`
+    : "Your best use of Loom is to treat it as a daily execution system, not as a place to collect more tasks.";
+  const p2 = `Run this sequence each day: [[A:Capture -> Action Blocks -> Little Wins -> Reflect]]. Capture should stay fast, Action Blocks should define today's focus, Little Wins should protect consistency, and Reflect should close the loop before tomorrow.`;
+  const p3 = [
+    captureCount > 0 ? `You currently have [[A:${captureCount}]] capture items` : "",
+    quickCompletions === 0 ? "with no quick completions in the last 7 days" : `with ${quickCompletions} quick completions in the last 7 days`,
+    firstBlockTitle ? `and an active block in [[F:${firstBlockTitle}]]` : "",
+    firstBlockActions.length > 0 ? `containing ${firstBlockActions.slice(0, 2).join(" + ")}` : ""
+  ].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+  const p4 = [
+    firstAreaName && firstAreaLittleWins.length > 0
+      ? `In [[F:${firstAreaName}]], keep only three Little Wins that are specific and finishable (example style: ${firstAreaLittleWins.slice(0, 2).join("; ")}).`
+      : "",
+    goalTitle
+      ? `For [[O:${goalTitle}]] (${goalProgress || "progress not tracked yet"}), connect at least one Action Block task and one Little Win to the same outcome this week.`
+      : ""
+  ].filter(Boolean).join(" ");
+  const p5 = [
+    diagnosticRoot ? `Your diagnostic pattern is: ${truncate(diagnosticRoot, 150)}.` : "",
+    diagnosticDirection ? `Use Loom to enforce this structural shift: ${truncate(diagnosticDirection, 150)}.` : "",
+    "Be agile: if time is low, do a 10-minute triage; if energy is high, do a 30-minute full planning pass."
+  ].filter(Boolean).join(" ");
+
+  return [p1, p2, p3, p4, p5].filter(Boolean).join("\n\n");
+}
+
+function buildBestUseLoomRecommendation(context) {
+  const captureCount = Number.isFinite(Number(context?.capture?.totalCount))
+    ? Number(context.capture.totalCount)
+    : 0;
+  const actionBlocks = Array.isArray(context?.currentWeekActionBlocks) ? context.currentWeekActionBlocks : [];
+  const topBlock = actionBlocks[0] || null;
+  const topBlockName = nonEmptyString(topBlock?.title || topBlock?.category) || "your top area";
+  const topActions = Array.isArray(topBlock?.actions)
+    ? topBlock.actions.map((item) => nonEmptyString(item)).filter(Boolean).slice(0, 2)
+    : [];
+  const nextActionsText = topActions.length > 0 ? topActions.join(" and ") : "one focused task";
+  return `Today: process ${Math.max(3, Math.min(8, captureCount || 3))} capture items, commit one 30-minute block in ${topBlockName}, execute ${nextActionsText}, then log one completed Little Win before ending the day.`;
 }
 
 function buildUserFacingChatErrorMessage(result) {
@@ -3946,12 +4208,14 @@ function collectGrounding(input, context, { maxItems = 5, route = null } = {}) {
   const rawItems = Array.isArray(input) ? input : [];
   const normalized = [];
   const seen = new Set();
+  const hasActionBlockGrounding = hasGroundableActionBlocks(context);
 
   for (const item of rawItems) {
     const rawSection = nonEmptyString(item?.section);
     const rawField = nonEmptyString(item?.field);
     if (!rawSection || !rawField) continue;
     const labels = normalizeGroundingLabels(rawSection, rawField);
+    if (!hasActionBlockGrounding && labels.section === "Action Blocks") continue;
     const section = truncate(labels.section, 64);
     const field = truncate(labels.field, 96);
     const timestamp = normalizeGroundingTimestamp(item?.timestamp);
@@ -4050,8 +4314,10 @@ function humanizeGroundingPath(value) {
 
 function buildFallbackGrounding(context, route) {
   const items = [];
+  const hasActionBlockGrounding = hasGroundableActionBlocks(context);
   const add = (section, field, timestamp) => {
     if (!section || !field) return;
+    if (section === "Action Blocks" && !hasActionBlockGrounding) return;
     items.push({
       section: truncate(String(section), 64),
       field: truncate(String(field), 96),
@@ -4078,7 +4344,7 @@ function buildFallbackGrounding(context, route) {
     if (Array.isArray(context?.activeOutcomes) && context.activeOutcomes.length > 0) {
       add("Goals", "activeOutcomes[0].title", context?.sectionTimestamps?.outcomes);
     }
-    if (Array.isArray(context?.currentWeekActionBlocks) && context.currentWeekActionBlocks.length > 0) {
+    if (hasActionBlockGrounding) {
       add("Action Blocks", "currentWeekActionBlocks[0].title", context?.sectionTimestamps?.actionBlocks);
     }
     if (context?.capture && Number.isFinite(Number(context.capture.totalCount))) {
@@ -4103,7 +4369,7 @@ function buildFallbackGrounding(context, route) {
   if (nonEmptyString(context?.drivingForce?.purpose)) {
     add("Purpose", "drivingForce.purpose", context?.sectionTimestamps?.purpose);
   }
-  if (Array.isArray(context?.currentWeekActionBlocks) && context.currentWeekActionBlocks.length > 0) {
+  if (hasActionBlockGrounding) {
     add("Action Blocks", "currentWeekActionBlocks[0].title", context?.sectionTimestamps?.actionBlocks);
   }
   if (context?.capture && Number.isFinite(Number(context.capture.totalCount))) {
@@ -4117,6 +4383,17 @@ function buildFallbackGrounding(context, route) {
   }
 
   return items;
+}
+
+function hasGroundableActionBlocks(context) {
+  const blocks = Array.isArray(context?.currentWeekActionBlocks) ? context.currentWeekActionBlocks : [];
+  if (blocks.length === 0) return false;
+  return blocks.some((item) => {
+    const actions = Array.isArray(item?.actions) ? item.actions : [];
+    const hasAction = actions.some((action) => nonEmptyString(action));
+    const hasTitle = Boolean(nonEmptyString(item?.title));
+    return hasAction || hasTitle;
+  });
 }
 
 function normalizeGroundingTimestamp(value) {
@@ -4218,11 +4495,8 @@ function buildRouteSuggestionCards(route, context) {
   const categoryId = resolveCategoryIdFromRouteTarget(target, context);
 
   if (route.id === 1 && categoryId) {
-    const options = [
-      { title: "10-minute daily focus sprint", type: "addLittleWin", payload: { categoryId, activity: "10-minute focused sprint", appleHealthEligible: false } },
-      { title: "15-minute cleanup and reset", type: "addLittleWin", payload: { categoryId, activity: "15-minute reset and cleanup", appleHealthEligible: false } },
-      { title: "20-minute completion block", type: "addLittleWin", payload: { categoryId, activity: "20-minute completion block", appleHealthEligible: false } }
-    ];
+    const category = resolveCategoryFromRouteTarget(target, context);
+    const options = buildLittleWinRouteOptions({ category, categoryId, target, context });
     return [buildCardFromOptions(`Little Wins for ${target || "this area"}`, "Pick one short daily action.", options, context)];
   }
 
@@ -4237,24 +4511,37 @@ function buildRouteSuggestionCards(route, context) {
 
   if (route.id === 3) {
     const category = target || "this area";
+    const categoryRecord = resolveCategoryFromRouteTarget(category, context);
     const categoryIdForIdentity = categoryId || firstCategoryIdFromContext(context);
-    const options = [
-      {
-        title: "Clear Communicator",
-        type: "addFulfillmentIdentity",
-        payload: { categoryId: categoryIdForIdentity, categoryName: category, identity: "Clear Communicator" }
-      },
-      {
-        title: "Consistent Connector",
-        type: "addFulfillmentIdentity",
-        payload: { categoryId: categoryIdForIdentity, categoryName: category, identity: "Consistent Connector" }
-      },
-      {
-        title: "Calm Finisher",
-        type: "addFulfillmentIdentity",
-        payload: { categoryId: categoryIdForIdentity, categoryName: category, identity: "Calm Finisher" }
+    const existingIdentities = uniqueOrdered(
+      (Array.isArray(categoryRecord?.identity) ? categoryRecord.identity : [])
+        .map((item) => normalizeModelCopy(nonEmptyString(item)))
+        .filter(Boolean)
+    );
+    const shouldReplaceIdentity = existingIdentities.length >= 3;
+    const replaceIdentityTarget = shouldReplaceIdentity
+      ? chooseIdentityReplacementTarget(existingIdentities, category)
+      : "";
+    const identityCandidates = ["Clear Communicator", "Consistent Connector", "Calm Finisher"];
+    const options = identityCandidates.map((identity) => {
+      if (shouldReplaceIdentity) {
+        return {
+          title: `Replace "${truncate(replaceIdentityTarget, 64)}" with "${identity}"`,
+          type: "replaceFulfillmentIdentity",
+          payload: {
+            categoryId: categoryIdForIdentity,
+            categoryName: category,
+            replaceIdentity: replaceIdentityTarget,
+            identity
+          }
+        };
       }
-    ];
+      return {
+        title: identity,
+        type: "addFulfillmentIdentity",
+        payload: { categoryId: categoryIdForIdentity, categoryName: category, identity }
+      };
+    });
     return [buildCardFromOptions(`Identity options for ${category}`, "", options, context)];
   }
 
@@ -4332,6 +4619,300 @@ function resolveCategoryIdFromRouteTarget(target, context) {
   );
   const id = nonEmptyString(found?.id);
   return /^[0-9a-f-]{36}$/i.test(id) ? id : firstCategoryIdFromContext(context);
+}
+
+function resolveCategoryFromRouteTarget(target, context) {
+  const categories = Array.isArray(context?.fulfillmentCategories) ? context.fulfillmentCategories : [];
+  if (!target) return categories[0] || null;
+  const found = categories.find(
+    (item) => String(item?.name || "").trim().toLowerCase() === target.toLowerCase()
+  );
+  return found || categories[0] || null;
+}
+
+const LITTLE_WIN_CORPUS_BY_CATEGORY = {
+  "Career & Business": [
+    "Plan top priorities",
+    "Deep work session",
+    "Follow up contact",
+    "Request feedback",
+    "Protect focus block",
+    "Plan tomorrow priorities"
+  ],
+  "Faith & Spirituality": [
+    "Morning prayer",
+    "Scripture reading",
+    "Quiet meditation",
+    "Gratitude reflection",
+    "Pray for others",
+    "Practice stillness"
+  ],
+  "Wealth & Finance": [
+    "Review daily spending",
+    "Track one expense",
+    "Check account balances",
+    "Transfer small savings",
+    "Cancel unused subscription",
+    "Pay extra debt",
+    "Review financial plan",
+    "Organize financial documents"
+  ],
+  "Love & Relationships": [
+    "Send appreciation text",
+    "10-minute check-in",
+    "Ask one deeper question",
+    "Offer one act of help",
+    "Plan quality time",
+    "Share one gratitude"
+  ],
+  "Health & Energy": [
+    "10-minute walk",
+    "Hydrate before lunch",
+    "Prepare one healthy meal",
+    "Sleep prep 30 minutes early",
+    "15-minute mobility session",
+    "Mindfulness break"
+  ],
+  "default": [
+    "Plan tomorrow priorities",
+    "Complete one 15-minute task",
+    "Clear one small blocker",
+    "Do one focused reset",
+    "Review progress briefly",
+    "Close one open loop"
+  ]
+};
+
+function buildLittleWinRouteOptions({ category, categoryId, target, context }) {
+  const categoryName = nonEmptyString(category?.name) || nonEmptyString(target) || "this area";
+  const existingLittleWins = uniqueOrdered(
+    (Array.isArray(category?.littleWins) ? category.littleWins : [])
+      .map((item) => normalizeModelCopy(nonEmptyString(item)))
+      .filter(Boolean)
+  );
+  const candidateTitles = selectLittleWinCandidates({
+    categoryName,
+    category,
+    context,
+    existingLittleWins
+  });
+
+  if (candidateTitles.length > 0) {
+    const shouldReplace = existingLittleWins.length >= 3;
+    const replaceActivityTarget = shouldReplace
+      ? chooseLittleWinReplacementTarget(existingLittleWins, categoryName)
+      : "";
+    return candidateTitles.map((title, index) => {
+      if (shouldReplace) {
+        const replaceActivity = replaceActivityTarget || existingLittleWins[index % existingLittleWins.length];
+        return {
+          title: `Replace "${truncate(replaceActivity, 64)}" with "${truncate(title, 72)}"`,
+          type: "replaceLittleWin",
+          payload: {
+            categoryId,
+            activity: title,
+            replaceActivity
+          }
+        };
+      }
+      return {
+        title,
+        type: "addLittleWin",
+        payload: {
+          categoryId,
+          activity: title,
+          appleHealthEligible: inferAppleHealthEligibility(title, categoryName)
+        }
+      };
+    });
+  }
+
+  return [
+    {
+      title: `10-minute step for ${categoryName}`,
+      type: "addLittleWin",
+      payload: { categoryId, activity: `10-minute step for ${categoryName}`, appleHealthEligible: false }
+    },
+    {
+      title: `15-minute reset for ${categoryName}`,
+      type: "addLittleWin",
+      payload: { categoryId, activity: `15-minute reset for ${categoryName}`, appleHealthEligible: false }
+    },
+    {
+      title: `20-minute completion block for ${categoryName}`,
+      type: "addLittleWin",
+      payload: { categoryId, activity: `20-minute completion block for ${categoryName}`, appleHealthEligible: false }
+    }
+  ];
+}
+
+function extractActionHintsForCategory(categoryName, context) {
+  const blocks = Array.isArray(context?.currentWeekActionBlocks) ? context.currentWeekActionBlocks : [];
+  const filtered = blocks.filter((block) => {
+    const title = nonEmptyString(block?.title).toLowerCase();
+    const category = nonEmptyString(block?.category).toLowerCase();
+    const target = nonEmptyString(categoryName).toLowerCase();
+    return target && (title === target || category === target);
+  });
+  const source = filtered.length > 0 ? filtered : blocks.slice(0, 1);
+  const items = [];
+  for (const block of source) {
+    const actions = Array.isArray(block?.actions) ? block.actions : [];
+    for (const action of actions) {
+      const text = normalizeModelCopy(nonEmptyString(action));
+      if (!text) continue;
+      items.push(text);
+      if (items.length >= 3) return items;
+    }
+  }
+  return items;
+}
+
+function selectLittleWinCandidates({ categoryName, category, context, existingLittleWins }) {
+  const normalizedCategory = normalizeLittleWinCorpusCategory(categoryName);
+  const corpus = LITTLE_WIN_CORPUS_BY_CATEGORY[normalizedCategory] || LITTLE_WIN_CORPUS_BY_CATEGORY.default;
+  const existingNorm = existingLittleWins.map(normalizeLittleWinForCompare).filter(Boolean);
+  const mission = normalizeModelCopy(nonEmptyString(category?.mission));
+  const purpose = normalizeModelCopy(nonEmptyString(context?.drivingForce?.purpose));
+  const actionHints = extractActionHintsForCategory(categoryName, context);
+  const signalText = [mission, purpose, ...actionHints].join(" ").toLowerCase();
+
+  const scored = corpus
+    .map((item) => normalizeModelCopy(nonEmptyString(item)))
+    .filter(Boolean)
+    .filter((item) => {
+      const normalized = normalizeLittleWinForCompare(item);
+      if (!normalized) return false;
+      if (existingNorm.includes(normalized)) return false;
+      return !isLittleWinSuggestionTooSimilarToExisting(item, existingLittleWins);
+    })
+    .map((item) => ({
+      item,
+      score: scoreLittleWinCandidate(item, normalizedCategory, signalText)
+    }))
+    .sort((a, b) => b.score - a.score || a.item.localeCompare(b.item))
+    .map((row) => row.item);
+
+  if (scored.length >= 3) return scored.slice(0, 3);
+
+  const fallbacks = uniqueOrdered([
+    ...scored,
+    mission ? `15-minute action toward: ${truncate(mission, 64)}` : "",
+    `10-minute step for ${categoryName}`,
+    `15-minute reset for ${categoryName}`,
+    `Close one open loop for ${categoryName}`
+  ].filter(Boolean));
+  return fallbacks
+    .filter((item) => !isLittleWinSuggestionTooSimilarToExisting(item, existingLittleWins))
+    .slice(0, 3);
+}
+
+function normalizeLittleWinCorpusCategory(category) {
+  const lowered = nonEmptyString(category).toLowerCase();
+  if (lowered === "health & vitality") return "Health & Energy";
+  if (lowered === "wealth & lifestyle") return "Wealth & Finance";
+  if (lowered === "mind & meaning") return "Mindset & Resilience";
+  if (lowered === "leadership & impact") return "Service & Impact";
+  return nonEmptyString(category);
+}
+
+function scoreLittleWinCandidate(candidate, categoryName, signalText) {
+  const text = nonEmptyString(candidate).toLowerCase();
+  if (!text) return 0;
+  let score = 0;
+  const categoryKeywords = categoryKeywordSet(categoryName);
+  for (const keyword of categoryKeywords) {
+    if (text.includes(keyword)) score += 2;
+    if (signalText.includes(keyword)) score += 1;
+  }
+  const candidateTokens = new Set(text.split(/\s+/).filter(Boolean));
+  const signalTokens = new Set(String(signalText || "").split(/\s+/).filter(Boolean));
+  for (const token of candidateTokens) {
+    if (token.length >= 4 && signalTokens.has(token)) score += 1;
+  }
+  if (/\b(review|track|check|plan|organize|transfer|cancel|pay)\b/.test(text)) score += 1;
+  if (text.split(/\s+/).length <= 5) score += 1;
+  return score;
+}
+
+function categoryKeywordSet(categoryName) {
+  const key = nonEmptyString(categoryName).toLowerCase();
+  if (key.includes("wealth") || key.includes("finance") || key.includes("money")) {
+    return ["budget", "spend", "expense", "account", "saving", "subscription", "debt", "financial", "money"];
+  }
+  if (key.includes("faith") || key.includes("spiritual")) {
+    return ["prayer", "scripture", "gratitude", "meditation", "reflect"];
+  }
+  if (key.includes("love") || key.includes("relationship")) {
+    return ["check", "gratitude", "listen", "quality", "support", "text"];
+  }
+  if (key.includes("health") || key.includes("energy")) {
+    return ["walk", "sleep", "workout", "hydrate", "mindfulness"];
+  }
+  return ["plan", "review", "track", "organize"];
+}
+
+function chooseLittleWinReplacementTarget(existingLittleWins, categoryName) {
+  const source = Array.isArray(existingLittleWins) ? existingLittleWins : [];
+  if (source.length === 0) return "";
+  const keywords = categoryKeywordSet(categoryName);
+  const scored = source.map((item) => {
+    const text = nonEmptyString(item).toLowerCase();
+    let relevance = 0;
+    for (const keyword of keywords) {
+      if (text.includes(keyword)) relevance += 1;
+    }
+    if (/\breset\b|\bcleanup\b|\bgeneral\b/.test(text)) relevance -= 1;
+    return { item, relevance };
+  }).sort((a, b) => a.relevance - b.relevance);
+  return nonEmptyString(scored[0]?.item) || nonEmptyString(source[0]);
+}
+
+function chooseIdentityReplacementTarget(existingIdentities, categoryName) {
+  const source = Array.isArray(existingIdentities) ? existingIdentities : [];
+  if (source.length === 0) return "";
+  const keywords = categoryKeywordSet(categoryName);
+  const scored = source.map((item) => {
+    const text = nonEmptyString(item).toLowerCase();
+    let relevance = 0;
+    for (const keyword of keywords) {
+      if (text.includes(keyword)) relevance += 1;
+    }
+    if (/\bhelper\b|\bgood\b|\bbetter\b|\bbest\b/.test(text)) relevance -= 1;
+    return { item, relevance };
+  }).sort((a, b) => a.relevance - b.relevance);
+  return nonEmptyString(scored[0]?.item) || nonEmptyString(source[0]);
+}
+
+function isLittleWinSuggestionTooSimilarToExisting(candidate, existing) {
+  const candidateNorm = normalizeLittleWinForCompare(candidate);
+  if (!candidateNorm) return false;
+  const candidateTokens = new Set(candidateNorm.split(" ").filter(Boolean));
+  const source = Array.isArray(existing) ? existing : [];
+  for (const item of source) {
+    const itemNorm = normalizeLittleWinForCompare(item);
+    if (!itemNorm) continue;
+    if (itemNorm === candidateNorm) return true;
+    if (candidateNorm.includes(itemNorm) || itemNorm.includes(candidateNorm)) return true;
+    const itemTokens = new Set(itemNorm.split(" ").filter(Boolean));
+    if (itemTokens.size === 0) continue;
+    const overlap = [...candidateTokens].filter((token) => itemTokens.has(token)).length;
+    const ratio = overlap / Math.max(1, Math.min(candidateTokens.size, itemTokens.size));
+    if (ratio >= 0.6) return true;
+  }
+  return false;
+}
+
+function normalizeLittleWinForCompare(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function inferAppleHealthEligibility(activity, categoryName) {
+  const lower = `${nonEmptyString(activity)} ${nonEmptyString(categoryName)}`.toLowerCase();
+  return /\b(steps?|walk|run|workout|exercise|sleep|mindful|mindfulness|active minutes?|calories?)\b/.test(lower);
 }
 
 function normalizeNextAction(input, suggestionCards, { context, confidence }) {
@@ -4677,6 +5258,7 @@ const ACTION_WHITELIST = new Set([
   "addFulfillmentIdentity",
   "replaceFulfillmentIdentity",
   "addLittleWin",
+  "replaceLittleWin",
   "createOutcome",
   "createCaptureAction",
   "addPlanSuggestion"
@@ -4767,6 +5349,17 @@ function normalizeActionPayload(type, payload, context) {
         categoryId: validCategoryId,
         activity: truncate(activity, 140),
         appleHealthEligible
+      };
+    }
+    case "replaceLittleWin": {
+      const validCategoryId = normalizeCategoryId(categoryId, categoryName, context);
+      const activity = normalizeModelCopy(nonEmptyString(src.activity || src.text));
+      const replaceActivity = normalizeModelCopy(nonEmptyString(src.replaceActivity || src.oldActivity));
+      if (!validCategoryId || !activity || !replaceActivity) return null;
+      return {
+        categoryId: validCategoryId,
+        activity: truncate(activity, 140),
+        replaceActivity: truncate(replaceActivity, 140)
       };
     }
     case "createOutcome": {
