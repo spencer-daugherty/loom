@@ -349,6 +349,7 @@ final class LoomAIViewModel: ObservableObject {
         static let warningThresholdRatio: Double = 0.75
         static let fallbackEstimatedCostPerReplyUSD: Double = 0.01
         static let defaultsKey = "loomAI.chatDailyMessageLimit.v1"
+        static let disableLimiterDefaultsKey = "loomAI.dev.disableDailyLimiter"
     }
 
     struct DebugFailureDetail {
@@ -392,11 +393,16 @@ final class LoomAIViewModel: ObservableObject {
         refreshRemainingDailyResponses()
     }
 
+    private var isDailyLimiterDisabled: Bool {
+        UserDefaults.standard.bool(forKey: DailyChatLimitConfig.disableLimiterDefaultsKey)
+    }
+
     var isDailyLimitReached: Bool {
-        remainingDailyResponses <= 0
+        !isDailyLimiterDisabled && remainingDailyResponses <= 0
     }
 
     var shouldShowFiveLeftWarning: Bool {
+        guard !isDailyLimiterDisabled else { return false }
         guard !isDailyLimitReached else { return false }
         return dailyEstimatedSpendUSD >= (DailyChatLimitConfig.maxDailyEstimatedCostUSD * DailyChatLimitConfig.warningThresholdRatio)
     }
@@ -427,7 +433,7 @@ final class LoomAIViewModel: ObservableObject {
         let trimmedTransport = (transportMessageOverride ?? draft).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedDisplay.isEmpty, !trimmedTransport.isEmpty, !isSending else { return }
         refreshRemainingDailyResponses()
-        guard remainingDailyResponses > 0 else {
+        guard isDailyLimiterDisabled || remainingDailyResponses > 0 else {
             errorMessage = nil
             return
         }
@@ -2327,7 +2333,7 @@ final class LoomAIViewModel: ObservableObject {
     @discardableResult
     private func incrementDailySpendLedger(with response: LoomAIService.LoomAIResponse, now: Date = Date()) -> Bool {
         var ledger = dailySpendLedger(for: now)
-        guard ledger.spentUSD < DailyChatLimitConfig.maxDailyEstimatedCostUSD else {
+        guard isDailyLimiterDisabled || ledger.spentUSD < DailyChatLimitConfig.maxDailyEstimatedCostUSD else {
             refreshRemainingDailyResponses(now: now)
             return false
         }

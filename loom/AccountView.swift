@@ -472,6 +472,7 @@ struct AccountView: View {
     @AppStorage("developer_demo_mode_enabled") private var developerDemoModeEnabled = false
     @AppStorage(loomAITroubleshootingDefaultsKey) private var enableLoomAITroubleshooting = true
     @AppStorage(loomAIDebugDefaultsKey) private var enableLoomAIDebug = true
+    @AppStorage("loomAI.dev.disableDailyLimiter") private var disableLoomAIDailyLimiter = false
     @AppStorage("dev_manual_warning_cards_enabled") private var devManualWarningCardsEnabled = false
     @AppStorage("dev_outcome_warning_target_passed") private var devOutcomeWarningTargetPassed = false
     @AppStorage("dev_outcome_warning_goal_achieved") private var devOutcomeWarningGoalAchieved = false
@@ -487,6 +488,7 @@ struct AccountView: View {
     @State private var developerPasswordInput = ""
     @State private var showDeveloperPasswordError = false
     @State private var showDeveloperPage = false
+    @State private var loomAICostSnapshot = LoomAICostLedger.dailySnapshot()
 
     private func deleteWarningTitle(for scope: DeleteScope) -> String {
         switch scope {
@@ -523,6 +525,33 @@ struct AccountView: View {
 
     private var isFulfillmentEmptyState: Bool {
         blankHomepageMode || fulfillments.isEmpty
+    }
+
+    private var legacyLoomAIChatDailyLimitDefaultsKey: String {
+        "loomAI.chatDailyMessageLimit.v1"
+    }
+
+    private func refreshLoomAICostSnapshot() {
+        loomAICostSnapshot = LoomAICostLedger.dailySnapshot()
+    }
+
+    private func resetLoomAIDailyLimit() {
+        LoomAICostLedger.resetToday()
+        UserDefaults.standard.removeObject(forKey: legacyLoomAIChatDailyLimitDefaultsKey)
+        refreshLoomAICostSnapshot()
+    }
+
+    private func costProgress(spent: Double, limit: Double) -> Double {
+        guard limit > 0 else { return 0 }
+        return min(max(spent / limit, 0), 1)
+    }
+
+    private func formatUSDCost(_ value: Double) -> String {
+        let sanitized = max(0, value)
+        if sanitized < 0.01 {
+            return String(format: "$%.4f", sanitized)
+        }
+        return String(format: "$%.2f", sanitized)
     }
 
     var body: some View {
@@ -821,6 +850,7 @@ struct AccountView: View {
                         Toggle("Enable LoomAI Insights Refresh", isOn: $enableLoomAIInsightsRefresh)
                         Toggle("LoomAI Troubleshooting", isOn: $enableLoomAITroubleshooting)
                         Toggle("LoomAI Debug", isOn: $enableLoomAIDebug)
+                        Toggle("Disable LoomAI Daily Limiter", isOn: $disableLoomAIDailyLimiter)
                         Toggle("Enable Projects", isOn: $enableProjectsFeature)
                         Toggle("Onboarding", isOn: $onboardingResetOnNextLaunch)
                         Toggle("Blank Homepage", isOn: $blankHomepageMode)
@@ -835,6 +865,46 @@ struct AccountView: View {
                         }
                         Section("Action Blocks") {
                             Toggle("Action Blocks are old", isOn: $devActionBlocksWarningOldBlocks)
+                        }
+                    }
+
+                    Section("LoomAI Cost") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("LoomAI Chat")
+                                    .font(.headline)
+                                Spacer()
+                                Text("\(formatUSDCost(loomAICostSnapshot.chatSpentUSD)) / \(formatUSDCost(loomAICostSnapshot.chatLimitUSD))")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                            ProgressView(value: costProgress(spent: loomAICostSnapshot.chatSpentUSD, limit: loomAICostSnapshot.chatLimitUSD))
+                                .tint(.accentColor)
+                            Text("Daily estimate total.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 4)
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("AutoWrite + AutoGroup")
+                                    .font(.headline)
+                                Spacer()
+                                Text("\(formatUSDCost(loomAICostSnapshot.autoWriteSpentUSD)) / \(formatUSDCost(loomAICostSnapshot.autoWriteLimitUSD))")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                            ProgressView(value: costProgress(spent: loomAICostSnapshot.autoWriteSpentUSD, limit: loomAICostSnapshot.autoWriteLimitUSD))
+                                .tint(.accentColor)
+                            Text("Includes AutoWrite and AutoGroup requests.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 4)
+
+                        Button("Refresh daily limit") {
+                            resetLoomAIDailyLimit()
                         }
                     }
 
@@ -870,6 +940,9 @@ struct AccountView: View {
                             showDeveloperPage = false
                         }
                     }
+                }
+                .onAppear {
+                    refreshLoomAICostSnapshot()
                 }
             }
         }
