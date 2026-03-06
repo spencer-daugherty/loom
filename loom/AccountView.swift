@@ -460,6 +460,7 @@ struct AccountView: View {
     }
 
     @Environment(\.modelContext) private var context
+    @Environment(\.dismiss) private var dismiss
     @Query private var fulfillments: [Fulfillment]
     @AppStorage(loomAIInsightsRefreshToggleDefaultsKey) private var enableLoomAIInsightsRefresh = false
     @AppStorage("enable_projects_feature") private var enableProjectsFeature = false
@@ -643,15 +644,18 @@ struct AccountView: View {
                     }
                 }
                 Button {
-                    // Replay the 7 onboarding screens, then return directly to app flow.
-                    // Keep account + subscription satisfied so gate stops at onboarding.
-                    hasAccount = true
-                    hasCompletedDiagnostic = true
-                    hasSeenDiagnosticInsights = true
-                    isSubscribed = true
-                    hasSeenOnboarding = false
-                    hasSeenContentQuickstart = false
-                    forceShowContentQuickstartOnce = true
+                    dismiss()
+                    DispatchQueue.main.async {
+                        // Replay the onboarding/tutorial flow only after returning to ContentView.
+                        // Keep account + subscription satisfied so gate stops at onboarding.
+                        hasAccount = true
+                        hasCompletedDiagnostic = true
+                        hasSeenDiagnosticInsights = true
+                        isSubscribed = true
+                        hasSeenOnboarding = false
+                        hasSeenContentQuickstart = false
+                        forceShowContentQuickstartOnce = true
+                    }
                 } label: {
                     HStack {
                         Text("Launch Tutorial")
@@ -757,54 +761,17 @@ struct AccountView: View {
             .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showDeveloperPasswordSheet) {
-            NavigationStack {
-                VStack(alignment: .leading, spacing: 14) {
-                    Text("Developer Access")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                    HStack(spacing: 8) {
-                        SecureField("Passcode", text: $developerPasswordInput)
-                            .font(.system(size: 20, weight: .regular))
-                            .keyboardType(.numberPad)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(height: 52)
-                            .onChange(of: developerPasswordInput) { _, newValue in
-                                let digitsOnly = newValue.filter(\.isNumber)
-                                let limited = String(digitsOnly.prefix(4))
-                                if limited != newValue {
-                                    developerPasswordInput = limited
-                                }
-                            }
-
-                        Button {
-                            if developerPasswordInput == "0927" {
-                                showDeveloperPasswordError = false
-                                showDeveloperPasswordSheet = false
-                                showDeveloperPage = true
-                            } else {
-                                showDeveloperPasswordError = true
-                            }
-                        } label: {
-                            Image(systemName: "arrow.right")
-                                .font(.system(size: 20, weight: .semibold))
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        }
-                        .buttonStyle(.plain)
-                        .frame(width: 52, height: 52)
-                        .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        .foregroundStyle(.white)
-                        .disabled(developerPasswordInput.count < 4)
-                    }
-
-                    if showDeveloperPasswordError {
-                        Text("Incorrect password.")
-                            .font(.footnote)
-                            .foregroundStyle(.red)
-                    }
-
-                    Spacer(minLength: 0)
+            DeveloperAccessSheet(
+                pin: $developerPasswordInput,
+                showError: $showDeveloperPasswordError
+            ) {
+                if developerPasswordInput == "0927" {
+                    showDeveloperPasswordError = false
+                    showDeveloperPasswordSheet = false
+                    showDeveloperPage = true
+                } else {
+                    showDeveloperPasswordError = true
                 }
-                .padding()
             }
             .presentationDetents([.height(220)])
             .presentationDragIndicator(.visible)
@@ -4549,6 +4516,107 @@ private struct NotificationsPlaceholderView: View {
         let refreshedStatus = await LoomNotificationScheduler.authorizationStatus()
         await MainActor.run { authorizationStatus = refreshedStatus }
         return isAuthorizationGranted(refreshedStatus)
+    }
+}
+
+private struct DeveloperAccessSheet: View {
+    @Binding var pin: String
+    @Binding var showError: Bool
+    let onSubmit: () -> Void
+
+    @FocusState private var isPinFieldFocused: Bool
+    @State private var isAutoSubmitting = false
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Developer Access")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity, alignment: .center)
+
+                ZStack {
+                    TextField("", text: $pin)
+                        .keyboardType(.numberPad)
+                        .textContentType(.oneTimeCode)
+                        .focused($isPinFieldFocused)
+                        .opacity(0.01)
+                        .frame(height: 1)
+                        .accessibilityHidden(true)
+
+                    HStack(spacing: 10) {
+                        ForEach(0..<4, id: \.self) { index in
+                            let isFilled = index < pin.count
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(Color(.secondarySystemBackground))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .stroke(
+                                            isFilled ? Color.accentColor.opacity(0.45) : Color.black.opacity(0.08),
+                                            lineWidth: 1
+                                        )
+                                )
+                                .overlay {
+                                    Text(pinDigit(at: index))
+                                        .font(.system(size: 24, weight: .semibold, design: .rounded))
+                                        .foregroundStyle(.primary)
+                                }
+                                .frame(maxWidth: .infinity, minHeight: 58)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        isPinFieldFocused = true
+                    }
+                }
+
+                if showError {
+                    Text("Incorrect password.")
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding()
+            .onAppear {
+                pin = String(pin.filter(\.isNumber).prefix(4))
+                DispatchQueue.main.async {
+                    isPinFieldFocused = true
+                }
+            }
+            .onChange(of: pin) { _, newValue in
+                let normalized = String(newValue.filter(\.isNumber).prefix(4))
+                if normalized != newValue {
+                    pin = normalized
+                    return
+                }
+
+                if showError {
+                    showError = false
+                }
+
+                guard normalized.count == 4 else {
+                    isAutoSubmitting = false
+                    return
+                }
+                guard !isAutoSubmitting else { return }
+
+                isAutoSubmitting = true
+                DispatchQueue.main.async {
+                    onSubmit()
+                    isAutoSubmitting = false
+                    if pin.count < 4 {
+                        isPinFieldFocused = true
+                    }
+                }
+            }
+        }
+    }
+
+    private func pinDigit(at index: Int) -> String {
+        guard index < pin.count else { return "" }
+        let stringIndex = pin.index(pin.startIndex, offsetBy: index)
+        return String(pin[stringIndex])
     }
 }
 

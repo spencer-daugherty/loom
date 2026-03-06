@@ -1449,7 +1449,7 @@ struct FulfillmentView: View {
                         .foregroundColor(.black)
                     readOnlyRows(values: roles)
 
-                    Text("Focus")
+                    Text("Little Wins")
                         .font(.headline)
                         .foregroundColor(.black)
                     readOnlyRows(values: fociValues)

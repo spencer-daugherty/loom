@@ -20,6 +20,42 @@ private struct PopoverHeightPreferenceKey: PreferenceKey {
     }
 }
 
+private struct CaptureChromeMaterialLayer<S: Shape>: View {
+    let shape: S
+    var shadowRadius: CGFloat = 0
+    var shadowY: CGFloat = 0
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        shape
+            .fill(.ultraThinMaterial)
+            .overlay {
+                LinearGradient(
+                    colors: [
+                        Color.white.opacity(colorScheme == .dark ? 0.10 : 0.16),
+                        Color.clear,
+                        Color.black.opacity(colorScheme == .dark ? 0.10 : 0.06)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .clipShape(shape)
+                .allowsHitTesting(false)
+            }
+            .shadow(
+                color: Color.black.opacity(shadowRadius > 0 ? (colorScheme == .dark ? 0.22 : 0.10) : 0),
+                radius: shadowRadius,
+                x: 0,
+                y: shadowY
+            )
+    }
+}
+
+private struct PlannedActionDueSnapshot: Codable {
+    let dueDate: Date
+    let attentionDays: Int
+}
+
 #Preview {
     NavigationStack {
         CaptureView()
@@ -470,8 +506,12 @@ struct CaptureView: View {
     private var recurringDispatches: [RecurringCaptureDispatch]
     @Query(sort: \LeverageResource.createdAt, order: .forward)
     private var leverageCatalog: [LeverageResource]
+    @Query(sort: \PlannedChunk.chunkIndex, order: .forward)
+    private var plannedChunks: [PlannedChunk]
     @Query(sort: \PlannedChunkAction.createdAt, order: .forward)
     private var plannedActions: [PlannedChunkAction]
+    @Query(sort: \PlannedChunkStepFourState.updatedAt, order: .reverse)
+    private var plannedChunkStepFourStates: [PlannedChunkStepFourState]
     @Query(sort: \ActivePlanState.id, order: .forward)
     private var activePlanStates: [ActivePlanState]
 
@@ -625,6 +665,12 @@ struct CaptureView: View {
     private enum FocusField: Hashable {
         case newInput
         case item(UUID)
+    }
+
+    private struct MoveToActionBlockOption: Identifiable, Hashable {
+        let id: UUID
+        let chunkIndex: Int
+        let title: String
     }
 
     private enum RepeatUnit: String, CaseIterable, Identifiable {
@@ -896,15 +942,14 @@ struct CaptureView: View {
                     if isCaptureSetupWelcomePage {
                         captureSetupWelcomeScreen
                     } else {
-                        VStack(spacing: 12) {
+                        ZStack(alignment: .bottom) {
                             ScrollViewReader { proxy in
                                 captureList(proxy: proxy)
+                                    .safeAreaPadding(.bottom, captureListBottomPadding)
                             }
-                        }
-                        .background(Color.clear)
-                        .safeAreaInset(edge: .bottom) {
                             captureBottomInset
                         }
+                        .background(Color.clear)
                     }
                 }
                 .navigationTitle(isCaptureSetupWelcomePage ? "" : "Capture")
@@ -921,7 +966,7 @@ struct CaptureView: View {
                                     .font(.system(size: 16, weight: .semibold))
                                     .foregroundStyle(.primary)
                                     .padding(8)
-                                    .background(.ultraThinMaterial, in: Circle())
+                                    .background(captureChromeBackground(in: Circle()))
                             }
                             .buttonStyle(.plain)
                         }
@@ -946,7 +991,7 @@ struct CaptureView: View {
                                         .font(.system(size: 16, weight: .semibold))
                                         .foregroundStyle(.primary)
                                         .padding(8)
-                                        .background(.ultraThinMaterial, in: Circle())
+                                        .background(captureChromeBackground(in: Circle()))
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -1112,7 +1157,7 @@ struct CaptureView: View {
                         if editActionKeyboardShowsCheckmark {
                             Circle().fill(Color.blue)
                         } else {
-                            Circle().fill(.ultraThinMaterial)
+                            captureChromeBackground(in: Circle())
                         }
                     }
                 )
@@ -1127,6 +1172,34 @@ struct CaptureView: View {
                 )
         }
         .buttonStyle(.plain)
+    }
+
+    private func captureChromeBackground<S: Shape>(
+        in shape: S,
+        shadowRadius: CGFloat = 0,
+        shadowY: CGFloat = 0
+    ) -> some View {
+        CaptureChromeMaterialLayer(
+            shape: shape,
+            shadowRadius: shadowRadius,
+            shadowY: shadowY
+        )
+    }
+
+    private var captureBottomToolbarBackdrop: some View {
+        GeometryReader { proxy in
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                captureChromeBackground(
+                    in: Rectangle(),
+                    shadowRadius: 12,
+                    shadowY: -2
+                )
+                .frame(height: proxy.size.height + 24)
+                .ignoresSafeArea(edges: .bottom)
+            }
+        }
+        .allowsHitTesting(false)
     }
 
     private func captureList(proxy: ScrollViewProxy) -> some View {
@@ -1422,6 +1495,14 @@ struct CaptureView: View {
         }
     }
 
+    private var captureListBottomPadding: CGFloat {
+        let composerHeight: CGFloat = 64
+        let outerMargin: CGFloat = 3
+        let ghostControlHeight: CGFloat = (!isSearchMode && isGhostOn && !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) ? 44 : 0
+        let ghostSpacing: CGFloat = ghostControlHeight > 0 ? 8 : 0
+        return composerHeight + outerMargin + ghostControlHeight + ghostSpacing
+    }
+
     private var editActionHasChanges: Bool {
         editingItemText != editingItemOriginalText
         || editingItemHasDueDate != editingItemOriginalHasDueDate
@@ -1499,6 +1580,7 @@ struct CaptureView: View {
             }
             editActionSourceRow
             editActionAttachmentsSection
+            editActionMoveToActionBlockRow
             editActionCompleteSection
         }
     }
@@ -1678,6 +1760,31 @@ struct CaptureView: View {
             } label: {
                 Text("Complete")
                     .foregroundStyle(.blue)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var editActionMoveToActionBlockRow: some View {
+        if !activeActionBlockOptions.isEmpty {
+            Section {
+                HStack {
+                    Text("Move to Action Block")
+                    Spacer()
+                    Menu {
+                        ForEach(activeActionBlockOptions) { option in
+                            Button(option.title) {
+                                moveEditingItemToActionBlock(option)
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("Select")
+                            Image(systemName: "chevron.up.chevron.down")
+                        }
+                        .foregroundStyle(.blue)
+                    }
+                }
             }
         }
     }
@@ -1866,72 +1973,84 @@ struct CaptureView: View {
                 let usable = totalWidth - (sidePadding * 2)
                 let textWidth = max(140, usable - controlsWidth - (isSearchMode ? 0 : spacing))
 
-                HStack(spacing: spacing) {
-                    PersistentCaptureComposerField(
-                        text: $input,
-                        placeholder: isSearchMode ? "Search for an action..." : "Add an action…",
-                        returnKeyType: isSearchMode ? .search : .send,
-                        isFirstResponder: isComposerAllowedFirstResponder,
-                        onSubmit: {
-                            if !isSearchMode {
-                                addItem()
-                            }
-                        },
-                        onBeginEditing: {
-                            focusedField = nil
-                            isComposerFocused = true
-                        }
+                ZStack {
+                    captureChromeBackground(
+                        in: RoundedRectangle(cornerRadius: 18, style: .continuous),
+                        shadowRadius: 10,
+                        shadowY: 2
                     )
-                        .frame(height: 20)
-                        .padding(textPadding)
-                        .background(Color(.secondarySystemBackground))
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .stroke(
-                                    shouldHighlightDuplicateInput
-                                    ? Color.red.opacity(0.85)
-                                    : (colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.3)),
-                                    lineWidth: shouldHighlightDuplicateInput ? 1.5 : 1
-                                )
-                        )
-                        .frame(width: textWidth, alignment: .leading)
 
-                    if !isSearchMode {
-                        HStack(spacing: spacing) {
-                            Toggle(isOn: $isGhostOn) {
-                                EmptyView()
-                            }
-                            .toggleStyle(.automatic)
-                            .labelsHidden()
-                            .frame(width: toggleWidth)
-
-                            Image(systemName: ghostClockIconName)
-                                .font(.system(size: iconSize, weight: .semibold))
-                                .foregroundStyle(isGhostOn ? .blue : .secondary)
-                                .frame(width: iconSlotWidth)
-                                .accessibilityHidden(true)
-
-                            if showQuickAddButton {
-                                Button {
+                    HStack(spacing: spacing) {
+                        PersistentCaptureComposerField(
+                            text: $input,
+                            placeholder: isSearchMode ? "Search for an action..." : "Add an action…",
+                            returnKeyType: isSearchMode ? .search : .send,
+                            isFirstResponder: isComposerAllowedFirstResponder,
+                            onSubmit: {
+                                if !isSearchMode {
                                     addItem()
-                                } label: {
-                                    Image(systemName: "arrow.up")
-                                        .font(.system(size: 16, weight: .semibold))
-                                        .foregroundStyle(.white)
-                                        .frame(width: quickAddButtonSize, height: quickAddButtonSize)
-                                        .background(Color.blue, in: Circle())
                                 }
-                                .buttonStyle(.plain)
+                            },
+                            onBeginEditing: {
+                                focusedField = nil
+                                isComposerFocused = true
                             }
+                        )
+                            .frame(height: 20)
+                            .padding(textPadding)
+                            .background(Color.clear)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(
+                                        shouldHighlightDuplicateInput
+                                        ? Color.red.opacity(0.85)
+                                        : (colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.3)),
+                                        lineWidth: shouldHighlightDuplicateInput ? 1.5 : 1
+                                    )
+                            )
+                            .frame(width: textWidth, alignment: .leading)
+
+                        if !isSearchMode {
+                            HStack(spacing: spacing) {
+                                Toggle(isOn: $isGhostOn) {
+                                    EmptyView()
+                                }
+                                .toggleStyle(.automatic)
+                                .labelsHidden()
+                                .frame(width: toggleWidth)
+
+                                Image(systemName: ghostClockIconName)
+                                    .font(.system(size: iconSize, weight: .semibold))
+                                    .foregroundStyle(isGhostOn ? .blue : .secondary)
+                                    .frame(width: iconSlotWidth)
+                                    .accessibilityHidden(true)
+
+                                if showQuickAddButton {
+                                    Button {
+                                        addItem()
+                                    } label: {
+                                        Image(systemName: "arrow.up")
+                                            .font(.system(size: 16, weight: .semibold))
+                                            .foregroundStyle(.white)
+                                            .frame(width: quickAddButtonSize, height: quickAddButtonSize)
+                                            .background(Color.blue, in: Circle())
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .frame(width: controlsWidth, alignment: .center)
                         }
-                        .frame(width: controlsWidth, alignment: .center)
                     }
+                    .padding(.horizontal, sidePadding)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 }
-                .padding(.horizontal, sidePadding)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             }
             .frame(height: 64)
+            .background(alignment: .bottom) {
+                captureBottomToolbarBackdrop
+            }
             .overlay(alignment: .top) {
                 if showDuplicateHint && !isSearchMode {
                     Text(duplicateMessage)
@@ -1948,10 +2067,9 @@ struct CaptureView: View {
                         .transition(.opacity)
                 }
             }
-            .padding(.bottom, 24)
         }
         .animation(.easeInOut(duration: 0.22), value: shouldShowCaptureIntro)
-        .ignoresSafeArea(edges: .bottom)
+        .padding(.bottom, 3)
     }
 
     private var captureSetupWelcomeScreen: some View {
@@ -4409,6 +4527,27 @@ struct CaptureView: View {
         )
     }
 
+    private var activeActionBlockOptions: [MoveToActionBlockOption] {
+        guard let activeWeekStart = activePlanWeekStart else { return [] }
+        let weekChunks = plannedChunks
+            .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: activeWeekStart) }
+            .sorted { $0.chunkIndex < $1.chunkIndex }
+        guard !weekChunks.isEmpty else { return [] }
+
+        var stepFourByChunkID: [UUID: PlannedChunkStepFourState] = [:]
+        for state in plannedChunkStepFourStates where Calendar.current.isDate(state.weekStart, inSameDayAs: activeWeekStart) {
+            if stepFourByChunkID[state.plannedChunkId] == nil {
+                stepFourByChunkID[state.plannedChunkId] = state
+            }
+        }
+
+        return weekChunks.map { chunk in
+            let rawResult = stepFourByChunkID[chunk.id]?.resultText.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let title = rawResult.isEmpty ? chunk.label : rawResult
+            return MoveToActionBlockOption(id: chunk.id, chunkIndex: chunk.chunkIndex, title: title)
+        }
+    }
+
     private func shouldKeepIntegratedItemHiddenDuringActivePlan(existingItem: RollingCaptureItem, incomingTitle: String) -> Bool {
         guard existingItem.sourceType?.isEmpty == false else { return false }
         guard activePlanWeekStart != nil else { return false }
@@ -4417,6 +4556,104 @@ struct CaptureView: View {
 
     private func sourceOverrideKey(sourceType: String, sourceID: String) -> String {
         "\(sourceType)|\(sourceID)"
+    }
+
+    private func persistActionDueSnapshotIfNeeded(for text: String, weekStart: Date, dueDate: Date?, attentionDays: Int) {
+        let normalizedText = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalizedText.isEmpty else { return }
+        let storageKey = actionDueSnapshotStorageKey(for: weekStart)
+        var snapshots: [String: PlannedActionDueSnapshot] = [:]
+        if let data = UserDefaults.standard.data(forKey: storageKey),
+           let decoded = try? JSONDecoder().decode([String: PlannedActionDueSnapshot].self, from: data) {
+            snapshots = decoded
+        }
+        if let dueDate {
+            snapshots[normalizedText] = PlannedActionDueSnapshot(
+                dueDate: Calendar.current.startOfDay(for: dueDate),
+                attentionDays: min(max(attentionDays, 7), 30)
+            )
+        } else {
+            snapshots.removeValue(forKey: normalizedText)
+        }
+        if snapshots.isEmpty {
+            UserDefaults.standard.removeObject(forKey: storageKey)
+            return
+        }
+        guard let data = try? JSONEncoder().encode(snapshots) else { return }
+        UserDefaults.standard.set(data, forKey: storageKey)
+    }
+
+    private func actionDueSnapshotStorageKey(for weekStart: Date) -> String {
+        "planned_action_due_snapshots_\(captureActionDayKey(for: weekStart))"
+    }
+
+    private func captureActionDayKey(for date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar.current
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
+
+    private func moveEditingItemToActionBlock(_ option: MoveToActionBlockOption) {
+        guard let activeWeekStart = activePlanWeekStart else { return }
+        guard let itemID = editingItemID,
+              let item = allItems.first(where: { $0.id == itemID }),
+              let chunk = plannedChunks.first(where: { $0.id == option.id }) else {
+            closeEditActionSheet()
+            return
+        }
+
+        let trimmedText = editingItemText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedText.isEmpty else { return }
+
+        let nextSort = (plannedActions
+            .filter {
+                Calendar.current.isDate($0.weekStart, inSameDayAs: activeWeekStart)
+                && $0.plannedChunkId == chunk.id
+            }
+            .map(\.sortOrder)
+            .max() ?? -1) + 1
+
+        let action = PlannedChunkAction(
+            weekStart: activeWeekStart,
+            chunkIndex: chunk.chunkIndex,
+            plannedChunkId: chunk.id,
+            text: trimmedText,
+            sourceType: item.sourceType,
+            sortOrder: nextSort,
+            createdAt: .now
+        )
+        modelContext.insert(action)
+        modelContext.insert(
+            PlannedChunkActionAdHocMarker(
+                weekStart: activeWeekStart,
+                plannedChunkActionId: action.id
+            )
+        )
+
+        let resolvedDueDate = editingItemHasDueDate ? Calendar.current.startOfDay(for: editingItemDueDate) : nil
+        let resolvedAttentionDays = min(max(editingItemAttentionDays, 7), 30)
+        persistActionDueSnapshotIfNeeded(
+            for: trimmedText,
+            weekStart: activeWeekStart,
+            dueDate: resolvedDueDate,
+            attentionDays: resolvedAttentionDays
+        )
+
+        if item.sourceType?.isEmpty == false {
+            item.text = trimmedText
+            item.dueDate = resolvedDueDate
+            item.dueDateAttentionDays = editingItemHasDueDate ? resolvedAttentionDays : nil
+            item.isGhost = true
+            item.unhideDate = nil
+            item.unhiddenAt = nil
+        } else {
+            modelContext.delete(item)
+        }
+
+        try? modelContext.save()
+        closeEditActionSheet()
     }
 
     private func decodedSourceDueDateOverrides() -> [String: SourceDueDateOverrideRecord] {

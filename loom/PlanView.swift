@@ -35,6 +35,37 @@ private struct PlanStepProgressBar: View {
     }
 }
 
+private struct PlanCaptureChromeMaterialLayer<S: Shape>: View {
+    let shape: S
+    var shadowRadius: CGFloat = 0
+    var shadowY: CGFloat = 0
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        shape
+            .fill(.ultraThinMaterial)
+            .overlay {
+                LinearGradient(
+                    colors: [
+                        Color.white.opacity(colorScheme == .dark ? 0.10 : 0.16),
+                        Color.clear,
+                        Color.black.opacity(colorScheme == .dark ? 0.10 : 0.06)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .clipShape(shape)
+                .allowsHitTesting(false)
+            }
+            .shadow(
+                color: Color.black.opacity(shadowRadius > 0 ? (colorScheme == .dark ? 0.22 : 0.10) : 0),
+                radius: shadowRadius,
+                x: 0,
+                y: shadowY
+            )
+    }
+}
+
 #if canImport(UIKit)
 private struct PersistentPlanComposerField: UIViewRepresentable {
     @Binding var text: String
@@ -547,7 +578,7 @@ struct PlanStepTwoView: View {
     private let hiddenUntilLaterIconName = "clock.arrow.trianglehead.clockwise.rotate.90.path.dotted"
     private let minimumActiveCaptureActionsRequired = 6
     private let footerPinnedHeight: CGFloat = 68
-    private let composerKeyboardGap: CGFloat = 5
+    private let composerKeyboardGap: CGFloat = 3
 
     private func normalizedActionText(_ text: String) -> String {
         text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -599,6 +630,34 @@ struct PlanStepTwoView: View {
         guard keyboardHeight > 0 else { return 0 }
         let footerHeight = max(footerPinnedHeight, measuredStep2FooterHeight)
         return max(0, keyboardHeight - footerHeight + composerKeyboardGap)
+    }
+
+    private func planCaptureChromeBackground<S: Shape>(
+        in shape: S,
+        shadowRadius: CGFloat = 0,
+        shadowY: CGFloat = 0
+    ) -> some View {
+        PlanCaptureChromeMaterialLayer(
+            shape: shape,
+            shadowRadius: shadowRadius,
+            shadowY: shadowY
+        )
+    }
+
+    private var stepTwoBottomToolbarBackdrop: some View {
+        GeometryReader { proxy in
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                planCaptureChromeBackground(
+                    in: Rectangle(),
+                    shadowRadius: 12,
+                    shadowY: -2
+                )
+                .frame(height: proxy.size.height + 24)
+                .ignoresSafeArea(edges: .bottom)
+            }
+        }
+        .allowsHitTesting(false)
     }
 
     private var brainstormPromptText: Text {
@@ -840,39 +899,51 @@ struct PlanStepTwoView: View {
     }
 
     private var stepTwoComposerRow: some View {
-        HStack(spacing: 12) {
-            stepTwoComposerInputField
-                .frame(height: 20)
-                .padding(12)
-                .background(Color(.secondarySystemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(
-                            shouldHighlightStep2InputValidation
-                            ? Color.red.opacity(0.85)
-                            : (colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.3)),
-                            lineWidth: shouldHighlightStep2InputValidation ? 1.5 : 1
-                        )
-                )
-                .layoutPriority(1)
-                .frame(maxWidth: .infinity)
+        ZStack {
+            planCaptureChromeBackground(
+                in: RoundedRectangle(cornerRadius: 18, style: .continuous),
+                shadowRadius: 10,
+                shadowY: 2
+            )
 
-            if isKeyboardVisible {
-                stepTwoKeyboardAccessoryButton
-            } else if hasDraftInput {
-                Button {
-                    addItem()
-                } label: {
-                    Image(systemName: "arrow.up")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 44, height: 44)
-                        .background(Color.blue, in: Circle())
+            HStack(spacing: 12) {
+                stepTwoComposerInputField
+                    .frame(height: 20)
+                    .padding(12)
+                    .background(Color.clear)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(
+                                shouldHighlightStep2InputValidation
+                                ? Color.red.opacity(0.85)
+                                : (colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.3)),
+                                lineWidth: shouldHighlightStep2InputValidation ? 1.5 : 1
+                            )
+                    )
+                    .layoutPriority(1)
+                    .frame(maxWidth: .infinity)
+
+                if isKeyboardVisible {
+                    stepTwoKeyboardAccessoryButton
+                } else if hasDraftInput {
+                    Button {
+                        addItem()
+                    } label: {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 44, height: 44)
+                            .background(Color.blue, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Add Action")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Add Action")
             }
+        }
+        .frame(height: 64)
+        .background(alignment: .bottom) {
+            stepTwoBottomToolbarBackdrop
         }
         .overlay(alignment: .top) {
             if showStep2ValidationHint {
@@ -919,7 +990,7 @@ struct PlanStepTwoView: View {
                         if stepTwoKeyboardShowsCheckmark {
                             Circle().fill(Color.blue)
                         } else {
-                            Circle().fill(.ultraThinMaterial)
+                            planCaptureChromeBackground(in: Circle())
                         }
                     }
                 )
@@ -3928,7 +3999,7 @@ struct PlanStepFourResultView: View {
     @State private var resultAutosaveTask: Task<Void, Never>? = nil
     @State private var resultAutoWriteSuggestionsByChunk: [UUID: String] = [:]
     @State private var appliedResultAutoWriteByChunk: [UUID: String] = [:]
-    @State private var selectedResultAutoWriteArea: String = "All"
+    @State private var selectedResultAutoWriteTargetID: String = "all"
     @State private var isAutoWritingResult: Bool = false
     @State private var autoWriteOutlineAngle: Double = 0
     @State private var autoWriteIconAnimating: Bool = false
@@ -3940,6 +4011,8 @@ struct PlanStepFourResultView: View {
     private let footerPinnedHeight: CGFloat = 68
     private let keyboardFloatingGap: CGFloat = 15
     private let autoWritePillHeight: CGFloat = 45
+    private let resultAutoWriteMinWords = 2
+    private let resultAutoWriteMaxWords = 6
     private let otherChunkFixedFill = Color(red: 0.92, green: 0.92, blue: 0.94)
     private let loomAIService = LoomAIService()
 
@@ -3963,29 +4036,49 @@ struct PlanStepFourResultView: View {
     }
 
     private struct PlanResultAutoWriteRequestPayload: Encodable {
-        let areaName: String
         let actions: [String]
     }
 
-    private var resultAutoWriteAreaOptions: [String] {
-        var seen: Set<String> = []
-        var rankedAreas: [String] = []
+    private struct ResultAutoWriteTargetOption: Identifiable, Hashable {
+        let id: String
+        let title: String
+        let chunkID: UUID?
+    }
+
+    private var resultAutoWriteTargetOptions: [ResultAutoWriteTargetOption] {
+        var options: [ResultAutoWriteTargetOption] = [
+            .init(id: "all", title: "All", chunkID: nil)
+        ]
         for chunk in plannedChunksForWeek {
-            let label = chunk.label.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !label.isEmpty else { continue }
-            let key = normalizeAreaLabel(label)
-            guard seen.insert(key).inserted else { continue }
-            rankedAreas.append(label)
+            let rawLabel = chunk.label.trimmingCharacters(in: .whitespacesAndNewlines)
+            let displayLabel: String = {
+                if isOtherChunk(chunk) { return "Other" }
+                if !rawLabel.isEmpty { return rawLabel }
+                return "Unlabeled"
+            }()
+            options.append(
+                .init(
+                    id: chunk.id.uuidString,
+                    title: "\(displayLabel) • Block \(chunk.chunkIndex + 1)",
+                    chunkID: chunk.id
+                )
+            )
         }
-        return ["All"] + rankedAreas.reversed()
+        return options
+    }
+
+    private var selectedResultAutoWriteTargetTitle: String {
+        resultAutoWriteTargetOptions.first(where: { $0.id == selectedResultAutoWriteTargetID })?.title ?? "All"
     }
 
     private var selectedResultAutoWriteTargetChunks: [PlannedChunk] {
-        let areaKey = normalizeAreaLabel(selectedResultAutoWriteArea)
-        if areaKey == "all" {
+        guard selectedResultAutoWriteTargetID != "all" else {
             return plannedChunksForWeek
         }
-        return plannedChunksForWeek.filter { normalizeAreaLabel($0.label) == areaKey }
+        guard let selectedChunkID = UUID(uuidString: selectedResultAutoWriteTargetID) else {
+            return plannedChunksForWeek
+        }
+        return plannedChunksForWeek.filter { $0.id == selectedChunkID }
     }
 
     private var isNextEnabled: Bool {
@@ -4525,7 +4618,7 @@ struct PlanStepFourResultView: View {
                             Text("AutoWrite")
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(autoWriteGradient)
-                            Text(selectedResultAutoWriteArea)
+                            Text(selectedResultAutoWriteTargetTitle)
                                 .font(.caption2.weight(.semibold))
                                 .foregroundStyle(.secondary)
                         }
@@ -4541,14 +4634,14 @@ struct PlanStepFourResultView: View {
                 .opacity(isLoading ? 0.7 : 1)
 
                 Menu {
-                    ForEach(resultAutoWriteAreaOptions, id: \.self) { option in
+                    ForEach(resultAutoWriteTargetOptions) { option in
                         Button {
-                            selectedResultAutoWriteArea = option
+                            selectedResultAutoWriteTargetID = option.id
                         } label: {
-                            if normalizeAreaLabel(selectedResultAutoWriteArea) == normalizeAreaLabel(option) {
-                                Label(option, systemImage: "checkmark")
+                            if selectedResultAutoWriteTargetID == option.id {
+                                Label(option.title, systemImage: "checkmark")
                             } else {
-                                Text(option)
+                                Text(option.title)
                             }
                         }
                     }
@@ -4612,7 +4705,7 @@ struct PlanStepFourResultView: View {
     }
 
     private func applyResultAutoWriteSuggestion(_ suggestion: String, to chunkID: UUID) {
-        let cleaned = truncateWords(suggestion, maxWords: 12)
+        let cleaned = truncateWords(suggestion, maxWords: resultAutoWriteMaxWords)
         guard !cleaned.isEmpty else { return }
         resultTextByChunk[chunkID] = cleaned
         appliedResultAutoWriteByChunk[chunkID] = cleaned
@@ -4670,7 +4763,7 @@ struct PlanStepFourResultView: View {
         let nonEmpty = actions.filter {
             !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
-        guard nonEmpty.count >= 2 else { return true }
+        guard !nonEmpty.isEmpty else { return true }
         return nonEmpty.allSatisfy(isVagueActionTitle)
     }
 
@@ -4693,9 +4786,44 @@ struct PlanStepFourResultView: View {
                 !token.allSatisfy(\.isNumber)
             }
 
-        return Set(tokens.map { token in
-            token.hasSuffix("s") && token.count > 4 ? String(token.dropLast()) : token
-        })
+        return Set(tokens.map(normalizedPlanResultToken))
+    }
+
+    private func normalizedPlanResultToken(_ token: String) -> String {
+        var value = token
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard !value.isEmpty else { return value }
+
+        if value.hasSuffix("ies"), value.count > 4 {
+            value = String(value.dropLast(3)) + "y"
+        } else if value.hasSuffix("ing"), value.count > 5 {
+            value = String(value.dropLast(3))
+        } else if value.hasSuffix("ed"), value.count > 4 {
+            value = String(value.dropLast(2))
+        } else if value.hasSuffix("s"), value.count > 4 {
+            value = String(value.dropLast())
+        }
+        return value
+    }
+
+    private func planResultTokensLikelyMatch(_ lhs: String, _ rhs: String) -> Bool {
+        let left = lhs.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let right = rhs.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !left.isEmpty, !right.isEmpty else { return false }
+        if left == right { return true }
+
+        let minLength = min(left.count, right.count)
+        if minLength >= 4 {
+            let sharedPrefixLength = min(5, minLength)
+            if left.prefix(sharedPrefixLength) == right.prefix(sharedPrefixLength) {
+                return true
+            }
+            if left.hasPrefix(right) || right.hasPrefix(left) {
+                return true
+            }
+        }
+        return false
     }
 
     private func isPlanResultSuggestionAcceptable(_ value: String, actions: [String]) -> Bool {
@@ -4703,28 +4831,38 @@ struct PlanStepFourResultView: View {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
         let words = normalized.split(separator: " ")
-        guard words.count >= 6, words.count <= 12 else { return false }
-
-        let suggestionLower = normalized.lowercased()
-        let actionsLower = actions.joined(separator: " ").lowercased()
-        let genericTerms = ["improve", "enhance", "maximize", "support", "optimize"]
-        for term in genericTerms where suggestionLower.contains(term) && !actionsLower.contains(term) {
-            return false
-        }
+        guard words.count >= resultAutoWriteMinWords, words.count <= resultAutoWriteMaxWords else { return false }
 
         let actionKeywords = actionKeywordSet(from: actions)
         guard !actionKeywords.isEmpty else { return false }
 
+        let stopWords: Set<String> = [
+            "the", "and", "for", "with", "from", "that", "this", "into", "through",
+            "about", "your", "you", "our", "their", "then", "than", "just", "also",
+            "will", "what", "when", "where", "have", "has", "had", "plan", "planned"
+        ]
         let suggestionKeywords = Set(
-            suggestionLower
+            normalized
+                .lowercased()
                 .replacingOccurrences(of: "[^a-z0-9\\s]", with: " ", options: .regularExpression)
                 .split(separator: " ")
                 .map(String.init)
-                .map { token in
-                    token.hasSuffix("s") && token.count > 4 ? String(token.dropLast()) : token
+                .filter { token in
+                    token.count >= 3 &&
+                    !stopWords.contains(token) &&
+                    !token.allSatisfy(\.isNumber)
                 }
+                .map(normalizedPlanResultToken)
         )
-        return !actionKeywords.intersection(suggestionKeywords).isEmpty
+        for suggestionKeyword in suggestionKeywords {
+            if actionKeywords.contains(suggestionKeyword) {
+                return true
+            }
+            if actionKeywords.contains(where: { planResultTokensLikelyMatch($0, suggestionKeyword) }) {
+                return true
+            }
+        }
+        return false
     }
 
     private func minimalPlanResultContextSnapshot() -> LoomAIContextSnapshot {
@@ -4772,38 +4910,35 @@ struct PlanStepFourResultView: View {
             resultAutoWriteSuggestionsByChunk.removeValue(forKey: id)
             appliedResultAutoWriteByChunk.removeValue(forKey: id)
         }
-        let groupedTargetChunks = Dictionary(grouping: targetChunks) { normalizeAreaLabel($0.label) }
-        let orderedAreaKeys = groupedTargetChunks.keys.sorted { lhs, rhs in
-            let lhsIndex = targetChunks.firstIndex { normalizeAreaLabel($0.label) == lhs } ?? .max
-            let rhsIndex = targetChunks.firstIndex { normalizeAreaLabel($0.label) == rhs } ?? .max
-            return lhsIndex < rhsIndex
-        }
 
         let contextSnapshot = minimalPlanResultContextSnapshot()
         let encoder = JSONEncoder()
-        var didFailGeneration = false
-        var skippedForLowConfidence = false
+        var generatedChunkCount = 0
+        var failedChunkCount = 0
+        var skippedChunkCount = 0
 
-        for areaKey in orderedAreaKeys {
-            guard let chunks = groupedTargetChunks[areaKey], let representativeChunk = chunks.first else { continue }
-            let areaLabel = representativeChunk.label.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !areaLabel.isEmpty else {
-                didFailGeneration = true
+        for chunk in targetChunks {
+            let chunkLabelRaw = chunk.label.trimmingCharacters(in: .whitespacesAndNewlines)
+            let chunkLabel = isOtherChunk(chunk) ? "Other" : (chunkLabelRaw.isEmpty ? "Unlabeled" : chunkLabelRaw)
+            let chunkDescriptor = "\(chunkLabel) • Block \(chunk.chunkIndex + 1)"
+
+            let actionTitles = normalizedActionTitles(for: [chunk])
+            if actionTitles.isEmpty {
+                skippedChunkCount += 1
+                AppDebugActivityLog.log("PlanResultAutoWrite", "Skipped chunk '\(chunkDescriptor)' because no actions were available.")
                 continue
             }
-
-            let actionTitles = normalizedActionTitles(for: chunks)
             if lacksConfidenceForResultInference(actions: actionTitles) {
-                skippedForLowConfidence = true
-                continue
+                AppDebugActivityLog.log("PlanResultAutoWrite", "Low-confidence actions for chunk '\(chunkDescriptor)'; still attempting generation.")
             }
 
-            let payload = PlanResultAutoWriteRequestPayload(areaName: areaLabel, actions: actionTitles)
+            let payload = PlanResultAutoWriteRequestPayload(actions: actionTitles)
             guard
                 let payloadData = try? encoder.encode(payload),
                 let payloadJSON = String(data: payloadData, encoding: .utf8)
             else {
-                didFailGeneration = true
+                failedChunkCount += 1
+                AppDebugActivityLog.log("PlanResultAutoWrite", "Failed to encode payload for chunk '\(chunkDescriptor)'.")
                 continue
             }
 
@@ -4815,21 +4950,25 @@ struct PlanStepFourResultView: View {
                     screen: "plan_result"
                 )
 
-                let suggestion = truncateWords(response.message, maxWords: 12)
+                let suggestion = truncateWords(response.message, maxWords: resultAutoWriteMaxWords)
                 guard isPlanResultSuggestionAcceptable(suggestion, actions: actionTitles) else {
-                    didFailGeneration = true
+                    failedChunkCount += 1
+                    AppDebugActivityLog.log(
+                        "PlanResultAutoWrite",
+                        "Rejected suggestion for chunk '\(chunkDescriptor)': '\(suggestion)' did not pass action-grounding validation."
+                    )
                     continue
                 }
 
-                for chunk in chunks {
-                    resultAutoWriteSuggestionsByChunk[chunk.id] = suggestion
-                }
+                resultAutoWriteSuggestionsByChunk[chunk.id] = suggestion
+                generatedChunkCount += 1
             } catch {
-                didFailGeneration = true
+                failedChunkCount += 1
+                AppDebugActivityLog.log("PlanResultAutoWrite", "Request failed for chunk '\(chunkDescriptor)': \(error.localizedDescription)")
             }
         }
 
-        if skippedForLowConfidence || didFailGeneration {
+        if generatedChunkCount == 0 && (failedChunkCount > 0 || skippedChunkCount > 0) {
             presentResultAutoWriteErrorPopup()
         }
     }
@@ -4877,10 +5016,10 @@ struct PlanStepFourResultView: View {
             resultTextByChunk[chunk.id] = ""
         }
 
-        if !resultAutoWriteAreaOptions.contains(where: {
-            normalizeAreaLabel($0) == normalizeAreaLabel(selectedResultAutoWriteArea)
+        if !resultAutoWriteTargetOptions.contains(where: {
+            $0.id == selectedResultAutoWriteTargetID
         }) {
-            selectedResultAutoWriteArea = "All"
+            selectedResultAutoWriteTargetID = "all"
         }
 
         let weekStates = stepFourStates

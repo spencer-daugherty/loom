@@ -126,6 +126,7 @@ struct ContentView: View {
     @State private var littleWinsSuppressRowTapUntil: Date = .distantPast
     @Environment(\.modelContext) private var modelContext
     private let drivingBounceTimer = Timer.publish(every: 2.0, on: .main, in: .common).autoconnect()
+    private let littleWinsAppleHealthRefreshTimer = Timer.publish(every: 900, on: .main, in: .common).autoconnect()
 
     // Model-derived state
     @Query(sort: \ActivePlanState.id, order: .forward)
@@ -268,7 +269,7 @@ struct ContentView: View {
     }
 
     private var shouldShowBlankHomepageAppearance: Bool {
-        isDeveloperDemoMode || blankHomepageMode || setupHomepageMode
+        blankHomepageMode || setupHomepageMode
     }
 
     private var isDeveloperDemoMode: Bool {
@@ -309,7 +310,7 @@ struct ContentView: View {
     }
 
     private var shouldShowContentQuickstart: Bool {
-        !isDeveloperDemoMode && (!hasSeenContentQuickstart || forceShowContentQuickstartOnce) && !showSplash
+        (!hasSeenContentQuickstart || forceShowContentQuickstartOnce) && !showSplash
     }
 
     private func quickstartPage(for stepIndex: Int) -> Int {
@@ -391,7 +392,6 @@ struct ContentView: View {
     }
 
     private var activeHomeFocusTarget: HomeStartupFocusTarget? {
-        guard !isDeveloperDemoMode else { return nil }
         guard !shouldShowContentQuickstart else { return nil }
         if !hasCompletedPurposeSetup { return .purpose }
         if !hasCompletedFulfillmentSetup { return .fulfillment }
@@ -614,13 +614,7 @@ struct ContentView: View {
                         homePageContent
                             .tag(HomeSwipePage.home.rawValue)
 
-                        Group {
-                            if isDeveloperDemoMode {
-                                demoLoomAIMiddlePage
-                            } else {
-                                LoomAIChatView(isActivePage: homePageIndex == HomeSwipePage.littleWins.rawValue && !shouldShowContentQuickstart)
-                            }
-                        }
+                        LoomAIChatView(isActivePage: homePageIndex == HomeSwipePage.littleWins.rawValue && !shouldShowContentQuickstart)
                         .background(quickstartTargetFrameIfNeeded(.loomAI))
                         .tag(HomeSwipePage.littleWins.rawValue)
                     }
@@ -988,6 +982,11 @@ struct ContentView: View {
 
     private var contentViewLifecycleLayer: some View {
         contentViewPresentationLayer
+            .onAppear {
+                if isDeveloperDemoMode {
+                    ensureDeveloperDemoDataIfNeeded()
+                }
+            }
             .onChange(of: isActivePlan) { _, newValue in
                 if newValue == true {
                     playSheetDestination = .action
@@ -1005,6 +1004,7 @@ struct ContentView: View {
                 if isOn {
                     showLoomAIChatMenu = false
                     homePageIndex = HomeSwipePage.home.rawValue
+                    ensureDeveloperDemoDataIfNeeded()
                 }
             }
             .onChange(of: isSubscribed) { _, newValue in
@@ -1049,6 +1049,7 @@ struct ContentView: View {
                 beginStartupPreparationIfNeeded()
                 refreshFulfillmentCategoryScoresForCurrentWeek()
                 markCaptureSetupCompletedIfNeeded()
+                presentPendingSharePayloadIfAvailable()
                 if isActiveActionFlow {
                     setupHomepageMode = false
                 }
@@ -1120,6 +1121,7 @@ struct ContentView: View {
                 guard phase == .active else { return }
                 refreshFulfillmentCategoryScoresForCurrentWeek()
                 scheduleNotificationResync(immediate: true)
+                presentPendingSharePayloadIfAvailable()
             }
             .onChange(of: fulfillments.map(\.updatedAt)) { _, _ in
                 refreshFulfillmentCategoryScoresForCurrentWeek()
@@ -1133,6 +1135,13 @@ struct ContentView: View {
             .onChange(of: resources.map(\.id)) { _, _ in
                 refreshFulfillmentCategoryScoresForCurrentWeek()
             }
+    }
+
+    private func presentPendingSharePayloadIfAvailable() {
+        guard pendingSharePayloadID == nil else { return }
+        guard let payloadID = ShareIntoLoomBridge.newestPendingPayloadID() else { return }
+        pendingSharePayloadID = payloadID
+        isPresentingCaptureView = true
     }
 
     private var contentViewRefreshObservers: some View {
@@ -1893,6 +1902,22 @@ struct ContentView: View {
         return true
     }
 
+    private func removeIntegratedLittleWinCompletionIfNeeded(
+        focus: FulfillmentFocus,
+        on day: Date
+    ) -> Bool {
+        let calendar = Calendar.current
+        let dayStart = calendar.startOfDay(for: day)
+        let matchingRows = littleWinsDailyCompletions.filter {
+            $0.focusId == focus.id && calendar.isDate($0.day, inSameDayAs: dayStart)
+        }
+        guard !matchingRows.isEmpty else { return false }
+        for row in matchingRows {
+            modelContext.delete(row)
+        }
+        return true
+    }
+
     private func refreshAppleHealthIntegratedLittleWinsProgressIfNeeded() {
         guard !littleWinsAppleHealthRefreshInFlight else { return }
 
@@ -1910,12 +1935,12 @@ struct ContentView: View {
         let lookbackDates: [Date] = (0..<7).compactMap { offset in
             calendar.date(byAdding: .day, value: -offset, to: todayStartDate)
         }
-        var insertedAny = false
+        var mutatedAny = false
         var savedAnyConfig = false
 
         func refreshNext(_ index: Int) {
             if index >= targets.count {
-                if insertedAny {
+                if mutatedAny {
                     try? modelContext.save()
                     syncLittleWinsCompletionStateFromStore()
                 }
@@ -1946,7 +1971,15 @@ struct ContentView: View {
                     for day in lookbackDates {
                         let dayStart = calendar.startOfDay(for: day)
                         guard let progress = progressByDayStart[dayStart] else { continue }
-                        guard progress >= target.config.targetValue else { continue }
+                        if progress < target.config.targetValue {
+                            if removeIntegratedLittleWinCompletionIfNeeded(
+                                focus: target.focus,
+                                on: dayStart
+                            ) {
+                                mutatedAny = true
+                            }
+                            continue
+                        }
                         let completionStamp = (dayIndexForDate(dayStart, in: lookbackDates) == 0)
                             ? Date()
                             : (calendar.date(bySettingHour: 23, minute: 59, second: 0, of: dayStart) ?? dayStart)
@@ -1955,7 +1988,7 @@ struct ContentView: View {
                             on: dayStart,
                             completionTimestamp: completionStamp
                         ) {
-                            insertedAny = true
+                            mutatedAny = true
                         }
                     }
 
@@ -2397,7 +2430,7 @@ struct ContentView: View {
                             .opacity(homePageIndex == HomeSwipePage.social.rawValue ? 0 : (homePageIndex == HomeSwipePage.littleWins.rawValue ? 0 : 1))
                             .offset(x: homePageIndex == HomeSwipePage.littleWins.rawValue ? -8 : 0)
 
-                        if homePageIndex == HomeSwipePage.littleWins.rawValue && !isDeveloperDemoMode {
+                        if homePageIndex == HomeSwipePage.littleWins.rawValue {
                             Button {
                                 withAnimation(.easeInOut(duration: 0.2)) {
                                     showLoomAIChatMenu.toggle()
@@ -2428,22 +2461,15 @@ struct ContentView: View {
 
                     Group {
                         if homePageIndex == HomeSwipePage.social.rawValue {
-                            Group {
-                                if isDeveloperDemoMode {
-                                    Color.clear
-                                        .frame(width: 32, height: 32)
-                                } else {
-                                    Button {
-                                        isPresentingLittleWinsShareCamera = true
-                                    } label: {
-                                        Image(systemName: "camera")
-                                            .font(.system(size: 23, weight: .semibold))
-                                            .frame(width: 32, height: 32)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .allowsHitTesting(!shouldLockToFocusedHomeTarget && !shouldShowContentQuickstart)
-                                }
+                            Button {
+                                isPresentingLittleWinsShareCamera = true
+                            } label: {
+                                Image(systemName: "camera")
+                                    .font(.system(size: 23, weight: .semibold))
+                                    .frame(width: 32, height: 32)
                             }
+                            .buttonStyle(.plain)
+                            .allowsHitTesting(!shouldLockToFocusedHomeTarget && !shouldShowContentQuickstart)
                         } else if homePageIndex == HomeSwipePage.littleWins.rawValue {
                             Color.clear
                                 .frame(width: 32, height: 32)
@@ -2937,65 +2963,46 @@ struct ContentView: View {
 
     @ViewBuilder
     private func littleWinsMiddlePage() -> some View {
-        if isDeveloperDemoMode {
-            VStack(spacing: 0) {
-                quickstartLittleWinsDemoCard
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
-                Spacer(minLength: 0)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .background(Color(.systemGroupedBackground))
-            .contentShape(Rectangle())
-        } else {
-            GeometryReader { proxy in
-                littleWinsMiddlePageContent(proxy: proxy)
-            }
-            .contentShape(Rectangle())
-            .onAppear(perform: syncLittleWinsCompletionStateFromStore)
-            .onAppear(perform: syncIntegratedLittleWinsCompletionsFromProgress)
-            .onAppear(perform: refreshAppleHealthIntegratedLittleWinsProgressIfNeeded)
-            .onAppear(perform: syncLittleWinsCardOrder)
-            .onChange(of: littleWinsDailyCompletions.map(\.id)) { _, _ in
-                syncLittleWinsCompletionStateFromStore()
-                syncIntegratedLittleWinsCompletionsFromProgress()
-                closeLittleWinsCalendarPreviewIfNoHistory()
-            }
-            .onChange(of: littleWinsSourceCardIDs) { _, _ in
-                syncLittleWinsCardOrder()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .littleWinsScheduleDidChange)) { _ in
-                littleWinsScheduleStoreRevision &+= 1
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .littleWinsIntegrationDidChange)) { _ in
-                littleWinsIntegrationStoreRevision &+= 1
-                syncIntegratedLittleWinsCompletionsFromProgress()
-            }
-            .onChange(of: scenePhase) { _, phase in
-                guard phase == .active else { return }
-                refreshAppleHealthIntegratedLittleWinsProgressIfNeeded()
-            }
-            .onChange(of: homePageIndex) { _, _ in
-                if littleWinsCalendarPreviewDate != nil {
-                    closeLittleWinsCalendarPreview(animated: true)
-                }
-            }
-            .sheet(item: $littleWinsIntegrationDetailTarget, content: littleWinsIntegrationDetailSheet)
-            .onDisappear {
-                closeLittleWinsCalendarPreview(animated: false)
+        GeometryReader { proxy in
+            littleWinsMiddlePageContent(proxy: proxy)
+        }
+        .contentShape(Rectangle())
+        .onAppear(perform: syncLittleWinsCompletionStateFromStore)
+        .onAppear(perform: syncIntegratedLittleWinsCompletionsFromProgress)
+        .onAppear(perform: refreshAppleHealthIntegratedLittleWinsProgressIfNeeded)
+        .onAppear(perform: syncLittleWinsCardOrder)
+        .onChange(of: littleWinsDailyCompletions.map(\.id)) { _, _ in
+            syncLittleWinsCompletionStateFromStore()
+            syncIntegratedLittleWinsCompletionsFromProgress()
+            closeLittleWinsCalendarPreviewIfNoHistory()
+        }
+        .onChange(of: littleWinsSourceCardIDs) { _, _ in
+            syncLittleWinsCardOrder()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .littleWinsScheduleDidChange)) { _ in
+            littleWinsScheduleStoreRevision &+= 1
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .littleWinsIntegrationDidChange)) { _ in
+            littleWinsIntegrationStoreRevision &+= 1
+            syncIntegratedLittleWinsCompletionsFromProgress()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            refreshAppleHealthIntegratedLittleWinsProgressIfNeeded()
+        }
+        .onReceive(littleWinsAppleHealthRefreshTimer) { _ in
+            guard scenePhase == .active else { return }
+            refreshAppleHealthIntegratedLittleWinsProgressIfNeeded()
+        }
+        .onChange(of: homePageIndex) { _, _ in
+            if littleWinsCalendarPreviewDate != nil {
+                closeLittleWinsCalendarPreview(animated: true)
             }
         }
-    }
-
-    private var demoLoomAIMiddlePage: some View {
-        VStack(spacing: 10) {
-            quickstartLoomAIDemoView
-            quickstartLoomAIComposer
-                .padding(.horizontal, 12)
-                .padding(.bottom, 8)
+        .sheet(item: $littleWinsIntegrationDetailTarget, content: littleWinsIntegrationDetailSheet)
+        .onDisappear {
+            closeLittleWinsCalendarPreview(animated: false)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(Color(.systemGroupedBackground))
     }
 
     private func littleWinsMiddlePageContent(proxy: GeometryProxy) -> some View {
@@ -4297,14 +4304,13 @@ struct ContentView: View {
         return VStack(spacing: 6) {
             HStack(spacing: 16) {
                 Button(action: {
-                    guard !isDeveloperDemoMode else { return }
                     isPresentingCaptureView = true
                 }) {
                     captureActionButtonVisual
                     .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.plain)
-                .disabled(isDeveloperDemoMode || (isFocusedLock && !isCaptureAllowedWhileLocked))
+                .disabled(isFocusedLock && !isCaptureAllowedWhileLocked)
                 .scaleEffect(
                     shouldShowCaptureOnboardingPulse
                         ? (drivingCardBounceOn ? 1.012 : 1.0)
@@ -4337,9 +4343,7 @@ struct ContentView: View {
                 }
 
                 Group {
-                    if isDeveloperDemoMode {
-                        actionBlocksPlayButtonVisual
-                    } else if isActiveActionFlow {
+                    if isActiveActionFlow {
                         Button(action: {
                             playSheetDestination = .action
                         }) {
@@ -4373,7 +4377,7 @@ struct ContentView: View {
                         .buttonStyle(.plain)
                     }
                 }
-                .disabled(isDeveloperDemoMode || (isFocusedLock && !isActionBlocksAllowedWhileLocked))
+                .disabled(isFocusedLock && !isActionBlocksAllowedWhileLocked)
                 .scaleEffect(
                     shouldShowActionBlocksOnboardingBounce
                         ? (drivingCardBounceOn ? 1.012 : 1.0)
@@ -5357,14 +5361,6 @@ struct ContentView: View {
             ? Color(.systemGray5)
             : Color(.secondarySystemBackground)
 
-        if isDeveloperDemoMode {
-            return AnyView(
-                quickstartPurposeDemoCard
-                    .allowsHitTesting(false)
-                    .background(quickstartTargetFrameIfNeeded(.purpose))
-            )
-        }
-
         return AnyView(NavigationLink {
             Group {
                 if isDrivingForceEmptyState {
@@ -5574,14 +5570,6 @@ struct ContentView: View {
             ? Color(.systemGray5)
             : Color(.secondarySystemBackground)
 
-        if isDeveloperDemoMode {
-            return AnyView(
-                quickstartFulfillmentDemoCard
-                    .allowsHitTesting(false)
-                    .background(quickstartTargetFrameIfNeeded(.fulfillment))
-            )
-        }
-
         return AnyView(NavigationLink {
             Group {
                 if isFulfillmentEmptyState {
@@ -5645,7 +5633,7 @@ struct ContentView: View {
                             in: graphNamespace,
                             properties: .frame,
                             anchor: .center,
-                            isSource: false
+                            isSource: !showSplash
                         )
                         
                         // labels
@@ -5741,13 +5729,6 @@ struct ContentView: View {
         let objectivesCardBackground: Color = isObjectivesEmptyState
             ? Color(.systemGray5)
             : Color(.secondarySystemBackground)
-        if isDeveloperDemoMode {
-            return AnyView(
-                quickstartObjectivesDemoCard
-                    .allowsHitTesting(false)
-                    .background(quickstartTargetFrameIfNeeded(.objectives))
-            )
-        }
         return AnyView(NavigationLink {
             if isObjectivesEmptyState {
                 ObjectivesStartView()
@@ -6041,10 +6022,8 @@ struct ContentView: View {
                 openOnboardingCallCardDestination(isObjectivesEmptyState ? .objectivesStart : .objectives)
             }
         case .capture:
-            guard !isDeveloperDemoMode else { return }
             isPresentingCaptureView = true
         case .actionBlocks:
-            guard !isDeveloperDemoMode else { return }
             if isActiveActionFlow {
                 playSheetDestination = .action
             } else if setupHomepageMode {
@@ -6055,6 +6034,146 @@ struct ContentView: View {
                 openOnboardingCallCardDestination(hasCompletedPlanFlowOnce ? .plan : .planStart)
             }
         }
+    }
+
+    private func ensureDeveloperDemoDataIfNeeded() {
+        guard developerDemoModeEnabled else { return }
+
+        let defaultCategories: [(name: String, id: UUID, colorKey: String)] = [
+            ("Career & Business", PlanLabelSeeder.categoryIDs["Career & Business"]!, "blue"),
+            ("Leadership & Impact", PlanLabelSeeder.categoryIDs["Leadership & Impact"]!, "indigo"),
+            ("Wealth & Lifestyle", PlanLabelSeeder.categoryIDs["Wealth & Lifestyle"]!, "green"),
+            ("Mind & Meaning", PlanLabelSeeder.categoryIDs["Mind & Meaning"]!, "purple"),
+            ("Love & Relationships", PlanLabelSeeder.categoryIDs["Love & Relationships"]!, "red"),
+            ("Health & Vitality", PlanLabelSeeder.categoryIDs["Health & Vitality"]!, "orange")
+        ]
+
+        var colorMap = FulfillmentCategoryTheme.persistedColorKeys()
+        for category in defaultCategories {
+            colorMap[category.name] = category.colorKey
+        }
+        FulfillmentCategoryTheme.persistColorKeys(colorMap)
+
+        if drivingForces.isEmpty {
+            modelContext.insert(
+                DrivingForce(
+                    ultimateVision: "I build a focused life where each week moves my core priorities forward with calm execution.",
+                    ultimatePurpose: "I align my daily actions with purpose so progress feels meaningful and sustainable."
+                )
+            )
+        }
+
+        let now = Date()
+        for category in defaultCategories {
+            if let existing = fulfillments.first(where: { $0.category_id == category.id }) {
+                existing.category = category.name
+                if existing.category_purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    existing.category_purpose = "I strengthen \(category.name) through consistent weekly execution."
+                }
+                existing.updatedAt = now
+            } else {
+                modelContext.insert(
+                    Fulfillment(
+                        category_id: category.id,
+                        updatedAt: now,
+                        category: category.name,
+                        category_identitiy: "Focused Builder",
+                        category_vision: "Stable momentum in \(category.name)",
+                        category_purpose: "I strengthen \(category.name) through consistent weekly execution."
+                    )
+                )
+            }
+        }
+
+        for (index, category) in defaultCategories.enumerated() {
+            if !roles.contains(where: { $0.category_id == category.id }) {
+                modelContext.insert(
+                    FulfillmentRoles(
+                        category_id: category.id,
+                        updatedAt: now,
+                        role: ["Consistent Operator", "Reliable Finisher", "Intentional Planner", "Steady Improver", "Calm Executor", "Disciplined Builder"][index],
+                        rank: 0
+                    )
+                )
+            }
+            if !foci.contains(where: { $0.category_id == category.id }) {
+                modelContext.insert(
+                    FulfillmentFocus(
+                        category_id: category.id,
+                        updatedAt: now,
+                        activity: ["Ship one priority task", "Lead one meaningful outreach", "Review spending and savings", "Read and reflect for 20 minutes", "Send one relationship check-in", "Move for 30 minutes"][index],
+                        rank: 0
+                    )
+                )
+            }
+            if !resources.contains(where: { $0.category_id == category.id }) {
+                modelContext.insert(
+                    FulfillmentResources(
+                        category_id: category.id,
+                        updatedAt: now,
+                        resource: ["Calendar blocking", "Weekly review", "Budget tracker", "Reading routine", "Relationship notes", "Workout plan"][index],
+                        rank: 0
+                    )
+                )
+            }
+        }
+
+        let passionDefaults: [(emotion: String, text: String)] = [
+            ("love", "Meaningful growth"),
+            ("vows", "Long-term integrity"),
+            ("thrill", "Breakthrough progress"),
+            ("just", "Avoid drift and excuses")
+        ]
+        for passion in passionDefaults {
+            if !passions.contains(where: { $0.emotion == passion.emotion }) {
+                modelContext.insert(
+                    Passion(
+                        date: now,
+                        emotion: passion.emotion,
+                        passion: passion.text
+                    )
+                )
+            }
+        }
+
+        for captureText in [
+            "Review weekly priorities",
+            "Plan tomorrow's top 3",
+            "Check budget dashboard",
+            "Send follow-up email",
+            "Schedule workout block",
+            "Read 20 minutes"
+        ] {
+            if !notificationCaptureItems.contains(where: { $0.text.caseInsensitiveCompare(captureText) == .orderedSame }) {
+                modelContext.insert(
+                    RollingCaptureItem(
+                        text: captureText,
+                        isGhost: false,
+                        createdAt: now
+                    )
+                )
+            }
+        }
+
+        if outcomes.isEmpty {
+            let start = Calendar.current.startOfDay(for: now)
+            let end = Calendar.current.date(byAdding: .day, value: 60, to: start) ?? now
+            for (index, category) in defaultCategories.enumerated() {
+                modelContext.insert(
+                    Outcomes(
+                        category: category.name,
+                        updatedAt: now,
+                        outcome: ["Launch core project milestone", "Host one strategic leadership session", "Build 60-day spending plan", "Finish one focused learning track", "Plan two meaningful date nights", "Complete 20 workout sessions"][index],
+                        reasons: "Demo goal for \(category.name)",
+                        start: start,
+                        end: end,
+                        rank: index
+                    )
+                )
+            }
+        }
+
+        try? modelContext.save()
     }
 
     private func openOnboardingCallCardDestination(_ destination: OnboardingCallCardDestination) {

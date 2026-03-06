@@ -104,6 +104,7 @@ private enum OutcomeHealthKitBridge {
     }
 
     private static let store = HKHealthStore()
+    private static let initialAuthorizationCompleteDefaultsKey = "outcome.healthkit.initialAuthorizationComplete.v1"
 
     private enum BridgeError: LocalizedError {
         case unavailable
@@ -122,67 +123,27 @@ private enum OutcomeHealthKitBridge {
         }
     }
 
+    // Order defines the exact order shown in the Outcome Apple Health metric picker.
     private static let quantityIdentifiers: [HKQuantityTypeIdentifier] = [
-        .activeEnergyBurned,
-        .appleExerciseTime,
-        .appleStandTime,
-        .basalEnergyBurned,
-        .bloodAlcoholContent,
-        .bloodGlucose,
-        .bloodPressureDiastolic,
-        .bloodPressureSystolic,
-        .bodyFatPercentage,
-        .bodyMass,
-        .bodyMassIndex,
-        .bodyTemperature,
-        .dietaryCaffeine,
-        .dietaryCalcium,
-        .dietaryCarbohydrates,
-        .dietaryCholesterol,
-        .dietaryCopper,
-        .dietaryEnergyConsumed,
-        .dietaryFatMonounsaturated,
-        .dietaryFatPolyunsaturated,
-        .dietaryFatSaturated,
-        .dietaryFatTotal,
-        .dietaryFiber,
-        .dietaryIron,
-        .dietaryPotassium,
-        .dietaryProtein,
-        .dietarySodium,
-        .dietarySugar,
-        .dietaryVitaminA,
-        .dietaryVitaminC,
-        .dietaryVitaminD,
-        .dietaryVitaminK,
-        .dietaryWater,
-        .distanceCycling,
-        .distanceSwimming,
-        .distanceWalkingRunning,
-        .flightsClimbed,
-        .heartRate,
-        .heartRateVariabilitySDNN,
-        .height,
-        .leanBodyMass,
-        .numberOfTimesFallen,
-        .oxygenSaturation,
-        .peakExpiratoryFlowRate,
-        .respiratoryRate,
-        .restingHeartRate,
         .stepCount,
+        .appleExerciseTime,
+        .activeEnergyBurned,
+        .distanceWalkingRunning,
+        .distanceCycling,
+        .flightsClimbed,
+        .bodyMass,
+        .bodyFatPercentage,
+        .heartRate,
+        .restingHeartRate,
+        .heartRateVariabilitySDNN,
         .vo2Max,
-        .walkingHeartRateAverage,
-        .walkingSpeed,
-        .walkingStepLength
+        .appleStandTime,
+        .dietaryWater,
+        .dietaryEnergyConsumed,
+        .dietaryProtein
     ]
 
     static func availableMetricOptions() -> [MetricOption] {
-        let prioritizedIDs = [
-            HKQuantityTypeIdentifier.stepCount.rawValue,
-            HKQuantityTypeIdentifier.bodyMass.rawValue,
-            HKQuantityTypeIdentifier.vo2Max.rawValue
-        ]
-
         return quantityIdentifiers
             .map { identifier in
                 return MetricOption(
@@ -190,17 +151,12 @@ private enum OutcomeHealthKitBridge {
                     displayName: displayName(for: identifier)
                 )
             }
-            .sorted { lhs, rhs in
-                let lhsRank = prioritizedIDs.firstIndex(of: lhs.identifierRaw) ?? Int.max
-                let rhsRank = prioritizedIDs.firstIndex(of: rhs.identifierRaw) ?? Int.max
-                if lhsRank != rhsRank {
-                    return lhsRank < rhsRank
-                }
-                return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
-            }
     }
 
     private static func displayName(for identifier: HKQuantityTypeIdentifier) -> String {
+        if identifier == .activeEnergyBurned {
+            return "Apple Energy Burned"
+        }
         if identifier == .bodyMass {
             return "Weight"
         }
@@ -242,8 +198,10 @@ private enum OutcomeHealthKitBridge {
             completion(.failure(BridgeError.invalidIdentifier))
             return
         }
-        var readTypes = allReadableQuantityTypes()
-        readTypes.insert(selectedType)
+        let shouldRequestInitialScope = !UserDefaults.standard.bool(forKey: initialAuthorizationCompleteDefaultsKey)
+        let readTypes: Set<HKObjectType> = shouldRequestInitialScope
+            ? allReadableQuantityTypes()
+            : [selectedType]
         guard !readTypes.isEmpty else {
             completion(.failure(BridgeError.invalidIdentifier))
             return
@@ -253,6 +211,9 @@ private enum OutcomeHealthKitBridge {
             if let error {
                 completion(.failure(error))
             } else if success {
+                if shouldRequestInitialScope {
+                    UserDefaults.standard.set(true, forKey: initialAuthorizationCompleteDefaultsKey)
+                }
                 completion(.success(()))
             } else {
                 completion(.failure(BridgeError.authorizationDenied))

@@ -45,6 +45,84 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         view.isScrollEnabled = true
         return view
     }()
+    private let notesTextContainerView: UIView = {
+        let view = UIView()
+        view.clipsToBounds = true
+        return view
+    }()
+    private let inlineLinkPreviewCard: UIView = {
+        let view = UIView()
+        view.layer.cornerRadius = 14
+        view.layer.cornerCurve = .continuous
+        view.layer.borderWidth = 1
+        view.clipsToBounds = true
+        view.isHidden = true
+        return view
+    }()
+    private let inlineLinkPreviewTitleLabel: UILabel = {
+        let label = UILabel()
+        label.font = .preferredFont(forTextStyle: .subheadline)
+        label.textColor = .label
+        label.numberOfLines = 1
+        return label
+    }()
+    private let inlineLinkPreviewSubtitleLabel: UILabel = {
+        let label = UILabel()
+        label.font = .preferredFont(forTextStyle: .caption1)
+        label.textColor = .secondaryLabel
+        label.numberOfLines = 1
+        return label
+    }()
+    private let inlineLinkPreviewThumbnailView: UIImageView = {
+        let view = UIImageView()
+        view.contentMode = .scaleAspectFill
+        view.backgroundColor = UIColor.systemGray5
+        view.clipsToBounds = true
+        view.layer.cornerRadius = 10
+        view.layer.cornerCurve = .continuous
+        return view
+    }()
+    private let inlineLinkPreviewFallbackIconView: UIImageView = {
+        let view = UIImageView(image: UIImage(systemName: "globe"))
+        view.contentMode = .scaleAspectFit
+        view.tintColor = .secondaryLabel
+        return view
+    }()
+    private lazy var inlineLinkPreviewThumbnailContainer: UIView = {
+        let view = UIView()
+        view.translatesAutoresizingMaskIntoConstraints = false
+        inlineLinkPreviewThumbnailView.translatesAutoresizingMaskIntoConstraints = false
+        inlineLinkPreviewFallbackIconView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(inlineLinkPreviewThumbnailView)
+        view.addSubview(inlineLinkPreviewFallbackIconView)
+        NSLayoutConstraint.activate([
+            view.widthAnchor.constraint(equalToConstant: 48),
+            view.heightAnchor.constraint(equalToConstant: 48),
+            inlineLinkPreviewThumbnailView.topAnchor.constraint(equalTo: view.topAnchor),
+            inlineLinkPreviewThumbnailView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            inlineLinkPreviewThumbnailView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            inlineLinkPreviewThumbnailView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            inlineLinkPreviewFallbackIconView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            inlineLinkPreviewFallbackIconView.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            inlineLinkPreviewFallbackIconView.widthAnchor.constraint(equalToConstant: 20),
+            inlineLinkPreviewFallbackIconView.heightAnchor.constraint(equalToConstant: 20),
+        ])
+        return view
+    }()
+    private lazy var inlineLinkPreviewTextStack: UIStackView = {
+        let stack = UIStackView(arrangedSubviews: [inlineLinkPreviewTitleLabel, inlineLinkPreviewSubtitleLabel])
+        stack.axis = .vertical
+        stack.spacing = 2
+        stack.alignment = .fill
+        return stack
+    }()
+    private lazy var inlineLinkPreviewRow: UIStackView = {
+        let stack = UIStackView(arrangedSubviews: [inlineLinkPreviewTextStack, inlineLinkPreviewThumbnailContainer])
+        stack.axis = .horizontal
+        stack.spacing = 12
+        stack.alignment = .center
+        return stack
+    }()
     private let notesImagePreviewView: UIImageView = {
         let view = UIImageView()
         view.contentMode = .scaleAspectFit
@@ -57,7 +135,7 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
     }()
     private lazy var notesImageHeightConstraint = notesImagePreviewView.heightAnchor.constraint(equalToConstant: 220)
     private lazy var notesContentStack: UIStackView = {
-        let stack = UIStackView(arrangedSubviews: [notesTextView, notesImagePreviewView])
+        let stack = UIStackView(arrangedSubviews: [notesTextContainerView, notesImagePreviewView])
         stack.axis = .vertical
         stack.spacing = 10
         return stack
@@ -167,70 +245,11 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
     private lazy var actionSectionHeader = sectionHeaderLabel("Action")
     private lazy var dueDateSectionHeader = sectionHeaderLabel("Due Date")
     private lazy var notesSectionHeader = sectionHeaderLabel("Notes")
-    private lazy var linkPreviewSectionHeader = sectionHeaderLabel("Attachment")
     private lazy var attachmentsSectionHeader = sectionHeaderLabel("Attachments")
     private lazy var actionCard = groupedCardContainer()
     private lazy var dueDateCard = groupedCardContainer()
     private lazy var notesCard = groupedCardContainer()
-    private lazy var linkPreviewCard = groupedCardContainer()
     private lazy var attachmentsCard = groupedCardContainer()
-    private let linkPreviewFaviconView: UIImageView = {
-        let view = UIImageView(image: UIImage(systemName: "globe"))
-        view.contentMode = .scaleAspectFit
-        view.tintColor = .secondaryLabel
-        view.layer.cornerRadius = 5
-        view.layer.cornerCurve = .continuous
-        view.clipsToBounds = true
-        view.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            view.widthAnchor.constraint(equalToConstant: 22),
-            view.heightAnchor.constraint(equalToConstant: 22),
-        ])
-        return view
-    }()
-    private let linkPreviewTitleLabel: UILabel = {
-        let label = UILabel()
-        label.font = .preferredFont(forTextStyle: .subheadline)
-        label.textColor = .label
-        label.numberOfLines = 2
-        return label
-    }()
-    private let linkPreviewDomainLabel: UILabel = {
-        let label = UILabel()
-        label.font = .preferredFont(forTextStyle: .caption1)
-        label.textColor = .secondaryLabel
-        label.numberOfLines = 1
-        return label
-    }()
-    private let linkPreviewImageView: UIImageView = {
-        let view = UIImageView()
-        view.contentMode = .scaleAspectFill
-        view.clipsToBounds = true
-        view.layer.cornerRadius = 8
-        view.layer.cornerCurve = .continuous
-        view.backgroundColor = UIColor.systemGray5
-        view.isHidden = true
-        return view
-    }()
-    private lazy var linkPreviewInfoStack: UIStackView = {
-        let stack = UIStackView(arrangedSubviews: [linkPreviewTitleLabel, linkPreviewDomainLabel])
-        stack.axis = .vertical
-        stack.spacing = 2
-        return stack
-    }()
-    private lazy var linkPreviewTopRow: UIStackView = {
-        let stack = UIStackView(arrangedSubviews: [linkPreviewFaviconView, linkPreviewInfoStack])
-        stack.axis = .horizontal
-        stack.spacing = 10
-        stack.alignment = .top
-        return stack
-    }()
-    private lazy var linkPreviewContentStack: UIStackView = {
-        let stack = UIStackView(arrangedSubviews: [linkPreviewTopRow, linkPreviewImageView])
-        stack.axis = .vertical
-        stack.spacing = 10
-        return stack
-    }()
     private lazy var attachmentsStack: UIStackView = {
         let stack = UIStackView()
         stack.axis = .vertical
@@ -238,14 +257,16 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         return stack
     }()
     private lazy var editorStack: UIStackView = {
-        notesTextView.heightAnchor.constraint(equalToConstant: 136).isActive = true
+        notesTextContainerView.heightAnchor.constraint(equalToConstant: 136).isActive = true
         notesImageHeightConstraint.isActive = true
         actionCard.addSubview(actionTextField)
         dueDateCard.addSubview(dueDateContentStack)
         notesCard.addSubview(notesContentStack)
-        linkPreviewCard.addSubview(linkPreviewContentStack)
         attachmentsCard.addSubview(attachmentsStack)
-        [actionTextField, dueDateContentStack, notesContentStack, linkPreviewContentStack, attachmentsStack].forEach { view in
+        notesTextContainerView.addSubview(notesTextView)
+        notesTextContainerView.addSubview(inlineLinkPreviewCard)
+        inlineLinkPreviewCard.addSubview(inlineLinkPreviewRow)
+        [actionTextField, dueDateContentStack, notesContentStack, attachmentsStack, notesTextView, inlineLinkPreviewCard, inlineLinkPreviewRow].forEach { view in
             view.translatesAutoresizingMaskIntoConstraints = false
         }
         NSLayoutConstraint.activate([
@@ -264,10 +285,20 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
             notesContentStack.trailingAnchor.constraint(equalTo: notesCard.trailingAnchor, constant: -12),
             notesContentStack.bottomAnchor.constraint(equalTo: notesCard.bottomAnchor, constant: -10),
 
-            linkPreviewContentStack.topAnchor.constraint(equalTo: linkPreviewCard.topAnchor, constant: 12),
-            linkPreviewContentStack.leadingAnchor.constraint(equalTo: linkPreviewCard.leadingAnchor, constant: 12),
-            linkPreviewContentStack.trailingAnchor.constraint(equalTo: linkPreviewCard.trailingAnchor, constant: -12),
-            linkPreviewContentStack.bottomAnchor.constraint(equalTo: linkPreviewCard.bottomAnchor, constant: -12),
+            notesTextView.topAnchor.constraint(equalTo: notesTextContainerView.topAnchor),
+            notesTextView.leadingAnchor.constraint(equalTo: notesTextContainerView.leadingAnchor),
+            notesTextView.trailingAnchor.constraint(equalTo: notesTextContainerView.trailingAnchor),
+            notesTextView.bottomAnchor.constraint(equalTo: notesTextContainerView.bottomAnchor),
+
+            inlineLinkPreviewCard.leadingAnchor.constraint(equalTo: notesTextContainerView.leadingAnchor, constant: 10),
+            inlineLinkPreviewCard.trailingAnchor.constraint(equalTo: notesTextContainerView.trailingAnchor, constant: -10),
+            inlineLinkPreviewCard.bottomAnchor.constraint(equalTo: notesTextContainerView.bottomAnchor, constant: -10),
+            inlineLinkPreviewCard.heightAnchor.constraint(equalToConstant: 64),
+
+            inlineLinkPreviewRow.topAnchor.constraint(equalTo: inlineLinkPreviewCard.topAnchor, constant: 8),
+            inlineLinkPreviewRow.leadingAnchor.constraint(equalTo: inlineLinkPreviewCard.leadingAnchor, constant: 10),
+            inlineLinkPreviewRow.trailingAnchor.constraint(equalTo: inlineLinkPreviewCard.trailingAnchor, constant: -8),
+            inlineLinkPreviewRow.bottomAnchor.constraint(equalTo: inlineLinkPreviewCard.bottomAnchor, constant: -8),
 
             attachmentsStack.topAnchor.constraint(equalTo: attachmentsCard.topAnchor, constant: 12),
             attachmentsStack.leadingAnchor.constraint(equalTo: attachmentsCard.leadingAnchor, constant: 12),
@@ -281,8 +312,6 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
             dueDateCard,
             notesSectionHeader,
             notesCard,
-            linkPreviewSectionHeader,
-            linkPreviewCard,
             attachmentsSectionHeader,
             attachmentsCard,
         ])
@@ -696,20 +725,26 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
 
     private func configureLinkPreview(from payload: ShareIntoLoomPayload) {
         guard let previewURL = previewURL(from: payload) else {
-            linkPreviewSectionHeader.isHidden = true
-            linkPreviewCard.isHidden = true
+            linkPreviewTask?.cancel()
+            linkPreviewTask = nil
+            activePreviewURL = nil
+            inlineLinkPreviewCard.isHidden = true
+            notesTextView.contentInset.bottom = 0
+            notesTextView.verticalScrollIndicatorInsets.bottom = 0
             return
         }
 
-        linkPreviewSectionHeader.isHidden = false
-        linkPreviewCard.isHidden = false
         activePreviewURL = previewURL
-        linkPreviewTitleLabel.text = "Loading preview…"
-        linkPreviewDomainLabel.text = previewURL.host ?? previewURL.absoluteString
-        linkPreviewFaviconView.image = UIImage(systemName: "globe")
-        linkPreviewImageView.image = nil
-        linkPreviewImageView.isHidden = true
+        inlineLinkPreviewCard.isHidden = false
+        inlineLinkPreviewTitleLabel.text = "Loading preview..."
+        inlineLinkPreviewSubtitleLabel.text = compactDomainText(for: previewURL)
+        inlineLinkPreviewThumbnailView.image = nil
+        inlineLinkPreviewFallbackIconView.image = UIImage(systemName: "globe")
+        inlineLinkPreviewFallbackIconView.tintColor = .secondaryLabel
+        inlineLinkPreviewFallbackIconView.isHidden = false
         setLinkPreviewTintColor(.secondarySystemGroupedBackground)
+        notesTextView.contentInset.bottom = 76
+        notesTextView.verticalScrollIndicatorInsets.bottom = 76
 
         linkPreviewTask?.cancel()
         linkPreviewTask = Task { [weak self] in
@@ -737,7 +772,8 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         guard !Task.isCancelled else { return }
 
         let title = metadata.title?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let domain = (metadata.originalURL ?? metadata.url ?? url).host ?? url.host ?? url.absoluteString
+        let resolvedURL = metadata.originalURL ?? metadata.url ?? url
+        let domain = compactDomainText(for: resolvedURL)
         let favicon = await loadImage(from: metadata.iconProvider)
         let previewImage = await loadImage(from: metadata.imageProvider)
         let tintSource = previewImage ?? favicon
@@ -745,19 +781,26 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
 
         await MainActor.run {
             guard self.activePreviewURL == url else { return }
-            self.linkPreviewTitleLabel.text = (title?.isEmpty == false) ? title : domain
-            self.linkPreviewDomainLabel.text = domain
-            self.linkPreviewFaviconView.image = favicon ?? UIImage(systemName: "globe")
-            self.linkPreviewFaviconView.tintColor = favicon == nil ? .secondaryLabel : .clear
-            self.linkPreviewImageView.image = previewImage
-            self.linkPreviewImageView.isHidden = previewImage == nil
+            self.inlineLinkPreviewTitleLabel.text = (title?.isEmpty == false) ? title : domain
+            self.inlineLinkPreviewSubtitleLabel.text = domain
+            self.inlineLinkPreviewThumbnailView.image = previewImage ?? favicon
+            self.inlineLinkPreviewFallbackIconView.image = previewImage == nil ? (favicon ?? UIImage(systemName: "globe")) : nil
+            self.inlineLinkPreviewFallbackIconView.tintColor = (previewImage == nil && favicon == nil) ? .secondaryLabel : .clear
+            self.inlineLinkPreviewFallbackIconView.isHidden = previewImage != nil || favicon != nil
             self.setLinkPreviewTintColor(previewTintColor)
         }
     }
 
     private func setLinkPreviewTintColor(_ color: UIColor) {
-        linkPreviewCard.backgroundColor = color.withAlphaComponent(0.14)
-        linkPreviewCard.layer.borderColor = color.withAlphaComponent(0.32).cgColor
+        inlineLinkPreviewCard.backgroundColor = color.withAlphaComponent(0.14)
+        inlineLinkPreviewCard.layer.borderColor = color.withAlphaComponent(0.32).cgColor
+        inlineLinkPreviewThumbnailView.backgroundColor = color.withAlphaComponent(0.18)
+    }
+
+    private func compactDomainText(for url: URL) -> String {
+        let host = url.host?.replacingOccurrences(of: "www.", with: "") ?? ""
+        if !host.isEmpty { return host }
+        return url.absoluteString
     }
 
     private func fetchMetadata(for url: URL) async -> LPLinkMetadata? {
@@ -967,7 +1010,7 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         }()
         notesImageHeightConstraint.constant = previewHeight
 
-        // For image or link shares, preview content is shown in dedicated sections.
+        // Link shares render inline in Notes; image shares still use the image preview area.
         let shouldHideAttachments = hasImageAttachment || hasLinkAttachment
         attachmentsSectionHeader.isHidden = shouldHideAttachments
         attachmentsCard.isHidden = shouldHideAttachments

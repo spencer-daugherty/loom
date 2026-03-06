@@ -1,6 +1,8 @@
 import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
+import LinkPresentation
+import CoreImage
 import os
 #if canImport(UIKit)
 import UIKit
@@ -871,17 +873,27 @@ struct ActionView: View {
                 }
 
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(actionBlocksSimpleViewEnabled ? "Full View" : "Simple View") {
-                        actionBlocksSimpleViewEnabled.toggle()
+                    if !areAllActionBlocksCollapsed {
+                        Button(actionBlocksSimpleViewEnabled ? "Full View" : "Simple View") {
+                            actionBlocksSimpleViewEnabled.toggle()
+                        }
+                        .buttonStyle(.plain)
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(.blue)
                     }
-                    .buttonStyle(.plain)
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(.blue)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(Color(.systemBackground))
             .coordinateSpace(name: "action-scroll")
+            .navigationDestination(item: $rearrangeActionsSheetPayload) { sheet in
+                RearrangeActionsSheet(
+                    items: sheet.items,
+                    onSave: { reorderedIDs in
+                        commitActionOrder(in: sheet.id, visibleOrderedIDs: reorderedIDs)
+                    }
+                )
+            }
             .overlay(alignment: .bottomTrailing) {
                 if isKeyboardVisible {
                     keyboardAccessoryButton
@@ -1834,14 +1846,6 @@ struct ActionView: View {
                 if areAllActionBlocksCollapsed {
                     expandAllActionBlocksAndScrollToTop(anchor: "chunk-\(chunk.id.uuidString)")
                 }
-            }
-            .sheet(item: $rearrangeActionsSheetPayload) { sheet in
-                RearrangeActionsSheet(
-                    items: sheet.items,
-                    onSave: { reorderedIDs in
-                        commitActionOrder(in: sheet.id, visibleOrderedIDs: reorderedIDs)
-                    }
-                )
             }
     }
 
@@ -4981,6 +4985,7 @@ private struct AttachmentsSheet: View {
     @State private var isFileImporterPresented: Bool = false
     @State private var noteText: String = ""
     @State private var hasSavedNote: Bool = false
+    @StateObject private var previewStore = ActionLinkPreviewStore()
 
     var body: some View {
         NavigationStack {
@@ -4989,9 +4994,7 @@ private struct AttachmentsSheet: View {
                     TextEditor(text: $noteText)
                         .focused($isNoteFocused)
                         .frame(height: 120)
-                }
-
-                Section("Files and Links") {
+                    
                     Button {
                         isNewLinkMode = true
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
@@ -5025,37 +5028,58 @@ private struct AttachmentsSheet: View {
                         isFileImporterPresented = true
                     }
 
-                    if attachments.isEmpty {
-                        Text("No attachments yet.")
+                    if linkAttachments.isEmpty && fileAttachments.isEmpty {
+                        Text("No notes or attachments yet.")
                             .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(attachments) { a in
-                            Button {
-                                openAttachment(a)
-                            } label: {
-                                HStack(alignment: .top, spacing: 10) {
-                                    Image(systemName: iconName(for: a))
-                                        .foregroundStyle(.secondary)
+                    }
 
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(titleText(for: a))
-                                            .font(.subheadline)
-                                            .foregroundStyle(.primary)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                    }
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                }
-                                .contentShape(Rectangle())
+                    ForEach(linkAttachments) { attachment in
+                        Button {
+                            openAttachment(attachment)
+                        } label: {
+                            ActionLinkBannerCard(
+                                urlString: attachment.urlString ?? "",
+                                preview: previewStore.preview(for: attachment.urlString)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
+                        .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) {
+                                onDeleteAttachment(attachment.id)
+                            } label: {
+                                Text("Delete")
                             }
-                            .buttonStyle(.plain)
-                            .swipeActions(edge: .trailing) {
-                                Button(role: .destructive) {
-                                    onDeleteAttachment(a.id)
-                                } label: {
-                                    Text("Delete")
+                            .tint(.red)
+                        }
+                    }
+
+                    ForEach(fileAttachments) { attachment in
+                        Button {
+                            openAttachment(attachment)
+                        } label: {
+                            HStack(alignment: .top, spacing: 10) {
+                                Image(systemName: iconName(for: attachment))
+                                    .foregroundStyle(.secondary)
+
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(titleText(for: attachment))
+                                        .font(.subheadline)
+                                        .foregroundStyle(.primary)
+                                        .fixedSize(horizontal: false, vertical: true)
                                 }
-                                .tint(.red)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) {
+                                onDeleteAttachment(attachment.id)
+                            } label: {
+                                Text("Delete")
+                            }
+                            .tint(.red)
                         }
                     }
                 }
@@ -5088,7 +5112,7 @@ private struct AttachmentsSheet: View {
                     break
                 }
             }
-            .navigationTitle("Attachments")
+            .navigationTitle("Notes")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -5165,12 +5189,16 @@ private struct AttachmentsSheet: View {
             .onAppear {
                 noteText = initialNoteText
                 hasSavedNote = false
+                previewStore.load(urlStrings: linkAttachments.compactMap(\.urlString))
             }
             .onChange(of: isNewLinkFocused) { _, isFocused in
                 guard !isFocused else { return }
                 guard trimmedInlineLinkValue.isEmpty else { return }
                 isNewLinkMode = false
                 linkText = ""
+            }
+            .onChange(of: linkAttachmentURLs) { _, urls in
+                previewStore.load(urlStrings: urls)
             }
             .onDisappear {
                 commitNoteIfNeeded()
@@ -5198,6 +5226,18 @@ private struct AttachmentsSheet: View {
 
     private var trimmedInlineLinkValue: String {
         linkText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var linkAttachments: [PlannedChunkActionAttachment] {
+        attachments.filter { $0.kind == .link }
+    }
+
+    private var fileAttachments: [PlannedChunkActionAttachment] {
+        attachments.filter { $0.kind == .file }
+    }
+
+    private var linkAttachmentURLs: [String] {
+        linkAttachments.compactMap(\.urlString)
     }
 
     private func iconName(for a: PlannedChunkActionAttachment) -> String {
@@ -5280,6 +5320,170 @@ private struct AttachmentsSheet: View {
         case .note:
             break
         }
+    }
+}
+
+private struct ActionLinkBannerCard: View {
+    let urlString: String
+    let preview: ActionLinkPreviewStore.PreviewData?
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(preview?.title ?? compactDomain)
+                    .font(.subheadline)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Text(preview?.subtitle ?? compactDomain)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            ZStack {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(previewTint.opacity(0.16))
+                if let image = preview?.image {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    Image(systemName: "globe")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(width: 48, height: 48)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(minHeight: 64)
+        .background(previewTint.opacity(0.14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(previewTint.opacity(0.3), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private var compactDomain: String {
+        guard let url = URL(string: urlString) else { return urlString }
+        return (url.host ?? urlString).replacingOccurrences(of: "www.", with: "")
+    }
+
+    private var previewTint: Color {
+        preview?.tint ?? Color(.secondarySystemGroupedBackground)
+    }
+}
+
+@MainActor
+private final class ActionLinkPreviewStore: ObservableObject {
+    struct PreviewData {
+        let title: String
+        let subtitle: String
+        let image: UIImage?
+        let tint: Color
+    }
+
+    @Published private var previews: [String: PreviewData] = [:]
+    private var loadedURLs: Set<String> = []
+
+    func preview(for urlString: String?) -> PreviewData? {
+        guard let urlString else { return nil }
+        return previews[urlString]
+    }
+
+    func load(urlStrings: [String]) {
+        let normalized = urlStrings
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        for urlString in normalized where !loadedURLs.contains(urlString) {
+            loadedURLs.insert(urlString)
+            Task {
+                await loadPreview(for: urlString)
+            }
+        }
+    }
+
+    private func loadPreview(for urlString: String) async {
+        guard let url = URL(string: urlString) else { return }
+        let provider = LPMetadataProvider()
+        let metadata = await withCheckedContinuation { continuation in
+            provider.startFetchingMetadata(for: url) { metadata, _ in
+                continuation.resume(returning: metadata)
+            }
+        }
+        guard let metadata else { return }
+
+        let resolvedURL = metadata.originalURL ?? metadata.url ?? url
+        let subtitle = (resolvedURL.host ?? url.host ?? urlString).replacingOccurrences(of: "www.", with: "")
+        let title = metadata.title?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? subtitle
+        let previewImage = await loadImage(from: metadata.imageProvider)
+        let fallbackIcon = await loadImage(from: metadata.iconProvider)
+        let image = previewImage ?? fallbackIcon
+        let tint = image.flatMap { dominantColor(from: $0) }.map(Color.init) ?? Color.blue
+
+        previews[urlString] = PreviewData(
+            title: title,
+            subtitle: subtitle,
+            image: image,
+            tint: tint
+        )
+    }
+
+    private func loadImage(from provider: NSItemProvider?) async -> UIImage? {
+        guard let provider else { return nil }
+        guard provider.canLoadObject(ofClass: UIImage.self) else { return nil }
+        return await withCheckedContinuation { continuation in
+            provider.loadObject(ofClass: UIImage.self) { object, _ in
+                continuation.resume(returning: object as? UIImage)
+            }
+        }
+    }
+
+    private func dominantColor(from image: UIImage) -> UIColor? {
+        guard let cgImage = image.cgImage else { return nil }
+        let ciImage = CIImage(cgImage: cgImage)
+        let extent = ciImage.extent
+        guard !extent.isEmpty,
+              let filter = CIFilter(
+                name: "CIAreaAverage",
+                parameters: [
+                    kCIInputImageKey: ciImage,
+                    kCIInputExtentKey: CIVector(cgRect: extent)
+                ]
+              ),
+              let outputImage = filter.outputImage
+        else {
+            return nil
+        }
+
+        let context = CIContext(options: [.workingColorSpace: NSNull()])
+        var bitmap = [UInt8](repeating: 0, count: 4)
+        context.render(
+            outputImage,
+            toBitmap: &bitmap,
+            rowBytes: 4,
+            bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
+            format: .RGBA8,
+            colorSpace: nil
+        )
+
+        return UIColor(
+            red: CGFloat(bitmap[0]) / 255,
+            green: CGFloat(bitmap[1]) / 255,
+            blue: CGFloat(bitmap[2]) / 255,
+            alpha: 1
+        )
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
     }
 }
 
