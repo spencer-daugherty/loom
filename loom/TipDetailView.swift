@@ -95,7 +95,8 @@ struct TipDetailView: View {
                 .foregroundStyle(.red)
         } else if tip == .loomAIPersonalization
             || tip == .loomAIChat
-            || tip == .loomAIAutoWrite {
+            || tip == .loomAIAutoWrite
+            || tip == .loomAIEmailAssit {
             Image("LoomAI")
                 .resizable()
                 .scaledToFit()

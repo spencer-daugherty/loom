@@ -11,6 +11,7 @@ enum TipPreviewType: String {
     case shareToLoom
     case loomAIChat
     case loomAIAutoWrite
+    case loomAIEmailAssit
 }
 
 enum TipFeature: String, CaseIterable, Identifiable {
@@ -21,8 +22,18 @@ enum TipFeature: String, CaseIterable, Identifiable {
     case shareToLoom
     case loomAIChat
     case loomAIAutoWrite
+    case loomAIEmailAssit
 
     var id: String { rawValue }
+
+    var hubSection: TipHubSection {
+        switch self {
+        case .loomAIEmailAssit:
+            return .inDevelopment
+        default:
+            return .tips
+        }
+    }
 
     var title: String {
         switch self {
@@ -40,6 +51,8 @@ enum TipFeature: String, CaseIterable, Identifiable {
             return "LoomAI Chat"
         case .loomAIAutoWrite:
             return "LoomAI AutoWrite"
+        case .loomAIEmailAssit:
+            return "LoomAI EmailAssit"
         }
     }
 
@@ -59,6 +72,8 @@ enum TipFeature: String, CaseIterable, Identifiable {
             return "Ask LoomAI for focused help and get suggestion cards you can apply fast."
         case .loomAIAutoWrite:
             return "AutoWrite drafts context-aware text using your Loom setup and direction."
+        case .loomAIEmailAssit:
+            return "Integrate with your email provider and LoomAI will capture any pending actions for your attention."
         }
     }
 
@@ -78,6 +93,8 @@ enum TipFeature: String, CaseIterable, Identifiable {
             return "Chat with LoomAI to clarify priorities, unblock execution, and get structured options. Suggestion cards help you move from idea to action quickly."
         case .loomAIAutoWrite:
             return "AutoWrite generates polished drafts in the moment based on your current screen and context. It helps you write faster while keeping your voice and intent intact."
+        case .loomAIEmailAssit:
+            return "Connect your inbox so LoomAI can scan email threads, surface the follow-ups that need action, and turn them into pending items without manual triage."
         }
     }
 
@@ -97,6 +114,8 @@ enum TipFeature: String, CaseIterable, Identifiable {
             return .loomAIChat
         case .loomAIAutoWrite:
             return .loomAIAutoWrite
+        case .loomAIEmailAssit:
+            return .loomAIEmailAssit
         }
     }
 
@@ -116,6 +135,8 @@ enum TipFeature: String, CaseIterable, Identifiable {
             return "bubble.left.and.bubble.right"
         case .loomAIAutoWrite:
             return "wand.and.stars"
+        case .loomAIEmailAssit:
+            return "envelope.badge"
         }
     }
 
@@ -141,10 +162,15 @@ enum TipFeature: String, CaseIterable, Identifiable {
         switch self {
         case .appleHealthIntegration:
             return 5
-        case .littleWinsMoments, .loomAIPersonalization, .assignActions, .shareToLoom, .loomAIChat, .loomAIAutoWrite:
+        case .littleWinsMoments, .loomAIPersonalization, .assignActions, .shareToLoom, .loomAIChat, .loomAIAutoWrite, .loomAIEmailAssit:
             return 4
         }
     }
+}
+
+enum TipHubSection {
+    case tips
+    case inDevelopment
 }
 
 private enum TipFeatureSupport {

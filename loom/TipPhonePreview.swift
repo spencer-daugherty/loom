@@ -299,6 +299,8 @@ struct TipPhonePreview: View {
             LoomAIChatTipPreviewScene(step: step, isAnimated: shouldAnimateScene)
         case .loomAIAutoWrite:
             LoomAIAutoWriteTipPreviewScene(step: step, isAnimated: shouldAnimateScene)
+        case .loomAIEmailAssit:
+            LoomAIEmailAssitTipPreviewScene(step: step, isAnimated: shouldAnimateScene)
         }
     }
 

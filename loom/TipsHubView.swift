@@ -1,17 +1,22 @@
 import SwiftUI
 
 struct TipsHubView: View {
+    private let tipFeatures = TipFeature.allCases.filter { $0.hubSection == .tips }
+    private let inDevelopmentFeatures = TipFeature.allCases.filter { $0.hubSection == .inDevelopment }
+
     var body: some View {
         ScrollView(showsIndicators: false) {
-            LazyVStack(spacing: 14) {
-                ForEach(TipFeature.allCases) { feature in
-                    NavigationLink {
-                        TipDetailView(feature: feature)
-                    } label: {
-                        TipHubCard(feature: feature)
+            LazyVStack(alignment: .leading, spacing: 22) {
+                tipSection(features: tipFeatures)
+
+                if !inDevelopmentFeatures.isEmpty {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("In Development")
+                            .font(.headline.weight(.semibold))
+                            .foregroundStyle(.primary)
+
+                        tipSection(features: inDevelopmentFeatures)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .buttonStyle(.plain)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -21,6 +26,20 @@ struct TipsHubView: View {
         .background(Color(.systemGroupedBackground).ignoresSafeArea())
         .navigationTitle("Tips")
         .navigationBarTitleDisplayMode(.large)
+    }
+
+    private func tipSection(features: [TipFeature]) -> some View {
+        VStack(spacing: 14) {
+            ForEach(features) { feature in
+                NavigationLink {
+                    TipDetailView(feature: feature)
+                } label: {
+                    TipHubCard(feature: feature)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .buttonStyle(.plain)
+            }
+        }
     }
 }
 
@@ -93,7 +112,8 @@ private struct TipHubCard: View {
                 .foregroundStyle(.red)
         } else if feature == .loomAIPersonalization
             || feature == .loomAIChat
-            || feature == .loomAIAutoWrite {
+            || feature == .loomAIAutoWrite
+            || feature == .loomAIEmailAssit {
             Image("LoomAI")
                 .resizable()
                 .scaledToFit()

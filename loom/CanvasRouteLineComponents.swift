@@ -50,7 +50,7 @@ struct IntroRouteLinesCanvas: View {
                     let laneOffset = laneOffsetForIndex(i, max(lineCount, 1))
 
                     let lineDelay = rand(seededIndex * 83 + 17, 0.00, 0.36)
-                    let lineRevealDuration = rand(seededIndex * 89 + 23, 0.62, 1.05)
+                    let lineRevealDuration = rand(seededIndex * 89 + 23, 0.62, 1.05) * 3
                     let rawReveal = (startupElapsed - lineDelay) / lineRevealDuration
                     let revealProgress = max(0.0, min(rawReveal, 1.0))
                     if revealProgress <= 0.0 { continue }

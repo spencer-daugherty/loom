@@ -264,6 +264,15 @@ final class DiagnosticsInsightsViewModel: ObservableObject {
         failedSnapshotKey = nil
     }
 
+    func suspendRefreshingState() {
+        cancelInFlight()
+        insightsErrorMessage = nil
+        troubleshootingMessage = nil
+        isGeneratingInsights = false
+        isShowingSkeleton = false
+        failedSnapshotKey = nil
+    }
+
     func prepareForPendingPersonalizationLoad(showSkeleton: Bool = true) {
         guard insightCards.isEmpty else { return }
         insightsErrorMessage = nil
@@ -604,6 +613,12 @@ private struct DiagnosticInsightCard: Identifiable, Hashable, Sendable {
     var id: String { kind.rawValue }
 }
 
+struct PersonalizationInsightsOverride: Equatable, Sendable {
+    var diagnosticsHash: String
+    var rootCause: String
+    var nextDirection: String
+}
+
 private struct DiagnosticInsightsCardsStack: View {
     let cards: [DiagnosticInsightCard]
     let lifeAreas: [String]
@@ -670,28 +685,45 @@ struct PersonalizationInsightsCards: View {
     let snapshot: PersonalizationSnapshot
     let userKey: String
     let purposeRefreshCycleKey: String?
-    let refreshToken: UUID
     let showsInlineLoading: Bool
+    let insightsOverride: PersonalizationInsightsOverride?
     @StateObject private var viewModel = DiagnosticsInsightsViewModel()
-    @State private var lastHandledRefreshToken: UUID?
-    @State private var hasLoadedAccountInsights = false
 
     private var diagnosticsSignature: String {
         let diagnosticsHash = DiagnosticsInsightsHasher.hash(for: snapshot)
         return "\(userKey)|\(diagnosticsHash)|v\(DiagnosticsInsightsHasher.schemaVersion)"
     }
 
-    private var accountRefreshSignature: String {
-        "\(diagnosticsSignature)|refresh:\(refreshToken.uuidString)"
+    private var currentDiagnosticsHash: String {
+        DiagnosticsInsightsHasher.hash(for: snapshot)
+    }
+
+    private var hasActiveOverride: Bool {
+        guard let insightsOverride else { return false }
+        return insightsOverride.diagnosticsHash == currentDiagnosticsHash
+    }
+
+    private var displayedCards: [DiagnosticInsightCard] {
+        if let insightsOverride, insightsOverride.diagnosticsHash == currentDiagnosticsHash {
+            return [
+                DiagnosticInsightCard(kind: .rootCause, body: insightsOverride.rootCause),
+                DiagnosticInsightCard(
+                    kind: .fulfillmentAreas,
+                    body: "Every task, goal, and little win will land in one of these areas, so your life stays organized."
+                ),
+                DiagnosticInsightCard(kind: .nextDirection, body: insightsOverride.nextDirection)
+            ]
+        }
+        return viewModel.insightCards
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             if viewModel.isShowingSkeleton {
                 DiagnosticInsightsSkeletonStack()
-            } else if !viewModel.insightCards.isEmpty {
+            } else if !displayedCards.isEmpty {
                 DiagnosticInsightsCardsStack(
-                    cards: viewModel.insightCards,
+                    cards: displayedCards,
                     lifeAreas: snapshot.lifeAreasSelected,
                     lifeAreaColorKeys: snapshot.lifeAreaColorKeys,
                     showsAnimatedOutline: false,
@@ -708,7 +740,7 @@ struct PersonalizationInsightsCards: View {
                 }
             }
 
-            if viewModel.insightsErrorMessage != nil {
+            if viewModel.insightsErrorMessage != nil && !hasActiveOverride {
                 HStack(spacing: 10) {
                     Button("Retry") {
                         Task { await refresh(forceRefresh: true) }
@@ -732,8 +764,17 @@ struct PersonalizationInsightsCards: View {
         }
         .onAppear {
             viewModel.prepareForPendingPersonalizationLoad(showSkeleton: false)
+            if hasActiveOverride {
+                viewModel.suspendRefreshingState()
+            }
         }
-        .task(id: accountRefreshSignature) {
+        .onChange(of: hasActiveOverride) { _, isActive in
+            if isActive {
+                viewModel.suspendRefreshingState()
+            }
+        }
+        .task(id: diagnosticsSignature) {
+            guard !hasActiveOverride else { return }
             await refreshForAccountContext()
         }
     }
@@ -761,19 +802,10 @@ struct PersonalizationInsightsCards: View {
         let snapshotKey = DiagnosticsInsightsHasher.snapshotKey(userKey: userKey, diagnosticsHash: diagnosticsHash)
         AppDebugActivityLog.log(
             "DiagnosticsInsightsAccount",
-            "account refresh start snapshotKey=\(snapshotKey) refreshToken=\(refreshToken.uuidString)"
+            "account refresh start snapshotKey=\(snapshotKey)"
         )
 
-        let shouldReloadPersisted = hasLoadedAccountInsights && lastHandledRefreshToken != refreshToken
-        lastHandledRefreshToken = refreshToken
-        hasLoadedAccountInsights = true
-
-        // Load persisted/current by default. After every completed Quick Diagnostic save,
-        // invalidate the currently loaded cards and re-read the freshly persisted snapshot,
-        // even if the diagnostics hash did not change.
-        if shouldReloadPersisted {
-            viewModel.invalidateLoadedSnapshot()
-        }
+        // Load persisted/current only for the active diagnostics signature.
         await refresh(forceRefresh: false)
     }
 }

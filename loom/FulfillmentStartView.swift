@@ -3483,81 +3483,69 @@ struct FulfillmentStartView: View {
 
     private var insightsStep: some View {
         GeometryReader { proxy in
-            ZStack {
-                VStack(alignment: .leading, spacing: lifeOSInsightsVerticalSpacing) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("PURPOSE")
-                            .font(.caption.weight(.bold))
-                            .textCase(.uppercase)
-                            .foregroundStyle(.secondary)
-                            .tracking(0.45)
+            VStack(alignment: .leading, spacing: lifeOSInsightsVerticalSpacing) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("PURPOSE")
+                        .font(.caption.weight(.bold))
+                        .textCase(.uppercase)
+                        .foregroundStyle(.secondary)
+                        .tracking(0.45)
 
-                        Text("Your passions reveal who you are and what drives you.")
-                            .font(.subheadline)
-                            .foregroundStyle(.primary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                    Text("Your passions reveal who you are and what drives you.")
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
-                    HStack(spacing: 16) {
-                        ForEach(lifeOSPassionCircleModels, id: \.emotionKey) { item in
-                            lifeOSPassionCircle(item)
-                        }
+                HStack(spacing: 16) {
+                    ForEach(lifeOSPassionCircleModels, id: \.emotionKey) { item in
+                        lifeOSPassionCircle(item)
+                            .anchorPreference(
+                                key: LifeOSInsightsBoundsPreferenceKey.self,
+                                value: .bounds
+                            ) { [.purposeCircle(item.emotionKey): $0] }
                     }
-                    .frame(maxWidth: .infinity, alignment: .center)
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.bottom, 60)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("FULFILLMENT")
+                        .font(.caption.weight(.bold))
+                        .textCase(.uppercase)
+                        .foregroundStyle(.secondary)
+                        .tracking(0.45)
+
+                    Text("These areas makeup your life.")
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                }
+
+                lifeOSFulfillmentLayeredCluster
                     .anchorPreference(
                         key: LifeOSInsightsBoundsPreferenceKey.self,
                         value: .bounds
-                    ) { [.purposeCircles: $0] }
+                    ) { [.fulfillmentCluster: $0] }
+                    .zIndex(10)
 
-                    Color.clear.frame(height: 48)
+                Spacer(minLength: 0)
 
-                    Spacer(minLength: 0)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-
-                VStack(alignment: .leading, spacing: lifeOSInsightsVerticalSpacing) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("FULFILLMENT")
-                            .font(.caption.weight(.bold))
-                            .textCase(.uppercase)
-                            .foregroundStyle(.secondary)
-                            .tracking(0.45)
-
-                        Text("These areas makeup your life.")
-                            .font(.subheadline)
-                            .foregroundStyle(.primary)
-                    }
-
-                    lifeOSFulfillmentLayeredCluster
-                        .anchorPreference(
-                            key: LifeOSInsightsBoundsPreferenceKey.self,
-                            value: .bounds
-                        ) { [.fulfillmentCluster: $0] }
-                        .zIndex(10)
-                }
-                .padding(.vertical, lifeOSInsightsVerticalSpacing)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .frame(maxHeight: .infinity, alignment: .center)
-                .zIndex(10)
-
-                VStack(alignment: .leading, spacing: lifeOSInsightsVerticalSpacing) {
-                    Spacer(minLength: 0)
-                    lifeOSBottomSystemsGroup(containerHeight: max(250, proxy.size.height * 0.34))
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                .padding(.bottom, proxy.safeAreaInsets.bottom)
+                lifeOSBottomSystemsGroup(containerHeight: max(250, proxy.size.height * 0.34))
+                    .padding(.bottom, proxy.safeAreaInsets.bottom)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .padding(.horizontal, 2)
             .overlayPreferenceValue(LifeOSInsightsBoundsPreferenceKey.self) { anchors in
                 GeometryReader { overlayProxy in
                     if
-                        let purposeAnchor = anchors[.purposeCircles],
                         let fulfillmentAnchor = anchors[.fulfillmentCluster],
                         let systemsAnchor = anchors[.systemsIcons]
                     {
+                        let purposeFrames = lifeOSPassionCircleModels.compactMap { item in
+                            anchors[.purposeCircle(item.emotionKey)].map { overlayProxy[$0] }
+                        }
                         lifeOSInsightsGlobalConnectorLayer(
-                            purposeFrame: overlayProxy[purposeAnchor],
+                            purposeFrames: purposeFrames,
                             fulfillmentFrame: overlayProxy[fulfillmentAnchor],
                             systemsFrame: overlayProxy[systemsAnchor]
                         )
@@ -3614,16 +3602,14 @@ struct FulfillmentStartView: View {
     }
 
     private func lifeOSInsightsGlobalConnectorLayer(
-        purposeFrame: CGRect,
+        purposeFrames: [CGRect],
         fulfillmentFrame: CGRect,
         systemsFrame: CGRect
     ) -> some View {
         let radarCenter = lifeOSGlobalRadarCenter(for: fulfillmentFrame)
-        let purposeStart = CGPoint(x: purposeFrame.midX, y: purposeFrame.maxY + 6)
-        let purposeColor = lifeOSRandomConnectorColor(
-            start: purposeStart,
-            end: radarCenter,
-            fallback: .secondary
+        let purposeConnectorSegments = lifeOSPurposeConnectorSegments(
+            purposeFrames: purposeFrames,
+            origin: radarCenter
         )
         let iconCenters = lifeOSIconCenters(for: systemsFrame.width).map { systemsFrame.minX + $0 }
         let connectorColorsByIcon = lifeOSConnectorColorsByIcon
@@ -3640,12 +3626,15 @@ struct FulfillmentStartView: View {
         )
 
         return ZStack {
-            lifeOSCurvedConnectorLine(
-                start: purposeStart,
-                end: radarCenter,
-                movingColor: purposeColor,
-                curveLift: max(0, abs(radarCenter.y - purposeStart.y) * 0.12)
-            )
+            ForEach(purposeConnectorSegments) { segment in
+                lifeOSCurvedConnectorLine(
+                    start: segment.start,
+                    end: segment.end,
+                    movingColor: segment.color,
+                    curveLift: segment.curveLift,
+                    middleHorizontalBend: segment.middleHorizontalBend
+                )
+            }
 
             ForEach(connectorSegments) { segment in
                 lifeOSCurvedConnectorLine(
@@ -3679,6 +3668,38 @@ struct FulfillmentStartView: View {
         )
     }
 
+    private func lifeOSPurposeConnectorSegments(
+        purposeFrames: [CGRect],
+        origin: CGPoint
+    ) -> [LifeOSConnectorSegment] {
+        let grayscaleColors: [Color] = [Color(.systemGray2), Color(.systemGray4)]
+
+        var segments: [LifeOSConnectorSegment] = []
+        for (index, purposeFrame) in purposeFrames.enumerated() {
+            let centerX = purposeFrame.midX
+            let startY = purposeFrame.maxY + 4
+            let laneSpread = max(4, min(purposeFrame.width * 0.12, 8))
+            for laneIndex in 0..<grayscaleColors.count {
+                let laneDirection: CGFloat = laneIndex == 0 ? -1 : 1
+                let start = CGPoint(
+                    x: centerX + (laneDirection * laneSpread),
+                    y: startY
+                )
+                segments.append(
+                    LifeOSConnectorSegment(
+                        id: "purpose-\(index)-\(laneIndex)",
+                        start: start,
+                        end: origin,
+                        color: grayscaleColors[laneIndex],
+                        curveLift: max(0, abs(origin.y - startY) * 0.12) + CGFloat(laneIndex * 2),
+                        middleHorizontalBend: abs(origin.x - start.x) * 0.9
+                    )
+                )
+            }
+        }
+        return segments
+    }
+
     private func lifeOSGlobalTargetsByIcon(
         iconCenters: [CGFloat],
         connectorColorsByIcon: [[Color]],
@@ -3700,7 +3721,7 @@ struct FulfillmentStartView: View {
     }
 
     private enum LifeOSInsightsAnchorID: Hashable {
-        case purposeCircles
+        case purposeCircle(String)
         case fulfillmentCluster
         case systemsIcons
     }

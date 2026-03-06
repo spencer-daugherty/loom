@@ -2,6 +2,8 @@ import SwiftUI
 import SwiftData
 
 struct AccountPersonalizationView: View {
+    private static let diagnosticsFallbackMessage = "Processing error. Please try again later."
+
     private enum EditorMode: String, Identifiable {
         case edit
         case reset
@@ -18,7 +20,9 @@ struct AccountPersonalizationView: View {
     @State private var selectedHistorySnapshot: PersonalizationSnapshot?
     @State private var isSaving = false
     @State private var isRefreshingDiagnosticsInsights = false
-    @State private var diagnosticsInsightsRefreshToken = UUID()
+    @State private var displayedDiagnosticsHash: String?
+    @State private var displayedRootCause = ""
+    @State private var displayedNextDirection = ""
 
     var body: some View {
         List {
@@ -46,13 +50,7 @@ struct AccountPersonalizationView: View {
                                 .multilineTextAlignment(.center)
                         }
 
-                        PersonalizationInsightsCards(
-                            snapshot: current,
-                            userKey: personalizationStore.userKey,
-                            purposeRefreshCycleKey: latestPurposeProfileSnapshot?.snapshotKey,
-                            refreshToken: diagnosticsInsightsRefreshToken,
-                            showsInlineLoading: isRefreshingDiagnosticsInsights
-                        )
+                        personalizationDiagnosticInsightsCards(for: current)
 
                         Button("Edit diagnostic answers") {
                             editorMode = .edit
@@ -134,6 +132,12 @@ struct AccountPersonalizationView: View {
         .task {
             await personalizationStore.reloadForCurrentUser()
         }
+        .onAppear {
+            syncDisplayedDiagnosticInsightsWithCurrentSnapshot()
+        }
+        .onChange(of: personalizationStore.current?.id) { _, _ in
+            syncDisplayedDiagnosticInsightsWithCurrentSnapshot()
+        }
         .sheet(item: $editorMode) { mode in
             NavigationStack {
                 DiagnosticFlowView(
@@ -208,12 +212,167 @@ struct AccountPersonalizationView: View {
         return PersonalizationHistoryDiff.summary(from: snapshot, to: newer)
     }
 
+    @ViewBuilder
+    private func personalizationDiagnosticInsightsCards(for snapshot: PersonalizationSnapshot) -> some View {
+        VStack(spacing: 12) {
+            personalizationInsightCard(
+                title: "Root cause",
+                body: displayedRootCause,
+                showsLoading: isRefreshingDiagnosticsInsights
+            )
+            personalizationInsightCard(
+                title: "Fulfillment areas",
+                body: "Every task, goal, and little win will land in one of these areas, so your life stays organized.",
+                chips: snapshot.lifeAreasSelected,
+                colorKeys: snapshot.lifeAreaColorKeys,
+                showsLoading: false
+            )
+            personalizationInsightCard(
+                title: "Next direction",
+                body: displayedNextDirection,
+                showsLoading: isRefreshingDiagnosticsInsights
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func personalizationInsightCard(
+        title: String,
+        body: String,
+        chips: [String] = [],
+        colorKeys: [String: String] = [:],
+        showsLoading: Bool
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+                .tracking(0.4)
+
+            if showsLoading {
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.bottom, 4)
+            }
+
+            if !chips.isEmpty {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 8)], spacing: 8) {
+                    ForEach(uniqueLifeAreas(from: chips), id: \.self) { area in
+                        personalizationInsightsChip(title: area, colorKey: colorKey(for: area, map: colorKeys))
+                    }
+                }
+                .padding(.bottom, 2)
+            }
+
+            if !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(body)
+                    .font(title == "Next direction" ? .body.weight(.medium) : .body)
+                    .lineSpacing(title == "Next direction" ? 2.6 : 1.4)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.black.opacity(0.08), lineWidth: 1)
+        )
+    }
+
+    private func uniqueLifeAreas(from items: [String]) -> [String] {
+        var seen = Set<String>()
+        return items
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .filter { seen.insert($0.lowercased()).inserted }
+    }
+
+    private func colorKey(for area: String, map: [String: String]) -> String? {
+        let trimmed = area.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if let exact = map[trimmed] {
+            return exact
+        }
+        return map.first(where: { $0.key.caseInsensitiveCompare(trimmed) == .orderedSame })?.value
+    }
+
+    @ViewBuilder
+    private func personalizationInsightsChip(title: String, colorKey: String?) -> some View {
+        let accent = personalizationChipColor(for: colorKey)
+        Text(title)
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(accent)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(accent.opacity(0.12))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(accent.opacity(0.24), lineWidth: 1)
+            )
+    }
+
+    private func personalizationChipColor(for key: String?) -> Color {
+        switch key?.lowercased() {
+        case "green":
+            return .green
+        case "indigo":
+            return .indigo
+        case "purple":
+            return .purple
+        case "red":
+            return .red
+        case "orange":
+            return .orange
+        case "brown":
+            return .brown
+        case "pink":
+            return .pink
+        default:
+            return .blue
+        }
+    }
+
+    private func syncDisplayedDiagnosticInsightsWithCurrentSnapshot() {
+        guard let current = personalizationStore.current else {
+            displayedDiagnosticsHash = nil
+            displayedRootCause = ""
+            displayedNextDirection = ""
+            return
+        }
+        guard !isRefreshingDiagnosticsInsights else { return }
+
+        let diagnosticsHash = DiagnosticsInsightsHasher.hash(for: current)
+        if let persisted = latestDiagnosticsInsightsSnapshot(
+            userKey: personalizationStore.userKey,
+            diagnosticsHash: diagnosticsHash
+        ) {
+            displayedDiagnosticsHash = diagnosticsHash
+            displayedRootCause = persisted.rootCauseText
+            displayedNextDirection = persisted.nextDirectionText
+        } else {
+            // Keep current rendered values if there is no persisted snapshot yet for this hash.
+            // This prevents the cards from going blank during save/rebind churn.
+            if displayedDiagnosticsHash == nil {
+                displayedDiagnosticsHash = diagnosticsHash
+                displayedRootCause = Self.diagnosticsFallbackMessage
+                displayedNextDirection = Self.diagnosticsFallbackMessage
+            }
+        }
+    }
+
     private func saveDiagnosticDraft(_ draft: PersonalizationDraft, mode: EditorMode) async {
         isSaving = true
-        defer {
-            isSaving = false
-            editorMode = nil
-        }
 
         do {
             let source: PersonalizationSaveSource = mode == .reset ? .accountReset : .accountEdit
@@ -223,26 +382,43 @@ struct AccountPersonalizationView: View {
                 "Edit diagnostic saved. mode=\(mode.rawValue) snapshot=\(savedSnapshot.id.uuidString)"
             )
 
+            // Dismiss the diagnostic flow before starting the visible refresh so the
+            // Personalization page can show the loading state instead of burning it
+            // down behind the modal.
+            editorMode = nil
+            isSaving = false
+            await Task.yield()
+
             let refreshStartedAt = Date()
             isRefreshingDiagnosticsInsights = true
-            await refreshInsightsForUpdatedDiagnostic(savedSnapshot)
+            let refreshedInsights = await refreshInsightsForUpdatedDiagnostic(savedSnapshot)
             let minimumLoadingInterval: TimeInterval = 2.0
             let elapsed = Date().timeIntervalSince(refreshStartedAt)
             if elapsed < minimumLoadingInterval {
                 let remainingNanoseconds = UInt64((minimumLoadingInterval - elapsed) * 1_000_000_000)
                 try? await Task.sleep(nanoseconds: remainingNanoseconds)
             }
-            diagnosticsInsightsRefreshToken = UUID()
+            if let refreshedInsights {
+                displayedDiagnosticsHash = refreshedInsights.diagnosticsHash
+                displayedRootCause = refreshedInsights.rootCause
+                displayedNextDirection = refreshedInsights.nextDirection
+            } else {
+                displayedDiagnosticsHash = DiagnosticsInsightsHasher.hash(for: savedSnapshot)
+                displayedRootCause = Self.diagnosticsFallbackMessage
+                displayedNextDirection = Self.diagnosticsFallbackMessage
+            }
             isRefreshingDiagnosticsInsights = false
             AppDebugActivityLog.log("Personalization", "Post-save insights refresh completed")
         } catch {
             // Keep previous values if save fails.
+            isSaving = false
+            editorMode = nil
             isRefreshingDiagnosticsInsights = false
             AppDebugActivityLog.log("Personalization", "Edit diagnostic save failed: \(error.localizedDescription)")
         }
     }
 
-    private func refreshInsightsForUpdatedDiagnostic(_ snapshot: PersonalizationSnapshot) async {
+    private func refreshInsightsForUpdatedDiagnostic(_ snapshot: PersonalizationSnapshot) async -> DiagnosticsInsightsOverride? {
         let userKey = personalizationStore.userKey
         let diagnostics = DiagnosticAnswers(snapshot: snapshot)
         let diagnosticsHash = DiagnosticsInsightsHasher.hash(for: snapshot)
@@ -374,6 +550,13 @@ struct AccountPersonalizationView: View {
         AppDebugActivityLog.log(
             "Personalization",
             "refreshInsightsForUpdatedDiagnostic completed profileKey=\(purposeSnapshotKey)"
+        )
+
+        guard !rootCause.isEmpty, !nextDirection.isEmpty else { return nil }
+        return DiagnosticsInsightsOverride(
+            diagnosticsHash: diagnosticsHash,
+            rootCause: rootCause,
+            nextDirection: nextDirection
         )
     }
 
