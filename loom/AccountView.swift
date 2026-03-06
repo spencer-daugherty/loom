@@ -469,7 +469,6 @@ struct AccountView: View {
     @AppStorage("has_seen_content_quickstart_v1") private var hasSeenContentQuickstart = false
     @AppStorage("force_show_content_quickstart_once") private var forceShowContentQuickstartOnce = false
     @AppStorage("developer_launch_paywall_once") private var developerLaunchPaywallOnce = false
-    @AppStorage("developer_demo_mode_enabled") private var developerDemoModeEnabled = false
     @AppStorage(loomAITroubleshootingDefaultsKey) private var enableLoomAITroubleshooting = true
     @AppStorage(loomAIDebugDefaultsKey) private var enableLoomAIDebug = false
     @AppStorage("loomAI.dev.disableDailyLimiter") private var disableLoomAIDailyLimiter = false
@@ -846,7 +845,6 @@ struct AccountView: View {
                     }
 
                     Section("Feature Flags") {
-                        Toggle("Demo", isOn: $developerDemoModeEnabled)
                         Toggle("Enable LoomAI Insights Refresh", isOn: $enableLoomAIInsightsRefresh)
                         Toggle("LoomAI Troubleshooting", isOn: $enableLoomAITroubleshooting)
                         Toggle("LoomAI Debug", isOn: $enableLoomAIDebug)
@@ -947,7 +945,6 @@ struct AccountView: View {
             }
         }
         .onChange(of: blankHomepageMode) { _, isOn in
-            guard !developerDemoModeEnabled else { return }
             if isOn {
                 if setupHomepageMode {
                     setupHomepageMode = false
@@ -957,18 +954,7 @@ struct AccountView: View {
                 forceShowContentQuickstartOnce = true
             }
         }
-        .onChange(of: developerDemoModeEnabled) { _, isOn in
-            if isOn {
-                blankHomepageMode = false
-                setupHomepageMode = true
-                hasSeenContentQuickstart = true
-                forceShowContentQuickstartOnce = false
-            } else if setupHomepageMode {
-                setupHomepageMode = false
-            }
-        }
         .onChange(of: setupHomepageMode) { _, isOn in
-            guard !developerDemoModeEnabled else { return }
             guard isOn else { return }
             if blankHomepageMode {
                 blankHomepageMode = false

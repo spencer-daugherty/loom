@@ -10,7 +10,7 @@ func registerLoomAITroubleshootingDefaultIfNeeded() {
     // Troubleshooting popups are disabled app-wide.
     defaults.set(false, forKey: loomAITroubleshootingDefaultsKey)
     if defaults.object(forKey: loomAIDebugDefaultsKey) == nil {
-        defaults.set(true, forKey: loomAIDebugDefaultsKey)
+        defaults.set(false, forKey: loomAIDebugDefaultsKey)
     }
 }
 

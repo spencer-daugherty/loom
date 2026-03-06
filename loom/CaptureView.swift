@@ -256,49 +256,6 @@ private struct AppleReminderFolderOption: Identifiable, Hashable {
     let title: String
 }
 
-private struct AutoFocusRecurringTextField: UIViewRepresentable {
-    @Binding var text: String
-    var placeholder: String
-    var isFirstResponder: Bool
-    var onSubmit: () -> Void
-
-    final class Coordinator: NSObject, UITextFieldDelegate {
-        var parent: AutoFocusRecurringTextField
-        init(_ parent: AutoFocusRecurringTextField) { self.parent = parent }
-        @objc func textChanged(_ sender: UITextField) {
-            parent.text = sender.text ?? ""
-        }
-        func textFieldShouldReturn(_ textField: UITextField) -> Bool {
-            parent.onSubmit()
-            return true
-        }
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
-
-    func makeUIView(context: Context) -> UITextField {
-        let field = UITextField(frame: .zero)
-        field.placeholder = placeholder
-        field.delegate = context.coordinator
-        field.returnKeyType = .done
-        field.autocapitalizationType = .sentences
-        field.autocorrectionType = .yes
-        field.addTarget(context.coordinator, action: #selector(Coordinator.textChanged(_:)), for: .editingChanged)
-        return field
-    }
-
-    func updateUIView(_ uiView: UITextField, context: Context) {
-        if uiView.text != text { uiView.text = text }
-        if isFirstResponder {
-            if !uiView.isFirstResponder {
-                DispatchQueue.main.async { uiView.becomeFirstResponder() }
-            }
-        } else if uiView.isFirstResponder {
-            uiView.resignFirstResponder()
-        }
-    }
-}
-
 private struct PersistentCaptureComposerField: UIViewRepresentable {
     @Binding var text: String
     var placeholder: String
@@ -364,6 +321,130 @@ private struct PersistentCaptureComposerField: UIViewRepresentable {
             }
         } else if uiView.isFirstResponder {
             uiView.resignFirstResponder()
+        }
+    }
+}
+
+private struct AccessoryActionTextField: UIViewRepresentable {
+    @Binding var text: String
+    var placeholder: String
+    var focusRequestID: Int
+    var onSubmit: () -> Void
+    var onBeginEditing: () -> Void
+    var onEndEditing: () -> Void
+
+    final class Coordinator: NSObject, UITextFieldDelegate {
+        var parent: AccessoryActionTextField
+        var lastAppliedFocusRequestID: Int
+        weak var textField: UITextField?
+        private let accessoryButton = UIButton(type: .system)
+
+        init(_ parent: AccessoryActionTextField) {
+            self.parent = parent
+            self.lastAppliedFocusRequestID = parent.focusRequestID
+            super.init()
+            accessoryButton.addTarget(self, action: #selector(accessoryButtonTapped), for: .touchUpInside)
+        }
+
+        @objc func textChanged(_ sender: UITextField) {
+            parent.text = sender.text ?? ""
+            updateAccessoryAppearance()
+        }
+
+        @objc func accessoryButtonTapped() {
+            let trimmed = parent.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                textField?.resignFirstResponder()
+            } else {
+                parent.onSubmit()
+            }
+        }
+
+        func textFieldDidBeginEditing(_ textField: UITextField) {
+            parent.onBeginEditing()
+            updateAccessoryAppearance()
+        }
+
+        func textFieldDidEndEditing(_ textField: UITextField) {
+            parent.onEndEditing()
+        }
+
+        func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+            parent.onSubmit()
+            return false
+        }
+
+        func makeAccessoryToolbar() -> UIView {
+            let containerHeight: CGFloat = 58
+            let container = UIView(frame: CGRect(x: 0, y: 0, width: 0, height: containerHeight))
+            container.backgroundColor = .clear
+
+            accessoryButton.translatesAutoresizingMaskIntoConstraints = false
+            accessoryButton.frame = CGRect(x: 0, y: 0, width: 44, height: 44)
+            accessoryButton.layer.cornerRadius = 22
+            accessoryButton.layer.masksToBounds = true
+            container.addSubview(accessoryButton)
+
+            NSLayoutConstraint.activate([
+                accessoryButton.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
+                accessoryButton.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -6),
+                accessoryButton.widthAnchor.constraint(equalToConstant: 44),
+                accessoryButton.heightAnchor.constraint(equalToConstant: 44)
+            ])
+
+            updateAccessoryAppearance()
+            return container
+        }
+
+        func updateAccessoryAppearance() {
+            let trimmed = parent.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let isFilled = !trimmed.isEmpty
+            let symbolName = isFilled ? "checkmark" : "keyboard.chevron.compact.down"
+            let image = UIImage(systemName: symbolName)?.withConfiguration(UIImage.SymbolConfiguration(pointSize: 16, weight: .semibold))
+            accessoryButton.setImage(image, for: .normal)
+            accessoryButton.tintColor = isFilled ? .white : UIColor.label.withAlphaComponent(0.85)
+            accessoryButton.backgroundColor = isFilled ? .systemBlue : UIColor.secondarySystemBackground
+            accessoryButton.layer.borderWidth = 1
+            accessoryButton.layer.borderColor = isFilled
+                ? UIColor.systemBlue.withAlphaComponent(0.9).cgColor
+                : UIColor.white.withAlphaComponent(0.28).cgColor
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeUIView(context: Context) -> UITextField {
+        let field = UITextField(frame: .zero)
+        field.placeholder = placeholder
+        field.delegate = context.coordinator
+        field.returnKeyType = .done
+        field.font = UIFont.preferredFont(forTextStyle: .body)
+        field.adjustsFontForContentSizeCategory = true
+        field.textColor = .label
+        field.tintColor = .systemBlue
+        field.backgroundColor = .clear
+        field.contentVerticalAlignment = .center
+        field.textAlignment = .left
+        field.autocapitalizationType = .sentences
+        field.autocorrectionType = .yes
+        field.borderStyle = .none
+        field.addTarget(context.coordinator, action: #selector(Coordinator.textChanged(_:)), for: .editingChanged)
+        context.coordinator.textField = field
+        field.inputAccessoryView = context.coordinator.makeAccessoryToolbar()
+        return field
+    }
+
+    func updateUIView(_ uiView: UITextField, context: Context) {
+        context.coordinator.parent = self
+        context.coordinator.textField = uiView
+        if uiView.text != text { uiView.text = text }
+        if uiView.placeholder != placeholder { uiView.placeholder = placeholder }
+        context.coordinator.updateAccessoryAppearance()
+        if focusRequestID != context.coordinator.lastAppliedFocusRequestID {
+            context.coordinator.lastAppliedFocusRequestID = focusRequestID
+            DispatchQueue.main.async {
+                uiView.becomeFirstResponder()
+            }
         }
     }
 }
@@ -491,9 +572,11 @@ struct CaptureView: View {
     private var sourceDueDateOverridesJSON: String = "{}"
     @State private var recurringAddIsAdding: Bool = false
     @State private var recurringAddText: String = ""
-    @State private var shouldFocusRecurringAddField: Bool = false
+    @State private var recurringAddFocusRequestID: Int = 0
+    @State private var isRecurringAddEditing: Bool = false
     @State private var showRepeatEditorSheet: Bool = false
     @State private var repeatEditorRuleID: UUID?
+    @State private var repeatEditorFocusRequestID: Int = 0
     @State private var repeatDraftText: String = ""
     @State private var repeatDraftUnit: RepeatUnit = .week
     @State private var repeatDraftEvery: Int = 1
@@ -507,7 +590,7 @@ struct CaptureView: View {
     @State private var repeatDraftEndMode: RepeatEndMode = .never
     @State private var repeatDraftEndDate: Date = Date()
     @FocusState private var isFullTextEditorFocused: Bool
-    @FocusState private var repeatEditorTextFocused: Bool
+    @State private var isRepeatEditorEditing: Bool = false
     @State private var editActionKeyboardHeight: CGFloat = 0
     @State private var handledSharePayloadID: String? = nil
     @State private var showSharedCreateSheet = false
@@ -776,7 +859,11 @@ struct CaptureView: View {
     }
 
     private var isComposerAllowedFirstResponder: Bool {
-        isComposerFocused && focusedField == nil && !showFullTextEditorSheet
+        isComposerFocused
+        && focusedField == nil
+        && !showFullTextEditorSheet
+        && !showRecurringSettingsSheet
+        && !showRepeatEditorSheet
     }
 
     private func normalizedActionText(_ text: String) -> String {
@@ -827,6 +914,7 @@ struct CaptureView: View {
                     if !isCaptureSetupWelcomePage {
                         ToolbarItem(placement: .navigationBarLeading) {
                             Button {
+                                isComposerFocused = false
                                 showRecurringSettingsSheet = true
                             } label: {
                                 Image(systemName: "gearshape")
@@ -891,6 +979,7 @@ struct CaptureView: View {
                         captureSetupDidContinue = !shouldUseCaptureSetupFlow
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                             guard !isCaptureSetupWelcomePage else { return }
+                            guard !showRecurringSettingsSheet else { return }
                             isComposerFocused = true
                         }
                     }
@@ -968,6 +1057,19 @@ struct CaptureView: View {
             if isShowing {
                 focusedField = nil
                 isComposerFocused = false
+            }
+        }
+        .onChange(of: showRecurringSettingsSheet) { _, isShowing in
+            if isShowing {
+                isComposerFocused = false
+                focusedField = nil
+            } else {
+                DispatchQueue.main.async {
+                    guard !showFullTextEditorSheet else { return }
+                    guard !showRepeatEditorSheet else { return }
+                    guard !isCaptureSetupWelcomePage else { return }
+                    isComposerFocused = true
+                }
             }
         }
         .onChange(of: setupHomepageMode) { _, isSetup in
@@ -1308,235 +1410,45 @@ struct CaptureView: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .sheet(isPresented: $showFullTextEditorSheet) {
-            let hasChanges =
-                editingItemText != editingItemOriginalText
-                || editingItemHasDueDate != editingItemOriginalHasDueDate
-                || (editingItemHasDueDate && Calendar.current.startOfDay(for: editingItemDueDate) != Calendar.current.startOfDay(for: editingItemOriginalDueDate))
-                || (editingItemHasDueDate && editingItemAttentionDays != editingItemOriginalAttentionDays)
-                || editingItemLeverageResourceID != editingItemOriginalLeverageResourceID
-                || (editingItemIsGhost && Calendar.current.startOfDay(for: editingItemHiddenUntil) != Calendar.current.startOfDay(for: editingItemOriginalHiddenUntil))
-            let hasNonBlankActionText = !editingItemText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            let dueDateSettingsChanged =
-                editingItemHasDueDate != editingItemOriginalHasDueDate
-                || (editingItemHasDueDate && Calendar.current.startOfDay(for: editingItemDueDate) != Calendar.current.startOfDay(for: editingItemOriginalDueDate))
-                || (editingItemHasDueDate && editingItemAttentionDays != editingItemOriginalAttentionDays)
-            NavigationStack {
-                List {
-                    TextField("Action", text: $editingItemText, axis: .vertical)
-                        .focused($isFullTextEditorFocused)
-                        .textInputAutocapitalization(.sentences)
-                        .autocorrectionDisabled(false)
-                        .foregroundStyle(.primary)
-                        .tint(.blue)
-                        .lineLimit(4, reservesSpace: true)
-                        .padding(10)
-                        .background(
-                            RoundedRectangle(cornerRadius: 10)
-                                .fill(Color(.secondarySystemBackground))
-                        )
-                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-
-                    if editingItemIsGhost {
-                        HStack {
-                            Text("Hidden Until")
-                            Spacer()
-                            DatePicker(
-                                "",
-                                selection: $editingItemHiddenUntil,
-                                in: Calendar.current.startOfDay(for: Date())...,
-                                displayedComponents: .date
-                            )
-                            .labelsHidden()
-                            .datePickerStyle(.compact)
-                        }
-                    }
-
-                    HStack {
-                        Text("Due Date")
-                        Spacer()
-                        Menu {
-                            Button("No") { editingItemHasDueDate = false }
-                            Button("Yes") { editingItemHasDueDate = true }
-                        } label: {
-                            HStack(spacing: 4) {
-                                Text(editingItemHasDueDate ? "Yes" : "No")
-                                Image(systemName: "chevron.up.chevron.down")
-                            }
-                            .foregroundStyle(.blue)
-                        }
-                    }
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 10)
-                            .stroke(showEditLeverageDueDateError && !editingItemHasDueDate ? Color.red : Color.clear, lineWidth: 2)
-                    }
-
-                    if hasAnyLeverageResources {
-                        HStack {
-                            Text("Assign")
-                                .foregroundStyle(editingItemHasDueDate ? .primary : .secondary)
-                            Spacer()
-                            leverageSelectorLabel
-                        }
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            if !editingItemHasDueDate {
-                                triggerCaptureEditLeverageDueDateError()
-                                return
-                            }
-                        }
-                    }
-
-                    if editingItemHasDueDate {
-                        HStack {
-                            Text("Set Due Date")
-                            Spacer()
-                            DatePicker(
-                                "",
-                                selection: $editingItemDueDate,
-                                in: Calendar.current.startOfDay(for: Date())...,
-                                displayedComponents: .date
-                            )
-                            .labelsHidden()
-                            .datePickerStyle(.compact)
-                        }
-
-                        HStack {
-                            Text("Reminder")
-                            Spacer()
-                            Menu {
-                                ForEach(7...30, id: \.self) { value in
-                                    Button("\(value) days") {
-                                        editingItemAttentionDays = value
-                                    }
-                                }
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Text("\(min(max(editingItemAttentionDays, 7), 30)) days")
-                                    Image(systemName: "chevron.up.chevron.down")
-                                }
-                                .foregroundStyle(.blue)
-                            }
-                        }
-
-                        Text("Reminder starts the countdown before the due date and brings it into view at the right time.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-
-                    if let sourceLabel = sourceDisplayName(for: editingItemSourceType) {
-                        HStack {
-                            Text("Source")
-                            Spacer()
-                            Text(sourceLabel)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-
-                    if editingItemSourceType == LoomShareSourceType.sharedIn {
-                        Section("Attachments") {
-                            if !editingItemSharedNoteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Text("Notes")
-                                        .font(.caption.weight(.semibold))
-                                        .foregroundStyle(.secondary)
-                                    Text(editingItemSharedNoteText)
-                                        .font(.subheadline)
-                                        .foregroundStyle(.primary)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }
-                            }
-
-                            if editingItemSharedAttachments.isEmpty {
-                                Text("No attachments available.")
-                                    .foregroundStyle(.secondary)
-                            } else {
-                                ForEach(editingItemSharedAttachments) { attachment in
-                                    Button {
-                                        openSharedDraftAttachment(attachment)
-                                    } label: {
-                                        HStack(spacing: 10) {
-                                            Image(systemName: iconName(for: attachment))
-                                                .foregroundStyle(.secondary)
-                                            Text(attachment.title)
-                                                .font(.subheadline)
-                                                .foregroundStyle(.primary)
-                                                .lineLimit(2)
-                                            Spacer(minLength: 0)
-                                        }
-                                        .contentShape(Rectangle())
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                        }
-                    }
-
-                    Section {
-                        Button {
-                            guard let id = editingItemID,
-                                  let item = allItems.first(where: { $0.id == id }) else {
-                                closeEditActionSheet()
-                                return
-                            }
-                            renameItemInline(item, to: editingItemText)
-                            quickCompleteItem(item)
-                            closeEditActionSheet()
-                        } label: {
-                            Text("Complete")
-                                .foregroundStyle(.blue)
-                        }
-                    }
+            editActionSheet
+        }
+        .onChange(of: showCompletedList) { _, isShowing in
+            guard isShowing else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    proxy.scrollTo("completed-list-start", anchor: .top)
                 }
+            }
+        }
+    }
+
+    private var editActionHasChanges: Bool {
+        editingItemText != editingItemOriginalText
+        || editingItemHasDueDate != editingItemOriginalHasDueDate
+        || (editingItemHasDueDate && Calendar.current.startOfDay(for: editingItemDueDate) != Calendar.current.startOfDay(for: editingItemOriginalDueDate))
+        || (editingItemHasDueDate && editingItemAttentionDays != editingItemOriginalAttentionDays)
+        || editingItemLeverageResourceID != editingItemOriginalLeverageResourceID
+        || (editingItemIsGhost && Calendar.current.startOfDay(for: editingItemHiddenUntil) != Calendar.current.startOfDay(for: editingItemOriginalHiddenUntil))
+    }
+
+    private var editActionHasNonBlankText: Bool {
+        !editingItemText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var editActionDueDateSettingsChanged: Bool {
+        editingItemHasDueDate != editingItemOriginalHasDueDate
+        || (editingItemHasDueDate && Calendar.current.startOfDay(for: editingItemDueDate) != Calendar.current.startOfDay(for: editingItemOriginalDueDate))
+        || (editingItemHasDueDate && editingItemAttentionDays != editingItemOriginalAttentionDays)
+    }
+
+    private var editActionSheet: some View {
+        NavigationStack {
+            editActionSheetList
                 .navigationTitle("Edit Action")
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        Button(hasChanges ? "Cancel" : "Close") {
-                            closeEditActionSheet()
-                        }
-                        .foregroundColor(hasChanges ? .red : .primary)
-                    }
-                    if hasChanges && hasNonBlankActionText {
-                        ToolbarItem(placement: .navigationBarTrailing) {
-                            Button("Update") {
-                                guard let id = editingItemID,
-                                      let item = allItems.first(where: { $0.id == id }) else {
-                                    closeEditActionSheet()
-                                    return
-                                }
-                                renameItemInline(item, to: editingItemText)
-                                let updatedDueDate = editingItemHasDueDate ? Calendar.current.startOfDay(for: editingItemDueDate) : nil
-                                item.dueDate = updatedDueDate
-                                item.dueDateAttentionDays = min(max(editingItemAttentionDays, 7), 30)
-                                if dueDateSettingsChanged {
-                                    persistSourceDueDateOverrideIfNeeded(for: item, dueDate: updatedDueDate)
-                                    applyAppleReminderDueDateUpdateIfNeeded(for: item, dueDate: updatedDueDate)
-                                }
-                                if editingItemIsGhost {
-                                    item.unhideDate = Calendar.current.startOfDay(for: editingItemHiddenUntil)
-                                }
-                                applyCaptureItemLeverageSelection(item: item)
-                                scheduleInlineEditSave()
-                                closeEditActionSheet()
-                            }
-                            .foregroundColor(.blue)
-                        }
-                    }
-                }
-                .overlay {
-                    GeometryReader { proxy in
-                        if editActionKeyboardHeight > 0 {
-                            HStack {
-                                Spacer()
-                                editActionKeyboardDismissButton
-                            }
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-                            .padding(.trailing, 16)
-                            .padding(.bottom, editActionKeyboardDismissBottomPadding(in: proxy))
-                        }
-                    }
-                }
+                .toolbar { editActionSheetToolbar }
+                .overlay { editActionKeyboardOverlay }
+                .overlay(alignment: .bottom) { editActionDueDateWarningOverlay }
                 .onChange(of: editingItemHasDueDate) { _, hasDueDate in
                     if !hasDueDate {
                         editingItemLeverageResourceID = nil
@@ -1555,50 +1467,291 @@ struct CaptureView: View {
                 .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
                     editActionKeyboardHeight = 0
                 }
-                .overlay(alignment: .bottom) {
-                    if showEditLeverageDueDateError && !editingItemHasDueDate {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("You must add a due date to assign this action so resources stay accountable")
-                                .font(.footnote)
-                                .fontWeight(.bold)
-                            Text("If not completed in this action block, the Resource and due date will be saved to your Capture list and future Action Blocks.")
-                                .font(.footnote)
+        }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+        .onAppear {
+            focusedField = nil
+            isComposerFocused = false
+            editActionKeyboardHeight = 0
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.07) {
+                isFullTextEditorFocused = true
+            }
+            showEditLeverageDueDateError = false
+        }
+        .onDisappear {
+            editActionKeyboardHeight = 0
+        }
+    }
+
+    private var editActionSheetList: some View {
+        List {
+            editActionTextFieldRow
+            if editingItemIsGhost {
+                editActionHiddenUntilRow
+            }
+            editActionDueDateToggleRow
+            if hasAnyLeverageResources {
+                editActionAssignRow
+            }
+            if editingItemHasDueDate {
+                editActionDueDateDetails
+            }
+            editActionSourceRow
+            editActionAttachmentsSection
+            editActionCompleteSection
+        }
+    }
+
+    private var editActionTextFieldRow: some View {
+        TextField("Action", text: $editingItemText, axis: .vertical)
+            .focused($isFullTextEditorFocused)
+            .textInputAutocapitalization(.sentences)
+            .autocorrectionDisabled(false)
+            .foregroundStyle(.primary)
+            .tint(.blue)
+            .lineLimit(4, reservesSpace: true)
+            .padding(10)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color(.secondarySystemBackground))
+            )
+            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+    }
+
+    private var editActionHiddenUntilRow: some View {
+        HStack {
+            Text("Hidden Until")
+            Spacer()
+            DatePicker(
+                "",
+                selection: $editingItemHiddenUntil,
+                in: Calendar.current.startOfDay(for: Date())...,
+                displayedComponents: .date
+            )
+            .labelsHidden()
+            .datePickerStyle(.compact)
+        }
+    }
+
+    private var editActionDueDateToggleRow: some View {
+        HStack {
+            Text("Due Date")
+            Spacer()
+            Menu {
+                Button("No") { editingItemHasDueDate = false }
+                Button("Yes") { editingItemHasDueDate = true }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(editingItemHasDueDate ? "Yes" : "No")
+                    Image(systemName: "chevron.up.chevron.down")
+                }
+                .foregroundStyle(.blue)
+            }
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(showEditLeverageDueDateError && !editingItemHasDueDate ? Color.red : Color.clear, lineWidth: 2)
+        }
+    }
+
+    private var editActionAssignRow: some View {
+        HStack {
+            Text("Assign")
+                .foregroundStyle(editingItemHasDueDate ? .primary : .secondary)
+            Spacer()
+            leverageSelectorLabel
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if !editingItemHasDueDate {
+                triggerCaptureEditLeverageDueDateError()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var editActionDueDateDetails: some View {
+        HStack {
+            Text("Set Due Date")
+            Spacer()
+            DatePicker(
+                "",
+                selection: $editingItemDueDate,
+                in: Calendar.current.startOfDay(for: Date())...,
+                displayedComponents: .date
+            )
+            .labelsHidden()
+            .datePickerStyle(.compact)
+        }
+
+        HStack {
+            Text("Reminder")
+            Spacer()
+            Menu {
+                ForEach(7...30, id: \.self) { value in
+                    Button("\(value) days") {
+                        editingItemAttentionDays = value
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text("\(min(max(editingItemAttentionDays, 7), 30)) days")
+                    Image(systemName: "chevron.up.chevron.down")
+                }
+                .foregroundStyle(.blue)
+            }
+        }
+
+        Text("Reminder starts the countdown before the due date and brings it into view at the right time.")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var editActionSourceRow: some View {
+        if editingItemSourceType != LoomShareSourceType.sharedIn,
+           let sourceLabel = sourceDisplayName(for: editingItemSourceType) {
+            HStack {
+                Text("Source")
+                Spacer()
+                Text(sourceLabel)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var editActionAttachmentsSection: some View {
+        if editingItemSourceType == LoomShareSourceType.sharedIn {
+            Section("Attachments") {
+                if !editingItemSharedNoteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Notes")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Text(editingItemSharedNoteText)
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                if visibleEditingItemSharedAttachments.isEmpty {
+                    Text("No attachments available.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(visibleEditingItemSharedAttachments) { attachment in
+                        Button {
+                            openSharedDraftAttachment(attachment)
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: iconName(for: attachment))
+                                    .foregroundStyle(.secondary)
+                                Text(attachment.title)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(2)
+                                Spacer(minLength: 0)
+                            }
+                            .contentShape(Rectangle())
                         }
-                        .multilineTextAlignment(.leading)
-                        .padding(10)
-                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .stroke(Color.black.opacity(0.12), lineWidth: 1)
-                        )
-                        .padding(.horizontal, 8)
-                        .padding(.bottom, 8)
-                        .transition(.opacity)
+                        .buttonStyle(.plain)
                     }
                 }
             }
-            .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
-            .onAppear {
-                focusedField = nil
-                isComposerFocused = false
-                editActionKeyboardHeight = 0
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.07) {
-                    isFullTextEditorFocused = true
+        }
+    }
+
+    private var editActionCompleteSection: some View {
+        Section {
+            Button {
+                guard let id = editingItemID,
+                      let item = allItems.first(where: { $0.id == id }) else {
+                    closeEditActionSheet()
+                    return
                 }
-                showEditLeverageDueDateError = false
-            }
-            .onDisappear {
-                editActionKeyboardHeight = 0
+                renameItemInline(item, to: editingItemText)
+                quickCompleteItem(item)
+                closeEditActionSheet()
+            } label: {
+                Text("Complete")
+                    .foregroundStyle(.blue)
             }
         }
-        .onChange(of: showCompletedList) { _, isShowing in
-            guard isShowing else { return }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                withAnimation(.easeInOut(duration: 0.25)) {
-                    proxy.scrollTo("completed-list-start", anchor: .top)
-                }
+    }
+
+    @ToolbarContentBuilder
+    private var editActionSheetToolbar: some ToolbarContent {
+        ToolbarItem(placement: .navigationBarLeading) {
+            Button(editActionHasChanges ? "Cancel" : "Close") {
+                closeEditActionSheet()
             }
+            .foregroundColor(editActionHasChanges ? .red : .primary)
+        }
+        if editActionHasChanges && editActionHasNonBlankText {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button("Update") {
+                    guard let id = editingItemID,
+                          let item = allItems.first(where: { $0.id == id }) else {
+                        closeEditActionSheet()
+                        return
+                    }
+                    renameItemInline(item, to: editingItemText)
+                    let updatedDueDate = editingItemHasDueDate ? Calendar.current.startOfDay(for: editingItemDueDate) : nil
+                    item.dueDate = updatedDueDate
+                    item.dueDateAttentionDays = min(max(editingItemAttentionDays, 7), 30)
+                    if editActionDueDateSettingsChanged {
+                        persistSourceDueDateOverrideIfNeeded(for: item, dueDate: updatedDueDate)
+                        applyAppleReminderDueDateUpdateIfNeeded(for: item, dueDate: updatedDueDate)
+                    }
+                    if editingItemIsGhost {
+                        item.unhideDate = Calendar.current.startOfDay(for: editingItemHiddenUntil)
+                    }
+                    applyCaptureItemLeverageSelection(item: item)
+                    scheduleInlineEditSave()
+                    closeEditActionSheet()
+                }
+                .foregroundColor(.blue)
+            }
+        }
+    }
+
+    private var editActionKeyboardOverlay: some View {
+        GeometryReader { proxy in
+            if editActionKeyboardHeight > 0 {
+                HStack {
+                    Spacer()
+                    editActionKeyboardDismissButton
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                .padding(.trailing, 16)
+                .padding(.bottom, editActionKeyboardDismissBottomPadding(in: proxy))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var editActionDueDateWarningOverlay: some View {
+        if showEditLeverageDueDateError && !editingItemHasDueDate {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("You must add a due date to assign this action so resources stay accountable")
+                    .font(.footnote)
+                    .fontWeight(.bold)
+                Text("If not completed in this action block, the Resource and due date will be saved to your Capture list and future Action Blocks.")
+                    .font(.footnote)
+            }
+            .multilineTextAlignment(.leading)
+            .padding(10)
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color.black.opacity(0.12), lineWidth: 1)
+            )
+            .padding(.horizontal, 8)
+            .padding(.bottom, 8)
+            .transition(.opacity)
         }
     }
 
@@ -2066,13 +2219,15 @@ struct CaptureView: View {
             if recurringAddIsAdding {
                 let hasAddText = !recurringAddText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 HStack(spacing: 12) {
-                    AutoFocusRecurringTextField(
+                    AccessoryActionTextField(
                         text: $recurringAddText,
                         placeholder: "Add recurring action",
-                        isFirstResponder: shouldFocusRecurringAddField,
-                        onSubmit: { finishRecurringAddFromReturn() }
+                        focusRequestID: recurringAddFocusRequestID,
+                        onSubmit: { finishRecurringAddFromReturn() },
+                        onBeginEditing: { isRecurringAddEditing = true },
+                        onEndEditing: { isRecurringAddEditing = false }
                     )
-                    .frame(height: 22)
+                        .frame(height: 22)
 
                     if hasAddText {
                         Button {
@@ -2094,13 +2249,13 @@ struct CaptureView: View {
                 .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
                 .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                 .listRowSeparator(.hidden)
-                .onAppear { focusRecurringAddField() }
+                .onAppear {
+                    focusRecurringAddField()
+                }
             } else {
                 Button("+ Add Recurring Action") {
                     focusedField = nil
-                    withAnimation {
-                        recurringAddIsAdding = true
-                    }
+                    recurringAddIsAdding = true
                     prepareRepeatDraftDefaults(using: recurringAddText)
                     focusRecurringAddField()
                 }
@@ -2466,14 +2621,15 @@ struct CaptureView: View {
         NavigationStack {
             List {
                 Section {
-                    TextField("Recurring action", text: $repeatDraftText)
-                        .textInputAutocapitalization(.sentences)
-                        .autocorrectionDisabled(false)
-                        .focused($repeatEditorTextFocused)
-                        .submitLabel(.done)
-                        .onSubmit {
-                            repeatEditorTextFocused = false
-                        }
+                    AccessoryActionTextField(
+                        text: $repeatDraftText,
+                        placeholder: "Recurring action",
+                        focusRequestID: repeatEditorFocusRequestID,
+                        onSubmit: { saveRepeatEditorChanges() },
+                        onBeginEditing: { isRepeatEditorEditing = true },
+                        onEndEditing: { isRepeatEditorEditing = false }
+                    )
+                    .frame(height: 22)
                 }
 
                 Section {
@@ -2670,12 +2826,14 @@ struct CaptureView: View {
                 }
             }
             .onAppear {
-                shouldFocusRecurringAddField = false
+                isRecurringAddEditing = false
+                isRepeatEditorEditing = false
+                hideKeyboard()
                 clampRepeatDraftEndDateIfNeeded()
                 clampRepeatDraftCaptureLeadDaysIfNeeded()
                 if repeatEditorRuleID == nil {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        repeatEditorTextFocused = true
+                        repeatEditorFocusRequestID += 1
                     }
                 }
             }
@@ -2707,10 +2865,10 @@ struct CaptureView: View {
     private func resetRecurringAddUI() {
         recurringAddText = ""
         recurringAddIsAdding = false
-        shouldFocusRecurringAddField = false
+        isRecurringAddEditing = false
         repeatEditorRuleID = nil
         showRepeatEditorSheet = false
-        repeatEditorTextFocused = false
+        isRepeatEditorEditing = false
     }
 
     private func createRecurringRuleFromDraft(text: String) {
@@ -2755,13 +2913,14 @@ struct CaptureView: View {
     }
 
     private func focusRecurringAddField() {
-        shouldFocusRecurringAddField = false
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
-            shouldFocusRecurringAddField = true
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-            shouldFocusRecurringAddField = true
-        }
+        guard recurringAddIsAdding else { return }
+        recurringAddFocusRequestID += 1
+    }
+
+    private func hideKeyboard() {
+#if canImport(UIKit)
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+#endif
     }
 
     private func runRecurringDispatchIfNeeded() {
@@ -2990,14 +3149,16 @@ struct CaptureView: View {
     private func openRepeatEditorForNewRule() {
         let trimmed = recurringAddText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        shouldFocusRecurringAddField = false
+        isRecurringAddEditing = false
+        hideKeyboard()
         repeatEditorRuleID = nil
         repeatDraftText = trimmed
         showRepeatEditorSheet = true
     }
 
     private func openRepeatEditor(for rule: RecurringCaptureRule) {
-        shouldFocusRecurringAddField = false
+        isRecurringAddEditing = false
+        hideKeyboard()
         loadRepeatDraft(from: rule)
         repeatEditorRuleID = rule.id
         showRepeatEditorSheet = true
@@ -3014,21 +3175,24 @@ struct CaptureView: View {
                 return
             }
             if trimmed.isEmpty {
-                repeatEditorTextFocused = false
+                isRepeatEditorEditing = false
+                hideKeyboard()
                 showRepeatEditorSheet = false
                 return
             }
             applyRepeatDraft(to: rule)
             try? modelContext.save()
-            repeatEditorTextFocused = false
+            isRepeatEditorEditing = false
+            hideKeyboard()
             showRepeatEditorSheet = false
             return
         }
 
         guard !trimmed.isEmpty else {
-            repeatEditorTextFocused = false
+            isRepeatEditorEditing = false
+            hideKeyboard()
             showRepeatEditorSheet = false
-            shouldFocusRecurringAddField = true
+            focusRecurringAddField()
             return
         }
         createRecurringRuleFromDraft(text: trimmed)
@@ -3036,10 +3200,11 @@ struct CaptureView: View {
     }
 
     private func cancelRepeatEditorChanges() {
-        repeatEditorTextFocused = false
+        isRepeatEditorEditing = false
+        hideKeyboard()
         showRepeatEditorSheet = false
         if repeatEditorRuleID == nil {
-            shouldFocusRecurringAddField = true
+            focusRecurringAddField()
         }
     }
 
@@ -3824,12 +3989,66 @@ struct CaptureView: View {
     private func iconName(for attachment: CaptureSharedDraftAttachment) -> String {
         switch attachment.kind {
         case .link:
-            return "link"
+            return "paperclip"
         case .file:
+            if isImageAttachment(attachment) {
+                return "photo"
+            }
             return "doc"
         case .note:
-            return "note.text"
+            return "doc.text"
         }
+    }
+
+    private var visibleEditingItemSharedAttachments: [CaptureSharedDraftAttachment] {
+        editingItemSharedAttachments.filter { attachment in
+            !isGenericAttachmentTypeLabel(attachment.title)
+        }
+    }
+
+    private func isGenericAttachmentTypeLabel(_ rawTitle: String) -> Bool {
+        let trimmed = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return true }
+        let lowered = trimmed.lowercased()
+        let genericTypeNames: Set<String> = [
+            "url",
+            "txt",
+            "text",
+            "plain text",
+            "rtf",
+            "pdf",
+            "json",
+            "csv",
+            "html",
+            "file",
+            "document",
+            "data"
+        ]
+        if genericTypeNames.contains(lowered) {
+            return true
+        }
+        if lowered.hasPrefix("public.") {
+            return true
+        }
+        if lowered.contains("/") || lowered.contains("application/") || lowered.contains("text/") {
+            return true
+        }
+        return false
+    }
+
+    private func isImageAttachment(_ attachment: CaptureSharedDraftAttachment) -> Bool {
+        let imageExtensions: Set<String> = [
+            "jpg", "jpeg", "png", "gif", "heic", "heif", "webp", "bmp", "tif", "tiff"
+        ]
+        let candidate = (attachment.fileName ?? attachment.title)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard !candidate.isEmpty else { return false }
+        let `extension` = URL(fileURLWithPath: candidate).pathExtension.lowercased()
+        if !`extension`.isEmpty {
+            return imageExtensions.contains(`extension`)
+        }
+        return imageExtensions.contains(candidate)
     }
 
     private func openSharedDraftAttachment(_ attachment: CaptureSharedDraftAttachment) {
