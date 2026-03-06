@@ -878,14 +878,17 @@ struct ActionView: View {
                     .font(.footnote.weight(.medium))
                     .foregroundStyle(.blue)
                 }
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    keyboardAccessoryButton
-                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(Color(.systemBackground))
             .coordinateSpace(name: "action-scroll")
+            .overlay(alignment: .bottomTrailing) {
+                if isKeyboardVisible {
+                    keyboardAccessoryButton
+                        .padding(.trailing, 16)
+                        .padding(.bottom, max(12, keyboardHeight + 8))
+                }
+            }
     }
 
     private func actionBodyPresentations<Content: View>(_ content: Content) -> some View {
@@ -1380,9 +1383,18 @@ struct ActionView: View {
             Image(systemName: keyboardAccessoryShowsCheckmark ? "checkmark" : "keyboard.chevron.compact.down")
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(keyboardAccessoryShowsCheckmark ? Color.white : Color.primary.opacity(0.85))
-                .frame(width: 38, height: 38)
+                .frame(width: 44, height: 44)
                 .background(
                     Circle().fill(keyboardAccessoryShowsCheckmark ? Color.blue : Color(.secondarySystemBackground))
+                )
+                .overlay(
+                    Circle()
+                        .stroke(
+                            keyboardAccessoryShowsCheckmark
+                            ? Color.blue.opacity(0.9)
+                            : Color.white.opacity(0.28),
+                            lineWidth: 1
+                        )
                 )
         }
         .buttonStyle(.plain)
@@ -1796,6 +1808,7 @@ struct ActionView: View {
             outcomesForChunk: outcomesForChunk,
             step4ResultText: step4ResultText,
             step4: step4,
+            isOtherChunk: isOtherChunk,
             showNoApplicableActionsPlaceholder: showNoApplicableActionsPlaceholder,
             isCollapsed: isCollapsed,
             showCompletedInactiveHeader: showCompletedInactiveHeader,
@@ -1852,6 +1865,7 @@ struct ActionView: View {
         outcomesForChunk: [Outcomes],
         step4ResultText: String,
         step4: PlannedChunkStepFourState?,
+        isOtherChunk: Bool,
         showNoApplicableActionsPlaceholder: Bool,
         isCollapsed: Bool,
         showCompletedInactiveHeader: Bool,
@@ -1866,7 +1880,8 @@ struct ActionView: View {
                     resultText: step4?.resultText ?? "",
                     actions: allForChunk,
                     defineByAction: defineByAction,
-                    executionByAction: executionByAction
+                    executionByAction: executionByAction,
+                    isOtherChunk: isOtherChunk
                 )
             } else {
                 expandedChunkContent(
@@ -1887,6 +1902,7 @@ struct ActionView: View {
                     roleName: roleName,
                     outcomesForChunk: outcomesForChunk,
                     step4ResultText: step4ResultText,
+                    isOtherChunk: isOtherChunk,
                     showCompletedInactiveHeader: showCompletedInactiveHeader,
                     canShowFooterControls: canShowFooterControls,
                     canReorderDisplayedActions: canReorderDisplayedActions
@@ -1909,7 +1925,8 @@ struct ActionView: View {
         resultText: String,
         actions: [PlannedChunkAction],
         defineByAction: [UUID: PlannedChunkActionDefineState],
-        executionByAction: [UUID: PlannedChunkActionExecutionState]
+        executionByAction: [UUID: PlannedChunkActionExecutionState],
+        isOtherChunk: Bool
     ) -> some View {
         HStack(alignment: .center, spacing: 10) {
             VStack(alignment: .leading, spacing: 10) {
@@ -1919,7 +1936,8 @@ struct ActionView: View {
 
                 compactActionsSummary(
                     actions: actions,
-                    executionByAction: executionByAction
+                    executionByAction: executionByAction,
+                    isOtherChunk: isOtherChunk
                 )
 
                 Divider().opacity(0.35)
@@ -1957,6 +1975,7 @@ struct ActionView: View {
         roleName: String,
         outcomesForChunk: [Outcomes],
         step4ResultText: String,
+        isOtherChunk: Bool,
         showCompletedInactiveHeader: Bool,
         canShowFooterControls: Bool,
         canReorderDisplayedActions: Bool
@@ -2121,6 +2140,7 @@ struct ActionView: View {
                         actionRow(
                             action: row.action,
                             accent: accent,
+                            isOtherChunk: isOtherChunk,
                             duePresentation: row.duePresentation,
                             defineState: row.defineState,
                             status: row.status,
@@ -2143,6 +2163,7 @@ struct ActionView: View {
                             actionRow(
                                 action: row.action,
                                 accent: accent,
+                                isOtherChunk: isOtherChunk,
                                 duePresentation: row.duePresentation,
                                 defineState: row.defineState,
                                 status: row.status,
@@ -2180,6 +2201,7 @@ struct ActionView: View {
                             actionRow(
                                 action: row.action,
                                 accent: accent,
+                                isOtherChunk: isOtherChunk,
                                 duePresentation: row.duePresentation,
                                 defineState: row.defineState,
                                 status: row.status,
@@ -2331,6 +2353,7 @@ struct ActionView: View {
     private func actionRow(
         action: PlannedChunkAction,
         accent: Color,
+        isOtherChunk: Bool,
         duePresentation: ActionDuePresentation?,
         defineState: PlannedChunkActionDefineState?,
         status: ActionExecutionStatus,
@@ -2351,6 +2374,7 @@ struct ActionView: View {
                 dueStatusColor: duePresentation?.color ?? .secondary,
                 status: status,
                 accent: accent,
+                isOtherChunk: isOtherChunk,
                 colorScheme: colorScheme,
                 isMust: isMust(for: action.id, defineState: defineState),
                 minutes: defineState?.timeEstimateMinutes,
@@ -2642,9 +2666,11 @@ struct ActionView: View {
 
     private func compactActionsSummary(
         actions: [PlannedChunkAction],
-        executionByAction: [UUID: PlannedChunkActionExecutionState]
+        executionByAction: [UUID: PlannedChunkActionExecutionState],
+        isOtherChunk: Bool
     ) -> some View {
         let usesFullViewPalette = !actionBlocksSimpleViewEnabled
+        let usesOtherDarkIconTint = isOtherChunk && colorScheme == .dark
         let statuses = actions.map { executionByAction[$0.id]?.status ?? .noAction }
         let leveragedCount = statuses.filter { $0 == .leveraged }.count
         let inProgressCount = statuses.filter { $0 == .inProgress }.count
@@ -2664,57 +2690,57 @@ struct ActionView: View {
                 )
 
             if leveragedCount > 0 {
-                compactStatusCount(icon: ActionExecutionStatus.leveraged.icon, count: leveragedCount)
+                compactStatusCount(icon: ActionExecutionStatus.leveraged.icon, count: leveragedCount, usesOtherDarkIconTint: usesOtherDarkIconTint)
             }
             if inProgressCount > 0 {
-                compactStatusCount(icon: ActionExecutionStatus.inProgress.icon, count: inProgressCount)
+                compactStatusCount(icon: ActionExecutionStatus.inProgress.icon, count: inProgressCount, usesOtherDarkIconTint: usesOtherDarkIconTint)
             }
             if doneCount > 0 {
-                compactStatusCount(icon: ActionExecutionStatus.done.icon, count: doneCount)
+                compactStatusCount(icon: ActionExecutionStatus.done.icon, count: doneCount, usesOtherDarkIconTint: usesOtherDarkIconTint)
             }
             if carriedCount > 0 {
-                compactStatusCount(icon: ActionExecutionStatus.carriedToCapture.icon, count: carriedCount)
+                compactStatusCount(icon: ActionExecutionStatus.carriedToCapture.icon, count: carriedCount, usesOtherDarkIconTint: usesOtherDarkIconTint)
             }
             if notNeededCount > 0 {
-                compactStatusCount(icon: ActionExecutionStatus.notNeeded.icon, count: notNeededCount)
+                compactStatusCount(icon: ActionExecutionStatus.notNeeded.icon, count: notNeededCount, usesOtherDarkIconTint: usesOtherDarkIconTint)
             }
 
-            noActionCountChip(count: noActionCount)
+            noActionCountChip(count: noActionCount, usesOtherDarkIconTint: usesOtherDarkIconTint)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func compactStatusCount(icon: String, count: Int) -> some View {
+    private func compactStatusCount(icon: String, count: Int, usesOtherDarkIconTint: Bool) -> some View {
         HStack(spacing: 3) {
             Image(systemName: icon)
                 .font(.caption.weight(.semibold))
             Text("\(count)")
                 .font(.caption.weight(.bold))
         }
-        .foregroundStyle(Color.black.opacity(0.72))
+        .foregroundStyle(usesOtherDarkIconTint ? Color.white.opacity(0.85) : Color.black.opacity(0.72))
         .padding(.vertical, 3)
         .padding(.horizontal, 6)
         .overlay(
             RoundedRectangle(cornerRadius: 7)
-                .stroke(Color.black.opacity(0.15), lineWidth: 1)
+                .stroke(usesOtherDarkIconTint ? Color.white.opacity(0.22) : Color.black.opacity(0.15), lineWidth: 1)
         )
     }
 
-    private func noActionCountChip(count: Int) -> some View {
+    private func noActionCountChip(count: Int, usesOtherDarkIconTint: Bool) -> some View {
         (
             Text("No action ")
                 .font(.caption)
             + Text("\(count)")
                 .font(.caption.weight(.bold))
         )
-        .foregroundStyle(Color.black.opacity(0.72))
+        .foregroundStyle(usesOtherDarkIconTint ? Color.white.opacity(0.85) : Color.black.opacity(0.72))
         .lineLimit(1)
         .truncationMode(.tail)
         .padding(.vertical, 3)
         .padding(.horizontal, 6)
         .overlay(
             RoundedRectangle(cornerRadius: 7)
-                .stroke(Color.black.opacity(0.15), lineWidth: 1)
+                .stroke(usesOtherDarkIconTint ? Color.white.opacity(0.22) : Color.black.opacity(0.15), lineWidth: 1)
         )
     }
 
@@ -5300,7 +5326,7 @@ private struct InlineActionEditor: View {
                     .strikethrough(strike, color: textColor)
                     .lineLimit(3)
                     .focused($isFocused)
-                    .submitLabel(.done)
+                    .submitLabel(.return)
                     .onSubmit {
                         onCommit(text)
                         focusedActionID = nil
@@ -5359,6 +5385,7 @@ private struct ActionSwipeRow: View {
     let dueStatusColor: Color
     let status: ActionExecutionStatus
     let accent: Color
+    let isOtherChunk: Bool
     let colorScheme: ColorScheme
     let isMust: Bool
     let minutes: Int?
@@ -5389,6 +5416,7 @@ private struct ActionSwipeRow: View {
         dueStatusColor: Color,
         status: ActionExecutionStatus,
         accent: Color,
+        isOtherChunk: Bool,
         colorScheme: ColorScheme,
         isMust: Bool,
         minutes: Int?,
@@ -5416,6 +5444,7 @@ private struct ActionSwipeRow: View {
         self.dueStatusColor = dueStatusColor
         self.status = status
         self.accent = accent
+        self.isOtherChunk = isOtherChunk
         self.colorScheme = colorScheme
         self.isMust = isMust
         self.minutes = minutes
@@ -5443,6 +5472,14 @@ private struct ActionSwipeRow: View {
         minutes == nil ? Color(.systemGray) : accent
     }
 
+    private var usesOtherDarkIconTint: Bool {
+        isOtherChunk && colorScheme == .dark
+    }
+
+    private var iconAccent: Color {
+        usesOtherDarkIconTint ? .white : accent
+    }
+
     private var isSwipeInteracting: Bool { false }
 
     private var effectiveStatus: ActionExecutionStatus {
@@ -5458,20 +5495,21 @@ private struct ActionSwipeRow: View {
     }
 
     private var inactiveTint: Color {
+        let baseColor: Color = usesOtherDarkIconTint ? .white : .black
         switch effectiveStatus {
         case .leveraged:
-            return Color.black.opacity(0.45)
+            return baseColor.opacity(0.45)
         case .done, .carriedToCapture, .notNeeded:
-            return Color.black.opacity(0.25)
+            return baseColor.opacity(0.25)
         case .inProgress:
-            return rowAccent
+            return iconAccent
         case .noAction:
-            return .black
+            return usesOtherDarkIconTint ? .white : .black
         }
     }
 
     private var iconTint: Color {
-        isInactive ? inactiveTint : accent
+        isInactive ? inactiveTint : iconAccent
     }
 
     private var actionTextColor: Color {
@@ -5550,7 +5588,7 @@ private struct ActionSwipeRow: View {
 
                         clockButton(
                             minutes: minutes,
-                            tint: isInactive ? inactiveTint : rowAccent,
+                            tint: isInactive ? inactiveTint : (usesOtherDarkIconTint ? .white : rowAccent),
                             isEnabled: !isInactive,
                             onTap: onOpenClock
                         )
