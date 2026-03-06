@@ -755,7 +755,10 @@ final class LoomAIViewModel: ObservableObject {
                 errorMessage = "That identity already exists in \(category.category)."
                 return false
             }
-            guard let roleRow = categoryRoles.first(where: { $0.role.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare(replaceIdentity) == .orderedSame }) else {
+            let roleRow = categoryRoles.first(where: {
+                $0.role.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare(replaceIdentity) == .orderedSame
+            }) ?? Self.oldestIdentityRowToRotate(from: categoryRoles, excludingIdentity: newIdentity)
+            guard let roleRow else {
                 errorMessage = "Couldn’t find the identity to replace in \(category.category)."
                 return false
             }
@@ -940,9 +943,10 @@ final class LoomAIViewModel: ObservableObject {
             }
 
             let normalizedTargetToReplace = Self.normalizedSuggestedLittleWinText(replaceActivity)
-            guard let rowToReplace = existingFocusRows.first(where: {
+            let rowToReplace = existingFocusRows.first(where: {
                 Self.normalizedSuggestedLittleWinText($0.activity) == normalizedTargetToReplace
-            }) else {
+            }) ?? Self.oldestLittleWinRowToRotate(from: existingFocusRows, excludingActivity: replacementActivity)
+            guard let rowToReplace else {
                 errorMessage = "Couldn’t find the existing Little Win to replace in \(targetCategory.category)."
                 return false
             }
@@ -1121,7 +1125,7 @@ final class LoomAIViewModel: ObservableObject {
 
             let category = normalized(block.category)
             if !category.isEmpty, !isLowSignal(category) {
-                return "\(category) action block"
+                return "\(category) action plan"
             }
 
             let actionTitle = block.actions
@@ -1138,7 +1142,7 @@ final class LoomAIViewModel: ObservableObject {
                 return outcome
             }
 
-            return "this action block"
+            return "this action plan"
         }
 
         let fulfillments = snapshot.fulfillmentCategories
@@ -1464,6 +1468,7 @@ final class LoomAIViewModel: ObservableObject {
         let plannedChunkActionAttachments = try context.fetch(FetchDescriptor<PlannedChunkActionAttachment>())
         let plannedChunkActionNotes = try context.fetch(FetchDescriptor<PlannedChunkActionNote>())
         let plannedChunkActionAdHocMarkers = try context.fetch(FetchDescriptor<PlannedChunkActionAdHocMarker>())
+        let activePlanStates = try context.fetch(FetchDescriptor<ActivePlanState>())
         let reflectionActions = try context.fetch(FetchDescriptor<ActionBlocksReflectionArchiveAction>())
         let reflectionArchives = try context.fetch(FetchDescriptor<ActionBlocksReflectionArchive>())
         let reflectionOutcomes = try context.fetch(FetchDescriptor<ActionBlocksReflectionArchiveOutcome>())
@@ -1534,7 +1539,10 @@ final class LoomAIViewModel: ObservableObject {
                 )
             }
 
-        let weekChunks = plannedChunks.filter { $0.weekStart == weekStart }
+        let isActivePlanFlow = activePlanStates.first?.isActive ?? false
+        let weekChunks = isActivePlanFlow
+            ? plannedChunks.filter { $0.weekStart == weekStart }
+            : []
         let actionsByChunk = Dictionary(grouping: plannedChunkActions.filter { $0.weekStart == weekStart }, by: \.plannedChunkId)
         let currentWeekBlocks = weekChunks
             .sorted { $0.chunkIndex < $1.chunkIndex }
@@ -1640,6 +1648,16 @@ final class LoomAIViewModel: ObservableObject {
             reflections: reflectionArchives.map(\.completedAt).max(),
             diagnostics: latestDiagnosticSnapshot?.generatedAt,
             recentlyDeleted: recentlyDeletedItems.map(\.deletedAt).max()
+        )
+        let gatedSectionTimestamps = LoomAIContextSnapshot.SectionTimestamps(
+            purpose: sectionTimestamps.purpose,
+            fulfillment: sectionTimestamps.fulfillment,
+            outcomes: sectionTimestamps.outcomes,
+            capture: sectionTimestamps.capture,
+            actionBlocks: isActivePlanFlow && !currentWeekBlocks.isEmpty ? sectionTimestamps.actionBlocks : nil,
+            reflections: sectionTimestamps.reflections,
+            diagnostics: sectionTimestamps.diagnostics,
+            recentlyDeleted: sectionTimestamps.recentlyDeleted
         )
         var inventory = buildDataInventory(
             now: now,
@@ -1788,7 +1806,7 @@ final class LoomAIViewModel: ObservableObject {
             ),
             capture: captureSummary,
             recentlyDeleted: recentlyDeletedSummary,
-            sectionTimestamps: sectionTimestamps,
+            sectionTimestamps: gatedSectionTimestamps,
             purposeProfile: purposeProfileSummary,
             dataInventory: inventory,
             appGuide: buildAppGuideTopics(),
@@ -2127,7 +2145,7 @@ final class LoomAIViewModel: ObservableObject {
             ),
             .init(
                 id: "action_blocks_active",
-                title: "Active Action Blocks + Motivation + Result + Links",
+                title: "Active Action Plan + Motivation + Result + Links",
                 currentCount: currentWeekChunks.count + currentWeekActions.count,
                 historicalCount: nil,
                 keySignals: [
@@ -2142,7 +2160,7 @@ final class LoomAIViewModel: ObservableObject {
             ),
             .init(
                 id: "action_blocks_actions_detail",
-                title: "Action Block Action Attributes (musts, duration, assign, sensitivities, attachments, notes, order)",
+                title: "Action Plan Action Attributes (musts, duration, assign, sensitivities, attachments, notes, order)",
                 currentCount: plannedChunkActions.count,
                 historicalCount: reflectionActions.count,
                 keySignals: [
@@ -2158,7 +2176,7 @@ final class LoomAIViewModel: ObservableObject {
             ),
             .init(
                 id: "action_blocks_completed",
-                title: "Completed Action Blocks + Journal + Insights",
+                title: "Completed Action Plans + Journal + Insights",
                 currentCount: reflectionArchives.count,
                 historicalCount: reflectionActions.count + reflectionOutcomes.count + reflectionOutcomeContributions.count,
                 keySignals: [
@@ -2223,7 +2241,7 @@ final class LoomAIViewModel: ObservableObject {
             .init(
                 id: "loom_ecosystem",
                 title: "Loom Ecosystem Map",
-                summary: "Purpose defines who the user is, Fulfillment Areas define life domains and why they matter, Outcomes define what they want, and Action Blocks define how they act weekly.",
+                summary: "Purpose defines who the user is, Fulfillment Areas define life domains and why they matter, Outcomes define what they want, and Action Plans define how they act weekly.",
                 relatedSections: ["purpose_current", "fulfillment_current", "objectives_outcomes", "action_blocks_active"]
             ),
             .init(
@@ -2258,7 +2276,7 @@ final class LoomAIViewModel: ObservableObject {
             ),
             .init(
                 id: "action_blocks_workflow",
-                title: "Action Blocks Workflow",
+                title: "Action Plan Workflow",
                 summary: "Weekly planning moves from grouped chunks to step-four motivations/results/outcome links, then action metadata (musts, duration, assign, sensitivities, notes, attachments) and execution states, followed by reflection archives/journals.",
                 relatedSections: ["action_blocks_active", "action_blocks_actions_detail", "action_blocks_completed"]
             ),
@@ -2508,7 +2526,7 @@ final class LoomAIViewModel: ObservableObject {
         }
         let cardTitle = mode.lowercased() == "rewordvision"
             ? "Reworded Purpose Vision options"
-            : "New Purpose Vision options"
+            : "New Purpose Vision"
         let suggestionCards = [
             LoomAISuggestionCard(
                 id: "purpose-vision-autowrite",
@@ -2772,5 +2790,41 @@ final class LoomAIViewModel: ObservableObject {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+    }
+
+    private static func oldestLittleWinRowToRotate(
+        from rows: [FulfillmentFocus],
+        excludingActivity: String
+    ) -> FulfillmentFocus? {
+        let normalizedExcluding = normalizedSuggestedLittleWinText(excludingActivity)
+        return rows
+            .filter { normalizedSuggestedLittleWinText($0.activity) != normalizedExcluding }
+            .sorted {
+                if $0.rank != $1.rank { return $0.rank < $1.rank }
+                return $0.updatedAt < $1.updatedAt
+            }
+            .first
+    }
+
+    private static func oldestIdentityRowToRotate(
+        from rows: [FulfillmentRoles],
+        excludingIdentity: String
+    ) -> FulfillmentRoles? {
+        let normalizedExcluding = excludingIdentity
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        return rows
+            .filter {
+                $0.role
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased()
+                    .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression) != normalizedExcluding
+            }
+            .sorted {
+                if $0.rank != $1.rank { return $0.rank < $1.rank }
+                return $0.updatedAt < $1.updatedAt
+            }
+            .first
     }
 }

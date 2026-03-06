@@ -224,9 +224,9 @@ struct ContentView: View {
             target: .capture
         ),
         ContentQuickstartStep(
-            title: "Action Blocks",
+            title: "Action Plan",
             summary: "Make real progress effortless by focusing on what matters now to create the life you want.",
-            lookAtPrompt: "Look at the Action Blocks (Play/Plan) area on this screen.",
+            lookAtPrompt: "Look at the Action Plan (Play/Plan) area on this screen.",
             target: .actionBlocks
         ),
         ContentQuickstartStep(
@@ -4841,7 +4841,7 @@ struct ContentView: View {
                     .resizable()
                     .scaledToFit()
                     .frame(width: 22, height: 22)
-                Text("Ask Loom to analyze and improve your Purpose, Passions, Fulfillment Areas, Little Wins, Outcomes, Actions, Capture List, Action Blocks, and more.")
+                Text("Ask Loom to analyze and improve your Purpose, Passions, Fulfillment Areas, Little Wins, Outcomes, Actions, Capture List, Action Plans, and more.")
                     .font(.subheadline.weight(.semibold))
             }
         }

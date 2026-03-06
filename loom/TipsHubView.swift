@@ -33,9 +33,7 @@ private struct TipHubCard: View {
         HStack(spacing: 14) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 7) {
-                    Image(systemName: feature.symbolName)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                    tipIcon(for: feature)
 
                     Text(feature.title)
                         .font(.headline.weight(.semibold))
@@ -85,6 +83,26 @@ private struct TipHubCard: View {
                 .stroke(Color.black.opacity(0.07), lineWidth: 1)
         )
         .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    @ViewBuilder
+    private func tipIcon(for feature: TipFeature) -> some View {
+        if feature == .appleHealthIntegration {
+            Image(systemName: "heart.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.red)
+        } else if feature == .loomAIPersonalization
+            || feature == .loomAIChat
+            || feature == .loomAIAutoWrite {
+            Image("LoomAI")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 16, height: 16)
+        } else {
+            Image(systemName: feature.symbolName)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+        }
     }
 
     private func tipBadge(title: String, tint: Color) -> some View {

@@ -25,32 +25,13 @@ struct LittleWinsMomentsTipPreviewScene: View {
                 ZStack(alignment: .topTrailing) {
                     LittleWinsShareOverlayTemplateView(
                         template: selectedTemplate,
-                        data: Self.sampleData
+                        data: Self.sampleData,
+                        showsBackdrop: false
                     )
                     .frame(width: referenceSize.width, height: referenceSize.height)
                     .scaleEffect(scale, anchor: .topLeading)
                     .frame(width: scaledWidth, height: scaledHeight, alignment: .topLeading)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-
-                    HStack(spacing: 6) {
-                        Image(systemName: "camera.filters")
-                            .font(.system(size: 11, weight: .semibold))
-                        Text("Moments")
-                            .font(.caption2.weight(.semibold))
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 6)
-                    .background(
-                        Capsule(style: .continuous)
-                            .fill(Color.black.opacity(0.5))
-                    )
-                    .overlay(
-                        Capsule(style: .continuous)
-                            .stroke(Color.white.opacity(step == 0 ? 0.7 : 0.35), lineWidth: 1)
-                    )
-                    .padding(.top, 10)
-                    .padding(.trailing, 10)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .overlay(alignment: .bottom) {

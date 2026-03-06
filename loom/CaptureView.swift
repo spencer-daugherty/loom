@@ -650,6 +650,7 @@ struct CaptureView: View {
     @State private var sharedAutoWriteTroubleshootingMessage: String? = nil
     @State private var sharedAutoWriteHistory: [String] = []
     @State private var sharedCompletedAttachmentsViewerID: CaptureSharedCompletedSheetID? = nil
+    @State private var showActiveActionBlocksPage = false
     @AppStorage(loomAITroubleshootingDefaultsKey) private var loomAITroubleshootingEnabled = true
 
     init(
@@ -865,6 +866,9 @@ struct CaptureView: View {
     }
     private var shouldShowCaptureSetupCautionCard: Bool {
         shouldUseCaptureSetupFlow && captureSetupDidContinue && !isSearchMode
+    }
+    private var shouldShowActiveActionBlocksCard: Bool {
+        !isSearchMode && !activeActionBlockOptions.isEmpty
     }
     private var captureSetupCautionText: String {
         if hasMetCaptureSetupRequirement {
@@ -1098,6 +1102,11 @@ struct CaptureView: View {
                 EmptyView()
             }
         }
+        .sheet(isPresented: $showActiveActionBlocksPage) {
+            NavigationStack {
+                ActionView()
+            }
+        }
         .onChange(of: showFullTextEditorSheet) { _, isShowing in
             if isShowing {
                 focusedField = nil
@@ -1204,6 +1213,13 @@ struct CaptureView: View {
 
     private func captureList(proxy: ScrollViewProxy) -> some View {
         List {
+            if shouldShowActiveActionBlocksCard {
+                activeActionBlocksCautionCard
+                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 2, trailing: 16))
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+            }
+
             if shouldShowCaptureSetupCautionCard {
                 captureSetupCautionCard
                     .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 2, trailing: 16))
@@ -1503,6 +1519,41 @@ struct CaptureView: View {
         return composerHeight + outerMargin + ghostControlHeight + ghostSpacing
     }
 
+    private var activeActionBlocksCautionCard: some View {
+        Button {
+            isComposerFocused = false
+            focusedField = nil
+            showActiveActionBlocksPage = true
+        } label: {
+            HStack(alignment: .center, spacing: 10) {
+                Image(systemName: "play.fill")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(Color.blue)
+                    .frame(width: 24)
+
+                (
+                    Text("Active Action Plan:").bold() +
+                    Text(" Click to open")
+                )
+                .font(.subheadline)
+                .foregroundStyle(Color.blue)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.blue)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 11)
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
     private var editActionHasChanges: Bool {
         editingItemText != editingItemOriginalText
         || editingItemHasDueDate != editingItemOriginalHasDueDate
@@ -1769,7 +1820,7 @@ struct CaptureView: View {
         if !activeActionBlockOptions.isEmpty {
             Section {
                 HStack {
-                    Text("Move to Action Block")
+                    Text("Move to Action Plan")
                     Spacer()
                     Menu {
                         ForEach(activeActionBlockOptions) { option in
@@ -1846,7 +1897,7 @@ struct CaptureView: View {
                 Text("You must add a due date to assign this action so resources stay accountable")
                     .font(.footnote)
                     .fontWeight(.bold)
-                Text("If not completed in this action block, the Resource and due date will be saved to your Capture list and future Action Blocks.")
+                Text("If not completed in this action plan, the Resource and due date will be saved to your Capture list and future Action Plans.")
                     .font(.footnote)
             }
             .multilineTextAlignment(.leading)

@@ -860,7 +860,7 @@ struct ActionView: View {
             .padding(.horizontal)
             .safeAreaPadding(.top)
             .safeAreaPadding(.bottom)
-            .navigationTitle("Action Blocks")
+            .navigationTitle("Action Plan")
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarBackButtonHidden(true)
             .toolbar {
@@ -1251,7 +1251,7 @@ struct ActionView: View {
 
                 LazyVStack(alignment: .leading, spacing: 12) {
                     if weekChunks.isEmpty {
-                        Text("No action blocks yet.")
+                        Text("No action plans yet.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .center)
@@ -1490,16 +1490,28 @@ struct ActionView: View {
     private var cautionRow: some View {
         let cautionAgeDays = blocksAgeDays ?? (devManualWarningCardsEnabled && devActionBlocksWarningOldBlocks ? 8 : 0)
         let cautionForeground = Color.black.opacity(0.7)
+        let accentBlue = Color.blue
+        let lightBlueSurface = Color(red: 0.89, green: 0.95, blue: 1.0)
         HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(cautionForeground)
-                .font(.subheadline)
-                .padding(.top, 1)
+            ZStack {
+                Circle()
+                    .fill(accentBlue)
+                Image(systemName: "play.fill")
+                    .foregroundStyle(.white)
+                    .font(.caption.weight(.bold))
+                    .offset(x: 0.5)
+            }
+            .frame(width: 22, height: 22)
+            .overlay(
+                Circle()
+                    .stroke(accentBlue, lineWidth: 1.5)
+            )
+            .padding(.top, 1)
 
             VStack(alignment: .leading, spacing: 4) {
                 (
                     Text("Caution: ").fontWeight(.bold)
-                    + Text("Action Blocks created \(cautionAgeDays) days ago. Mark uncompleted actions ")
+                    + Text("Action Plans created \(cautionAgeDays) days ago. Mark uncompleted actions ")
                     + Text(Image(systemName: "arrow.right"))
                     + Text(" to a new capture list and start a new plan to keep it fresh.")
                 )
@@ -1533,7 +1545,11 @@ struct ActionView: View {
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 10)
-                .fill(Color(red: 0.98, green: 0.92, blue: 0.72))
+                .fill(lightBlueSurface)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(accentBlue, lineWidth: 1.2)
         )
     }
 
@@ -2674,7 +2690,7 @@ struct ActionView: View {
         isOtherChunk: Bool
     ) -> some View {
         let usesFullViewPalette = !actionBlocksSimpleViewEnabled
-        let usesOtherDarkIconTint = isOtherChunk && colorScheme == .dark
+        let usesOtherDarkIconTint = false
         let statuses = actions.map { executionByAction[$0.id]?.status ?? .noAction }
         let leveragedCount = statuses.filter { $0 == .leveraged }.count
         let inProgressCount = statuses.filter { $0 == .inProgress }.count
@@ -4734,7 +4750,7 @@ private struct SensitivitySheet: View {
                     Text("You must add a due date to assign this action so resources stay accountable")
                         .font(.footnote)
                         .fontWeight(.bold)
-                    Text("If not completed in this action block, the Resource and due date will be saved to your Capture list and future Action Blocks.")
+                    Text("If not completed in this action plan, the Resource and due date will be saved to your Capture list and future Action Plans.")
                         .font(.footnote)
                 }
                 .multilineTextAlignment(.leading)

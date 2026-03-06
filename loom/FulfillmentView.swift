@@ -232,8 +232,8 @@ fileprivate func normalizeFulfillmentReadableInsightMetricReferences(
     var output = text
         .replacingOccurrences(of: "Enagement", with: "Engagement")
         .replacingOccurrences(of: "enagement", with: "Engagement")
-        .replacingOccurrences(of: "Action Block ", with: "Action Blocks ")
-        .replacingOccurrences(of: "action block ", with: "Action Blocks ")
+        .replacingOccurrences(of: "Action Block ", with: "Action Plan ")
+        .replacingOccurrences(of: "action block ", with: "Action Plan ")
         .replacingOccurrences(of: "acieving", with: "achieving")
 
     func pct(_ value: Double) -> String {
@@ -245,7 +245,7 @@ fileprivate func normalizeFulfillmentReadableInsightMetricReferences(
         ("Consistency", fulfillmentReadableInsightConsistencyDescriptor(payload.consistency)),
         ("Structure", pct(payload.structure)),
         ("Outcomes", pct(payload.outcomes)),
-        ("Action Blocks", pct(payload.actionBlocks)),
+        ("Action Plans", pct(payload.actionBlocks)),
         ("Little Wins", pct(payload.littleWins)),
         ("Engagement", pct(payload.engagement)),
         ("Strategic Behavior", pct(payload.strategicBehavior)),
@@ -280,7 +280,7 @@ fileprivate func normalizeFulfillmentReadableInsightMetricReferences(
 
     // Remove duplicated raw-score tails after canonical metric parentheticals, e.g. "Action Blocks (50%) score (0.5)".
     if let duplicateValueRegex = try? NSRegularExpression(
-        pattern: "(?i)(\\b(?:Momentum|Consistency|Structure|Outcomes|Action Blocks|Little Wins|Engagement|Strategic Behavior|Carryover penalty)\\b\\s*\\([^\\)]*\\))\\s+score\\s*\\([-+]?\\d*\\.?\\d+%?\\)"
+        pattern: "(?i)(\\b(?:Momentum|Consistency|Structure|Outcomes|Action Plans|Little Wins|Engagement|Strategic Behavior|Carryover penalty)\\b\\s*\\([^\\)]*\\))\\s+score\\s*\\([-+]?\\d*\\.?\\d+%?\\)"
     ) {
         let source = output
         let nsRange = NSRange(source.startIndex..<source.endIndex, in: source)
@@ -313,29 +313,29 @@ fileprivate func isFulfillmentSingleRecordPayload(_ payload: FulfillmentReadable
 
 fileprivate func startupFulfillmentTechnicalLine(payload: FulfillmentReadableInsightRequestPayload) -> String {
     let weakest = [
-        ("Action Blocks", payload.actionBlocks),
+        ("Action Plans", payload.actionBlocks),
         ("Little Wins", payload.littleWins),
         ("Engagement", payload.engagement),
         ("Strategic Behavior", payload.strategicBehavior),
         ("Structure", payload.structure),
         ("Outcomes", payload.outcomes)
-    ].min(by: { $0.1 < $1.1 })?.0 ?? "Action Blocks"
+    ].min(by: { $0.1 < $1.1 })?.0 ?? "Action Plans"
     return "Baseline week only: trend and mover signals are not established yet; score gains depend on improving \(weakest) consistency."
 }
 
 fileprivate func startupFulfillmentPracticalLine(payload: FulfillmentReadableInsightRequestPayload) -> String {
     let weakest = [
-        ("Action Blocks", payload.actionBlocks),
+        ("Action Plans", payload.actionBlocks),
         ("Little Wins", payload.littleWins),
         ("Engagement", payload.engagement),
         ("Strategic Behavior", payload.strategicBehavior),
         ("Structure", payload.structure),
         ("Outcomes", payload.outcomes)
-    ].min(by: { $0.1 < $1.1 })?.0 ?? "Action Blocks"
+    ].min(by: { $0.1 < $1.1 })?.0 ?? "Action Plans"
 
     switch weakest {
-    case "Action Blocks":
-        return "Complete one realistic Action Block in this area today."
+    case "Action Plans":
+        return "Complete one realistic Action Plan in this area today."
     case "Little Wins":
         return "Complete one Little Win in this area each day this week."
     case "Engagement":
@@ -347,7 +347,7 @@ fileprivate func startupFulfillmentPracticalLine(payload: FulfillmentReadableIns
     case "Outcomes":
         return "Connect one Outcome for this area and review it this week."
     default:
-        return "Complete one Action Block and one Little Win in this area this week."
+        return "Complete one Action Plan and one Little Win in this area this week."
     }
 }
 
@@ -420,10 +420,10 @@ fileprivate func practicalFulfillmentInsightLine(payload: FulfillmentReadableIns
         return "Carryover penalty (\(pct(carry))) is dragging this area despite stronger Structure (\(pct(structure)))."
     }
     if structure >= 0.8 && outcomes >= 0.8 && littleWins + 0.18 < actionBlocks {
-        return "Structure (\(pct(structure))) and Outcomes (\(pct(outcomes))) are strong, but Little Wins (\(pct(littleWins))) lag Action Blocks (\(pct(actionBlocks)))."
+        return "Structure (\(pct(structure))) and Outcomes (\(pct(outcomes))) are strong, but Little Wins (\(pct(littleWins))) lag Action Plans (\(pct(actionBlocks)))."
     }
     if outcomes >= 0.8 && actionBlocks < 0.6 {
-        return "Outcomes (\(pct(outcomes))) are strong, but Action Blocks (\(pct(actionBlocks))) need stronger execution support."
+        return "Outcomes (\(pct(outcomes))) are strong, but Action Plans (\(pct(actionBlocks))) need stronger execution support."
     }
     if strategic < 0.6 && (structure >= 0.75 || outcomes >= 0.75) {
         return "Strategic Behavior (\(pct(strategic))) is lagging stronger Structure (\(pct(structure))) and Outcomes (\(pct(outcomes)))."
@@ -432,7 +432,7 @@ fileprivate func practicalFulfillmentInsightLine(payload: FulfillmentReadableIns
         return "Engagement (\(pct(engagement))) and Little Wins (\(pct(littleWins))) are the clearest drag on this area."
     }
     if actionBlocks < 0.55 {
-        return "Action Blocks (\(pct(actionBlocks))) are the clearest execution constraint on this area right now."
+        return "Action Plans (\(pct(actionBlocks))) are the clearest execution constraint on this area right now."
     }
     if littleWins < 0.55 {
         return "Little Wins (\(pct(littleWins))) are lagging and may be weakening day-to-day support."
@@ -445,27 +445,27 @@ fileprivate func defaultFulfillmentReadableInsightCTA(payload: FulfillmentReadab
         return "Balance only adding essential actions and completing more actions"
     }
     if payload.actionBlocks < 0.6 && payload.littleWins < 0.6 {
-        return "Complete more Little Wins and Action Blocks"
+        return "Complete more Little Wins and Action Plans"
     }
     let weakest = [
-        ("Action Blocks", payload.actionBlocks),
+        ("Action Plans", payload.actionBlocks),
         ("Little Wins", payload.littleWins),
         ("Engagement", payload.engagement),
         ("Strategic Behavior", payload.strategicBehavior),
         ("Structure", payload.structure),
         ("Outcomes", payload.outcomes)
-    ].min(by: { $0.1 < $1.1 })?.0 ?? "Action Blocks"
+    ].min(by: { $0.1 < $1.1 })?.0 ?? "Action Plans"
 
     if payload.littleWins + 0.12 < payload.actionBlocks && payload.littleWins < 0.55 {
-        return "Complete more Little Wins and Action Blocks"
+        return "Complete more Little Wins and Action Plans"
     }
     if payload.strategicBehavior < 0.6 && (payload.structure >= 0.75 || payload.outcomes >= 0.75) {
         return "Revise Mission or Identity to improve alignment"
     }
 
     switch weakest {
-    case "Action Blocks":
-        return "Complete more Action Blocks with realistic durations"
+    case "Action Plans":
+        return "Complete more Action Plans with realistic durations"
     case "Little Wins":
         return "Complete more Little Wins"
     case "Engagement":
@@ -487,8 +487,8 @@ fileprivate func normalizeFulfillmentReadableInsightCTALine(_ line: String) -> S
     output = output.replacingOccurrences(of: #"^(?i)in loom\s*"#, with: "", options: .regularExpression)
     output = output.replacingOccurrences(of: "Enagement", with: "Engagement")
     output = output.replacingOccurrences(of: "enagement", with: "Engagement")
-    output = output.replacingOccurrences(of: "Action Block ", with: "Action Blocks ")
-    output = output.replacingOccurrences(of: "action block ", with: "Action Blocks ")
+    output = output.replacingOccurrences(of: "Action Block ", with: "Action Plan ")
+    output = output.replacingOccurrences(of: "action block ", with: "Action Plan ")
     output = output.replacingOccurrences(
         of: #"(?i)shorten or split one Action Blocks? to reduce carryover"#,
         with: "Balance only adding essential actions and completing more actions",
@@ -496,7 +496,7 @@ fileprivate func normalizeFulfillmentReadableInsightCTALine(_ line: String) -> S
     )
     if output.lowercased().contains("add or replace one practical little win"),
        output.lowercased().contains("action blocks") {
-        output = "Complete more Little Wins and Action Blocks"
+        output = "Complete more Little Wins and Action Plans"
     }
     return output
 }
@@ -6588,8 +6588,8 @@ private func applyInsightMetricItalics(
         "Consistency",
         "Structure",
         "Outcomes",
-        "Action Blocks",
-        "Action blocks",
+        "Action Plans",
+        "Action plans",
         "Little Wins",
         "Engagement",
         "Strategic Behavior",

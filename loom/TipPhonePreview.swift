@@ -16,9 +16,14 @@ struct DeviceFrameView<Content: View>: View {
     static var screenAspectRatio: CGFloat { DeviceFrameConstants.screenAspectRatio }
     static var deviceAspectRatio: CGFloat { DeviceFrameConstants.deviceAspectRatio }
 
+    private let screenBackground: AnyView
     private let content: (CGSize) -> Content
 
-    init(@ViewBuilder content: @escaping (CGSize) -> Content) {
+    init<ScreenBackground: View>(
+        @ViewBuilder screenBackground: () -> ScreenBackground = { TipPreviewPalette.screenBackground },
+        @ViewBuilder content: @escaping (CGSize) -> Content
+    ) {
+        self.screenBackground = AnyView(screenBackground())
         self.content = content
     }
 
@@ -83,18 +88,9 @@ struct DeviceFrameView<Content: View>: View {
                     .frame(width: metrics.bezelSize.width, height: metrics.bezelSize.height)
                     .offset(x: metrics.bezelOrigin.x, y: metrics.bezelOrigin.y)
 
-                screenShape
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color(red: 0.94, green: 0.95, blue: 0.97),
-                                Color(red: 0.91, green: 0.93, blue: 0.96)
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
+                screenBackground
                     .frame(width: metrics.screenSize.width, height: metrics.screenSize.height)
+                    .clipShape(screenShape)
                     .overlay {
                         content(metrics.contentSize)
                             .frame(
@@ -235,13 +231,14 @@ struct TipPhonePreview: View {
     var animate: Bool = true
     private static let previewDesignSize = CGSize(width: 240, height: 520)
 
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var step: Int = 0
     @State private var loopTask: Task<Void, Never>?
 
     var body: some View {
-        DeviceFrameView { contentSize in
+        DeviceFrameView(screenBackground: { phoneScreenBackground }) { contentSize in
             let sceneScale = max(
                 contentSize.width / Self.previewDesignSize.width,
                 contentSize.height / Self.previewDesignSize.height
@@ -271,6 +268,20 @@ struct TipPhonePreview: View {
     }
 
     @ViewBuilder
+    private var phoneScreenBackground: some View {
+        if feature.previewType == .littleWinsMoments {
+            TipBlueRidgeMountainsBackground()
+                .overlay(Color.white.opacity(0.12))
+                .animation(nil, value: step)
+                .transaction { tx in
+                    tx.animation = nil
+                }
+        } else {
+            TipPreviewPalette.screenBackground(for: colorScheme)
+        }
+    }
+
+    @ViewBuilder
     private var previewScene: some View {
         let shouldAnimateScene = animate && !reduceMotion && !feature.isComingSoon
         switch feature.previewType {
@@ -282,6 +293,8 @@ struct TipPhonePreview: View {
             AppleHealthIntegrationTipPreviewScene(step: step, isAnimated: shouldAnimateScene)
         case .assignActions:
             AssignActionsTipPreviewScene(step: step, isAnimated: shouldAnimateScene)
+        case .shareToLoom:
+            ShareToLoomTipPreviewScene(step: step, isAnimated: shouldAnimateScene)
         case .loomAIChat:
             LoomAIChatTipPreviewScene(step: step, isAnimated: shouldAnimateScene)
         case .loomAIAutoWrite:
@@ -302,7 +315,7 @@ struct TipPhonePreview: View {
 
         loopTask = Task {
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 1_050_000_000)
+                try? await Task.sleep(nanoseconds: stepIntervalNanoseconds)
                 guard !Task.isCancelled else { break }
                 await MainActor.run {
                     withAnimation(.easeInOut(duration: 0.42)) {
@@ -311,6 +324,20 @@ struct TipPhonePreview: View {
                 }
             }
         }
+    }
+
+    private var stepIntervalNanoseconds: UInt64 {
+        let base: UInt64 = 1_050_000_000
+        if feature.previewType == .littleWinsMoments {
+            return base * 3
+        }
+        if feature.previewType == .appleHealthIntegration {
+            if step == 4 {
+                return base * 4
+            }
+            return base * 2
+        }
+        return base
     }
 
     private func stopLoop() {
@@ -327,14 +354,23 @@ enum TipPreviewPalette {
         Color(red: 0.98, green: 0.36, blue: 0.58)
     ]
 
-    static let screenBackground = LinearGradient(
-        colors: [
-            Color(.secondarySystemBackground),
-            Color(.systemBackground)
-        ],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-    )
+    static let screenBackground = screenBackground(for: .light)
+
+    static func screenBackground(for colorScheme: ColorScheme) -> LinearGradient {
+        LinearGradient(
+            colors: colorScheme == .dark
+                ? [
+                    Color(.systemBackground),
+                    Color(.secondarySystemBackground)
+                ]
+                : [
+                    Color(.secondarySystemBackground),
+                    Color(.systemBackground)
+                ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
 }
 
 struct TipPreviewSurface<Content: View>: View {
@@ -349,6 +385,97 @@ struct TipPreviewSurface<Content: View>: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+}
+
+private struct TipBlueRidgeMountainsBackground: View {
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color(red: 0.78, green: 0.88, blue: 0.97),
+                    Color(red: 0.60, green: 0.76, blue: 0.90),
+                    Color(red: 0.43, green: 0.61, blue: 0.78)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+
+            TipBlueRidgeLayer(
+                peaks: [0.62, 0.57, 0.60, 0.55, 0.58, 0.54, 0.59, 0.57],
+                baseY: 0.78,
+                fill: Color(red: 0.34, green: 0.50, blue: 0.66).opacity(0.55),
+                blurRadius: 1.4
+            )
+
+            TipBlueRidgeLayer(
+                peaks: [0.70, 0.64, 0.66, 0.61, 0.65, 0.60, 0.63],
+                baseY: 0.86,
+                fill: Color(red: 0.24, green: 0.40, blue: 0.56).opacity(0.62),
+                blurRadius: 0.8
+            )
+
+            TipBlueRidgeLayer(
+                peaks: [0.81, 0.75, 0.77, 0.73, 0.76, 0.72, 0.74],
+                baseY: 0.96,
+                fill: Color(red: 0.16, green: 0.30, blue: 0.44).opacity(0.72),
+                blurRadius: 0
+            )
+        }
+        .saturation(0.78)
+        .overlay(
+            LinearGradient(
+                colors: [
+                    Color.white.opacity(0.10),
+                    Color.clear,
+                    Color.black.opacity(0.08)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
+        .allowsHitTesting(false)
+    }
+}
+
+private struct TipBlueRidgeLayer: View {
+    let peaks: [CGFloat]
+    let baseY: CGFloat
+    let fill: Color
+    let blurRadius: CGFloat
+
+    var body: some View {
+        GeometryReader { proxy in
+            let width = max(1, proxy.size.width)
+            let height = max(1, proxy.size.height)
+            let count = max(peaks.count, 2)
+
+            Path { path in
+                path.move(to: CGPoint(x: 0, y: height))
+                path.addLine(to: CGPoint(x: 0, y: height * baseY))
+
+                for index in 0..<count {
+                    let safeIndex = min(index, peaks.count - 1)
+                    let x = width * CGFloat(index) / CGFloat(count - 1)
+                    let y = height * peaks[safeIndex]
+                    if index == 0 {
+                        path.addLine(to: CGPoint(x: x, y: y))
+                    } else {
+                        let prevX = width * CGFloat(index - 1) / CGFloat(count - 1)
+                        let prevY = height * peaks[min(index - 1, peaks.count - 1)]
+                        let mid = CGPoint(x: (prevX + x) * 0.5, y: (prevY + y) * 0.5)
+                        path.addQuadCurve(to: mid, control: CGPoint(x: prevX, y: prevY))
+                        path.addQuadCurve(to: CGPoint(x: x, y: y), control: CGPoint(x: x, y: y))
+                    }
+                }
+
+                path.addLine(to: CGPoint(x: width, y: height))
+                path.closeSubpath()
+            }
+            .fill(fill)
+            .blur(radius: blurRadius)
+        }
+        .allowsHitTesting(false)
     }
 }
 

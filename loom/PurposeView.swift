@@ -180,8 +180,8 @@ fileprivate func normalizePurposeReadableInsightMetricReferences(
     payload: PurposeReadableInsightRequestPayload
 ) -> String {
     var output = text
-        .replacingOccurrences(of: "Action Block ", with: "Action Blocks ")
-        .replacingOccurrences(of: "action block ", with: "Action Blocks ")
+        .replacingOccurrences(of: "Action Block ", with: "Action Plan ")
+        .replacingOccurrences(of: "action block ", with: "Action Plan ")
         .replacingOccurrences(of: "acieving", with: "achieving")
 
     func pct(_ value: Double) -> String {
@@ -193,7 +193,7 @@ fileprivate func normalizePurposeReadableInsightMetricReferences(
         ("Consistency", purposeReadableInsightConsistencyDescriptor(payload.consistency)),
         ("Structure", pct(payload.structure)),
         ("Outcomes", pct(payload.outcomes)),
-        ("Action Blocks", pct(payload.actionBlocks)),
+        ("Action Plans", pct(payload.actionBlocks)),
         ("Little Wins", pct(payload.littleWins)),
         ("Evidence", pct(payload.evidence)),
         ("Carryover penalty", pct(payload.carryoverPenalty))
@@ -224,27 +224,27 @@ fileprivate func isPurposeSingleRecordPayload(_ payload: PurposeReadableInsightR
 
 fileprivate func startupPurposeTechnicalLine(payload: PurposeReadableInsightRequestPayload) -> String {
     let weakest = [
-        ("Action Blocks", payload.actionBlocks),
+        ("Action Plans", payload.actionBlocks),
         ("Little Wins", payload.littleWins),
         ("Evidence", payload.evidence),
         ("Structure", payload.structure),
         ("Outcomes", payload.outcomes)
-    ].min(by: { $0.1 < $1.1 })?.0 ?? "Action Blocks"
+    ].min(by: { $0.1 < $1.1 })?.0 ?? "Action Plans"
     return "Baseline month only: trend and mover signals are not established yet; score gains depend on strengthening \(weakest)."
 }
 
 fileprivate func startupPurposePracticalLine(payload: PurposeReadableInsightRequestPayload) -> String {
     let weakest = [
-        ("Action Blocks", payload.actionBlocks),
+        ("Action Plans", payload.actionBlocks),
         ("Little Wins", payload.littleWins),
         ("Evidence", payload.evidence),
         ("Structure", payload.structure),
         ("Outcomes", payload.outcomes)
-    ].min(by: { $0.1 < $1.1 })?.0 ?? "Action Blocks"
+    ].min(by: { $0.1 < $1.1 })?.0 ?? "Action Plans"
 
     switch weakest {
-    case "Action Blocks":
-        return "Add one small Action Block tied to this passion this week."
+    case "Action Plans":
+        return "Add one small Action Plan tied to this passion this week."
     case "Little Wins":
         return "Add one repeatable Little Win tied to this passion and complete it daily."
     case "Evidence":
@@ -254,7 +254,7 @@ fileprivate func startupPurposePracticalLine(payload: PurposeReadableInsightRequ
     case "Outcomes":
         return "Connect one Outcome that directly supports this passion."
     default:
-        return "Add one Action Block and one Little Win tied to this passion."
+        return "Add one Action Plan and one Little Win tied to this passion."
     }
 }
 
@@ -325,10 +325,10 @@ fileprivate func practicalPurposeInsightLine(payload: PurposeReadableInsightRequ
         return "Carryover penalty (\(pct(carry))) is suppressing progress despite stronger support signals."
     }
     if outcomes >= 0.8 && actionBlocks < 0.6 {
-        return "Outcomes (\(pct(outcomes))) are strong, but Action Blocks (\(pct(actionBlocks))) need more consistent follow-through."
+        return "Outcomes (\(pct(outcomes))) are strong, but Action Plans (\(pct(actionBlocks))) need more consistent follow-through."
     }
     if actionBlocks >= 0.7 && littleWins + 0.18 < actionBlocks {
-        return "Action Blocks (\(pct(actionBlocks))) are stronger than Little Wins (\(pct(littleWins))), reducing daily support."
+        return "Action Plans (\(pct(actionBlocks))) are stronger than Little Wins (\(pct(littleWins))), reducing daily support."
     }
     if evidence < 0.6 && (structure >= 0.7 || outcomes >= 0.7) {
         return "Evidence (\(pct(evidence))) is lagging stronger Structure (\(pct(structure))) and Outcomes (\(pct(outcomes)))."
@@ -336,7 +336,7 @@ fileprivate func practicalPurposeInsightLine(payload: PurposeReadableInsightRequ
     if littleWins < 0.55 {
         return "Little Wins (\(pct(littleWins))) are the weakest support signal for sustaining this passion."
     }
-    return "Action Blocks (\(pct(actionBlocks))) are the clearest practical lever to improve this passion."
+    return "Action Plans (\(pct(actionBlocks))) are the clearest practical lever to improve this passion."
 }
 
 fileprivate func defaultPurposeReadableInsightCTA(payload: PurposeReadableInsightRequestPayload) -> String {
@@ -344,19 +344,19 @@ fileprivate func defaultPurposeReadableInsightCTA(payload: PurposeReadableInsigh
         return "Balance only adding essential actions and completing more actions"
     }
     if payload.littleWins + 0.12 < payload.actionBlocks && payload.littleWins < 0.55 {
-        return "Complete more Little Wins and Action Blocks"
+        return "Complete more Little Wins and Action Plans"
     }
     let weakest = [
-        ("Action Blocks", payload.actionBlocks),
+        ("Action Plans", payload.actionBlocks),
         ("Little Wins", payload.littleWins),
         ("Outcomes", payload.outcomes),
         ("Evidence", payload.evidence),
         ("Structure", payload.structure)
-    ].min(by: { $0.1 < $1.1 })?.0 ?? "Action Blocks"
+    ].min(by: { $0.1 < $1.1 })?.0 ?? "Action Plans"
 
     switch weakest {
-    case "Action Blocks":
-        return "Add one Action Block tied to this passion"
+    case "Action Plans":
+        return "Add one Action Plan tied to this passion"
     case "Little Wins":
         return "Add or revise one Little Win for this passion"
     case "Outcomes":
@@ -374,8 +374,8 @@ fileprivate func normalizePurposeReadableInsightCTALine(_ line: String) -> Strin
     var output = line.trimmingCharacters(in: .whitespacesAndNewlines)
     output = output.replacingOccurrences(of: #"^(?i)in loom,\s*"#, with: "", options: .regularExpression)
     output = output.replacingOccurrences(of: #"^(?i)in loom\s*"#, with: "", options: .regularExpression)
-    output = output.replacingOccurrences(of: "Action Block ", with: "Action Blocks ")
-    output = output.replacingOccurrences(of: "action block ", with: "Action Blocks ")
+    output = output.replacingOccurrences(of: "Action Block ", with: "Action Plan ")
+    output = output.replacingOccurrences(of: "action block ", with: "Action Plan ")
     output = output.replacingOccurrences(
         of: #"(?i)shorten or split one Action Blocks? to reduce carryover"#,
         with: "Balance only adding essential actions and completing more actions",
@@ -2902,8 +2902,8 @@ private func applyPurposeInsightMetricItalics(
         "Consistency",
         "Structure",
         "Outcomes",
-        "Action Blocks",
-        "Action blocks",
+        "Action Plans",
+        "Action plans",
         "Little Wins",
         "Evidence",
         "Carryover penalty",
@@ -2931,7 +2931,7 @@ private func applyPurposeInsightMetricItalics(
         "Consistency",
         "Structure",
         "Outcomes",
-        "Action Blocks",
+        "Action Plans",
         "Action blocks",
         "Little Wins",
         "Evidence",

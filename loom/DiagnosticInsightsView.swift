@@ -259,6 +259,11 @@ final class DiagnosticsInsightsViewModel: ObservableObject {
     private var failedSnapshotKey: String?
     private var currentTask: Task<DiagnosticsInsightsRemoteResult, Never>?
 
+    func invalidateLoadedSnapshot() {
+        loadedSnapshotKey = nil
+        failedSnapshotKey = nil
+    }
+
     func prepareForPendingPersonalizationLoad(showSkeleton: Bool = true) {
         guard insightCards.isEmpty else { return }
         insightsErrorMessage = nil
@@ -604,11 +609,19 @@ private struct DiagnosticInsightsCardsStack: View {
     let lifeAreas: [String]
     let lifeAreaColorKeys: [String: String]
     var showsAnimatedOutline: Bool = true
+    var loadingKinds: Set<DiagnosticInsightCard.Kind> = []
 
     var body: some View {
         VStack(spacing: 12) {
             ForEach(cards) { card in
                 InsightsCard(title: card.kind.title, showsAnimatedOutline: showsAnimatedOutline) {
+                    if loadingKinds.contains(card.kind) {
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.bottom, 4)
+                    }
+
                     if card.kind == .fulfillmentAreas {
                         let areas = uniqueLifeAreas(from: lifeAreas)
                         if !areas.isEmpty {
@@ -657,8 +670,11 @@ struct PersonalizationInsightsCards: View {
     let snapshot: PersonalizationSnapshot
     let userKey: String
     let purposeRefreshCycleKey: String?
+    let refreshToken: UUID
+    let showsInlineLoading: Bool
     @StateObject private var viewModel = DiagnosticsInsightsViewModel()
-    @State private var lastForcedCycleRefreshToken: String?
+    @State private var lastHandledRefreshToken: UUID?
+    @State private var hasLoadedAccountInsights = false
 
     private var diagnosticsSignature: String {
         let diagnosticsHash = DiagnosticsInsightsHasher.hash(for: snapshot)
@@ -666,8 +682,7 @@ struct PersonalizationInsightsCards: View {
     }
 
     private var accountRefreshSignature: String {
-        let cycle = normalizedPurposeCycleKey ?? "none"
-        return "\(diagnosticsSignature)|cycle:\(cycle)"
+        "\(diagnosticsSignature)|refresh:\(refreshToken.uuidString)"
     }
 
     var body: some View {
@@ -679,7 +694,10 @@ struct PersonalizationInsightsCards: View {
                     cards: viewModel.insightCards,
                     lifeAreas: snapshot.lifeAreasSelected,
                     lifeAreaColorKeys: snapshot.lifeAreaColorKeys,
-                    showsAnimatedOutline: false
+                    showsAnimatedOutline: false,
+                    loadingKinds: (showsInlineLoading || viewModel.isGeneratingInsights)
+                        ? [.rootCause, .nextDirection]
+                        : []
                 )
             } else {
                 InsightsCard(title: "Insights") {
@@ -743,51 +761,26 @@ struct PersonalizationInsightsCards: View {
         let snapshotKey = DiagnosticsInsightsHasher.snapshotKey(userKey: userKey, diagnosticsHash: diagnosticsHash)
         AppDebugActivityLog.log(
             "DiagnosticsInsightsAccount",
-            "account refresh start snapshotKey=\(snapshotKey) cycle=\(normalizedPurposeCycleKey ?? "none")"
+            "account refresh start snapshotKey=\(snapshotKey) refreshToken=\(refreshToken.uuidString)"
         )
 
-        // Always load persisted/current first so text remains stable in Account > Personalization.
+        let shouldReloadPersisted = hasLoadedAccountInsights && lastHandledRefreshToken != refreshToken
+        lastHandledRefreshToken = refreshToken
+        hasLoadedAccountInsights = true
+
+        // Load persisted/current by default. After every completed Quick Diagnostic save,
+        // invalidate the currently loaded cards and re-read the freshly persisted snapshot,
+        // even if the diagnostics hash did not change.
+        if shouldReloadPersisted {
+            viewModel.invalidateLoadedSnapshot()
+        }
         await refresh(forceRefresh: false)
-
-        guard let desiredCycle = normalizedPurposeCycleKey else {
-            AppDebugActivityLog.log("DiagnosticsInsightsAccount", "account refresh exit: no desired cycle key")
-            return
-        }
-        // Re-read after baseline refresh so cycle comparison uses the latest persisted value.
-        guard let storedSnapshot = fetchStoredSnapshot(snapshotKey: snapshotKey) else {
-            AppDebugActivityLog.log("DiagnosticsInsightsAccount", "account refresh exit: no stored snapshot")
-            return
-        }
-        let storedCycle = storedSnapshot.purposeRefreshCycleKey?.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard storedCycle != desiredCycle else {
-            AppDebugActivityLog.log("DiagnosticsInsightsAccount", "account refresh exit: cycle unchanged")
-            return
-        }
-
-        let forceRefreshToken = "\(snapshotKey)|\(desiredCycle)"
-        guard lastForcedCycleRefreshToken != forceRefreshToken else {
-            AppDebugActivityLog.log("DiagnosticsInsightsAccount", "account refresh exit: cycle already forced")
-            return
-        }
-        lastForcedCycleRefreshToken = forceRefreshToken
-
-        // Re-analyze only once when the monthly Purpose Insights cycle changes.
-        AppDebugActivityLog.log("DiagnosticsInsightsAccount", "account refresh forcing re-analysis for new cycle")
-        await refresh(forceRefresh: true)
-    }
-
-    private func fetchStoredSnapshot(snapshotKey: String) -> DiagnosticsInsightsSnapshot? {
-        let key = snapshotKey
-        let descriptor = FetchDescriptor<DiagnosticsInsightsSnapshot>(
-            predicate: #Predicate { $0.snapshotKey == key }
-        )
-        return (try? modelContext.fetch(descriptor))?
-            .sorted(by: { $0.generatedAt > $1.generatedAt })
-            .first
     }
 }
 
 private enum PersonalizationInsightsComposer {
+    private static let retryFallbackMessage = "Processing error. Please try again later."
+
     static func decodeRemotePayload(_ insights: DiagnosticInsights) -> DiagnosticsInsightsDecodedPayload {
         let root = normalizedBody(insights.rootCause)
         let next = normalizedBody(insights.nextDirection)
@@ -812,6 +805,7 @@ private enum PersonalizationInsightsComposer {
     }
 
     private static func isValidInsightBody(_ text: String) -> Bool {
+        if text == retryFallbackMessage { return true }
         guard !text.isEmpty else { return false }
         let sentences = text
             .split(whereSeparator: { ".!?".contains($0) })

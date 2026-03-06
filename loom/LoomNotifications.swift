@@ -324,8 +324,8 @@ enum LoomNotificationScheduler {
                     appendOneShot(
                         to: &requests,
                         id: "\(idPrefix)actionBlockAging.\(dayKey(agingDay))",
-                        title: "Action Block Aging",
-                        body: "Your current Action Blocks are aging and may need a refresh.",
+                        title: "Action Plan Aging",
+                        body: "Your current Action Plans are aging and may need a refresh.",
                         fireDate: fireDate,
                         now: now,
                         calendar: calendar

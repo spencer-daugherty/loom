@@ -8,6 +8,7 @@ enum TipPreviewType: String {
     case loomAIPersonalization
     case appleHealthIntegration
     case assignActions
+    case shareToLoom
     case loomAIChat
     case loomAIAutoWrite
 }
@@ -17,6 +18,7 @@ enum TipFeature: String, CaseIterable, Identifiable {
     case loomAIPersonalization
     case appleHealthIntegration
     case assignActions
+    case shareToLoom
     case loomAIChat
     case loomAIAutoWrite
 
@@ -32,6 +34,8 @@ enum TipFeature: String, CaseIterable, Identifiable {
             return "Apple Health Integration"
         case .assignActions:
             return "Assign Actions"
+        case .shareToLoom:
+            return "Share to Loom"
         case .loomAIChat:
             return "LoomAI Chat"
         case .loomAIAutoWrite:
@@ -46,9 +50,11 @@ enum TipFeature: String, CaseIterable, Identifiable {
         case .loomAIPersonalization:
             return "Quick diagnostic answers shape personalized guidance across Loom."
         case .appleHealthIntegration:
-            return "Bring in Apple Health signals so Little Wins and Outcomes stay grounded."
+            return "Bring in Apple Health signals so Little Wins and Goals stay grounded."
         case .assignActions:
             return "Assign actions to people or places to strengthen accountability context."
+        case .shareToLoom:
+            return "Save photos, links, and notes straight into Capture from any app."
         case .loomAIChat:
             return "Ask LoomAI for focused help and get suggestion cards you can apply fast."
         case .loomAIAutoWrite:
@@ -63,9 +69,11 @@ enum TipFeature: String, CaseIterable, Identifiable {
         case .loomAIPersonalization:
             return "Your diagnostics and insights become persistent context for LoomAI. That lets suggestions feel personal, grounded, and consistent as your setup evolves."
         case .appleHealthIntegration:
-            return "Connect Apple Health so progress signals like activity can support your Little Wins and Outcomes. Loom uses this to keep your direction measurable and realistic."
+            return "Connect Apple Health so progress signals like activity can support your Little Wins and Goals. Loom uses this to keep your direction measurable and realistic."
         case .assignActions:
             return "Tag an action to a person or place when context matters. It keeps responsibility clear inside your plan without changing how your workflow moves."
+        case .shareToLoom:
+            return "Share anything into Loom from other apps. Photos, website links, and note text arrive in one Capture flow so you can turn incoming context into action fast."
         case .loomAIChat:
             return "Chat with LoomAI to clarify priorities, unblock execution, and get structured options. Suggestion cards help you move from idea to action quickly."
         case .loomAIAutoWrite:
@@ -83,6 +91,8 @@ enum TipFeature: String, CaseIterable, Identifiable {
             return .appleHealthIntegration
         case .assignActions:
             return .assignActions
+        case .shareToLoom:
+            return .shareToLoom
         case .loomAIChat:
             return .loomAIChat
         case .loomAIAutoWrite:
@@ -93,13 +103,15 @@ enum TipFeature: String, CaseIterable, Identifiable {
     var symbolName: String {
         switch self {
         case .littleWinsMoments:
-            return "camera.filters"
+            return "camera"
         case .loomAIPersonalization:
             return "sparkles"
         case .appleHealthIntegration:
-            return "heart.text.square"
+            return "heart.fill"
         case .assignActions:
-            return "person.crop.circle.badge.checkmark"
+            return "person.fill"
+        case .shareToLoom:
+            return "square.and.arrow.up"
         case .loomAIChat:
             return "bubble.left.and.bubble.right"
         case .loomAIAutoWrite:
@@ -109,7 +121,7 @@ enum TipFeature: String, CaseIterable, Identifiable {
 
     var isNew: Bool {
         switch self {
-        case .littleWinsMoments, .loomAIPersonalization:
+        case .littleWinsMoments, .loomAIPersonalization, .shareToLoom:
             return true
         default:
             return false
@@ -127,7 +139,9 @@ enum TipFeature: String, CaseIterable, Identifiable {
 
     var previewStepCount: Int {
         switch self {
-        case .littleWinsMoments, .loomAIPersonalization, .appleHealthIntegration, .assignActions, .loomAIChat, .loomAIAutoWrite:
+        case .appleHealthIntegration:
+            return 5
+        case .littleWinsMoments, .loomAIPersonalization, .assignActions, .shareToLoom, .loomAIChat, .loomAIAutoWrite:
             return 4
         }
     }

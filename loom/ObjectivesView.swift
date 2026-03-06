@@ -123,7 +123,7 @@ struct ObjectivesView: View {
                     // Outcomes Header
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Outcomes")
+                            Text("Goals")
                                 .font(.title2)
                                 .fontWeight(.bold)
                             HStack {
@@ -181,7 +181,7 @@ struct ObjectivesView: View {
                                 }
                             }
                             Button(action: { navigationAction = .addOutcome }) {
-                                Text("Add Outcome")
+                                Text("Add Goal")
                                     .font(.body)
                                     .foregroundColor(.blue)
                                     .frame(maxWidth: .infinity)

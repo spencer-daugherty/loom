@@ -17,12 +17,18 @@ struct AccountPersonalizationView: View {
     @State private var editorMode: EditorMode?
     @State private var selectedHistorySnapshot: PersonalizationSnapshot?
     @State private var isSaving = false
+    @State private var isRefreshingDiagnosticsInsights = false
+    @State private var diagnosticsInsightsRefreshToken = UUID()
 
     var body: some View {
         List {
             Section {
                 NavigationLink {
-                    FulfillmentStartView(entryMode: .lifeOSInsights, showsProgressStrip: false)
+                    FulfillmentStartView(
+                        entryMode: .lifeOSInsights,
+                        showsProgressStrip: false,
+                        openedFromPersonalization: true
+                    )
                 } label: {
                     Text("LifeOS: Connecting the Dots")
                 }
@@ -33,17 +39,28 @@ struct AccountPersonalizationView: View {
                     VStack(spacing: 12) {
                         if let profileSnapshot = latestPurposeProfileSnapshot {
                             purposeProfileSnapshotCard(profileSnapshot)
-                            Text("Purpose profile refresh checks monthly using your latest inputs.")
+                            Text("Personality profile refreshes monthly based on your latest data.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .frame(maxWidth: .infinity, alignment: .center)
+                                .multilineTextAlignment(.center)
                         }
 
                         PersonalizationInsightsCards(
                             snapshot: current,
                             userKey: personalizationStore.userKey,
-                            purposeRefreshCycleKey: latestPurposeProfileSnapshot?.snapshotKey
+                            purposeRefreshCycleKey: latestPurposeProfileSnapshot?.snapshotKey,
+                            refreshToken: diagnosticsInsightsRefreshToken,
+                            showsInlineLoading: isRefreshingDiagnosticsInsights
                         )
+
+                        Button("Edit diagnostic answers") {
+                            editorMode = .edit
+                        }
+                        .buttonStyle(.plain)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.blue)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
                 } else {
@@ -68,13 +85,6 @@ struct AccountPersonalizationView: View {
             if let current = personalizationStore.current {
                 Section("Current") {
                     snapshotRows(current)
-                    Button("Edit diagnostic answers") {
-                        editorMode = .edit
-                    }
-                    .buttonStyle(.plain)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.blue)
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
 
@@ -164,7 +174,6 @@ struct AccountPersonalizationView: View {
     private func snapshotRows(_ snapshot: PersonalizationSnapshot) -> some View {
         row("Most stress", value: snapshot.stressSource)
         row("Break point", value: snapshot.breakPoint)
-        row("Life areas", value: snapshot.lifeAreasSelected.joined(separator: ", "))
         row("Most days", value: snapshot.planningReality)
         row("First change", value: snapshot.desiredChange)
         row(
@@ -213,10 +222,22 @@ struct AccountPersonalizationView: View {
                 "Personalization",
                 "Edit diagnostic saved. mode=\(mode.rawValue) snapshot=\(savedSnapshot.id.uuidString)"
             )
+
+            let refreshStartedAt = Date()
+            isRefreshingDiagnosticsInsights = true
             await refreshInsightsForUpdatedDiagnostic(savedSnapshot)
+            let minimumLoadingInterval: TimeInterval = 2.0
+            let elapsed = Date().timeIntervalSince(refreshStartedAt)
+            if elapsed < minimumLoadingInterval {
+                let remainingNanoseconds = UInt64((minimumLoadingInterval - elapsed) * 1_000_000_000)
+                try? await Task.sleep(nanoseconds: remainingNanoseconds)
+            }
+            diagnosticsInsightsRefreshToken = UUID()
+            isRefreshingDiagnosticsInsights = false
             AppDebugActivityLog.log("Personalization", "Post-save insights refresh completed")
         } catch {
             // Keep previous values if save fails.
+            isRefreshingDiagnosticsInsights = false
             AppDebugActivityLog.log("Personalization", "Edit diagnostic save failed: \(error.localizedDescription)")
         }
     }

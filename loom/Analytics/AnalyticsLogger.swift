@@ -8,6 +8,7 @@ enum AnalyticsLogger {
         let params = event.parameters
         AppDebugActivityLog.log("Analytics", "\(event.name) \(params)")
 #if canImport(FirebaseAnalytics)
+        guard AnalyticsCollectionPolicy.shouldCollectAnalytics else { return }
         Analytics.logEvent(event.name, parameters: params)
 #endif
 #if DEBUG
@@ -18,6 +19,7 @@ enum AnalyticsLogger {
     static func setUserProperty(_ value: String?, forName name: String) {
         AppDebugActivityLog.log("Analytics", "set_user_property \(name)=\(value ?? "nil")")
 #if canImport(FirebaseAnalytics)
+        guard AnalyticsCollectionPolicy.shouldCollectAnalytics else { return }
         Analytics.setUserProperty(value, forName: name)
 #endif
 #if DEBUG

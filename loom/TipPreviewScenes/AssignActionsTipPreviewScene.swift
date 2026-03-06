@@ -16,7 +16,7 @@ struct AssignActionsTipPreviewScene: View {
                 let secondaryLineWidth = min(88, contentWidth * 0.38)
 
                 VStack(alignment: .leading, spacing: 9) {
-                    Text("Action Block")
+                    Text("Action Plan")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
 

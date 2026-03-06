@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct AppleHealthIntegrationTipPreviewScene: View {
+    private let contentColumnWidth: CGFloat = 350
+
     let step: Int
     let isAnimated: Bool
 
@@ -120,7 +122,7 @@ struct AppleHealthIntegrationTipPreviewScene: View {
     private var littleWinsHealthLayout: some View {
         VStack(alignment: .leading, spacing: 8) {
             animatedHealthCard
-                .frame(width: 338, height: 338 * 1.42)
+                .frame(width: contentColumnWidth, height: contentColumnWidth * 1.42)
                 .opacity(0.5)
                 .frame(maxWidth: .infinity, alignment: .leading)
 

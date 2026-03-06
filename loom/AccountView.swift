@@ -616,7 +616,7 @@ struct AccountView: View {
                     CompletedActionBlocksListView()
                 } label: {
                     HStack {
-                        Text("Completed Action Blocks")
+                        Text("Completed Action Plans")
                     }
                 }
 
@@ -828,12 +828,33 @@ struct AccountView: View {
                             Toggle("Outcome date passed", isOn: $devOutcomeWarningTargetPassed)
                             Toggle("Outcome achieved", isOn: $devOutcomeWarningGoalAchieved)
                         }
-                        Section("Action Blocks") {
-                            Toggle("Action Blocks are old", isOn: $devActionBlocksWarningOldBlocks)
+                        Section("Action Plan") {
+                            Toggle("Action Plans are old", isOn: $devActionBlocksWarningOldBlocks)
                         }
                     }
 
                     Section("LoomAI Cost") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("Total Daily Cost")
+                                    .font(.headline)
+                                Spacer()
+                                Text(formatUSDCost(loomAICostSnapshot.totalDailySpentUSD))
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            HStack {
+                                Text("Total Monthly Cost")
+                                    .font(.headline)
+                                Spacer()
+                                Text(formatUSDCost(loomAICostSnapshot.totalMonthlySpentUSD))
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 4)
+
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
                                 Text("LoomAI Chat")
@@ -868,9 +889,22 @@ struct AccountView: View {
                         }
                         .padding(.vertical, 4)
 
-                        Button("Refresh daily limit") {
-                            resetLoomAIDailyLimit()
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("Insights")
+                                    .font(.headline)
+                                Spacer()
+                                Text("\(formatUSDCost(loomAICostSnapshot.insightsSpentUSD)) / \(formatUSDCost(loomAICostSnapshot.insightsLimitUSD))")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                            ProgressView(value: costProgress(spent: loomAICostSnapshot.insightsSpentUSD, limit: loomAICostSnapshot.insightsLimitUSD))
+                                .tint(.accentColor)
+                            Text("Includes How Loom Sees You and diagnostic insights requests.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
                         }
+                        .padding(.vertical, 4)
                     }
 
                     Section("Danger Zone") {
@@ -2937,7 +2971,7 @@ struct ManageFulfillmentCategoriesView: View {
         .alert("Can't change area", isPresented: $showCannotDeleteCategoryPopup) {
             Button("Return", role: .cancel) {}
         } message: {
-            Text("This area has an ongoing action block, group, or outcome.")
+            Text("This area has an ongoing action plan, group, or outcome.")
         }
         .alert("Archived", isPresented: $showArchiveCompletePopup) {
             Button("OK", role: .cancel) {}
@@ -3360,7 +3394,7 @@ private struct FulfillmentCategoryLabelsView: View {
         .alert("Can't change category", isPresented: $showCannotChangeCategoryPopup) {
             Button("Return", role: .cancel) {}
         } message: {
-            Text("This category has an ongoing action block, group, or outcome.")
+            Text("This category has an ongoing action plan, group, or outcome.")
         }
         .safeAreaInset(edge: .bottom) {
             if showNewCategoryLabelsInlineHint {
@@ -4399,7 +4433,7 @@ private struct NotificationsPlaceholderView: View {
                         toggleRow("Action Captured", keyPath: \.actionCaptured)
                         toggleRow("Capture Action Reminder", keyPath: \.captureActionAttention)
                         toggleRow("Action Due", keyPath: \.actionDue)
-                        toggleRow("Action Block Aging", keyPath: \.actionBlockAging)
+                        toggleRow("Action Plan Aging", keyPath: \.actionBlockAging)
                         toggleRow("Little Wins", keyPath: \.littleWins)
                     }
 

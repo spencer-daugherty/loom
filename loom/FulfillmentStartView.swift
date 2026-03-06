@@ -1334,10 +1334,16 @@ struct FulfillmentStartView: View {
 
     private let entryMode: EntryMode
     private let showsProgressStrip: Bool
+    private let openedFromPersonalization: Bool
 
-    init(entryMode: EntryMode = .onboarding, showsProgressStrip: Bool = true) {
+    init(
+        entryMode: EntryMode = .onboarding,
+        showsProgressStrip: Bool = true,
+        openedFromPersonalization: Bool = false
+    ) {
         self.entryMode = entryMode
         self.showsProgressStrip = showsProgressStrip
+        self.openedFromPersonalization = openedFromPersonalization
     }
 
 
@@ -1582,7 +1588,7 @@ struct FulfillmentStartView: View {
 
     private var isScrollableStep: Bool {
         switch step {
-        case .createCategories, .visionSweep, .purposeSweep, .roles, .littleWins, .passions, .summary, .insights:
+        case .createCategories, .visionSweep, .purposeSweep, .roles, .littleWins, .passions, .summary:
             return true
         default:
             return false
@@ -2105,8 +2111,8 @@ struct FulfillmentStartView: View {
             }
         }
         .padding(.horizontal)
-        .padding(.bottom, (step == .intro ? introFooterReserve : ((step == .summary || step == .insights) ? 100 : 0)) + keyboardScrollableBottomPadding)
-        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .padding(.bottom, (step == .intro ? introFooterReserve : (step == .summary ? 100 : 0)) + keyboardScrollableBottomPadding)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private var keyboardDismissButton: some View {
@@ -3476,44 +3482,96 @@ struct FulfillmentStartView: View {
     }
 
     private var insightsStep: some View {
-        VStack(alignment: .leading, spacing: lifeOSInsightsVerticalSpacing) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("PURPOSE")
-                    .font(.caption.weight(.bold))
-                    .textCase(.uppercase)
-                    .foregroundStyle(.secondary)
-                    .tracking(0.45)
+        GeometryReader { proxy in
+            ZStack {
+                VStack(alignment: .leading, spacing: lifeOSInsightsVerticalSpacing) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("PURPOSE")
+                            .font(.caption.weight(.bold))
+                            .textCase(.uppercase)
+                            .foregroundStyle(.secondary)
+                            .tracking(0.45)
 
-                Text("Your passions reveal who you are and what drives you.")
-                    .font(.subheadline)
-                    .foregroundStyle(.primary)
-                    .fixedSize(horizontal: false, vertical: true)
+                        Text("Your passions reveal who you are and what drives you.")
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    HStack(spacing: 16) {
+                        ForEach(lifeOSPassionCircleModels, id: \.emotionKey) { item in
+                            lifeOSPassionCircle(item)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .anchorPreference(
+                        key: LifeOSInsightsBoundsPreferenceKey.self,
+                        value: .bounds
+                    ) { [.purposeCircles: $0] }
+
+                    Color.clear.frame(height: 48)
+
+                    Spacer(minLength: 0)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+
+                VStack(alignment: .leading, spacing: lifeOSInsightsVerticalSpacing) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("FULFILLMENT")
+                            .font(.caption.weight(.bold))
+                            .textCase(.uppercase)
+                            .foregroundStyle(.secondary)
+                            .tracking(0.45)
+
+                        Text("These areas makeup your life.")
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                    }
+
+                    lifeOSFulfillmentLayeredCluster
+                        .anchorPreference(
+                            key: LifeOSInsightsBoundsPreferenceKey.self,
+                            value: .bounds
+                        ) { [.fulfillmentCluster: $0] }
+                        .zIndex(10)
+                }
+                .padding(.vertical, lifeOSInsightsVerticalSpacing)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxHeight: .infinity, alignment: .center)
+                .zIndex(10)
+
+                VStack(alignment: .leading, spacing: lifeOSInsightsVerticalSpacing) {
+                    Spacer(minLength: 0)
+                    lifeOSBottomSystemsGroup(containerHeight: max(250, proxy.size.height * 0.34))
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .padding(.bottom, proxy.safeAreaInsets.bottom)
             }
-
-            HStack(spacing: 16) {
-                ForEach(lifeOSPassionCircleModels, id: \.emotionKey) { item in
-                    lifeOSPassionCircle(item)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .padding(.horizontal, 2)
+            .overlayPreferenceValue(LifeOSInsightsBoundsPreferenceKey.self) { anchors in
+                GeometryReader { overlayProxy in
+                    if
+                        let purposeAnchor = anchors[.purposeCircles],
+                        let fulfillmentAnchor = anchors[.fulfillmentCluster],
+                        let systemsAnchor = anchors[.systemsIcons]
+                    {
+                        lifeOSInsightsGlobalConnectorLayer(
+                            purposeFrame: overlayProxy[purposeAnchor],
+                            fulfillmentFrame: overlayProxy[fulfillmentAnchor],
+                            systemsFrame: overlayProxy[systemsAnchor]
+                        )
+                    }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .center)
+        }
+    }
 
-            lifeOSVerticalConnectorLine(height: 48)
+    private func lifeOSBottomSystemsGroup(containerHeight: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: lifeOSInsightsVerticalSpacing) {
+            Spacer(minLength: 0)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text("FULFILLMENT")
-                    .font(.caption.weight(.bold))
-                    .textCase(.uppercase)
-                    .foregroundStyle(.secondary)
-                    .tracking(0.45)
-
-                Text("These areas makeup your life.")
-                    .font(.subheadline)
-                    .foregroundStyle(.primary)
-            }
-            .zIndex(10)
-
-            lifeOSFulfillmentSystemsLayeredCluster
-                .zIndex(10)
+            lifeOSSystemsConnectorCluster
 
             Text("These all live inside of each Fulfillment Area. Activity and progress gradually increases your Fulfillment over time.")
                 .font(.footnote)
@@ -3521,6 +3579,15 @@ struct FulfillmentStartView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity, alignment: .center)
                 .fixedSize(horizontal: false, vertical: true)
+
+            if !openedFromPersonalization {
+                Text("This page is viewable anytime in Account > Personalization")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "exclamationmark.triangle.fill")
@@ -3542,15 +3609,111 @@ struct FulfillmentStartView: View {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
             )
-
-            Text("This page is viewable anytime in Account > Personalization")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.horizontal, 2)
+        .frame(maxWidth: .infinity, minHeight: containerHeight, alignment: .bottom)
+    }
+
+    private func lifeOSInsightsGlobalConnectorLayer(
+        purposeFrame: CGRect,
+        fulfillmentFrame: CGRect,
+        systemsFrame: CGRect
+    ) -> some View {
+        let radarCenter = lifeOSGlobalRadarCenter(for: fulfillmentFrame)
+        let purposeStart = CGPoint(x: purposeFrame.midX, y: purposeFrame.maxY + 6)
+        let purposeColor = lifeOSRandomConnectorColor(
+            start: purposeStart,
+            end: radarCenter,
+            fallback: .secondary
+        )
+        let iconCenters = lifeOSIconCenters(for: systemsFrame.width).map { systemsFrame.minX + $0 }
+        let connectorColorsByIcon = lifeOSConnectorColorsByIcon
+        let targetsByIcon = lifeOSGlobalTargetsByIcon(
+            iconCenters: iconCenters,
+            connectorColorsByIcon: connectorColorsByIcon,
+            width: systemsFrame.width,
+            startY: systemsFrame.minY + 6
+        )
+        let connectorSegments = lifeOSConnectorSegments(
+            origin: radarCenter,
+            connectorColorsByIcon: connectorColorsByIcon,
+            targetsByIcon: targetsByIcon
+        )
+
+        return ZStack {
+            lifeOSCurvedConnectorLine(
+                start: purposeStart,
+                end: radarCenter,
+                movingColor: purposeColor,
+                curveLift: max(0, abs(radarCenter.y - purposeStart.y) * 0.12)
+            )
+
+            ForEach(connectorSegments) { segment in
+                lifeOSCurvedConnectorLine(
+                    start: segment.start,
+                    end: segment.end,
+                    movingColor: segment.color,
+                    curveLift: segment.curveLift,
+                    middleHorizontalBend: segment.middleHorizontalBend
+                )
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .allowsHitTesting(false)
+        .zIndex(-50)
+        .overlay(alignment: .topLeading) {
+            lifeOSFulfillmentRadarOcclusionMask
+                .frame(width: fulfillmentFrame.width, height: fulfillmentFrame.height, alignment: .top)
+                .offset(x: fulfillmentFrame.minX, y: fulfillmentFrame.minY)
+                .blendMode(.destinationOut)
+        }
+        .compositingGroup()
+    }
+
+    private func lifeOSGlobalRadarCenter(for fulfillmentFrame: CGRect) -> CGPoint {
+        let leftWidth = min(max(fulfillmentFrame.width * 0.43, 128), 220)
+        let rightWidth = max(150, fulfillmentFrame.width - leftWidth)
+        let radarSize = min(max(186, rightWidth - 8), fulfillmentFrame.height - 8)
+        return CGPoint(
+            x: fulfillmentFrame.minX + leftWidth + (rightWidth / 2),
+            y: fulfillmentFrame.minY + (radarSize / 2)
+        )
+    }
+
+    private func lifeOSGlobalTargetsByIcon(
+        iconCenters: [CGFloat],
+        connectorColorsByIcon: [[Color]],
+        width: CGFloat,
+        startY: CGFloat
+    ) -> [[CGPoint]] {
+        let originBandWidth = min(max((width / 3) * 0.16, 14), 31)
+        return zip(iconCenters, connectorColorsByIcon).map { centerX, colors in
+            let lineCount = max(1, colors.count)
+            guard lineCount > 1 else {
+                return [CGPoint(x: centerX, y: startY)]
+            }
+            return (0..<lineCount).map { idx in
+                let t = CGFloat(idx) / CGFloat(max(lineCount - 1, 1))
+                let x = centerX - (originBandWidth / 2) + (originBandWidth * t)
+                return CGPoint(x: x, y: startY)
+            }
+        }
+    }
+
+    private enum LifeOSInsightsAnchorID: Hashable {
+        case purposeCircles
+        case fulfillmentCluster
+        case systemsIcons
+    }
+
+    private struct LifeOSInsightsBoundsPreferenceKey: PreferenceKey {
+        static var defaultValue: [LifeOSInsightsAnchorID: Anchor<CGRect>] = [:]
+
+        static func reduce(
+            value: inout [LifeOSInsightsAnchorID: Anchor<CGRect>],
+            nextValue: () -> [LifeOSInsightsAnchorID: Anchor<CGRect>]
+        ) {
+            value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+        }
     }
 
     private struct LifeOSPassionCircleModel: Hashable {
@@ -3745,7 +3908,7 @@ struct FulfillmentStartView: View {
     }
 
     private var lifeOSLittleWinsConnectorColors: [Color] {
-        lifeOSFulfillmentAreasWithLittleWinsColors
+        Array(lifeOSFulfillmentAreasWithLittleWinsColors.prefix(6).reversed())
     }
 
     private var lifeOSFulfillmentRadarConnectorLayer: some View {
@@ -3760,6 +3923,9 @@ struct FulfillmentStartView: View {
             let rowTopInset: CGFloat = 0
             let chipsStartY = rowTopInset
             let radarCenter = CGPoint(x: leftWidth + (rightWidth / 2), y: rowTopInset + (radarSize / 2))
+            let indexedMetrics: [LifeOSMetricConnectorInput] = Array(metrics.enumerated()).map {
+                LifeOSMetricConnectorInput(id: $0.offset, metric: $0.element)
+            }
 
             ZStack(alignment: .top) {
                 ZStack {
@@ -3770,15 +3936,25 @@ struct FulfillmentStartView: View {
                         curveLift: 0
                     )
 
-                    ForEach(Array(metrics.enumerated()), id: \.offset) { idx, metric in
-                        let chipCenterY = chipsStartY + CGFloat(idx) * (chipHeight + chipSpacing) + (chipHeight / 2)
-                        lifeOSCurvedConnectorLine(
-                            start: CGPoint(x: leftWidth - 10, y: chipCenterY),
-                            end: radarCenter,
-                            movingColor: metric.1,
-                            curveLift: max(0, abs(radarCenter.y - chipCenterY) * 0.22)
-                        )
-                    }
+                    LifeOSFulfillmentConnectorLines(
+                        items: indexedMetrics,
+                        chipsStartY: chipsStartY,
+                        chipHeight: chipHeight,
+                        chipSpacing: chipSpacing,
+                        leftWidth: leftWidth,
+                        radarCenter: radarCenter,
+                        makeConnectorLine: { start, end, color, lift, verticalBend in
+                            AnyView(
+                                lifeOSCurvedConnectorLine(
+                                    start: start,
+                                    end: end,
+                                    movingColor: color,
+                                    curveLift: lift,
+                                    middleVerticalBend: verticalBend
+                                )
+                            )
+                        }
+                    )
                 }
                 .allowsHitTesting(false)
                 .zIndex(-200)
@@ -3796,22 +3972,15 @@ struct FulfillmentStartView: View {
         .zIndex(200)
     }
 
-    private var lifeOSFulfillmentSystemsLayeredCluster: some View {
+    private var lifeOSFulfillmentLayeredCluster: some View {
         ZStack(alignment: .top) {
-            VStack(spacing: lifeOSInsightsVerticalSpacing) {
-                lifeOSFulfillmentRadarConnectorLayer
-                    .frame(height: lifeOSRadarClusterHeight)
-
-                lifeOSSystemsConnectorCluster
-            }
-            .compositingGroup()
-            .mask {
-                Rectangle()
-                    .overlay(alignment: .top) {
-                        lifeOSFulfillmentRadarOcclusionMask
-                            .blendMode(.destinationOut)
-                    }
-            }
+            lifeOSFulfillmentRadarConnectorLayer
+                .frame(height: lifeOSRadarClusterHeight)
+                .overlay(alignment: .top) {
+                    lifeOSFulfillmentRadarOcclusionMask
+                        .blendMode(.destinationOut)
+                }
+                .compositingGroup()
 
             lifeOSFulfillmentRadarClusterTopLayer
         }
@@ -3856,32 +4025,53 @@ struct FulfillmentStartView: View {
         color: Color,
         chipHeight: CGFloat
     ) -> some View {
-        Text(title)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(color)
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
-            .frame(maxWidth: .infinity, minHeight: chipHeight, alignment: .leading)
-            .padding(.horizontal, 10)
-            .background(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(color.opacity(0.18))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .stroke(color.opacity(0.35), lineWidth: 1)
-            )
+        lifeOSFulfillmentChipShell(
+            chipHeight: chipHeight,
+            backgroundColor: color.opacity(0.18),
+            strokeColor: color.opacity(0.35)
+        ) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
     }
 
     private func lifeOSFulfillmentChipMaskRow(
+        title: String,
         chipHeight: CGFloat
     ) -> some View {
-        Color.clear
+        lifeOSFulfillmentChipShell(
+            chipHeight: chipHeight,
+            backgroundColor: .black,
+            strokeColor: .black
+        ) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.clear)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .shadow(color: Color(.systemBackground), radius: 3, x: 0, y: 0)
+    }
+
+    private func lifeOSFulfillmentChipShell<Content: View>(
+        chipHeight: CGFloat,
+        backgroundColor: Color,
+        strokeColor: Color,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        content()
             .frame(maxWidth: .infinity, minHeight: chipHeight, alignment: .leading)
             .padding(.horizontal, 10)
             .background(
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(Color.black)
+                    .fill(backgroundColor)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .stroke(strokeColor, lineWidth: 1)
             )
     }
 
@@ -3923,16 +4113,16 @@ struct FulfillmentStartView: View {
         case .mask:
             HStack(alignment: .top, spacing: 18) {
                 VStack(alignment: .leading, spacing: chipSpacing) {
-                    ForEach(metrics, id: \.0) { _ in
+                    ForEach(metrics, id: \.0) { metric in
                         lifeOSFulfillmentChipMaskRow(
+                            title: metric.0,
                             chipHeight: chipHeight
                         )
                     }
                 }
                 .frame(width: leftWidth, alignment: .leading)
 
-                Circle()
-                    .fill(Color.black)
+                lifeOSFulfillmentRadarSectorMask(metrics: metrics, radarSize: radarSize)
                     .frame(width: radarSize, height: radarSize)
                     .frame(maxWidth: .infinity, alignment: .center)
             }
@@ -3940,23 +4130,85 @@ struct FulfillmentStartView: View {
         }
     }
 
+    private func lifeOSFulfillmentRadarSectorMask(
+        metrics: [(String, Color, Double)],
+        radarSize: CGFloat
+    ) -> some View {
+        GeometryReader { geo in
+            let size = min(geo.size.width, geo.size.height)
+            let half = size / 2
+            let radius = half
+            let center = CGPoint(x: half, y: half)
+            let count = metrics.count
+            let dotDiameter: CGFloat = 14
+
+            let outerPoints: [CGPoint] = (0..<count).map { index in
+                let angle = Angle.degrees((Double(index) / Double(max(count, 1))) * 360 - 90).radians
+                return CGPoint(
+                    x: center.x + cos(angle) * radius,
+                    y: center.y + sin(angle) * radius
+                )
+            }
+
+            let filledPoints: [CGPoint] = outerPoints.enumerated().map { index, point in
+                let ratio = max(0.2, min(metrics[index].2 / 100, 1))
+                return CGPoint(
+                    x: half + (point.x - half) * ratio,
+                    y: half + (point.y - half) * ratio
+                )
+            }
+
+            ZStack {
+                if count > 1 {
+                    ForEach(0..<count, id: \.self) { index in
+                        let nextIndex = (index + 1) % count
+                        Path { path in
+                            path.move(to: center)
+                            path.addLine(to: filledPoints[index])
+                            path.addLine(to: filledPoints[nextIndex])
+                            path.closeSubpath()
+                        }
+                        .fill(Color.black)
+                    }
+                } else if count == 1, let point = filledPoints.first {
+                    Path { path in
+                        path.move(to: center)
+                        path.addLine(to: point)
+                        path.addArc(
+                            center: center,
+                            radius: max(2, radius * 0.2),
+                            startAngle: .degrees(-90),
+                            endAngle: .degrees(270),
+                            clockwise: false
+                        )
+                        path.closeSubpath()
+                    }
+                    .fill(Color.black)
+                }
+
+                ForEach(filledPoints.indices, id: \.self) { index in
+                    Circle()
+                        .fill(Color.black)
+                        .frame(width: dotDiameter, height: dotDiameter)
+                        .position(filledPoints[index])
+                }
+            }
+            .frame(width: size, height: size)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        }
+    }
+
     private var lifeOSSystemsConnectorCluster: some View {
-        let connectorLift = (lifeOSRadarClusterHeight / 2) + lifeOSInsightsVerticalSpacing
         let connectorGap: CGFloat = 8
-        let connectorCanvasHeight = connectorLift + connectorGap + 2
 
         return lifeOSSystemsIconsRow
             .frame(maxWidth: .infinity)
             .padding(.top, connectorGap)
+            .anchorPreference(
+                key: LifeOSInsightsBoundsPreferenceKey.self,
+                value: .bounds
+            ) { [.systemsIcons: $0] }
             .zIndex(1)
-            .background(Color.clear)
-            .background(alignment: .top) {
-                lifeOSSystemsConnectorBackground(
-                    connectorCanvasHeight: connectorCanvasHeight,
-                    connectorLift: connectorLift
-                )
-                .zIndex(-200)
-            }
     }
 
     private var lifeOSSystemsIconsRow: some View {
@@ -3999,58 +4251,31 @@ struct FulfillmentStartView: View {
         connectorLift: CGFloat
     ) -> some View {
         GeometryReader { geo in
-            let leftWidth = min(max(geo.size.width * 0.43, 128), 220)
-            let rightWidth = max(150, geo.size.width - leftWidth)
-            let radarCenterX = leftWidth + (rightWidth / 2)
+            let radarCenterX = lifeOSRadarCenterX(for: geo.size)
             let origin = CGPoint(x: radarCenterX, y: 0)
-            let iconCenters: [CGFloat] = [
-                geo.size.width * 0.16,
-                geo.size.width * 0.50,
-                geo.size.width * 0.84
-            ]
-            let columnWidth = geo.size.width / 3
-            let originBandWidth = min(max(columnWidth * 0.32, 28), 62)
-            let connectorColorsByIcon: [[Color]] = [
-                lifeOSConnectorPalette,
-                lifeOSLittleWinsConnectorColors,
-                lifeOSConnectorPalette
-            ]
-
-            let targetsByIcon: [[CGPoint]] = zip(iconCenters, connectorColorsByIcon).map { centerX, colors in
-                let lineCount = max(1, colors.count)
-                guard lineCount > 1 else {
-                    return [CGPoint(x: centerX, y: connectorCanvasHeight - 2)]
-                }
-                return (0..<lineCount).map { idx in
-                    let t = CGFloat(idx) / CGFloat(lineCount - 1)
-                    let x = centerX - (originBandWidth / 2) + (originBandWidth * t)
-                    return CGPoint(x: x, y: connectorCanvasHeight - 2)
-                }
-            }
+            let connectorColorsByIcon = lifeOSConnectorColorsByIcon
+            let iconCenters = lifeOSIconCenters(for: geo.size.width)
+            let targetsByIcon = lifeOSTargetsByIcon(
+                iconCenters: iconCenters,
+                connectorColorsByIcon: connectorColorsByIcon,
+                width: geo.size.width,
+                connectorCanvasHeight: connectorCanvasHeight
+            )
+            let connectorSegments = lifeOSConnectorSegments(
+                origin: origin,
+                connectorColorsByIcon: connectorColorsByIcon,
+                targetsByIcon: targetsByIcon
+            )
 
             ZStack {
-                ForEach(0..<targetsByIcon.count, id: \.self) { iconIndex in
-                    ForEach(0..<targetsByIcon[iconIndex].count, id: \.self) { laneIndex in
-                        let start = targetsByIcon[iconIndex][laneIndex]
-                        let laneLift = 14 + (CGFloat(laneIndex) * 2.2)
-                        let connectorColors = connectorColorsByIcon[iconIndex]
-                        let lineColor = connectorColors[min(laneIndex, max(connectorColors.count - 1, 0))]
-                        if iconIndex == 1 {
-                            lifeOSCurvedConnectorLine(
-                                start: start,
-                                end: origin,
-                                movingColor: lineColor,
-                                curveLift: laneLift
-                            )
-                        } else {
-                            lifeOSCurvedConnectorLine(
-                                start: start,
-                                end: origin,
-                                movingColor: lineColor,
-                                curveLift: laneLift
-                            )
-                        }
-                    }
+                ForEach(connectorSegments) { segment in
+                    lifeOSCurvedConnectorLine(
+                        start: segment.start,
+                        end: segment.end,
+                        movingColor: segment.color,
+                        curveLift: segment.curveLift,
+                        middleHorizontalBend: segment.middleHorizontalBend
+                    )
                 }
             }
             .frame(width: geo.size.width, height: connectorCanvasHeight, alignment: .top)
@@ -4065,17 +4290,177 @@ struct FulfillmentStartView: View {
         .background(Color.clear)
     }
 
+    private var lifeOSConnectorColorsByIcon: [[Color]] {
+        [
+            lifeOSConnectorPalette,
+            lifeOSLittleWinsConnectorColors,
+            lifeOSConnectorPalette
+        ]
+    }
+
+    private struct LifeOSConnectorSegment: Identifiable {
+        let id: String
+        let start: CGPoint
+        let end: CGPoint
+        let color: Color
+        let curveLift: CGFloat
+        let middleHorizontalBend: CGFloat
+    }
+
+    private struct LifeOSMetricConnectorInput: Identifiable {
+        let id: Int
+        let metric: (String, Color, Double)
+    }
+
+    private struct LifeOSFulfillmentConnectorLines: View {
+        let items: [LifeOSMetricConnectorInput]
+        let chipsStartY: CGFloat
+        let chipHeight: CGFloat
+        let chipSpacing: CGFloat
+        let leftWidth: CGFloat
+        let radarCenter: CGPoint
+        let makeConnectorLine: (CGPoint, CGPoint, Color, CGFloat, CGFloat) -> AnyView
+
+        var body: some View {
+            items.reduce(AnyView(EmptyView())) { partial, item in
+                AnyView(
+                    ZStack {
+                        partial
+                        connectorViews(for: item)
+                    }
+                )
+            }
+        }
+
+        @ViewBuilder
+        private func connectorViews(for item: LifeOSMetricConnectorInput) -> some View {
+            let idx = item.id
+            let metric = item.metric
+            let chipCenterY = chipsStartY + CGFloat(idx) * (chipHeight + chipSpacing) + (chipHeight / 2)
+            let verticalSpread = chipHeight * 0.5
+            let centerIndex = CGFloat(max(items.count - 1, 0)) / 2
+            let chipOffsetFromCenter = CGFloat(idx) - centerIndex
+            let verticalBendMagnitude = abs(radarCenter.y - chipCenterY) * 0.18
+            let middleVerticalBend: CGFloat = abs(chipOffsetFromCenter) < 0.01
+                ? 0
+                : (chipOffsetFromCenter < 0 ? verticalBendMagnitude : -verticalBendMagnitude)
+
+            let topY = chipCenterY - (verticalSpread / 2)
+            let middleY = chipCenterY
+            let bottomY = chipCenterY + (verticalSpread / 2)
+
+            makeConnectorLine(
+                CGPoint(x: leftWidth - 10, y: topY),
+                radarCenter,
+                metric.1,
+                max(0, abs(radarCenter.y - topY) * 0.22),
+                middleVerticalBend
+            )
+
+            makeConnectorLine(
+                CGPoint(x: leftWidth - 10, y: middleY),
+                radarCenter,
+                metric.1,
+                max(0, abs(radarCenter.y - middleY) * 0.22),
+                middleVerticalBend
+            )
+
+            makeConnectorLine(
+                CGPoint(x: leftWidth - 10, y: bottomY),
+                radarCenter,
+                metric.1,
+                max(0, abs(radarCenter.y - bottomY) * 0.22),
+                middleVerticalBend
+            )
+        }
+    }
+
+    private func lifeOSRadarCenterX(for size: CGSize) -> CGFloat {
+        let leftWidth = min(max(size.width * 0.43, 128), 220)
+        let rightWidth = max(150, size.width - leftWidth)
+        return leftWidth + (rightWidth / 2)
+    }
+
+    private func lifeOSIconCenters(for width: CGFloat) -> [CGFloat] {
+        [
+            width * 0.16,
+            width * 0.50,
+            width * 0.84
+        ]
+    }
+
+    private func lifeOSTargetsByIcon(
+        iconCenters: [CGFloat],
+        connectorColorsByIcon: [[Color]],
+        width: CGFloat,
+        connectorCanvasHeight: CGFloat
+    ) -> [[CGPoint]] {
+        let originBandWidth = min(max((width / 3) * 0.16, 14), 31)
+        return zip(iconCenters, connectorColorsByIcon).map { centerX, colors in
+            let lineCount = max(1, colors.count)
+            guard lineCount > 1 else {
+                return [CGPoint(x: centerX, y: connectorCanvasHeight - 2)]
+            }
+            return (0..<lineCount).map { idx in
+                let t = CGFloat(idx) / CGFloat(lineCount - 1)
+                let x = centerX - (originBandWidth / 2) + (originBandWidth * t)
+                return CGPoint(x: x, y: connectorCanvasHeight - 2)
+            }
+        }
+    }
+
+    private func lifeOSConnectorSegments(
+        origin: CGPoint,
+        connectorColorsByIcon: [[Color]],
+        targetsByIcon: [[CGPoint]]
+    ) -> [LifeOSConnectorSegment] {
+        var segments: [LifeOSConnectorSegment] = []
+        for iconIndex in targetsByIcon.indices {
+            let targets = targetsByIcon[iconIndex]
+            let colors = connectorColorsByIcon[iconIndex]
+            for laneIndex in targets.indices {
+                let start = targets[laneIndex]
+                let laneLift = 14 + (CGFloat(laneIndex) * 2.2)
+                let color = colors[min(laneIndex, max(colors.count - 1, 0))]
+                let middleHorizontalBend: CGFloat
+                switch iconIndex {
+                case 0:
+                    middleHorizontalBend = abs(origin.x - start.x) * 0.45
+                case 1:
+                    middleHorizontalBend = abs(origin.x - start.x) * 0.9
+                default:
+                    middleHorizontalBend = 0
+                }
+                segments.append(
+                    LifeOSConnectorSegment(
+                        id: "\(iconIndex)-\(laneIndex)",
+                        start: start,
+                        end: origin,
+                        color: color,
+                        curveLift: laneLift,
+                        middleHorizontalBend: middleHorizontalBend
+                    )
+                )
+            }
+        }
+        return segments
+    }
+
     private func lifeOSCurvedConnectorLine(
         start: CGPoint,
         end: CGPoint,
         movingColor: Color,
-        curveLift: CGFloat
+        curveLift: CGFloat,
+        middleHorizontalBend: CGFloat = 0,
+        middleVerticalBend: CGFloat = 0
     ) -> some View {
         return lifeOSRouteLineCanvas(
             start: start,
             end: end,
             colors: [movingColor],
             curveLift: curveLift,
+            middleHorizontalBend: middleHorizontalBend,
+            middleVerticalBend: middleVerticalBend,
             lineCount: 1,
             laneSpread: 0
         )
@@ -4087,6 +4472,8 @@ struct FulfillmentStartView: View {
         end: CGPoint,
         colors: [Color],
         curveLift: CGFloat,
+        middleHorizontalBend: CGFloat = 0,
+        middleVerticalBend: CGFloat = 0,
         lineCount: Int,
         laneSpread: CGFloat
     ) -> some View {
@@ -4108,13 +4495,32 @@ struct FulfillmentStartView: View {
             routedPoint: { s, _, laneOffset in
                 let p0 = CGPoint(x: start.x, y: start.y + laneOffset * 0.22)
                 let p2 = CGPoint(x: end.x, y: end.y + laneOffset * 0.22)
-                let control = CGPoint(
-                    x: (p0.x + p2.x) / 2 + laneOffset * 0.08,
-                    y: min(p0.y, p2.y) - curveLift + laneOffset * 0.06
-                )
-                return lifeOSQuadraticPoint(start: p0, control: control, end: p2, t: s)
+                if middleHorizontalBend > 0.0001 {
+                    let control1 = CGPoint(
+                        x: p0.x + middleHorizontalBend + laneOffset * 0.08,
+                        y: p0.y - curveLift * 0.12 + laneOffset * 0.04
+                    )
+                    let control2 = CGPoint(
+                        x: p2.x + middleHorizontalBend * 0.18 + laneOffset * 0.04,
+                        y: p2.y + curveLift * 0.92 + laneOffset * 0.04
+                    )
+                    return lifeOSCubicPoint(
+                        start: p0,
+                        control1: control1,
+                        control2: control2,
+                        end: p2,
+                        t: s
+                    )
+                } else {
+                    let control = CGPoint(
+                        x: (p0.x + p2.x) / 2 + laneOffset * 0.08,
+                        y: ((p0.y + p2.y) / 2) + middleVerticalBend + laneOffset * 0.06 - curveLift
+                    )
+                    return lifeOSQuadraticPoint(start: p0, control: control, end: p2, t: s)
+                }
             },
-            lineSeedOffset: connectorSeed
+            lineSeedOffset: connectorSeed,
+            lineWidthMultiplier: 0.5
         )
         .allowsHitTesting(false)
         .zIndex(-200)
@@ -4151,20 +4557,51 @@ struct FulfillmentStartView: View {
         return CGPoint(x: x, y: y)
     }
 
+    private func lifeOSCubicPoint(
+        start: CGPoint,
+        control1: CGPoint,
+        control2: CGPoint,
+        end: CGPoint,
+        t: CGFloat
+    ) -> CGPoint {
+        let invT = 1 - t
+        let x =
+            (invT * invT * invT * start.x) +
+            (3 * invT * invT * t * control1.x) +
+            (3 * invT * t * t * control2.x) +
+            (t * t * t * end.x)
+        let y =
+            (invT * invT * invT * start.y) +
+            (3 * invT * invT * t * control1.y) +
+            (3 * invT * t * t * control2.y) +
+            (t * t * t * end.y)
+        return CGPoint(x: x, y: y)
+    }
+
     private var lifeOSLittleWinsMiniCardStack: some View {
-        let baseColor = lifeOSLittleWinsAccentColor
+        let cardColors = lifeOSFulfillmentAreasWithLittleWinsColors
         let cardWidth: CGFloat = 28
         let cardHeight: CGFloat = cardWidth * 1.42
         let radarSideCount = max(3, min(7, lifeOSFulfillmentRadarMetrics.count))
+        let horizontalStep: CGFloat = 8
+        let visibleColors = Array(cardColors.prefix(6))
+        let totalWidth = cardWidth + (CGFloat(max(visibleColors.count - 1, 0)) * horizontalStep)
 
-        return RoundedRectangle(cornerRadius: 4, style: .continuous)
-            .fill(baseColor.opacity(0.70))
-            .frame(width: cardWidth, height: cardHeight)
-            .overlay {
-                LifeOSRadarPolygonOutline(sides: radarSideCount)
-                    .stroke(Color.white.opacity(0.86), style: StrokeStyle(lineWidth: 1.4))
-                    .padding(4)
+        return ZStack(alignment: .leading) {
+            ForEach(Array(visibleColors.enumerated()), id: \.offset) { index, color in
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(color)
+                    .frame(width: cardWidth, height: cardHeight)
+                    .overlay {
+                        LifeOSRadarPolygonOutline(sides: radarSideCount)
+                            .stroke(Color.white.opacity(0.86), style: StrokeStyle(lineWidth: 1.4))
+                            .padding(4)
+                    }
+                    .offset(x: CGFloat(max(visibleColors.count - 1 - index, 0)) * horizontalStep)
+                    .zIndex(Double(visibleColors.count - index))
             }
+        }
+        .frame(width: totalWidth, height: cardHeight, alignment: .leading)
     }
 
     private struct LifeOSRadarPolygonOutline: Shape {
@@ -6475,7 +6912,7 @@ struct FulfillmentStartView: View {
 
     private func attemptRemoveCategoryFromStepList(_ category: String) {
         if hasOngoingUsage(in: category) {
-            triggerHint("This category has an ongoing action block, group, or outcome.")
+            triggerHint("This category has an ongoing action plan, group, or outcome.")
             return
         }
         removeCategoryFromStepList(category)
@@ -6548,7 +6985,7 @@ struct FulfillmentStartView: View {
             assignDefaultColorIfNeeded(for: category)
         } else {
             if hasOngoingUsage(in: category) {
-                triggerHint("This category has an ongoing action block, group, or outcome.")
+                triggerHint("This category has an ongoing action plan, group, or outcome.")
                 return
             }
             selectedCategoryNames.removeAll { $0.caseInsensitiveCompare(category) == .orderedSame }

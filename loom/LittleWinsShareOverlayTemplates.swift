@@ -132,19 +132,22 @@ struct LittleWinsShareOverlayData {
 struct LittleWinsShareOverlayTemplateView: View {
     let template: LittleWinsShareTemplate
     let data: LittleWinsShareOverlayData
+    let showsBackdrop: Bool
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            LinearGradient(
-                colors: [
-                    Color.black.opacity(0.28),
-                    Color.black.opacity(0.14),
-                    Color.black.opacity(0.24)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+            if showsBackdrop {
+                LinearGradient(
+                    colors: [
+                        Color.black.opacity(0.28),
+                        Color.black.opacity(0.14),
+                        Color.black.opacity(0.24)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .ignoresSafeArea()
+            }
 
             switch template {
             case .todaysWins:
@@ -167,6 +170,16 @@ struct LittleWinsShareOverlayTemplateView: View {
                 foundingMemberLayout
             }
         }
+    }
+
+    init(
+        template: LittleWinsShareTemplate,
+        data: LittleWinsShareOverlayData,
+        showsBackdrop: Bool = true
+    ) {
+        self.template = template
+        self.data = data
+        self.showsBackdrop = showsBackdrop
     }
 
     private var standardTemplatePadding: EdgeInsets {
@@ -795,7 +808,7 @@ struct LittleWinsShareOverlayTemplateView: View {
         .mask(
             Rectangle()
                 .overlay {
-                    Rectangle().fill(Color.white)
+                    Rectangle().fill(Color(.systemBackground))
                     Rectangle()
                         .frame(width: topCutoutWidth, height: lineWidth + 12)
                         .position(x: safeWidth / 2, y: topY)

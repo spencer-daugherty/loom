@@ -82,7 +82,7 @@ struct CompletedActionBlocksListView: View {
     var body: some View {
         List {
             if filteredSessions.isEmpty {
-                Text("No completed action blocks.")
+                Text("No completed action plans.")
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .center)
@@ -157,7 +157,7 @@ struct CompletedActionBlocksListView: View {
             .padding(.bottom, 10)
             .background(.clear)
         }
-        .navigationTitle("Completed Action Blocks")
+        .navigationTitle("Completed Action Plans")
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
                 if isSearchFocused {
@@ -188,13 +188,13 @@ struct CompletedActionBlocksListView: View {
                 }
             }
         }
-        .alert("Delete Action Blocks?", isPresented: Binding(
+        .alert("Delete Action Plans?", isPresented: Binding(
             get: { pendingDeleteSession != nil },
             set: { if !$0 { pendingDeleteSession = nil } }
         )) {
             Button("Delete", role: .destructive) {
                 guard let session = pendingDeleteSession else { return }
-                RecentlyDeletedStore.trash(session, in: modelContext, source: "Completed Action Blocks")
+                RecentlyDeletedStore.trash(session, in: modelContext, source: "Completed Action Plans")
                 try? modelContext.save()
                 pendingDeleteSession = nil
             }
@@ -221,7 +221,7 @@ struct CompletedActionBlocksListView: View {
 }
 
 private enum CompletedTab: String, CaseIterable, Identifiable {
-    case actionBlocks = "Action Blocks"
+    case actionBlocks = "Action Plan"
     case insights = "Insights"
     case journal = "Journal"
     var id: String { rawValue }
@@ -328,7 +328,7 @@ struct CompletedActionBlocksDetailView: View {
         }
         .padding(.horizontal)
         .safeAreaPadding(.top)
-        .navigationTitle("Completed Action Blocks")
+        .navigationTitle("Completed Action Plans")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(
             isPresented: Binding(

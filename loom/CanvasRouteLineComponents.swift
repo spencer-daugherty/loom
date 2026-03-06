@@ -6,6 +6,7 @@ struct IntroRouteLinesCanvas: View {
     let laneOffsetForIndex: (Int, Int) -> CGFloat
     let routedPoint: (CGFloat, CGSize, CGFloat) -> CGPoint
     let lineSeedOffset: Int
+    let lineWidthMultiplier: CGFloat
 
     @State private var animationStartDate: Date = .now
 
@@ -14,13 +15,15 @@ struct IntroRouteLinesCanvas: View {
         colors: [Color],
         laneOffsetForIndex: @escaping (Int, Int) -> CGFloat,
         routedPoint: @escaping (CGFloat, CGSize, CGFloat) -> CGPoint,
-        lineSeedOffset: Int = 0
+        lineSeedOffset: Int = 0,
+        lineWidthMultiplier: CGFloat = 1
     ) {
         self.lineCount = lineCount
         self.colors = colors
         self.laneOffsetForIndex = laneOffsetForIndex
         self.routedPoint = routedPoint
         self.lineSeedOffset = lineSeedOffset
+        self.lineWidthMultiplier = lineWidthMultiplier
     }
 
     private func rand(_ seed: Int, _ a: Double, _ b: Double) -> Double {
@@ -110,7 +113,7 @@ struct IntroRouteLinesCanvas: View {
                     ctx.stroke(
                         path,
                         with: .linearGradient(tailGradient, startPoint: startPt, endPoint: endPt),
-                        lineWidth: 10
+                        lineWidth: 10 * lineWidthMultiplier
                     )
 
                     let tailFactorAtGlow = 1.0 - smoothstepD(tailStartFrac, 1.0, posFrac)
@@ -133,7 +136,7 @@ struct IntroRouteLinesCanvas: View {
                         layer.stroke(
                             path,
                             with: .linearGradient(gradient, startPoint: startPt, endPoint: endPt),
-                            lineWidth: 12
+                            lineWidth: 12 * lineWidthMultiplier
                         )
                     }
                     ctx.drawLayer { layer in
@@ -142,7 +145,7 @@ struct IntroRouteLinesCanvas: View {
                         layer.stroke(
                             path,
                             with: .linearGradient(gradient, startPoint: startPt, endPoint: endPt),
-                            lineWidth: 6
+                            lineWidth: 6 * lineWidthMultiplier
                         )
                     }
                 }

@@ -235,7 +235,7 @@ struct LoomAIChatView: View {
                         .fill(Color(.systemGray5))
                 )
                 .padding(.horizontal, 12)
-                .opacity(error == requestTimedOutMessage ? transientErrorOpacity : 1)
+                .opacity(shouldAutoDismissError(error) ? transientErrorOpacity : 1)
             }
 
         }
@@ -362,7 +362,7 @@ struct LoomAIChatView: View {
         }
 
         displayedErrorMessage = message
-        guard message == requestTimedOutMessage else { return }
+        guard shouldAutoDismissError(message) else { return }
 
         let token = UUID()
         transientErrorToken = token
@@ -380,6 +380,13 @@ struct LoomAIChatView: View {
         }
         transientErrorWorkItem = hideWorkItem
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: hideWorkItem)
+    }
+
+    private func shouldAutoDismissError(_ message: String) -> Bool {
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed == requestTimedOutMessage { return true }
+        return trimmed.hasPrefix("Couldn’t find the existing")
+            || trimmed.hasPrefix("Couldn't find the existing")
     }
 
     private var suggestedPromptChipBar: some View {
@@ -911,7 +918,7 @@ struct LoomAIChatView: View {
         if combined.contains("fulfillment") || combined.contains("category") { return "Fulfillment Areas" }
         if combined.contains("outcome") || combined.contains("goal") { return "Goals" }
         if combined.contains("actionblock") || combined.contains("action_block") || combined.contains("actions") {
-            return "Action Blocks"
+            return "Action Plan"
         }
         if combined.contains("capture") { return "Capture" }
         if combined.contains("diagnostic") || combined.contains("personalization") { return "Diagnostic" }
@@ -1142,7 +1149,7 @@ struct LoomAIChatView: View {
             suggestedIdentityPrimaryText(action: action, isApplied: isApplied)
         } else if action.type == "replacePurposeVision" || action.type == "updatePurposeVision" {
             suggestedSimpleTwoLineAction(
-                topLine: isApplied ? "Updated Purpose Vision:" : "Update Purpose Vision:",
+                topLine: "",
                 detail: action.payload["vision"] ?? action.payload["text"] ?? action.title,
                 isApplied: isApplied
             )
@@ -1160,11 +1167,14 @@ struct LoomAIChatView: View {
 
     private func suggestedSimpleTwoLineAction(topLine: String, detail: String, isApplied: Bool) -> some View {
         let cleaned = detail.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanedTopLine = topLine.trimmingCharacters(in: .whitespacesAndNewlines)
         return VStack(alignment: .leading, spacing: 3) {
-            Text(topLine)
-                .font(.subheadline.italic())
-                .foregroundStyle(suggestedActionPrimaryColor(isApplied: isApplied).opacity(isApplied ? 0.88 : 0.95))
-                .multilineTextAlignment(.leading)
+            if !cleanedTopLine.isEmpty {
+                Text(cleanedTopLine)
+                    .font(.subheadline.italic())
+                    .foregroundStyle(suggestedActionPrimaryColor(isApplied: isApplied).opacity(isApplied ? 0.88 : 0.95))
+                    .multilineTextAlignment(.leading)
+            }
             if !cleaned.isEmpty {
                 Text(cleaned)
                     .font(.subheadline.weight(.bold))
@@ -1209,28 +1219,9 @@ struct LoomAIChatView: View {
     }
 
     private func suggestedPassionPrimaryText(action: LoomAISuggestedAction, isApplied: Bool) -> some View {
-        let rawEmotion = (action.payload["emotion"] ?? action.payload["passionType"] ?? "love")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        let emotion: String = {
-            switch rawEmotion {
-            case "vow", "vows":
-                return "Vows"
-            case "thrill":
-                return "Thrill"
-            case "hate", "just":
-                return "Hate"
-            default:
-                return "Love"
-            }
-        }()
         let passion = (action.payload["passion"] ?? action.payload["title"] ?? action.payload["text"] ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let top = isApplied ? "Added Passion (\(emotion)):" : "Add Passion (\(emotion)):"
         return VStack(alignment: .leading, spacing: 3) {
-            Text(top)
-                .font(.subheadline.italic())
-                .foregroundStyle(suggestedActionPrimaryColor(isApplied: isApplied).opacity(isApplied ? 0.88 : 0.95))
             if !passion.isEmpty {
                 Text(passion)
                     .font(.subheadline.weight(.bold))
@@ -1367,7 +1358,7 @@ struct LoomAIChatView: View {
         case "replacePurposeVision", "updatePurposeVision":
             return "Updates your Purpose Vision."
         case "addPassion", "addPassionItem":
-            return categoryOnlySubtitle(action, fallback: "Adds a passion in the selected emotion bucket.")
+            return nil
         case "launchAddFulfillmentAreaPrefill":
             return "Opens the Add Fulfillment Area flow with Loom's suggested prefill."
         case "createAction", "createCaptureAction":
@@ -1730,7 +1721,7 @@ struct LoomAIChatView: View {
                 .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
             if !currentActions.isEmpty {
-                lines.append("Action Blocks: \(currentActions.prefix(2).joined(separator: " • "))")
+                lines.append("Action Plan: \(currentActions.prefix(2).joined(separator: " • "))")
             }
         }
 
@@ -1739,7 +1730,7 @@ struct LoomAIChatView: View {
             "Searching root cause and next direction...",
             "Searching goals, reasons, and fulfillment graph...",
             "Searching identity, passions, and little wins...",
-            "Searching capture list and action blocks..."
+            "Searching capture list and action plans..."
         ]
 
         let merged = (lines + fallback).map { String($0.prefix(180)) }.filter { !$0.isEmpty }
@@ -1827,6 +1818,16 @@ private struct LoomAIDeepStateScanningCard: View {
     @State private var incomingIndex = 0
     @State private var isTransitioning = false
     @State private var cycleTask: Task<Void, Never>? = nil
+    private let baseTextAreaMinHeight: CGFloat = 88
+    private let cardHeightScale: CGFloat = 0.8
+
+    private var textAreaMinHeight: CGFloat {
+        baseTextAreaMinHeight * cardHeightScale
+    }
+
+    private var cardWidth: CGFloat {
+        UIScreen.main.bounds.width * 0.75
+    }
 
     private var sources: [SourceLine] {
         let parsed = lines.map { line -> SourceLine in
@@ -1863,7 +1864,7 @@ private struct LoomAIDeepStateScanningCard: View {
                     .scaledToFit()
                     .frame(width: 12, height: 12)
                     .opacity(0.92)
-                Text(currentSource.title)
+                Text("Reading: \(currentSource.title)")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(Color.white.opacity(0.90))
                     .lineLimit(1)
@@ -1879,13 +1880,13 @@ private struct LoomAIDeepStateScanningCard: View {
                     .opacity(isTransitioning ? 0 : 1)
                     .offset(y: isTransitioning ? -18 : 0)
             }
-            .frame(maxWidth: .infinity, minHeight: 88, alignment: .topLeading)
+            .frame(maxWidth: .infinity, minHeight: textAreaMinHeight, alignment: .topLeading)
             .mask(verticalEdgeFadeMask)
             .animation(.easeInOut(duration: 0.45), value: isTransitioning)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 10)
+        .frame(width: cardWidth, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(.ultraThinMaterial)

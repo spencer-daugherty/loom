@@ -33,6 +33,8 @@ struct DiagnosticAnswers: Codable, Hashable {
 struct DiagnosticInsights: Codable, Hashable {
     var rootCause: String
     var nextDirection: String
+    var debug: LoomAIDebug?
+    var usage: LoomAIUsage?
 }
 
 struct DiagnosticInsightsClient: Codable, Hashable {

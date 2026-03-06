@@ -2,6 +2,89 @@ const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const DEFAULT_CHAT_MODEL = "gpt-5.2";
 const DIAGNOSTIC_CACHE_TTL_SECONDS = 60 * 60 * 24 * 14; // 14 days
 const CHAT_CACHE_TTL_SECONDS = 60 * 10; // 10 minutes
+const DIAGNOSTIC_LOOM_MECHANICS_CONTEXT = [
+  "Loom reduces stress by narrowing attention. Instead of managing everything at once, the system helps the user focus on one clear result at a time.",
+  "Loom organizes life into a simple flow: Purpose -> Fulfillment Areas -> Goals -> Action Blocks. Each level clarifies what matters and filters what comes next.",
+  "Goals define the result that matters most right now. Action Blocks turn that result into a short, prioritized set of actions so the user knows where to start and when they are done.",
+  "This structure reduces overthinking by removing competing choices in the moment and giving the user a clear order of focus across the week and day.",
+  "A good nextDirection should briefly explain the shift Loom introduces, such as clearer priority, one main outcome, fewer decisions during the day, or a simpler execution flow.",
+  "Write in plain language describing how the user's day will feel different with this structure.",
+  "Do not reference app screens or features the user cannot see. Avoid product marketing language."
+];
+const DIAGNOSTIC_QUESTIONNAIRE = [
+  {
+    key: "stress",
+    question: "What's causing the most stress right now?",
+    selection: "single",
+    options: [
+      "Too many priorities competing",
+      "Feeling behind or disorganized",
+      "Distractions are stealing my focus",
+      "Work pressure",
+      "Money pressure",
+      "Low energy / health",
+      "Relationship tension",
+      "Not sure yet"
+    ]
+  },
+  {
+    key: "breaksFirst",
+    question: "When you try to make progress, what usually breaks first?",
+    selection: "single",
+    options: [
+      "I don't start",
+      "I start, then lose momentum",
+      "I get distracted",
+      "I overthink it",
+      "I don't finish what I start",
+      "I'm not sure"
+    ]
+  },
+  {
+    key: "areas",
+    question: "Which life areas should Loom help you manage long-term?",
+    selection: "multi",
+    minSelections: 3,
+    maxSelections: 7,
+    allowsCustom: true,
+    options: [
+      "Career & Business",
+      "Faith & Spirituality",
+      "Wealth & Finance",
+      "Learning & Education",
+      "Love & Relationships",
+      "Health & Energy",
+      "Lifestyle & Experiences",
+      "Mindset & Resilience",
+      "Service & Impact",
+      "Home & Life"
+    ]
+  },
+  {
+    key: "planningStyle",
+    question: "Most days, you...",
+    selection: "single",
+    options: [
+      "React to what's urgent",
+      "Keep a simple to-do list",
+      "Plan, but get off track",
+      "Plan and follow through consistently",
+      "It depends on the day"
+    ]
+  },
+  {
+    key: "firstChange",
+    question: "If Loom works, what changes first?",
+    selection: "single",
+    options: [
+      "I feel in control (less stress)",
+      "I know what matters (clear direction)",
+      "I follow through (consistency)",
+      "I make faster progress on big goals",
+      "I feel balanced across life"
+    ]
+  }
+];
 const PURPOSE_PROFILE_CATALOG = [
   {
     profile: "Strategic Integrator",
@@ -192,16 +275,19 @@ export default {
         }
       }
 
+    const diagnosticPromptContext = buildDiagnosticPromptContext(normalizedDiagnostic);
     const systemPrompt = [
       "You generate first-signup diagnostic insights for Loom.",
       "Write it as if I was a 5th grader: simple words, short sentences, no jargon.",
       "",
       "Hard rules:",
-      "- Use ONLY these fields as grounding: stress, breaksFirst, areas, planningStyle, firstChange.",
+      "- Use ONLY the provided diagnostic questionnaire, answer options, and chosen answers as grounding.",
+      "- Analyze the meaning of the chosen answer in the context of the full option set for that question.",
       "- Do not use any external context or generic productivity advice.",
       "- Do not repeat or closely paraphrase the exact option text the user picked.",
       "- Do not praise, hype, reward, or motivate. No cheerleading.",
       "- Do not list, rename, or restate the selected 'areas'. You may refer to them only as 'different parts of life'.",
+      "- For nextDirection, use the provided Loom mechanics context so the structural shift matches how Loom actually works.",
       "",
       "Output requirements:",
       "- rootCause: 2–3 short sentences, max 40 words total.",
@@ -227,7 +313,28 @@ export default {
           nextDirection: { type: "string" },
           error: { type: "string" }
         },
-        required: ["rootCause", "nextDirection"]
+        anyOf: [
+          {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              rootCause: { type: "string" },
+              nextDirection: { type: "string" },
+              error: { type: "string" }
+            },
+            required: ["rootCause", "nextDirection"]
+          },
+          {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              rootCause: { type: "string" },
+              nextDirection: { type: "string" },
+              error: { type: "string" }
+            },
+            required: ["error"]
+          }
+        ]
       }
     };
 
@@ -237,6 +344,7 @@ export default {
       systemPrompt,
       userPayload: {
         diagnostic: normalizedDiagnostic,
+        diagnosticPromptContext,
         client: {
           appVersion: nonEmptyString(client.appVersion) || null,
           platform: "ios",
@@ -248,26 +356,56 @@ export default {
       timeoutMs: 26000
     });
     const diagnosticUsage = normalizeResponsesUsage(result.usage, "gpt-5.1");
+    const diagnosticDebugEnabled =
+      env.DEBUG_DIAGNOSTIC === "1" || nonEmptyString(client?.screen) === "diagnostic_insights_debug";
 
     let responseBody;
+    let diagnosticDebug = null;
     if (result.error) {
       responseBody = buildDeterministicDiagnosticInsights(normalizedDiagnostic);
+      diagnosticDebug = {
+        fallbackReason: "upstream_error",
+        upstreamError: result.error,
+        upstreamDetails: result.details || null
+      };
     } else {
       const parsed = result.json;
       const signaledInsufficient = parsed && typeof parsed.error === "string" && parsed.error.trim() !== "";
-      const rootCause = normalizeInsightText(parsed?.rootCause);
-      const nextDirection = normalizeInsightText(parsed?.nextDirection);
+      const rootCause = coerceInsightText(parsed?.rootCause);
+      const nextDirection = coerceInsightText(parsed?.nextDirection);
       if (signaledInsufficient || !isValidInsightText(rootCause) || !isValidInsightText(nextDirection)) {
         responseBody = buildDeterministicDiagnosticInsights(normalizedDiagnostic);
+        diagnosticDebug = {
+          fallbackReason: signaledInsufficient
+            ? "insufficient_signal"
+            : !rootCause
+              ? "invalid_root_cause"
+              : !nextDirection
+                ? "invalid_next_direction"
+                : "post_validation_failed",
+          parsedResponse: parsed || null,
+          normalizedCandidate: {
+            rootCause,
+            nextDirection
+          }
+        };
       } else {
         responseBody = { rootCause, nextDirection };
+        diagnosticDebug = {
+          fallbackReason: null,
+          parsedResponse: parsed || null,
+          normalizedCandidate: {
+            rootCause,
+            nextDirection
+          }
+        };
       }
     }
     if (diagnosticUsage) {
       responseBody.usage = diagnosticUsage;
     }
 
-    if (env.DEBUG_DIAGNOSTIC !== "1") {
+    if (!diagnosticDebugEnabled) {
       const cacheResponse = new Response(JSON.stringify(responseBody), {
         status: 200,
         headers: {
@@ -278,11 +416,28 @@ export default {
       await caches.default.put(cacheKey, cacheResponse);
     }
 
-    if (env.DEBUG_DIAGNOSTIC === "1") {
+    if (diagnosticDebugEnabled) {
+      const evidence = [];
+      if (diagnosticDebug?.fallbackReason) {
+        evidence.push(`fallbackReason: ${diagnosticDebug.fallbackReason}`);
+      } else {
+        evidence.push("fallbackReason: none");
+      }
+      if (diagnosticDebug?.normalizedCandidate?.rootCause) {
+        evidence.push(`normalized rootCause: ${truncate(diagnosticDebug.normalizedCandidate.rootCause, 160)}`);
+      }
+      if (diagnosticDebug?.normalizedCandidate?.nextDirection) {
+        evidence.push(`normalized nextDirection: ${truncate(diagnosticDebug.normalizedCandidate.nextDirection, 160)}`);
+      }
+      if (diagnosticDebug?.upstreamError) {
+        evidence.push(`upstreamError: ${truncate(String(diagnosticDebug.upstreamError), 160)}`);
+      }
       responseBody.debug = {
         usedFields: ["stress", "breaksFirst", "areas", "planningStyle", "firstChange"],
         model: "gpt-5.1",
-        latencyMs: Date.now() - startedAt
+        latencyMs: Date.now() - startedAt,
+        evidence,
+        ...diagnosticDebug
       };
     }
 
@@ -870,6 +1025,7 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
     : hasMeaningfulLoomContext(context);
   const unrelatedPrompt = isLikelyUnrelatedPrompt(latestUserMessage);
   const chipIntentRoute = resolveChipIntentRoute(latestUserMessage);
+  const heuristicPromptType = detectHeuristicPromptType(latestUserMessage);
 
   if (!latestUserMessage) {
     return json(
@@ -944,10 +1100,25 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
     );
   }
 
-  const preferredModel = shouldForceMiniModel
+  // Freeform prompts that map cleanly to known Loom workflows should not depend on upstream latency.
+  if (!isAutoGroupIntent && !chipIntentRoute && heuristicPromptType) {
+    return json(
+      buildDeterministicHeuristicPromptResponse({
+        hasContext,
+        context,
+        promptType: heuristicPromptType,
+        latestUserMessage
+      }),
+      200,
+      corsHeaders(request)
+    );
+  }
+
+  const shouldPreferFastModel = !chipIntentRoute;
+  const preferredModel = shouldForceMiniModel || shouldPreferFastModel
     ? "gpt-5-mini"
     : (nonEmptyString(env.OPENAI_MODEL) || DEFAULT_CHAT_MODEL);
-  const modelCandidates = shouldForceMiniModel
+  const modelCandidates = shouldForceMiniModel || shouldPreferFastModel
     ? ["gpt-5-mini"]
     : uniqueOrdered(
       [preferredModel, "gpt-5-mini"]
@@ -1170,12 +1341,12 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
     "Mission: End stress. Live fulfilled.",
     "",
     "Loom architecture:",
-    "- Purpose (vision + passions): why the user is moving in this direction.",
-    "- Fulfillment Areas (mission + identities + little wins): life domains to strengthen continuously.",
+    "- Purpose (vision + passions): why the user is moving in this direction; usually refined yearly.",
+    "- Fulfillment Areas (mission + identities + little wins): life domains to strengthen continuously; usually refined every 3 months.",
     "- Goals: concrete targets tied to fulfillment.",
     "- Capture: incoming actions and ideas.",
-    "- Action Blocks: weekly execution plan.",
-    "- Reflect: completed work and learning signals.",
+    "- Action Blocks: weekly commitments that should be completed by end of week.",
+    "- Reflect: post-completion review after Action Blocks are executed (not pre-planning).",
     "",
     "Rules:",
     "- Ground your answer in APP_CONTEXT when available.",
@@ -1194,6 +1365,10 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
     "- Produce executable options only when confidence is high or medium and payload is executable.",
     "- NEVER put add/edit/improve/update/replace/create suggestions in `message`.",
     "- If confidence is low, suggestionCards must be [] and actions must be [].",
+    "- Treat Action Blocks as weekly finish targets; do not frame them as optional daily ideas.",
+    "- Treat Reflect as a follow-up step after execution/completion, not a planning substitute.",
+    "- Treat Purpose (vision + passions) as long-horizon direction, typically refined yearly unless major life change occurs.",
+    "- Treat Fulfillment Areas as medium-horizon structure, typically refined quarterly (about every 3 months).",
     "",
     "Formatting tokens in `message`:",
     "- [[P:...]] for purpose/passion emphasis",
@@ -1250,7 +1425,7 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
   }
   const modelContext = contextPackResult.modelContext;
   const payloadContextMeta = contextPackResult.payloadContextMeta;
-  const CHAT_HISTORY_LIMIT = 10;
+  const CHAT_HISTORY_LIMIT = chipIntentRoute ? 10 : 4;
   const userPayload = {
     messages: messages.slice(-CHAT_HISTORY_LIMIT).map((msg) => ({
       role: String(msg?.role || ""),
@@ -1358,14 +1533,21 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
       routeKey: nonEmptyString(chipIntentRoute?.key) || null,
       intent: normalizedIntent || "loomai_chat"
     });
-    const response = safeChatFallback({
-      hasContext,
-      context,
-      route: chipIntentRoute,
-      allowRouteSuggestionCards: true,
-      intent: normalizedIntent,
-      message: buildUserFacingChatErrorMessage(result)
-    });
+    const response = (!chipIntentRoute && normalizedIntent !== "autogroup_plan")
+      ? buildReliableNonRouteFallbackResponse({
+        hasContext,
+        context,
+        latestUserMessage,
+        intent: normalizedIntent
+      })
+      : safeChatFallback({
+        hasContext,
+        context,
+        route: chipIntentRoute,
+        allowRouteSuggestionCards: true,
+        intent: normalizedIntent,
+        message: buildUserFacingChatErrorMessage(result)
+      });
     const debugScreen = nonEmptyString(client.screen).toLowerCase().includes("debug");
     if (debugScreen) {
       const detailSnippet = truncate(nonEmptyString(result.details), 220);
@@ -1551,16 +1733,19 @@ async function purposeVisionAutowriteResponse({
   const diagnostic = extractDiagnosticFromChatPayload(payload);
   const normalizedDiagnostic = canonicalizeDiagnosticForVision(diagnostic);
 
+  const diagnosticPromptContext = buildDiagnosticPromptContext(normalizedDiagnostic);
   const diagnosticPrompt = [
     "You generate first-signup diagnostic insights for Loom.",
     "Write it as if I was a 5th grader: simple words, short sentences, no jargon.",
     "",
     "Hard rules:",
-    "- Use ONLY these fields as grounding: stress, breaksFirst, areas, planningStyle, firstChange.",
+    "- Use ONLY the provided diagnostic questionnaire, answer options, and chosen answers as grounding.",
+    "- Analyze the meaning of the chosen answer in the context of the full option set for that question.",
     "- Do not use any external context or generic productivity advice.",
     "- Do not repeat or closely paraphrase the exact option text the user picked.",
     "- Do not praise, hype, reward, or motivate. No cheerleading.",
     "- Do not list, rename, or restate the selected 'areas'. You may refer to them only as 'different parts of life'.",
+    "- For nextDirection, use the provided Loom mechanics context so the structural shift matches how Loom actually works.",
     "",
     "Output requirements:",
     "- rootCause: 2–3 short sentences, max 40 words total.",
@@ -1586,7 +1771,28 @@ async function purposeVisionAutowriteResponse({
         nextDirection: { type: "string" },
         error: { type: "string" }
       },
-      required: ["rootCause", "nextDirection", "error"]
+      anyOf: [
+        {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            rootCause: { type: "string" },
+            nextDirection: { type: "string" },
+            error: { type: "string" }
+          },
+          required: ["rootCause", "nextDirection"]
+        },
+        {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            rootCause: { type: "string" },
+            nextDirection: { type: "string" },
+            error: { type: "string" }
+          },
+          required: ["error"]
+        }
+      ]
     }
   };
 
@@ -1596,7 +1802,7 @@ async function purposeVisionAutowriteResponse({
     apiKey,
     model: "gpt-5.1",
     systemPrompt: diagnosticPrompt,
-    userPayload: { diagnostic: normalizedDiagnostic },
+    userPayload: { diagnostic: normalizedDiagnostic, diagnosticPromptContext },
     responseSchema: insightSchema,
     maxOutputTokens: 130,
     timeoutMs: 8000,
@@ -1606,8 +1812,8 @@ async function purposeVisionAutowriteResponse({
   if (!insightResult.error) {
     const parsedInsight = insightResult.json || {};
     if (!(typeof parsedInsight.error === "string" && parsedInsight.error.trim() !== "")) {
-      rootCause = normalizeInsightText(parsedInsight.rootCause);
-      nextDirection = normalizeInsightText(parsedInsight.nextDirection);
+      rootCause = coerceInsightText(parsedInsight.rootCause);
+      nextDirection = coerceInsightText(parsedInsight.nextDirection);
     }
   }
   const hasStrongDiagnosticContext = isValidInsightText(rootCause) && isValidInsightText(nextDirection);
@@ -2153,6 +2359,20 @@ function canonicalizeDiagnostic(input) {
   };
 }
 
+function buildDiagnosticPromptContext(diagnostic) {
+  return {
+    loomMechanics: DIAGNOSTIC_LOOM_MECHANICS_CONTEXT,
+    questionnaire: DIAGNOSTIC_QUESTIONNAIRE,
+    chosenAnswers: {
+      stress: diagnostic.stress,
+      breaksFirst: diagnostic.breaksFirst,
+      areas: diagnostic.areas,
+      planningStyle: diagnostic.planningStyle,
+      firstChange: diagnostic.firstChange
+    }
+  };
+}
+
 function rankPurposeProfilesHeuristically({ diagnostic, rootCause, nextDirection, vision, passions }) {
   const d = diagnostic || {};
   const input = {
@@ -2368,21 +2588,21 @@ function isAcceptablePlanResultPhrase(value) {
 function heuristicPlanResultFromActions(actions, areaName) {
   const keywords = planResultKeywordCandidates(actions);
   if (keywords.length >= 2) {
-    return `Consistent ${keywords[0]} ${keywords[1]}`;
+    return `${keywords[0]} and ${keywords[1]} follow-through`;
   }
   if (keywords.length === 1) {
-    return `Consistent ${keywords[0]} progress`;
+    return `${keywords[0]} follow-through`;
   }
   const areaToken = String(areaName || "")
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, " ")
     .split(/\s+/)
     .map((token) => token.trim())
-    .find((token) => token.length >= 3);
+    .find((token) => token.length >= 3 && !PLAN_RESULT_GENERIC_TOKENS.has(token));
   if (areaToken) {
-    return `Consistent ${areaToken} progress`;
+    return `${areaToken} follow-through`;
   }
-  return "Consistent weekly progress";
+  return "Weekly follow-through";
 }
 
 function planResultKeywordCandidates(actions) {
@@ -2402,6 +2622,9 @@ function planResultKeywordCandidates(actions) {
       .filter((token) => token.length >= 3 && !stopWords.has(token) && !/^\d+$/.test(token))
       .map((token) => (token.endsWith("s") && token.length > 4 ? token.slice(0, -1) : token));
     for (const token of tokens) {
+      if (PLAN_RESULT_ACTION_VERBS.has(token) || PLAN_RESULT_GENERIC_TOKENS.has(token)) {
+        continue;
+      }
       counts.set(token, (counts.get(token) || 0) + 1);
     }
   }
@@ -2415,6 +2638,18 @@ function planResultKeywordCandidates(actions) {
     .slice(0, 3)
     .map(([token]) => token);
 }
+
+const PLAN_RESULT_ACTION_VERBS = new Set([
+  "finish", "file", "send", "review", "update", "clean", "get", "make",
+  "call", "email", "organize", "plan", "start", "complete", "check",
+  "track", "build", "set", "create", "work", "manage", "fix", "shop",
+  "sign", "walk", "follow", "keep", "do"
+]);
+
+const PLAN_RESULT_GENERIC_TOKENS = new Set([
+  "thing", "item", "task", "action", "result", "progress", "goal",
+  "weekly", "daily", "today", "tomorrow", "week", "day"
+]);
 
 function buildPlanResultAutoWriteResponse({ message, confidence, evidence }) {
   const cleanedMessage = normalizePlanResultPhrase(message);
@@ -2486,6 +2721,49 @@ function normalizeInsightText(value) {
   return value.replace(/\s+/g, " ").trim();
 }
 
+function coerceInsightText(value) {
+  const normalized = normalizeInsightText(value);
+  if (!normalized) return "";
+
+  const rawSentences = normalized
+    .match(/[^.!?]+[.!?]?/g)
+    ?.map((s) => s.trim())
+    .filter(Boolean) || [];
+
+  const limitedSentences = rawSentences
+    .slice(0, 3)
+    .map((sentence) => /[.!?]$/.test(sentence) ? sentence : `${sentence}.`);
+
+  if (limitedSentences.length === 0) return "";
+
+  const rebuilt = [];
+  let wordCount = 0;
+  for (const sentence of limitedSentences) {
+    const sentenceWords = sentence.split(/\s+/).filter(Boolean);
+    if (sentenceWords.length === 0) continue;
+    const remainingWords = 40 - wordCount;
+    if (remainingWords <= 0) break;
+
+    if (sentenceWords.length <= remainingWords) {
+      rebuilt.push(sentence);
+      wordCount += sentenceWords.length;
+      continue;
+    }
+
+    // Preserve a second/third sentence when possible by trimming it to fit
+    // instead of dropping the entire tail and failing validation.
+    if (rebuilt.length > 0 && remainingWords >= 3) {
+      const trimmedSentence = `${sentenceWords.slice(0, remainingWords).join(" ")}.`;
+      rebuilt.push(trimmedSentence);
+      wordCount += remainingWords;
+    }
+    break;
+  }
+
+  const candidate = rebuilt.join(" ").trim();
+  return isValidInsightText(candidate) ? candidate : "";
+}
+
 function normalizeSuggestion(value) {
   const text = String(value ?? "")
     .replace(/\s+/g, " ")
@@ -2523,14 +2801,9 @@ function isValidInsightText(value) {
 }
 
 function buildDeterministicDiagnosticInsights(diagnostic) {
-  const areaCount = Array.isArray(diagnostic?.areas) ? diagnostic.areas.length : 0;
-  const scope = areaCount >= 5 ? "many parts of life" : "a few key parts of life";
-  const rootCause = normalizeInsightText(
-    `Your priorities compete across ${scope}. Urgent tasks keep taking over, so progress gets fragmented. You restart often, but completion falls behind.`
-  );
-  const nextDirection = normalizeInsightText(
-    "Loom will create one clear lane each day. It narrows choices to a single finish target with short steps. This keeps progress steady before new tasks expand."
-  );
+  const retryMessage = "Processing error. Please try again later.";
+  const rootCause = retryMessage;
+  const nextDirection = retryMessage;
   return { rootCause, nextDirection };
 }
 
@@ -2744,37 +3017,389 @@ function buildDeterministicRouteResponse({ hasContext, context, route, message }
   };
 }
 
-function buildBestUseLoomDeterministicResponse({ hasContext, context, route }) {
-  const message = buildBestUseLoomGuidanceMessage(context);
-  const recommendationText = buildBestUseLoomRecommendation(context);
-  const suggestionCards = recommendationText
-    ? [{
-        id: "best-use-loom-recommendation",
-        title: "Best next move in Loom",
-        description: "",
-        options: [{
-          id: "best-use-loom-recommendation-1",
-          label: "A",
-          title: "Run this now",
-          type: "addPlanSuggestion",
-          payload: { text: recommendationText }
-        }]
-      }]
+function detectHeuristicPromptType(message) {
+  const text = nonEmptyString(message).toLowerCase();
+  if (!text) return "";
+  const wantsPersonality =
+    /\bwhat personality\b/.test(text) ||
+    /\bmy personality\b/.test(text) ||
+    /\bpersonality profile\b/.test(text) ||
+    /\bwhat profile\b/.test(text);
+  if (wantsPersonality) return "personality_profile";
+  const wantsSelfSummary =
+    /\bwhat do you know about me\b/.test(text) ||
+    /\bwhat have you learned about me\b/.test(text) ||
+    /\bwhat do you know so far\b/.test(text) ||
+    /\babout me so far\b/.test(text) ||
+    /\bsummarize me\b/.test(text);
+  if (wantsSelfSummary) return "self_summary";
+  const wantsGoals =
+    /\b(goals?|outcomes?)\b/.test(text) &&
+    (/\b(each|every|all)\b/.test(text) || /\bcategory|categories|area|areas\b/.test(text));
+  if (wantsGoals) return "goals_per_category";
+  return "";
+}
+
+function buildDeterministicHeuristicPromptResponse({ hasContext, context, promptType, latestUserMessage }) {
+  if (promptType === "personality_profile") {
+    return buildPersonalityProfileDeterministicResponse({ hasContext, context });
+  }
+  if (promptType === "self_summary") {
+    return buildKnowMeSoFarDeterministicResponse({ hasContext, context });
+  }
+  if (promptType === "goals_per_category") {
+    return buildGoalsPerCategoryDeterministicResponse({ hasContext, context });
+  }
+  return safeChatFallback({
+    hasContext,
+    context,
+    message: "I prepared suggestions below based on your current Loom context.",
+    allowRouteSuggestionCards: false
+  });
+}
+
+function buildReliableNonRouteFallbackResponse({ hasContext, context, latestUserMessage, intent }) {
+  const categories = Array.isArray(context?.fulfillmentCategories) ? context.fulfillmentCategories : [];
+  const topCategory = categories[0] || null;
+  const topCategoryName = nonEmptyString(topCategory?.name) || "your top area";
+  const topCategoryId = nonEmptyString(topCategory?.id);
+  const topCategoryLittleWins = Array.isArray(topCategory?.littleWins)
+    ? topCategory.littleWins.map((item) => nonEmptyString(item)).filter(Boolean)
     : [];
-  const actions = flattenSuggestionCardsToActions(suggestionCards, context);
+  const goals = Array.isArray(context?.activeOutcomes) ? context.activeOutcomes : [];
+  const topGoal = goals[0] || null;
+  const topGoalTitle = nonEmptyString(topGoal?.title);
+  const captureCount = Number.isFinite(Number(context?.capture?.totalCount))
+    ? Number(context.capture.totalCount)
+    : 0;
+  const purpose = nonEmptyString(context?.drivingForce?.purpose || context?.drivingForce?.vision);
+  const prompt = nonEmptyString(latestUserMessage);
+  const promptLead = prompt ? `For "${truncate(prompt, 90)}",` : "Based on your current Loom data,";
+
+  const summaryLines = [
+    `${promptLead} here is a reliable, context-based answer:`,
+    purpose ? `• Your direction: ${truncate(purpose, 160)}` : "",
+    `• Priority area right now: ${topCategoryName}`,
+    topGoalTitle ? `• Active goal: ${topGoalTitle}` : "",
+    captureCount > 0 ? `• Capture queue: ${captureCount} items` : ""
+  ].filter(Boolean);
+  summaryLines.push("I added practical next actions below so you can move immediately.");
+
+  const options = buildReliableFallbackActionOptions({
+    topCategoryName,
+    topCategoryId,
+    topCategoryLittleWins,
+    topGoalTitle
+  });
+
+  const suggestionCards = options.length > 0
+    ? [{
+      id: "reliable-next-actions",
+      title: "Reliable next actions",
+      description: "",
+      options
+    }]
+    : [];
+
   return {
-    message,
-    grounding: hasContext ? collectGrounding([], context, { maxItems: 5, route }) : [],
+    message: summaryLines.join("\n"),
+    grounding: hasContext ? collectGrounding([], context, { maxItems: 4 }) : [],
     suggestionCards,
     nextAction: normalizeNextAction(null, suggestionCards, {
       context,
-      confidence: suggestionCards.length > 0 ? "high" : "medium"
+      confidence: suggestionCards.length > 0 ? "medium" : "low"
+    }),
+    chips: [],
+    actions: flattenSuggestionCardsToActions(suggestionCards, context),
+    debug: {
+      usedContext: Boolean(hasContext),
+      confidence: suggestionCards.length > 0 ? "medium" : "low",
+      evidence: hasContext
+        ? uniqueOrdered([...extractEvidencePathsFromContext(context, 4), "fallback:non_route_reliable"]).slice(0, 8)
+        : ["fallback:non_route_reliable"]
+    }
+  };
+}
+
+function buildReliableFallbackActionOptions({ topCategoryName, topCategoryId, topCategoryLittleWins, topGoalTitle }) {
+  const hasCategoryId = /^[0-9a-f-]{36}$/i.test(nonEmptyString(topCategoryId));
+  const littleWinCandidates = uniqueOrdered(
+    [
+      topGoalTitle ? `15-minute progress on ${truncate(topGoalTitle, 64)}` : "",
+      `Plan tomorrow priorities for ${truncate(topCategoryName, 40)}`,
+      "Close one open loop today"
+    ].filter(Boolean)
+  );
+
+  const littleWinOptions = littleWinCandidates.slice(0, 2).map((activity, index) => {
+    if (!hasCategoryId) {
+      return {
+        id: `reliable-action-${index + 1}`,
+        label: String.fromCharCode(65 + index),
+        title: activity,
+        type: "createCaptureAction",
+        payload: { text: activity }
+      };
+    }
+    const shouldReplace = topCategoryLittleWins.length >= 3;
+    if (shouldReplace) {
+      const replaceTargets = chooseLittleWinReplacementTargets(topCategoryLittleWins, topCategoryName, littleWinCandidates.length);
+      const replaceActivity = replaceTargets[index % Math.max(1, replaceTargets.length)] || topCategoryLittleWins[0];
+      return {
+        id: `reliable-action-${index + 1}`,
+        label: String.fromCharCode(65 + index),
+        title: `Replace "${truncate(replaceActivity, 52)}" with "${truncate(activity, 64)}"`,
+        type: "replaceLittleWin",
+        payload: {
+          categoryId: topCategoryId,
+          activity,
+          replaceActivity
+        }
+      };
+    }
+    return {
+      id: `reliable-action-${index + 1}`,
+      label: String.fromCharCode(65 + index),
+      title: activity,
+      type: "addLittleWin",
+      payload: {
+        categoryId: topCategoryId,
+        activity,
+        appleHealthEligible: inferAppleHealthEligibility(activity, topCategoryName)
+      }
+    };
+  });
+
+  const captureTitle = topGoalTitle
+    ? `Draft execution checklist for ${truncate(topGoalTitle, 64)}`
+    : `Sort capture for ${truncate(topCategoryName, 40)}`;
+  const captureOption = {
+    id: "reliable-action-3",
+    label: "C",
+    title: captureTitle,
+    type: "createCaptureAction",
+    payload: { text: captureTitle }
+  };
+
+  return [...littleWinOptions, captureOption].slice(0, 3);
+}
+
+function buildGoalsPerCategoryDeterministicResponse({ hasContext, context }) {
+  const categories = Array.isArray(context?.fulfillmentCategories) ? context.fulfillmentCategories : [];
+  const activeGoals = Array.isArray(context?.activeOutcomes) ? context.activeOutcomes : [];
+  const existingGoalTitles = new Set(
+    activeGoals
+      .map((goal) => nonEmptyString(goal?.title).toLowerCase())
+      .filter(Boolean)
+  );
+  const topCategories = categories.slice(0, 3);
+
+  const options = topCategories
+    .map((category, index) => {
+      const categoryName = nonEmptyString(category?.name) || `Category ${index + 1}`;
+      const categoryId = nonEmptyString(category?.id);
+      const idea = goalIdeaForCategory(categoryName, existingGoalTitles, index);
+      if (!idea) return null;
+      if (!/^[0-9a-f-]{36}$/i.test(categoryId)) {
+        return {
+          id: `goal-idea-${index + 1}`,
+          label: String.fromCharCode(65 + index),
+          title: `${categoryName}: ${idea}`,
+          type: "createCaptureAction",
+          payload: { text: `Draft outcome for ${categoryName}: ${idea}` }
+        };
+      }
+      return {
+        id: `goal-idea-${index + 1}`,
+        label: String.fromCharCode(65 + index),
+        title: `${categoryName}: ${idea}`,
+        type: "createOutcome",
+        payload: {
+          categoryId,
+          title: idea,
+          measurable: false,
+          unit: ""
+        }
+      };
+    })
+    .filter(Boolean);
+
+  const suggestionCards = options.length > 0
+    ? [{
+      id: "goals-by-category",
+      title: "Goal ideas by category",
+      description: "",
+      options
+    }]
+    : [];
+  const actions = flattenSuggestionCardsToActions(suggestionCards, context);
+
+  return {
+    message: "I generated goal ideas for your categories below based on your current context.",
+    grounding: hasContext ? collectGrounding([], context, { maxItems: 4 }) : [],
+    suggestionCards,
+    nextAction: normalizeNextAction(null, suggestionCards, {
+      context,
+      confidence: suggestionCards.length > 0 ? "medium" : "low"
     }),
     chips: [],
     actions,
     debug: {
       usedContext: Boolean(hasContext),
-      confidence: suggestionCards.length > 0 ? "high" : "medium",
+      confidence: suggestionCards.length > 0 ? "medium" : "low",
+      evidence: hasContext
+        ? uniqueOrdered([...extractEvidencePathsFromContext(context, 4), "heuristic:goals_per_category"]).slice(0, 8)
+        : ["heuristic:goals_per_category"]
+    }
+  };
+}
+
+function buildPersonalityProfileDeterministicResponse({ hasContext, context }) {
+  const profile = nonEmptyString(context?.personalityProfile?.profile || context?.personalityProfile);
+  const diagnostic = context?.diagnostic && typeof context.diagnostic === "object" ? context.diagnostic : {};
+  const planningStyle = nonEmptyString(diagnostic?.planningStyle);
+  const breaksFirst = nonEmptyString(diagnostic?.breaksFirst);
+  const firstChange = nonEmptyString(diagnostic?.firstChange);
+  const rootCause = nonEmptyString(diagnostic?.rootCause);
+  const nextDirection = nonEmptyString(diagnostic?.nextDirection);
+
+  const lines = [];
+  lines.push(profile ? `Your current personality profile in Loom is: ${profile}.` : "You do not have a saved personality profile yet.");
+  if (planningStyle) lines.push(`Planning style: ${truncate(planningStyle, 120)}.`);
+  if (breaksFirst) lines.push(`What breaks first: ${truncate(breaksFirst, 120)}.`);
+  if (firstChange) lines.push(`Desired first change: ${truncate(firstChange, 140)}.`);
+  if (rootCause) lines.push(`Pattern Loom sees: ${truncate(rootCause, 170)}.`);
+  if (nextDirection) lines.push(`Direction Loom suggests: ${truncate(nextDirection, 170)}.`);
+  if (!profile && !planningStyle && !breaksFirst && !firstChange && !rootCause && !nextDirection) {
+    lines.push("I need a bit more diagnostic data to infer this confidently.");
+  }
+
+  return {
+    message: lines.join("\n"),
+    grounding: hasContext ? collectGrounding([], context, { maxItems: 4 }) : [],
+    suggestionCards: [],
+    nextAction: null,
+    chips: [],
+    actions: [],
+    debug: {
+      usedContext: Boolean(hasContext),
+      confidence: hasContext ? "high" : "low",
+      evidence: hasContext
+        ? uniqueOrdered([...extractEvidencePathsFromContext(context, 4), "heuristic:personality_profile"]).slice(0, 8)
+        : ["heuristic:personality_profile"]
+    }
+  };
+}
+
+function buildKnowMeSoFarDeterministicResponse({ hasContext, context }) {
+  const purpose = nonEmptyString(context?.drivingForce?.purpose);
+  const vision = nonEmptyString(context?.drivingForce?.vision);
+  const passions = Array.isArray(context?.drivingForce?.passions) ? context.drivingForce.passions : [];
+  const passionLabels = passions
+    .map((item) => nonEmptyString(item?.title || item?.passion))
+    .filter(Boolean)
+    .slice(0, 4);
+  const profile = nonEmptyString(context?.personalityProfile?.profile || context?.personalityProfile);
+  const diagnostic = context?.diagnostic && typeof context.diagnostic === "object" ? context.diagnostic : {};
+  const areas = Array.isArray(diagnostic?.areas) ? diagnostic.areas.map((item) => nonEmptyString(item)).filter(Boolean).slice(0, 3) : [];
+  const rootCause = nonEmptyString(diagnostic?.rootCause);
+  const nextDirection = nonEmptyString(diagnostic?.nextDirection);
+  const categories = Array.isArray(context?.fulfillmentCategories) ? context.fulfillmentCategories : [];
+  const topCategories = categories.map((item) => nonEmptyString(item?.name)).filter(Boolean).slice(0, 3);
+  const activeGoals = Array.isArray(context?.activeOutcomes) ? context.activeOutcomes : [];
+  const goal = activeGoals[0] || null;
+  const goalTitle = nonEmptyString(goal?.title);
+  const goalProgress = nonEmptyString(goal?.progressSummary);
+  const captureCount = Number.isFinite(Number(context?.capture?.totalCount))
+    ? Number(context.capture.totalCount)
+    : 0;
+
+  const lines = [];
+  lines.push("Here’s what I know about you so far from Loom:");
+  if (profile) lines.push(`• Profile: ${profile}`);
+  if (vision) lines.push(`• Vision: ${truncate(vision, 180)}`);
+  if (purpose) lines.push(`• Purpose: ${truncate(purpose, 180)}`);
+  if (passionLabels.length > 0) lines.push(`• Passions: ${passionLabels.join(", ")}`);
+  if (topCategories.length > 0) lines.push(`• Main fulfillment areas: ${topCategories.join(", ")}`);
+  if (goalTitle) {
+    lines.push(`• Active goal: ${goalTitle}${goalProgress ? ` (${goalProgress})` : ""}`);
+  }
+  if (captureCount > 0) lines.push(`• Capture queue: ${captureCount} items right now`);
+  if (areas.length > 0) lines.push(`• Diagnostic focus areas: ${areas.join(", ")}`);
+  if (rootCause) lines.push(`• Pattern I see: ${truncate(rootCause, 160)}`);
+  if (nextDirection) lines.push(`• Best next direction: ${truncate(nextDirection, 160)}`);
+  lines.push("If you want, I can turn this into a one-week focus plan next.");
+
+  return {
+    message: lines.join("\n"),
+    grounding: hasContext ? collectGrounding([], context, { maxItems: 5 }) : [],
+    suggestionCards: [],
+    nextAction: null,
+    chips: [],
+    actions: [],
+    debug: {
+      usedContext: Boolean(hasContext),
+      confidence: hasContext ? "high" : "low",
+      evidence: hasContext
+        ? uniqueOrdered([...extractEvidencePathsFromContext(context, 5), "heuristic:self_summary"]).slice(0, 8)
+        : ["heuristic:self_summary"]
+    }
+  };
+}
+
+function goalIdeaForCategory(categoryName, existingGoalTitles, seed = 0) {
+  const key = nonEmptyString(categoryName).toLowerCase();
+  let candidates = [];
+  if (key.includes("wealth") || key.includes("finance")) {
+    candidates = [
+      "Build a 30-day spending plan",
+      "Pay down one high-interest debt",
+      "Increase monthly savings rate"
+    ];
+  } else if (key.includes("faith") || key.includes("spiritual")) {
+    candidates = [
+      "Complete 20 days of morning prayer",
+      "Read one spiritual chapter daily",
+      "Practice weekly reflection"
+    ];
+  } else if (key.includes("love") || key.includes("relationship")) {
+    candidates = [
+      "Schedule two quality-time blocks weekly",
+      "Run a daily 10-minute relationship check-in",
+      "Practice one gratitude message daily"
+    ];
+  } else if (key.includes("health") || key.includes("energy")) {
+    candidates = [
+      "Walk 30 minutes five days weekly",
+      "Follow nutrition plan six days weekly",
+      "Sleep 7+ hours at least five nights weekly"
+    ];
+  } else {
+    candidates = [
+      `Define a 30-day milestone for ${categoryName}`,
+      `Complete one weekly execution block for ${categoryName}`,
+      `Track progress weekly in ${categoryName}`
+    ];
+  }
+  for (let i = 0; i < candidates.length; i += 1) {
+    const candidate = candidates[(i + seed) % candidates.length];
+    if (!existingGoalTitles.has(candidate.toLowerCase())) return candidate;
+  }
+  return candidates[0] || "";
+}
+
+function buildBestUseLoomDeterministicResponse({ hasContext, context, route }) {
+  const message = buildBestUseLoomGuidanceMessage(context);
+  return {
+    message,
+    grounding: hasContext ? collectGrounding([], context, { maxItems: 5, route }) : [],
+    suggestionCards: [],
+    nextAction: null,
+    chips: [],
+    actions: [],
+    debug: {
+      usedContext: Boolean(hasContext),
+      confidence: "high",
       evidence: hasContext ? extractEvidencePathsFromContext(context, 5) : []
     }
   };
@@ -2807,7 +3432,7 @@ function buildBestUseLoomGuidanceMessage(context) {
   const p1 = purpose || vision
     ? `Your best use of Loom is to treat it as a daily execution system for [[P:${truncate(purpose || vision, 120)}]], not as a place to collect more tasks.`
     : "Your best use of Loom is to treat it as a daily execution system, not as a place to collect more tasks.";
-  const p2 = `Run this sequence each day: [[A:Capture -> Action Blocks -> Little Wins -> Reflect]]. Capture should stay fast, Action Blocks should define today's focus, Little Wins should protect consistency, and Reflect should close the loop before tomorrow.`;
+  const p2 = `Run Loom in this order: [[A:Capture -> Action Blocks (weekly) -> Little Wins (daily) -> Reflect (after execution)]]. Capture should stay fast, Action Blocks should be finished by week end, Little Wins should protect daily consistency, and Reflect should happen after blocks are completed to lock in learning.`;
   const p3 = [
     captureCount > 0 ? `You currently have [[A:${captureCount}]] capture items` : "",
     quickCompletions === 0 ? "with no quick completions in the last 7 days" : `with ${quickCompletions} quick completions in the last 7 days`,
@@ -2822,27 +3447,29 @@ function buildBestUseLoomGuidanceMessage(context) {
       ? `For [[O:${goalTitle}]] (${goalProgress || "progress not tracked yet"}), connect at least one Action Block task and one Little Win to the same outcome this week.`
       : ""
   ].filter(Boolean).join(" ");
-  const p5 = [
-    diagnosticRoot ? `Your diagnostic pattern is: ${truncate(diagnosticRoot, 150)}.` : "",
-    diagnosticDirection ? `Use Loom to enforce this structural shift: ${truncate(diagnosticDirection, 150)}.` : "",
-    "Be agile: if time is low, do a 10-minute triage; if energy is high, do a 30-minute full planning pass."
-  ].filter(Boolean).join(" ");
+  const p5 = buildBestUseLoomDiagnosticSection({
+    diagnosticRoot,
+    diagnosticDirection,
+    firstAreaName,
+    firstBlockTitle
+  });
+  const p6 = "Agile mode: low time = 10-minute triage (Capture 3, plan 1 block, do 1 Little Win). High energy = 30-minute weekly pass (clean Capture, tighten this week’s blocks, and link each to one outcome).";
 
-  return [p1, p2, p3, p4, p5].filter(Boolean).join("\n\n");
+  return [p1, p2, p3, p4, p5, p6].filter(Boolean).join("\n\n");
 }
 
-function buildBestUseLoomRecommendation(context) {
-  const captureCount = Number.isFinite(Number(context?.capture?.totalCount))
-    ? Number(context.capture.totalCount)
-    : 0;
-  const actionBlocks = Array.isArray(context?.currentWeekActionBlocks) ? context.currentWeekActionBlocks : [];
-  const topBlock = actionBlocks[0] || null;
-  const topBlockName = nonEmptyString(topBlock?.title || topBlock?.category) || "your top area";
-  const topActions = Array.isArray(topBlock?.actions)
-    ? topBlock.actions.map((item) => nonEmptyString(item)).filter(Boolean).slice(0, 2)
-    : [];
-  const nextActionsText = topActions.length > 0 ? topActions.join(" and ") : "one focused task";
-  return `Today: process ${Math.max(3, Math.min(8, captureCount || 3))} capture items, commit one 30-minute block in ${topBlockName}, execute ${nextActionsText}, then log one completed Little Win before ending the day.`;
+function buildBestUseLoomDiagnosticSection({ diagnosticRoot, diagnosticDirection, firstAreaName, firstBlockTitle }) {
+  if (!diagnosticRoot && !diagnosticDirection) return "";
+  const area = nonEmptyString(firstAreaName) || nonEmptyString(firstBlockTitle) || "your top area";
+  const parts = ["Diagnostic pattern (from your data):"];
+  if (diagnosticRoot) {
+    parts.push(`• Root cause: "${truncate(diagnosticRoot, 180)}"`);
+  }
+  if (diagnosticDirection) {
+    parts.push(`• Direction: "${truncate(diagnosticDirection, 180)}"`);
+  }
+  parts.push(`Apply this in [[F:${area}]] first, then mirror the same structure in your next area.`);
+  return parts.join("\n");
 }
 
 function buildUserFacingChatErrorMessage(result) {
@@ -3130,6 +3757,7 @@ function legacyContextFromIntentPack(contextPack) {
     generatedAt: modelContext.generatedAt || null,
     personalizationHash: nonEmptyString(modelContext.personalizationHash) || null,
     diagnostic: identity.diagnostic || null,
+    personalityProfile: nonEmptyString(identity.personalityProfile) || null,
     drivingForce: identity.purpose || null,
     fulfillmentCategories: mergedFulfillment,
     activeOutcomes: mergedGoals,
@@ -3331,6 +3959,10 @@ function buildCurrentRealityContextLayer({ route, cleaned, targetObject }) {
       ? categories.filter((item) => equalsFold(item.name, goalCategory)).slice(0, 1)
       : [];
     blocks = filterActionBlocksByTarget(blocks, targetGoalTitle || goalCategory).slice(0, 2);
+  } else if (routeID === 6) {
+    categories = [];
+    goals = goals.slice(0, 2);
+    blocks = blocks.slice(0, 2);
   } else if (routeID === 8) {
     categories = categories.slice(0, 2);
     goals = goals.slice(0, 3);
@@ -4519,12 +5151,16 @@ function buildRouteSuggestionCards(route, context) {
         .filter(Boolean)
     );
     const shouldReplaceIdentity = existingIdentities.length >= 3;
-    const replaceIdentityTarget = shouldReplaceIdentity
-      ? chooseIdentityReplacementTarget(existingIdentities, category)
-      : "";
+    const replaceIdentityTargets = shouldReplaceIdentity
+      ? chooseIdentityReplacementTargets(existingIdentities, category, 3)
+      : [];
     const identityCandidates = ["Clear Communicator", "Consistent Connector", "Calm Finisher"];
-    const options = identityCandidates.map((identity) => {
+    const options = identityCandidates.map((identity, index) => {
       if (shouldReplaceIdentity) {
+        const replaceIdentityTarget =
+          replaceIdentityTargets.length > 0
+            ? replaceIdentityTargets[index % replaceIdentityTargets.length]
+            : "";
         return {
           title: `Replace "${truncate(replaceIdentityTarget, 64)}" with "${identity}"`,
           type: "replaceFulfillmentIdentity",
@@ -4547,31 +5183,31 @@ function buildRouteSuggestionCards(route, context) {
 
   if (route.id === 4) {
     const goalName = target || "this goal";
-    const options = [
-      { title: "Next step A", type: "addPlanSuggestion", payload: { text: `Next step for ${goalName}: define one measurable checkpoint for this week.` } },
-      { title: "Next step B", type: "addPlanSuggestion", payload: { text: `Next step for ${goalName}: schedule one focused 30-minute execution block.` } },
-      { title: "Next step C", type: "addPlanSuggestion", payload: { text: `Next step for ${goalName}: identify and remove one blocker before execution.` } }
-    ];
-    return [buildCardFromOptions(`Next steps for ${goalName}`, "Choose one immediate step.", options, context)];
+    const goal = resolveGoalFromRouteTarget(goalName, context);
+    const options = buildGoalExecutionOptions({
+      goalName,
+      goalCategory: nonEmptyString(goal?.category),
+      context,
+      variant: "next"
+    });
+    return [buildCardFromOptions(`Next steps for ${goalName}`, "Choose one goal-supporting action.", options, context)];
   }
 
   if (route.id === 5) {
     const goalName = target || "this goal";
-    const options = [
-      { title: "Plan option A", type: "addPlanSuggestion", payload: { text: `Plan for ${goalName}: define 3 checkpoints across this week.` } },
-      { title: "Plan option B", type: "addPlanSuggestion", payload: { text: `Plan for ${goalName}: batch similar tasks into two focused sessions.` } },
-      { title: "Plan option C", type: "addPlanSuggestion", payload: { text: `Plan for ${goalName}: set one daily minimum action and review each evening.` } }
-    ];
-    return [buildCardFromOptions(`Plan options for ${goalName}`, "Choose one short plan template.", options, context)];
+    const goal = resolveGoalFromRouteTarget(goalName, context);
+    const options = buildGoalExecutionOptions({
+      goalName,
+      goalCategory: nonEmptyString(goal?.category),
+      context,
+      variant: "plan"
+    });
+    return [buildCardFromOptions(`Plan for ${goalName}`, "Choose one action to add now.", options, context)];
   }
 
   if (route.id === 6) {
     const passionType = normalizePassionType(target || "love");
-    const options = [
-      { title: "Passion option A", type: "addPassionItem", payload: { passionType, text: `Building consistent progress in ${passionType} aligned work.` } },
-      { title: "Passion option B", type: "addPassionItem", payload: { passionType, text: `Creating calm structure in daily planning and execution.` } },
-      { title: "Passion option C", type: "addPassionItem", payload: { passionType, text: `Learning through weekly experiments with clear follow-through.` } }
-    ];
+    const options = buildPassionRouteOptions({ passionType, context });
     return [buildCardFromOptions(`New passions for ${passionType}`, "Choose one passion to add.", options, context)];
   }
 
@@ -4581,7 +5217,7 @@ function buildRouteSuggestionCards(route, context) {
       { title: "Vision option B", type: "updatePurposeVision", payload: { text: "I create steady progress across the areas that matter most by finishing the right work each week." } },
       { title: "Vision option C", type: "updatePurposeVision", payload: { text: "I live with clear direction, focused execution, and systems that support meaningful growth." } }
     ];
-    return [buildCardFromOptions("Purpose Vision options", "Choose one vision rewrite.", options, context)];
+    return [buildCardFromOptions("New Purpose Vision", "Choose one vision rewrite.", options, context)];
   }
 
   return [];
@@ -4628,6 +5264,129 @@ function resolveCategoryFromRouteTarget(target, context) {
     (item) => String(item?.name || "").trim().toLowerCase() === target.toLowerCase()
   );
   return found || categories[0] || null;
+}
+
+function resolveGoalFromRouteTarget(target, context) {
+  const goals = Array.isArray(context?.activeOutcomes) ? context.activeOutcomes : [];
+  if (!target) return goals[0] || null;
+  const found = goals.find(
+    (item) => String(item?.title || "").trim().toLowerCase() === target.toLowerCase()
+  );
+  return found || goals[0] || null;
+}
+
+function buildGoalExecutionOptions({ goalName, goalCategory, context, variant = "plan" }) {
+  const normalizedGoal = nonEmptyString(goalName) || "this goal";
+  const templates = goalExecutionTemplates(normalizedGoal, variant);
+  const category = resolveCategoryFromRouteTarget(goalCategory, context);
+  const categoryId = nonEmptyString(category?.id) || firstCategoryIdFromContext(context);
+  const existingLittleWins = uniqueOrdered(
+    (Array.isArray(category?.littleWins) ? category.littleWins : [])
+      .map((item) => normalizeModelCopy(nonEmptyString(item)))
+      .filter(Boolean)
+  );
+  const shouldReplaceLittleWin = Boolean(categoryId) && existingLittleWins.length >= 3;
+  const replaceTargets = shouldReplaceLittleWin
+    ? chooseLittleWinReplacementTargets(existingLittleWins, nonEmptyString(category?.name), templates.littleWins.length)
+    : [];
+
+  const littleWinActions = templates.littleWins.map((activity, index) => {
+    const cleanedActivity = truncate(normalizeModelCopy(nonEmptyString(activity)), 120);
+    if (!cleanedActivity) return null;
+    if (!categoryId) {
+      return {
+        title: cleanedActivity,
+        type: "createCaptureAction",
+        payload: { text: cleanedActivity }
+      };
+    }
+    if (shouldReplaceLittleWin) {
+      const replaceActivity =
+        replaceTargets[index % Math.max(1, replaceTargets.length)] || existingLittleWins[index % existingLittleWins.length];
+      return {
+        title: `Replace "${truncate(replaceActivity, 64)}" with "${cleanedActivity}"`,
+        type: "replaceLittleWin",
+        payload: {
+          categoryId,
+          activity: cleanedActivity,
+          replaceActivity
+        }
+      };
+    }
+    return {
+      title: cleanedActivity,
+      type: "addLittleWin",
+      payload: {
+        categoryId,
+        activity: cleanedActivity,
+        appleHealthEligible: inferAppleHealthEligibility(cleanedActivity, goalCategory || nonEmptyString(category?.name))
+      }
+    };
+  }).filter(Boolean);
+
+  const captureActions = templates.capture.map((text) => {
+    const cleaned = truncate(normalizeModelCopy(nonEmptyString(text)), 140);
+    if (!cleaned) return null;
+    return {
+      title: cleaned,
+      type: "createCaptureAction",
+      payload: { text: cleaned }
+    };
+  }).filter(Boolean);
+
+  const deduped = [];
+  const seen = new Set();
+  for (const option of [...littleWinActions, ...captureActions]) {
+    if (!option || typeof option !== "object") continue;
+    const type = nonEmptyString(option.type);
+    const title = nonEmptyString(option.title);
+    if (!type || !title) continue;
+    const payload = option.payload && typeof option.payload === "object" ? option.payload : {};
+    const dedupeKey = `${type}|${title.toLowerCase()}|${JSON.stringify(payload)}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    deduped.push(option);
+    if (deduped.length >= 3) break;
+  }
+  return deduped;
+}
+
+function goalExecutionTemplates(goalName, variant) {
+  const lower = nonEmptyString(goalName).toLowerCase();
+  const isWeightGoal = /\b(lose|loss|weight|lbs?|kg|fat|diet|walk|gym|cardio)\b/.test(lower);
+  const isFinanceGoal = /\b(save|debt|money|finance|budget|income|net worth|invest)\b/.test(lower);
+
+  if (isWeightGoal) {
+    const littleWins = variant === "next"
+      ? ["Follow diet plan today", "Walk 30 minutes today"]
+      : ["Follow diet plan daily", "Walk 30 minutes daily"];
+    return {
+      littleWins,
+      capture: ["Sign up for gym", "Shop for healthy food", "Prep healthy meals for 2 days"]
+    };
+  }
+
+  if (isFinanceGoal) {
+    const littleWins = variant === "next"
+      ? ["Track every purchase today", "Review account balances"]
+      : ["Track spending daily", "Move money to savings daily"];
+    return {
+      littleWins,
+      capture: ["Set up auto-transfer to savings", "Cancel one unused subscription", "Create a debt payoff checklist"]
+    };
+  }
+
+  return {
+    littleWins: [
+      `15-minute progress on ${truncate(goalName, 64)}`,
+      `Daily check-in for ${truncate(goalName, 64)}`
+    ],
+    capture: [
+      `Create a weekly checklist for ${truncate(goalName, 64)}`,
+      `Schedule one focused block for ${truncate(goalName, 64)}`,
+      `List one blocker and one fix for ${truncate(goalName, 64)}`
+    ]
+  };
 }
 
 const LITTLE_WIN_CORPUS_BY_CATEGORY = {
@@ -4699,12 +5458,15 @@ function buildLittleWinRouteOptions({ category, categoryId, target, context }) {
 
   if (candidateTitles.length > 0) {
     const shouldReplace = existingLittleWins.length >= 3;
-    const replaceActivityTarget = shouldReplace
-      ? chooseLittleWinReplacementTarget(existingLittleWins, categoryName)
-      : "";
+    const replaceActivityTargets = shouldReplace
+      ? chooseLittleWinReplacementTargets(existingLittleWins, categoryName, candidateTitles.length)
+      : [];
     return candidateTitles.map((title, index) => {
       if (shouldReplace) {
-        const replaceActivity = replaceActivityTarget || existingLittleWins[index % existingLittleWins.length];
+        const replaceActivity =
+          replaceActivityTargets.length > 0
+            ? replaceActivityTargets[index % replaceActivityTargets.length]
+            : existingLittleWins[index % existingLittleWins.length];
         return {
           title: `Replace "${truncate(replaceActivity, 64)}" with "${truncate(title, 72)}"`,
           type: "replaceLittleWin",
@@ -4744,6 +5506,63 @@ function buildLittleWinRouteOptions({ category, categoryId, target, context }) {
       payload: { categoryId, activity: `20-minute completion block for ${categoryName}`, appleHealthEligible: false }
     }
   ];
+}
+
+function buildPassionRouteOptions({ passionType, context }) {
+  const normalizedType = normalizePassionType(passionType || "love");
+  const purpose = nonEmptyString(context?.drivingForce?.purpose);
+  const vision = nonEmptyString(context?.drivingForce?.vision);
+  const diagnosticRoot = nonEmptyString(context?.diagnostic?.rootCause);
+  const diagnosticDirection = nonEmptyString(context?.diagnostic?.nextDirection);
+  const firstGoal = Array.isArray(context?.activeOutcomes) ? context.activeOutcomes[0] : null;
+  const firstGoalTitle = nonEmptyString(firstGoal?.title);
+  const purposeCue = purpose || vision ? "in line with your purpose and vision" : "with clear intention";
+  const diagnosticCue = diagnosticDirection || diagnosticRoot
+    ? truncate(nonEmptyString(diagnosticDirection) || nonEmptyString(diagnosticRoot), 64)
+    : "";
+
+  let textCandidates;
+  if (normalizedType === "love") {
+    textCandidates = [
+      "Choosing connection and compassion daily, even when your schedule feels noisy.",
+      `Showing up with patience and follow-through ${purposeCue}.`,
+      "Strengthening trust by keeping one small promise every day."
+    ];
+  } else if (normalizedType === "vows") {
+    textCandidates = [
+      "Honoring long-term commitments with steady weekly execution.",
+      "Choosing discipline over drift through repeatable systems.",
+      "Building identity through consistent follow-through on the right work."
+    ];
+  } else if (normalizedType === "thrill") {
+    textCandidates = [
+      "Creating breakthrough momentum by finishing one meaningful challenge each week.",
+      "Turning pressure into progress through focused execution blocks.",
+      `Pursuing high-impact wins with courage, clarity, and measurable follow-through${firstGoalTitle ? ` toward ${firstGoalTitle}` : ""}.`
+    ];
+  } else {
+    textCandidates = [
+      "Refusing avoidance by naming the hardest truth and acting on it immediately.",
+      "Confronting drift with one direct, measurable action every day.",
+      `Eliminating vague busyness by replacing it with concrete execution${diagnosticCue ? ` (${diagnosticCue})` : ""}.`
+    ];
+  }
+
+  const uniqueTexts = uniqueOrdered(
+    textCandidates
+      .map((item) => normalizeModelCopy(nonEmptyString(item)))
+      .filter(Boolean)
+      .map((item) => truncate(item, 120))
+  ).slice(0, 3);
+
+  return uniqueTexts.map((text) => ({
+    title: text,
+    type: "addPassionItem",
+    payload: {
+      passionType: normalizedType,
+      text
+    }
+  }));
 }
 
 function extractActionHintsForCategory(categoryName, context) {
@@ -4852,9 +5671,9 @@ function categoryKeywordSet(categoryName) {
   return ["plan", "review", "track", "organize"];
 }
 
-function chooseLittleWinReplacementTarget(existingLittleWins, categoryName) {
+function chooseLittleWinReplacementTargets(existingLittleWins, categoryName, maxCount = 3) {
   const source = Array.isArray(existingLittleWins) ? existingLittleWins : [];
-  if (source.length === 0) return "";
+  if (source.length === 0) return [];
   const keywords = categoryKeywordSet(categoryName);
   const scored = source.map((item) => {
     const text = nonEmptyString(item).toLowerCase();
@@ -4864,13 +5683,17 @@ function chooseLittleWinReplacementTarget(existingLittleWins, categoryName) {
     }
     if (/\breset\b|\bcleanup\b|\bgeneral\b/.test(text)) relevance -= 1;
     return { item, relevance };
-  }).sort((a, b) => a.relevance - b.relevance);
-  return nonEmptyString(scored[0]?.item) || nonEmptyString(source[0]);
+  }).sort((a, b) => a.relevance - b.relevance || a.item.localeCompare(b.item));
+  const limit = Math.max(1, Math.floor(Number(maxCount) || 3));
+  return scored
+    .map((row) => nonEmptyString(row?.item))
+    .filter(Boolean)
+    .slice(0, Math.min(limit, source.length));
 }
 
-function chooseIdentityReplacementTarget(existingIdentities, categoryName) {
+function chooseIdentityReplacementTargets(existingIdentities, categoryName, maxCount = 3) {
   const source = Array.isArray(existingIdentities) ? existingIdentities : [];
-  if (source.length === 0) return "";
+  if (source.length === 0) return [];
   const keywords = categoryKeywordSet(categoryName);
   const scored = source.map((item) => {
     const text = nonEmptyString(item).toLowerCase();
@@ -4880,8 +5703,12 @@ function chooseIdentityReplacementTarget(existingIdentities, categoryName) {
     }
     if (/\bhelper\b|\bgood\b|\bbetter\b|\bbest\b/.test(text)) relevance -= 1;
     return { item, relevance };
-  }).sort((a, b) => a.relevance - b.relevance);
-  return nonEmptyString(scored[0]?.item) || nonEmptyString(source[0]);
+  }).sort((a, b) => a.relevance - b.relevance || a.item.localeCompare(b.item));
+  const limit = Math.max(1, Math.floor(Number(maxCount) || 3));
+  return scored
+    .map((row) => nonEmptyString(row?.item))
+    .filter(Boolean)
+    .slice(0, Math.min(limit, source.length));
 }
 
 function isLittleWinSuggestionTooSimilarToExisting(candidate, existing) {

@@ -105,7 +105,7 @@ struct FulfillmentRadarGraph: View {
                             }
                             path.closeSubpath()
                         }
-                        .stroke(Color(.separator).opacity(0.5), lineWidth: 4)
+                        .stroke(Color(.separator), lineWidth: 4)
                     }
 
                     // Data dots with white outline and glow

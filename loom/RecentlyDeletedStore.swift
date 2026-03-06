@@ -838,7 +838,7 @@ enum RecentlyDeletedStore {
             return "Purpose"
         }
         if let m = model as? ActionBlocksReflectionArchive {
-            return "Action Blocks • \(shortDate(m.startedAt)) - \(shortDate(m.completedAt))"
+            return "Action Plan • \(shortDate(m.startedAt)) - \(shortDate(m.completedAt))"
         }
         if let m = model as? DrivingForceArchive {
             let vision = m.visionSnapshot.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -895,7 +895,7 @@ enum RecentlyDeletedStore {
             return "Completed Outcome • \(shortDate(m.start)) - \(shortDate(m.completedAt))"
         }
         if model is ActionBlocksReflectionArchive {
-            return "Completed Action Blocks"
+            return "Completed Action Plans"
         }
         if model is DrivingForce {
             return "Purpose"

@@ -56,8 +56,11 @@ struct LoomAIAutoWriteTipPreviewScene: View {
 
     private var autoWriteButton: some View {
         HStack(spacing: 6) {
-            Image(systemName: "wand.and.stars")
-                .font(.caption.weight(.semibold))
+            Image("LoomAI")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 13, height: 13)
             Text("AutoWrite")
                 .font(.caption.weight(.semibold))
         }

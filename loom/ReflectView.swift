@@ -1136,7 +1136,7 @@ struct ReflectView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Fulfillment Areas")
                                 .font(.headline)
-                            Text("Projection score impact from Action Blocks completion.")
+                            Text("Projection score impact from Action Plan completion.")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                             ForEach(snapshot.fulfillmentAreaRows, id: \.self) { row in

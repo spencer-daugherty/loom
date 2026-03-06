@@ -686,6 +686,7 @@ struct TemporaryVisionAutoWriteDebugView: View {
         usageSummaryText = "-"
         estimatedCostText = "-"
         rawContextText = ""
+        loomAIDebugEvidence = []
         defer { isLoading = false }
         let startedAt = Date()
 
@@ -707,6 +708,11 @@ struct TemporaryVisionAutoWriteDebugView: View {
             rawResponseText = responseText
             responseStatus = "HTTP \(status)"
             responseDurationText = formatDuration(Date().timeIntervalSince(startedAt))
+            if let decoded = try? JSONDecoder().decode(DiagnosticInsights.self, from: data) {
+                loomAIDebugEvidence = diagnosticDebugEvidence(from: decoded.debug)
+            } else {
+                loomAIDebugEvidence = []
+            }
             updateUsageEstimate(from: data, requestData: bodyData, fallbackModel: "gpt-5.1")
         } catch {
             let nsError = error as NSError
@@ -715,6 +721,7 @@ struct TemporaryVisionAutoWriteDebugView: View {
             } else {
                 responseStatus = "Request failed"
             }
+            loomAIDebugEvidence = []
             rawResponseText = String(describing: error)
             responseDurationText = formatDuration(Date().timeIntervalSince(startedAt))
         }
@@ -1384,6 +1391,14 @@ struct TemporaryVisionAutoWriteDebugView: View {
             merged.append(.init(id: chip.id, title: title, prompt: prompt))
         }
         return merged
+    }
+
+    private func diagnosticDebugEvidence(from debug: LoomAIDebug?) -> [String] {
+        guard let debug else { return [] }
+        if let evidence = debug.evidence, !evidence.isEmpty {
+            return evidence
+        }
+        return []
     }
 }
 

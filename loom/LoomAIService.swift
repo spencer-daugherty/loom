@@ -159,6 +159,7 @@ struct LoomAIService {
         var stressTrigger: String
         var breakingPoint: String
         var debug: LoomAIDebug?
+        var usage: LoomAIUsage?
     }
 
     struct DiagnosticInsightsRequest: Codable {
@@ -557,7 +558,12 @@ struct LoomAIService {
                         rawBody: rawBody
                     )
                 }
-                return .init(rootCause: root, nextDirection: next)
+                return .init(
+                    rootCause: root,
+                    nextDirection: next,
+                    debug: decoded.debug,
+                    usage: decoded.usage
+                )
             } catch {
                 throw LoomAIServiceError(
                     message: "Invalid diagnostic insights JSON.",
@@ -575,6 +581,14 @@ struct LoomAIService {
                 reportSlowDiagnosticInsightsIfNeeded(
                     insights: insights,
                     elapsedMS: (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
+                )
+                LoomAICostLedger.record(
+                    response: LoomAIResponse(
+                        message: insights.rootCause + "\n" + insights.nextDirection,
+                        debug: insights.debug,
+                        usage: insights.usage
+                    ),
+                    intent: "diagnostic_insights"
                 )
                 return insights
             } catch {
@@ -934,7 +948,8 @@ struct LoomAIService {
             weakness: weakness,
             stressTrigger: stress,
             breakingPoint: breaking,
-            debug: decoded.debug
+            debug: decoded.debug,
+            usage: decoded.usage
         )
 
         let preview = """
@@ -951,6 +966,16 @@ struct LoomAIService {
         ) {
             loomAIReportTroubleshootingIfEnabled(details: details)
         }
+
+        LoomAICostLedger.record(
+            response: LoomAIResponse(
+                message: profile,
+                debug: decoded.debug,
+                usage: decoded.usage,
+                elapsedMS: elapsedMS
+            ),
+            intent: "purpose_profile_insights"
+        )
 
         return responseModel
     }
@@ -2031,7 +2056,7 @@ struct LoomAIService {
         loomAIReportTroubleshootingIfEnabled(details: details)
     }
 }
-    struct LoomAIUsage: Codable {
+    struct LoomAIUsage: Codable, Hashable {
         var model: String?
         var inputTokens: Int
         var cachedInputTokens: Int
@@ -2044,24 +2069,82 @@ struct LoomAIDailyCostSnapshot {
     var chatLimitUSD: Double
     var autoWriteSpentUSD: Double
     var autoWriteLimitUSD: Double
+    var insightsSpentUSD: Double
+    var insightsLimitUSD: Double
+    var totalDailySpentUSD: Double
+    var totalMonthlySpentUSD: Double
 }
 
 enum LoomAICostLedger {
     private struct DailyLedger: Codable {
         var dayKey: String
+        var monthKey: String
         var userKey: String
         var chatSpentUSD: Double
         var autoWriteSpentUSD: Double
+        var insightsSpentUSD: Double
+        var monthlyChatSpentUSD: Double
+        var monthlyAutoWriteSpentUSD: Double
+        var monthlyInsightsSpentUSD: Double
+
+        init(
+            dayKey: String,
+            monthKey: String,
+            userKey: String,
+            chatSpentUSD: Double,
+            autoWriteSpentUSD: Double,
+            insightsSpentUSD: Double,
+            monthlyChatSpentUSD: Double,
+            monthlyAutoWriteSpentUSD: Double,
+            monthlyInsightsSpentUSD: Double
+        ) {
+            self.dayKey = dayKey
+            self.monthKey = monthKey
+            self.userKey = userKey
+            self.chatSpentUSD = chatSpentUSD
+            self.autoWriteSpentUSD = autoWriteSpentUSD
+            self.insightsSpentUSD = insightsSpentUSD
+            self.monthlyChatSpentUSD = monthlyChatSpentUSD
+            self.monthlyAutoWriteSpentUSD = monthlyAutoWriteSpentUSD
+            self.monthlyInsightsSpentUSD = monthlyInsightsSpentUSD
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case dayKey
+            case monthKey
+            case userKey
+            case chatSpentUSD
+            case autoWriteSpentUSD
+            case insightsSpentUSD
+            case monthlyChatSpentUSD
+            case monthlyAutoWriteSpentUSD
+            case monthlyInsightsSpentUSD
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            dayKey = try container.decode(String.self, forKey: .dayKey)
+            monthKey = try container.decodeIfPresent(String.self, forKey: .monthKey) ?? ""
+            userKey = try container.decode(String.self, forKey: .userKey)
+            chatSpentUSD = try container.decodeIfPresent(Double.self, forKey: .chatSpentUSD) ?? 0
+            autoWriteSpentUSD = try container.decodeIfPresent(Double.self, forKey: .autoWriteSpentUSD) ?? 0
+            insightsSpentUSD = try container.decodeIfPresent(Double.self, forKey: .insightsSpentUSD) ?? 0
+            monthlyChatSpentUSD = try container.decodeIfPresent(Double.self, forKey: .monthlyChatSpentUSD) ?? 0
+            monthlyAutoWriteSpentUSD = try container.decodeIfPresent(Double.self, forKey: .monthlyAutoWriteSpentUSD) ?? 0
+            monthlyInsightsSpentUSD = try container.decodeIfPresent(Double.self, forKey: .monthlyInsightsSpentUSD) ?? 0
+        }
     }
 
     private enum Bucket {
         case chat
         case autoWrite
+        case insights
     }
 
     private static let defaultsKey = "loom.ai.dailyCostLedger.v1"
     private static let chatLimitUSD: Double = 0.10
     private static let autoWriteLimitUSD: Double = 0.10
+    private static let insightsLimitUSD: Double = 0.10
     private static let fallbackEstimatedCostPerReplyUSD: Double = 0.01
 
     static func record(response: LoomAIService.LoomAIResponse, intent: String?) {
@@ -2071,32 +2154,42 @@ enum LoomAICostLedger {
         switch bucket {
         case .chat:
             ledger.chatSpentUSD += cost
+            ledger.monthlyChatSpentUSD += cost
         case .autoWrite:
             ledger.autoWriteSpentUSD += cost
+            ledger.monthlyAutoWriteSpentUSD += cost
+        case .insights:
+            ledger.insightsSpentUSD += cost
+            ledger.monthlyInsightsSpentUSD += cost
         }
         save(ledger)
     }
 
     static func dailySnapshot() -> LoomAIDailyCostSnapshot {
         let ledger = dailyLedger()
+        let totalDaily = max(0, ledger.chatSpentUSD)
+            + max(0, ledger.autoWriteSpentUSD)
+            + max(0, ledger.insightsSpentUSD)
+        let totalMonthly = max(0, ledger.monthlyChatSpentUSD)
+            + max(0, ledger.monthlyAutoWriteSpentUSD)
+            + max(0, ledger.monthlyInsightsSpentUSD)
         return LoomAIDailyCostSnapshot(
             chatSpentUSD: max(0, ledger.chatSpentUSD),
             chatLimitUSD: chatLimitUSD,
             autoWriteSpentUSD: max(0, ledger.autoWriteSpentUSD),
-            autoWriteLimitUSD: autoWriteLimitUSD
+            autoWriteLimitUSD: autoWriteLimitUSD,
+            insightsSpentUSD: max(0, ledger.insightsSpentUSD),
+            insightsLimitUSD: insightsLimitUSD,
+            totalDailySpentUSD: totalDaily,
+            totalMonthlySpentUSD: totalMonthly
         )
     }
 
     static func resetToday() {
-        let now = Date()
-        let dayKey = dayKeyFormatter.string(from: now)
-        let userKey = PersonalizationUserIdentity.currentUserKey()
-        let ledger = DailyLedger(
-            dayKey: dayKey,
-            userKey: userKey,
-            chatSpentUSD: 0,
-            autoWriteSpentUSD: 0
-        )
+        var ledger = dailyLedger()
+        ledger.chatSpentUSD = 0
+        ledger.autoWriteSpentUSD = 0
+        ledger.insightsSpentUSD = 0
         save(ledger)
     }
 
@@ -2108,6 +2201,9 @@ enum LoomAICostLedger {
         if normalized == "loomai_chat" || normalized == "chat_thread_title" {
             return .chat
         }
+        if normalized == "diagnostic_insights" || normalized == "purpose_profile_insights" {
+            return .insights
+        }
         if normalized == "autogroup_plan" || normalized.contains("autowrite") {
             return .autoWrite
         }
@@ -2116,12 +2212,34 @@ enum LoomAICostLedger {
 
     private static func dailyLedger(now: Date = Date()) -> DailyLedger {
         let dayKey = dayKeyFormatter.string(from: now)
+        let monthKey = monthKeyFormatter.string(from: now)
         let userKey = PersonalizationUserIdentity.currentUserKey()
         guard let data = UserDefaults.standard.data(forKey: defaultsKey),
-              let decoded = try? JSONDecoder().decode(DailyLedger.self, from: data),
-              decoded.dayKey == dayKey,
+              var decoded = try? JSONDecoder().decode(DailyLedger.self, from: data),
               decoded.userKey == userKey else {
-            return DailyLedger(dayKey: dayKey, userKey: userKey, chatSpentUSD: 0, autoWriteSpentUSD: 0)
+            return DailyLedger(
+                dayKey: dayKey,
+                monthKey: monthKey,
+                userKey: userKey,
+                chatSpentUSD: 0,
+                autoWriteSpentUSD: 0,
+                insightsSpentUSD: 0,
+                monthlyChatSpentUSD: 0,
+                monthlyAutoWriteSpentUSD: 0,
+                monthlyInsightsSpentUSD: 0
+            )
+        }
+        if decoded.monthKey != monthKey {
+            decoded.monthKey = monthKey
+            decoded.monthlyChatSpentUSD = 0
+            decoded.monthlyAutoWriteSpentUSD = 0
+            decoded.monthlyInsightsSpentUSD = 0
+        }
+        if decoded.dayKey != dayKey {
+            decoded.dayKey = dayKey
+            decoded.chatSpentUSD = 0
+            decoded.autoWriteSpentUSD = 0
+            decoded.insightsSpentUSD = 0
         }
         return decoded
     }
@@ -2170,6 +2288,15 @@ enum LoomAICostLedger {
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.timeZone = .current
         formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
+    private static let monthKeyFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM"
         return formatter
     }()
 }

@@ -23,9 +23,7 @@ struct TipDetailView: View {
 
                         VStack(alignment: .leading, spacing: 10) {
                             HStack(spacing: 8) {
-                                Image(systemName: tip.symbolName)
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(.secondary)
+                                tipIcon(for: tip)
 
                                 Text(tip.title)
                                     .font(.title2.weight(.bold))
@@ -86,6 +84,26 @@ struct TipDetailView: View {
             .frame(maxWidth: .infinity)
             .padding(.top, 8)
             .padding(.bottom, 8)
+        }
+    }
+
+    @ViewBuilder
+    private func tipIcon(for tip: TipFeature) -> some View {
+        if tip == .appleHealthIntegration {
+            Image(systemName: "heart.fill")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.red)
+        } else if tip == .loomAIPersonalization
+            || tip == .loomAIChat
+            || tip == .loomAIAutoWrite {
+            Image("LoomAI")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 18, height: 18)
+        } else {
+            Image(systemName: tip.symbolName)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
         }
     }
 }
