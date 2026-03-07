@@ -11,7 +11,8 @@ enum TipPreviewType: String {
     case shareToLoom
     case loomAIChat
     case loomAIAutoWrite
-    case loomAIEmailAssit
+    case loomAIEmailAssist
+    case loomAIAgent
 }
 
 enum TipFeature: String, CaseIterable, Identifiable {
@@ -22,13 +23,14 @@ enum TipFeature: String, CaseIterable, Identifiable {
     case shareToLoom
     case loomAIChat
     case loomAIAutoWrite
-    case loomAIEmailAssit
+    case loomAIEmailAssist
+    case loomAIAgent
 
     var id: String { rawValue }
 
     var hubSection: TipHubSection {
         switch self {
-        case .loomAIEmailAssit:
+        case .loomAIEmailAssist, .loomAIAgent:
             return .inDevelopment
         default:
             return .tips
@@ -51,8 +53,10 @@ enum TipFeature: String, CaseIterable, Identifiable {
             return "LoomAI Chat"
         case .loomAIAutoWrite:
             return "LoomAI AutoWrite"
-        case .loomAIEmailAssit:
-            return "LoomAI EmailAssit"
+        case .loomAIEmailAssist:
+            return "LoomAI EmailAssist"
+        case .loomAIAgent:
+            return "LoomAI Agent"
         }
     }
 
@@ -72,8 +76,10 @@ enum TipFeature: String, CaseIterable, Identifiable {
             return "Ask LoomAI for focused help and get suggestion cards you can apply fast."
         case .loomAIAutoWrite:
             return "AutoWrite drafts context-aware text using your Loom setup and direction."
-        case .loomAIEmailAssit:
+        case .loomAIEmailAssist:
             return "Integrate with your email provider and LoomAI will capture any pending actions for your attention."
+        case .loomAIAgent:
+            return "Assign real-world tasks to LoomAI and review curated options before it books, buys, or schedules."
         }
     }
 
@@ -93,8 +99,10 @@ enum TipFeature: String, CaseIterable, Identifiable {
             return "Chat with LoomAI to clarify priorities, unblock execution, and get structured options. Suggestion cards help you move from idea to action quickly."
         case .loomAIAutoWrite:
             return "AutoWrite generates polished drafts in the moment based on your current screen and context. It helps you write faster while keeping your voice and intent intact."
-        case .loomAIEmailAssit:
+        case .loomAIEmailAssist:
             return "Connect your inbox so LoomAI can scan email threads, surface the follow-ups that need action, and turn them into pending items without manual triage."
+        case .loomAIAgent:
+            return "LoomAI Agent can take a request like travel, shopping, appointments, or reservations, confirm that you want help, and return strong options before taking the next step."
         }
     }
 
@@ -114,8 +122,10 @@ enum TipFeature: String, CaseIterable, Identifiable {
             return .loomAIChat
         case .loomAIAutoWrite:
             return .loomAIAutoWrite
-        case .loomAIEmailAssit:
-            return .loomAIEmailAssit
+        case .loomAIEmailAssist:
+            return .loomAIEmailAssist
+        case .loomAIAgent:
+            return .loomAIAgent
         }
     }
 
@@ -135,8 +145,10 @@ enum TipFeature: String, CaseIterable, Identifiable {
             return "bubble.left.and.bubble.right"
         case .loomAIAutoWrite:
             return "wand.and.stars"
-        case .loomAIEmailAssit:
+        case .loomAIEmailAssist:
             return "envelope.badge"
+        case .loomAIAgent:
+            return "person.crop.circle.badge.sparkles"
         }
     }
 
@@ -162,7 +174,9 @@ enum TipFeature: String, CaseIterable, Identifiable {
         switch self {
         case .appleHealthIntegration:
             return 5
-        case .littleWinsMoments, .loomAIPersonalization, .assignActions, .shareToLoom, .loomAIChat, .loomAIAutoWrite, .loomAIEmailAssit:
+        case .loomAIAgent:
+            return 16
+        case .littleWinsMoments, .loomAIPersonalization, .assignActions, .shareToLoom, .loomAIChat, .loomAIAutoWrite, .loomAIEmailAssist:
             return 4
         }
     }

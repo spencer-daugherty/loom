@@ -96,7 +96,8 @@ struct TipDetailView: View {
         } else if tip == .loomAIPersonalization
             || tip == .loomAIChat
             || tip == .loomAIAutoWrite
-            || tip == .loomAIEmailAssit {
+            || tip == .loomAIEmailAssist
+            || tip == .loomAIAgent {
             Image("LoomAI")
                 .resizable()
                 .scaledToFit()

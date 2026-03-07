@@ -113,7 +113,8 @@ private struct TipHubCard: View {
         } else if feature == .loomAIPersonalization
             || feature == .loomAIChat
             || feature == .loomAIAutoWrite
-            || feature == .loomAIEmailAssit {
+            || feature == .loomAIEmailAssist
+            || feature == .loomAIAgent {
             Image("LoomAI")
                 .resizable()
                 .scaledToFit()

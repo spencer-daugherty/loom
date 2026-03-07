@@ -554,6 +554,12 @@ struct AccountView: View {
         return String(format: "$%.2f", sanitized)
     }
 
+    private func unpricedCostFootnote(_ count: Int) -> String? {
+        guard count > 0 else { return nil }
+        let requestWord = count == 1 ? "request" : "requests"
+        return "Excludes \(count) \(requestWord) without exact usage metadata."
+    }
+
     var body: some View {
         List {
             Section {
@@ -852,6 +858,12 @@ struct AccountView: View {
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
                             }
+
+                            if loomAICostSnapshot.totalUnpricedDailyCount > 0 || loomAICostSnapshot.totalUnpricedMonthlyCount > 0 {
+                                Text("Exact totals exclude \(loomAICostSnapshot.totalUnpricedDailyCount) daily and \(loomAICostSnapshot.totalUnpricedMonthlyCount) monthly requests without exact usage metadata.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                         .padding(.vertical, 4)
 
@@ -866,7 +878,7 @@ struct AccountView: View {
                             }
                             ProgressView(value: costProgress(spent: loomAICostSnapshot.chatSpentUSD, limit: loomAICostSnapshot.chatLimitUSD))
                                 .tint(.accentColor)
-                            Text("Daily estimate total.")
+                            Text(unpricedCostFootnote(loomAICostSnapshot.chatUnpricedDailyCount) ?? "Exact cost total for today.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                         }
@@ -883,7 +895,7 @@ struct AccountView: View {
                             }
                             ProgressView(value: costProgress(spent: loomAICostSnapshot.autoWriteSpentUSD, limit: loomAICostSnapshot.autoWriteLimitUSD))
                                 .tint(.accentColor)
-                            Text("Includes AutoWrite and AutoGroup requests.")
+                            Text(unpricedCostFootnote(loomAICostSnapshot.autoWriteUnpricedDailyCount) ?? "Includes AutoWrite and AutoGroup requests.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                         }
@@ -900,7 +912,7 @@ struct AccountView: View {
                             }
                             ProgressView(value: costProgress(spent: loomAICostSnapshot.insightsSpentUSD, limit: loomAICostSnapshot.insightsLimitUSD))
                                 .tint(.accentColor)
-                            Text("Includes How Loom Sees You and diagnostic insights requests.")
+                            Text(unpricedCostFootnote(loomAICostSnapshot.insightsUnpricedDailyCount) ?? "Includes How Loom Sees You and diagnostic insights requests.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                         }

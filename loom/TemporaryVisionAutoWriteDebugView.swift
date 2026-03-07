@@ -9,6 +9,8 @@ import UIKit
 /// Delete this file and the `showTemporaryVisionAutoWriteDebugPage` branch in `loomApp.swift`
 /// to remove it entirely.
 struct TemporaryVisionAutoWriteDebugView: View {
+    private static let diagnosticsFallbackMessage = "Processing error. Please try again later."
+
     private enum DebugMode: String, CaseIterable, Identifiable {
         case newVision
         case rewordVision
@@ -51,6 +53,11 @@ struct TemporaryVisionAutoWriteDebugView: View {
 
     @Environment(\.modelContext) private var modelContext
     @ObservedObject private var appActivityLog = AppDebugActivityLog.shared
+    @StateObject private var personalizationStore = PersonalizationStore()
+    @Query(sort: \DrivingForce.updatedAt, order: .reverse) private var drivingForces: [DrivingForce]
+    @Query(sort: \Passion.date, order: .forward) private var passions: [Passion]
+    @Query(sort: \DiagnosticsInsightsSnapshot.generatedAt, order: .reverse) private var diagnosticsInsightsSnapshots: [DiagnosticsInsightsSnapshot]
+    @Query(sort: \PurposeProfileInsightsSnapshot.generatedAt, order: .reverse) private var purposeProfileInsightsSnapshots: [PurposeProfileInsightsSnapshot]
 
     @State private var currentVision: String = ""
     @State private var mode: DebugMode = .loomAI
@@ -66,6 +73,9 @@ struct TemporaryVisionAutoWriteDebugView: View {
     @State private var estimatedCostText: String = "-"
     @State private var loomAIDebugChips: [LoomAIPromptChip] = []
     @State private var loomAIDebugEvidence: [String] = []
+    @State private var lastDiagnosticRunSnapshot: PersonalizationSnapshot?
+    @State private var lastDiagnosticRunHash: String?
+    @State private var lastDiagnosticRunSnapshotKey: String?
     @State private var requestCopied = false
     @State private var responseCopied = false
     @State private var contextCopied = false
@@ -257,7 +267,7 @@ struct TemporaryVisionAutoWriteDebugView: View {
                             }
                         }
                     } else if mode == .diagnostic {
-                        Text("Sends random diagnostic answers (stress, break point, 3-7 life areas, planning style, and desired change) to the Diagnostic Insights endpoint.")
+                        Text("Runs the same save-and-refresh path as Edit diagnostic answers in Personalization, using randomized diagnostic answers.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     } else if mode == .personalities {
@@ -329,7 +339,7 @@ struct TemporaryVisionAutoWriteDebugView: View {
                         Text("Usage: \(usageSummaryText)")
                             .font(.footnote.monospaced())
                             .foregroundStyle(.secondary)
-                        Text("Estimated cost: \(estimatedCostText)")
+                        Text("Cost: \(estimatedCostText)")
                             .font(.footnote.monospaced())
                             .foregroundStyle(.secondary)
 
@@ -691,29 +701,33 @@ struct TemporaryVisionAutoWriteDebugView: View {
         let startedAt = Date()
 
         do {
-            let body = makeRandomDiagnosticRequestBody()
-            let bodyData = try JSONSerialization.data(withJSONObject: body, options: [.prettyPrinted, .sortedKeys])
+            let draft = makeRandomDiagnosticDraft()
+            let requestPreview = makeDiagnosticRequestBody(from: draft)
+            let bodyData = try JSONSerialization.data(withJSONObject: requestPreview, options: [.prettyPrinted, .sortedKeys])
             rawRequestText = String(data: bodyData, encoding: .utf8) ?? "<request encoding failed>"
+            responseStatus = "Saving snapshot..."
+            let savedSnapshot = try await personalizationStore.saveSnapshot(from: draft, source: .accountEdit)
+            let savedDiagnosticsHash = DiagnosticsInsightsHasher.hash(for: savedSnapshot)
+            let savedSnapshotKey = DiagnosticsInsightsHasher.snapshotKey(
+                userKey: personalizationStore.userKey,
+                diagnosticsHash: savedDiagnosticsHash
+            )
+            lastDiagnosticRunSnapshot = savedSnapshot
+            lastDiagnosticRunHash = savedDiagnosticsHash
+            lastDiagnosticRunSnapshotKey = savedSnapshotKey
+            AppDebugActivityLog.log(
+                "Personalization",
+                "Debug Diagnostic saved. mode=debug snapshot=\(savedSnapshot.id.uuidString)"
+            )
 
-            var request = URLRequest(url: diagnosticInsightsEndpointURL)
-            request.httpMethod = "POST"
-            request.timeoutInterval = 45
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = bodyData
-
-            responseStatus = "Sending..."
-            let (data, response) = try await URLSession.shared.data(for: request)
-            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-            let responseText = String(data: data, encoding: .utf8) ?? "<non-UTF8 \(data.count) bytes>"
-            rawResponseText = responseText
-            responseStatus = "HTTP \(status)"
+            responseStatus = "Refreshing insights..."
+            let envelope = await runDiagnosticAccountRefresh(snapshot: savedSnapshot)
+            let responseData = try encodePrettyJSONData(envelope)
+            rawResponseText = String(data: responseData, encoding: .utf8) ?? "<response encoding failed>"
+            responseStatus = "HTTP 200"
             responseDurationText = formatDuration(Date().timeIntervalSince(startedAt))
-            if let decoded = try? JSONDecoder().decode(DiagnosticInsights.self, from: data) {
-                loomAIDebugEvidence = diagnosticDebugEvidence(from: decoded.debug)
-            } else {
-                loomAIDebugEvidence = []
-            }
-            updateUsageEstimate(from: data, requestData: bodyData, fallbackModel: "gpt-5.1")
+            loomAIDebugEvidence = diagnosticDebugEvidence(from: envelope.debug)
+            updateUsageEstimate(from: responseData, requestData: bodyData, fallbackModel: envelope.usage?.model ?? "gpt-5.1")
         } catch {
             let nsError = error as NSError
             if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorTimedOut {
@@ -1078,15 +1092,22 @@ struct TemporaryVisionAutoWriteDebugView: View {
         )
     }
 
-    private func makeRandomDiagnosticRequestBody() -> [String: Any] {
-        let diagnostic = makeRandomDiagnosticAnswers()
+    private func makeDiagnosticRequestBody(from draft: PersonalizationDraft) -> [String: Any] {
+        let snapshot = draft.snapshotValue()!
+        let diagnostic = DiagnosticAnswers(snapshot: snapshot)
 
         return [
-            "diagnostic": diagnostic,
+            "diagnostic": [
+                "stress": diagnostic.stress,
+                "breaksFirst": diagnostic.breaksFirst,
+                "areas": diagnostic.areas,
+                "planningStyle": diagnostic.planningStyle,
+                "firstChange": diagnostic.firstChange
+            ],
             "client": [
                 "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
                 "platform": "ios",
-                "screen": "diagnostic_insights_debug"
+                "screen": "account_personalization_debug"
             ]
         ]
     }
@@ -1131,6 +1152,293 @@ struct TemporaryVisionAutoWriteDebugView: View {
         ]
     }
 
+    private func makeRandomDiagnosticDraft() -> PersonalizationDraft {
+        let diagnostic = makeRandomDiagnosticAnswers()
+        let areas = diagnostic["areas"] as? [String] ?? []
+        let colorDefaults = FulfillmentCategoryTheme.defaultColorKeys()
+        let colorKeys = Dictionary(uniqueKeysWithValues: areas.map { area in
+            (area, colorDefaults[area] ?? FulfillmentCategoryTheme.colorKey(for: area))
+        })
+        return PersonalizationDraft(
+            stressSource: diagnostic["stress"] as? String,
+            breakPoint: diagnostic["breaksFirst"] as? String,
+            lifeAreasSelected: areas,
+            lifeAreaColorKeys: colorKeys,
+            planningReality: diagnostic["planningStyle"] as? String,
+            desiredChange: diagnostic["firstChange"] as? String
+        )
+    }
+
+    private func runDiagnosticAccountRefresh(snapshot: PersonalizationSnapshot) async -> DiagnosticInsights {
+        let userKey = personalizationStore.userKey
+        let diagnostics = DiagnosticAnswers(snapshot: snapshot)
+        let diagnosticsHash = DiagnosticsInsightsHasher.hash(for: snapshot)
+        let diagnosticsSnapshotKey = DiagnosticsInsightsHasher.snapshotKey(
+            userKey: userKey,
+            diagnosticsHash: diagnosticsHash
+        )
+        AppDebugActivityLog.log(
+            "Personalization",
+            "refreshInsightsForUpdatedDiagnostic start user=\(userKey) diagnosticsHash=\(String(diagnosticsHash.prefix(8)))"
+        )
+
+        let fallbackDiagnosticsSnapshot = diagnosticsInsightsSnapshots.first(where: {
+            $0.userKey == userKey && $0.diagnosticsHash == diagnosticsHash
+        })
+
+        var rootCause = fallbackDiagnosticsSnapshot?.rootCauseText.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        var nextDirection = fallbackDiagnosticsSnapshot?.nextDirectionText.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        var debug: LoomAIDebug?
+        var usage: LoomAIUsage?
+        var receivedFreshValidInsights = false
+        let fulfillmentText = fallbackDiagnosticsSnapshot?.fulfillmentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            ? fallbackDiagnosticsSnapshot!.fulfillmentText
+            : "Every task, goal, and little win will land in one of these areas, so your life stays organized."
+
+        do {
+            let response = try await LoomAIService().fetchDiagnosticInsights(
+                diagnostic: diagnostics,
+                client: DiagnosticInsightsClient(
+                    appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
+                    platform: "ios",
+                    screen: "account_personalization_debug"
+                )
+            )
+            usage = response.usage
+            debug = response.debug
+            let normalizedRoot = normalizeInsightsBody(response.rootCause)
+            let normalizedNext = normalizeInsightsBody(response.nextDirection)
+            if isRenderableDiagnosticInsightBody(normalizedRoot),
+               isRenderableDiagnosticInsightBody(normalizedNext),
+               normalizedRoot != Self.diagnosticsFallbackMessage,
+               normalizedNext != Self.diagnosticsFallbackMessage {
+                rootCause = normalizedRoot
+                nextDirection = normalizedNext
+                receivedFreshValidInsights = true
+                AppDebugActivityLog.log(
+                    "Personalization",
+                    "Diagnostic insights refreshed from API root/next chars=\(rootCause.count)/\(nextDirection.count)"
+                )
+                upsertDiagnosticsInsightsSnapshot(
+                    snapshotKey: diagnosticsSnapshotKey,
+                    userKey: userKey,
+                    diagnosticsHash: diagnosticsHash,
+                    rootCause: rootCause,
+                    fulfillmentText: fulfillmentText,
+                    nextDirection: nextDirection,
+                    purposeRefreshCycleKey: fallbackDiagnosticsSnapshot?.purposeRefreshCycleKey
+                )
+            } else {
+                AppDebugActivityLog.log(
+                    "Personalization",
+                    "Diagnostic insights response rejected; preserving prior root/next"
+                )
+            }
+        } catch {
+            AppDebugActivityLog.log("Personalization", "Diagnostic insights refresh failed: \(error.localizedDescription)")
+        }
+
+        let currentVision = currentVisionForProfileInsights()
+        let currentPassions = currentPassionsForProfileInsights()
+        let fallbackRecord = PurposeProfileMatcher.bestMatch(
+            inputs: .init(
+                stress: diagnostics.stress,
+                breakPoint: diagnostics.breaksFirst,
+                planning: diagnostics.planningStyle,
+                desired: diagnostics.firstChange,
+                rootCause: rootCause,
+                nextDirection: nextDirection,
+                vision: currentVision,
+                passions: currentPassions
+            )
+        )
+
+        let monthKey = PurposeProfileInsightsHasher.monthKey()
+        let inputsHash = PurposeProfileInsightsHasher.hash(
+            diagnostic: diagnostics,
+            rootCause: rootCause,
+            nextDirection: nextDirection,
+            vision: currentVision,
+            passions: currentPassions
+        )
+        let purposeSnapshotKey = PurposeProfileInsightsHasher.snapshotKey(
+            userKey: userKey,
+            monthKey: monthKey,
+            inputsHash: inputsHash
+        )
+        AppDebugActivityLog.log(
+            "Personalization",
+            "Purpose profile refresh request month=\(monthKey) inputsHash=\(String(inputsHash.prefix(8)))"
+        )
+
+        let resolvedRecord: PurposeProfileRecord
+        do {
+            let response = try await LoomAIService().fetchPurposeProfileInsights(
+                diagnostic: diagnostics,
+                rootCause: rootCause,
+                nextDirection: nextDirection,
+                vision: currentVision,
+                passions: currentPassions
+            )
+            resolvedRecord = PurposeProfilesCatalog.record(named: response.profile) ?? PurposeProfileRecord(
+                profile: response.profile,
+                strength: response.strength,
+                weakness: response.weakness,
+                stressTrigger: response.stressTrigger,
+                breakingPoint: response.breakingPoint
+            )
+            AppDebugActivityLog.log("Personalization", "Purpose profile refreshed profile=\(resolvedRecord.profile)")
+        } catch {
+            resolvedRecord = fallbackRecord
+            AppDebugActivityLog.log("Personalization", "Purpose profile refresh failed, using fallback profile=\(fallbackRecord.profile)")
+        }
+
+        upsertPurposeProfileSnapshot(
+            snapshotKey: purposeSnapshotKey,
+            userKey: userKey,
+            monthKey: monthKey,
+            inputsHash: inputsHash,
+            record: resolvedRecord
+        )
+
+        if receivedFreshValidInsights || fallbackDiagnosticsSnapshot != nil {
+            upsertDiagnosticsInsightsSnapshot(
+                snapshotKey: diagnosticsSnapshotKey,
+                userKey: userKey,
+                diagnosticsHash: diagnosticsHash,
+                rootCause: rootCause,
+                fulfillmentText: fulfillmentText,
+                nextDirection: nextDirection,
+                purposeRefreshCycleKey: purposeSnapshotKey
+            )
+        }
+        AppDebugActivityLog.log(
+            "Personalization",
+            "refreshInsightsForUpdatedDiagnostic completed profileKey=\(purposeSnapshotKey)"
+        )
+
+        return DiagnosticInsights(
+            rootCause: receivedFreshValidInsights ? rootCause : Self.diagnosticsFallbackMessage,
+            nextDirection: receivedFreshValidInsights ? nextDirection : Self.diagnosticsFallbackMessage,
+            debug: debug,
+            usage: usage
+        )
+    }
+
+    private func normalizeInsightsBody(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func isRenderableDiagnosticInsightBody(_ text: String) -> Bool {
+        guard !text.isEmpty else { return false }
+        let sentences = text
+            .split(whereSeparator: { ".!?".contains($0) })
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return sentences.count >= 2 && sentences.count <= 3
+    }
+
+    private func currentVisionForProfileInsights() -> String {
+        (drivingForces.first?.ultimateVision ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func currentPassionsForProfileInsights() -> [String] {
+        let normalized = passions
+            .map(\.passion)
+            .map {
+                $0.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            .filter { !$0.isEmpty }
+        return Array(Set(normalized)).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    private func upsertDiagnosticsInsightsSnapshot(
+        snapshotKey: String,
+        userKey: String,
+        diagnosticsHash: String,
+        rootCause: String,
+        fulfillmentText: String,
+        nextDirection: String,
+        purposeRefreshCycleKey: String?
+    ) {
+        if let existing = diagnosticsInsightsSnapshots.first(where: { $0.snapshotKey == snapshotKey }) {
+            existing.generatedAt = .now
+            existing.userKey = userKey
+            existing.diagnosticsHash = diagnosticsHash
+            existing.rootCauseText = rootCause
+            existing.fulfillmentText = fulfillmentText
+            existing.nextDirectionText = nextDirection
+            existing.purposeRefreshCycleKey = purposeRefreshCycleKey
+            existing.version = DiagnosticsInsightsHasher.schemaVersion
+        } else {
+            modelContext.insert(
+                DiagnosticsInsightsSnapshot(
+                    snapshotKey: snapshotKey,
+                    userKey: userKey,
+                    diagnosticsHash: diagnosticsHash,
+                    generatedAt: .now,
+                    rootCauseText: rootCause,
+                    fulfillmentText: fulfillmentText,
+                    nextDirectionText: nextDirection,
+                    purposeRefreshCycleKey: purposeRefreshCycleKey,
+                    version: DiagnosticsInsightsHasher.schemaVersion
+                )
+            )
+        }
+        do {
+            try modelContext.save()
+            AppDebugActivityLog.log(
+                "Personalization",
+                "Persisted diagnostics snapshot key=\(snapshotKey) diagnosticsHash=\(String(diagnosticsHash.prefix(8)))"
+            )
+        } catch {
+            AppDebugActivityLog.log(
+                "Personalization",
+                "Persist diagnostics snapshot failed key=\(snapshotKey) error=\(error.localizedDescription)"
+            )
+        }
+    }
+
+    private func upsertPurposeProfileSnapshot(
+        snapshotKey: String,
+        userKey: String,
+        monthKey: String,
+        inputsHash: String,
+        record: PurposeProfileRecord
+    ) {
+        if let existing = purposeProfileInsightsSnapshots.first(where: { $0.snapshotKey == snapshotKey }) {
+            existing.generatedAt = .now
+            existing.userKey = userKey
+            existing.monthKey = monthKey
+            existing.inputsHash = inputsHash
+            existing.profile = record.profile
+            existing.strength = record.strength
+            existing.weakness = record.weakness
+            existing.stressTrigger = record.stressTrigger
+            existing.breakingPoint = record.breakingPoint
+        } else {
+            modelContext.insert(
+                PurposeProfileInsightsSnapshot(
+                    snapshotKey: snapshotKey,
+                    userKey: userKey,
+                    monthKey: monthKey,
+                    inputsHash: inputsHash,
+                    generatedAt: .now,
+                    profile: record.profile,
+                    strength: record.strength,
+                    weakness: record.weakness,
+                    stressTrigger: record.stressTrigger,
+                    breakingPoint: record.breakingPoint
+                )
+            )
+        }
+        try? modelContext.save()
+    }
+
     private func randomDiagnosticLifeAreas() -> [String] {
         let options = fulfillmentStartSelectableDefaultCategories.shuffled()
         let count = Int.random(in: 3...7)
@@ -1165,7 +1473,7 @@ struct TemporaryVisionAutoWriteDebugView: View {
             return
         }
 
-        let model = (usage["model"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? "gpt-5.2"
+        let model = (usage["model"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
         let inputTokens = intValue(usage["inputTokens"])
         let cachedInputTokens = intValue(usage["cachedInputTokens"])
         let outputTokens = intValue(usage["outputTokens"])
@@ -1173,34 +1481,25 @@ struct TemporaryVisionAutoWriteDebugView: View {
 
         usageSummaryText = "in \(inputTokens) (cached \(cachedInputTokens)) out \(outputTokens) total \(totalTokens)"
 
-        let pricing = pricingForModel(model)
-        let nonCachedInput = max(0, inputTokens - cachedInputTokens)
-        let cost =
-            (Double(nonCachedInput) / 1_000_000.0) * pricing.inputPerM +
-            (Double(cachedInputTokens) / 1_000_000.0) * pricing.cachedInputPerM +
-            (Double(outputTokens) / 1_000_000.0) * pricing.outputPerM
+        guard let cost = LoomAIUsageCostCalculator.exactCostUSD(
+            model: model,
+            inputTokens: inputTokens,
+            cachedInputTokens: cachedInputTokens,
+            outputTokens: outputTokens
+        ) else {
+            usageSummaryText = "in \(inputTokens) (cached \(cachedInputTokens)) out \(outputTokens) total \(totalTokens)"
+            estimatedCostText = "unavailable"
+            return
+        }
         estimatedCostText = String(format: "$%.6f", cost)
     }
 
     private func applyEstimatedUsageFallback(requestData: Data?, responseData: Data, fallbackModel: String?) {
-        guard let requestData else {
-            usageSummaryText = "n/a"
-            estimatedCostText = "n/a"
-            return
-        }
-        let model = (fallbackModel ?? "gpt-5.2").lowercased()
-        let inputTokens = estimatedTokenCount(for: requestData)
-        let outputTokens = estimatedTokenCount(for: responseData)
-        let cachedInputTokens = 0
-        let totalTokens = inputTokens + outputTokens
-
-        usageSummaryText = "in \(inputTokens) (cached \(cachedInputTokens)) out \(outputTokens) total \(totalTokens) (est.)"
-
-        let pricing = pricingForModel(model)
-        let cost =
-            (Double(inputTokens) / 1_000_000.0) * pricing.inputPerM +
-            (Double(outputTokens) / 1_000_000.0) * pricing.outputPerM
-        estimatedCostText = String(format: "~$%.6f", cost)
+        _ = requestData
+        _ = responseData
+        _ = fallbackModel
+        usageSummaryText = "n/a"
+        estimatedCostText = "unavailable"
     }
 
     private func estimatedTokenCount(for data: Data) -> Int {
@@ -1213,21 +1512,6 @@ struct TemporaryVisionAutoWriteDebugView: View {
         if let value = raw as? NSNumber { return max(0, value.intValue) }
         if let text = raw as? String, let value = Int(text) { return max(0, value) }
         return 0
-    }
-
-    private func pricingForModel(_ model: String) -> (inputPerM: Double, cachedInputPerM: Double, outputPerM: Double) {
-        switch model {
-        case "gpt-5.2":
-            return (1.75, 0.175, 14.00)
-        case "gpt-5.1":
-            return (1.25, 0.125, 10.00)
-        case "gpt-5":
-            return (1.25, 0.125, 10.00)
-        case "gpt-5-mini":
-            return (0.25, 0.025, 2.00)
-        default:
-            return (1.75, 0.175, 14.00)
-        }
     }
 
     private func prettyJSONText(from data: Data) throws -> String {
@@ -1318,6 +1602,11 @@ struct TemporaryVisionAutoWriteDebugView: View {
         \(rawResponseText.isEmpty ? "<empty>" : rawResponseText)
         """
 
+        let personalizationState = """
+        Personalization Diagnostic State
+        \(personalizationDiagnosticStateExportText())
+        """
+
         let appLog = """
         App Activity Log
         \(appActivityLog.exportText().isEmpty ? "<empty>" : appActivityLog.exportText())
@@ -1331,8 +1620,82 @@ struct TemporaryVisionAutoWriteDebugView: View {
             request,
             context,
             response,
+            personalizationState,
             appLog
         ].joined(separator: sectionDivider)
+    }
+
+    private func personalizationDiagnosticStateExportText() -> String {
+        guard mode == .diagnostic else { return "<not captured for this mode>" }
+        let userKey = PersonalizationUserIdentity.currentUserKey()
+        let personalizationState = PersonalizationStore.cachedStateForCurrentUser()
+        let current = lastDiagnosticRunSnapshot ?? personalizationState.current
+        guard let current else {
+            return "currentSnapshot: <none>"
+        }
+
+        let diagnosticsHash = lastDiagnosticRunHash ?? DiagnosticsInsightsHasher.hash(for: current)
+        let snapshotKey = lastDiagnosticRunSnapshotKey ?? DiagnosticsInsightsHasher.snapshotKey(
+            userKey: userKey,
+            diagnosticsHash: diagnosticsHash
+        )
+        let matchingDiagnosticsSnapshot = diagnosticsInsightsSnapshots.first(where: {
+            $0.userKey == userKey && $0.diagnosticsHash == diagnosticsHash
+        })
+
+        let currentSnapshotJSON = (try? encodePrettyJSONText(current)) ?? "<json encoding failed>"
+        let diagnosticsSnapshotJSON: String = {
+            guard let matchingDiagnosticsSnapshot else { return "<none>" }
+            return (try? encodePrettyJSONText(
+                DiagnosticsSnapshotExport(
+                    snapshotKey: matchingDiagnosticsSnapshot.snapshotKey,
+                    userKey: matchingDiagnosticsSnapshot.userKey,
+                    diagnosticsHash: matchingDiagnosticsSnapshot.diagnosticsHash,
+                    generatedAt: matchingDiagnosticsSnapshot.generatedAt,
+                    rootCauseText: matchingDiagnosticsSnapshot.rootCauseText,
+                    fulfillmentText: matchingDiagnosticsSnapshot.fulfillmentText,
+                    nextDirectionText: matchingDiagnosticsSnapshot.nextDirectionText,
+                    purposeRefreshCycleKey: matchingDiagnosticsSnapshot.purposeRefreshCycleKey,
+                    version: matchingDiagnosticsSnapshot.version
+                )
+            )) ?? "<json encoding failed>"
+        }()
+
+        let filteredLog = filteredDiagnosticActivityLogText()
+
+        return """
+        userKey: \(userKey)
+        lastRunDiagnosticsHash: \(lastDiagnosticRunHash ?? "<none>")
+        lastRunDiagnosticsSnapshotKey: \(lastDiagnosticRunSnapshotKey ?? "<none>")
+        currentDiagnosticsHash: \(diagnosticsHash)
+        currentDiagnosticsSnapshotKey: \(snapshotKey)
+
+        Current Personalization Snapshot
+        \(currentSnapshotJSON)
+
+        Latest Persisted DiagnosticsInsightsSnapshot For Current Hash
+        \(diagnosticsSnapshotJSON)
+
+        Filtered Personalization Activity
+        \(filteredLog)
+        """
+    }
+
+    private func filteredDiagnosticActivityLogText(limit: Int = 220) -> String {
+        let allowedSubsystems: Set<String> = [
+            "Personalization",
+            "PersonalizationStore",
+            "DiagnosticsInsights",
+            "DiagnosticsInsightsAccount"
+        ]
+        let lines = appActivityLog.entries
+            .filter { allowedSubsystems.contains($0.subsystem) }
+            .suffix(max(1, limit))
+            .map { entry in
+                let time = ISO8601DateFormatter().string(from: entry.timestamp)
+                return "[\(time)] [\(entry.subsystem)] \(entry.message)"
+            }
+        return lines.isEmpty ? "<none>" : lines.joined(separator: "\n")
     }
 
     private func buildAllLoomAIDebugChips(from snapshot: LoomAIContextSnapshot) -> [LoomAIPromptChip] {
@@ -1411,6 +1774,18 @@ private struct DebugLoomAIResponseEnvelope: Encodable {
     var actions: [LoomAIAction]
     var debug: LoomAIDebug?
     var usage: LoomAIUsage?
+}
+
+private struct DiagnosticsSnapshotExport: Encodable {
+    var snapshotKey: String
+    var userKey: String
+    var diagnosticsHash: String
+    var generatedAt: Date
+    var rootCauseText: String
+    var fulfillmentText: String
+    var nextDirectionText: String
+    var purposeRefreshCycleKey: String?
+    var version: Int
 }
 
 private extension LoomAIContextSnapshot {

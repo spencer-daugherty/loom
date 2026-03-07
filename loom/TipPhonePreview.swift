@@ -299,8 +299,10 @@ struct TipPhonePreview: View {
             LoomAIChatTipPreviewScene(step: step, isAnimated: shouldAnimateScene)
         case .loomAIAutoWrite:
             LoomAIAutoWriteTipPreviewScene(step: step, isAnimated: shouldAnimateScene)
-        case .loomAIEmailAssit:
-            LoomAIEmailAssitTipPreviewScene(step: step, isAnimated: shouldAnimateScene)
+        case .loomAIEmailAssist:
+            LoomAIEmailAssistTipPreviewScene(step: step, isAnimated: shouldAnimateScene)
+        case .loomAIAgent:
+            LoomAIAgentTipPreviewScene(step: step, isAnimated: shouldAnimateScene)
         }
     }
 
@@ -338,6 +340,16 @@ struct TipPhonePreview: View {
                 return base * 4
             }
             return base * 2
+        }
+        if feature.previewType == .loomAIAgent {
+            switch step % 4 {
+            case 0:
+                return base * 3
+            case 3:
+                return base * 4
+            default:
+                return base * 2
+            }
         }
         return base
     }

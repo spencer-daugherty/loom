@@ -2366,31 +2366,13 @@ final class LoomAIViewModel: ObservableObject {
         guard let usage = response.usage else {
             return DailyChatLimitConfig.fallbackEstimatedCostPerReplyUSD
         }
-        let model = (usage.model ?? "gpt-5.2").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let pricing = pricingForModel(model)
-        let inputTokens = max(0, usage.inputTokens)
-        let cachedInputTokens = max(0, usage.cachedInputTokens)
-        let nonCachedInputTokens = max(0, inputTokens - cachedInputTokens)
-        let outputTokens = max(0, usage.outputTokens)
-
-        let inputCost = (Double(nonCachedInputTokens) / 1_000_000.0) * pricing.inputPerM
-        let cachedInputCost = (Double(cachedInputTokens) / 1_000_000.0) * pricing.cachedInputPerM
-        let outputCost = (Double(outputTokens) / 1_000_000.0) * pricing.outputPerM
-        let total = inputCost + cachedInputCost + outputCost
-        return total.isFinite && total > 0 ? total : DailyChatLimitConfig.fallbackEstimatedCostPerReplyUSD
-    }
-
-    private func pricingForModel(_ model: String) -> (inputPerM: Double, cachedInputPerM: Double, outputPerM: Double) {
-        switch model {
-        case "gpt-5.2":
-            return (0.875, 0.0875, 7.00)
-        case "gpt-5.1":
-            return (1.25, 0.125, 10.00)
-        case "gpt-5-mini":
-            return (0.25, 0.025, 2.00)
-        default:
-            return (0.875, 0.0875, 7.00)
-        }
+        return LoomAIUsageCostCalculator.estimatedCostUSD(
+            model: usage.model,
+            inputTokens: usage.inputTokens,
+            cachedInputTokens: usage.cachedInputTokens,
+            outputTokens: usage.outputTokens,
+            fallbackUSD: DailyChatLimitConfig.fallbackEstimatedCostPerReplyUSD
+        )
     }
 
     private static let dayKeyFormatter: DateFormatter = {

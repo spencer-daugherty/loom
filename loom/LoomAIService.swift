@@ -2056,6 +2056,104 @@ struct LoomAIService {
         loomAIReportTroubleshootingIfEnabled(details: details)
     }
 }
+struct LoomAIUsageCostCalculator {
+    struct Pricing {
+        let inputPerM: Double
+        let cachedInputPerM: Double?
+        let outputPerM: Double
+    }
+
+    private static let longContextThreshold = 272_000
+
+    static func exactCostUSD(
+        model: String?,
+        inputTokens: Int,
+        cachedInputTokens: Int,
+        outputTokens: Int
+    ) -> Double? {
+        let normalizedInputTokens = max(0, inputTokens)
+        let normalizedCachedInputTokens = max(0, min(cachedInputTokens, normalizedInputTokens))
+        let nonCachedInputTokens = max(0, normalizedInputTokens - normalizedCachedInputTokens)
+        let normalizedOutputTokens = max(0, outputTokens)
+
+        guard let pricing = pricingForModel(model, inputTokens: normalizedInputTokens) else {
+            return nil
+        }
+        guard normalizedCachedInputTokens == 0 || pricing.cachedInputPerM != nil else {
+            return nil
+        }
+
+        let inputCost = (Double(nonCachedInputTokens) / 1_000_000.0) * pricing.inputPerM
+        let cachedInputCost = (Double(normalizedCachedInputTokens) / 1_000_000.0) * (pricing.cachedInputPerM ?? 0)
+        let outputCost = (Double(normalizedOutputTokens) / 1_000_000.0) * pricing.outputPerM
+        let total = inputCost + cachedInputCost + outputCost
+        guard total.isFinite, total >= 0 else { return nil }
+        return total
+    }
+
+    static func estimatedCostUSD(
+        model: String?,
+        inputTokens: Int,
+        cachedInputTokens: Int,
+        outputTokens: Int,
+        fallbackUSD: Double
+    ) -> Double {
+        guard let exact = exactCostUSD(
+            model: model,
+            inputTokens: inputTokens,
+            cachedInputTokens: cachedInputTokens,
+            outputTokens: outputTokens
+        ) else {
+            return fallbackUSD
+        }
+        return exact > 0 ? exact : fallbackUSD
+    }
+
+    static func pricingForModel(_ model: String?, inputTokens: Int) -> Pricing? {
+        let normalizedModel = (model ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard !normalizedModel.isEmpty else { return nil }
+        let usesLongContextPricing = max(0, inputTokens) > longContextThreshold
+
+        if normalizedModel.contains("gpt-5.4-pro") {
+            if usesLongContextPricing {
+                return Pricing(inputPerM: 60.00, cachedInputPerM: nil, outputPerM: 270.00)
+            }
+            return Pricing(inputPerM: 30.00, cachedInputPerM: nil, outputPerM: 180.00)
+        }
+        if normalizedModel.contains("gpt-5.4") {
+            if usesLongContextPricing {
+                return Pricing(inputPerM: 5.00, cachedInputPerM: 0.50, outputPerM: 22.50)
+            }
+            return Pricing(inputPerM: 2.50, cachedInputPerM: 0.25, outputPerM: 15.00)
+        }
+        if normalizedModel.contains("gpt-5.2-pro") {
+            return Pricing(inputPerM: 21.00, cachedInputPerM: nil, outputPerM: 168.00)
+        }
+        if normalizedModel.contains("gpt-5-pro") {
+            return Pricing(inputPerM: 15.00, cachedInputPerM: nil, outputPerM: 120.00)
+        }
+        if normalizedModel.contains("gpt-5.2") {
+            return Pricing(inputPerM: 1.75, cachedInputPerM: 0.175, outputPerM: 14.00)
+        }
+        if normalizedModel.contains("gpt-5.1") {
+            return Pricing(inputPerM: 1.25, cachedInputPerM: 0.125, outputPerM: 10.00)
+        }
+        if normalizedModel.contains("gpt-5-mini") {
+            return Pricing(inputPerM: 0.25, cachedInputPerM: 0.025, outputPerM: 2.00)
+        }
+        if normalizedModel.contains("gpt-5-nano") {
+            return Pricing(inputPerM: 0.05, cachedInputPerM: 0.005, outputPerM: 0.40)
+        }
+        if normalizedModel == "gpt-5" || normalizedModel.contains("gpt-5-") || normalizedModel.hasPrefix("gpt-5@") {
+            return Pricing(inputPerM: 1.25, cachedInputPerM: 0.125, outputPerM: 10.00)
+        }
+
+        return nil
+    }
+}
+
     struct LoomAIUsage: Codable, Hashable {
         var model: String?
         var inputTokens: Int
@@ -2073,6 +2171,11 @@ struct LoomAIDailyCostSnapshot {
     var insightsLimitUSD: Double
     var totalDailySpentUSD: Double
     var totalMonthlySpentUSD: Double
+    var chatUnpricedDailyCount: Int
+    var autoWriteUnpricedDailyCount: Int
+    var insightsUnpricedDailyCount: Int
+    var totalUnpricedDailyCount: Int
+    var totalUnpricedMonthlyCount: Int
 }
 
 enum LoomAICostLedger {
@@ -2086,6 +2189,12 @@ enum LoomAICostLedger {
         var monthlyChatSpentUSD: Double
         var monthlyAutoWriteSpentUSD: Double
         var monthlyInsightsSpentUSD: Double
+        var chatUnpricedDailyCount: Int
+        var autoWriteUnpricedDailyCount: Int
+        var insightsUnpricedDailyCount: Int
+        var monthlyChatUnpricedCount: Int
+        var monthlyAutoWriteUnpricedCount: Int
+        var monthlyInsightsUnpricedCount: Int
 
         init(
             dayKey: String,
@@ -2096,7 +2205,13 @@ enum LoomAICostLedger {
             insightsSpentUSD: Double,
             monthlyChatSpentUSD: Double,
             monthlyAutoWriteSpentUSD: Double,
-            monthlyInsightsSpentUSD: Double
+            monthlyInsightsSpentUSD: Double,
+            chatUnpricedDailyCount: Int,
+            autoWriteUnpricedDailyCount: Int,
+            insightsUnpricedDailyCount: Int,
+            monthlyChatUnpricedCount: Int,
+            monthlyAutoWriteUnpricedCount: Int,
+            monthlyInsightsUnpricedCount: Int
         ) {
             self.dayKey = dayKey
             self.monthKey = monthKey
@@ -2107,6 +2222,12 @@ enum LoomAICostLedger {
             self.monthlyChatSpentUSD = monthlyChatSpentUSD
             self.monthlyAutoWriteSpentUSD = monthlyAutoWriteSpentUSD
             self.monthlyInsightsSpentUSD = monthlyInsightsSpentUSD
+            self.chatUnpricedDailyCount = chatUnpricedDailyCount
+            self.autoWriteUnpricedDailyCount = autoWriteUnpricedDailyCount
+            self.insightsUnpricedDailyCount = insightsUnpricedDailyCount
+            self.monthlyChatUnpricedCount = monthlyChatUnpricedCount
+            self.monthlyAutoWriteUnpricedCount = monthlyAutoWriteUnpricedCount
+            self.monthlyInsightsUnpricedCount = monthlyInsightsUnpricedCount
         }
 
         private enum CodingKeys: String, CodingKey {
@@ -2119,6 +2240,12 @@ enum LoomAICostLedger {
             case monthlyChatSpentUSD
             case monthlyAutoWriteSpentUSD
             case monthlyInsightsSpentUSD
+            case chatUnpricedDailyCount
+            case autoWriteUnpricedDailyCount
+            case insightsUnpricedDailyCount
+            case monthlyChatUnpricedCount
+            case monthlyAutoWriteUnpricedCount
+            case monthlyInsightsUnpricedCount
         }
 
         init(from decoder: Decoder) throws {
@@ -2132,6 +2259,12 @@ enum LoomAICostLedger {
             monthlyChatSpentUSD = try container.decodeIfPresent(Double.self, forKey: .monthlyChatSpentUSD) ?? 0
             monthlyAutoWriteSpentUSD = try container.decodeIfPresent(Double.self, forKey: .monthlyAutoWriteSpentUSD) ?? 0
             monthlyInsightsSpentUSD = try container.decodeIfPresent(Double.self, forKey: .monthlyInsightsSpentUSD) ?? 0
+            chatUnpricedDailyCount = try container.decodeIfPresent(Int.self, forKey: .chatUnpricedDailyCount) ?? 0
+            autoWriteUnpricedDailyCount = try container.decodeIfPresent(Int.self, forKey: .autoWriteUnpricedDailyCount) ?? 0
+            insightsUnpricedDailyCount = try container.decodeIfPresent(Int.self, forKey: .insightsUnpricedDailyCount) ?? 0
+            monthlyChatUnpricedCount = try container.decodeIfPresent(Int.self, forKey: .monthlyChatUnpricedCount) ?? 0
+            monthlyAutoWriteUnpricedCount = try container.decodeIfPresent(Int.self, forKey: .monthlyAutoWriteUnpricedCount) ?? 0
+            monthlyInsightsUnpricedCount = try container.decodeIfPresent(Int.self, forKey: .monthlyInsightsUnpricedCount) ?? 0
         }
     }
 
@@ -2145,22 +2278,33 @@ enum LoomAICostLedger {
     private static let chatLimitUSD: Double = 0.10
     private static let autoWriteLimitUSD: Double = 0.10
     private static let insightsLimitUSD: Double = 0.10
-    private static let fallbackEstimatedCostPerReplyUSD: Double = 0.01
-
     static func record(response: LoomAIService.LoomAIResponse, intent: String?) {
         guard let bucket = bucket(for: intent) else { return }
         var ledger = dailyLedger()
-        let cost = estimatedCostUSD(for: response.usage)
-        switch bucket {
-        case .chat:
-            ledger.chatSpentUSD += cost
-            ledger.monthlyChatSpentUSD += cost
-        case .autoWrite:
-            ledger.autoWriteSpentUSD += cost
-            ledger.monthlyAutoWriteSpentUSD += cost
-        case .insights:
-            ledger.insightsSpentUSD += cost
-            ledger.monthlyInsightsSpentUSD += cost
+        if let cost = exactCostUSD(for: response.usage) {
+            switch bucket {
+            case .chat:
+                ledger.chatSpentUSD += cost
+                ledger.monthlyChatSpentUSD += cost
+            case .autoWrite:
+                ledger.autoWriteSpentUSD += cost
+                ledger.monthlyAutoWriteSpentUSD += cost
+            case .insights:
+                ledger.insightsSpentUSD += cost
+                ledger.monthlyInsightsSpentUSD += cost
+            }
+        } else {
+            switch bucket {
+            case .chat:
+                ledger.chatUnpricedDailyCount += 1
+                ledger.monthlyChatUnpricedCount += 1
+            case .autoWrite:
+                ledger.autoWriteUnpricedDailyCount += 1
+                ledger.monthlyAutoWriteUnpricedCount += 1
+            case .insights:
+                ledger.insightsUnpricedDailyCount += 1
+                ledger.monthlyInsightsUnpricedCount += 1
+            }
         }
         save(ledger)
     }
@@ -2181,7 +2325,12 @@ enum LoomAICostLedger {
             insightsSpentUSD: max(0, ledger.insightsSpentUSD),
             insightsLimitUSD: insightsLimitUSD,
             totalDailySpentUSD: totalDaily,
-            totalMonthlySpentUSD: totalMonthly
+            totalMonthlySpentUSD: totalMonthly,
+            chatUnpricedDailyCount: max(0, ledger.chatUnpricedDailyCount),
+            autoWriteUnpricedDailyCount: max(0, ledger.autoWriteUnpricedDailyCount),
+            insightsUnpricedDailyCount: max(0, ledger.insightsUnpricedDailyCount),
+            totalUnpricedDailyCount: max(0, ledger.chatUnpricedDailyCount + ledger.autoWriteUnpricedDailyCount + ledger.insightsUnpricedDailyCount),
+            totalUnpricedMonthlyCount: max(0, ledger.monthlyChatUnpricedCount + ledger.monthlyAutoWriteUnpricedCount + ledger.monthlyInsightsUnpricedCount)
         )
     }
 
@@ -2190,6 +2339,9 @@ enum LoomAICostLedger {
         ledger.chatSpentUSD = 0
         ledger.autoWriteSpentUSD = 0
         ledger.insightsSpentUSD = 0
+        ledger.chatUnpricedDailyCount = 0
+        ledger.autoWriteUnpricedDailyCount = 0
+        ledger.insightsUnpricedDailyCount = 0
         save(ledger)
     }
 
@@ -2226,7 +2378,13 @@ enum LoomAICostLedger {
                 insightsSpentUSD: 0,
                 monthlyChatSpentUSD: 0,
                 monthlyAutoWriteSpentUSD: 0,
-                monthlyInsightsSpentUSD: 0
+                monthlyInsightsSpentUSD: 0,
+                chatUnpricedDailyCount: 0,
+                autoWriteUnpricedDailyCount: 0,
+                insightsUnpricedDailyCount: 0,
+                monthlyChatUnpricedCount: 0,
+                monthlyAutoWriteUnpricedCount: 0,
+                monthlyInsightsUnpricedCount: 0
             )
         }
         if decoded.monthKey != monthKey {
@@ -2234,12 +2392,18 @@ enum LoomAICostLedger {
             decoded.monthlyChatSpentUSD = 0
             decoded.monthlyAutoWriteSpentUSD = 0
             decoded.monthlyInsightsSpentUSD = 0
+            decoded.monthlyChatUnpricedCount = 0
+            decoded.monthlyAutoWriteUnpricedCount = 0
+            decoded.monthlyInsightsUnpricedCount = 0
         }
         if decoded.dayKey != dayKey {
             decoded.dayKey = dayKey
             decoded.chatSpentUSD = 0
             decoded.autoWriteSpentUSD = 0
             decoded.insightsSpentUSD = 0
+            decoded.chatUnpricedDailyCount = 0
+            decoded.autoWriteUnpricedDailyCount = 0
+            decoded.insightsUnpricedDailyCount = 0
         }
         return decoded
     }
@@ -2249,37 +2413,16 @@ enum LoomAICostLedger {
         UserDefaults.standard.set(data, forKey: defaultsKey)
     }
 
-    private static func estimatedCostUSD(for usage: LoomAIUsage?) -> Double {
+    private static func exactCostUSD(for usage: LoomAIUsage?) -> Double? {
         guard let usage else {
-            return fallbackEstimatedCostPerReplyUSD
+            return nil
         }
-        let model = (usage.model ?? "gpt-5.2")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        let pricing = pricingForModel(model)
-        let inputTokens = max(0, usage.inputTokens)
-        let cachedInputTokens = max(0, usage.cachedInputTokens)
-        let nonCachedInputTokens = max(0, inputTokens - cachedInputTokens)
-        let outputTokens = max(0, usage.outputTokens)
-
-        let inputCost = (Double(nonCachedInputTokens) / 1_000_000.0) * pricing.inputPerM
-        let cachedInputCost = (Double(cachedInputTokens) / 1_000_000.0) * pricing.cachedInputPerM
-        let outputCost = (Double(outputTokens) / 1_000_000.0) * pricing.outputPerM
-        let total = inputCost + cachedInputCost + outputCost
-        return total.isFinite && total > 0 ? total : fallbackEstimatedCostPerReplyUSD
-    }
-
-    private static func pricingForModel(_ model: String) -> (inputPerM: Double, cachedInputPerM: Double, outputPerM: Double) {
-        switch model {
-        case "gpt-5.2":
-            return (0.875, 0.0875, 7.00)
-        case "gpt-5.1":
-            return (1.25, 0.125, 10.00)
-        case "gpt-5-mini":
-            return (0.25, 0.025, 2.00)
-        default:
-            return (0.875, 0.0875, 7.00)
-        }
+        return LoomAIUsageCostCalculator.exactCostUSD(
+            model: usage.model,
+            inputTokens: usage.inputTokens,
+            cachedInputTokens: usage.cachedInputTokens,
+            outputTokens: usage.outputTokens
+        )
     }
 
     private static let dayKeyFormatter: DateFormatter = {
