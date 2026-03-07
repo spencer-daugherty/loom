@@ -3677,8 +3677,8 @@ struct FulfillmentStartView: View {
         var segments: [LifeOSConnectorSegment] = []
         for (index, purposeFrame) in purposeFrames.enumerated() {
             let centerX = purposeFrame.midX
-            let startY = purposeFrame.maxY + 4
-            let laneSpread = max(4, min(purposeFrame.width * 0.12, 8))
+            let startY = purposeFrame.maxY + 1
+            let laneSpread = max(2.5, min(purposeFrame.width * 0.06, 4))
             for laneIndex in 0..<grayscaleColors.count {
                 let laneDirection: CGFloat = laneIndex == 0 ? -1 : 1
                 let start = CGPoint(
@@ -4214,6 +4214,8 @@ struct FulfillmentStartView: View {
                         .position(filledPoints[index])
                 }
             }
+            .shadow(color: Color(.systemBackground).opacity(0.98), radius: 18, x: 0, y: 0)
+            .shadow(color: Color(.systemBackground).opacity(0.92), radius: 32, x: 0, y: 0)
             .frame(width: size, height: size)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         }

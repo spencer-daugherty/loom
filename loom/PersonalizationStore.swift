@@ -119,9 +119,13 @@ final class PersonalizationStore: ObservableObject {
         from draft: PersonalizationDraft,
         source _: PersonalizationSaveSource
     ) async throws -> PersonalizationSnapshot {
-        guard let snapshot = draft.snapshotValue() else {
+        guard var snapshot = draft.snapshotValue() else {
             AppDebugActivityLog.log("PersonalizationStore", "saveSnapshot failed: incomplete draft")
             throw PersonalizationStoreError.incompleteDraft
+        }
+        if let existingCurrent = current {
+            snapshot.diagnosticRootCause = existingCurrent.diagnosticRootCause
+            snapshot.diagnosticNextDirection = existingCurrent.diagnosticNextDirection
         }
         AppDebugActivityLog.log(
             "PersonalizationStore",
@@ -145,6 +149,50 @@ final class PersonalizationStore: ObservableObject {
             "saveSnapshot completed current=\(snapshot.id.uuidString) history=\(history.count)"
         )
         return snapshot
+    }
+
+    func persistDiagnosticInsights(
+        snapshotID: UUID,
+        rootCause: String,
+        nextDirection: String
+    ) async {
+        var updated = false
+
+        if var currentSnapshot = current, currentSnapshot.id == snapshotID {
+            currentSnapshot.diagnosticRootCause = rootCause
+            currentSnapshot.diagnosticNextDirection = nextDirection
+            current = currentSnapshot
+            updated = true
+        }
+
+        if let historyIndex = history.firstIndex(where: { $0.id == snapshotID }) {
+            history[historyIndex].diagnosticRootCause = rootCause
+            history[historyIndex].diagnosticNextDirection = nextDirection
+            updated = true
+        }
+
+        guard updated else {
+            AppDebugActivityLog.log(
+                "PersonalizationStore",
+                "persistDiagnosticInsights skipped snapshot=\(snapshotID.uuidString) reason=missing_snapshot"
+            )
+            return
+        }
+
+        let state = normalizedState()
+        do {
+            try await repository.saveState(state, for: userKey)
+            Self.cacheState(state, for: userKey)
+            AppDebugActivityLog.log(
+                "PersonalizationStore",
+                "persistDiagnosticInsights completed snapshot=\(snapshotID.uuidString)"
+            )
+        } catch {
+            AppDebugActivityLog.log(
+                "PersonalizationStore",
+                "persistDiagnosticInsights failed snapshot=\(snapshotID.uuidString) error=\(error.localizedDescription)"
+            )
+        }
     }
 
     func makeHistorySummary(limit: Int = 3) -> [String] {

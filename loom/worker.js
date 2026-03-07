@@ -296,10 +296,10 @@ export default {
       "- nextDirection must describe one structural shift Loom will introduce (not a checklist).",
       "",
       "Output JSON ONLY in this exact shape:",
-      '{"rootCause":"2-3 short sentences.","nextDirection":"2-3 short sentences."}',
+      '{"rootCause":"2-3 short sentences.","nextDirection":"2-3 short sentences.","error":""}',
       "",
       "If you cannot produce a specific, grounded output confidently from the diagnostic answers, return JSON only:",
-      '{"error":"insufficient_signal"}'
+      '{"rootCause":"","nextDirection":"","error":"insufficient_signal"}'
     ].join("\n");
 
     const schema = {
@@ -313,28 +313,7 @@ export default {
           nextDirection: { type: "string" },
           error: { type: "string" }
         },
-        anyOf: [
-          {
-            type: "object",
-            additionalProperties: false,
-            properties: {
-              rootCause: { type: "string" },
-              nextDirection: { type: "string" },
-              error: { type: "string" }
-            },
-            required: ["rootCause", "nextDirection"]
-          },
-          {
-            type: "object",
-            additionalProperties: false,
-            properties: {
-              rootCause: { type: "string" },
-              nextDirection: { type: "string" },
-              error: { type: "string" }
-            },
-            required: ["error"]
-          }
-        ]
+        required: ["rootCause", "nextDirection", "error"]
       }
     };
 
@@ -356,8 +335,11 @@ export default {
       timeoutMs: 26000
     });
     const diagnosticUsage = normalizeResponsesUsage(result.usage, "gpt-5.1");
+    const diagnosticScreen = nonEmptyString(client?.screen);
     const diagnosticDebugEnabled =
-      env.DEBUG_DIAGNOSTIC === "1" || nonEmptyString(client?.screen) === "diagnostic_insights_debug";
+      env.DEBUG_DIAGNOSTIC === "1" ||
+      diagnosticScreen === "diagnostic_insights_debug" ||
+      diagnosticScreen === "account_personalization_debug";
 
     let responseBody;
     let diagnosticDebug = null;
@@ -1754,10 +1736,10 @@ async function purposeVisionAutowriteResponse({
     "- nextDirection must describe one structural shift Loom will introduce (not a checklist).",
     "",
     "Output JSON ONLY in this exact shape:",
-    '{"rootCause":"2-3 short sentences.","nextDirection":"2-3 short sentences."}',
+    '{"rootCause":"2-3 short sentences.","nextDirection":"2-3 short sentences.","error":""}',
     "",
     "If you cannot produce a specific, grounded output confidently from the diagnostic answers, return JSON only:",
-    '{"error":"insufficient_signal"}'
+    '{"rootCause":"","nextDirection":"","error":"insufficient_signal"}'
   ].join("\n");
 
   const insightSchema = {
@@ -1771,28 +1753,7 @@ async function purposeVisionAutowriteResponse({
         nextDirection: { type: "string" },
         error: { type: "string" }
       },
-      anyOf: [
-        {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            rootCause: { type: "string" },
-            nextDirection: { type: "string" },
-            error: { type: "string" }
-          },
-          required: ["rootCause", "nextDirection"]
-        },
-        {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            rootCause: { type: "string" },
-            nextDirection: { type: "string" },
-            error: { type: "string" }
-          },
-          required: ["error"]
-        }
-      ]
+      required: ["rootCause", "nextDirection", "error"]
     }
   };
 

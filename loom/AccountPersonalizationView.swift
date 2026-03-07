@@ -3,6 +3,14 @@ import SwiftData
 
 struct AccountPersonalizationView: View {
     private static let diagnosticsFallbackMessage = "Processing error. Please try again later."
+    private typealias RefreshedDiagnosticsInsights = (diagnosticsHash: String, rootCause: String, nextDirection: String)
+    private static let diagnosticsDisplayCachePrefix = "loom.personalization.diagnostics-display.v1"
+
+    private struct CachedDiagnosticsDisplay: Codable {
+        var diagnosticsHash: String
+        var rootCause: String
+        var nextDirection: String
+    }
 
     private enum EditorMode: String, Identifiable {
         case edit
@@ -14,6 +22,7 @@ struct AccountPersonalizationView: View {
     @EnvironmentObject private var personalizationStore: PersonalizationStore
     @Query(sort: \DrivingForce.updatedAt, order: .reverse) private var drivingForces: [DrivingForce]
     @Query(sort: \Passion.date, order: .forward) private var passions: [Passion]
+    @Query(sort: \Fulfillment.updatedAt, order: .forward) private var fulfillmentCategories: [Fulfillment]
     @Query(sort: \DiagnosticsInsightsSnapshot.generatedAt, order: .reverse) private var diagnosticsInsightsSnapshots: [DiagnosticsInsightsSnapshot]
     @Query(sort: \PurposeProfileInsightsSnapshot.generatedAt, order: .reverse) private var purposeProfileInsightsSnapshots: [PurposeProfileInsightsSnapshot]
     @State private var editorMode: EditorMode?
@@ -23,6 +32,14 @@ struct AccountPersonalizationView: View {
     @State private var displayedDiagnosticsHash: String?
     @State private var displayedRootCause = ""
     @State private var displayedNextDirection = ""
+    @State private var postSaveRefreshTask: Task<Void, Never>?
+    @State private var pendingDiagnosticsHydrationKey: String?
+
+    private var diagnosticsSnapshotsSignature: String {
+        diagnosticsInsightsSnapshots
+            .map { "\($0.snapshotKey)|\($0.generatedAt.timeIntervalSince1970)" }
+            .joined(separator: ",")
+    }
 
     var body: some View {
         List {
@@ -129,13 +146,17 @@ struct AccountPersonalizationView: View {
                     )
             }
         }
-        .task {
+        .task(id: personalizationStore.userKey) {
+            guard personalizationStore.current == nil, !personalizationStore.isLoading else { return }
             await personalizationStore.reloadForCurrentUser()
         }
         .onAppear {
             syncDisplayedDiagnosticInsightsWithCurrentSnapshot()
         }
         .onChange(of: personalizationStore.current?.id) { _, _ in
+            syncDisplayedDiagnosticInsightsWithCurrentSnapshot()
+        }
+        .onChange(of: diagnosticsSnapshotsSignature) { _, _ in
             syncDisplayedDiagnosticInsightsWithCurrentSnapshot()
         }
         .sheet(item: $editorMode) { mode in
@@ -214,22 +235,23 @@ struct AccountPersonalizationView: View {
 
     @ViewBuilder
     private func personalizationDiagnosticInsightsCards(for snapshot: PersonalizationSnapshot) -> some View {
+        let resolved = resolvedDiagnosticsDisplay(for: snapshot)
         VStack(spacing: 12) {
             personalizationInsightCard(
                 title: "Root cause",
-                body: displayedRootCause,
+                body: resolved.rootCause,
                 showsLoading: isRefreshingDiagnosticsInsights
             )
             personalizationInsightCard(
                 title: "Fulfillment areas",
                 body: "Every task, goal, and little win will land in one of these areas, so your life stays organized.",
-                chips: snapshot.lifeAreasSelected,
-                colorKeys: snapshot.lifeAreaColorKeys,
+                chips: officialFulfillmentAreaTitles,
+                colorKeys: officialFulfillmentAreaColorKeys,
                 showsLoading: false
             )
             personalizationInsightCard(
                 title: "Next direction",
-                body: displayedNextDirection,
+                body: resolved.nextDirection,
                 showsLoading: isRefreshingDiagnosticsInsights
             )
         }
@@ -343,36 +365,103 @@ struct AccountPersonalizationView: View {
         }
     }
 
+    private var officialFulfillmentAreaTitles: [String] {
+        let titles = fulfillmentCategories
+            .map(\.category)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let unique = uniqueLifeAreas(from: titles)
+        if !unique.isEmpty {
+            return unique
+        }
+        return personalizationStore.current?.lifeAreasSelected ?? []
+    }
+
+    private var officialFulfillmentAreaColorKeys: [String: String] {
+        var map: [String: String] = [:]
+        for title in officialFulfillmentAreaTitles {
+            map[title] = FulfillmentCategoryTheme.colorKey(for: title)
+        }
+        if !map.isEmpty {
+            return map
+        }
+        return personalizationStore.current?.lifeAreaColorKeys ?? [:]
+    }
+
     private func syncDisplayedDiagnosticInsightsWithCurrentSnapshot() {
         guard let current = personalizationStore.current else {
             displayedDiagnosticsHash = nil
             displayedRootCause = ""
             displayedNextDirection = ""
+            pendingDiagnosticsHydrationKey = nil
             return
         }
         guard !isRefreshingDiagnosticsInsights else { return }
 
         let diagnosticsHash = DiagnosticsInsightsHasher.hash(for: current)
+        let hydrationKey = "\(current.id.uuidString)|\(diagnosticsHash)"
+        let storedRoot = current.diagnosticRootCause?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let storedNext = current.diagnosticNextDirection?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !storedRoot.isEmpty, !storedNext.isEmpty {
+            displayedDiagnosticsHash = diagnosticsHash
+            displayedRootCause = storedRoot
+            displayedNextDirection = storedNext
+            pendingDiagnosticsHydrationKey = nil
+            cacheDisplayedDiagnostics(
+                diagnosticsHash: diagnosticsHash,
+                rootCause: storedRoot,
+                nextDirection: storedNext
+            )
+            return
+        }
+        let snapshotKey = DiagnosticsInsightsHasher.snapshotKey(
+            userKey: personalizationStore.userKey,
+            diagnosticsHash: diagnosticsHash
+        )
         if let persisted = latestDiagnosticsInsightsSnapshot(
             userKey: personalizationStore.userKey,
             diagnosticsHash: diagnosticsHash
-        ) {
+        ) ?? fetchStoredDiagnosticsInsightsSnapshot(snapshotKey: snapshotKey) {
             displayedDiagnosticsHash = diagnosticsHash
             displayedRootCause = persisted.rootCauseText
             displayedNextDirection = persisted.nextDirectionText
+            cacheDisplayedDiagnostics(
+                diagnosticsHash: diagnosticsHash,
+                rootCause: persisted.rootCauseText,
+                nextDirection: persisted.nextDirectionText
+            )
+            if pendingDiagnosticsHydrationKey != hydrationKey {
+                pendingDiagnosticsHydrationKey = hydrationKey
+                Task {
+                    await personalizationStore.persistDiagnosticInsights(
+                        snapshotID: current.id,
+                        rootCause: persisted.rootCauseText,
+                        nextDirection: persisted.nextDirectionText
+                    )
+                    await MainActor.run {
+                        if pendingDiagnosticsHydrationKey == hydrationKey {
+                            pendingDiagnosticsHydrationKey = nil
+                        }
+                    }
+                }
+            }
+        } else if let cached = cachedDisplayedDiagnostics(diagnosticsHash: diagnosticsHash) {
+            displayedDiagnosticsHash = diagnosticsHash
+            displayedRootCause = cached.rootCause
+            displayedNextDirection = cached.nextDirection
         } else {
-            // Keep current rendered values if there is no persisted snapshot yet for this hash.
-            // This prevents the cards from going blank during save/rebind churn.
+            // Do not inject the fallback during load races on page re-entry.
+            // Keep whatever is currently rendered until a persisted snapshot arrives.
             if displayedDiagnosticsHash == nil {
                 displayedDiagnosticsHash = diagnosticsHash
-                displayedRootCause = Self.diagnosticsFallbackMessage
-                displayedNextDirection = Self.diagnosticsFallbackMessage
             }
         }
     }
 
     private func saveDiagnosticDraft(_ draft: PersonalizationDraft, mode: EditorMode) async {
         isSaving = true
+        let previousRootCause = displayedRootCause
+        let previousNextDirection = displayedNextDirection
 
         do {
             let source: PersonalizationSaveSource = mode == .reset ? .accountReset : .accountEdit
@@ -387,28 +476,15 @@ struct AccountPersonalizationView: View {
             // down behind the modal.
             editorMode = nil
             isSaving = false
-            await Task.yield()
-
-            let refreshStartedAt = Date()
-            isRefreshingDiagnosticsInsights = true
-            let refreshedInsights = await refreshInsightsForUpdatedDiagnostic(savedSnapshot)
-            let minimumLoadingInterval: TimeInterval = 2.0
-            let elapsed = Date().timeIntervalSince(refreshStartedAt)
-            if elapsed < minimumLoadingInterval {
-                let remainingNanoseconds = UInt64((minimumLoadingInterval - elapsed) * 1_000_000_000)
-                try? await Task.sleep(nanoseconds: remainingNanoseconds)
+            postSaveRefreshTask?.cancel()
+            postSaveRefreshTask = Task { @MainActor in
+                await Task.yield()
+                await performPostSaveInsightsRefresh(
+                    savedSnapshot: savedSnapshot,
+                    previousRootCause: previousRootCause,
+                    previousNextDirection: previousNextDirection
+                )
             }
-            if let refreshedInsights {
-                displayedDiagnosticsHash = refreshedInsights.diagnosticsHash
-                displayedRootCause = refreshedInsights.rootCause
-                displayedNextDirection = refreshedInsights.nextDirection
-            } else {
-                displayedDiagnosticsHash = DiagnosticsInsightsHasher.hash(for: savedSnapshot)
-                displayedRootCause = Self.diagnosticsFallbackMessage
-                displayedNextDirection = Self.diagnosticsFallbackMessage
-            }
-            isRefreshingDiagnosticsInsights = false
-            AppDebugActivityLog.log("Personalization", "Post-save insights refresh completed")
         } catch {
             // Keep previous values if save fails.
             isSaving = false
@@ -418,7 +494,46 @@ struct AccountPersonalizationView: View {
         }
     }
 
-    private func refreshInsightsForUpdatedDiagnostic(_ snapshot: PersonalizationSnapshot) async -> DiagnosticsInsightsOverride? {
+    private func performPostSaveInsightsRefresh(
+        savedSnapshot: PersonalizationSnapshot,
+        previousRootCause: String,
+        previousNextDirection: String
+    ) async {
+        let refreshStartedAt = Date()
+        isRefreshingDiagnosticsInsights = true
+        let refreshedInsights = await refreshInsightsForUpdatedDiagnostic(savedSnapshot)
+        let minimumLoadingInterval: TimeInterval = 2.0
+        let elapsed = Date().timeIntervalSince(refreshStartedAt)
+        if elapsed < minimumLoadingInterval {
+            let remainingNanoseconds = UInt64((minimumLoadingInterval - elapsed) * 1_000_000_000)
+            try? await Task.sleep(nanoseconds: remainingNanoseconds)
+        }
+        guard !Task.isCancelled else { return }
+        if let refreshedInsights {
+            await personalizationStore.persistDiagnosticInsights(
+                snapshotID: savedSnapshot.id,
+                rootCause: refreshedInsights.rootCause,
+                nextDirection: refreshedInsights.nextDirection
+            )
+            displayedDiagnosticsHash = refreshedInsights.diagnosticsHash
+            displayedRootCause = refreshedInsights.rootCause
+            displayedNextDirection = refreshedInsights.nextDirection
+            pendingDiagnosticsHydrationKey = nil
+            cacheDisplayedDiagnostics(
+                diagnosticsHash: refreshedInsights.diagnosticsHash,
+                rootCause: refreshedInsights.rootCause,
+                nextDirection: refreshedInsights.nextDirection
+            )
+        } else {
+            displayedDiagnosticsHash = DiagnosticsInsightsHasher.hash(for: savedSnapshot)
+            displayedRootCause = previousRootCause.isEmpty ? Self.diagnosticsFallbackMessage : previousRootCause
+            displayedNextDirection = previousNextDirection.isEmpty ? Self.diagnosticsFallbackMessage : previousNextDirection
+        }
+        isRefreshingDiagnosticsInsights = false
+        AppDebugActivityLog.log("Personalization", "Post-save insights refresh completed")
+    }
+
+    private func refreshInsightsForUpdatedDiagnostic(_ snapshot: PersonalizationSnapshot) async -> RefreshedDiagnosticsInsights? {
         let userKey = personalizationStore.userKey
         let diagnostics = DiagnosticAnswers(snapshot: snapshot)
         let diagnosticsHash = DiagnosticsInsightsHasher.hash(for: snapshot)
@@ -438,6 +553,7 @@ struct AccountPersonalizationView: View {
 
         var rootCause = fallbackDiagnosticsSnapshot?.rootCauseText.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         var nextDirection = fallbackDiagnosticsSnapshot?.nextDirectionText.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        var receivedFreshValidInsights = false
         let fulfillmentText = fallbackDiagnosticsSnapshot?.fulfillmentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
             ? fallbackDiagnosticsSnapshot!.fulfillmentText
             : "Every task, goal, and little win will land in one of these areas, so your life stays organized."
@@ -453,9 +569,13 @@ struct AccountPersonalizationView: View {
             )
             let normalizedRoot = normalizeInsightsBody(response.rootCause)
             let normalizedNext = normalizeInsightsBody(response.nextDirection)
-            if !normalizedRoot.isEmpty, !normalizedNext.isEmpty {
+            if isRenderableDiagnosticInsightBody(normalizedRoot),
+               isRenderableDiagnosticInsightBody(normalizedNext),
+               normalizedRoot != Self.diagnosticsFallbackMessage,
+               normalizedNext != Self.diagnosticsFallbackMessage {
                 rootCause = normalizedRoot
                 nextDirection = normalizedNext
+                receivedFreshValidInsights = true
                 AppDebugActivityLog.log(
                     "Personalization",
                     "Diagnostic insights refreshed from API root/next chars=\(rootCause.count)/\(nextDirection.count)"
@@ -468,6 +588,11 @@ struct AccountPersonalizationView: View {
                     fulfillmentText: fulfillmentText,
                     nextDirection: nextDirection,
                     purposeRefreshCycleKey: fallbackDiagnosticsSnapshot?.purposeRefreshCycleKey
+                )
+            } else {
+                AppDebugActivityLog.log(
+                    "Personalization",
+                    "Diagnostic insights response rejected; preserving prior root/next"
                 )
             }
         } catch {
@@ -538,32 +663,39 @@ struct AccountPersonalizationView: View {
             record: resolvedRecord
         )
 
-        upsertDiagnosticsInsightsSnapshot(
-            snapshotKey: diagnosticsSnapshotKey,
-            userKey: userKey,
-            diagnosticsHash: diagnosticsHash,
-            rootCause: rootCause,
-            fulfillmentText: fulfillmentText,
-            nextDirection: nextDirection,
-            purposeRefreshCycleKey: purposeSnapshotKey
-        )
+        if receivedFreshValidInsights || fallbackDiagnosticsSnapshot != nil {
+            upsertDiagnosticsInsightsSnapshot(
+                snapshotKey: diagnosticsSnapshotKey,
+                userKey: userKey,
+                diagnosticsHash: diagnosticsHash,
+                rootCause: rootCause,
+                fulfillmentText: fulfillmentText,
+                nextDirection: nextDirection,
+                purposeRefreshCycleKey: purposeSnapshotKey
+            )
+        }
         AppDebugActivityLog.log(
             "Personalization",
             "refreshInsightsForUpdatedDiagnostic completed profileKey=\(purposeSnapshotKey)"
         )
 
-        guard !rootCause.isEmpty, !nextDirection.isEmpty else { return nil }
-        return DiagnosticsInsightsOverride(
-            diagnosticsHash: diagnosticsHash,
-            rootCause: rootCause,
-            nextDirection: nextDirection
-        )
+        guard receivedFreshValidInsights else { return nil }
+        return (diagnosticsHash, rootCause, nextDirection)
     }
 
     private func normalizeInsightsBody(_ text: String) -> String {
         text
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func isRenderableDiagnosticInsightBody(_ text: String) -> Bool {
+        guard !text.isEmpty else { return false }
+        let sentences = text
+            .split(whereSeparator: { ".!?".contains($0) })
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return sentences.count >= 2 && sentences.count <= 3
     }
 
     private func latestDiagnosticsInsightsSnapshot(
@@ -573,6 +705,75 @@ struct AccountPersonalizationView: View {
         diagnosticsInsightsSnapshots.first(where: {
             $0.userKey == userKey && $0.diagnosticsHash == diagnosticsHash
         })
+    }
+
+    private func fetchStoredDiagnosticsInsightsSnapshot(snapshotKey: String) -> DiagnosticsInsightsSnapshot? {
+        let key = snapshotKey
+        let descriptor = FetchDescriptor<DiagnosticsInsightsSnapshot>(
+            predicate: #Predicate { $0.snapshotKey == key }
+        )
+        return (try? modelContext.fetch(descriptor))?
+            .sorted(by: { $0.generatedAt > $1.generatedAt })
+            .first
+    }
+
+    private func cacheDisplayedDiagnostics(
+        diagnosticsHash: String,
+        rootCause: String,
+        nextDirection: String
+    ) {
+        let payload = CachedDiagnosticsDisplay(
+            diagnosticsHash: diagnosticsHash,
+            rootCause: rootCause,
+            nextDirection: nextDirection
+        )
+        let encoder = JSONEncoder()
+        guard let data = try? encoder.encode(payload) else { return }
+        UserDefaults.standard.set(data, forKey: diagnosticsDisplayCacheKey(diagnosticsHash: diagnosticsHash))
+    }
+
+    private func cachedDisplayedDiagnostics(diagnosticsHash: String) -> CachedDiagnosticsDisplay? {
+        guard let data = UserDefaults.standard.data(forKey: diagnosticsDisplayCacheKey(diagnosticsHash: diagnosticsHash)) else {
+            return nil
+        }
+        return try? JSONDecoder().decode(CachedDiagnosticsDisplay.self, from: data)
+    }
+
+    private func diagnosticsDisplayCacheKey(diagnosticsHash: String) -> String {
+        "\(Self.diagnosticsDisplayCachePrefix).\(PersonalizationUserIdentity.storageSafeKey(for: personalizationStore.userKey)).\(diagnosticsHash)"
+    }
+
+    private func resolvedDiagnosticsDisplay(for snapshot: PersonalizationSnapshot) -> (rootCause: String, nextDirection: String) {
+        let diagnosticsHash = DiagnosticsInsightsHasher.hash(for: snapshot)
+        let storedRoot = snapshot.diagnosticRootCause?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let storedNext = snapshot.diagnosticNextDirection?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        if !storedRoot.isEmpty, !storedNext.isEmpty {
+            return (storedRoot, storedNext)
+        }
+
+        if displayedDiagnosticsHash == diagnosticsHash,
+           (!displayedRootCause.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+            !displayedNextDirection.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
+            return (displayedRootCause, displayedNextDirection)
+        }
+
+        let snapshotKey = DiagnosticsInsightsHasher.snapshotKey(
+            userKey: personalizationStore.userKey,
+            diagnosticsHash: diagnosticsHash
+        )
+        if let persisted = latestDiagnosticsInsightsSnapshot(
+            userKey: personalizationStore.userKey,
+            diagnosticsHash: diagnosticsHash
+        ) ?? fetchStoredDiagnosticsInsightsSnapshot(snapshotKey: snapshotKey) {
+            return (persisted.rootCauseText, persisted.nextDirectionText)
+        }
+
+        if let cached = cachedDisplayedDiagnostics(diagnosticsHash: diagnosticsHash) {
+            return (cached.rootCause, cached.nextDirection)
+        }
+
+        return (displayedRootCause, displayedNextDirection)
     }
 
     private func currentVisionForProfileInsights() -> String {

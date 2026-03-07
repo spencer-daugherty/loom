@@ -10,6 +10,8 @@ struct PersonalizationSnapshot: Codable, Identifiable, Hashable, Sendable {
     var planningReality: String
     var desiredChange: String
     var derivedTags: [String]
+    var diagnosticRootCause: String?
+    var diagnosticNextDirection: String?
 
     init(
         id: UUID = UUID(),
@@ -20,7 +22,9 @@ struct PersonalizationSnapshot: Codable, Identifiable, Hashable, Sendable {
         lifeAreaColorKeys: [String: String] = [:],
         planningReality: String,
         desiredChange: String,
-        derivedTags: [String]? = nil
+        derivedTags: [String]? = nil,
+        diagnosticRootCause: String? = nil,
+        diagnosticNextDirection: String? = nil
     ) {
         self.id = id
         self.createdAt = createdAt
@@ -37,6 +41,8 @@ struct PersonalizationSnapshot: Codable, Identifiable, Hashable, Sendable {
             desiredChange: desiredChange,
             lifeAreasSelected: lifeAreasSelected
         )
+        self.diagnosticRootCause = diagnosticRootCause
+        self.diagnosticNextDirection = diagnosticNextDirection
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -49,6 +55,8 @@ struct PersonalizationSnapshot: Codable, Identifiable, Hashable, Sendable {
         case planningReality
         case desiredChange
         case derivedTags
+        case diagnosticRootCause
+        case diagnosticNextDirection
     }
 
     init(from decoder: Decoder) throws {
@@ -69,6 +77,8 @@ struct PersonalizationSnapshot: Codable, Identifiable, Hashable, Sendable {
             desiredChange: desiredChange,
             lifeAreasSelected: lifeAreasSelected
         )
+        diagnosticRootCause = try container.decodeIfPresent(String.self, forKey: .diagnosticRootCause)
+        diagnosticNextDirection = try container.decodeIfPresent(String.self, forKey: .diagnosticNextDirection)
     }
 
     static func deriveTags(

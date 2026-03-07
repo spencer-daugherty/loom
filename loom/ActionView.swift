@@ -84,6 +84,7 @@ struct ActionView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
 
     @Query private var allChunks: [PlannedChunk]
     @Query private var allActions: [PlannedChunkAction]
@@ -1201,10 +1202,12 @@ struct ActionView: View {
                 }
             }
             .onDisappear {
-                let pending = deferredPersistor.takePendingAndCancel()
-                applyDeferredWrites(statuses: pending.statuses, musts: pending.musts)
-                runtimeState.autosaveTask?.cancel()
-                persistNow()
+                flushPendingWritesAndPersist()
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                if newPhase == .inactive || newPhase == .background {
+                    flushPendingWritesAndPersist()
+                }
             }
         #if canImport(UIKit)
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { note in
@@ -3409,7 +3412,11 @@ struct ActionView: View {
         scheduleStatusPersist(for: actionId, status: .noAction)
     }
 
-    private func applyDeferredWrites(statuses: [UUID: ActionExecutionStatus], musts: [UUID: Bool]) {
+    private func applyDeferredWrites(
+        statuses: [UUID: ActionExecutionStatus],
+        musts: [UUID: Bool],
+        persistImmediately: Bool = false
+    ) {
         signposted("apply_deferred_writes") {
             if !statuses.isEmpty {
                 for (actionId, newStatus) in statuses {
@@ -3428,9 +3435,25 @@ struct ActionView: View {
                 }
             }
             if !statuses.isEmpty || !musts.isEmpty {
-                scheduleAutosave()
+                if persistImmediately {
+                    runtimeState.autosaveTask?.cancel()
+                    persistNow()
+                } else {
+                    scheduleAutosave()
+                }
             }
         }
+    }
+
+    private func flushPendingWritesAndPersist() {
+        let pending = deferredPersistor.takePendingAndCancel()
+        runtimeState.autosaveTask?.cancel()
+        applyDeferredWrites(
+            statuses: pending.statuses,
+            musts: pending.musts,
+            persistImmediately: true
+        )
+        persistNow()
     }
 
     private func actionFont(status: ActionExecutionStatus) -> Font {
@@ -5692,6 +5715,10 @@ private struct ActionSwipeRow: View {
         minutes == nil ? Color(.systemGray) : accent
     }
 
+    private var rowBorderAccent: Color {
+        accent
+    }
+
     private var usesOtherDarkIconTint: Bool {
         isOtherChunk && colorScheme == .dark
     }
@@ -5859,7 +5886,7 @@ private struct ActionSwipeRow: View {
                 .stroke(
                     simpleMode
                         ? Color.clear
-                        : (effectiveStatus == .inProgress ? rowAccent : Color.black.opacity(0.12)),
+                        : (effectiveStatus == .inProgress ? rowBorderAccent : Color.black.opacity(0.12)),
                     lineWidth: simpleMode
                         ? 0
                         : (effectiveStatus == .inProgress ? 3 : 1)
