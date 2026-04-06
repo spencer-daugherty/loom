@@ -276,8 +276,7 @@ enum PurposeProfileMatcher {
         let breakPoint: String
         let planning: String
         let desired: String
-        let rootCause: String
-        let nextDirection: String
+        let areas: [String]
         let vision: String
         let passions: [String]
     }
@@ -287,10 +286,785 @@ enum PurposeProfileMatcher {
         let score: Double
     }
 
-    private static let stopWords: Set<String> = [
-        "and", "are", "for", "from", "that", "this", "with", "your", "you", "the",
-        "will", "into", "when", "then", "what", "have", "has", "but", "not", "yet",
-        "too", "very", "more", "less", "across", "life", "loom", "through", "only"
+    private struct BonusRule: Sendable {
+        let score: Double
+        let stress: [String]
+        let breakPoint: [String]
+        let planning: [String]
+        let desired: [String]
+        let areas: [String]
+        let signals: [String]
+    }
+
+    private struct SelectionContext: Sendable {
+        let stressWeights: [String: Double]
+        let breakWeights: [String: Double]
+        let planningWeights: [String: Double]
+        let changeWeights: [String: Double]
+        let areaWeights: [String: Double]
+        let signalWeights: [String: Double]
+        let comboBonuses: [BonusRule]
+    }
+
+    private struct NormalizedInputs: Sendable {
+        let stress: String
+        let breakPoint: String
+        let planning: String
+        let desired: String
+        let areas: [String]
+        let signals: [String]
+        let visionKey: String
+        let passionKey: String
+    }
+
+    private static let emptyContext = SelectionContext(
+        stressWeights: [:],
+        breakWeights: [:],
+        planningWeights: [:],
+        changeWeights: [:],
+        areaWeights: [:],
+        signalWeights: [:],
+        comboBonuses: []
+    )
+
+    private static let signalLexicon: [String: [String]] = [
+        "clarity": [
+            "clear",
+            "clarity",
+            "direction",
+            "priorities",
+            "focused",
+            "focus",
+            "boundaries",
+            "simple systems"
+        ],
+        "consistency": [
+            "routine",
+            "routines",
+            "steady",
+            "stable",
+            "consistency",
+            "consistent",
+            "follow through",
+            "promises",
+            "calm"
+        ],
+        "execution": [
+            "action",
+            "daily action",
+            "progress",
+            "faster progress",
+            "finish",
+            "momentum",
+            "shipping",
+            "commitments"
+        ],
+        "analysis": [
+            "deep learning",
+            "learning",
+            "education",
+            "writing ideas clearly",
+            "writing",
+            "designing systems",
+            "systems",
+            "framework"
+        ],
+        "relationships": [
+            "relationships",
+            "family",
+            "home",
+            "present at home",
+            "community",
+            "coaching others",
+            "coaching",
+            "teaching",
+            "love"
+        ],
+        "leadership": [
+            "leading teams",
+            "teams",
+            "public speaking",
+            "leadership",
+            "impact",
+            "service"
+        ],
+        "exploration": [
+            "travel and exploration",
+            "travel",
+            "exploration",
+            "creative problem solving",
+            "creative",
+            "building useful products",
+            "products",
+            "entrepreneurship"
+        ],
+        "recovery": [
+            "health",
+            "energy",
+            "fitness training",
+            "fitness",
+            "recovery",
+            "burning out",
+            "burn out"
+        ],
+        "finance": [
+            "financial independence",
+            "financial",
+            "finances",
+            "wealth",
+            "business",
+            "career"
+        ],
+        "meaning": [
+            "meaningful",
+            "purpose",
+            "values",
+            "faith",
+            "spiritual"
+        ],
+        "autonomy": [
+            "deep work",
+            "autonomy",
+            "autonomous",
+            "independent",
+            "solo"
+        ]
+    ]
+
+    private static let selectionContexts: [String: SelectionContext] = [
+        normalizedKey("Strategic Integrator"): context(
+            stressWeights: [
+                "Too many priorities competing": 3.6,
+                "Work pressure": 1.0,
+                "Not sure yet": 0.5
+            ],
+            breakWeights: [
+                "I overthink it": 0.7,
+                "I'm not sure": 0.6
+            ],
+            planningWeights: [
+                "Plan and follow through consistently": 1.9,
+                "Plan, but get off track": 1.7,
+                "It depends on the day": 0.4
+            ],
+            changeWeights: [
+                "I know what matters (clear direction)": 2.4,
+                "I make faster progress on big goals": 1.0,
+                "I feel in control (less stress)": 0.8
+            ],
+            areaWeights: [
+                "Career & Business": 1.2,
+                "Service & Impact": 1.1,
+                "Love & Relationships": 0.7,
+                "Home & Life": 0.5,
+                "Learning & Education": 0.4
+            ],
+            signalWeights: [
+                "clarity": 1.1,
+                "relationships": 0.9,
+                "leadership": 0.9,
+                "execution": 0.4,
+                "finance": 0.3
+            ],
+            comboBonuses: [
+                bonus(
+                    score: 1.0,
+                    stress: ["Too many priorities competing"],
+                    desired: ["I know what matters (clear direction)"]
+                ),
+                bonus(
+                    score: 0.8,
+                    stress: ["Too many priorities competing"],
+                    planning: ["Plan and follow through consistently", "Plan, but get off track"]
+                )
+            ]
+        ),
+        normalizedKey("Structured Clarity Driver"): context(
+            stressWeights: [
+                "Too many priorities competing": 2.4,
+                "Feeling behind or disorganized": 1.4,
+                "Not sure yet": 0.6
+            ],
+            breakWeights: [
+                "I overthink it": 1.4,
+                "I don't start": 0.5
+            ],
+            planningWeights: [
+                "Keep a simple to-do list": 1.0,
+                "Plan, but get off track": 1.2,
+                "Plan and follow through consistently": 0.9
+            ],
+            changeWeights: [
+                "I know what matters (clear direction)": 2.8,
+                "I feel in control (less stress)": 1.6
+            ],
+            areaWeights: [
+                "Career & Business": 1.0,
+                "Learning & Education": 1.0,
+                "Wealth & Finance": 0.7,
+                "Service & Impact": 0.6
+            ],
+            signalWeights: [
+                "clarity": 1.4,
+                "analysis": 1.0,
+                "execution": 0.3
+            ],
+            comboBonuses: [
+                bonus(
+                    score: 1.0,
+                    stress: ["Too many priorities competing"],
+                    breakPoint: ["I overthink it"],
+                    desired: ["I know what matters (clear direction)"]
+                )
+            ]
+        ),
+        normalizedKey("Adaptive Catalyst"): context(
+            stressWeights: [
+                "Feeling behind or disorganized": 1.7,
+                "Distractions are stealing my focus": 0.8,
+                "Low energy / health": 0.5
+            ],
+            breakWeights: [
+                "I start, then lose momentum": 2.5,
+                "I don't start": 1.4,
+                "I get distracted": 1.0
+            ],
+            planningWeights: [
+                "React to what's urgent": 1.0,
+                "It depends on the day": 1.0,
+                "Plan, but get off track": 0.8
+            ],
+            changeWeights: [
+                "I make faster progress on big goals": 2.4,
+                "I follow through (consistency)": 1.5
+            ],
+            areaWeights: [
+                "Career & Business": 0.9,
+                "Lifestyle & Experiences": 1.1,
+                "Service & Impact": 0.9,
+                "Love & Relationships": 0.5
+            ],
+            signalWeights: [
+                "execution": 0.9,
+                "leadership": 0.8,
+                "exploration": 0.7,
+                "relationships": 0.5
+            ],
+            comboBonuses: [
+                bonus(
+                    score: 1.1,
+                    breakPoint: ["I start, then lose momentum"],
+                    desired: ["I make faster progress on big goals", "I follow through (consistency)"]
+                )
+            ]
+        ),
+        normalizedKey("Rapid Experimenter"): context(
+            stressWeights: [
+                "Feeling behind or disorganized": 1.3,
+                "Work pressure": 1.1,
+                "Not sure yet": 0.9
+            ],
+            breakWeights: [
+                "I start, then lose momentum": 1.3,
+                "I get distracted": 1.2,
+                "I don't start": 0.8
+            ],
+            planningWeights: [
+                "React to what's urgent": 1.9,
+                "It depends on the day": 1.3
+            ],
+            changeWeights: [
+                "I make faster progress on big goals": 2.5,
+                "I know what matters (clear direction)": 0.8
+            ],
+            areaWeights: [
+                "Career & Business": 0.9,
+                "Learning & Education": 1.0,
+                "Lifestyle & Experiences": 1.1,
+                "Wealth & Finance": 0.5
+            ],
+            signalWeights: [
+                "execution": 0.8,
+                "exploration": 1.2,
+                "analysis": 0.3
+            ],
+            comboBonuses: [
+                bonus(
+                    score: 1.0,
+                    planning: ["React to what's urgent"],
+                    desired: ["I make faster progress on big goals"]
+                )
+            ]
+        ),
+        normalizedKey("Momentum Builder"): context(
+            stressWeights: [
+                "Feeling behind or disorganized": 1.5,
+                "Money pressure": 1.0,
+                "Low energy / health": 1.0
+            ],
+            breakWeights: [
+                "I start, then lose momentum": 3.0,
+                "I don't finish what I start": 1.4
+            ],
+            planningWeights: [
+                "Plan and follow through consistently": 2.6,
+                "Keep a simple to-do list": 0.9
+            ],
+            changeWeights: [
+                "I follow through (consistency)": 2.7,
+                "I feel balanced across life": 1.0
+            ],
+            areaWeights: [
+                "Health & Energy": 1.0,
+                "Home & Life": 1.1,
+                "Love & Relationships": 1.0,
+                "Career & Business": 0.8
+            ],
+            signalWeights: [
+                "consistency": 1.3,
+                "recovery": 0.6,
+                "relationships": 0.5,
+                "execution": 0.6
+            ],
+            comboBonuses: [
+                bonus(
+                    score: 1.2,
+                    breakPoint: ["I start, then lose momentum"],
+                    planning: ["Plan and follow through consistently"],
+                    desired: ["I follow through (consistency)"]
+                )
+            ]
+        ),
+        normalizedKey("Operational Commander"): context(
+            stressWeights: [
+                "Work pressure": 2.5,
+                "Too many priorities competing": 1.6,
+                "Money pressure": 1.1
+            ],
+            breakWeights: [
+                "I don't finish what I start": 1.1,
+                "I get distracted": 0.8
+            ],
+            planningWeights: [
+                "React to what's urgent": 2.0,
+                "Keep a simple to-do list": 1.4,
+                "Plan and follow through consistently": 0.8
+            ],
+            changeWeights: [
+                "I feel in control (less stress)": 2.5,
+                "I make faster progress on big goals": 1.2
+            ],
+            areaWeights: [
+                "Career & Business": 1.2,
+                "Home & Life": 1.0,
+                "Wealth & Finance": 0.8,
+                "Service & Impact": 0.8
+            ],
+            signalWeights: [
+                "execution": 1.2,
+                "clarity": 0.9,
+                "leadership": 1.0,
+                "finance": 0.4
+            ],
+            comboBonuses: [
+                bonus(
+                    score: 1.3,
+                    stress: ["Work pressure"],
+                    planning: ["React to what's urgent"],
+                    desired: ["I feel in control (less stress)"]
+                ),
+                bonus(
+                    score: 0.7,
+                    areas: ["Career & Business", "Home & Life"]
+                )
+            ]
+        ),
+        normalizedKey("Adaptive Stabilizer"): context(
+            stressWeights: [
+                "Low energy / health": 1.9,
+                "Relationship tension": 1.4,
+                "Feeling behind or disorganized": 1.1
+            ],
+            breakWeights: [
+                "I get distracted": 1.0,
+                "I start, then lose momentum": 1.1,
+                "I'm not sure": 0.7
+            ],
+            planningWeights: [
+                "Plan, but get off track": 1.7,
+                "It depends on the day": 1.2
+            ],
+            changeWeights: [
+                "I follow through (consistency)": 1.8,
+                "I feel balanced across life": 2.1
+            ],
+            areaWeights: [
+                "Love & Relationships": 1.0,
+                "Home & Life": 1.1,
+                "Health & Energy": 1.0,
+                "Mindset & Resilience": 0.8
+            ],
+            signalWeights: [
+                "consistency": 0.9,
+                "relationships": 0.8,
+                "recovery": 1.0,
+                "meaning": 0.4
+            ],
+            comboBonuses: [
+                bonus(
+                    score: 1.0,
+                    stress: ["Low energy / health", "Relationship tension"],
+                    desired: ["I feel balanced across life", "I follow through (consistency)"]
+                )
+            ]
+        ),
+        normalizedKey("Crisis Navigator"): context(
+            stressWeights: [
+                "Work pressure": 2.0,
+                "Too many priorities competing": 1.5,
+                "Not sure yet": 0.8
+            ],
+            breakWeights: [
+                "I don't finish what I start": 1.0,
+                "I overthink it": 0.5
+            ],
+            planningWeights: [
+                "React to what's urgent": 3.1
+            ],
+            changeWeights: [
+                "I feel in control (less stress)": 2.0,
+                "I make faster progress on big goals": 1.7
+            ],
+            areaWeights: [
+                "Service & Impact": 1.3,
+                "Career & Business": 1.0,
+                "Home & Life": 0.9
+            ],
+            signalWeights: [
+                "execution": 1.0,
+                "leadership": 0.8,
+                "clarity": 0.5
+            ],
+            comboBonuses: [
+                bonus(
+                    score: 1.4,
+                    stress: ["Work pressure", "Too many priorities competing"],
+                    planning: ["React to what's urgent"],
+                    desired: ["I feel in control (less stress)", "I make faster progress on big goals"]
+                ),
+                bonus(
+                    score: 0.8,
+                    areas: ["Service & Impact", "Home & Life"]
+                )
+            ]
+        ),
+        normalizedKey("Purpose-Led Planner"): context(
+            stressWeights: [
+                "Distractions are stealing my focus": 3.1,
+                "Too many priorities competing": 1.5,
+                "Low energy / health": 0.6
+            ],
+            breakWeights: [
+                "I don't start": 2.7,
+                "I get distracted": 2.1
+            ],
+            planningWeights: [
+                "Plan and follow through consistently": 2.0,
+                "Plan, but get off track": 1.0
+            ],
+            changeWeights: [
+                "I know what matters (clear direction)": 2.1,
+                "I follow through (consistency)": 1.2
+            ],
+            areaWeights: [
+                "Faith & Spirituality": 1.1,
+                "Mindset & Resilience": 1.1,
+                "Learning & Education": 0.8,
+                "Health & Energy": 0.7
+            ],
+            signalWeights: [
+                "clarity": 1.0,
+                "consistency": 0.9,
+                "autonomy": 0.6,
+                "meaning": 0.8,
+                "analysis": 0.4
+            ],
+            comboBonuses: [
+                bonus(
+                    score: 1.4,
+                    stress: ["Distractions are stealing my focus"],
+                    breakPoint: ["I don't start", "I get distracted"],
+                    desired: ["I know what matters (clear direction)"]
+                )
+            ]
+        ),
+        normalizedKey("Analytical Architect"): context(
+            stressWeights: [
+                "Not sure yet": 1.0,
+                "Too many priorities competing": 0.7
+            ],
+            breakWeights: [
+                "I overthink it": 3.1
+            ],
+            planningWeights: [
+                "Keep a simple to-do list": 1.1,
+                "Plan and follow through consistently": 0.9
+            ],
+            changeWeights: [
+                "I know what matters (clear direction)": 2.2,
+                "I feel in control (less stress)": 1.3
+            ],
+            areaWeights: [
+                "Learning & Education": 1.3,
+                "Wealth & Finance": 0.9,
+                "Career & Business": 0.8,
+                "Home & Life": 0.4
+            ],
+            signalWeights: [
+                "analysis": 1.5,
+                "clarity": 0.7,
+                "autonomy": 0.6,
+                "finance": 0.5
+            ],
+            comboBonuses: [
+                bonus(
+                    score: 1.3,
+                    breakPoint: ["I overthink it"],
+                    desired: ["I know what matters (clear direction)", "I feel in control (less stress)"],
+                    areas: ["Learning & Education", "Wealth & Finance"]
+                )
+            ]
+        ),
+        normalizedKey("Reflective Synthesizer"): context(
+            stressWeights: [
+                "Not sure yet": 1.8,
+                "Relationship tension": 0.8,
+                "Low energy / health": 0.7
+            ],
+            breakWeights: [
+                "I overthink it": 2.2,
+                "I don't start": 1.1
+            ],
+            planningWeights: [
+                "It depends on the day": 2.0,
+                "Keep a simple to-do list": 0.6
+            ],
+            changeWeights: [
+                "I feel balanced across life": 1.9,
+                "I know what matters (clear direction)": 1.5
+            ],
+            areaWeights: [
+                "Faith & Spirituality": 1.0,
+                "Mindset & Resilience": 1.2,
+                "Learning & Education": 1.0,
+                "Lifestyle & Experiences": 0.6
+            ],
+            signalWeights: [
+                "analysis": 0.9,
+                "meaning": 1.0,
+                "exploration": 0.6,
+                "autonomy": 0.4
+            ],
+            comboBonuses: [
+                bonus(
+                    score: 1.2,
+                    breakPoint: ["I overthink it"],
+                    desired: ["I feel balanced across life", "I know what matters (clear direction)"],
+                    areas: ["Mindset & Resilience", "Faith & Spirituality"]
+                )
+            ]
+        ),
+        normalizedKey("Independent Pathfinder"): context(
+            stressWeights: [
+                "Not sure yet": 1.2,
+                "Distractions are stealing my focus": 1.0,
+                "Too many priorities competing": 0.7
+            ],
+            breakWeights: [
+                "I don't start": 1.1,
+                "I get distracted": 0.8
+            ],
+            planningWeights: [
+                "It depends on the day": 1.7,
+                "Keep a simple to-do list": 0.7
+            ],
+            changeWeights: [
+                "I make faster progress on big goals": 1.9,
+                "I know what matters (clear direction)": 1.1
+            ],
+            areaWeights: [
+                "Learning & Education": 1.2,
+                "Lifestyle & Experiences": 1.0,
+                "Career & Business": 0.7,
+                "Wealth & Finance": 0.4
+            ],
+            signalWeights: [
+                "exploration": 1.0,
+                "autonomy": 1.4,
+                "analysis": 0.6,
+                "execution": 0.3
+            ],
+            comboBonuses: [
+                bonus(
+                    score: 1.0,
+                    stress: ["Not sure yet"],
+                    planning: ["It depends on the day"],
+                    desired: ["I make faster progress on big goals"]
+                )
+            ]
+        ),
+        normalizedKey("Steady Alignment Builder"): context(
+            stressWeights: [
+                "Relationship tension": 3.5,
+                "Low energy / health": 0.8,
+                "Not sure yet": 0.5
+            ],
+            breakWeights: [
+                "I'm not sure": 1.0,
+                "I don't finish what I start": 0.9,
+                "I don't start": 0.5
+            ],
+            planningWeights: [
+                "Plan and follow through consistently": 1.9,
+                "Plan, but get off track": 1.0
+            ],
+            changeWeights: [
+                "I feel balanced across life": 2.2,
+                "I follow through (consistency)": 1.5
+            ],
+            areaWeights: [
+                "Love & Relationships": 1.3,
+                "Home & Life": 1.1,
+                "Service & Impact": 0.8,
+                "Faith & Spirituality": 0.6
+            ],
+            signalWeights: [
+                "relationships": 1.3,
+                "consistency": 1.0,
+                "meaning": 0.5
+            ],
+            comboBonuses: [
+                bonus(
+                    score: 1.5,
+                    stress: ["Relationship tension"],
+                    desired: ["I feel balanced across life", "I follow through (consistency)"]
+                )
+            ]
+        ),
+        normalizedKey("Quality Sentinel"): context(
+            stressWeights: [
+                "Work pressure": 1.7,
+                "Feeling behind or disorganized": 1.2,
+                "Money pressure": 0.8
+            ],
+            breakWeights: [
+                "I overthink it": 1.6,
+                "I don't finish what I start": 1.1
+            ],
+            planningWeights: [
+                "Keep a simple to-do list": 1.2,
+                "Plan and follow through consistently": 1.3
+            ],
+            changeWeights: [
+                "I feel in control (less stress)": 2.3,
+                "I follow through (consistency)": 1.0
+            ],
+            areaWeights: [
+                "Wealth & Finance": 1.0,
+                "Career & Business": 0.9,
+                "Health & Energy": 0.8,
+                "Home & Life": 0.6
+            ],
+            signalWeights: [
+                "clarity": 1.0,
+                "analysis": 1.1,
+                "consistency": 0.7,
+                "finance": 0.4
+            ],
+            comboBonuses: [
+                bonus(
+                    score: 1.1,
+                    stress: ["Work pressure", "Feeling behind or disorganized"],
+                    desired: ["I feel in control (less stress)"]
+                )
+            ]
+        ),
+        normalizedKey("Supportive Adapter"): context(
+            stressWeights: [
+                "Relationship tension": 1.6,
+                "Low energy / health": 1.4,
+                "Not sure yet": 1.0
+            ],
+            breakWeights: [
+                "I'm not sure": 1.7,
+                "I get distracted": 0.8
+            ],
+            planningWeights: [
+                "It depends on the day": 1.8,
+                "Keep a simple to-do list": 0.8
+            ],
+            changeWeights: [
+                "I feel balanced across life": 2.4,
+                "I feel in control (less stress)": 0.9
+            ],
+            areaWeights: [
+                "Love & Relationships": 1.1,
+                "Home & Life": 1.1,
+                "Health & Energy": 0.9,
+                "Faith & Spirituality": 0.7
+            ],
+            signalWeights: [
+                "relationships": 1.2,
+                "recovery": 0.8,
+                "consistency": 0.7,
+                "meaning": 0.4
+            ],
+            comboBonuses: [
+                bonus(
+                    score: 1.1,
+                    stress: ["Relationship tension", "Low energy / health"],
+                    breakPoint: ["I'm not sure"],
+                    desired: ["I feel balanced across life"]
+                )
+            ]
+        ),
+        normalizedKey("Pragmatic Realist"): context(
+            stressWeights: [
+                "Money pressure": 2.6,
+                "Work pressure": 1.8
+            ],
+            breakWeights: [
+                "I overthink it": 0.7,
+                "I don't start": 0.6
+            ],
+            planningWeights: [
+                "React to what's urgent": 1.8,
+                "Keep a simple to-do list": 1.3
+            ],
+            changeWeights: [
+                "I feel in control (less stress)": 1.9,
+                "I make faster progress on big goals": 1.4
+            ],
+            areaWeights: [
+                "Wealth & Finance": 1.2,
+                "Career & Business": 1.0,
+                "Home & Life": 0.6,
+                "Service & Impact": 0.4
+            ],
+            signalWeights: [
+                "finance": 1.2,
+                "execution": 0.8,
+                "clarity": 0.8
+            ],
+            comboBonuses: [
+                bonus(
+                    score: 1.2,
+                    stress: ["Money pressure"],
+                    planning: ["React to what's urgent"],
+                    desired: ["I feel in control (less stress)", "I make faster progress on big goals"]
+                )
+            ]
+        )
     ]
 
     static func bestMatch(
@@ -299,7 +1073,7 @@ enum PurposeProfileMatcher {
     ) -> PurposeProfileRecord {
         let ranked = rankedMatches(inputs: inputs, catalog: catalog)
         guard !ranked.isEmpty else { return PurposeProfilesCatalog.fallback() }
-        let seed = buildEvidenceTokens(inputs).sorted().joined(separator: "|")
+        let seed = buildSeed(from: normalizedInputs(from: inputs))
         return pickFromTopBand(ranked: ranked, seed: seed)
     }
 
@@ -308,29 +1082,20 @@ enum PurposeProfileMatcher {
         catalog: [PurposeProfileRecord] = PurposeProfilesCatalog.all()
     ) -> [ScoredProfile] {
         guard !catalog.isEmpty else { return [] }
-        let evidence = buildEvidenceTokens(inputs)
-        let stressTokens = tokenSet("\(inputs.stress) \(inputs.rootCause)")
-        let executionTokens = tokenSet("\(inputs.breakPoint) \(inputs.planning) \(inputs.desired) \(inputs.nextDirection)")
-        let visionTokens = tokenSet("\(inputs.vision) \(inputs.passions.joined(separator: " ")) \(inputs.desired)")
-        let seed = evidence.sorted().joined(separator: "|")
+        let normalized = normalizedInputs(from: inputs)
+        let seed = buildSeed(from: normalized)
 
         return catalog
             .map { record in
-                let stressDescriptor = tokenSet(record.stressTrigger)
-                let breakDescriptor = tokenSet(record.breakingPoint)
-                let strengthDescriptor = tokenSet(record.strength)
-                let weaknessDescriptor = tokenSet(record.weakness)
-                let descriptorUnion = stressDescriptor
-                    .union(breakDescriptor)
-                    .union(strengthDescriptor)
-                    .union(weaknessDescriptor)
-
+                let context = selectionContexts[normalizedKey(record.profile)] ?? emptyContext
                 var score = 0.0
-                score += overlap(stressTokens, stressDescriptor) * 3.0
-                score += overlap(executionTokens, breakDescriptor) * 3.0
-                score += overlap(visionTokens, strengthDescriptor) * 1.4
-                score += overlap(executionTokens, weaknessDescriptor) * 1.4
-                score += overlap(evidence, descriptorUnion) * 2.2
+                score += context.stressWeights[normalized.stress] ?? 0
+                score += context.breakWeights[normalized.breakPoint] ?? 0
+                score += context.planningWeights[normalized.planning] ?? 0
+                score += context.changeWeights[normalized.desired] ?? 0
+                score += areaScore(context.areaWeights, normalizedAreas: normalized.areas)
+                score += signalScore(context.signalWeights, signals: normalized.signals)
+                score += bonusScore(context.comboBonuses, normalized: normalized)
 
                 return ScoredProfile(record: record, score: score)
             }
@@ -342,74 +1107,9 @@ enum PurposeProfileMatcher {
             }
     }
 
-    private static func buildEvidenceTokens(_ inputs: Inputs) -> Set<String> {
-        let combined = [
-            inputs.stress,
-            inputs.breakPoint,
-            inputs.planning,
-            inputs.desired,
-            inputs.rootCause,
-            inputs.nextDirection,
-            inputs.vision,
-            inputs.passions.joined(separator: " ")
-        ].joined(separator: " ")
-        var tokens = tokenSet(combined)
-        let signal = PurposeProfilesCatalog.normalized(combined)
-        tokens.formUnion(expandedTokens(from: signal))
-        return tokens
-    }
-
-    private static func expandedTokens(from signal: String) -> Set<String> {
-        var out: Set<String> = []
-        let expansions: [(String, [String])] = [
-            ("too many priorities", ["competing", "priorities", "tradeoffs", "coordination"]),
-            ("feeling behind", ["chaos", "stability", "cadence", "consistency"]),
-            ("disorganized", ["chaos", "stability", "structure"]),
-            ("distractions", ["focus", "noise", "context", "switching"]),
-            ("work pressure", ["pressure", "commitments", "deadlines"]),
-            ("money pressure", ["resources", "constraints", "budget", "finance"]),
-            ("low energy", ["energy", "capacity", "recovery"]),
-            ("health", ["energy", "capacity", "recovery"]),
-            ("relationship tension", ["interpersonal", "tension", "conflict"]),
-            ("i don t start", ["start", "activation", "friction"]),
-            ("lose momentum", ["consistency", "cadence", "follow", "through"]),
-            ("distracted", ["focus", "context", "switching"]),
-            ("overthink", ["analysis", "delay", "specificity"]),
-            ("don t finish", ["finish", "follow", "through", "consistency"]),
-            ("react to what s urgent", ["urgent", "reactive", "firefighting", "triage"]),
-            ("off track", ["drift", "consistency", "boundary"]),
-            ("follow through consistently", ["consistency", "cadence", "reliability"]),
-            ("in control", ["clarity", "standards", "ownership"]),
-            ("clear direction", ["clarity", "priorities", "alignment"]),
-            ("faster progress", ["momentum", "velocity", "shipping"]),
-            ("balanced across life", ["balance", "harmony", "alignment"])
-        ]
-        for (needle, mapped) in expansions where signal.contains(needle) {
-            mapped.forEach { out.insert($0) }
-        }
-        return out
-    }
-
-    private static func tokenSet(_ raw: String) -> Set<String> {
-        let lowered = raw.lowercased()
-        let cleaned = lowered.replacingOccurrences(of: "[^a-z0-9 ]", with: " ", options: .regularExpression)
-        return Set(
-            cleaned
-                .split(separator: " ")
-                .map(String.init)
-                .filter { $0.count > 2 && !stopWords.contains($0) }
-        )
-    }
-
-    private static func overlap(_ lhs: Set<String>, _ rhs: Set<String>) -> Double {
-        guard !lhs.isEmpty, !rhs.isEmpty else { return 0 }
-        let intersectionCount = lhs.intersection(rhs).count
-        return Double(intersectionCount) / Double(max(rhs.count, 1))
-    }
-
     private static func pickFromTopBand(ranked: [ScoredProfile], seed: String) -> PurposeProfileRecord {
         guard let top = ranked.first else { return PurposeProfilesCatalog.fallback() }
-        let threshold = max(top.score * 0.92, top.score - 0.28)
+        let threshold = max(top.score * 0.88, top.score - 1.15)
         let band = ranked.filter { $0.score >= threshold }
         guard band.count > 1 else { return top.record }
         let index = Int(stableHash("\(seed)|band") % UInt64(band.count))
@@ -418,6 +1118,190 @@ enum PurposeProfileMatcher {
 
     private static func tieBreakRank(seed: String, profile: String) -> UInt64 {
         stableHash("\(seed)|\(profile.lowercased())")
+    }
+
+    private static func buildSeed(from normalized: NormalizedInputs) -> String {
+        [
+            normalized.stress,
+            normalized.breakPoint,
+            normalized.planning,
+            normalized.desired,
+            normalized.areas.joined(separator: "|"),
+            normalized.signals.joined(separator: "|"),
+            normalized.visionKey,
+            normalized.passionKey
+        ].joined(separator: "||")
+    }
+
+    private static func normalizedInputs(from inputs: Inputs) -> NormalizedInputs {
+        let areas = normalizedAreaKeys(inputs.areas)
+        let signals = extractSignals(vision: inputs.vision, passions: inputs.passions)
+        return NormalizedInputs(
+            stress: normalizedKey(inputs.stress),
+            breakPoint: normalizedKey(inputs.breakPoint),
+            planning: normalizedKey(inputs.planning),
+            desired: normalizedKey(inputs.desired),
+            areas: areas,
+            signals: signals,
+            visionKey: normalizedKey(inputs.vision),
+            passionKey: inputs.passions.map(normalizedKey).filter { !$0.isEmpty }.sorted().joined(separator: "|")
+        )
+    }
+
+    private static func areaScore(_ weights: [String: Double], normalizedAreas: [String]) -> Double {
+        let matches = normalizedAreas
+            .compactMap { value -> Double? in
+                guard let score = weights[value], score > 0 else { return nil }
+                return score
+            }
+            .sorted(by: >)
+            .prefix(3)
+        guard !matches.isEmpty else { return 0 }
+        let total = matches.reduce(0, +)
+        return total / Double(matches.count)
+    }
+
+    private static func signalScore(_ weights: [String: Double], signals: [String]) -> Double {
+        signals.reduce(0) { $0 + (weights[$1] ?? 0) }
+    }
+
+    private static func bonusScore(_ bonuses: [BonusRule], normalized: NormalizedInputs) -> Double {
+        bonuses.reduce(0) { partial, bonus in
+            partial + (matches(bonus: bonus, normalized: normalized) ? bonus.score : 0)
+        }
+    }
+
+    private static func matches(bonus: BonusRule, normalized: NormalizedInputs) -> Bool {
+        if !bonus.stress.isEmpty && !bonus.stress.contains(normalized.stress) {
+            return false
+        }
+        if !bonus.breakPoint.isEmpty && !bonus.breakPoint.contains(normalized.breakPoint) {
+            return false
+        }
+        if !bonus.planning.isEmpty && !bonus.planning.contains(normalized.planning) {
+            return false
+        }
+        if !bonus.desired.isEmpty && !bonus.desired.contains(normalized.desired) {
+            return false
+        }
+        if !bonus.areas.isEmpty && !bonus.areas.contains(where: { normalized.areas.contains($0) }) {
+            return false
+        }
+        if !bonus.signals.isEmpty && !bonus.signals.contains(where: { normalized.signals.contains($0) }) {
+            return false
+        }
+        return true
+    }
+
+    private static func extractSignals(vision: String, passions: [String]) -> [String] {
+        let combined = normalizedKey(([vision] + passions).joined(separator: " "))
+        guard !combined.isEmpty else { return [] }
+        return signalLexicon.keys.sorted().filter { signal in
+            (signalLexicon[signal] ?? []).contains { phrase in
+                combined.contains(normalizedKey(phrase))
+            }
+        }
+    }
+
+    private static func normalizedAreaKeys(_ rawAreas: [String]) -> [String] {
+        var keys: Set<String> = []
+        for area in rawAreas {
+            let normalized = normalizedKey(area)
+            guard !normalized.isEmpty else { continue }
+            keys.insert(normalized)
+            if normalized.range(of: "(career|business|work|job|entrepreneur|product)", options: .regularExpression) != nil {
+                keys.insert(normalizedKey("Career & Business"))
+            }
+            if normalized.range(of: "(faith|spiritual|church|religion)", options: .regularExpression) != nil {
+                keys.insert(normalizedKey("Faith & Spirituality"))
+            }
+            if normalized.range(of: "(wealth|finance|money|financial|budget|invest)", options: .regularExpression) != nil {
+                keys.insert(normalizedKey("Wealth & Finance"))
+            }
+            if normalized.range(of: "(learn|study|education|school|knowledge)", options: .regularExpression) != nil {
+                keys.insert(normalizedKey("Learning & Education"))
+            }
+            if normalized.range(of: "(love|relationship|marriage|partner|family)", options: .regularExpression) != nil {
+                keys.insert(normalizedKey("Love & Relationships"))
+            }
+            if normalized.range(of: "(health|fitness|energy|wellness|recovery)", options: .regularExpression) != nil {
+                keys.insert(normalizedKey("Health & Energy"))
+            }
+            if normalized.range(of: "(lifestyle|travel|experience|fun|adventure)", options: .regularExpression) != nil {
+                keys.insert(normalizedKey("Lifestyle & Experiences"))
+            }
+            if normalized.range(of: "(mindset|mental|resilience|clarity|inner)", options: .regularExpression) != nil {
+                keys.insert(normalizedKey("Mindset & Resilience"))
+            }
+            if normalized.range(of: "(service|impact|community|help|mentor|teach|coach)", options: .regularExpression) != nil {
+                keys.insert(normalizedKey("Service & Impact"))
+            }
+            if normalized.range(of: "(home|house|family life|household|life admin)", options: .regularExpression) != nil {
+                keys.insert(normalizedKey("Home & Life"))
+            }
+        }
+        return keys.sorted()
+    }
+
+    private static func context(
+        stressWeights: [String: Double] = [:],
+        breakWeights: [String: Double] = [:],
+        planningWeights: [String: Double] = [:],
+        changeWeights: [String: Double] = [:],
+        areaWeights: [String: Double] = [:],
+        signalWeights: [String: Double] = [:],
+        comboBonuses: [BonusRule] = []
+    ) -> SelectionContext {
+        SelectionContext(
+            stressWeights: normalizeMap(stressWeights),
+            breakWeights: normalizeMap(breakWeights),
+            planningWeights: normalizeMap(planningWeights),
+            changeWeights: normalizeMap(changeWeights),
+            areaWeights: normalizeMap(areaWeights),
+            signalWeights: normalizeMap(signalWeights),
+            comboBonuses: comboBonuses
+        )
+    }
+
+    private static func bonus(
+        score: Double,
+        stress: [String] = [],
+        breakPoint: [String] = [],
+        planning: [String] = [],
+        desired: [String] = [],
+        areas: [String] = [],
+        signals: [String] = []
+    ) -> BonusRule {
+        BonusRule(
+            score: score,
+            stress: stress.map(normalizedKey).filter { !$0.isEmpty },
+            breakPoint: breakPoint.map(normalizedKey).filter { !$0.isEmpty },
+            planning: planning.map(normalizedKey).filter { !$0.isEmpty },
+            desired: desired.map(normalizedKey).filter { !$0.isEmpty },
+            areas: areas.map(normalizedKey).filter { !$0.isEmpty },
+            signals: signals.map(normalizedKey).filter { !$0.isEmpty }
+        )
+    }
+
+    private static func normalizeMap(_ values: [String: Double]) -> [String: Double] {
+        Dictionary(uniqueKeysWithValues: values.compactMap { key, value in
+            let normalized = normalizedKey(key)
+            guard !normalized.isEmpty else { return nil }
+            return (normalized, value)
+        })
+    }
+
+    private static func normalizedKey(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "’", with: "'")
+            .replacingOccurrences(of: "`", with: "'")
+            .replacingOccurrences(of: "&", with: " and ")
+            .replacingOccurrences(of: "[^a-z0-9']+", with: " ", options: .regularExpression)
+            .replacingOccurrences(of: "'", with: "")
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func stableHash(_ value: String) -> UInt64 {

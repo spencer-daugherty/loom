@@ -1116,15 +1116,9 @@ struct TemporaryVisionAutoWriteDebugView: View {
         let diagnostic = makeRandomDiagnosticAnswers()
         let vision = Self.randomVisionOptions.randomElement() ?? "I build a focused life with steady progress."
         let passions = randomPassions()
-        let rootCause = Self.randomRootCauseOptions.randomElement()
-            ?? "Plans get split by competing priorities before momentum is built."
-        let nextDirection = Self.randomNextDirectionOptions.randomElement()
-            ?? "Loom will create one clear priority path and protect start time."
 
         return [
             "diagnostic": diagnostic,
-            "rootCause": rootCause,
-            "nextDirection": nextDirection,
             "vision": vision,
             "passions": passions,
             "client": [
@@ -1246,8 +1240,7 @@ struct TemporaryVisionAutoWriteDebugView: View {
                 breakPoint: diagnostics.breaksFirst,
                 planning: diagnostics.planningStyle,
                 desired: diagnostics.firstChange,
-                rootCause: rootCause,
-                nextDirection: nextDirection,
+                areas: diagnostics.areas,
                 vision: currentVision,
                 passions: currentPassions
             )
@@ -1256,8 +1249,6 @@ struct TemporaryVisionAutoWriteDebugView: View {
         let monthKey = PurposeProfileInsightsHasher.monthKey()
         let inputsHash = PurposeProfileInsightsHasher.hash(
             diagnostic: diagnostics,
-            rootCause: rootCause,
-            nextDirection: nextDirection,
             vision: currentVision,
             passions: currentPassions
         )
@@ -1275,8 +1266,6 @@ struct TemporaryVisionAutoWriteDebugView: View {
         do {
             let response = try await LoomAIService().fetchPurposeProfileInsights(
                 diagnostic: diagnostics,
-                rootCause: rootCause,
-                nextDirection: nextDirection,
                 vision: currentVision,
                 passions: currentPassions
             )

@@ -313,7 +313,21 @@ struct AccountPersonalizationView: View {
         return items
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-            .filter { seen.insert($0.lowercased()).inserted }
+            .filter { seen.insert(normalizedFulfillmentAreaKey(for: $0)).inserted }
+    }
+
+    private func normalizedFulfillmentAreaKey(for raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !trimmed.isEmpty else { return "" }
+        let andNormalized = trimmed.replacingOccurrences(of: "&", with: " and ")
+        let cleaned = andNormalized.replacingOccurrences(
+            of: "[^a-z0-9]+",
+            with: " ",
+            options: .regularExpression
+        )
+        return cleaned
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
     }
 
     private func colorKey(for area: String, map: [String: String]) -> String? {
@@ -608,8 +622,7 @@ struct AccountPersonalizationView: View {
                 breakPoint: diagnostics.breaksFirst,
                 planning: diagnostics.planningStyle,
                 desired: diagnostics.firstChange,
-                rootCause: rootCause,
-                nextDirection: nextDirection,
+                areas: diagnostics.areas,
                 vision: currentVision,
                 passions: currentPassions
             )
@@ -618,8 +631,6 @@ struct AccountPersonalizationView: View {
         let monthKey = PurposeProfileInsightsHasher.monthKey()
         let inputsHash = PurposeProfileInsightsHasher.hash(
             diagnostic: diagnostics,
-            rootCause: rootCause,
-            nextDirection: nextDirection,
             vision: currentVision,
             passions: currentPassions
         )
@@ -637,8 +648,6 @@ struct AccountPersonalizationView: View {
         do {
             let response = try await LoomAIService().fetchPurposeProfileInsights(
                 diagnostic: diagnostics,
-                rootCause: rootCause,
-                nextDirection: nextDirection,
                 vision: currentVision,
                 passions: currentPassions
             )

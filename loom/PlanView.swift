@@ -474,6 +474,7 @@ struct PlanView: View {
                 state.weekStart = nil
             }
         }
+        ActivePlanSessionStore.setWeekStart(nil)
         try? modelContext.save()
     }
 
@@ -572,13 +573,12 @@ struct PlanStepTwoView: View {
     @State private var highlightedDuplicateItemID: UUID? = nil
     @State private var step2ValidationResetWorkItem: DispatchWorkItem?
     @State private var keyboardHeight: CGFloat = 0
-    @State private var measuredStep2FooterHeight: CGFloat = 68
+    @State private var measuredStep2BottomInsetHeight: CGFloat = 129
     @AppStorage("capture_default_due_date_attention_days")
     private var dueDateAttentionDays: Int = 7
     private let hiddenUntilLaterIconName = "clock.arrow.trianglehead.clockwise.rotate.90.path.dotted"
     private let minimumActiveCaptureActionsRequired = 6
-    private let footerPinnedHeight: CGFloat = 68
-    private let composerKeyboardGap: CGFloat = 3
+    private let stepTwoHorizontalPadding: CGFloat = 16
 
     private func normalizedActionText(_ text: String) -> String {
         text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -626,10 +626,8 @@ struct PlanStepTwoView: View {
 
     private var isKeyboardVisible: Bool { keyboardHeight > 0 }
 
-    private var composerKeyboardLift: CGFloat {
-        guard keyboardHeight > 0 else { return 0 }
-        let footerHeight = max(footerPinnedHeight, measuredStep2FooterHeight)
-        return max(0, keyboardHeight - footerHeight + composerKeyboardGap)
+    private var stepTwoListBottomPadding: CGFloat {
+        max(67, measuredStep2BottomInsetHeight)
     }
 
     private func planCaptureChromeBackground<S: Shape>(
@@ -653,7 +651,18 @@ struct PlanStepTwoView: View {
                     shadowRadius: 12,
                     shadowY: -2
                 )
-                .frame(height: proxy.size.height + 24)
+                .frame(height: proxy.size.height + proxy.safeAreaInsets.bottom + 24)
+                .mask(
+                    LinearGradient(
+                        stops: [
+                            .init(color: .clear, location: 0),
+                            .init(color: .black.opacity(0.25), location: 0.35),
+                            .init(color: .black, location: 1)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
                 .ignoresSafeArea(edges: .bottom)
             }
         }
@@ -726,84 +735,73 @@ struct PlanStepTwoView: View {
                 Spacer(minLength: 0)
             }
 
-            List {
-                ForEach(displayItems) { item in
-                    HStack(alignment: .center, spacing: 8) {
-                        if baselineItemIDs.contains(item.id) {
-                            Image(systemName: captureSourceIconName(for: item.sourceType))
-                                .foregroundStyle(.secondary)
-                        } else if showHidden, item.isGhost {
-                            Image(systemName: hiddenUntilLaterIconName)
-                                .foregroundStyle(.blue)
-                        }
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            if let dueStatus = dueDateStatusText(for: item) {
-                                Text(dueStatus)
-                                    .font(.caption)
-                                    .foregroundStyle(dueDateStatusColor(for: item))
-                            }
-                            Text(item.text)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .padding(8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
-                    .overlay {
-                        ZStack {
-                            if item.isGhost {
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(style: StrokeStyle(lineWidth: 2, dash: [6]))
+            ZStack(alignment: .bottom) {
+                List {
+                    ForEach(displayItems) { item in
+                        HStack(alignment: .center, spacing: 8) {
+                            if baselineItemIDs.contains(item.id) {
+                                Image(systemName: captureSourceIconName(for: item.sourceType))
+                                    .foregroundStyle(.secondary)
+                            } else if showHidden, item.isGhost {
+                                Image(systemName: hiddenUntilLaterIconName)
                                     .foregroundStyle(.blue)
                             }
-                            if hasVisibleDueStatus(for: item) && !item.isGhost {
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(dueDateStatusBorderColor(for: item), lineWidth: 1.5)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                if let dueStatus = dueDateStatusText(for: item) {
+                                    Text(dueStatus)
+                                        .font(.caption)
+                                        .foregroundStyle(dueDateStatusColor(for: item))
+                                }
+                                Text(item.text)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                             }
-                            if highlightedDuplicateItemID == item.id {
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(Color.red.opacity(0.85), lineWidth: 1.5)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+                        .overlay {
+                            ZStack {
+                                if item.isGhost {
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(style: StrokeStyle(lineWidth: 2, dash: [6]))
+                                        .foregroundStyle(.blue)
+                                }
+                                if hasVisibleDueStatus(for: item) && !item.isGhost {
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(dueDateStatusBorderColor(for: item), lineWidth: 1.5)
+                                }
+                                if highlightedDuplicateItemID == item.id {
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(Color.red.opacity(0.85), lineWidth: 1.5)
+                                }
                             }
                         }
-                    }
-                    .padding(.vertical, 4)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-                    .listRowSeparator(.hidden)
-                    .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                        Button {
-                            quickCompleteItem(item)
-                        } label: {
-                            Text("Quick Complete")
+                        .padding(.vertical, 4)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                        .listRowSeparator(.hidden)
+                        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                            Button {
+                                quickCompleteItem(item)
+                            } label: {
+                                Text("Quick Complete")
+                            }
+                            .tint(.green)
                         }
-                        .tint(.green)
-                    }
                 }
                 .onDelete(perform: deleteItems)
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .scrollDismissesKeyboard(.never)
+            .safeAreaPadding(.bottom, stepTwoListBottomPadding)
 
-            stepTwoComposerRow
-                .padding(.top, 4)
-                .padding(.bottom, composerKeyboardLift)
+            stepTwoBottomInset
         }
-        .padding(.horizontal)
+        }
+        .padding(.horizontal, stepTwoHorizontalPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .safeAreaInset(edge: .bottom) {
-            stepTwoFooter
-                .padding(.horizontal)
-                .padding(.top, 8)
-                .padding(.bottom, 10)
-                .background(
-                    GeometryReader { proxy in
-                        Color.clear.preference(key: Step2FooterHeightPreferenceKey.self, value: proxy.size.height)
-                    }
-                )
-        }
-        .ignoresSafeArea(.keyboard, edges: .bottom)
         .onAppear {
             if baselineItemIDs.isEmpty {
                 baselineItemIDs = Set(allItems.map(\.id))
@@ -837,9 +835,9 @@ struct PlanStepTwoView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
             keyboardHeight = 0
         }
-        .onPreferenceChange(Step2FooterHeightPreferenceKey.self) { height in
+        .onPreferenceChange(Step2BottomInsetHeightPreferenceKey.self) { height in
             if height > 0 {
-                measuredStep2FooterHeight = height
+                measuredStep2BottomInsetHeight = height
             }
         }
         .navigationTitle("Capture")
@@ -898,6 +896,31 @@ struct PlanStepTwoView: View {
         .padding(.bottom, 2)
     }
 
+    private var stepTwoBottomInset: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .trailing, spacing: 8) {
+                stepTwoComposerRow
+
+                if !isKeyboardVisible {
+                    stepTwoFooter
+                }
+            }
+            .padding(.horizontal, stepTwoHorizontalPadding)
+            .padding(.top, 8)
+            .padding(.bottom, 3)
+        }
+        .frame(maxWidth: .infinity, alignment: .bottom)
+        .background(alignment: .bottom) {
+            stepTwoBottomToolbarBackdrop
+        }
+        .padding(.horizontal, -stepTwoHorizontalPadding)
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(key: Step2BottomInsetHeightPreferenceKey.self, value: proxy.size.height)
+            }
+        )
+    }
+
     private var stepTwoComposerRow: some View {
         ZStack {
             planCaptureChromeBackground(
@@ -942,9 +965,7 @@ struct PlanStepTwoView: View {
             }
         }
         .frame(height: 64)
-        .background(alignment: .bottom) {
-            stepTwoBottomToolbarBackdrop
-        }
+        .zIndex(1)
         .overlay(alignment: .top) {
             if showStep2ValidationHint {
                 HStack(spacing: 8) {
@@ -981,7 +1002,7 @@ struct PlanStepTwoView: View {
                 dismissKeyboard()
             }
         } label: {
-            Image(systemName: stepTwoKeyboardShowsCheckmark ? "checkmark" : "keyboard.chevron.compact.down")
+            Image(systemName: stepTwoKeyboardShowsCheckmark ? "arrow.up" : "keyboard.chevron.compact.down")
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(stepTwoKeyboardShowsCheckmark ? .white : .primary.opacity(0.85))
                 .frame(width: 44, height: 44)
@@ -1015,6 +1036,7 @@ struct PlanStepTwoView: View {
             text: $input,
             placeholder: "Add an action…",
             isFirstResponder: isInputFocused,
+            returnKeyType: .send,
             onSubmit: addItem,
             onBeginEditing: { isInputFocused = true }
         )
@@ -1023,7 +1045,7 @@ struct PlanStepTwoView: View {
             .textInputAutocapitalization(.sentences)
             .autocorrectionDisabled(false)
             .focused($isInputFocused)
-            .submitLabel(.done)
+            .submitLabel(.send)
             .onSubmit(addItem)
 #endif
     }
@@ -1272,6 +1294,7 @@ struct PlanStepThreeView: View {
 
     @State private var poolItemIDs: [UUID] = []
     @State private var chunks: [ChunkContainerState] = []
+    @State private var initialStep3OrderIDs: [UUID] = []
 
     @State private var baselineShowHidden: Bool = false
     @State private var baselinePoolItemIDs: [UUID] = []
@@ -1575,10 +1598,6 @@ struct PlanStepThreeView: View {
                 step3ContentArea(in: geometry)
             }
             .frame(maxHeight: .infinity)
-
-            if isRefreshVisible { step3RefreshButton }
-            step3FooterControls
-            .padding(.bottom, 2)
         }
         .padding(.horizontal)
         .navigationTitle("Group")
@@ -1616,7 +1635,9 @@ struct PlanStepThreeView: View {
                 .transition(.opacity)
             }
         }
-        .safeAreaPadding(.bottom)
+        .safeAreaInset(edge: .bottom) {
+            step3BottomInset
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear {
             hasInitializedStep3State = false
@@ -1797,16 +1818,47 @@ struct PlanStepThreeView: View {
         }
     }
 
-    private var step3RefreshButton: some View {
-        Button { refreshStep3() } label: {
-            Text("Refresh")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.top, 2)
+    private var step3BottomToolbarBackdrop: some View {
+        GeometryReader { proxy in
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                PlanCaptureChromeMaterialLayer(
+                    shape: Rectangle(),
+                    shadowRadius: 12,
+                    shadowY: -2
+                )
+                .frame(height: proxy.size.height + proxy.safeAreaInsets.bottom + 24)
+                .mask(
+                    LinearGradient(
+                        stops: [
+                            .init(color: .clear, location: 0),
+                            .init(color: .black.opacity(0.25), location: 0.35),
+                            .init(color: .black, location: 1)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .ignoresSafeArea(edges: .bottom)
+            }
         }
-        .buttonStyle(.plain)
-        .padding(.bottom, 2)
+        .allowsHitTesting(false)
+    }
+
+    private var step3RefreshButton: some View {
+        Group {
+            if chunks.contains(where: { !$0.itemIDs.isEmpty }) {
+                Button { refreshStep3() } label: {
+                    Text("Refresh")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.top, 2)
+                }
+                .buttonStyle(.plain)
+                .padding(.bottom, 2)
+            }
+        }
     }
 
     private var step3FooterControls: some View {
@@ -1870,6 +1922,24 @@ struct PlanStepThreeView: View {
             .onChange(of: isAutoGrouping, initial: false) { _, isLoading in
                 setAutoGroupIconLoadingAnimation(isLoading)
             }
+        }
+    }
+
+    private var step3BottomInset: some View {
+        VStack(spacing: 0) {
+            VStack(spacing: 0) {
+                if isRefreshVisible { step3RefreshButton }
+                step3FooterControls
+                    .padding(.bottom, 2)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 10)
+        }
+        .frame(maxWidth: .infinity, alignment: .bottom)
+        .background {
+            step3BottomToolbarBackdrop
+                .padding(.horizontal, -16)
         }
     }
 
@@ -2421,10 +2491,9 @@ struct PlanStepThreeView: View {
             ChunkContainerState(isLocked: true),
         ]
 
-        poolItemIDs = allItems
-            .filter { !$0.isGhost }
-            .sorted { $0.createdAt > $1.createdAt }
-            .map(\.id)
+        let currentVisibleIDs = Set(allItems.filter { !$0.isGhost }.map(\.id))
+        let restoredOrder = initialStep3OrderIDs.filter { currentVisibleIDs.contains($0) }
+        poolItemIDs = restoredOrder.isEmpty ? initialPoolIDs : restoredOrder
 
         persistStep3Plan(force: true)
 
@@ -2450,6 +2519,10 @@ struct PlanStepThreeView: View {
         let persistedSelections = allChunkSelections
             .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) }
             .sorted { $0.chunkIndex < $1.chunkIndex }
+
+        if initialStep3OrderIDs.isEmpty {
+            initialStep3OrderIDs = initialPoolIDs
+        }
 
         if persistedChunks.isEmpty && persistedActions.isEmpty && persistedSelections.isEmpty {
             if chunks.isEmpty || chunks.count < 2 {
@@ -7648,6 +7721,7 @@ struct PlanStepFiveView: View {
         state.isActive = true
         state.activatedAt = .now
         state.weekStart = currentWeekStart
+        ActivePlanSessionStore.setWeekStart(currentWeekStart)
         hasCompletedPlanFlowOnce = true
         try? modelContext.save()
         NotificationCenter.default.post(name: Notification.Name("plan_flow_completed"), object: nil)
@@ -8831,7 +8905,7 @@ private struct Step3ChunkRowHeightPreferenceKey: PreferenceKey {
     }
 }
 
-private struct Step2FooterHeightPreferenceKey: PreferenceKey {
+private struct Step2BottomInsetHeightPreferenceKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         let next = nextValue()

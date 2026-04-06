@@ -41,7 +41,7 @@ final class PurposeProfileInsightsSnapshot {
 }
 
 enum PurposeProfileInsightsHasher {
-    static let schemaVersion = 1
+    static let schemaVersion = 3
 
     static func monthKey(from date: Date = .now) -> String {
         let formatter = DateFormatter()
@@ -54,8 +54,6 @@ enum PurposeProfileInsightsHasher {
 
     static func hash(
         diagnostic: DiagnosticAnswers,
-        rootCause: String,
-        nextDirection: String,
         vision: String,
         passions: [String]
     ) -> String {
@@ -65,8 +63,6 @@ enum PurposeProfileInsightsHasher {
             var areas: [String]
             var planningStyle: String
             var firstChange: String
-            var rootCause: String
-            var nextDirection: String
             var vision: String
             var passions: [String]
         }
@@ -77,8 +73,6 @@ enum PurposeProfileInsightsHasher {
             areas: diagnostic.areas.map(normalize).filter { !$0.isEmpty }.sorted(),
             planningStyle: normalize(diagnostic.planningStyle),
             firstChange: normalize(diagnostic.firstChange),
-            rootCause: normalize(rootCause),
-            nextDirection: normalize(nextDirection),
             vision: normalize(vision),
             passions: passions.map(normalize).filter { !$0.isEmpty }.sorted()
         )

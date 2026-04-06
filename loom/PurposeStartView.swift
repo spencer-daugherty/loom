@@ -2209,9 +2209,6 @@ struct PurposeStartView: View {
         }
 
         let diagnostics = DiagnosticAnswers(snapshot: personalizationSnapshot)
-        let diagnosticsInsights = latestDiagnosticsInsightsSnapshot(for: personalizationSnapshot)
-        let rootCause = diagnosticsInsights?.rootCauseText.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let nextDirection = diagnosticsInsights?.nextDirectionText.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let currentVision = visionTrimmed.isEmpty
             ? currentDrivingForce?.ultimateVision.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             : visionTrimmed
@@ -2221,8 +2218,7 @@ struct PurposeStartView: View {
             breakPoint: diagnostics.breaksFirst,
             planning: diagnostics.planningStyle,
             desired: diagnostics.firstChange,
-            rootCause: rootCause,
-            nextDirection: nextDirection,
+            areas: diagnostics.areas,
             vision: currentVision,
             passions: passions
         )
@@ -2254,8 +2250,6 @@ struct PurposeStartView: View {
         guard !Task.isCancelled else { return }
         let inputsHash = PurposeProfileInsightsHasher.hash(
             diagnostic: diagnostics,
-            rootCause: rootCause,
-            nextDirection: nextDirection,
             vision: currentVision,
             passions: passions
         )
@@ -2263,8 +2257,6 @@ struct PurposeStartView: View {
         do {
             let response = try await LoomAIService().fetchPurposeProfileInsights(
                 diagnostic: diagnostics,
-                rootCause: rootCause,
-                nextDirection: nextDirection,
                 vision: currentVision,
                 passions: passions
             )
@@ -2487,8 +2479,7 @@ struct PurposeStartView: View {
         breakPoint: String,
         planning: String,
         desired: String,
-        rootCause: String,
-        nextDirection: String,
+        areas: [String],
         vision: String,
         passions: [String]
     ) -> PurposeProfileRecord {
@@ -2498,8 +2489,7 @@ struct PurposeStartView: View {
                 breakPoint: breakPoint,
                 planning: planning,
                 desired: desired,
-                rootCause: rootCause,
-                nextDirection: nextDirection,
+                areas: areas,
                 vision: vision,
                 passions: passions
             )

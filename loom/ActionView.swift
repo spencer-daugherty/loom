@@ -5024,7 +5024,7 @@ private struct AttachmentsSheet: View {
     @State private var isFileImporterPresented: Bool = false
     @State private var noteText: String = ""
     @State private var hasSavedNote: Bool = false
-    @StateObject private var previewStore = ActionLinkPreviewStore()
+    @StateObject private var previewStore = LoomLinkPreviewStore()
 
     var body: some View {
         NavigationStack {
@@ -5076,7 +5076,7 @@ private struct AttachmentsSheet: View {
                         Button {
                             openAttachment(attachment)
                         } label: {
-                            ActionLinkBannerCard(
+                            LoomLinkBannerCard(
                                 urlString: attachment.urlString ?? "",
                                 preview: previewStore.preview(for: attachment.urlString)
                             )
@@ -5359,164 +5359,6 @@ private struct AttachmentsSheet: View {
         case .note:
             break
         }
-    }
-}
-
-private struct ActionLinkBannerCard: View {
-    let urlString: String
-    let preview: ActionLinkPreviewStore.PreviewData?
-
-    var body: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(preview?.title ?? compactDomain)
-                    .font(.subheadline)
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                Text(preview?.subtitle ?? compactDomain)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            ZStack {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(previewTint.opacity(0.16))
-                if let image = preview?.image {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFill()
-                } else {
-                    Image(systemName: "globe")
-                        .font(.system(size: 18, weight: .medium))
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .frame(width: 48, height: 48)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .frame(minHeight: 64)
-        .background(previewTint.opacity(0.14))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(previewTint.opacity(0.3), lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
-
-    private var compactDomain: String {
-        guard let url = URL(string: urlString) else { return urlString }
-        return (url.host ?? urlString).replacingOccurrences(of: "www.", with: "")
-    }
-
-    private var previewTint: Color {
-        preview?.tint ?? Color(.secondarySystemGroupedBackground)
-    }
-}
-
-@MainActor
-private final class ActionLinkPreviewStore: ObservableObject {
-    struct PreviewData {
-        let title: String
-        let subtitle: String
-        let image: UIImage?
-        let tint: Color
-    }
-
-    @Published private var previews: [String: PreviewData] = [:]
-    private var loadedURLs: Set<String> = []
-
-    func preview(for urlString: String?) -> PreviewData? {
-        guard let urlString else { return nil }
-        return previews[urlString]
-    }
-
-    func load(urlStrings: [String]) {
-        let normalized = urlStrings
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-
-        for urlString in normalized where !loadedURLs.contains(urlString) {
-            loadedURLs.insert(urlString)
-            Task {
-                await loadPreview(for: urlString)
-            }
-        }
-    }
-
-    private func loadPreview(for urlString: String) async {
-        guard let url = URL(string: urlString) else { return }
-        let provider = LPMetadataProvider()
-        let metadata = await withCheckedContinuation { continuation in
-            provider.startFetchingMetadata(for: url) { metadata, _ in
-                continuation.resume(returning: metadata)
-            }
-        }
-        guard let metadata else { return }
-
-        let resolvedURL = metadata.originalURL ?? metadata.url ?? url
-        let subtitle = (resolvedURL.host ?? url.host ?? urlString).replacingOccurrences(of: "www.", with: "")
-        let title = metadata.title?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? subtitle
-        let previewImage = await loadImage(from: metadata.imageProvider)
-        let fallbackIcon = await loadImage(from: metadata.iconProvider)
-        let image = previewImage ?? fallbackIcon
-        let tint = image.flatMap { dominantColor(from: $0) }.map(Color.init) ?? Color.blue
-
-        previews[urlString] = PreviewData(
-            title: title,
-            subtitle: subtitle,
-            image: image,
-            tint: tint
-        )
-    }
-
-    private func loadImage(from provider: NSItemProvider?) async -> UIImage? {
-        guard let provider else { return nil }
-        guard provider.canLoadObject(ofClass: UIImage.self) else { return nil }
-        return await withCheckedContinuation { continuation in
-            provider.loadObject(ofClass: UIImage.self) { object, _ in
-                continuation.resume(returning: object as? UIImage)
-            }
-        }
-    }
-
-    private func dominantColor(from image: UIImage) -> UIColor? {
-        guard let cgImage = image.cgImage else { return nil }
-        let ciImage = CIImage(cgImage: cgImage)
-        let extent = ciImage.extent
-        guard !extent.isEmpty,
-              let filter = CIFilter(
-                name: "CIAreaAverage",
-                parameters: [
-                    kCIInputImageKey: ciImage,
-                    kCIInputExtentKey: CIVector(cgRect: extent)
-                ]
-              ),
-              let outputImage = filter.outputImage
-        else {
-            return nil
-        }
-
-        let context = CIContext(options: [.workingColorSpace: NSNull()])
-        var bitmap = [UInt8](repeating: 0, count: 4)
-        context.render(
-            outputImage,
-            toBitmap: &bitmap,
-            rowBytes: 4,
-            bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
-            format: .RGBA8,
-            colorSpace: nil
-        )
-
-        return UIColor(
-            red: CGFloat(bitmap[0]) / 255,
-            green: CGFloat(bitmap[1]) / 255,
-            blue: CGFloat(bitmap[2]) / 255,
-            alpha: 1
-        )
     }
 }
 

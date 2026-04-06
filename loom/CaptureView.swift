@@ -165,13 +165,27 @@ private struct CaptureSharedCompletedSheetID: Identifiable {
     let id: UUID
 }
 
+private struct CaptureAttachmentPreviewTarget: Identifiable {
+    enum Kind {
+        case link(String)
+        case file(URL)
+        case unavailable(String)
+    }
+
+    let id: UUID
+    let title: String
+    let kind: Kind
+    let stopAccess: (() -> Void)?
+}
+
 private struct CaptureSharedAttachmentsReadOnlySheet: View {
     let title: String
     let noteText: String
     let attachments: [CaptureSharedDraftAttachment]
 
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.openURL) private var openURL
+    @StateObject private var previewStore = LoomLinkPreviewStore()
+    @State private var previewTarget: CaptureAttachmentPreviewTarget? = nil
 
     var body: some View {
         NavigationStack {
@@ -192,27 +206,25 @@ private struct CaptureSharedAttachmentsReadOnlySheet: View {
                     }
                 }
 
-                Section("Attachments") {
+                Section("Notes") {
                     if attachments.isEmpty {
-                        Text("No attachments available.")
+                        Text(
+                            noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            ? "No notes or attachments available."
+                            : "No attachments available."
+                        )
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(attachments) { attachment in
                             Button {
-                                openAttachment(attachment)
+                                previewTarget = previewTarget(for: attachment)
                             } label: {
-                                HStack(spacing: 10) {
-                                    Image(systemName: attachmentIconName(for: attachment))
-                                        .foregroundStyle(.secondary)
-                                    Text(attachment.title)
-                                        .font(.subheadline)
-                                        .foregroundStyle(.primary)
-                                        .lineLimit(2)
-                                    Spacer(minLength: 0)
-                                }
-                                .contentShape(Rectangle())
+                                attachmentCard(for: attachment)
+                                    .padding(.horizontal, 4)
+                                    .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+                            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                         }
                     }
                 }
@@ -226,45 +238,168 @@ private struct CaptureSharedAttachmentsReadOnlySheet: View {
                     }
                 }
             }
+            .task {
+                previewStore.load(urlStrings: attachments.compactMap(\.urlString))
+            }
         }
         .presentationDetents([.medium, .large])
+        .sheet(item: $previewTarget, onDismiss: clearPreviewTarget) { preview in
+            switch preview.kind {
+            case .link(let urlString):
+                LoomLinkAttachmentPreviewSheet(urlString: urlString)
+            case .file(let url):
+                #if canImport(QuickLook) && canImport(UIKit)
+                LoomQuickLookPreviewSheet(url: url)
+                    .onDisappear {
+                        preview.stopAccess?()
+                    }
+                #else
+                LoomAttachmentUnavailableSheet(
+                    title: preview.title,
+                    message: "Preview is not available on this device."
+                )
+                .onDisappear {
+                    preview.stopAccess?()
+                }
+                #endif
+            case .unavailable(let message):
+                LoomAttachmentUnavailableSheet(title: preview.title, message: message)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func attachmentCard(for attachment: CaptureSharedDraftAttachment) -> some View {
+        switch attachment.kind {
+        case .link:
+            LoomLinkBannerCard(
+                urlString: attachment.urlString ?? attachment.title,
+                preview: previewStore.preview(for: attachment.urlString)
+            )
+        case .file:
+            LoomFileBannerCard(
+                title: attachment.fileName ?? attachment.title,
+                subtitle: attachmentSubtitle(for: attachment),
+                tint: attachmentTint(for: attachment),
+                systemName: attachmentIconName(for: attachment),
+                thumbnail: thumbnailImage(for: attachment)
+            )
+        case .note:
+            LoomFileBannerCard(
+                title: attachment.title,
+                subtitle: "Note",
+                tint: .blue,
+                systemName: attachmentIconName(for: attachment),
+                thumbnail: nil
+            )
+        }
     }
 
     private func attachmentIconName(for attachment: CaptureSharedDraftAttachment) -> String {
         switch attachment.kind {
         case .link:
-            return "link"
+            return "paperclip"
         case .file:
-            return "doc"
+            return attachmentIsImage(attachment) ? "photo" : "doc"
         case .note:
-            return "note.text"
+            return "doc.text"
         }
     }
 
-    private func openAttachment(_ attachment: CaptureSharedDraftAttachment) {
+    private func attachmentSubtitle(for attachment: CaptureSharedDraftAttachment) -> String {
+        if attachmentIsImage(attachment) {
+            return "Image"
+        }
+        let fileName = attachment.fileName ?? attachment.title
+        let fileExtension = URL(fileURLWithPath: fileName).pathExtension.uppercased()
+        return fileExtension.isEmpty ? "File" : fileExtension
+    }
+
+    private func attachmentTint(for attachment: CaptureSharedDraftAttachment) -> Color {
+        attachmentIsImage(attachment) ? .blue : .indigo
+    }
+
+    private func attachmentIsImage(_ attachment: CaptureSharedDraftAttachment) -> Bool {
+        let fileName = (attachment.fileName ?? attachment.title).lowercased()
+        let imageExtensions: Set<String> = ["jpg", "jpeg", "png", "gif", "heic", "heif", "webp", "bmp", "tif", "tiff"]
+        let fileExtension = URL(fileURLWithPath: fileName).pathExtension
+        return !fileExtension.isEmpty && imageExtensions.contains(fileExtension)
+    }
+
+    private func thumbnailImage(for attachment: CaptureSharedDraftAttachment) -> UIImage? {
+        guard attachmentIsImage(attachment),
+              let resolved = resolvedFileURL(for: attachment, startAccess: true) else { return nil }
+        defer { resolved.stopAccess?() }
+        return UIImage(contentsOfFile: resolved.url.path)
+    }
+
+    private func previewTarget(for attachment: CaptureSharedDraftAttachment) -> CaptureAttachmentPreviewTarget {
         switch attachment.kind {
         case .link:
-            guard let value = attachment.urlString, let url = URL(string: value) else { return }
-            openURL(url)
-        case .file:
-            guard let bookmark = attachment.fileBookmarkData else { return }
-            var isStale = false
-            guard let url = try? URL(
-                resolvingBookmarkData: bookmark,
-                options: [.withoutUI],
-                relativeTo: nil,
-                bookmarkDataIsStale: &isStale
-            ) else { return }
-            let didAccess = url.startAccessingSecurityScopedResource()
-            openURL(url)
-            if didAccess {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                    url.stopAccessingSecurityScopedResource()
-                }
+            let urlString = attachment.urlString?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if urlString.isEmpty {
+                return CaptureAttachmentPreviewTarget(
+                    id: attachment.id,
+                    title: attachment.title,
+                    kind: .unavailable("This link is unavailable."),
+                    stopAccess: nil
+                )
             }
+            return CaptureAttachmentPreviewTarget(
+                id: attachment.id,
+                title: attachment.title,
+                kind: .link(urlString),
+                stopAccess: nil
+            )
+        case .file:
+            guard let resolved = resolvedFileURL(for: attachment, startAccess: true) else {
+                return CaptureAttachmentPreviewTarget(
+                    id: attachment.id,
+                    title: attachment.fileName ?? attachment.title,
+                    kind: .unavailable("This file preview is unavailable."),
+                    stopAccess: nil
+                )
+            }
+            return CaptureAttachmentPreviewTarget(
+                id: attachment.id,
+                title: attachment.fileName ?? attachment.title,
+                kind: .file(resolved.url),
+                stopAccess: resolved.stopAccess
+            )
         case .note:
-            break
+            return CaptureAttachmentPreviewTarget(
+                id: attachment.id,
+                title: attachment.title,
+                kind: .unavailable("This attachment type cannot be previewed."),
+                stopAccess: nil
+            )
         }
+    }
+
+    private func resolvedFileURL(
+        for attachment: CaptureSharedDraftAttachment,
+        startAccess: Bool
+    ) -> (url: URL, stopAccess: (() -> Void)?)? {
+        guard let bookmark = attachment.fileBookmarkData else { return nil }
+        var isStale = false
+        guard let url = try? URL(
+            resolvingBookmarkData: bookmark,
+            options: [.withoutUI],
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        ) else {
+            return nil
+        }
+        guard startAccess else {
+            return (url, nil)
+        }
+        let didAccess = url.startAccessingSecurityScopedResource()
+        let stopAccess = didAccess ? { url.stopAccessingSecurityScopedResource() } : nil
+        return (url, stopAccess)
+    }
+
+    private func clearPreviewTarget() {
+        previewTarget = nil
     }
 }
 
@@ -495,6 +630,7 @@ struct CaptureView: View {
     private let forceSetupWelcome: Bool
     private let pendingSharePayloadID: String?
     private let onSharePayloadHandled: ((String) -> Void)?
+    private let onOpenActionPlan: (() -> Void)?
 
     @Query(sort: \RollingCaptureItem.createdAt, order: .reverse)
     private var allItems: [RollingCaptureItem]
@@ -552,6 +688,8 @@ struct CaptureView: View {
     @State private var editingItemSourceType: String? = nil
     @State private var editingItemSharedNoteText: String = ""
     @State private var editingItemSharedAttachments: [CaptureSharedDraftAttachment] = []
+    @State private var editingAttachmentPreviewTarget: CaptureAttachmentPreviewTarget? = nil
+    @State private var editingAttachmentImageThumbnails: [UUID: UIImage] = [:]
     @State private var editingItemLeverageResourceID: UUID? = nil
     @State private var editingItemOriginalLeverageResourceID: UUID? = nil
     @State private var showEditLeverageDueDateError: Bool = false
@@ -629,7 +767,7 @@ struct CaptureView: View {
     @State private var repeatDraftAnchorDate: Date = Date()
     @State private var repeatDraftEndMode: RepeatEndMode = .never
     @State private var repeatDraftEndDate: Date = Date()
-    @FocusState private var isFullTextEditorFocused: Bool
+    @FocusState private var editActionFocusedField: EditActionFocusedField?
     @State private var isRepeatEditorEditing: Bool = false
     @State private var editActionKeyboardHeight: CGFloat = 0
     @State private var handledSharePayloadID: String? = nil
@@ -644,6 +782,8 @@ struct CaptureView: View {
     @State private var sharedDraftSourceApp: String? = nil
     @State private var sharedDraftSourceTitle: String? = nil
     @State private var sharedDraftAttachments: [CaptureSharedDraftAttachment] = []
+    @State private var sharedDraftAttachmentPreviewTarget: CaptureAttachmentPreviewTarget? = nil
+    @State private var sharedDraftAttachmentImageThumbnails: [UUID: UIImage] = [:]
     @State private var isGeneratingSharedAutoWrite = false
     @State private var sharedAutoWriteSuggestion: String? = nil
     @State private var sharedAutoWriteErrorMessage: String? = nil
@@ -651,21 +791,30 @@ struct CaptureView: View {
     @State private var sharedAutoWriteHistory: [String] = []
     @State private var sharedCompletedAttachmentsViewerID: CaptureSharedCompletedSheetID? = nil
     @State private var showActiveActionBlocksPage = false
+    @StateObject private var editingAttachmentPreviewStore = LoomLinkPreviewStore()
+    @StateObject private var sharedDraftAttachmentPreviewStore = LoomLinkPreviewStore()
     @AppStorage(loomAITroubleshootingDefaultsKey) private var loomAITroubleshootingEnabled = true
 
     init(
         forceSetupWelcome: Bool = false,
         pendingSharePayloadID: String? = nil,
-        onSharePayloadHandled: ((String) -> Void)? = nil
+        onSharePayloadHandled: ((String) -> Void)? = nil,
+        onOpenActionPlan: (() -> Void)? = nil
     ) {
         self.forceSetupWelcome = forceSetupWelcome
         self.pendingSharePayloadID = pendingSharePayloadID
         self.onSharePayloadHandled = onSharePayloadHandled
+        self.onOpenActionPlan = onOpenActionPlan
     }
 
     private enum FocusField: Hashable {
         case newInput
         case item(UUID)
+    }
+
+    private enum EditActionFocusedField: Hashable {
+        case action
+        case notes
     }
 
     private struct MoveToActionBlockOption: Identifiable, Hashable {
@@ -1091,6 +1240,29 @@ struct CaptureView: View {
         .sheet(isPresented: $showSharedCreateSheet) {
             sharedCreateActionSheet
         }
+        .sheet(item: $sharedDraftAttachmentPreviewTarget, onDismiss: clearSharedDraftAttachmentPreview) { preview in
+            switch preview.kind {
+            case .link(let urlString):
+                LoomLinkAttachmentPreviewSheet(urlString: urlString)
+            case .file(let url):
+                #if canImport(QuickLook) && canImport(UIKit)
+                LoomQuickLookPreviewSheet(url: url)
+                    .onDisappear {
+                        preview.stopAccess?()
+                    }
+                #else
+                LoomAttachmentUnavailableSheet(
+                    title: preview.title,
+                    message: "Preview is not available on this device."
+                )
+                .onDisappear {
+                    preview.stopAccess?()
+                }
+                #endif
+            case .unavailable(let message):
+                LoomAttachmentUnavailableSheet(title: preview.title, message: message)
+            }
+        }
         .sheet(item: $sharedCompletedAttachmentsViewerID) { _ in
             if let item = sharedCompletedAttachmentsViewerItem {
                 CaptureSharedAttachmentsReadOnlySheet(
@@ -1100,6 +1272,32 @@ struct CaptureView: View {
                 )
             } else {
                 EmptyView()
+            }
+        }
+        .sheet(item: $editingAttachmentPreviewTarget, onDismiss: clearEditingAttachmentPreview) { preview in
+            switch preview.kind {
+            case .link(let urlString):
+                LoomLinkAttachmentPreviewSheet(urlString: urlString)
+            case .file(let url):
+                #if canImport(QuickLook) && canImport(UIKit)
+                LoomQuickLookPreviewSheet(url: url)
+                    .onDisappear {
+                        preview.stopAccess?()
+                    }
+                #else
+                LoomAttachmentUnavailableSheet(
+                    title: preview.title,
+                    message: "Preview is not available on this device."
+                )
+                .onDisappear {
+                    preview.stopAccess?()
+                }
+                #endif
+            case .unavailable(let message):
+                LoomAttachmentUnavailableSheet(
+                    title: preview.title,
+                    message: message
+                )
             }
         }
         .sheet(isPresented: $showActiveActionBlocksPage) {
@@ -1149,12 +1347,19 @@ struct CaptureView: View {
     }
 
     private var editActionKeyboardShowsCheckmark: Bool {
-        !editingItemText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        switch editActionFocusedField {
+        case .action:
+            return !editingItemText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .notes:
+            return !editingItemSharedNoteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .none:
+            return false
+        }
     }
 
     private var editActionKeyboardDismissButton: some View {
         Button {
-            isFullTextEditorFocused = false
+            editActionFocusedField = nil
             focusedField = nil
         } label: {
             Image(systemName: editActionKeyboardShowsCheckmark ? "checkmark" : "keyboard.chevron.compact.down")
@@ -1205,6 +1410,17 @@ struct CaptureView: View {
                     shadowY: -2
                 )
                 .frame(height: proxy.size.height + 24)
+                .mask(
+                    LinearGradient(
+                        stops: [
+                            .init(color: .clear, location: 0),
+                            .init(color: .black.opacity(0.25), location: 0.35),
+                            .init(color: .black, location: 1)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
                 .ignoresSafeArea(edges: .bottom)
             }
         }
@@ -1523,7 +1739,11 @@ struct CaptureView: View {
         Button {
             isComposerFocused = false
             focusedField = nil
-            showActiveActionBlocksPage = true
+            if let onOpenActionPlan {
+                onOpenActionPlan()
+            } else {
+                showActiveActionBlocksPage = true
+            }
         } label: {
             HStack(alignment: .center, spacing: 10) {
                 Image(systemName: "play.fill")
@@ -1607,7 +1827,7 @@ struct CaptureView: View {
             isComposerFocused = false
             editActionKeyboardHeight = 0
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.07) {
-                isFullTextEditorFocused = true
+                editActionFocusedField = .action
             }
             showEditLeverageDueDateError = false
         }
@@ -1638,7 +1858,7 @@ struct CaptureView: View {
 
     private var editActionTextFieldRow: some View {
         TextField("Action", text: $editingItemText, axis: .vertical)
-            .focused($isFullTextEditorFocused)
+            .focused($editActionFocusedField, equals: .action)
             .textInputAutocapitalization(.sentences)
             .autocorrectionDisabled(false)
             .foregroundStyle(.primary)
@@ -1758,39 +1978,31 @@ struct CaptureView: View {
     @ViewBuilder
     private var editActionAttachmentsSection: some View {
         if editingItemSourceType == LoomShareSourceType.sharedIn {
-            Section("Attachments") {
-                if !editingItemSharedNoteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Notes")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        Text(editingItemSharedNoteText)
-                            .font(.subheadline)
-                            .foregroundStyle(.primary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
+            Section("Notes") {
+                TextEditor(text: $editingItemSharedNoteText)
+                    .focused($editActionFocusedField, equals: .notes)
+                    .frame(height: 130)
+                    .scrollContentBackground(.hidden)
+                    .padding(10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color(.secondarySystemBackground))
+                    )
 
-                if visibleEditingItemSharedAttachments.isEmpty {
-                    Text("No attachments available.")
+                if visibleEditingItemSharedAttachments.isEmpty && editingItemSharedNoteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text("No notes or attachments available.")
                         .foregroundStyle(.secondary)
-                } else {
+                } else if !visibleEditingItemSharedAttachments.isEmpty {
                     ForEach(visibleEditingItemSharedAttachments) { attachment in
                         Button {
-                            openSharedDraftAttachment(attachment)
+                            presentEditingAttachmentPreview(for: attachment)
                         } label: {
-                            HStack(spacing: 10) {
-                                Image(systemName: iconName(for: attachment))
-                                    .foregroundStyle(.secondary)
-                                Text(attachment.title)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.primary)
-                                    .lineLimit(2)
-                                Spacer(minLength: 0)
-                            }
-                            .contentShape(Rectangle())
+                            editingAttachmentCard(for: attachment)
+                                .padding(.horizontal, 4)
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                     }
                 }
             }
@@ -1868,6 +2080,13 @@ struct CaptureView: View {
                         item.unhideDate = Calendar.current.startOfDay(for: editingItemHiddenUntil)
                     }
                     applyCaptureItemLeverageSelection(item: item)
+                    if editingItemSourceType == LoomShareSourceType.sharedIn {
+                        syncCarriedActionProfileSharedContent(
+                            forText: item.text,
+                            noteText: editingItemSharedNoteText,
+                            attachments: editingItemSharedAttachments
+                        )
+                    }
                     scheduleInlineEditSave()
                     closeEditActionSheet()
                 }
@@ -3704,39 +3923,30 @@ struct CaptureView: View {
                     }
                 }
 
-                Section("Attachments") {
-                    if !sharedDraftNoteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Notes")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                            Text(sharedDraftNoteText)
-                                .font(.subheadline)
-                                .foregroundStyle(.primary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
+                Section("Notes") {
+                    TextEditor(text: $sharedDraftNoteText)
+                        .frame(minHeight: 130)
+                        .scrollContentBackground(.hidden)
+                        .padding(10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(Color(.secondarySystemBackground))
+                        )
 
-                    if sharedDraftAttachments.isEmpty {
-                        Text("No attachments found in shared content.")
-                            .foregroundStyle(.secondary)
-                    } else {
+                    if sharedDraftAttachments.isEmpty && sharedDraftNoteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text("No notes or attachments found in shared content.")
+                        .foregroundStyle(.secondary)
+                    } else if !sharedDraftAttachments.isEmpty {
                         ForEach(sharedDraftAttachments) { attachment in
                             Button {
-                                openSharedDraftAttachment(attachment)
+                                presentSharedDraftAttachmentPreview(for: attachment)
                             } label: {
-                                HStack(spacing: 10) {
-                                    Image(systemName: iconName(for: attachment))
-                                        .foregroundStyle(.secondary)
-                                    Text(attachment.title)
-                                        .font(.subheadline)
-                                        .foregroundStyle(.primary)
-                                        .lineLimit(2)
-                                    Spacer(minLength: 0)
-                                }
-                                .contentShape(Rectangle())
+                                sharedDraftAttachmentCard(for: attachment)
+                                    .padding(.horizontal, 4)
+                                    .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+                            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                         }
                     }
                 }
@@ -3758,6 +3968,7 @@ struct CaptureView: View {
             }
             .onAppear {
                 Task { await generateSharedAutoWriteSuggestion(force: false) }
+                refreshSharedDraftAttachmentPreviewResources()
             }
         }
         .presentationDetents([.large])
@@ -3813,6 +4024,7 @@ struct CaptureView: View {
         sharedDraftActionText = resolvedActionText
         sharedDraftNoteText = textTrimmed
         sharedDraftAttachments = resolvedAttachments
+        refreshSharedDraftAttachmentPreviewResources()
         showSharedCreateSheet = true
     }
 
@@ -4178,6 +4390,9 @@ struct CaptureView: View {
     private func isGenericAttachmentTypeLabel(_ rawTitle: String) -> Bool {
         let trimmed = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return true }
+        if let url = URL(string: trimmed), url.scheme != nil {
+            return false
+        }
         let lowered = trimmed.lowercased()
         let genericTypeNames: Set<String> = [
             "url",
@@ -4199,7 +4414,7 @@ struct CaptureView: View {
         if lowered.hasPrefix("public.") {
             return true
         }
-        if lowered.contains("/") || lowered.contains("application/") || lowered.contains("text/") {
+        if lowered.contains("application/") || lowered.contains("text/") {
             return true
         }
         return false
@@ -4218,6 +4433,254 @@ struct CaptureView: View {
             return imageExtensions.contains(`extension`)
         }
         return imageExtensions.contains(candidate)
+    }
+
+    private func refreshEditingAttachmentPreviewResources() {
+        let attachments = visibleEditingItemSharedAttachments
+        editingAttachmentPreviewStore.load(
+            urlStrings: attachments.compactMap(\.urlString)
+        )
+
+        var thumbnails: [UUID: UIImage] = [:]
+        for attachment in attachments where attachment.kind == .file && isImageAttachment(attachment) {
+            guard let image = previewThumbnailImage(for: attachment) else { continue }
+            thumbnails[attachment.id] = image
+        }
+        editingAttachmentImageThumbnails = thumbnails
+    }
+
+    @ViewBuilder
+    private func editingAttachmentCard(for attachment: CaptureSharedDraftAttachment) -> some View {
+        switch attachment.kind {
+        case .link:
+            LoomLinkBannerCard(
+                urlString: attachment.urlString ?? attachment.title,
+                preview: editingAttachmentPreviewStore.preview(for: attachment.urlString)
+            )
+        case .file:
+            LoomFileBannerCard(
+                title: attachment.fileName ?? attachment.title,
+                subtitle: editingAttachmentSubtitle(for: attachment),
+                tint: editingAttachmentTint(for: attachment),
+                systemName: iconName(for: attachment),
+                thumbnail: editingAttachmentImageThumbnails[attachment.id]
+            )
+        case .note:
+            LoomFileBannerCard(
+                title: attachment.title,
+                subtitle: "Note",
+                tint: .blue,
+                systemName: iconName(for: attachment),
+                thumbnail: nil
+            )
+        }
+    }
+
+    private func editingAttachmentSubtitle(for attachment: CaptureSharedDraftAttachment) -> String {
+        if isImageAttachment(attachment) {
+            return "Image"
+        }
+        let fileName = attachment.fileName ?? attachment.title
+        let fileExtension = URL(fileURLWithPath: fileName).pathExtension
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        return fileExtension.isEmpty ? "File" : fileExtension
+    }
+
+    private func editingAttachmentTint(for attachment: CaptureSharedDraftAttachment) -> Color {
+        if isImageAttachment(attachment) {
+            return .blue
+        }
+        switch attachment.kind {
+        case .link:
+            return .blue
+        case .file:
+            return .indigo
+        case .note:
+            return .blue
+        }
+    }
+
+    private func previewThumbnailImage(for attachment: CaptureSharedDraftAttachment) -> UIImage? {
+        guard let resolved = resolveSharedDraftAttachmentFileURL(attachment, startAccess: true) else { return nil }
+        defer { resolved.stopAccess?() }
+        return UIImage(contentsOfFile: resolved.url.path)
+    }
+
+    private func refreshSharedDraftAttachmentPreviewResources() {
+        sharedDraftAttachmentPreviewStore.load(
+            urlStrings: sharedDraftAttachments.compactMap(\.urlString)
+        )
+
+        var thumbnails: [UUID: UIImage] = [:]
+        for attachment in sharedDraftAttachments where attachment.kind == .file && isImageAttachment(attachment) {
+            guard let image = previewThumbnailImage(for: attachment) else { continue }
+            thumbnails[attachment.id] = image
+        }
+        sharedDraftAttachmentImageThumbnails = thumbnails
+    }
+
+    @ViewBuilder
+    private func sharedDraftAttachmentCard(for attachment: CaptureSharedDraftAttachment) -> some View {
+        switch attachment.kind {
+        case .link:
+            LoomLinkBannerCard(
+                urlString: attachment.urlString ?? attachment.title,
+                preview: sharedDraftAttachmentPreviewStore.preview(for: attachment.urlString)
+            )
+        case .file:
+            LoomFileBannerCard(
+                title: attachment.fileName ?? attachment.title,
+                subtitle: editingAttachmentSubtitle(for: attachment),
+                tint: editingAttachmentTint(for: attachment),
+                systemName: iconName(for: attachment),
+                thumbnail: sharedDraftAttachmentImageThumbnails[attachment.id]
+            )
+        case .note:
+            LoomFileBannerCard(
+                title: attachment.title,
+                subtitle: "Note",
+                tint: .blue,
+                systemName: iconName(for: attachment),
+                thumbnail: nil
+            )
+        }
+    }
+
+    private func presentSharedDraftAttachmentPreview(for attachment: CaptureSharedDraftAttachment) {
+        dismissSharedDraftAttachmentPreview()
+
+        switch attachment.kind {
+        case .link:
+            guard let urlString = attachment.urlString?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !urlString.isEmpty else {
+                sharedDraftAttachmentPreviewTarget = CaptureAttachmentPreviewTarget(
+                    id: attachment.id,
+                    title: attachment.title,
+                    kind: .unavailable("This link is unavailable."),
+                    stopAccess: nil
+                )
+                return
+            }
+            sharedDraftAttachmentPreviewTarget = CaptureAttachmentPreviewTarget(
+                id: attachment.id,
+                title: attachment.title,
+                kind: .link(urlString),
+                stopAccess: nil
+            )
+        case .file:
+            guard let resolved = resolveSharedDraftAttachmentFileURL(attachment, startAccess: true) else {
+                sharedDraftAttachmentPreviewTarget = CaptureAttachmentPreviewTarget(
+                    id: attachment.id,
+                    title: attachment.fileName ?? attachment.title,
+                    kind: .unavailable("This file preview is unavailable."),
+                    stopAccess: nil
+                )
+                return
+            }
+            sharedDraftAttachmentPreviewTarget = CaptureAttachmentPreviewTarget(
+                id: attachment.id,
+                title: attachment.fileName ?? attachment.title,
+                kind: .file(resolved.url),
+                stopAccess: resolved.stopAccess
+            )
+        case .note:
+            sharedDraftAttachmentPreviewTarget = CaptureAttachmentPreviewTarget(
+                id: attachment.id,
+                title: attachment.title,
+                kind: .unavailable("This attachment type cannot be previewed."),
+                stopAccess: nil
+            )
+        }
+    }
+
+    private func dismissSharedDraftAttachmentPreview() {
+        sharedDraftAttachmentPreviewTarget?.stopAccess?()
+        sharedDraftAttachmentPreviewTarget = nil
+    }
+
+    private func clearSharedDraftAttachmentPreview() {
+        sharedDraftAttachmentPreviewTarget = nil
+    }
+
+    private func presentEditingAttachmentPreview(for attachment: CaptureSharedDraftAttachment) {
+        dismissEditingAttachmentPreview()
+
+        switch attachment.kind {
+        case .link:
+            guard let urlString = attachment.urlString?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !urlString.isEmpty else {
+                editingAttachmentPreviewTarget = CaptureAttachmentPreviewTarget(
+                    id: attachment.id,
+                    title: attachment.title,
+                    kind: .unavailable("This link is unavailable."),
+                    stopAccess: nil
+                )
+                return
+            }
+            editingAttachmentPreviewTarget = CaptureAttachmentPreviewTarget(
+                id: attachment.id,
+                title: attachment.title,
+                kind: .link(urlString),
+                stopAccess: nil
+            )
+        case .file:
+            guard let resolved = resolveSharedDraftAttachmentFileURL(attachment, startAccess: true) else {
+                editingAttachmentPreviewTarget = CaptureAttachmentPreviewTarget(
+                    id: attachment.id,
+                    title: attachment.fileName ?? attachment.title,
+                    kind: .unavailable("This file preview is unavailable."),
+                    stopAccess: nil
+                )
+                return
+            }
+            editingAttachmentPreviewTarget = CaptureAttachmentPreviewTarget(
+                id: attachment.id,
+                title: attachment.fileName ?? attachment.title,
+                kind: .file(resolved.url),
+                stopAccess: resolved.stopAccess
+            )
+        case .note:
+            editingAttachmentPreviewTarget = CaptureAttachmentPreviewTarget(
+                id: attachment.id,
+                title: attachment.title,
+                kind: .unavailable("This attachment type cannot be previewed."),
+                stopAccess: nil
+            )
+        }
+    }
+
+    private func dismissEditingAttachmentPreview() {
+        editingAttachmentPreviewTarget?.stopAccess?()
+        editingAttachmentPreviewTarget = nil
+    }
+
+    private func clearEditingAttachmentPreview() {
+        editingAttachmentPreviewTarget = nil
+    }
+
+    private func resolveSharedDraftAttachmentFileURL(
+        _ attachment: CaptureSharedDraftAttachment,
+        startAccess: Bool
+    ) -> (url: URL, stopAccess: (() -> Void)?)? {
+        guard let data = attachment.fileBookmarkData else { return nil }
+        var isStale = false
+        guard let url = try? URL(
+            resolvingBookmarkData: data,
+            options: [.withoutUI],
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        ) else {
+            return nil
+        }
+
+        guard startAccess else {
+            return (url, nil)
+        }
+
+        let didAccess = url.startAccessingSecurityScopedResource()
+        let stopAccess = didAccess ? { url.stopAccessingSecurityScopedResource() } : nil
+        return (url, stopAccess)
     }
 
     private func openSharedDraftAttachment(_ attachment: CaptureSharedDraftAttachment) {
@@ -4370,6 +4833,7 @@ struct CaptureView: View {
         let sharedProfile = ActionCarryProfileStore.load(for: item.text)
         editingItemSharedNoteText = sharedProfile?.noteText ?? ""
         editingItemSharedAttachments = sharedAttachmentsFromCarryProfile(forText: item.text)
+        refreshEditingAttachmentPreviewResources()
         let leverageResourceID = resolvedLeverageResourceID(for: item)
         editingItemLeverageResourceID = leverageResourceID
         editingItemOriginalLeverageResourceID = leverageResourceID
@@ -4494,8 +4958,9 @@ struct CaptureView: View {
     }
 
     private func closeEditActionSheet() {
-        isFullTextEditorFocused = false
+        editActionFocusedField = nil
         showFullTextEditorSheet = false
+        dismissEditingAttachmentPreview()
         editingItemID = nil
         editingItemText = ""
         editingItemOriginalText = ""
@@ -4505,6 +4970,7 @@ struct CaptureView: View {
         editingItemSourceType = nil
         editingItemSharedNoteText = ""
         editingItemSharedAttachments = []
+        editingAttachmentImageThumbnails = [:]
         editingItemLeverageResourceID = nil
         editingItemOriginalLeverageResourceID = nil
         showEditLeverageDueDateError = false
@@ -4527,6 +4993,36 @@ struct CaptureView: View {
         profile.leverageKindRaw = resource?.kind.rawValue
         profile.leverageValue = resource?.value
         profile.updatedAtUnix = Date().timeIntervalSince1970
+        ActionCarryProfileStore.save(for: text, profile: profile)
+    }
+
+    private func syncCarriedActionProfileSharedContent(
+        forText text: String,
+        noteText: String,
+        attachments: [CaptureSharedDraftAttachment]
+    ) {
+        let trimmedNoteText = noteText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if var profile = ActionCarryProfileStore.load(for: text) {
+            profile.noteText = trimmedNoteText
+            profile.attachments = attachments.map(\.asCarriedAttachment)
+            profile.updatedAtUnix = Date().timeIntervalSince1970
+            ActionCarryProfileStore.save(for: text, profile: profile)
+            return
+        }
+
+        let profile = CarriedActionProfile(
+            isMust: false,
+            timeEstimateMinutes: nil,
+            sensitiveMorning: true,
+            sensitiveAfternoon: true,
+            sensitiveEvening: true,
+            leverageKindRaw: nil,
+            leverageValue: nil,
+            placeNames: [],
+            noteText: trimmedNoteText,
+            attachments: attachments.map(\.asCarriedAttachment),
+            updatedAtUnix: Date().timeIntervalSince1970
+        )
         ActionCarryProfileStore.save(for: text, profile: profile)
     }
 

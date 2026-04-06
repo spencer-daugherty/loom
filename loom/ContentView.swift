@@ -959,6 +959,12 @@ struct ContentView: View {
                         if pendingSharePayloadID == handledID {
                             pendingSharePayloadID = nil
                         }
+                    },
+                    onOpenActionPlan: {
+                        isPresentingCaptureView = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                            playSheetDestination = .action
+                        }
                     }
                 )
                     .presentationDragIndicator(.visible)

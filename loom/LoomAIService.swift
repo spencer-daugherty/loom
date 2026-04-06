@@ -145,8 +145,6 @@ struct LoomAIService {
 
     struct PurposeProfileInsightsRequest: Codable {
         var diagnostic: DiagnosticAnswers
-        var rootCause: String
-        var nextDirection: String
         var vision: String
         var passions: [String]
         var client: ClientInfo
@@ -863,8 +861,6 @@ struct LoomAIService {
 
     func fetchPurposeProfileInsights(
         diagnostic: DiagnosticAnswers,
-        rootCause: String,
-        nextDirection: String,
         vision: String,
         passions: [String],
         requestID: String? = nil,
@@ -882,8 +878,6 @@ struct LoomAIService {
 
         let requestBody = PurposeProfileInsightsRequest(
             diagnostic: diagnostic,
-            rootCause: rootCause.trimmingCharacters(in: .whitespacesAndNewlines),
-            nextDirection: nextDirection.trimmingCharacters(in: .whitespacesAndNewlines),
             vision: vision.trimmingCharacters(in: .whitespacesAndNewlines),
             passions: passions
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
