@@ -90,6 +90,7 @@ fileprivate enum FulfillmentReadableInsightRuntimeStore {
 
 fileprivate func fulfillmentReadableInsightKey(for payload: FulfillmentReadableInsightRequestPayload) -> String {
     struct ScoreSignature: Codable {
+        let version: Int
         let categoryID: UUID
         let weekStartISO8601: String
         let score: Double
@@ -107,6 +108,7 @@ fileprivate func fulfillmentReadableInsightKey(for payload: FulfillmentReadableI
     }
 
     let signature = ScoreSignature(
+        version: 2,
         categoryID: payload.categoryID,
         weekStartISO8601: payload.weekStartISO8601,
         score: payload.score,
@@ -1772,7 +1774,7 @@ struct FulfillmentView: View {
                             weekOverWeekDelta: selectedDelta
                         ))
                         let isLoadingInsight = aiReadableInsightLoadingKeys.contains(insightKey)
-                        if isLoadingInsight || summaryInsight != nil {
+                        if AppleIntelligenceSupport.isAvailable && (isLoadingInsight || summaryInsight != nil) {
                             FulfillmentReadableInsightCard(
                                 text: summaryInsight,
                                 isLoading: isLoadingInsight,
@@ -1788,21 +1790,24 @@ struct FulfillmentView: View {
                         Color.clear
                             .frame(height: 0)
                             .task(id: insightKey) {
+                                guard AppleIntelligenceSupport.isAvailable else { return }
                                 await requestFulfillmentReadableInsightIfNeeded(for: snap, categoryTitle: selectedTitle, weekOverWeekDelta: selectedDelta)
                             }
                     }
 
                     Spacer(minLength: 4)
 
-                    NavigationLink {
-                        FulfillmentTrendsView()
-                    } label: {
-                        Text("Show insights")
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.blue)
+                    if AppleIntelligenceSupport.isAvailable {
+                        NavigationLink {
+                            FulfillmentTrendsView()
+                        } label: {
+                            Text("Show insights")
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                                .foregroundStyle(.blue)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
                 .frame(width: leftWidth, alignment: .leading)
 
@@ -2265,6 +2270,7 @@ struct FulfillmentView: View {
         categoryTitle: String,
         weekOverWeekDelta: Double?
     ) -> String? {
+        guard AppleIntelligenceSupport.isAvailable else { return nil }
         let payload = fulfillmentReadableInsightPayload(for: snap, categoryTitle: categoryTitle, weekOverWeekDelta: weekOverWeekDelta)
         let key = fulfillmentReadableInsightKey(for: payload)
         guard let base = aiReadableInsightsByKey[key] ?? FulfillmentReadableInsightRuntimeStore.value(for: key) else { return nil }
@@ -2277,6 +2283,7 @@ struct FulfillmentView: View {
         categoryTitle: String,
         weekOverWeekDelta: Double?
     ) async {
+        guard AppleIntelligenceSupport.isAvailable else { return }
         let payload = fulfillmentReadableInsightPayload(for: snap, categoryTitle: categoryTitle, weekOverWeekDelta: weekOverWeekDelta)
         let key = fulfillmentReadableInsightKey(for: payload)
         if !loomAIInsightsRefreshEnabled(),
@@ -2288,14 +2295,10 @@ struct FulfillmentView: View {
         defer { aiReadableInsightLoadingKeys.remove(key) }
 
         do {
-            let contextSnapshot = try LoomAIViewModel().buildContextSnapshot(in: modelContext)
-            let response = try await LoomAIService().sendChat(
-                messages: [.init(role: "user", content: fulfillmentReadableInsightPrompt(for: payload))],
-                context: contextSnapshot,
-                intent: "readable_insight_fulfillment",
-                screen: "fulfillment_readable_header"
+            let response = try await AppleIntelligencePurposeInsightsGenerator.readableInsight(
+                prompt: fulfillmentReadableInsightPrompt(for: payload)
             )
-            let normalized = normalizeFulfillmentReadableInsightMetricReferences(response.message, payload: payload)
+            let normalized = normalizeFulfillmentReadableInsightMetricReferences(response, payload: payload)
             let text = limitFulfillmentReadableInsightText(normalized, maxCharacters: 220)
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return }
@@ -5465,6 +5468,18 @@ private struct FulfillmentTrendsView: View {
     @State private var trendsInsightOutlineAngle: Double = 0
     @State private var cachedFilteredSnapshots: [FulfillmentCategoryScoreSnapshot] = []
     @State private var cachedDisplayCategoryTitleByID: [UUID: String] = [:]
+    @State private var cachedAllWeekStarts: [Date] = []
+    @State private var cachedLatestWeekStart: Date?
+    @State private var cachedVisibleWeeks: [Date] = []
+    @State private var cachedLatestWeekSnapshots: [FulfillmentCategoryScoreSnapshot] = []
+    @State private var cachedSelectedWeekStart: Date?
+    @State private var cachedSelectedWeekSnapshots: [FulfillmentCategoryScoreSnapshot] = []
+    @State private var cachedFulfillmentDisplayOrderCategoryIDs: [UUID] = []
+    @State private var cachedChartCategoryIDs: [UUID] = []
+    @State private var cachedChartRowsByWeek: [Date: [FulfillmentTrendRow]] = [:]
+    @State private var cachedCategoryOrderIndex: [UUID: Int] = [:]
+    @State private var cachedCategoriesListOrderIndex: [UUID: Int] = [:]
+    @State private var cachedActualSnapshotValueByWeekCategory: [String: Double] = [:]
     @State private var aiReadableInsightsByKey: [String: String] = [:]
     @State private var aiReadableInsightLoadingKeys: Set<String> = []
     @State private var isHowItWorksExpanded = false
@@ -5474,17 +5489,13 @@ private struct FulfillmentTrendsView: View {
     }
 
     private var allWeekStarts: [Date] {
-        Array(Set(cachedFilteredSnapshots.map { Calendar.current.startOfDay(for: $0.weekStartDate) })).sorted()
+        cachedAllWeekStarts
     }
 
-    private var latestWeekStart: Date? { allWeekStarts.last }
+    private var latestWeekStart: Date? { cachedLatestWeekStart }
 
     private var visibleWeeks: [Date] {
-        guard let latestWeekStart else { return [] }
-        guard let days = selectedTimeline.rollingDays else { return allWeekStarts }
-        let start = Calendar.current.date(byAdding: .day, value: -(days - 1), to: latestWeekStart) ?? latestWeekStart
-        let filtered = allWeekStarts.filter { $0 >= start && $0 <= latestWeekStart }
-        return filtered.isEmpty ? (allWeekStarts.isEmpty ? [] : [latestWeekStart]) : filtered
+        cachedVisibleWeeks
     }
 
     private var timelineOptions: [TimelineOption] {
@@ -5515,90 +5526,23 @@ private struct FulfillmentTrendsView: View {
     }
 
     private var latestWeekSnapshots: [FulfillmentCategoryScoreSnapshot] {
-        guard let latestWeekStart else { return [] }
-        return snapshots.filter {
-            Calendar.current.isDate($0.weekStartDate, inSameDayAs: latestWeekStart) &&
-            liveFulfillmentCategoryIDs.contains($0.categoryID)
-        }
+        cachedLatestWeekSnapshots
     }
 
     private var selectedWeekStart: Date? {
-        guard let latest = latestWeekStart else { return nil }
-        guard let selectedWeekRaw else { return latest }
-        return nearestWeek(to: selectedWeekRaw) ?? latest
+        cachedSelectedWeekStart
     }
 
     private var selectedWeekSnapshots: [FulfillmentCategoryScoreSnapshot] {
-        guard let selectedWeekStart else { return latestWeekSnapshots }
-        let isLatestSelection = latestWeekStart.map { Calendar.current.isDate($0, inSameDayAs: selectedWeekStart) } ?? false
-        return snapshots.filter { snap in
-            guard Calendar.current.isDate(snap.weekStartDate, inSameDayAs: selectedWeekStart) else { return false }
-            if isLatestSelection {
-                return liveFulfillmentCategoryIDs.contains(snap.categoryID)
-            }
-            return true
-        }
+        cachedSelectedWeekSnapshots
     }
 
     private var chartCategoryIDs: [UUID] {
-        let ids = Array(fulfillmentDisplayOrderCategoryIDs.prefix(7))
-        if !ids.isEmpty { return ids }
-        return Array(fulfillments.prefix(7).map(\.category_id))
+        cachedChartCategoryIDs
     }
 
     private var fulfillmentDisplayOrderCategoryIDs: [UUID] {
-        let defaultIDs: [UUID] = [
-            "Career & Business",
-            "Leadership & Impact",
-            "Wealth & Lifestyle",
-            "Mind & Meaning",
-            "Love & Relationships",
-            "Health & Vitality"
-        ].compactMap { PlanLabelSeeder.categoryIDs[$0] }
-
-        var ordered: [UUID] = []
-        var seen = Set<UUID>()
-        var byID = Dictionary(uniqueKeysWithValues: fulfillments.map { ($0.category_id, $0) })
-        var seenTitleKeys = Set<String>()
-
-        for id in defaultIDs {
-            if let row = byID.removeValue(forKey: id) {
-                let key = fulfillmentCategoryKey(row.category)
-                guard !key.isEmpty, !seenTitleKeys.contains(key) else { continue }
-                if seen.insert(row.category_id).inserted {
-                    ordered.append(row.category_id)
-                    seenTitleKeys.insert(key)
-                }
-            }
-        }
-
-        let extras = byID.values
-            .sorted { $0.updatedAt > $1.updatedAt }
-            .filter { row in
-                let key = fulfillmentCategoryKey(row.category)
-                guard !key.isEmpty, !seenTitleKeys.contains(key) else { return false }
-                seenTitleKeys.insert(key)
-                return true
-            }
-            .sorted { $0.category.localizedCaseInsensitiveCompare($1.category) == .orderedAscending }
-
-        for row in extras where seen.insert(row.category_id).inserted {
-            ordered.append(row.category_id)
-        }
-
-        let snapshotFallbackIDs = snapshots
-            .sorted { lhs, rhs in
-                if lhs.weekStartDate == rhs.weekStartDate {
-                    return trendsDisplayCategoryTitle(for: lhs).localizedCaseInsensitiveCompare(trendsDisplayCategoryTitle(for: rhs)) == .orderedAscending
-                }
-                return lhs.weekStartDate > rhs.weekStartDate
-            }
-            .map(\.categoryID)
-
-        for id in snapshotFallbackIDs where seen.insert(id).inserted {
-            ordered.append(id)
-        }
-        return ordered
+        cachedFulfillmentDisplayOrderCategoryIDs
     }
 
     private func fulfillmentCategoryKey(_ raw: String) -> String {
@@ -5615,52 +5559,61 @@ private struct FulfillmentTrendsView: View {
             .joined(separator: " ")
     }
 
-    private var chartRows: [FulfillmentTrendRow] {
-        let cal = Calendar.current
-        let visibleSet = Set(visibleWeeks.map { cal.startOfDay(for: $0) })
-        let latestVisibleWeek = latestWeekStart.map { cal.startOfDay(for: $0) }
-        let grouped = Dictionary(grouping: snapshots.filter { visibleSet.contains(cal.startOfDay(for: $0.weekStartDate)) }) {
-            "\(cal.startOfDay(for: $0.weekStartDate).timeIntervalSince1970)|\($0.categoryID.uuidString)"
-        }.compactMapValues { rows in rows.max(by: { $0.updatedAt < $1.updatedAt }) }
+    private func deduplicatedSnapshotsByDisplayedCategory(
+        _ rows: [FulfillmentCategoryScoreSnapshot]
+    ) -> [FulfillmentCategoryScoreSnapshot] {
+        deduplicatedSnapshotsByDisplayedCategory(
+            rows,
+            displayCategoryTitleByID: displayCategoryTitleByID,
+            categoriesListOrderIndex: categoriesListOrderIndex
+        )
+    }
 
-        return chartCategoryIDs.flatMap { categoryID in
-            visibleWeeks.map { week in
-                let weekStart = cal.startOfDay(for: week)
-                if let latestVisibleWeek, latestVisibleWeek == weekStart, !liveFulfillmentCategoryIDs.contains(categoryID) {
-                    return FulfillmentTrendRow(
-                        id: "\(Int(weekStart.timeIntervalSince1970))|\(categoryID.uuidString)",
-                        weekStart: weekStart,
-                        categoryID: categoryID,
-                        category: displayCategoryTitleByID[categoryID] ?? "Category",
-                        value: 0
-                    )
-                }
-                let key = "\(weekStart.timeIntervalSince1970)|\(categoryID.uuidString)"
-                let snap = grouped[key]
-                let title = snap.map { trendsDisplayCategoryTitle(for: $0) }
-                    ?? displayCategoryTitleByID[categoryID]
-                    ?? "Category"
-                return FulfillmentTrendRow(
-                    id: "\(Int(weekStart.timeIntervalSince1970))|\(categoryID.uuidString)",
-                    weekStart: weekStart,
-                    categoryID: categoryID,
-                    category: title,
-                    value: snap?.score ?? 0
-                )
+    private func deduplicatedSnapshotsByDisplayedCategory(
+        _ rows: [FulfillmentCategoryScoreSnapshot],
+        displayCategoryTitleByID: [UUID: String],
+        categoriesListOrderIndex: [UUID: Int]
+    ) -> [FulfillmentCategoryScoreSnapshot] {
+        var bestByCategoryKey: [String: FulfillmentCategoryScoreSnapshot] = [:]
+
+        for row in rows {
+            let titleKey = fulfillmentCategoryKey(displayCategoryTitleByID[row.categoryID] ?? row.categoryTitleSnapshot)
+            guard !titleKey.isEmpty else { continue }
+
+            guard let existing = bestByCategoryKey[titleKey] else {
+                bestByCategoryKey[titleKey] = row
+                continue
             }
+
+            if row.updatedAt > existing.updatedAt {
+                bestByCategoryKey[titleKey] = row
+            } else if row.updatedAt == existing.updatedAt && row.score > existing.score {
+                bestByCategoryKey[titleKey] = row
+            }
+        }
+
+        return bestByCategoryKey.values.sorted { lhs, rhs in
+            let li = categoriesListOrderIndex[lhs.categoryID] ?? Int.max
+            let ri = categoriesListOrderIndex[rhs.categoryID] ?? Int.max
+            if li == ri {
+                let lhsTitle = displayCategoryTitleByID[lhs.categoryID] ?? lhs.categoryTitleSnapshot
+                let rhsTitle = displayCategoryTitleByID[rhs.categoryID] ?? rhs.categoryTitleSnapshot
+                return lhsTitle.localizedCaseInsensitiveCompare(rhsTitle) == .orderedAscending
+            }
+            return li < ri
         }
     }
 
     private var chartRowsByWeek: [Date: [FulfillmentTrendRow]] {
-        Dictionary(grouping: chartRows) { Calendar.current.startOfDay(for: $0.weekStart) }
+        cachedChartRowsByWeek
     }
 
     private var categoryOrderIndex: [UUID: Int] {
-        Dictionary(uniqueKeysWithValues: chartCategoryIDs.enumerated().map { ($0.element, $0.offset) })
+        cachedCategoryOrderIndex
     }
 
     private var categoriesListOrderIndex: [UUID: Int] {
-        Dictionary(uniqueKeysWithValues: fulfillmentDisplayOrderCategoryIDs.enumerated().map { ($0.element, $0.offset) })
+        cachedCategoriesListOrderIndex
     }
 
     private var chartYMax: Double {
@@ -5729,22 +5682,8 @@ private struct FulfillmentTrendsView: View {
         visibleWeeks.first
     }
 
-    private var chartRowValueByWeekCategory: [String: Double] {
-        Dictionary(uniqueKeysWithValues: chartRows.map { row in
-            (chartWeekCategoryKey(weekStart: row.weekStart, categoryID: row.categoryID), row.value)
-        })
-    }
-
     private var actualSnapshotValueByWeekCategory: [String: Double] {
-        let visibleSet = Set(visibleWeeks.map { Calendar.current.startOfDay(for: $0) })
-        let latestVisibleSnapshots = Dictionary(grouping: snapshots.filter {
-            visibleSet.contains(Calendar.current.startOfDay(for: $0.weekStartDate))
-        }) {
-            chartWeekCategoryKey(weekStart: $0.weekStartDate, categoryID: $0.categoryID)
-        }.compactMapValues { rows in
-            rows.max(by: { $0.updatedAt < $1.updatedAt })
-        }
-        return latestVisibleSnapshots.mapValues(\.score)
+        cachedActualSnapshotValueByWeekCategory
     }
 
     private func categoryWeekOverWeekDelta(for snap: FulfillmentCategoryScoreSnapshot) -> Double? {
@@ -5794,27 +5733,15 @@ private struct FulfillmentTrendsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             rebuildTrendsCaches()
-            if selectedWeekRaw == nil {
-                selectedWeekRaw = visibleWeeks.last ?? allWeekStarts.last
-            }
             if selectedCategoryID == nil {
                 selectedCategoryID = selectedSnapshot?.categoryID
             }
         }
-        .onChange(of: snapshots.count) { _, _ in
-            if selectedWeekRaw == nil || nearestWeek(to: selectedWeekRaw ?? .now) == nil {
-                selectedWeekRaw = visibleWeeks.last ?? allWeekStarts.last
-            }
-            if let selectedCategoryID,
-               selectedWeekSnapshots.contains(where: { $0.categoryID == selectedCategoryID }) {
-                return
-            }
-            self.selectedCategoryID = selectedSnapshot?.categoryID
-        }
         .onChange(of: selectedTimeline) { _, _ in
-            selectedWeekRaw = visibleWeeks.last ?? allWeekStarts.last
+            selectedWeekRaw = nil
+            rebuildTrendsCaches()
         }
-        .onChange(of: allSnapshots.count) { _, _ in
+        .onChange(of: allSnapshots.map(\.updatedAt)) { _, _ in
             rebuildTrendsCaches()
         }
         .onChange(of: fulfillments.map(\.updatedAt)) { _, _ in
@@ -5838,11 +5765,187 @@ private struct FulfillmentTrendsView: View {
         }
         cachedFilteredSnapshots = filtered
 
+        let allWeekStarts = Array(Set(filtered.map { cal.startOfDay(for: $0.weekStartDate) })).sorted()
+        cachedAllWeekStarts = allWeekStarts
+        let latestWeekStart = allWeekStarts.last
+        cachedLatestWeekStart = latestWeekStart
+
         var titleMap = Dictionary(uniqueKeysWithValues: fulfillments.map { ($0.category_id, $0.category) })
         for snap in filtered where titleMap[snap.categoryID] == nil {
             titleMap[snap.categoryID] = snap.categoryTitleSnapshot
         }
         cachedDisplayCategoryTitleByID = titleMap
+
+        let visibleWeeks: [Date] = {
+            guard let latestWeekStart else { return [] }
+            guard let days = selectedTimeline.rollingDays else { return allWeekStarts }
+            let start = cal.date(byAdding: .day, value: -(days - 1), to: latestWeekStart) ?? latestWeekStart
+            let filteredWeeks = allWeekStarts.filter { $0 >= start && $0 <= latestWeekStart }
+            return filteredWeeks.isEmpty ? (allWeekStarts.isEmpty ? [] : [latestWeekStart]) : filteredWeeks
+        }()
+        cachedVisibleWeeks = visibleWeeks
+
+        let displayOrderIDs = buildFulfillmentDisplayOrderCategoryIDs(
+            snapshots: filtered,
+            titleMap: titleMap
+        )
+        cachedFulfillmentDisplayOrderCategoryIDs = displayOrderIDs
+
+        let categoriesListOrderIndex = Dictionary(uniqueKeysWithValues: displayOrderIDs.enumerated().map { ($0.element, $0.offset) })
+        cachedCategoriesListOrderIndex = categoriesListOrderIndex
+
+        let chartCategoryIDs: [UUID] = {
+            let ids = Array(displayOrderIDs.prefix(7))
+            if !ids.isEmpty { return ids }
+            return Array(fulfillments.prefix(7).map(\.category_id))
+        }()
+        cachedChartCategoryIDs = chartCategoryIDs
+        cachedCategoryOrderIndex = Dictionary(uniqueKeysWithValues: chartCategoryIDs.enumerated().map { ($0.element, $0.offset) })
+
+        let latestWeekSnapshots: [FulfillmentCategoryScoreSnapshot] = {
+            guard let latestWeekStart else { return [] }
+            let rows = filtered.filter {
+                cal.isDate($0.weekStartDate, inSameDayAs: latestWeekStart) &&
+                liveCategoryIDs.contains($0.categoryID)
+            }
+            return deduplicatedSnapshotsByDisplayedCategory(
+                rows,
+                displayCategoryTitleByID: titleMap,
+                categoriesListOrderIndex: categoriesListOrderIndex
+            )
+        }()
+        cachedLatestWeekSnapshots = latestWeekSnapshots
+
+        let resolvedSelectedWeek: Date? = {
+            guard let latestWeekStart else { return nil }
+            guard let selectedWeekRaw else { return latestWeekStart }
+            let target = cal.startOfDay(for: selectedWeekRaw)
+            let resolved = visibleWeeks.min(by: { abs($0.timeIntervalSince(target)) < abs($1.timeIntervalSince(target)) })
+            return resolved ?? latestWeekStart
+        }()
+        cachedSelectedWeekStart = resolvedSelectedWeek
+
+        let selectedWeekSnapshots: [FulfillmentCategoryScoreSnapshot] = {
+            guard let resolvedSelectedWeek else { return latestWeekSnapshots }
+            let isLatestSelection = latestWeekStart.map { cal.isDate($0, inSameDayAs: resolvedSelectedWeek) } ?? false
+            let rows = filtered.filter { snap in
+                guard cal.isDate(snap.weekStartDate, inSameDayAs: resolvedSelectedWeek) else { return false }
+                if isLatestSelection {
+                    return liveCategoryIDs.contains(snap.categoryID)
+                }
+                return true
+            }
+            return deduplicatedSnapshotsByDisplayedCategory(
+                rows,
+                displayCategoryTitleByID: titleMap,
+                categoriesListOrderIndex: categoriesListOrderIndex
+            )
+        }()
+        cachedSelectedWeekSnapshots = selectedWeekSnapshots
+
+        let latestVisibleSnapshots = Dictionary(grouping: filtered.filter {
+            visibleWeeks.contains(cal.startOfDay(for: $0.weekStartDate))
+        }) {
+            chartWeekCategoryKey(weekStart: $0.weekStartDate, categoryID: $0.categoryID)
+        }.compactMapValues { rows in
+            rows.max(by: { $0.updatedAt < $1.updatedAt })
+        }
+        cachedActualSnapshotValueByWeekCategory = latestVisibleSnapshots.mapValues(\.score)
+
+        let latestVisibleWeek = latestWeekStart.map { cal.startOfDay(for: $0) }
+        let chartRows = chartCategoryIDs.flatMap { categoryID in
+            visibleWeeks.map { week in
+                let weekStart = cal.startOfDay(for: week)
+                if let latestVisibleWeek, latestVisibleWeek == weekStart, !liveCategoryIDs.contains(categoryID) {
+                    return FulfillmentTrendRow(
+                        id: "\(Int(weekStart.timeIntervalSince1970))|\(categoryID.uuidString)",
+                        weekStart: weekStart,
+                        categoryID: categoryID,
+                        category: titleMap[categoryID] ?? "Category",
+                        value: 0
+                    )
+                }
+                let key = chartWeekCategoryKey(weekStart: weekStart, categoryID: categoryID)
+                let snap = latestVisibleSnapshots[key]
+                let title = snap.map { titleMap[$0.categoryID] ?? $0.categoryTitleSnapshot }
+                    ?? titleMap[categoryID]
+                    ?? "Category"
+                return FulfillmentTrendRow(
+                    id: "\(Int(weekStart.timeIntervalSince1970))|\(categoryID.uuidString)",
+                    weekStart: weekStart,
+                    categoryID: categoryID,
+                    category: title,
+                    value: snap?.score ?? 0
+                )
+            }
+        }
+        cachedChartRowsByWeek = Dictionary(grouping: chartRows) { cal.startOfDay(for: $0.weekStart) }
+
+        if let selectedCategoryID,
+           selectedWeekSnapshots.contains(where: { $0.categoryID == selectedCategoryID }) {
+            return
+        }
+        self.selectedCategoryID = selectedWeekSnapshots.max(by: { $0.score < $1.score })?.categoryID
+    }
+
+    private func buildFulfillmentDisplayOrderCategoryIDs(
+        snapshots: [FulfillmentCategoryScoreSnapshot],
+        titleMap: [UUID: String]
+    ) -> [UUID] {
+        let defaultIDs: [UUID] = [
+            "Career & Business",
+            "Leadership & Impact",
+            "Wealth & Lifestyle",
+            "Mind & Meaning",
+            "Love & Relationships",
+            "Health & Vitality"
+        ].compactMap { PlanLabelSeeder.categoryIDs[$0] }
+
+        var ordered: [UUID] = []
+        var seen = Set<UUID>()
+        var byID = Dictionary(uniqueKeysWithValues: fulfillments.map { ($0.category_id, $0) })
+        var seenTitleKeys = Set<String>()
+
+        for id in defaultIDs {
+            if let row = byID.removeValue(forKey: id) {
+                let key = fulfillmentCategoryKey(row.category)
+                guard !key.isEmpty, !seenTitleKeys.contains(key) else { continue }
+                if seen.insert(row.category_id).inserted {
+                    ordered.append(row.category_id)
+                    seenTitleKeys.insert(key)
+                }
+            }
+        }
+
+        let extras = byID.values
+            .sorted { $0.updatedAt > $1.updatedAt }
+            .filter { row in
+                let key = fulfillmentCategoryKey(row.category)
+                guard !key.isEmpty, !seenTitleKeys.contains(key) else { return false }
+                seenTitleKeys.insert(key)
+                return true
+            }
+            .sorted { $0.category.localizedCaseInsensitiveCompare($1.category) == .orderedAscending }
+
+        for row in extras where seen.insert(row.category_id).inserted {
+            ordered.append(row.category_id)
+        }
+
+        let snapshotFallbackIDs = snapshots
+            .sorted { lhs, rhs in
+                if lhs.weekStartDate == rhs.weekStartDate {
+                    let lhsTitle = titleMap[lhs.categoryID] ?? lhs.categoryTitleSnapshot
+                    let rhsTitle = titleMap[rhs.categoryID] ?? rhs.categoryTitleSnapshot
+                    return lhsTitle.localizedCaseInsensitiveCompare(rhsTitle) == .orderedAscending
+                }
+                return lhs.weekStartDate > rhs.weekStartDate
+            }
+            .map(\.categoryID)
+
+        for id in snapshotFallbackIDs where seen.insert(id).inserted {
+            ordered.append(id)
+        }
+        return ordered
     }
 
     @ViewBuilder
@@ -5870,7 +5973,10 @@ private struct FulfillmentTrendsView: View {
                                 xAxisView(plotWidth: plotWidth)
                             }
                         }
+                        .frame(width: plotWidth, alignment: .leading)
+                        .clipped()
                     }
+                    .frame(width: geo.size.width, alignment: .leading)
                 }
                 .frame(height: trendPlotHeight + 16)
             }
@@ -5900,6 +6006,7 @@ private struct FulfillmentTrendsView: View {
             ForEach(visibleWeeks, id: \.self) { week in
                 Button {
                     selectedWeekRaw = week
+                    rebuildTrendsCaches()
                 } label: {
                     ZStack(alignment: .bottom) {
                         RoundedRectangle(cornerRadius: 5)
@@ -6073,7 +6180,7 @@ private struct FulfillmentTrendsView: View {
                 let insightKey = fulfillmentReadableInsightKey(for: payload)
                 let summaryInsight = aiTrendsReadableInsightText(for: snap)
                 let isLoadingInsight = aiReadableInsightLoadingKeys.contains(insightKey)
-                if isLoadingInsight || summaryInsight != nil {
+                if AppleIntelligenceSupport.isAvailable && (isLoadingInsight || summaryInsight != nil) {
                     FulfillmentReadableInsightCard(
                         text: summaryInsight,
                         isLoading: isLoadingInsight,
@@ -6092,6 +6199,7 @@ private struct FulfillmentTrendsView: View {
                 Color.clear
                     .frame(height: 0)
                     .task(id: insightKey) {
+                        guard AppleIntelligenceSupport.isAvailable else { return }
                         await requestTrendsReadableInsightIfNeeded(for: snap)
                     }
 
@@ -6446,6 +6554,7 @@ private struct FulfillmentTrendsView: View {
     }
 
     private func aiTrendsReadableInsightText(for snap: FulfillmentCategoryScoreSnapshot) -> String? {
+        guard AppleIntelligenceSupport.isAvailable else { return nil }
         let payload = trendsReadableInsightPayload(for: snap)
         let key = fulfillmentReadableInsightKey(for: payload)
         guard let base = aiReadableInsightsByKey[key] ?? FulfillmentReadableInsightRuntimeStore.value(for: key) else { return nil }
@@ -6454,6 +6563,7 @@ private struct FulfillmentTrendsView: View {
 
     @MainActor
     private func requestTrendsReadableInsightIfNeeded(for snap: FulfillmentCategoryScoreSnapshot) async {
+        guard AppleIntelligenceSupport.isAvailable else { return }
         let payload = trendsReadableInsightPayload(for: snap)
         let key = fulfillmentReadableInsightKey(for: payload)
         if !loomAIInsightsRefreshEnabled(),
@@ -6465,14 +6575,10 @@ private struct FulfillmentTrendsView: View {
         defer { aiReadableInsightLoadingKeys.remove(key) }
 
         do {
-            let contextSnapshot = try LoomAIViewModel().buildContextSnapshot(in: modelContext)
-            let response = try await LoomAIService().sendChat(
-                messages: [.init(role: "user", content: fulfillmentReadableInsightPrompt(for: payload))],
-                context: contextSnapshot,
-                intent: "readable_insight_fulfillment",
-                screen: "fulfillment_readable_trends"
+            let response = try await AppleIntelligencePurposeInsightsGenerator.readableInsight(
+                prompt: fulfillmentReadableInsightPrompt(for: payload)
             )
-            let normalized = normalizeFulfillmentReadableInsightMetricReferences(response.message, payload: payload)
+            let normalized = normalizeFulfillmentReadableInsightMetricReferences(response, payload: payload)
             let text = limitFulfillmentReadableInsightText(normalized, maxCharacters: 220)
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return }
