@@ -165,8 +165,8 @@ private struct CaptureSharedCompletedSheetID: Identifiable {
     let id: UUID
 }
 
-private struct CaptureAttachmentPreviewTarget: Identifiable {
-    enum Kind {
+private struct CaptureAttachmentPreviewTarget: Identifiable, Hashable {
+    enum Kind: Hashable {
         case link(String)
         case file(URL)
         case unavailable(String)
@@ -176,6 +176,16 @@ private struct CaptureAttachmentPreviewTarget: Identifiable {
     let title: String
     let kind: Kind
     let stopAccess: (() -> Void)?
+
+    static func == (lhs: CaptureAttachmentPreviewTarget, rhs: CaptureAttachmentPreviewTarget) -> Bool {
+        lhs.id == rhs.id && lhs.title == rhs.title && lhs.kind == rhs.kind
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(title)
+        hasher.combine(kind)
+    }
 }
 
 private struct CaptureSharedAttachmentsReadOnlySheet: View {
@@ -667,6 +677,7 @@ struct CaptureView: View {
     @State private var duplicateMessage: String = "Duplicate: action is already entered"
     @State private var highlightedDuplicateItemID: UUID? = nil
     @State private var duplicateResetWorkItem: DispatchWorkItem? = nil
+    @State private var captureMutationRefreshTick: Int = 0
     @State private var captureIntroShowsDeleteDemoRow: Bool = true
     @State private var captureIntroShowsQuickCompleteDemoRow: Bool = true
     @State private var captureIntroShowsSettingsDemoRow: Bool = true
@@ -1201,6 +1212,9 @@ struct CaptureView: View {
                 .onReceive(recurringDispatchTimer) { _ in
                     runRecurringDispatchIfNeeded()
                 }
+                .onReceive(NotificationCenter.default.publisher(for: .captureItemsDidChange)) { _ in
+                    captureMutationRefreshTick &+= 1
+                }
                 .onChange(of: allItems.map(\.id)) { _, _ in
                     markCaptureSetupCompletedIfNeeded()
                     dedupeCaptureItemsIfNeeded()
@@ -1272,32 +1286,6 @@ struct CaptureView: View {
                 )
             } else {
                 EmptyView()
-            }
-        }
-        .sheet(item: $editingAttachmentPreviewTarget, onDismiss: clearEditingAttachmentPreview) { preview in
-            switch preview.kind {
-            case .link(let urlString):
-                LoomLinkAttachmentPreviewSheet(urlString: urlString)
-            case .file(let url):
-                #if canImport(QuickLook) && canImport(UIKit)
-                LoomQuickLookPreviewSheet(url: url)
-                    .onDisappear {
-                        preview.stopAccess?()
-                    }
-                #else
-                LoomAttachmentUnavailableSheet(
-                    title: preview.title,
-                    message: "Preview is not available on this device."
-                )
-                .onDisappear {
-                    preview.stopAccess?()
-                }
-                #endif
-            case .unavailable(let message):
-                LoomAttachmentUnavailableSheet(
-                    title: preview.title,
-                    message: message
-                )
             }
         }
         .sheet(isPresented: $showActiveActionBlocksPage) {
@@ -1798,6 +1786,9 @@ struct CaptureView: View {
             editActionSheetList
                 .navigationTitle("Edit Action")
                 .navigationBarTitleDisplayMode(.inline)
+                .navigationDestination(item: $editingAttachmentPreviewTarget) { preview in
+                    editActionAttachmentPreviewPage(for: preview)
+                }
                 .toolbar { editActionSheetToolbar }
                 .overlay { editActionKeyboardOverlay }
                 .overlay(alignment: .bottom) { editActionDueDateWarningOverlay }
@@ -1853,6 +1844,47 @@ struct CaptureView: View {
             editActionAttachmentsSection
             editActionMoveToActionBlockRow
             editActionCompleteSection
+        }
+    }
+
+    @ViewBuilder
+    private func editActionAttachmentPreviewPage(for preview: CaptureAttachmentPreviewTarget) -> some View {
+        switch preview.kind {
+        case .link(let urlString):
+            LoomLinkAttachmentPreviewContent(urlString: urlString)
+                .navigationTitle("Attachment")
+                .navigationBarTitleDisplayMode(.inline)
+                .onDisappear {
+                    clearEditingAttachmentPreview()
+                }
+        case .file(let url):
+            #if canImport(QuickLook) && canImport(UIKit)
+            LoomQuickLookPreviewSheet(url: url)
+                .navigationTitle(preview.title)
+                .navigationBarTitleDisplayMode(.inline)
+                .onDisappear {
+                    preview.stopAccess?()
+                    clearEditingAttachmentPreview()
+                }
+            #else
+            LoomAttachmentUnavailableContent(
+                title: preview.title,
+                message: "Preview is not available on this device."
+            )
+            .navigationTitle("Attachment")
+            .navigationBarTitleDisplayMode(.inline)
+            .onDisappear {
+                preview.stopAccess?()
+                clearEditingAttachmentPreview()
+            }
+            #endif
+        case .unavailable(let message):
+            LoomAttachmentUnavailableContent(title: preview.title, message: message)
+                .navigationTitle("Attachment")
+                .navigationBarTitleDisplayMode(.inline)
+                .onDisappear {
+                    clearEditingAttachmentPreview()
+                }
         }
     }
 
@@ -2602,6 +2634,10 @@ struct CaptureView: View {
         }
     }
 
+    private var recurringRowInsets: EdgeInsets {
+        EdgeInsets(top: 0, leading: 16, bottom: 6, trailing: 16)
+    }
+
     private func recurringAddRow() -> some View {
         Group {
             if recurringAddIsAdding {
@@ -2635,7 +2671,7 @@ struct CaptureView: View {
                 .padding(.vertical, 2)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
-                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                .listRowInsets(recurringRowInsets)
                 .listRowSeparator(.hidden)
                 .onAppear {
                     focusRecurringAddField()
@@ -2652,7 +2688,7 @@ struct CaptureView: View {
                 .padding(.vertical, 2)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
-                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                .listRowInsets(recurringRowInsets)
                 .listRowSeparator(.hidden)
             }
         }
@@ -2683,7 +2719,7 @@ struct CaptureView: View {
         .padding(.vertical, 2)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
-        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+        .listRowInsets(recurringRowInsets)
         .listRowSeparator(.hidden)
         .contentShape(Rectangle())
         .onTapGesture {

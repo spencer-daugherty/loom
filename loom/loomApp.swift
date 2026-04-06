@@ -249,10 +249,17 @@ struct loomApp: App {
                 _ = GIDSignIn.sharedInstance.handle(url)
 #endif
             }
+            .onAppear {
+                if !enableLoomAIDebug {
+                    showLoomAIDebugPage = false
+                }
+            }
             .onChange(of: enableLoomAIDebug) { _, isEnabled in
                 AppDebugActivityLog.log("App", "LoomAI Debug mode toggled \(isEnabled ? "on" : "off")")
                 if isEnabled {
                     showLoomAIDebugPage = true
+                } else {
+                    showLoomAIDebugPage = false
                 }
             }
         }

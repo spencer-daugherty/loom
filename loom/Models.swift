@@ -13,6 +13,7 @@ extension Notification.Name {
   static let littleWinsIntegrationDidChange = Notification.Name("littleWinsIntegrationDidChange")
   static let littleWinsPassionsDidChange = Notification.Name("littleWinsPassionsDidChange")
   static let vacationModeDidChange = Notification.Name("vacationModeDidChange")
+  static let captureItemsDidChange = Notification.Name("captureItemsDidChange")
 }
 
 struct VacationModeConfig: Codable, Equatable {
@@ -1749,6 +1750,22 @@ extension ActivePlanState {
       context.insert(state)
       try? context.save()
       return state
+    }
+  }
+}
+
+enum ActivePlanSessionStore {
+  private static let defaultsKey = "activePlanWeekStart.v1"
+
+  static func weekStart() -> Date? {
+    UserDefaults.standard.object(forKey: defaultsKey) as? Date
+  }
+
+  static func setWeekStart(_ date: Date?) {
+    if let date {
+      UserDefaults.standard.set(date, forKey: defaultsKey)
+    } else {
+      UserDefaults.standard.removeObject(forKey: defaultsKey)
     }
   }
 }

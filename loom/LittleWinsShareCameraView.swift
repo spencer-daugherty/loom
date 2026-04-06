@@ -12,16 +12,35 @@ struct LittleWinsShareCameraView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
 
+    @AppStorage("analytics_install_date") private var analyticsInstallDate = ""
+    @AppStorage(UserSessionStore.Keys.isSubscribed) private var isSubscribed = false
+    @AppStorage("loom.subscription_plan") private var subscriptionPlanRaw = SubscriptionPlan.annual.rawValue
+    @AppStorage(UserSessionStore.Keys.accountName) private var accountName = ""
+
     @Query(sort: \Fulfillment.updatedAt, order: .forward)
     private var fulfillments: [Fulfillment]
     @Query(sort: \FulfillmentFocus.rank, order: .forward)
     private var foci: [FulfillmentFocus]
     @Query(sort: \LittleWinsDailyCompletion.completedAt, order: .reverse)
     private var completions: [LittleWinsDailyCompletion]
+    @Query(sort: \Outcomes.updatedAt, order: .reverse)
+    private var outcomes: [Outcomes]
+    @Query(sort: \OutcomesMeasureEntry.measuredAt, order: .forward)
+    private var outcomeMeasureEntries: [OutcomesMeasureEntry]
+    @Query(sort: \OutcomesMeasure.measuredAt, order: .forward)
+    private var outcomeMeasures: [OutcomesMeasure]
+    @Query(sort: \CompletedOutcomeArchive.completedAt, order: .reverse)
+    private var completedOutcomes: [CompletedOutcomeArchive]
+    @Query(sort: \CompletedOutcomeMeasurePointArchive.measuredAt, order: .forward)
+    private var completedOutcomeMeasurePoints: [CompletedOutcomeMeasurePointArchive]
+    @Query(sort: \FulfillmentCategoryScoreSnapshot.weekStartDate, order: .reverse)
+    private var fulfillmentCategoryScoreSnapshots: [FulfillmentCategoryScoreSnapshot]
+    @Query(sort: \DiagnosticsInsightsSnapshot.generatedAt, order: .reverse)
+    private var diagnosticInsightsSnapshots: [DiagnosticsInsightsSnapshot]
 
     @StateObject private var cameraSession = LittleWinsShareCameraSession()
-    @State private var selectedTemplate: LittleWinsShareTemplate = .todaysWins
-    @State private var selectedFilter: LittleWinsShareImageFilter = .vivid
+    @State private var selectedTemplateID = LittleWinsShareTemplateCatalog.sortedTemplates.first?.id ?? "todaysWins"
+    @State private var selectedFilter: LittleWinsShareImageFilter = .color
     @State private var capturedImage: UIImage?
     @State private var hasRequestedCameraAccess = false
     @State private var isRenderingCapture = false
@@ -36,8 +55,35 @@ struct LittleWinsShareCameraView: View {
         LittleWinsShareOverlayDataFactory.build(
             fulfillments: fulfillments,
             foci: foci,
-            completions: completions
+            completions: completions,
+            outcomes: outcomes,
+            outcomeMeasureEntries: outcomeMeasureEntries,
+            outcomeMeasures: outcomeMeasures,
+            completedOutcomes: completedOutcomes,
+            completedOutcomeMeasurePoints: completedOutcomeMeasurePoints,
+            fulfillmentCategoryScoreSnapshots: fulfillmentCategoryScoreSnapshots,
+            diagnosticInsightsSnapshots: diagnosticInsightsSnapshots,
+            accountName: accountName,
+            installDateRaw: analyticsInstallDate,
+            isSubscribed: isSubscribed,
+            subscriptionPlanRaw: subscriptionPlanRaw
         )
+    }
+
+    private var templates: [LittleWinsShareTemplateDefinition] {
+        LittleWinsShareTemplateCatalog.sortedTemplates
+    }
+
+    private var selectedTemplateDefinition: LittleWinsShareTemplateDefinition {
+        templates.first(where: { $0.id == selectedTemplateID }) ?? templates[0]
+    }
+
+    private var selectedTemplateLockReason: String? {
+        selectedTemplateDefinition.lockReason(in: overlayData)
+    }
+
+    private var canCaptureSelectedTemplate: Bool {
+        selectedTemplateLockReason == nil
     }
 
     var body: some View {
@@ -59,6 +105,7 @@ struct LittleWinsShareCameraView: View {
         }
         .task {
             await prepareCameraIfNeeded()
+            selectFirstEligibleTemplateIfNeeded()
         }
         .onDisappear {
             cameraSession.stopSession()
@@ -161,31 +208,37 @@ struct LittleWinsShareCameraView: View {
     }
 
     private var bottomControls: some View {
-        VStack(spacing: 10) {
-            templateNavigationRow
+        VStack(spacing: 12) {
+            templateStatusRow
             captureControlsRow
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
     }
 
-    private var templateNavigationRow: some View {
-        HStack(spacing: 7) {
-            ForEach(Array(LittleWinsShareTemplate.allCases.enumerated()), id: \.element.id) { _, template in
-                Button {
-                    withAnimation(.interactiveSpring(response: 0.30, dampingFraction: 0.88)) {
-                        selectedTemplate = template
-                    }
-                } label: {
-                    Capsule(style: .continuous)
-                        .fill(template == selectedTemplate ? Color.white : Color.white.opacity(0.32))
-                        .frame(width: template == selectedTemplate ? 20 : 10, height: 4)
-                }
-                .buttonStyle(.plain)
+    private var templateStatusRow: some View {
+        VStack(alignment: .center, spacing: 4) {
+            Text(selectedTemplateDefinition.title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white)
+                .multilineTextAlignment(.center)
+
+            if let lockReason = selectedTemplateLockReason {
+                Text(lockReason)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.72))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+            } else {
+                Text(selectedTemplateDefinition.subtitle)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.72))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
             }
         }
-        .padding(.vertical, 2)
         .frame(maxWidth: .infinity)
+        .padding(.horizontal, 4)
     }
 
     private var captureControlsRow: some View {
@@ -221,8 +274,8 @@ struct LittleWinsShareCameraView: View {
                 }
             }
             .buttonStyle(.plain)
-            .disabled(!cameraSession.isSessionRunning || isRenderingCapture)
-            .opacity((cameraSession.isSessionRunning && !isRenderingCapture) ? 1 : 0.55)
+            .disabled(!cameraSession.isSessionRunning || isRenderingCapture || !canCaptureSelectedTemplate)
+            .opacity((cameraSession.isSessionRunning && !isRenderingCapture && canCaptureSelectedTemplate) ? 1 : 0.55)
 
             Spacer()
 
@@ -247,10 +300,10 @@ struct LittleWinsShareCameraView: View {
     }
 
     private var liveTemplatePager: some View {
-        TabView(selection: $selectedTemplate) {
-            ForEach(LittleWinsShareTemplate.allCases) { template in
-                LittleWinsShareOverlayTemplateView(template: template, data: overlayData)
-                    .tag(template)
+        TabView(selection: $selectedTemplateID) {
+            ForEach(templates) { template in
+                template.renderView(data: overlayData)
+                    .tag(template.id)
                     .ignoresSafeArea()
             }
         }
@@ -260,10 +313,8 @@ struct LittleWinsShareCameraView: View {
 
     private var livePreviewSaturation: Double {
         switch selectedFilter {
-        case .vivid:
+        case .color:
             return 1.32
-        case .warm:
-            return 1.10
         case .mono:
             return 0
         }
@@ -271,10 +322,8 @@ struct LittleWinsShareCameraView: View {
 
     private var livePreviewContrast: Double {
         switch selectedFilter {
-        case .vivid:
+        case .color:
             return 1.12
-        case .warm:
-            return 1.05
         case .mono:
             return 1.05
         }
@@ -282,10 +331,8 @@ struct LittleWinsShareCameraView: View {
 
     private var livePreviewBrightness: Double {
         switch selectedFilter {
-        case .vivid:
+        case .color:
             return 0.02
-        case .warm:
-            return 0
         case .mono:
             return 0
         }
@@ -294,16 +341,7 @@ struct LittleWinsShareCameraView: View {
     @ViewBuilder
     private var livePreviewToneOverlay: some View {
         switch selectedFilter {
-        case .warm:
-            LinearGradient(
-                colors: [
-                    Color(red: 1.0, green: 0.85, blue: 0.62).opacity(0.20),
-                    Color.clear
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        default:
+        case .color, .mono:
             Color.clear
         }
     }
@@ -318,7 +356,7 @@ struct LittleWinsShareCameraView: View {
     }
 
     private func capturePhoto() {
-        guard !isRenderingCapture else { return }
+        guard !isRenderingCapture, canCaptureSelectedTemplate else { return }
         let haptic = UIImpactFeedbackGenerator(style: .medium)
         haptic.impactOccurred()
 
@@ -365,7 +403,7 @@ struct LittleWinsShareCameraView: View {
         let referenceWidth = max(UIScreen.main.bounds.width, 1)
         let referenceHeight = referenceWidth * (referencePhotoSize.height / max(referencePhotoSize.width, 1))
         let overlayScale = max(outputPixelSize.width / referenceWidth, 1)
-        let overlayView = LittleWinsShareOverlayTemplateView(template: selectedTemplate, data: overlayData)
+        let overlayView = selectedTemplateDefinition.renderView(data: overlayData)
             .frame(width: referenceWidth, height: referenceHeight)
             .ignoresSafeArea()
         let renderer = ImageRenderer(content: overlayView)
@@ -374,31 +412,24 @@ struct LittleWinsShareCameraView: View {
         return renderer.uiImage
     }
 
+    private func selectFirstEligibleTemplateIfNeeded() {
+        guard selectedTemplateLockReason != nil else { return }
+        guard let firstEligible = templates.first(where: { $0.isEligible(in: overlayData) }) else { return }
+        selectedTemplateID = firstEligible.id
+    }
+
     private func applyFilter(to image: UIImage, style: LittleWinsShareImageFilter) -> UIImage? {
         guard let inputImage = CIImage(image: image) else { return nil }
 
         let outputImage: CIImage
         switch style {
-        case .vivid:
+        case .color:
             let filter = CIFilter.colorControls()
             filter.inputImage = inputImage
             filter.saturation = 1.32
             filter.contrast = 1.12
             filter.brightness = 0.02
             guard let result = filter.outputImage else { return nil }
-            outputImage = result
-        case .warm:
-            let tempFilter = CIFilter.temperatureAndTint()
-            tempFilter.inputImage = inputImage
-            tempFilter.neutral = CIVector(x: 6500, y: 0)
-            tempFilter.targetNeutral = CIVector(x: 7900, y: 0)
-            guard let warmed = tempFilter.outputImage else { return nil }
-
-            let controls = CIFilter.colorControls()
-            controls.inputImage = warmed
-            controls.saturation = 1.10
-            controls.contrast = 1.05
-            guard let result = controls.outputImage else { return nil }
             outputImage = result
         case .mono:
             let filter = CIFilter.photoEffectMono()
@@ -761,7 +792,18 @@ private enum LittleWinsShareOverlayDataFactory {
     static func build(
         fulfillments: [Fulfillment],
         foci: [FulfillmentFocus],
-        completions: [LittleWinsDailyCompletion]
+        completions: [LittleWinsDailyCompletion],
+        outcomes: [Outcomes],
+        outcomeMeasureEntries: [OutcomesMeasureEntry],
+        outcomeMeasures: [OutcomesMeasure],
+        completedOutcomes: [CompletedOutcomeArchive],
+        completedOutcomeMeasurePoints: [CompletedOutcomeMeasurePointArchive],
+        fulfillmentCategoryScoreSnapshots: [FulfillmentCategoryScoreSnapshot],
+        diagnosticInsightsSnapshots: [DiagnosticsInsightsSnapshot],
+        accountName: String,
+        installDateRaw: String,
+        isSubscribed: Bool,
+        subscriptionPlanRaw: String
     ) -> LittleWinsShareOverlayData {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: .now)
@@ -823,9 +865,11 @@ private enum LittleWinsShareOverlayDataFactory {
         let completedCardsToday = todayCards.filter(\.isCompleted)
         let fullHouseUnlocked = !todayCards.isEmpty && completedCardsToday.count == todayCards.count
 
-        let completedCardsByDayLast7: [[LittleWinsShareOverlayCard]] = stride(from: 6, through: 0, by: -1).map { dayOffset in
-            guard let day = calendar.date(byAdding: .day, value: -dayOffset, to: today) else { return [] }
-            return cards(on: day).filter(\.isCompleted)
+        let daysLast7 = stride(from: 6, through: 0, by: -1).compactMap {
+            calendar.date(byAdding: .day, value: -$0, to: today)
+        }
+        let completedCardsByDayLast7: [[LittleWinsShareOverlayCard]] = daysLast7.map { day in
+            cards(on: day).filter(\.isCompleted)
         }
         let completedCardStylesLast7Days: [[LittleWinsShareOverlayMiniCardStyle]] = completedCardsByDayLast7.map { dayCards in
             dayCards.map { card in
@@ -834,6 +878,9 @@ private enum LittleWinsShareOverlayDataFactory {
                     strokeColor: card.titleColor
                 )
             }
+        }
+        let completionCountsLast7Days = daysLast7.map { day in
+            completionFocusIDsByDay[calendar.startOfDay(for: day)]?.count ?? 0
         }
 
         var streak = 0
@@ -859,26 +906,373 @@ private enum LittleWinsShareOverlayDataFactory {
             }
         }
 
-        let totalWeekCompletions = stride(from: 6, through: 0, by: -1).reduce(0) { partial, dayOffset in
-            guard let day = calendar.date(byAdding: .day, value: -dayOffset, to: today) else { return partial }
-            return partial + (completionFocusIDsByDay[calendar.startOfDay(for: day)]?.count ?? 0)
-        }
+        let totalWeekCompletions = completionCountsLast7Days.reduce(0, +)
         let hotStreak = streak >= 5
         let royalFlushUnlocked = fullHouseStreak >= 7
         let radarSideCount = max(3, min(7, max(fulfillments.count, 3)))
+        let userProfile = buildUserProfile(
+            accountName: accountName,
+            installDateRaw: installDateRaw,
+            isSubscribed: isSubscribed,
+            subscriptionPlanRaw: subscriptionPlanRaw
+        )
+        let featuredActiveGoal = buildFeaturedActiveGoal(
+            outcomes: outcomes,
+            outcomeMeasureEntries: outcomeMeasureEntries,
+            outcomeMeasures: outcomeMeasures,
+            today: today,
+            calendar: calendar
+        )
+        let appleHealthVerifiedStory = buildAppleHealthVerifiedStory(
+            foci: candidateFoci,
+            categoryTitleByID: categoryTitleByID,
+            featuredActiveGoal: featuredActiveGoal
+        )
+        let latestAchievedGoal = buildLatestAchievedGoal(
+            completedOutcomes: completedOutcomes,
+            completedOutcomeMeasurePoints: completedOutcomeMeasurePoints
+        )
+        let fulfillmentStory = buildFulfillmentStory(
+            fulfillments: fulfillments,
+            snapshots: fulfillmentCategoryScoreSnapshots
+        )
+        let latestInsight = buildLatestInsight(from: diagnosticInsightsSnapshots)
 
         return LittleWinsShareOverlayData(
             activeCards: todayCards,
             completedCardsToday: completedCardsToday,
             completedCardStylesLast7Days: completedCardStylesLast7Days,
+            completionCountsLast7Days: completionCountsLast7Days,
             radarSideCount: radarSideCount,
             streak: streak,
             hotStreak: hotStreak,
             totalWeekCompletions: totalWeekCompletions,
             fullHouseUnlocked: fullHouseUnlocked,
             royalFlushUnlocked: royalFlushUnlocked,
-            royalFlushProgressDays: min(7, fullHouseStreak)
+            royalFlushProgressDays: min(7, fullHouseStreak),
+            userProfile: userProfile,
+            appleHealthVerifiedStory: appleHealthVerifiedStory,
+            featuredActiveGoal: featuredActiveGoal,
+            latestAchievedGoal: latestAchievedGoal,
+            fulfillmentStory: fulfillmentStory,
+            latestInsight: latestInsight
         )
+    }
+
+    private static func buildUserProfile(
+        accountName: String,
+        installDateRaw: String,
+        isSubscribed: Bool,
+        subscriptionPlanRaw: String
+    ) -> LittleWinsShareUserProfile {
+        let installDate = parseAnalyticsInstallDate(installDateRaw)
+        let daysSinceInstall = installDate.map {
+            max(0, Calendar(identifier: .gregorian).dateComponents([.day], from: $0, to: .now).day ?? 0)
+        }
+
+        return LittleWinsShareUserProfile(
+            displayName: accountName.trimmed.nonEmpty,
+            installDate: installDate,
+            daysSinceInstall: daysSinceInstall,
+            isSubscribed: isSubscribed,
+            isFoundingMember: isSubscribed && subscriptionPlanRaw == SubscriptionPlan.annual.rawValue
+        )
+    }
+
+    private static func buildFeaturedActiveGoal(
+        outcomes: [Outcomes],
+        outcomeMeasureEntries: [OutcomesMeasureEntry],
+        outcomeMeasures: [OutcomesMeasure],
+        today: Date,
+        calendar: Calendar
+    ) -> LittleWinsShareGoalProgressData? {
+        let snapshotsByOutcome = latestOutcomeMeasuresByOutcomeID(outcomeMeasures)
+        let entriesByOutcome = Dictionary(grouping: outcomeMeasureEntries, by: \.outcome_id)
+
+        let candidates = outcomes.compactMap { outcome -> LittleWinsShareGoalProgressData? in
+            guard calendar.startOfDay(for: outcome.end) >= today else { return nil }
+            guard outcome.format != nil || snapshotsByOutcome[outcome.outcome_id] != nil || !(entriesByOutcome[outcome.outcome_id] ?? []).isEmpty else {
+                return nil
+            }
+
+            let rows = dailyLatestRowsWithinOutcomeWindow(
+                entriesByOutcome[outcome.outcome_id] ?? [],
+                start: outcome.start,
+                end: outcome.end,
+                calendar: calendar
+            )
+            let snapshot = snapshotsByOutcome[outcome.outcome_id]
+            let chartRows: [OutcomesMeasureEntry]
+            if rows.isEmpty, let snapshot {
+                chartRows = [
+                    OutcomesMeasureEntry(
+                        outcome_id: snapshot.outcome_id,
+                        measure: snapshot.measure,
+                        measure_amt: snapshot.measure_amt,
+                        measuredAt: snapshot.measuredAt,
+                        createdAt: snapshot.measure_updated,
+                        format: snapshot.format,
+                        unit: snapshot.unit,
+                        decimalPlaces: snapshot.decimalPlaces
+                    )
+                ]
+            } else {
+                chartRows = rows
+            }
+
+            guard let firstRow = chartRows.first else { return nil }
+            let latestRow = chartRows.last ?? firstRow
+            let goalValue = snapshot?.measure_amt ?? latestRow.measure_amt
+            let decimalPlaces = snapshot?.decimalPlaces ?? latestRow.decimalPlaces ?? 0
+
+            return LittleWinsShareGoalProgressData(
+                outcomeID: outcome.outcome_id,
+                title: outcome.outcome.trimmed.nonEmptyOr("Measured Goal"),
+                category: outcome.category.trimmed.nonEmptyOr("Outcome"),
+                startDate: outcome.start,
+                endDate: outcome.end,
+                startValue: firstRow.measure,
+                currentValue: latestRow.measure,
+                goalValue: goalValue,
+                latestDate: latestRow.measuredAt,
+                chartPoints: chartRows.map {
+                    LittleWinsShareGoalProgressPoint(date: $0.measuredAt, value: $0.measure)
+                },
+                format: snapshot?.format ?? latestRow.format ?? outcome.format,
+                unit: snapshot?.unit ?? latestRow.unit,
+                decimalPlaces: decimalPlaces,
+                isBehindGoalPath: computeIsBehindGoalPath(
+                    startValue: firstRow.measure,
+                    goalValue: goalValue,
+                    latestValue: latestRow.measure,
+                    startDate: outcome.start,
+                    endDate: outcome.end,
+                    currentDate: latestRow.measuredAt
+                )
+            )
+        }
+
+        return candidates.sorted {
+            if abs($0.progressFraction - $1.progressFraction) < 0.001 {
+                return $0.latestDate > $1.latestDate
+            }
+            return $0.progressFraction > $1.progressFraction
+        }.first
+    }
+
+    private static func buildAppleHealthVerifiedStory(
+        foci: [FulfillmentFocus],
+        categoryTitleByID: [UUID: String],
+        featuredActiveGoal: LittleWinsShareGoalProgressData?
+    ) -> LittleWinsShareAppleHealthVerifiedData? {
+        let candidates = foci.compactMap { focus -> LittleWinsShareAppleHealthVerifiedData? in
+            guard let config = LittleWinsIntegrationStore.config(for: focus.id) else { return nil }
+            guard config.isEnabled, config.isConnected, config.source == .appleHealth else { return nil }
+
+            let decimalPlaces = config.metric == .sleepHours ? 1 : 0
+            return LittleWinsShareAppleHealthVerifiedData(
+                focusID: focus.id,
+                focusTitle: focus.activity.trimmed.nonEmptyOr("Verified Little Win"),
+                categoryTitle: categoryTitleByID[focus.category_id]?.nonEmptyOr("Little Wins") ?? "Little Wins",
+                metricTitle: config.metric.title,
+                unitLabel: config.metric.unitLabel,
+                progressValue: config.progressValue,
+                targetValue: config.targetValue,
+                decimalPlaces: decimalPlaces,
+                updatedAt: config.updatedAtUnix > 0 ? Date(timeIntervalSince1970: config.updatedAtUnix) : nil,
+                relatedGoalTitle: featuredActiveGoal?.title
+            )
+        }
+
+        return candidates.sorted {
+            if abs($0.progressFraction - $1.progressFraction) < 0.001 {
+                return ($0.updatedAt ?? .distantPast) > ($1.updatedAt ?? .distantPast)
+            }
+            return $0.progressFraction > $1.progressFraction
+        }.first
+    }
+
+    private static func buildLatestAchievedGoal(
+        completedOutcomes: [CompletedOutcomeArchive],
+        completedOutcomeMeasurePoints: [CompletedOutcomeMeasurePointArchive]
+    ) -> LittleWinsShareAchievedGoalData? {
+        guard let archive = completedOutcomes.first(where: \.goalMet) else { return nil }
+        let chartPoints = completedOutcomeMeasurePoints
+            .filter { $0.completedOutcomeArchiveId == archive.id }
+            .sorted { $0.measuredAt < $1.measuredAt }
+            .map { LittleWinsShareGoalProgressPoint(date: $0.measuredAt, value: $0.measure) }
+        let decimalPlaces = inferredDecimalPlaces(
+            values: chartPoints.map(\.value) + [archive.goalValue, archive.finalValue].compactMap { $0 }
+        )
+
+        return LittleWinsShareAchievedGoalData(
+            archiveID: archive.id,
+            title: archive.outcome.trimmed.nonEmptyOr("Completed Goal"),
+            category: archive.category.trimmed.nonEmptyOr("Outcome"),
+            completedAt: archive.completedAt,
+            goalValue: archive.goalValue,
+            finalValue: archive.finalValue,
+            daysElapsed: archive.daysElapsed,
+            goalMet: archive.goalMet,
+            isMeasurable: archive.isMeasurable,
+            chartPoints: chartPoints,
+            startDate: archive.start,
+            endDate: archive.end,
+            format: archive.format,
+            decimalPlaces: decimalPlaces
+        )
+    }
+
+    private static func buildFulfillmentStory(
+        fulfillments: [Fulfillment],
+        snapshots: [FulfillmentCategoryScoreSnapshot]
+    ) -> LittleWinsShareFulfillmentStoryData? {
+        guard !fulfillments.isEmpty else { return nil }
+
+        let calendar = Calendar.current
+        let currentWeek = FulfillmentScoringMath.weekWindow(for: .now, calendar: calendar).weekStart
+        guard let priorWeek = calendar.date(byAdding: .day, value: -7, to: currentWeek) else { return nil }
+
+        struct SnapshotRow {
+            let fulfillment: Fulfillment
+            let snapshot: FulfillmentCategoryScoreSnapshot
+            let delta: Double?
+        }
+
+        let currentRows: [SnapshotRow] = fulfillments.compactMap { fulfillment in
+            guard let snapshot = snapshots.first(where: {
+                $0.categoryID == fulfillment.category_id &&
+                calendar.isDate($0.weekStartDate, inSameDayAs: currentWeek)
+            }) else { return nil }
+
+            let prior = snapshots.first(where: {
+                $0.categoryID == fulfillment.category_id &&
+                calendar.isDate($0.weekStartDate, inSameDayAs: priorWeek)
+            })
+            let delta = prior.map { roundedTenth(snapshot.score) - roundedTenth($0.score) }
+
+            return SnapshotRow(fulfillment: fulfillment, snapshot: snapshot, delta: delta)
+        }
+
+        guard !currentRows.isEmpty else { return nil }
+
+        let featuredRow = currentRows.sorted { lhs, rhs in
+            switch (lhs.delta, rhs.delta) {
+            case let (.some(left), .some(right)) where abs(left - right) > 0.01:
+                return left > right
+            case (.some, nil):
+                return true
+            case (nil, .some):
+                return false
+            default:
+                return lhs.snapshot.score > rhs.snapshot.score
+            }
+        }.first
+
+        guard let featuredRow else { return nil }
+
+        let metrics = currentRows.map { row in
+            LittleWinsShareFulfillmentMetric(
+                title: row.fulfillment.category.trimmed.nonEmptyOr("Fulfillment"),
+                color: FulfillmentCategoryTheme.color(for: row.fulfillment.category),
+                percentage: (FulfillmentScoringMath.clamp(row.snapshot.score, 1, 5) / 5.0) * 100.0
+            )
+        }
+
+        return LittleWinsShareFulfillmentStoryData(
+            featuredCategoryTitle: featuredRow.fulfillment.category.trimmed.nonEmptyOr("Fulfillment"),
+            featuredColor: FulfillmentCategoryTheme.color(for: featuredRow.fulfillment.category),
+            score: featuredRow.snapshot.score,
+            delta: featuredRow.delta,
+            metrics: metrics
+        )
+    }
+
+    private static func buildLatestInsight(
+        from snapshots: [DiagnosticsInsightsSnapshot]
+    ) -> LittleWinsShareInsightData? {
+        guard let snapshot = snapshots.first(where: {
+            !$0.rootCauseText.trimmed.isEmpty || !$0.nextDirectionText.trimmed.isEmpty
+        }) else {
+            return nil
+        }
+
+        let root = snapshot.rootCauseText.trimmed
+        let nextDirection = snapshot.nextDirectionText.trimmed
+        guard !root.isEmpty || !nextDirection.isEmpty else { return nil }
+
+        return LittleWinsShareInsightData(
+            rootCause: root.nonEmptyOr("Root cause unavailable."),
+            nextDirection: nextDirection.nonEmptyOr("Next direction unavailable."),
+            generatedAt: snapshot.generatedAt
+        )
+    }
+
+    private static func latestOutcomeMeasuresByOutcomeID(
+        _ rows: [OutcomesMeasure]
+    ) -> [UUID: OutcomesMeasure] {
+        rows.reduce(into: [:]) { result, row in
+            let existing = result[row.outcome_id]
+            if existing == nil || row.measure_updated > existing!.measure_updated {
+                result[row.outcome_id] = row
+            }
+        }
+    }
+
+    private static func dailyLatestRowsWithinOutcomeWindow(
+        _ rows: [OutcomesMeasureEntry],
+        start: Date,
+        end: Date,
+        calendar: Calendar
+    ) -> [OutcomesMeasureEntry] {
+        let range = calendar.startOfDay(for: start)...calendar.startOfDay(for: end)
+        let filtered = rows.filter {
+            range.contains(calendar.startOfDay(for: $0.measuredAt))
+        }
+        let grouped = Dictionary(grouping: filtered) { calendar.startOfDay(for: $0.measuredAt) }
+        return grouped.values.compactMap { rows in
+            rows.max(by: { $0.createdAt < $1.createdAt })
+        }
+        .sorted { $0.measuredAt < $1.measuredAt }
+    }
+
+    private static func computeIsBehindGoalPath(
+        startValue: Double,
+        goalValue: Double,
+        latestValue: Double,
+        startDate: Date,
+        endDate: Date,
+        currentDate: Date
+    ) -> Bool? {
+        guard endDate > startDate else { return nil }
+
+        let total = endDate.timeIntervalSince(startDate)
+        let elapsed = min(max(0, currentDate.timeIntervalSince(startDate)), total)
+        let progress = elapsed / total
+        let expected = startValue + (goalValue - startValue) * progress
+        let directionUp = goalValue >= startValue
+
+        return directionUp ? (latestValue < expected) : (latestValue > expected)
+    }
+
+    private static func inferredDecimalPlaces(values: [Double]) -> Int {
+        values.contains(where: { abs($0.rounded() - $0) > 0.001 }) ? 1 : 0
+    }
+
+    private static func roundedTenth(_ value: Double) -> Double {
+        (value * 10).rounded() / 10
+    }
+
+    private static func parseAnalyticsInstallDate(_ raw: String) -> Date? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.date(from: trimmed)
     }
 
     private static func isFocusActive(_ focus: FulfillmentFocus, on date: Date, calendar: Calendar) -> Bool {

@@ -18,6 +18,35 @@ private struct PlanViewSourceDueDateOverrideRecord: Codable {
     let dueDateUnix: TimeInterval
 }
 
+private struct PlanViewGoogleTokenResponse: Decodable {
+    var accessToken: String
+    var expiresIn: Int
+    var refreshToken: String?
+
+    enum CodingKeys: String, CodingKey {
+        case accessToken = "access_token"
+        case expiresIn = "expires_in"
+        case refreshToken = "refresh_token"
+    }
+}
+
+private struct PlanViewMicrosoftTokenResponse: Decodable {
+    var accessToken: String
+    var expiresIn: Int
+    var refreshToken: String?
+
+    enum CodingKeys: String, CodingKey {
+        case accessToken = "access_token"
+        case expiresIn = "expires_in"
+        case refreshToken = "refresh_token"
+    }
+}
+
+private enum PlanViewExternalMutationAction {
+    case complete
+    case delete
+}
+
 private struct PlanStepProgressBar: View {
     let current: Int
     let total: Int
@@ -576,6 +605,18 @@ struct PlanStepTwoView: View {
     @State private var measuredStep2BottomInsetHeight: CGFloat = 129
     @AppStorage("capture_default_due_date_attention_days")
     private var dueDateAttentionDays: Int = 7
+    @AppStorage("capture_google_tasks_access_token")
+    private var googleTasksAccessToken: String = ""
+    @AppStorage("capture_google_tasks_refresh_token")
+    private var googleTasksRefreshToken: String = ""
+    @AppStorage("capture_google_tasks_access_expiry_unix")
+    private var googleTasksAccessExpiryUnix: Double = 0
+    @AppStorage("capture_microsoft_todo_access_token")
+    private var microsoftTodoAccessToken: String = ""
+    @AppStorage("capture_microsoft_todo_refresh_token")
+    private var microsoftTodoRefreshToken: String = ""
+    @AppStorage("capture_microsoft_todo_access_expiry_unix")
+    private var microsoftTodoAccessExpiryUnix: Double = 0
     private let hiddenUntilLaterIconName = "clock.arrow.trianglehead.clockwise.rotate.90.path.dotted"
     private let minimumActiveCaptureActionsRequired = 6
     private let stepTwoHorizontalPadding: CGFloat = 16
@@ -1075,6 +1116,7 @@ struct PlanStepTwoView: View {
         )
         modelContext.insert(newItem)
         try? modelContext.save()
+        NotificationCenter.default.post(name: .captureItemsDidChange, object: nil)
 
         input = ""
         isInputFocused = true
@@ -1084,12 +1126,15 @@ struct PlanStepTwoView: View {
         for offset in offsets {
             let item = displayItems[offset]
             ActionCarryProfileStore.remove(for: item.text)
+            applyExternalSourceMutationIfNeeded(for: item, action: .delete)
             RecentlyDeletedStore.trash(item, in: modelContext)
         }
         try? modelContext.save()
+        NotificationCenter.default.post(name: .captureItemsDidChange, object: nil)
     }
 
     private func quickCompleteItem(_ item: RollingCaptureItem) {
+        applyExternalSourceMutationIfNeeded(for: item, action: .complete)
         modelContext.insert(
             QuickCompletedCaptureItem(
                 text: item.text,
@@ -1100,6 +1145,269 @@ struct PlanStepTwoView: View {
         )
         RecentlyDeletedStore.trash(item, in: modelContext)
         try? modelContext.save()
+        NotificationCenter.default.post(name: .captureItemsDidChange, object: nil)
+    }
+
+    private func applyExternalSourceMutationIfNeeded(for item: RollingCaptureItem, action: PlanViewExternalMutationAction) {
+        guard let sourceType = item.sourceType else { return }
+        switch sourceType {
+        case "apple_reminder":
+            applyAppleReminderMutationIfNeeded(for: item, action: action)
+        case "google_tasks":
+            applyGoogleTaskMutationIfNeeded(for: item, action: action)
+        case "microsoft_todo":
+            applyMicrosoftTodoMutationIfNeeded(for: item, action: action)
+        default:
+            break
+        }
+    }
+
+    private func applyAppleReminderMutationIfNeeded(for item: RollingCaptureItem, action: PlanViewExternalMutationAction) {
+        guard let externalID = item.sourceExternalID, !externalID.isEmpty else { return }
+        #if canImport(EventKit)
+        let store = EKEventStore()
+        let runMutation: (Bool) -> Void = { granted in
+            guard granted else { return }
+            guard let reminder = store.calendarItem(withIdentifier: externalID) as? EKReminder else { return }
+            do {
+                switch action {
+                case .complete:
+                    reminder.isCompleted = true
+                    reminder.completionDate = Date()
+                    try store.save(reminder, commit: true)
+                case .delete:
+                    try store.remove(reminder, commit: true)
+                }
+            } catch { }
+        }
+        if #available(iOS 17.0, *) {
+            store.requestFullAccessToReminders { granted, _ in runMutation(granted) }
+        } else {
+            store.requestAccess(to: .reminder) { granted, _ in runMutation(granted) }
+        }
+        #endif
+    }
+
+    private func googleOAuthConfig() -> (clientID: String, redirectURI: String)? {
+        guard
+            let clientID = Bundle.main.object(forInfoDictionaryKey: "GoogleOAuthClientID") as? String,
+            let redirectURI = Bundle.main.object(forInfoDictionaryKey: "GoogleOAuthRedirectURI") as? String
+        else { return nil }
+        let trimmedClient = clientID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedRedirect = redirectURI.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedClient.isEmpty, !trimmedRedirect.isEmpty else { return nil }
+        return (trimmedClient, trimmedRedirect)
+    }
+
+    private func googleValidAccessToken(completion: @escaping (String?) -> Void) {
+        let now = Date().timeIntervalSince1970
+        if !googleTasksAccessToken.isEmpty, googleTasksAccessExpiryUnix > now + 30 {
+            completion(googleTasksAccessToken)
+            return
+        }
+        guard let config = googleOAuthConfig(), !googleTasksRefreshToken.isEmpty else {
+            completion(nil)
+            return
+        }
+        Task {
+            let refreshed = await refreshGoogleAccessToken(config: config)
+            await MainActor.run {
+                completion(refreshed)
+            }
+        }
+    }
+
+    private func refreshGoogleAccessToken(config: (clientID: String, redirectURI: String)) async -> String? {
+        guard !googleTasksRefreshToken.isEmpty,
+              let url = URL(string: "https://oauth2.googleapis.com/token") else { return nil }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        let body = [
+            "client_id": config.clientID,
+            "grant_type": "refresh_token",
+            "refresh_token": googleTasksRefreshToken
+        ]
+        request.httpBody = body
+            .map { "\($0.key)=\($0.value.addingPercentEncoding(withAllowedCharacters: CharacterSet.urlQueryAllowed) ?? "")" }
+            .joined(separator: "&")
+            .data(using: String.Encoding.utf8)
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            if let token = try? JSONDecoder().decode(PlanViewGoogleTokenResponse.self, from: data) {
+                await MainActor.run {
+                    googleTasksAccessToken = token.accessToken
+                    googleTasksAccessExpiryUnix = Date().timeIntervalSince1970 + Double(max(60, token.expiresIn))
+                    if let refresh = token.refreshToken, !refresh.isEmpty {
+                        googleTasksRefreshToken = refresh
+                    }
+                }
+                return token.accessToken
+            }
+        } catch { }
+        return nil
+    }
+
+    private func applyGoogleTaskMutationIfNeeded(for item: RollingCaptureItem, action: PlanViewExternalMutationAction) {
+        guard let externalID = item.sourceExternalID else { return }
+        let parts = externalID.split(separator: "|", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { return }
+        let listID = parts[0]
+        let taskID = parts[1]
+        googleValidAccessToken { token in
+            guard let token else { return }
+            Task {
+                await performGoogleTaskMutation(
+                    accessToken: token,
+                    listID: listID,
+                    taskID: taskID,
+                    action: action
+                )
+            }
+        }
+    }
+
+    private func performGoogleTaskMutation(
+        accessToken: String,
+        listID: String,
+        taskID: String,
+        action: PlanViewExternalMutationAction
+    ) async {
+        guard
+            let listEncoded = listID.addingPercentEncoding(withAllowedCharacters: CharacterSet.urlPathAllowed),
+            let taskEncoded = taskID.addingPercentEncoding(withAllowedCharacters: CharacterSet.urlPathAllowed)
+        else { return }
+        switch action {
+        case .complete:
+            guard let url = URL(string: "https://tasks.googleapis.com/tasks/v1/lists/\(listEncoded)/tasks/\(taskEncoded)") else { return }
+            var request = URLRequest(url: url)
+            request.httpMethod = "PATCH"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+            let body: [String: String] = [
+                "status": "completed",
+                "completed": ISO8601DateFormatter().string(from: Date())
+            ]
+            request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+            _ = try? await URLSession.shared.data(for: request)
+        case .delete:
+            guard let url = URL(string: "https://tasks.googleapis.com/tasks/v1/lists/\(listEncoded)/tasks/\(taskEncoded)") else { return }
+            var request = URLRequest(url: url)
+            request.httpMethod = "DELETE"
+            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+            _ = try? await URLSession.shared.data(for: request)
+        }
+    }
+
+    private func microsoftOAuthConfig() -> (clientID: String, redirectURI: String, tenantID: String) {
+        let rawClientID = (Bundle.main.object(forInfoDictionaryKey: "MicrosoftOAuthClientID") as? String) ?? ""
+        let rawRedirectURI = (Bundle.main.object(forInfoDictionaryKey: "MicrosoftOAuthRedirectURI") as? String) ?? ""
+        let rawTenantID = (Bundle.main.object(forInfoDictionaryKey: "MicrosoftOAuthTenantID") as? String) ?? "common"
+        let clientID = rawClientID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let redirectURI = rawRedirectURI.trimmingCharacters(in: .whitespacesAndNewlines)
+        let tenantID = rawTenantID.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (
+            clientID: clientID,
+            redirectURI: redirectURI,
+            tenantID: tenantID.isEmpty ? "common" : tenantID
+        )
+    }
+
+    private func microsoftValidAccessToken(completion: @escaping (String?) -> Void) {
+        let config = microsoftOAuthConfig()
+        let now = Date().timeIntervalSince1970
+        if !microsoftTodoAccessToken.isEmpty, microsoftTodoAccessExpiryUnix > now + 30 {
+            completion(microsoftTodoAccessToken)
+            return
+        }
+        guard !config.clientID.isEmpty, !config.redirectURI.isEmpty, !microsoftTodoRefreshToken.isEmpty else {
+            completion(nil)
+            return
+        }
+        Task {
+            let refreshed = await refreshMicrosoftAccessToken(config: config)
+            await MainActor.run {
+                completion(refreshed)
+            }
+        }
+    }
+
+    private func refreshMicrosoftAccessToken(config: (clientID: String, redirectURI: String, tenantID: String)) async -> String? {
+        guard !microsoftTodoRefreshToken.isEmpty,
+              let url = URL(string: "https://login.microsoftonline.com/\(config.tenantID)/oauth2/v2.0/token") else { return nil }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        let body = [
+            "client_id": config.clientID,
+            "grant_type": "refresh_token",
+            "refresh_token": microsoftTodoRefreshToken,
+            "scope": "offline_access openid profile Tasks.ReadWrite"
+        ]
+        request.httpBody = body
+            .map { "\($0.key)=\($0.value.addingPercentEncoding(withAllowedCharacters: CharacterSet.urlQueryAllowed) ?? "")" }
+            .joined(separator: "&")
+            .data(using: String.Encoding.utf8)
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            if let token = try? JSONDecoder().decode(PlanViewMicrosoftTokenResponse.self, from: data) {
+                await MainActor.run {
+                    microsoftTodoAccessToken = token.accessToken
+                    microsoftTodoAccessExpiryUnix = Date().timeIntervalSince1970 + Double(max(60, token.expiresIn))
+                    if let refresh = token.refreshToken, !refresh.isEmpty {
+                        microsoftTodoRefreshToken = refresh
+                    }
+                }
+                return token.accessToken
+            }
+        } catch { }
+        return nil
+    }
+
+    private func applyMicrosoftTodoMutationIfNeeded(for item: RollingCaptureItem, action: PlanViewExternalMutationAction) {
+        guard let externalID = item.sourceExternalID else { return }
+        let parts = externalID.split(separator: "|", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { return }
+        let listID = parts[0]
+        let taskID = parts[1]
+        microsoftValidAccessToken { token in
+            guard let token else { return }
+            Task {
+                await performMicrosoftTodoMutation(
+                    accessToken: token,
+                    listID: listID,
+                    taskID: taskID,
+                    action: action
+                )
+            }
+        }
+    }
+
+    private func performMicrosoftTodoMutation(
+        accessToken: String,
+        listID: String,
+        taskID: String,
+        action: PlanViewExternalMutationAction
+    ) async {
+        guard
+            let listEncoded = listID.addingPercentEncoding(withAllowedCharacters: CharacterSet.urlPathAllowed),
+            let taskEncoded = taskID.addingPercentEncoding(withAllowedCharacters: CharacterSet.urlPathAllowed),
+            let url = URL(string: "https://graph.microsoft.com/v1.0/me/todo/lists/\(listEncoded)/tasks/\(taskEncoded)")
+        else { return }
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        switch action {
+        case .complete:
+            request.httpMethod = "PATCH"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            let body: [String: String] = ["status": "completed"]
+            request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+            _ = try? await URLSession.shared.data(for: request)
+        case .delete:
+            request.httpMethod = "DELETE"
+            _ = try? await URLSession.shared.data(for: request)
+        }
     }
 
     private var recurringRuleByID: [UUID: RecurringCaptureRule] {
@@ -1352,11 +1660,15 @@ struct PlanStepThreeView: View {
 
     private var selectableLabels: [Step3SelectableLabel] {
         var seenFulfillmentAreaIDs: Set<UUID> = []
+        var seenVisibleLabelKeys: Set<String> = []
         return fulfillments
             .compactMap { area -> Step3SelectableLabel? in
                 let trimmed = area.category.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmed.isEmpty else { return nil }
                 guard seenFulfillmentAreaIDs.insert(area.category_id).inserted else { return nil }
+                let normalizedKey = normalizedAutoGroupAreaKey(trimmed)
+                guard !normalizedKey.isEmpty else { return nil }
+                guard seenVisibleLabelKeys.insert(normalizedKey).inserted else { return nil }
 
                 return Step3SelectableLabel(
                     id: area.category_id,
@@ -3648,11 +3960,16 @@ struct PlanStepThreeLabelView: View {
 
     private var selectableLabels: [Step3SelectableLabel] {
         var seenFulfillmentAreaIDs: Set<UUID> = []
+        var seenVisibleLabelKeys: Set<String> = []
         return fulfillments
             .compactMap { area -> Step3SelectableLabel? in
                 let trimmed = area.category.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmed.isEmpty else { return nil }
                 guard seenFulfillmentAreaIDs.insert(area.category_id).inserted else { return nil }
+                let normalizedKey = normalizedSelectionLabel(trimmed)
+                    .folding(options: [.diacriticInsensitive], locale: .current)
+                guard !normalizedKey.isEmpty else { return nil }
+                guard seenVisibleLabelKeys.insert(normalizedKey).inserted else { return nil }
                 return Step3SelectableLabel(
                     id: area.category_id,
                     label: trimmed,
@@ -3694,6 +4011,68 @@ struct PlanStepThreeLabelView: View {
     private var missingLabelChunkIndices: Set<Int> {
         let selected = selectedLabelIDsByChunkIndex
         return Set(plannedChunksForWeek.map(\.chunkIndex).filter { selected[$0] == nil })
+    }
+
+    private var step4LabelBottomToolbarBackdrop: some View {
+        GeometryReader { proxy in
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                PlanCaptureChromeMaterialLayer(
+                    shape: Rectangle(),
+                    shadowRadius: 12,
+                    shadowY: -2
+                )
+                .frame(height: proxy.size.height + proxy.safeAreaInsets.bottom + 24)
+                .mask(
+                    LinearGradient(
+                        stops: [
+                            .init(color: .clear, location: 0),
+                            .init(color: .black.opacity(0.25), location: 0.35),
+                            .init(color: .black, location: 1)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .ignoresSafeArea(edges: .bottom)
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    private var step4LabelFooter: some View {
+        HStack(spacing: 12) {
+            Button {
+                if isNextEnabled {
+                    shouldHighlightMissingLabels = false
+                    showValidationHint = false
+                    if let onNext { onNext() }
+                } else {
+                    triggerValidationFeedback()
+                }
+            } label: {
+                Text("Next")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .tint(isNextEnabled ? .accentColor : Color(.systemGray3))
+        }
+        .padding(.bottom, 2)
+    }
+
+    private var step4LabelBottomInset: some View {
+        VStack(spacing: 0) {
+            step4LabelFooter
+                .padding(.horizontal)
+                .padding(.top, 8)
+                .padding(.bottom, 3)
+        }
+        .frame(maxWidth: .infinity, alignment: .bottom)
+        .background(alignment: .bottom) {
+            step4LabelBottomToolbarBackdrop
+        }
+        .padding(.horizontal, -16)
     }
 
     var body: some View {
@@ -3760,25 +4139,6 @@ struct PlanStepThreeLabelView: View {
                 }
                 .padding(.bottom, 12)
             }
-
-            HStack(spacing: 12) {
-                Button {
-                    if isNextEnabled {
-                        shouldHighlightMissingLabels = false
-                        showValidationHint = false
-                        if let onNext { onNext() }
-                    } else {
-                        triggerValidationFeedback()
-                    }
-                } label: {
-                    Text("Next")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .tint(isNextEnabled ? .accentColor : Color(.systemGray3))
-            }
-            .padding(.bottom, 2)
         }
         .padding(.horizontal)
         .navigationTitle("Label")
@@ -3814,7 +4174,9 @@ struct PlanStepThreeLabelView: View {
                 .transition(.opacity)
             }
         }
-        .safeAreaPadding(.bottom)
+        .safeAreaInset(edge: .bottom) {
+            step4LabelBottomInset
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .sheet(isPresented: $isShowingAddFulfillmentAreaSheet) {
             NavigationStack {
@@ -4125,7 +4487,6 @@ struct PlanStepFourResultView: View {
     private let resultAutoWriteMinWords = 2
     private let resultAutoWriteMaxWords = 6
     private let otherChunkFixedFill = Color(red: 0.92, green: 0.92, blue: 0.94)
-    private let loomAIService = LoomAIService()
 
     private var secondaryButtonTextColor: Color {
         colorScheme == .dark ? Color(.secondaryLabel) : .black
@@ -4144,10 +4505,6 @@ struct PlanStepFourResultView: View {
     private var plannedActionsForWeek: [PlannedChunkAction] {
         allPlannedActions
             .filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeekStart) }
-    }
-
-    private struct PlanResultAutoWriteRequestPayload: Encodable {
-        let actions: [String]
     }
 
     private struct ResultAutoWriteTargetOption: Identifiable, Hashable {
@@ -4394,11 +4751,11 @@ struct PlanStepFourResultView: View {
         .alert("Couldn’t generate a Result", isPresented: $showResultAutoWriteErrorPopup) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text("LoomAI needs clearer actions to infer a Result. Try refining the actions first.")
+            Text("Apple Intelligence needs clearer actions to infer a Result. Try refining the actions first.")
         }
         .overlay {
             GeometryReader { proxy in
-                if !plannedChunksForWeek.isEmpty {
+                if !plannedChunksForWeek.isEmpty && AppleIntelligenceSupport.isAvailable {
                     HStack(spacing: 8) {
                         resultAutoWriteControls
                         if isKeyboardVisible {
@@ -4717,9 +5074,8 @@ struct PlanStepFourResultView: View {
                     Task { await requestAutoWriteResultSuggestions() }
                 } label: {
                     HStack(alignment: .top, spacing: 6) {
-                        Image("LoomAI")
-                            .resizable()
-                            .scaledToFit()
+                        Image(systemName: "apple.intelligence")
+                            .font(.system(size: 23, weight: .semibold))
                             .frame(width: 27, height: 27)
                             .rotation3DEffect(
                                 .degrees(isLoading && autoWriteIconAnimating ? 180 : 0),
@@ -4976,40 +5332,13 @@ struct PlanStepFourResultView: View {
         return false
     }
 
-    private func minimalPlanResultContextSnapshot() -> LoomAIContextSnapshot {
-        LoomAIContextSnapshot(
-            generatedAt: .now,
-            personalizationHash: "",
-            diagnostic: nil,
-            drivingForce: nil,
-            fulfillmentCategories: [],
-            activeOutcomes: [],
-            currentWeekActionBlocks: [],
-            recentActivity: .init(
-                quickCompletesLast7Days: 0,
-                littleWinsCompletionsLast7Days: 0,
-                carryoversLast7Days: 0
-            ),
-            capture: nil,
-            recentlyDeleted: nil,
-            sectionTimestamps: nil,
-            dataInventory: [],
-            appGuide: [],
-            notes: [],
-            purposeDraft: nil,
-            fulfillmentSetup: nil,
-            personalization: nil,
-            reflectionJournal: nil,
-            shareAttachmentPreview: nil
-        )
-    }
-
     private func presentResultAutoWriteErrorPopup() {
         showResultAutoWriteErrorPopup = false
         showResultAutoWriteErrorPopup = true
     }
 
     private func requestAutoWriteResultSuggestions() async {
+        guard AppleIntelligenceSupport.isAvailable else { return }
         let targetChunks = selectedResultAutoWriteTargetChunks
         guard !targetChunks.isEmpty else { return }
 
@@ -5022,8 +5351,6 @@ struct PlanStepFourResultView: View {
             appliedResultAutoWriteByChunk.removeValue(forKey: id)
         }
 
-        let contextSnapshot = minimalPlanResultContextSnapshot()
-        let encoder = JSONEncoder()
         var generatedChunkCount = 0
         var failedChunkCount = 0
         var skippedChunkCount = 0
@@ -5043,25 +5370,9 @@ struct PlanStepFourResultView: View {
                 AppDebugActivityLog.log("PlanResultAutoWrite", "Low-confidence actions for chunk '\(chunkDescriptor)'; still attempting generation.")
             }
 
-            let payload = PlanResultAutoWriteRequestPayload(actions: actionTitles)
-            guard
-                let payloadData = try? encoder.encode(payload),
-                let payloadJSON = String(data: payloadData, encoding: .utf8)
-            else {
-                failedChunkCount += 1
-                AppDebugActivityLog.log("PlanResultAutoWrite", "Failed to encode payload for chunk '\(chunkDescriptor)'.")
-                continue
-            }
-
             do {
-                let response = try await loomAIService.sendChat(
-                    messages: [.init(role: "user", content: payloadJSON)],
-                    context: contextSnapshot,
-                    intent: "plan_result_autowrite",
-                    screen: "plan_result"
-                )
-
-                let suggestion = truncateWords(response.message, maxWords: resultAutoWriteMaxWords)
+                let response = try await AppleIntelligencePlanResultGenerator.suggestion(actions: actionTitles)
+                let suggestion = truncateWords(response, maxWords: resultAutoWriteMaxWords)
                 guard isPlanResultSuggestionAcceptable(suggestion, actions: actionTitles) else {
                     failedChunkCount += 1
                     AppDebugActivityLog.log(

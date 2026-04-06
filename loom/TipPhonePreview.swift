@@ -331,7 +331,7 @@ struct TipPhonePreview: View {
     }
 
     private var stepIntervalNanoseconds: UInt64 {
-        let base: UInt64 = 1_050_000_000
+        let base: UInt64 = 1_200_000_000
         if feature.previewType == .littleWinsMoments {
             return base * 3
         }
@@ -340,6 +340,18 @@ struct TipPhonePreview: View {
                 return base * 4
             }
             return base * 2
+        }
+        if feature.previewType == .loomAIPersonalization {
+            return base * 2
+        }
+        if feature.previewType == .assignActions || feature.previewType == .shareToLoom {
+            return base * 2
+        }
+        if feature.previewType == .loomAIChat || feature.previewType == .loomAIAutoWrite {
+            return UInt64(Double(base) * 1.8)
+        }
+        if feature.previewType == .loomAIEmailAssist {
+            return UInt64(Double(base) * 2.1)
         }
         if feature.previewType == .loomAIAgent {
             switch step % 4 {
@@ -615,6 +627,83 @@ struct TipPreviewChip: View {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .stroke(tint.opacity(0.32), lineWidth: 1)
             )
+    }
+}
+
+struct TipPreviewPanel<Content: View>: View {
+    var fill: Color = Color(.systemBackground).opacity(0.96)
+    var stroke: Color = Color.black.opacity(0.08)
+    var cornerRadius: CGFloat = 14
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            content()
+        }
+        .padding(11)
+        .background(
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(fill)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .stroke(stroke, lineWidth: 1)
+        )
+    }
+}
+
+struct TipPreviewSectionLabel: View {
+    var text: String
+
+    var body: some View {
+        Text(text)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .textCase(.uppercase)
+            .tracking(0.35)
+    }
+}
+
+struct TipPreviewPrimaryPill: View {
+    var title: String
+    var tint: Color = .blue
+    var textColor: Color = .white
+
+    var body: some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(textColor)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(tint)
+            )
+    }
+}
+
+struct TipPreviewProgressBar: View {
+    var progress: CGFloat
+    var fill: LinearGradient = LinearGradient(
+        colors: TipPreviewPalette.loomAI,
+        startPoint: .leading,
+        endPoint: .trailing
+    )
+
+    var body: some View {
+        GeometryReader { proxy in
+            let width = max(1, proxy.size.width)
+
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 999, style: .continuous)
+                    .fill(Color.secondary.opacity(0.14))
+
+                RoundedRectangle(cornerRadius: 999, style: .continuous)
+                    .fill(fill)
+                    .frame(width: width * max(0, min(1, progress)))
+            }
+        }
+        .frame(height: 8)
     }
 }
 

@@ -4,16 +4,16 @@ struct LoomAIEmailAssistTipPreviewScene: View {
     let step: Int
     let isAnimated: Bool
 
-    private var normalizedStep: Int { step % 4 }
-    private var showsFirstPendingAction: Bool { normalizedStep >= 2 }
-    private var showsSecondPendingAction: Bool { normalizedStep >= 3 }
+    private var normalizedStep: Int {
+        step % 4
+    }
 
     var body: some View {
         TipPreviewSurface {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .center, spacing: 8) {
                     TipPreviewLoomAIHeader(
-                        progress: normalizedStep == 0 ? 0.28 : 1.0,
+                        progress: normalizedStep == 0 ? 0.26 : 1.0,
                         isAnimated: isAnimated
                     )
 
@@ -21,12 +21,12 @@ struct LoomAIEmailAssistTipPreviewScene: View {
                         .padding(.top, 4)
                 }
 
-                VStack(alignment: .leading, spacing: 8) {
+                TipPreviewPanel(fill: Color(.systemBackground)) {
                     emailCard(
                         sender: "Alex",
                         subject: "Finalize onboarding checklist",
                         preview: "Can you send the updated checklist and confirm owners?",
-                        emphasized: normalizedStep == 1
+                        emphasized: normalizedStep >= 1
                     )
 
                     emailCard(
@@ -37,40 +37,42 @@ struct LoomAIEmailAssistTipPreviewScene: View {
                     )
                 }
 
-                VStack(alignment: .leading, spacing: 7) {
-                    Text("CLICK TO CAPTURE")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                if normalizedStep >= 1 {
+                    TipPreviewPanel(fill: Color.white.opacity(0.95)) {
+                        HStack(spacing: 8) {
+                            Image("LoomAI")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 14, height: 14)
+                            Text(normalizedStep == 1 ? "Scanning for follow-ups" : "Click to capture")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            Spacer(minLength: 0)
+                        }
 
-                    if showsFirstPendingAction {
-                        pendingActionCard(
-                            title: "Send onboarding checklist",
-                            metadata: "Email reply",
-                            emphasized: true
-                        )
-                    }
+                        if normalizedStep == 1 {
+                            TipPreviewProgressBar(progress: 0.58)
+                        } else {
+                            pendingActionCard(
+                                title: "Send onboarding checklist",
+                                metadata: "Email reply",
+                                emphasized: true
+                            )
+                        }
 
-                    if showsSecondPendingAction {
-                        pendingActionCard(
-                            title: "Reply to vendor quote",
-                            metadata: "Waiting on decision"
-                        )
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        if normalizedStep >= 3 {
+                            pendingActionCard(
+                                title: "Reply to vendor quote",
+                                metadata: "Waiting on decision",
+                                emphasized: false
+                            )
+                        }
                     }
-                }
-                .padding(10)
-                .background(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(Color.white.opacity(0.94))
-                )
-                .overlay {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(Color.black.opacity(0.08), lineWidth: 1)
-                }
-                .overlay {
-                    if isAnimated {
-                        TipPreviewAnimatedOutline(cornerRadius: 14)
-                            .opacity(0.85)
+                    .overlay {
+                        if isAnimated {
+                            TipPreviewAnimatedOutline(cornerRadius: 14)
+                                .opacity(normalizedStep == 1 ? 0.55 : 0.82)
+                        }
                     }
                 }
 
@@ -89,7 +91,7 @@ struct LoomAIEmailAssistTipPreviewScene: View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 8) {
                 Circle()
-                    .fill(emphasized ? Color.blue.opacity(0.88) : Color(.systemGray4))
+                    .fill(emphasized ? TipPreviewPalette.loomAI[0] : Color(.systemGray4))
                     .frame(width: 20, height: 20)
                     .overlay {
                         Text(String(sender.prefix(1)))
@@ -108,6 +110,12 @@ struct LoomAIEmailAssistTipPreviewScene: View {
                 }
 
                 Spacer(minLength: 0)
+
+                if emphasized && normalizedStep >= 2 {
+                    Image(systemName: "sparkles")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(TipPreviewPalette.loomAI[1])
+                }
             }
 
             Text(preview)
@@ -120,28 +128,22 @@ struct LoomAIEmailAssistTipPreviewScene: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(emphasized ? Color.blue.opacity(0.11) : Color(.systemGray6))
         )
-        .overlay {
+        .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(
-                    emphasized ? TipPreviewPalette.loomAI[0].opacity(0.34) : Color.black.opacity(0.08),
+                    emphasized ? TipPreviewPalette.loomAI[0].opacity(0.32) : Color.black.opacity(0.08),
                     lineWidth: 1
                 )
-        }
-        .overlay {
-            if emphasized && isAnimated {
-                TipPreviewAnimatedOutline(cornerRadius: 12)
-                    .opacity(0.7)
-            }
-        }
+        )
     }
 
     private func pendingActionCard(
         title: String,
         metadata: String,
-        emphasized: Bool = false
+        emphasized: Bool
     ) -> some View {
         HStack(spacing: 8) {
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
                 .fill(
                     emphasized
                         ? LinearGradient(
@@ -155,7 +157,7 @@ struct LoomAIEmailAssistTipPreviewScene: View {
                             endPoint: .bottomTrailing
                         )
                 )
-                .frame(width: 26, height: 26)
+                .frame(width: 28, height: 28)
                 .overlay {
                     Image(systemName: "checklist")
                         .font(.caption2.weight(.bold))
@@ -177,14 +179,14 @@ struct LoomAIEmailAssistTipPreviewScene: View {
         .padding(10)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(emphasized ? Color.white.opacity(0.94) : Color(.systemGray6))
+                .fill(emphasized ? Color.white.opacity(0.96) : Color(.systemGray6))
         )
-        .overlay {
+        .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(
                     emphasized ? TipPreviewPalette.loomAI[0].opacity(0.22) : Color.black.opacity(0.08),
                     lineWidth: 1
                 )
-        }
+        )
     }
 }

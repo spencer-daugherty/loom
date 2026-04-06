@@ -75,7 +75,7 @@ fileprivate struct PurposeReadableInsightRequestPayload: Codable {
 
 fileprivate func purposeReadableInsightScoreKey(for snap: PassionScoreSnapshot) -> String {
     [
-        "v2",
+        "v3",
         snap.passionTypeRaw,
         Calendar.current.startOfDay(for: snap.monthStartDate).ISO8601Format(),
         String((snap.score * 10).rounded() / 10),
@@ -1435,18 +1435,20 @@ struct PurposeView: View {
 
                 Spacer(minLength: 0)
 
-                Button {
-                    showDrivingForceTrends = true
-                } label: {
-                    Text("Show insights")
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(.blue)
+                if AppleIntelligenceSupport.isAvailable {
+                    Button {
+                        showDrivingForceTrends = true
+                    } label: {
+                        Text("Show insights")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.blue)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 4)
+                    .padding(.leading, 14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .buttonStyle(.plain)
-                .padding(.top, 4)
-                .padding(.leading, 14)
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
 
@@ -1497,7 +1499,7 @@ struct PurposeView: View {
                     let insightKey = purposeReadableInsightScoreKey(for: snap)
                     let summaryInsight = purposeReadableInsightCTAParagraph(aiPurposeHeaderInsightText(for: snap))
                     let isLoadingInsight = readableInsightLoadingKeys.contains(insightKey)
-                    if isLoadingInsight || summaryInsight != nil {
+                    if AppleIntelligenceSupport.isAvailable && (isLoadingInsight || summaryInsight != nil) {
                     let loomAIGradient = AngularGradient(
                         colors: [
                             Color(red: 0.22, green: 0.47, blue: 1.0),
@@ -1544,6 +1546,7 @@ struct PurposeView: View {
                     Color.clear
                         .frame(width: 0, height: 0)
                         .task(id: purposeReadableInsightScoreKey(for: snap)) {
+                            guard AppleIntelligenceSupport.isAvailable else { return }
                             await requestPurposeHeaderReadableInsightIfNeeded(for: snap)
                         }
                 }
@@ -1612,27 +1615,29 @@ struct PurposeView: View {
             passionAutoRotatePausedUntil = Date().addingTimeInterval(20)
         } label: {
             HStack(spacing: 6) {
-                Circle()
-                    .fill(
-                        highlightedPassionEmotionKey == emotionKey
-                        ? AnyShapeStyle(
-                            AngularGradient(
-                                colors: [
-                                    Color(red: 0.22, green: 0.47, blue: 1.0),
-                                    Color(red: 0.15, green: 0.83, blue: 0.95),
-                                    Color(red: 0.62, green: 0.40, blue: 0.95),
-                                    Color(red: 0.80, green: 0.38, blue: 0.78),
-                                    Color(red: 0.98, green: 0.36, blue: 0.58),
-                                    Color(red: 0.75, green: 0.42, blue: 0.74),
-                                    Color(red: 0.22, green: 0.47, blue: 1.0)
-                                ],
-                                center: .center,
-                                angle: .degrees(24)
+                if AppleIntelligenceSupport.isAvailable {
+                    Circle()
+                        .fill(
+                            highlightedPassionEmotionKey == emotionKey
+                            ? AnyShapeStyle(
+                                AngularGradient(
+                                    colors: [
+                                        Color(red: 0.22, green: 0.47, blue: 1.0),
+                                        Color(red: 0.15, green: 0.83, blue: 0.95),
+                                        Color(red: 0.62, green: 0.40, blue: 0.95),
+                                        Color(red: 0.80, green: 0.38, blue: 0.78),
+                                        Color(red: 0.98, green: 0.36, blue: 0.58),
+                                        Color(red: 0.75, green: 0.42, blue: 0.74),
+                                        Color(red: 0.22, green: 0.47, blue: 1.0)
+                                    ],
+                                    center: .center,
+                                    angle: .degrees(24)
+                                )
                             )
+                            : AnyShapeStyle(Color.clear)
                         )
-                        : AnyShapeStyle(Color.clear)
-                    )
-                    .frame(width: 7, height: 7)
+                        .frame(width: 7, height: 7)
+                }
                 passionSignalCircle(icon: icon, value: value)
                 Text(label)
                     .font(.title2.weight(.semibold))
@@ -1795,9 +1800,13 @@ struct PurposeView: View {
             guard let delta = passionMonthOverMonthDelta(for: emotionKey(for: snap.passionType)) else { return nil }
             return (snap, delta)
         }
-        let best = deltas.max(by: { abs($0.1) < abs($1.1) })
-        if let best, abs(best.1) < 0.05 { return nil }
-        return best
+        let result = deltas.max(by: { abs($0.1) < abs($1.1) })
+        guard let result else { return nil }
+        if abs(result.1) < 0.05 { return nil }
+
+        let topMagnitude = abs(roundedTenth(result.1))
+        let tieCount = deltas.filter { abs(roundedTenth($0.1)) == topMagnitude }.count
+        return tieCount >= 3 ? nil : result
     }
 
     private var purposeHeaderStrongestTitle: String {
@@ -1947,6 +1956,7 @@ struct PurposeView: View {
     }
 
     private func aiPurposeHeaderInsightText(for snap: PassionScoreSnapshot) -> String? {
+        guard AppleIntelligenceSupport.isAvailable else { return nil }
         let key = purposeReadableInsightScoreKey(for: snap)
         guard let base = readableInsightsByScoreKey[key] ?? PurposeReadableInsightRuntimeStore.value(for: key) else { return nil }
         let payload = purposeHeaderReadableInsightPayload(for: snap)
@@ -1955,6 +1965,7 @@ struct PurposeView: View {
 
     @MainActor
     private func requestPurposeHeaderReadableInsightIfNeeded(for snap: PassionScoreSnapshot) async {
+        guard AppleIntelligenceSupport.isAvailable else { return }
         let key = purposeReadableInsightScoreKey(for: snap)
         if !loomAIInsightsRefreshEnabled(),
            let cached = readableInsightsByScoreKey[key] ?? PurposeReadableInsightRuntimeStore.value(for: key) {
@@ -1965,15 +1976,11 @@ struct PurposeView: View {
         defer { readableInsightLoadingKeys.remove(key) }
 
         do {
-            let contextSnapshot = try LoomAIViewModel().buildContextSnapshot(in: self.context)
             let payload = purposeHeaderReadableInsightPayload(for: snap)
-            let response = try await LoomAIService().sendChat(
-                messages: [.init(role: "user", content: purposeReadableInsightPrompt(for: payload))],
-                context: contextSnapshot,
-                intent: "readable_insight_purpose",
-                screen: "purpose_readable_header"
+            let response = try await AppleIntelligencePurposeInsightsGenerator.readableInsight(
+                prompt: purposeReadableInsightPrompt(for: payload)
             )
-            let normalized = normalizePurposeReadableInsightMetricReferences(response.message, payload: payload)
+            let normalized = normalizePurposeReadableInsightMetricReferences(response, payload: payload)
             let text = limitPurposeReadableInsightText(normalized, maxCharacters: 220)
             let trimmed = text.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return }
@@ -3546,12 +3553,13 @@ private struct DrivingForceTrendsView: View {
                 let insightKey = purposeReadableInsightScoreKey(for: snap)
                 let message = aiPurposeTrendsInsightText(for: snap)
                 let isLoadingInsight = readableInsightLoadingKeys.contains(insightKey)
-                if isLoadingInsight || message != nil {
+                if AppleIntelligenceSupport.isAvailable && (isLoadingInsight || message != nil) {
                     DrivingForceAnimatedInsightCallout(message: message ?? "", isLoading: isLoadingInsight)
                 }
                 Color.clear
                     .frame(width: 0, height: 0)
                     .task(id: insightKey) {
+                        guard AppleIntelligenceSupport.isAvailable else { return }
                         await requestPurposeTrendsReadableInsightIfNeeded(for: snap)
                     }
 
@@ -3815,6 +3823,7 @@ private struct DrivingForceTrendsView: View {
     }
 
     private func aiPurposeTrendsInsightText(for snap: PassionScoreSnapshot) -> String? {
+        guard AppleIntelligenceSupport.isAvailable else { return nil }
         let key = purposeReadableInsightScoreKey(for: snap)
         guard let base = readableInsightsByScoreKey[key] ?? PurposeReadableInsightRuntimeStore.value(for: key) else { return nil }
         let payload = purposeTrendsReadableInsightPayload(for: snap)
@@ -3823,6 +3832,7 @@ private struct DrivingForceTrendsView: View {
 
     @MainActor
     private func requestPurposeTrendsReadableInsightIfNeeded(for snap: PassionScoreSnapshot) async {
+        guard AppleIntelligenceSupport.isAvailable else { return }
         let key = purposeReadableInsightScoreKey(for: snap)
         if !loomAIInsightsRefreshEnabled(),
            let cached = readableInsightsByScoreKey[key] ?? PurposeReadableInsightRuntimeStore.value(for: key) {
@@ -3833,15 +3843,11 @@ private struct DrivingForceTrendsView: View {
         defer { readableInsightLoadingKeys.remove(key) }
 
         do {
-            let contextSnapshot = try LoomAIViewModel().buildContextSnapshot(in: modelContext)
             let payload = purposeTrendsReadableInsightPayload(for: snap)
-            let response = try await LoomAIService().sendChat(
-                messages: [.init(role: "user", content: purposeReadableInsightPrompt(for: payload))],
-                context: contextSnapshot,
-                intent: "readable_insight_purpose",
-                screen: "purpose_readable_trends"
+            let response = try await AppleIntelligencePurposeInsightsGenerator.readableInsight(
+                prompt: purposeReadableInsightPrompt(for: payload)
             )
-            let normalized = normalizePurposeReadableInsightMetricReferences(response.message, payload: payload)
+            let normalized = normalizePurposeReadableInsightMetricReferences(response, payload: payload)
             let text = limitPurposeReadableInsightText(normalized, maxCharacters: 220)
             let trimmed = text.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return }

@@ -461,7 +461,7 @@ struct ContentView: View {
         case .capture:
             return ("Master To Do List", "4/5")
         case .actionBlocks:
-            let stepPrefix = reflectionArchives.isEmpty ? "5/5" : ""
+            let stepPrefix = hasCompletedPlanFlowOnce ? "" : "5/5"
             return ("Start Weekly Action Plan", stepPrefix)
         case .none:
             return nil
@@ -1053,6 +1053,7 @@ struct ContentView: View {
             }
             .onAppear {
                 beginStartupPreparationIfNeeded()
+                syncActivePlanSessionStore()
                 refreshFulfillmentCategoryScoresForCurrentWeek()
                 markCaptureSetupCompletedIfNeeded()
                 presentPendingSharePayloadIfAvailable()
@@ -1125,6 +1126,7 @@ struct ContentView: View {
         contentViewBounceObservers
             .onChange(of: scenePhase) { _, phase in
                 guard phase == .active else { return }
+                syncActivePlanSessionStore()
                 refreshFulfillmentCategoryScoresForCurrentWeek()
                 scheduleNotificationResync(immediate: true)
                 presentPendingSharePayloadIfAvailable()
@@ -1244,6 +1246,14 @@ struct ContentView: View {
         var descriptor = FetchDescriptor<T>()
         descriptor.fetchLimit = 1
         _ = try? modelContext.fetch(descriptor)
+    }
+
+    private func syncActivePlanSessionStore() {
+        guard let state = activePlanStates.first else {
+            ActivePlanSessionStore.setWeekStart(nil)
+            return
+        }
+        ActivePlanSessionStore.setWeekStart(state.isActive ? state.weekStart : nil)
     }
 
     private func scheduleNotificationResync(immediate: Bool = false) {

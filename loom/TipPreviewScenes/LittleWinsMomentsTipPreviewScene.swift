@@ -4,11 +4,18 @@ struct LittleWinsMomentsTipPreviewScene: View {
     let step: Int
     let isAnimated: Bool
 
-    private var templates: [LittleWinsShareTemplate] {
-        [.todaysWins, .hotStreak, .weeklyCalendar, .fullSnapshot]
+    private var templates: [LittleWinsShareTemplateDefinition] {
+        [
+            "todaysWins",
+            "hotStreak",
+            "weeklyCalendar",
+            "fullSnapshot"
+        ].compactMap { id in
+            LittleWinsShareTemplateCatalog.sortedTemplates.first(where: { $0.id == id })
+        }
     }
 
-    private var selectedTemplate: LittleWinsShareTemplate {
+    private var selectedTemplate: LittleWinsShareTemplateDefinition {
         templates[step % templates.count]
     }
 
@@ -23,15 +30,11 @@ struct LittleWinsMomentsTipPreviewScene: View {
                 let scaledHeight = referenceSize.height * scale
 
                 ZStack(alignment: .topTrailing) {
-                    LittleWinsShareOverlayTemplateView(
-                        template: selectedTemplate,
-                        data: Self.sampleData,
-                        showsBackdrop: false
-                    )
-                    .frame(width: referenceSize.width, height: referenceSize.height)
-                    .scaleEffect(scale, anchor: .topLeading)
-                    .frame(width: scaledWidth, height: scaledHeight, alignment: .topLeading)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    selectedTemplate.renderView(data: Self.sampleData, showsBackdrop: false)
+                        .frame(width: referenceSize.width, height: referenceSize.height)
+                        .scaleEffect(scale, anchor: .topLeading)
+                        .frame(width: scaledWidth, height: scaledHeight, alignment: .topLeading)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .overlay(alignment: .bottom) {
@@ -101,13 +104,26 @@ struct LittleWinsMomentsTipPreviewScene: View {
             activeCards: [workCard, healthCard, familyCard],
             completedCardsToday: [healthCard],
             completedCardStylesLast7Days: miniStyles,
+            completionCountsLast7Days: [0, 0, 1, 2, 1, 3, 2],
             radarSideCount: 6,
             streak: 5,
             hotStreak: true,
             totalWeekCompletions: 9,
             fullHouseUnlocked: false,
             royalFlushUnlocked: false,
-            royalFlushProgressDays: 3
+            royalFlushProgressDays: 3,
+            userProfile: LittleWinsShareUserProfile(
+                displayName: nil,
+                installDate: nil,
+                daysSinceInstall: nil,
+                isSubscribed: false,
+                isFoundingMember: false
+            ),
+            appleHealthVerifiedStory: nil,
+            featuredActiveGoal: nil,
+            latestAchievedGoal: nil,
+            fulfillmentStory: nil,
+            latestInsight: nil
         )
     }()
 }

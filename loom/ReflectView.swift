@@ -1913,6 +1913,7 @@ struct ReflectView: View {
             active.isActive = false
             active.weekStart = nil
         }
+        ActivePlanSessionStore.setWeekStart(nil)
 
         try? modelContext.save()
         onFinish()

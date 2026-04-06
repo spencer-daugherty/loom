@@ -187,7 +187,7 @@ struct ActionView: View {
     private static let signposter = OSSignposter(subsystem: "loom", category: "ActionView")
 
     init() {
-        let ws = WeeklyMindsetEntry.weekStart(for: Date())
+        let ws = ActivePlanSessionStore.weekStart() ?? WeeklyMindsetEntry.weekStart(for: Date())
         let we = Calendar.current.date(byAdding: .day, value: 1, to: ws) ?? ws
         weekStart = ws
 
@@ -883,6 +883,13 @@ struct ActionView: View {
                         .foregroundStyle(.blue)
                     }
                 }
+
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    if isKeyboardVisible {
+                        keyboardAccessoryButton
+                    }
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(Color(.systemBackground))
@@ -894,13 +901,6 @@ struct ActionView: View {
                         commitActionOrder(in: sheet.id, visibleOrderedIDs: reorderedIDs)
                     }
                 )
-            }
-            .overlay(alignment: .bottomTrailing) {
-                if isKeyboardVisible {
-                    keyboardAccessoryButton
-                        .padding(.trailing, 16)
-                        .padding(.bottom, max(12, keyboardHeight + 8))
-                }
             }
     }
 
@@ -1215,6 +1215,11 @@ struct ActionView: View {
                 if let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect {
                     keyboardHeight = max(0, frame.height - 34)
                 }
+                if let focusedActionID {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                        scrollTargetActionID = focusedActionID
+                    }
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
                 isKeyboardVisible = false
@@ -1356,6 +1361,16 @@ struct ActionView: View {
                     }
                 }
             }
+            .onChange(of: keyboardHeight) { _, height in
+                signposted("on_change_keyboard_height") {
+                    guard height > 0, let id = focusedActionID else { return }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            proxy.scrollTo(id, anchor: .bottom)
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -1443,7 +1458,7 @@ struct ActionView: View {
     }
 
     private var currentWeekStartForMotivation: Date {
-        WeeklyMindsetEntry.weekStart(for: Date())
+        currentWeekStart
     }
 
     private var currentMotivationEntry: WeeklyMindsetEntry.Fields? {
@@ -2410,6 +2425,7 @@ struct ActionView: View {
                 simpleMode: simpleMode,
                 simpleModeFillColor: blockFill,
                 focusedActionID: $focusedActionID,
+                isKeyboardVisible: $isKeyboardVisible,
                 onLiveTextChange: { newValue in
                     liveActionDraftByID[action.id] = newValue
                 },
@@ -4077,6 +4093,7 @@ struct ActionView: View {
         guard state.isActive || state.weekStart != nil else { return }
         state.isActive = false
         state.weekStart = nil
+        ActivePlanSessionStore.setWeekStart(nil)
         try? modelContext.save()
     }
 
@@ -5375,6 +5392,7 @@ private struct InlineActionEditor: View {
     let textColor: Color
     let strike: Bool
     @Binding var focusedActionID: UUID?
+    @Binding var isKeyboardVisible: Bool
     let onTextChange: (String) -> Void
     let onCommit: (String) -> Void
 
@@ -5388,6 +5406,7 @@ private struct InlineActionEditor: View {
         textColor: Color,
         strike: Bool,
         focusedActionID: Binding<UUID?>,
+        isKeyboardVisible: Binding<Bool>,
         onTextChange: @escaping (String) -> Void,
         onCommit: @escaping (String) -> Void
     ) {
@@ -5397,6 +5416,7 @@ private struct InlineActionEditor: View {
         self.textColor = textColor
         self.strike = strike
         self._focusedActionID = focusedActionID
+        self._isKeyboardVisible = isKeyboardVisible
         self.onTextChange = onTextChange
         self.onCommit = onCommit
         _text = State(initialValue: sourceText)
@@ -5447,7 +5467,9 @@ private struct InlineActionEditor: View {
                 if focusedActionID != actionId { focusedActionID = actionId }
             } else {
                 onCommit(text)
-                if focusedActionID == actionId { focusedActionID = nil }
+                if focusedActionID == actionId, !isKeyboardVisible {
+                    focusedActionID = nil
+                }
             }
         }
         .onAppear {
@@ -5483,6 +5505,7 @@ private struct ActionSwipeRow: View {
     let simpleMode: Bool
     let simpleModeFillColor: Color
     @Binding var focusedActionID: UUID?
+    @Binding var isKeyboardVisible: Bool
     let onLiveTextChange: (String) -> Void
     let onCommitText: (String) -> Void
     let onOpenStatus: () -> Void
@@ -5514,6 +5537,7 @@ private struct ActionSwipeRow: View {
         simpleMode: Bool,
         simpleModeFillColor: Color,
         focusedActionID: Binding<UUID?>,
+        isKeyboardVisible: Binding<Bool>,
         onLiveTextChange: @escaping (String) -> Void,
         onCommitText: @escaping (String) -> Void,
         onOpenStatus: @escaping () -> Void,
@@ -5542,6 +5566,7 @@ private struct ActionSwipeRow: View {
         self.simpleMode = simpleMode
         self.simpleModeFillColor = simpleModeFillColor
         self._focusedActionID = focusedActionID
+        self._isKeyboardVisible = isKeyboardVisible
         self.onLiveTextChange = onLiveTextChange
         self.onCommitText = onCommitText
         self.onOpenStatus = onOpenStatus
@@ -5657,6 +5682,7 @@ private struct ActionSwipeRow: View {
                     textColor: actionTextColor,
                     strike: effectiveStatus == .done || effectiveStatus == .carriedToCapture || effectiveStatus == .notNeeded,
                     focusedActionID: $focusedActionID,
+                    isKeyboardVisible: $isKeyboardVisible,
                     onTextChange: onLiveTextChange,
                     onCommit: onCommitText
                 )

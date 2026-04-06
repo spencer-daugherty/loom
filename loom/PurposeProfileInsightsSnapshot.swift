@@ -41,7 +41,7 @@ final class PurposeProfileInsightsSnapshot {
 }
 
 enum PurposeProfileInsightsHasher {
-    static let schemaVersion = 3
+    static let schemaVersion = 4
 
     static func monthKey(from date: Date = .now) -> String {
         let formatter = DateFormatter()

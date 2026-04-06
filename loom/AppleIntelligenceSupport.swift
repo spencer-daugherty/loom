@@ -140,6 +140,41 @@ enum AppleIntelligenceAutoGroupGenerator {
     }
 }
 
+enum AppleIntelligencePlanResultGenerator {
+    static func suggestion(actions: [String]) async throws -> String {
+        let cleanedActions = actions
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !cleanedActions.isEmpty else { throw AppleIntelligencePurposeInsightsError.unavailable }
+
+        let prompt = """
+        Create one concise weekly result statement from these actions.
+
+        Requirements:
+        - Return plain text only.
+        - Keep it to 2 to 6 words.
+        - Make it specific and outcome-oriented, not a generic phrase.
+        - Ground it directly in the action list. Do not invent context.
+        - Prefer the clearest end result implied by the actions.
+        - Do not include quotation marks, bullets, numbering, or explanations.
+
+        Actions:
+        \(cleanedActions.map { "- \($0)" }.joined(separator: "\n"))
+        """
+
+        #if canImport(FoundationModels)
+        if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
+            let model = SystemLanguageModel(useCase: .general)
+            guard model.isAvailable else { throw AppleIntelligencePurposeInsightsError.unavailable }
+            let session = LanguageModelSession(model: model)
+            let response = try await session.respond(to: prompt)
+            return response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        #endif
+        throw AppleIntelligencePurposeInsightsError.unavailable
+    }
+}
+
 enum AppleIntelligencePurposeInsightsError: Error {
     case unavailable
 }

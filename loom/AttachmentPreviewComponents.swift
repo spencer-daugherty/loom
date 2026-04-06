@@ -244,50 +244,61 @@ struct LoomLinkAttachmentPreviewSheet: View {
     let urlString: String
 
     @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            LoomLinkAttachmentPreviewContent(urlString: urlString)
+                .navigationTitle("Attachment")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Done") { dismiss() }
+                    }
+                }
+        }
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
+    }
+}
+
+struct LoomLinkAttachmentPreviewContent: View {
+    let urlString: String
+
     @Environment(\.openURL) private var openURL
     @StateObject private var previewStore = LoomLinkPreviewStore()
 
     var body: some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 18) {
-                LoomLinkBannerCard(
-                    urlString: urlString,
-                    preview: previewStore.preview(for: urlString)
-                )
+        VStack(alignment: .leading, spacing: 18) {
+            LoomLinkBannerCard(
+                urlString: urlString,
+                preview: previewStore.preview(for: urlString)
+            )
 
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Link")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text(urlString)
-                        .font(.footnote)
-                        .foregroundStyle(.primary)
-                        .textSelection(.enabled)
-                }
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Link")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(urlString)
+                    .font(.footnote)
+                    .foregroundStyle(.primary)
+                    .textSelection(.enabled)
+            }
 
-                Spacer(minLength: 0)
-            }
-            .padding(20)
-            .background(Color(.systemBackground))
-            .navigationTitle("Attachment")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
+            Spacer(minLength: 0)
+        }
+        .padding(20)
+        .background(Color(.systemBackground))
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Open") {
+                    guard let url = URL(string: urlString) else { return }
+                    openURL(url)
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Open") {
-                        guard let url = URL(string: urlString) else { return }
-                        openURL(url)
-                    }
-                }
-            }
-            .task {
-                previewStore.load(urlStrings: [urlString])
             }
         }
-        .presentationDetents([.medium])
-        .presentationDragIndicator(.visible)
+        .task {
+            previewStore.load(urlStrings: [urlString])
+        }
     }
 }
 
@@ -299,33 +310,42 @@ struct LoomAttachmentUnavailableSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 16) {
-                Image(systemName: "exclamationmark.triangle")
-                    .font(.system(size: 34, weight: .medium))
-                    .foregroundStyle(.orange)
-
-                Text(title)
-                    .font(.headline)
-                    .multilineTextAlignment(.center)
-
-                Text(message)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-
-                Spacer(minLength: 0)
-            }
-            .padding(24)
-            .navigationTitle("Attachment")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+            LoomAttachmentUnavailableContent(title: title, message: message)
+                .navigationTitle("Attachment")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { dismiss() }
+                    }
                 }
-            }
         }
         .presentationDetents([.medium])
         .presentationDragIndicator(.visible)
+    }
+}
+
+struct LoomAttachmentUnavailableContent: View {
+    let title: String
+    let message: String
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 34, weight: .medium))
+                .foregroundStyle(.orange)
+
+            Text(title)
+                .font(.headline)
+                .multilineTextAlignment(.center)
+
+            Text(message)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+
+            Spacer(minLength: 0)
+        }
+        .padding(24)
     }
 }
 

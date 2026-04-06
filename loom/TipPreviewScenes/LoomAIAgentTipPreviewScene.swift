@@ -101,30 +101,27 @@ struct LoomAIAgentTipPreviewScene: View {
     }
 
     private var requestCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Action")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .textCase(.uppercase)
+        TipPreviewPanel(fill: Color(.systemBackground).opacity(0.96)) {
+            TipPreviewSectionLabel(text: "Action")
 
             Text(scenario.request)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(11)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color(.systemBackground).opacity(0.96))
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.black.opacity(0.08), lineWidth: 1)
+
+            HStack(spacing: 6) {
+                TipPreviewChip(text: scenario.category, tint: categoryTint)
+                Text("Returns options before booking, buying, or scheduling.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
         }
     }
 
     private var agentCard: some View {
-        VStack(alignment: .leading, spacing: 9) {
+        TipPreviewPanel(fill: Color.white.opacity(0.95)) {
             HStack(spacing: 8) {
                 Image("LoomAI")
                     .resizable()
@@ -151,15 +148,6 @@ struct LoomAIAgentTipPreviewScene: View {
                 loadingRow
                     .transition(.opacity)
             }
-        }
-        .padding(11)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.white.opacity(0.95))
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.black.opacity(0.08), lineWidth: 1)
         }
         .overlay {
             if isAnimated {

@@ -807,7 +807,10 @@ struct PurposeStartView: View {
     }
 
     private var isWaitingForPurposeInsights: Bool {
-        step == .insights && purposeInsightCards.isEmpty && !hasTimedOutPurposeInsights
+        AppleIntelligenceSupport.isAvailable
+            && step == .insights
+            && purposeInsightCards.isEmpty
+            && !hasTimedOutPurposeInsights
     }
 
     private var progressCurrentStep: Int {
@@ -1274,55 +1277,61 @@ struct PurposeStartView: View {
     }
 
     private var insightsStep: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            PurposeInsightsThinkingHeader(
-                title: "LoomAI",
-                progress: 1.0
-            )
+        Group {
+            if AppleIntelligenceSupport.isAvailable {
+                VStack(alignment: .leading, spacing: 12) {
+                    PurposeInsightsThinkingHeader(
+                        title: "LoomAI",
+                        progress: 1.0
+                    )
 
-            if !(isGeneratingPurposeInsights && purposeInsightCards.isEmpty) {
-                Text("This will personalize your Loom experience.")
-                    .font(.title3.weight(.medium))
-                    .foregroundStyle(.secondary)
-            }
-
-            Text(purposeInsightHeadingText)
-                .font(.system(size: 38, weight: .bold))
-                .fixedSize(horizontal: false, vertical: true)
-
-            Group {
-                if isGeneratingPurposeInsights && purposeInsightCards.isEmpty {
-                    ForEach(0..<1, id: \.self) { _ in
-                        purposeInsightsLoadingCard
+                    if !(isGeneratingPurposeInsights && purposeInsightCards.isEmpty) {
+                        Text("This will personalize your Loom experience.")
+                            .font(.title3.weight(.medium))
+                            .foregroundStyle(.secondary)
                     }
-                    .transition(.opacity)
-                } else {
-                    ForEach(purposeInsightCards) { card in
-                        purposeInsightsCard(card, animateOutline: animatePurposeInsightOutline)
-                    }
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
-                }
-            }
-            .animation(.easeInOut(duration: 0.24), value: isGeneratingPurposeInsights)
-            .animation(.easeInOut(duration: 0.24), value: purposeInsightCards.count)
 
-            Text("This may change overtime and with different data. View anytime in Account > Personalization")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(14)
-        .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
-        .onAppear {
-            if autoWriteOutlineAngle == 0 {
-                withAnimation(.linear(duration: 8).repeatForever(autoreverses: false)) {
-                    autoWriteOutlineAngle = 360
+                    Text(purposeInsightHeadingText)
+                        .font(.system(size: 38, weight: .bold))
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Group {
+                        if isGeneratingPurposeInsights && purposeInsightCards.isEmpty {
+                            ForEach(0..<1, id: \.self) { _ in
+                                purposeInsightsLoadingCard
+                            }
+                            .transition(.opacity)
+                        } else {
+                            ForEach(purposeInsightCards) { card in
+                                purposeInsightsCard(card, animateOutline: animatePurposeInsightOutline)
+                            }
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        }
+                    }
+                    .animation(.easeInOut(duration: 0.24), value: isGeneratingPurposeInsights)
+                    .animation(.easeInOut(duration: 0.24), value: purposeInsightCards.count)
+
+                    Text("This may change overtime and with different data. View anytime in Account > Personalization")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-            }
-            if insightsOutlinePhase == 0 {
-                withAnimation(.linear(duration: 2.1).repeatForever(autoreverses: false)) {
-                    insightsOutlinePhase = 1
+                .padding(14)
+                .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+                .onAppear {
+                    if autoWriteOutlineAngle == 0 {
+                        withAnimation(.linear(duration: 8).repeatForever(autoreverses: false)) {
+                            autoWriteOutlineAngle = 360
+                        }
+                    }
+                    if insightsOutlinePhase == 0 {
+                        withAnimation(.linear(duration: 2.1).repeatForever(autoreverses: false)) {
+                            insightsOutlinePhase = 1
+                        }
+                    }
                 }
+            } else {
+                EmptyView()
             }
         }
     }
@@ -2203,8 +2212,17 @@ struct PurposeStartView: View {
     }
 
     private func generatePurposeInsights(forceRefresh: Bool = false) async {
+        guard AppleIntelligenceSupport.isAvailable else {
+            purposeInsightCards = []
+            purposeInsightProfileName = ""
+            purposeInsightsTroubleshootingMessage = nil
+            loadedPurposeInsightsCycleKey = nil
+            hasTimedOutPurposeInsights = false
+            return
+        }
         guard let personalizationSnapshot else {
-            applyPurposeInsightRecord(PurposeProfilesCatalog.fallback())
+            purposeInsightCards = []
+            purposeInsightProfileName = ""
             return
         }
 
@@ -2213,15 +2231,6 @@ struct PurposeStartView: View {
             ? currentDrivingForce?.ultimateVision.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             : visionTrimmed
         let passions = currentPassionPhrasesForProfileInsights()
-        let fallbackRecord = defaultPurposeInsightRecord(
-            stress: diagnostics.stress,
-            breakPoint: diagnostics.breaksFirst,
-            planning: diagnostics.planningStyle,
-            desired: diagnostics.firstChange,
-            areas: diagnostics.areas,
-            vision: currentVision,
-            passions: passions
-        )
         let userKey = PersonalizationUserIdentity.currentUserKey()
         let monthKey = PurposeProfileInsightsHasher.monthKey()
         let cycleKey = "\(userKey)|\(monthKey)"
@@ -2255,19 +2264,12 @@ struct PurposeStartView: View {
         )
 
         do {
-            let response = try await LoomAIService().fetchPurposeProfileInsights(
+            let resolved = try await AppleIntelligencePurposeInsightsGenerator.purposeProfile(
                 diagnostic: diagnostics,
                 vision: currentVision,
                 passions: passions
             )
             guard !Task.isCancelled else { return }
-            let resolved = PurposeProfilesCatalog.record(named: response.profile) ?? PurposeProfileRecord(
-                profile: response.profile,
-                strength: response.strength,
-                weakness: response.weakness,
-                stressTrigger: response.stressTrigger,
-                breakingPoint: response.breakingPoint
-            )
             persistPurposeProfileSnapshot(
                 record: resolved,
                 userKey: userKey,
@@ -2287,19 +2289,17 @@ struct PurposeStartView: View {
                 loadedPurposeInsightsCycleKey = cycleKey
                 return
             }
-            // Freeze fallback for the month when upstream fails to avoid repeated re-analysis.
-            persistPurposeProfileSnapshot(
-                record: fallbackRecord,
-                userKey: userKey,
-                monthKey: monthKey,
-                inputsHash: inputsHash
-            )
-            applyPurposeInsightRecord(fallbackRecord)
-            loadedPurposeInsightsCycleKey = cycleKey
+            purposeInsightCards = []
+            purposeInsightProfileName = ""
         }
     }
 
     private func restartPurposeInsightsTimeoutWindow() {
+        guard AppleIntelligenceSupport.isAvailable else {
+            hasTimedOutPurposeInsights = false
+            purposeInsightsTimeoutTask?.cancel()
+            return
+        }
         hasTimedOutPurposeInsights = false
         purposeInsightsTimeoutTask?.cancel()
         purposeInsightsTimeoutTask = Task {

@@ -1006,8 +1006,9 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
     ? hasMeaningfulPackedLoomContext(rawContext) || hasMeaningfulLoomContext(context)
     : hasMeaningfulLoomContext(context);
   const unrelatedPrompt = isLikelyUnrelatedPrompt(latestUserMessage);
-  const chipIntentRoute = resolveChipIntentRoute(latestUserMessage);
-  const heuristicPromptType = detectHeuristicPromptType(latestUserMessage);
+  const chipIntentRoute =
+    resolveChipIntentRoute(latestUserMessage) ||
+    detectHeuristicIntentRoute(latestUserMessage, context);
 
   if (!latestUserMessage) {
     return json(
@@ -1017,90 +1018,31 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
         route: chipIntentRoute,
         intent: normalizedIntent,
         message:
-          "I’m ready to help with Loom. Ask me about Purpose, Fulfillment, Goals, Capture, or Action Blocks."
+          "I’m ready to help with Loom. Ask me about Purpose, Fulfillment, Goals, Capture, or Action Plans."
       }),
       200,
       corsHeaders(request)
     );
   }
 
-  if (unrelatedPrompt) {
-    if (isAutoGroupIntent) {
-      return json(
-        safeChatFallback({
-          hasContext,
-          context,
-          route: chipIntentRoute,
-          intent: normalizedIntent
-        }),
-        200,
-        corsHeaders(request)
-      );
-    }
+  if (unrelatedPrompt && isAutoGroupIntent) {
     return json(
-      {
-        message:
-          "I can’t help with that, but I can help you with Loom planning and execution right now.",
-        grounding: collectGrounding([], context, { maxItems: 2 }),
-        suggestionCards: [],
-        nextAction: null,
-        chips: buildUnrelatedRedirectChips(context),
-        actions: [],
-        debug: {
-          usedContext: false,
-          confidence: "low",
-          evidence: []
-        }
-      },
-      200,
-      corsHeaders(request)
-    );
-  }
-
-  // Chip action routes are deterministic and should never block on upstream model latency.
-  if (!isAutoGroupIntent && shouldUseDeterministicRouteResponse(chipIntentRoute)) {
-    if (chipIntentRoute?.id === 8) {
-      return json(
-        buildBestUseLoomDeterministicResponse({
-          hasContext,
-          context,
-          route: chipIntentRoute
-        }),
-        200,
-        corsHeaders(request)
-      );
-    }
-    return json(
-      buildDeterministicRouteResponse({
+      safeChatFallback({
         hasContext,
         context,
         route: chipIntentRoute,
-        message: buildDeterministicRouteMessage(chipIntentRoute)
+        intent: normalizedIntent,
+        allowRouteSuggestionCards: false
       }),
       200,
       corsHeaders(request)
     );
   }
 
-  // Freeform prompts that map cleanly to known Loom workflows should not depend on upstream latency.
-  if (!isAutoGroupIntent && !chipIntentRoute && heuristicPromptType) {
-    return json(
-      buildDeterministicHeuristicPromptResponse({
-        hasContext,
-        context,
-        promptType: heuristicPromptType,
-        latestUserMessage
-      }),
-      200,
-      corsHeaders(request)
-    );
-  }
-
-  const shouldPreferFastModel = !chipIntentRoute;
-  const preferredModel = shouldForceMiniModel || shouldPreferFastModel
+  const preferredModel = shouldForceMiniModel
     ? "gpt-5-mini"
     : (nonEmptyString(env.OPENAI_MODEL) || DEFAULT_CHAT_MODEL);
-  const modelCandidates = shouldForceMiniModel || shouldPreferFastModel
+  const modelCandidates = shouldForceMiniModel
     ? ["gpt-5-mini"]
     : uniqueOrdered(
       [preferredModel, "gpt-5-mini"]
@@ -1327,27 +1269,28 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
     "- Fulfillment Areas (mission + identities + little wins): life domains to strengthen continuously; usually refined every 3 months.",
     "- Goals: concrete targets tied to fulfillment.",
     "- Capture: incoming actions and ideas.",
-    "- Action Blocks: weekly commitments that should be completed by end of week.",
-    "- Reflect: post-completion review after Action Blocks are executed (not pre-planning).",
+    "- Action Plans: weekly commitments that should be completed by end of week.",
+    "- Reflect: post-completion review after Action Plans are executed (not pre-planning).",
     "",
     "Rules:",
     "- Ground your answer in APP_CONTEXT when available.",
     "- APP_CONTEXT uses an intent-based context pack with layers: identity, currentReality, targetObject.",
     "- When APP_CONTEXT exists and the user asks a Loom-related question, reference at least 2 concrete context details.",
+    "- PERSONALIZATION_BRIEF highlights the most relevant current user signals. Use it to keep the answer tailored.",
     "- Never invent stats, values, goals, dates, or progress.",
     "- Never invent user history or user behavior not present in APP_CONTEXT.",
     "- If data is missing, say that briefly and continue with the best next step.",
     "- Do NOT parrot diagnostic option text verbatim; interpret patterns in your own words.",
-    "- Message must feel like 'Loom knows me': concise, specific, and personalized.",
-    "- Message can be 2-6 short paragraphs maximum. No filler. No hardcoded preambles.",
+    "- Message must feel like Loom knows this exact user: concise, specific, and personalized.",
+    "- Never give generic productivity filler, broad motivational language, or reusable advice that could fit anyone.",
+    "- Message can be 1-4 short paragraphs maximum. No filler. No hardcoded preambles.",
     "- Never include a sources block, A/B/C option comparisons, or 'which should I add/edit/replace' in message.",
-    "- Avoid generic productivity filler.",
     "- Put recommendations in suggestionCards only (never inline in message).",
     "- suggestionCards may include A/B/C options when relevant.",
     "- Produce executable options only when confidence is high or medium and payload is executable.",
     "- NEVER put add/edit/improve/update/replace/create suggestions in `message`.",
     "- If confidence is low, suggestionCards must be [] and actions must be [].",
-    "- Treat Action Blocks as weekly finish targets; do not frame them as optional daily ideas.",
+    "- Treat Action Plans as weekly finish targets; do not frame them as optional daily ideas.",
     "- Treat Reflect as a follow-up step after execution/completion, not a planning substitute.",
     "- Treat Purpose (vision + passions) as long-horizon direction, typically refined yearly unless major life change occurs.",
     "- Treat Fulfillment Areas as medium-horizon structure, typically refined quarterly (about every 3 months).",
@@ -1375,21 +1318,22 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
     '- addPlanSuggestion {"text":"..."}',
     "",
     "Chip intent routing (if APP_CONTEXT.intent.routeID exists):",
-    "- 1 Daily Little Wins for {category}: return little-win suggestion cards.",
-    "- 2 New Mission for {category}: return mission rewrite cards.",
-    "- 3 New Identity for {category}: return identity suggestion cards.",
-    "- 4 Next step for {goal}: return immediate next-step cards.",
-    "- 5 Plan for {goal}: return short plan cards.",
-    "- 6 New passions for {emotion}: return passion cards.",
-    "- 7 Improve my Purpose Vision: return purpose-vision cards.",
-    "- 8 How can I best use Loom?: return a single high-leverage recommendation grounded in current context.",
+    "- 1 Daily Little Wins for {category}: return 1 suggestionCard with 2-3 little-win options.",
+    "- 2 New Mission for {category}: return 1 suggestionCard with 2-3 mission rewrite options.",
+    "- 3 New Identity for {category}: return 1 suggestionCard with 2-3 identity options.",
+    "- 4 Next step for {goal}: return 1 suggestionCard with 2-3 immediate next-step options.",
+    "- 5 Plan for {goal}: return 1 suggestionCard with 2-3 short plan options.",
+    "- 6 New passions for {emotion}: return 1 suggestionCard with 2-3 passion options.",
+    "- 7 Improve my Purpose Vision: return 1 suggestionCard with 2-3 purpose-vision options.",
+    "- 8 How can I best use Loom?: return a single high-leverage recommendation grounded in current context. suggestionCards may be [].",
+    "- If APP_CONTEXT.intent.routeID exists for routes 1-7 and confidence is medium or high, do not return empty suggestionCards.",
     "",
     "Little Wins rule:",
     "- Default to daily-doable 5-20 minute actions unless user explicitly asks for weekly cadence.",
     "- For health/energy, prefer measurable Apple Health-aligned options when appropriate (steps, workouts, active minutes, sleep, mindfulness minutes).",
     "",
     "If user prompt is unrelated to Loom, respond gently:",
-    '- "I can’t help with that, but I can help you with..." and provide 2-3 Loom-relevant chips.',
+    '- "I can’t help with that here, but I can help you with..." and provide 2-3 Loom-relevant chips.',
     "- For unrelated prompts, return actions as []."
   ].join("\n");
 
@@ -1407,13 +1351,20 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
   }
   const modelContext = contextPackResult.modelContext;
   const payloadContextMeta = contextPackResult.payloadContextMeta;
-  const CHAT_HISTORY_LIMIT = chipIntentRoute ? 10 : 4;
+  const CHAT_HISTORY_LIMIT = chipIntentRoute ? 10 : 6;
+  const personalizationBrief = buildChatPersonalizationBrief({
+    context,
+    latestUserMessage,
+    route: chipIntentRoute,
+    unrelatedPrompt
+  });
   const userPayload = {
     messages: messages.slice(-CHAT_HISTORY_LIMIT).map((msg) => ({
       role: String(msg?.role || ""),
       content: String(msg?.content || "")
     })),
     APP_CONTEXT: modelContext,
+    PERSONALIZATION_BRIEF: personalizationBrief,
     client: {
       intent: nonEmptyString(client.intent) || "loomai_chat",
       appVersion: nonEmptyString(client.appVersion) || null,
@@ -1526,7 +1477,7 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
         hasContext,
         context,
         route: chipIntentRoute,
-        allowRouteSuggestionCards: true,
+        allowRouteSuggestionCards: false,
         intent: normalizedIntent,
         message: buildUserFacingChatErrorMessage(result)
       });
@@ -1551,14 +1502,36 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
     return json(response, 200, corsHeaders(request));
   }
 
-  const response = sanitizeLoomChatResponse(result.json, {
+  let response = sanitizeLoomChatResponse(result.json, {
     context,
     hasContext,
     latestUserMessage,
     intent: normalizedIntent,
     chipIntentRoute
   });
-  const usage = normalizeResponsesUsage(result.usage, usedModel);
+  let combinedUsage = result.usage;
+  if (!isAutoGroupIntent && looksLikeGenericLoomChatMessage(response.message, context, {
+    route: chipIntentRoute,
+    prompt: latestUserMessage
+  })) {
+    const repaired = await repairGenericLoomChatMessage({
+      apiKey,
+      model: usedModel || preferredModel,
+      latestUserMessage,
+      originalMessage: response.message,
+      context: modelContext,
+      personalizationBrief,
+      route: chipIntentRoute
+    });
+    if (nonEmptyString(repaired?.message)) {
+      response = {
+        ...response,
+        message: nonEmptyString(repaired.message)
+      };
+    }
+    combinedUsage = combineResponsesUsage(combinedUsage, repaired?.usage);
+  }
+  const usage = normalizeResponsesUsage(combinedUsage, usedModel);
   if (usage) {
     response.usage = usage;
   }
@@ -1585,7 +1558,7 @@ function buildChatCacheIdentity({ model, userPayload }) {
     : {};
 
   return {
-    version: "loom_chat_v6",
+    version: "loom_chat_v7",
     model: nonEmptyString(model) || DEFAULT_CHAT_MODEL,
     messages: Array.isArray(payload.messages) ? payload.messages : [],
     APP_CONTEXT: {
@@ -1609,6 +1582,10 @@ function buildChatCacheIdentity({ model, userPayload }) {
             }
       }
     },
+    PERSONALIZATION_BRIEF:
+      payload.PERSONALIZATION_BRIEF && typeof payload.PERSONALIZATION_BRIEF === "object"
+        ? payload.PERSONALIZATION_BRIEF
+        : null,
     client: {
       intent: nonEmptyString(payload?.client?.intent) || "loomai_chat",
       userLocalDate: nonEmptyString(payload?.client?.userLocalDate) || null,
@@ -2905,13 +2882,10 @@ function safeChatFallback({ hasContext, context, message, intent, route, allowRo
     nonEmptyString(message) ||
     "Couldn't generate response. Check your connection.";
   const fallbackGrounding = hasContext ? collectGrounding([], context, { maxItems: 3 }) : [];
-  const fallbackSuggestionCards = (hasContext && allowRouteSuggestionCards)
-    ? buildRouteSuggestionCards(route, context)
-    : [];
   return {
     message: fallbackMessage,
     grounding: fallbackGrounding,
-    suggestionCards: fallbackSuggestionCards,
+    suggestionCards: [],
     nextAction: null,
     chips: [],
     actions: [],
@@ -4623,6 +4597,94 @@ function resolveChipIntentRoute(latestUserMessage) {
   return null;
 }
 
+function matchBestStringFromPrompt(prompt, values) {
+  const text = nonEmptyString(prompt).toLowerCase();
+  const source = Array.isArray(values) ? values : [];
+  if (!text || source.length === 0) return "";
+
+  let bestMatch = "";
+  for (const raw of source) {
+    const value = nonEmptyString(raw);
+    const lower = value.toLowerCase();
+    if (!lower) continue;
+    if (text.includes(lower) && lower.length > bestMatch.length) {
+      bestMatch = value;
+    }
+  }
+  return bestMatch;
+}
+
+function findBestCategoryMatchFromPrompt(prompt, context) {
+  const categories = Array.isArray(context?.fulfillmentCategories) ? context.fulfillmentCategories : [];
+  const bestName = matchBestStringFromPrompt(prompt, categories.map((item) => item?.name));
+  if (!bestName) return null;
+  return categories.find((item) => equalsFold(item?.name, bestName)) || null;
+}
+
+function findBestGoalMatchFromPrompt(prompt, context) {
+  const goals = Array.isArray(context?.activeOutcomes) ? context.activeOutcomes : [];
+  const bestTitle = matchBestStringFromPrompt(prompt, goals.map((item) => item?.title));
+  if (!bestTitle) return null;
+  return goals.find((item) => equalsFold(item?.title, bestTitle)) || null;
+}
+
+function detectHeuristicIntentRoute(latestUserMessage, context) {
+  const text = nonEmptyString(latestUserMessage);
+  const lower = text.toLowerCase();
+  if (!text) return null;
+
+  if (/\b(improve|rewrite|refine|sharpen)\b.*\bpurpose vision\b/.test(lower)) {
+    return { id: 7, key: "improve_purpose_vision", label: truncate(text, 180), target: null };
+  }
+  if (/\b(best way|best use|how should i use)\b.*\bloom\b/.test(lower)) {
+    return { id: 8, key: "best_use_loom", label: truncate(text, 180), target: null };
+  }
+
+  const matchedGoal = findBestGoalMatchFromPrompt(text, context);
+  if (matchedGoal) {
+    if (/\b(plan|roadmap|strategy|break down|map out|organize)\b/.test(lower)) {
+      return {
+        id: 5,
+        key: "goal_plan",
+        label: truncate(text, 180),
+        target: truncate(nonEmptyString(matchedGoal?.title), 120)
+      };
+    }
+    if (/\b(next step|next move|first step|what should i do next|what do i do next|how should i start)\b/.test(lower)) {
+      return {
+        id: 4,
+        key: "goal_next_step",
+        label: truncate(text, 180),
+        target: truncate(nonEmptyString(matchedGoal?.title), 120)
+      };
+    }
+  }
+
+  const matchedCategory = findBestCategoryMatchFromPrompt(text, context);
+  if (matchedCategory) {
+    const target = truncate(nonEmptyString(matchedCategory?.name), 120);
+    if (/\b(little wins?|habit|habits|daily action|daily actions|repeatable)\b/.test(lower)) {
+      return { id: 1, key: "daily_little_wins", label: truncate(text, 180), target };
+    }
+    if (/\bmission\b/.test(lower)) {
+      return { id: 2, key: "new_mission", label: truncate(text, 180), target };
+    }
+    if (/\bidentity|identities|who should i be\b/.test(lower)) {
+      return { id: 3, key: "new_identity", label: truncate(text, 180), target };
+    }
+  }
+
+  if (/\bpassion|passions\b/.test(lower)) {
+    const passionMatch = text.match(/\b(love|vows?|thrill|hate|hates|just)\b/i);
+    if (passionMatch?.[1]) {
+      const passionType = normalizePassionType(passionMatch[1]);
+      return { id: 6, key: "new_passions", label: truncate(text, 180), target: passionType };
+    }
+  }
+
+  return null;
+}
+
 function normalizePassionType(value) {
   const text = String(value || "").trim().toLowerCase();
   if (!text) return "love";
@@ -4630,6 +4692,70 @@ function normalizePassionType(value) {
   if (text === "just" || text === "hate" || text === "hates") return "hate";
   if (["love", "vows", "thrill"].includes(text)) return text;
   return "love";
+}
+
+function findRelevantActionPlanTitle(context, goalName = "", goalCategory = "") {
+  const blocks = Array.isArray(context?.currentWeekActionBlocks) ? context.currentWeekActionBlocks : [];
+  if (blocks.length === 0) return "";
+  const byGoal = goalName ? filterActionBlocksByTarget(blocks, goalName) : [];
+  if (Array.isArray(byGoal) && byGoal.length > 0 && byGoal.length < blocks.length) {
+    return nonEmptyString(byGoal[0]?.title || byGoal[0]?.category);
+  }
+  const byCategory = goalCategory ? filterActionBlocksByTarget(blocks, goalCategory) : [];
+  if (Array.isArray(byCategory) && byCategory.length > 0 && byCategory.length < blocks.length) {
+    return nonEmptyString(byCategory[0]?.title || byCategory[0]?.category);
+  }
+  return nonEmptyString(blocks[0]?.title || blocks[0]?.category);
+}
+
+function buildChatPersonalizationBrief({ context, latestUserMessage, route, unrelatedPrompt }) {
+  const matchedGoal = findBestGoalMatchFromPrompt(latestUserMessage, context);
+  const matchedCategory = findBestCategoryMatchFromPrompt(latestUserMessage, context);
+  const routeGoal = [4, 5].includes(Number(route?.id))
+    ? resolveGoalFromRouteTarget(route?.target, context)
+    : null;
+  const routeCategory = [1, 2, 3].includes(Number(route?.id))
+    ? resolveCategoryFromRouteTarget(route?.target, context)
+    : null;
+  const goal = routeGoal || matchedGoal || resolveGoalFromRouteTarget("", context);
+  const category = routeCategory || matchedCategory || resolveCategoryFromRouteTarget(nonEmptyString(goal?.category), context);
+  const actionPlan = findRelevantActionPlanTitle(
+    context,
+    nonEmptyString(goal?.title),
+    nonEmptyString(category?.name || goal?.category)
+  );
+  const pressure = nonEmptyString(
+    context?.diagnostic?.rootCause ||
+      context?.diagnostic?.nextDirection ||
+      context?.diagnostic?.breaksFirst
+  );
+  const captureCount = Number.isFinite(Number(context?.capture?.totalCount))
+    ? Number(context.capture.totalCount)
+    : 0;
+
+  return pruneEmptyObject({
+    likelyUnrelatedPrompt: Boolean(unrelatedPrompt),
+    routeKey: nonEmptyString(route?.key) || null,
+    direction: truncate(
+      nonEmptyString(context?.drivingForce?.purpose || context?.drivingForce?.vision),
+      140
+    ) || null,
+    pressurePattern: truncate(pressure, 140) || null,
+    fulfillmentArea: category
+      ? truncate(
+        `${nonEmptyString(category?.name)}${nonEmptyString(category?.mission) ? ` | ${extractFirstSentence(nonEmptyString(category?.mission))}` : ""}`,
+        160
+      )
+      : null,
+    goal: goal
+      ? truncate(
+        `${nonEmptyString(goal?.title)}${nonEmptyString(goal?.progressSummary) ? ` | ${nonEmptyString(goal?.progressSummary)}` : ""}`,
+        160
+      )
+      : null,
+    actionPlan: truncate(actionPlan, 120) || null,
+    captureLoad: captureCount > 0 ? `${captureCount} capture items` : null
+  });
 }
 
 function sanitizeLoomChatResponse(raw, { context, hasContext, latestUserMessage, intent, chipIntentRoute }) {
@@ -4640,7 +4766,10 @@ function sanitizeLoomChatResponse(raw, { context, hasContext, latestUserMessage,
     return safeChatFallback({ hasContext, context, intent: normalizedIntent });
   }
 
-  const route = chipIntentRoute || resolveChipIntentRoute(latestUserMessage);
+  const route =
+    chipIntentRoute ||
+    resolveChipIntentRoute(latestUserMessage) ||
+    detectHeuristicIntentRoute(latestUserMessage, context);
   const debug = normalizeDebug(base.debug, context, hasContext);
   const chips = normalizeChips(base.chips, context);
   const normalizedActions = isAutoGroupIntent ? [] : normalizeActions(base.actions, {
@@ -4808,7 +4937,7 @@ function collectGrounding(input, context, { maxItems = 5, route = null } = {}) {
     const rawField = nonEmptyString(item?.field);
     if (!rawSection || !rawField) continue;
     const labels = normalizeGroundingLabels(rawSection, rawField);
-    if (!hasActionBlockGrounding && labels.section === "Action Blocks") continue;
+    if (!hasActionBlockGrounding && labels.section === "Action Plans") continue;
     const section = truncate(labels.section, 64);
     const field = truncate(labels.field, 96);
     const timestamp = normalizeGroundingTimestamp(item?.timestamp);
@@ -4855,7 +4984,7 @@ function normalizeGroundingLabels(section, field) {
     if (combined.includes("littlewin") || combined.includes("little_win")) return "Little Wins";
     if (combined.includes("outcome") || combined.includes("goal")) return "Goals";
     if (combined.includes("actionblock") || combined.includes("currentweekactionblocks") || combined.includes("actions")) {
-      return "Action Blocks";
+      return "Action Plans";
     }
     if (combined.includes("capture")) return "Capture";
     if (combined.includes("diagnostic") || combined.includes("personalization")) return "Diagnostic";
@@ -4870,7 +4999,7 @@ function normalizeGroundingLabels(section, field) {
       return "Fulfillment";
     }
     if (combined.includes("outcome") || combined.includes("goal")) return "Goals";
-    if (combined.includes("actionblock") || combined.includes("currentweekactionblocks")) return "Action Blocks";
+    if (combined.includes("actionblock") || combined.includes("currentweekactionblocks")) return "Action Plans";
     if (combined.includes("capture")) return "Capture";
     if (combined.includes("diagnostic") || combined.includes("personalization")) return "Diagnostic";
     if (combined.includes("inventory")) return "Data Inventory";
@@ -4910,7 +5039,7 @@ function buildFallbackGrounding(context, route) {
   const hasActionBlockGrounding = hasGroundableActionBlocks(context);
   const add = (section, field, timestamp) => {
     if (!section || !field) return;
-    if (section === "Action Blocks" && !hasActionBlockGrounding) return;
+    if (section === "Action Plans" && !hasActionBlockGrounding) return;
     items.push({
       section: truncate(String(section), 64),
       field: truncate(String(field), 96),
@@ -4938,7 +5067,7 @@ function buildFallbackGrounding(context, route) {
       add("Goals", "activeOutcomes[0].title", context?.sectionTimestamps?.outcomes);
     }
     if (hasActionBlockGrounding) {
-      add("Action Blocks", "currentWeekActionBlocks[0].title", context?.sectionTimestamps?.actionBlocks);
+      add("Action Plans", "currentWeekActionBlocks[0].title", context?.sectionTimestamps?.actionBlocks);
     }
     if (context?.capture && Number.isFinite(Number(context.capture.totalCount))) {
       add("Capture", "capture.totalCount", context?.sectionTimestamps?.capture);
@@ -4963,7 +5092,7 @@ function buildFallbackGrounding(context, route) {
     add("Purpose", "drivingForce.purpose", context?.sectionTimestamps?.purpose);
   }
   if (hasActionBlockGrounding) {
-    add("Action Blocks", "currentWeekActionBlocks[0].title", context?.sectionTimestamps?.actionBlocks);
+    add("Action Plans", "currentWeekActionBlocks[0].title", context?.sectionTimestamps?.actionBlocks);
   }
   if (context?.capture && Number.isFinite(Number(context.capture.totalCount))) {
     add("Capture", "capture.totalCount", context?.sectionTimestamps?.capture);
@@ -5002,15 +5131,12 @@ function normalizeGroundingTimestamp(value) {
 
 function buildSuggestionCards(inputCards, inputActions, { context, confidence, route }) {
   const level = String(confidence || "").trim().toLowerCase();
-  const routeCards = buildRouteSuggestionCards(route, context);
   if (level === "low") {
-    return routeCards;
+    return [];
   }
 
   const normalizedCards = normalizeSuggestionCards(inputCards, context);
   if (normalizedCards.length > 0) return normalizedCards;
-
-  if (routeCards.length > 0) return routeCards;
 
   return actionsToSuggestionCards(inputActions, context);
 }
@@ -5733,6 +5859,119 @@ function normalizeNextAction(input, suggestionCards, { context, confidence }) {
   };
 }
 
+function extractContextMentionTargets(context, route) {
+  const targets = [];
+  const push = (value) => {
+    const text = nonEmptyString(value);
+    if (text) targets.push(text.toLowerCase());
+  };
+  push(route?.target);
+  push(context?.drivingForce?.purpose);
+  push(context?.drivingForce?.vision);
+  const firstPassion = Array.isArray(context?.drivingForce?.passions) ? context.drivingForce.passions[0] : null;
+  push(firstPassion?.title || firstPassion?.passion);
+  const category = Array.isArray(context?.fulfillmentCategories) ? context.fulfillmentCategories[0] : null;
+  push(category?.name);
+  const goal = Array.isArray(context?.activeOutcomes) ? context.activeOutcomes[0] : null;
+  push(goal?.title);
+  const actionPlan = findRelevantActionPlanTitle(
+    context,
+    nonEmptyString(goal?.title),
+    nonEmptyString(category?.name || goal?.category)
+  );
+  push(actionPlan);
+  return uniqueOrdered(targets).slice(0, 8);
+}
+
+function looksLikeGenericLoomChatMessage(message, context, { route, prompt = "" } = {}) {
+  const text = normalizeModelCopy(message, { preserveNewlines: true }).toLowerCase();
+  if (!text || !context || typeof context !== "object") return false;
+
+  const mentionTargets = extractContextMentionTargets(context, route);
+  if (mentionTargets.some((target) => target && text.includes(target))) return false;
+
+  const genericPatterns = [
+    /\bstart small\b/,
+    /\bsmall steps?\b/,
+    /\bstay consistent\b/,
+    /\bbuild momentum\b/,
+    /\bkeep moving\b/,
+    /\bkeep it simple\b/,
+    /\bmake progress\b/,
+    /\breduce friction\b/,
+    /\bprotect your energy\b/,
+    /\bsteady progress\b/,
+    /\bone step at a time\b/
+  ];
+  const promptText = nonEmptyString(prompt).toLowerCase();
+  const echoesPrompt = promptText
+    ? text.split(/\s+/).some((token) => token.length >= 5 && promptText.includes(token))
+    : false;
+  return genericPatterns.some((pattern) => pattern.test(text)) && !echoesPrompt;
+}
+
+async function repairGenericLoomChatMessage({
+  apiKey,
+  model,
+  latestUserMessage,
+  originalMessage,
+  context,
+  personalizationBrief,
+  route
+}) {
+  if (!apiKey) return null;
+
+  const schema = {
+    name: "loom_chat_message_repair",
+    strict: true,
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        message: { type: "string" }
+      },
+      required: ["message"]
+    }
+  };
+
+  const systemPrompt = [
+    "You repair LoomAI chat messages that are too generic.",
+    "Rewrite the message so it feels specific to this exact Loom user.",
+    "Use 2-4 concrete details from APP_CONTEXT or PERSONALIZATION_BRIEF.",
+    "Do not add new facts. Do not add suggestions, bullets, or option comparisons.",
+    "Keep it concise: 1-3 short paragraphs maximum.",
+    "Avoid generic productivity filler like 'start small', 'build momentum', or 'stay consistent'.",
+    "Use the term Action Plans, not Action Blocks.",
+    "Return JSON only: {\"message\":\"string\"}"
+  ].join("\n");
+
+  const result = await callOpenAIResponsesJSON({
+    apiKey,
+    model: nonEmptyString(model) || DEFAULT_CHAT_MODEL,
+    systemPrompt,
+    userPayload: {
+      latestUserMessage,
+      originalMessage,
+      route: route && typeof route === "object"
+        ? { id: Number(route.id) || null, key: nonEmptyString(route.key) || null, target: nonEmptyString(route.target) || null }
+        : null,
+      APP_CONTEXT: context,
+      PERSONALIZATION_BRIEF: personalizationBrief
+    },
+    responseSchema: schema,
+    maxOutputTokens: 220,
+    timeoutMs: 6000,
+    reasoningEffort: "none",
+    allowRetry: false
+  });
+
+  if (result?.error) return { message: "", usage: result?.usage || null };
+  return {
+    message: normalizeModelCopy(result?.json?.message, { preserveNewlines: true }),
+    usage: result?.usage || null
+  };
+}
+
 function validateOutput(output, { context, hasContext, route }) {
   const message = composeMessage(output?.message, { context, route });
   const sanitizedMessage = removeInteractionText(message);
@@ -6368,9 +6607,23 @@ function canonicalizeDiagnosticForVision(input) {
 
 export const __test = {
   resolveChipIntentRoute,
+  detectHeuristicIntentRoute,
+  rankPurposeProfilesHeuristically,
+  purposeProfileTopBand,
+  pickPurposeProfileFromTopBand,
+  buildPurposeProfileHeuristicSeed,
+  purposeProfileCatalog: PURPOSE_PROFILE_CATALOG.map((item) => ({
+    profile: item.profile,
+    strength: item.strength,
+    weakness: item.weakness,
+    stressTrigger: item.stressTrigger,
+    breakingPoint: item.breakingPoint
+  })),
+  buildChatPersonalizationBrief,
   composeMessage,
   collectGrounding,
   buildSuggestionCards,
+  looksLikeGenericLoomChatMessage,
   validateOutput,
   sanitizeLoomChatResponse
 };

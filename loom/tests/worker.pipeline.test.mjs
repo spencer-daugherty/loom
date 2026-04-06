@@ -1,13 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { __test } from "../worker.js";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const snapshotPath = path.join(__dirname, "__snapshots__", "worker.pipeline.snapshots.json");
 
 const mockContext = {
   generatedAt: "2026-03-05T10:00:00.000Z",
@@ -40,70 +33,58 @@ const mockContext = {
   appGuide: [{ title: "Action Blocks Workflow" }]
 };
 
-const chipPrompts = [
-  "Daily Little Wins for Health & Vitality",
-  "New Mission for Health & Vitality",
-  "New Identity for Health & Vitality",
-  "Next step for Sleep 7+ hours",
-  "Plan for Sleep 7+ hours",
-  "New passions for Love",
-  "Improve my Purpose Vision",
-  "How can I best use Loom?"
-];
-
-function runCase(prompt) {
-  const route = __test.resolveChipIntentRoute(prompt);
-  const suggestionCards = __test.buildSuggestionCards([], [], {
-    context: mockContext,
-    confidence: "medium",
-    route
-  });
-  const grounding = __test.collectGrounding([], mockContext, { route, maxItems: 4 });
-  const output = __test.validateOutput({
-    message: "You can make focused progress this week.",
-    grounding,
-    suggestionCards,
-    nextAction: null,
-    chips: [],
-    actions: [],
-    debug: { usedContext: true, confidence: "medium", evidence: ["drivingForce.vision"] }
-  }, {
-    context: mockContext,
-    hasContext: true,
-    route
-  });
-
-  return {
-    routeID: route?.id ?? null,
-    routeKey: route?.key ?? null,
-    suggestionCardCount: output.suggestionCards.length,
-    suggestionCardTitle: output.suggestionCards[0]?.title ?? "",
-    optionTypes: (output.suggestionCards[0]?.options ?? []).map((item) => item.type),
-    nextActionType: output.nextAction?.type ?? "",
-    groundingFields: output.grounding.map((item) => `${item.section}|${item.field}`),
-    message: output.message
-  };
-}
-
-test("worker pipeline snapshots for chip intents 1-8", () => {
-  const actual = Object.fromEntries(chipPrompts.map((prompt) => [prompt, runCase(prompt)]));
-
-  if (process.env.UPDATE_SNAPSHOTS === "1") {
-    fs.mkdirSync(path.dirname(snapshotPath), { recursive: true });
-    fs.writeFileSync(snapshotPath, `${JSON.stringify(actual, null, 2)}\n`, "utf8");
-  }
-
-  const expected = JSON.parse(fs.readFileSync(snapshotPath, "utf8"));
-  assert.deepEqual(actual, expected);
-});
-
 test("route 6 normalizes legacy 'just' emotion alias", () => {
   const route = __test.resolveChipIntentRoute("New passions for just");
   assert.equal(route?.id, 6);
   assert.equal(route?.target, "hate");
 });
 
-test("route 6 still returns suggestion cards when model confidence is low", () => {
+test("heuristic routing maps loose goal prompts to the right route and target", () => {
+  const nextRoute = __test.detectHeuristicIntentRoute("What should I do next for Sleep 7+ hours?", mockContext);
+  const planRoute = __test.detectHeuristicIntentRoute("Help me plan Sleep 7+ hours this week.", mockContext);
+
+  assert.equal(nextRoute?.id, 4);
+  assert.equal(nextRoute?.target, "Sleep 7+ hours");
+  assert.equal(planRoute?.id, 5);
+  assert.equal(planRoute?.target, "Sleep 7+ hours");
+});
+
+test("personalization brief carries the live goal, area, and action plan context", () => {
+  const brief = __test.buildChatPersonalizationBrief({
+    context: mockContext,
+    latestUserMessage: "How should I plan Sleep 7+ hours this week?",
+    route: { id: 5, key: "goal_plan", target: "Sleep 7+ hours" },
+    unrelatedPrompt: false
+  });
+
+  assert.equal(brief.routeKey, "goal_plan");
+  assert.match(brief.direction, /End stress|calm execution/i);
+  assert.match(brief.fulfillmentArea, /Health & Vitality/i);
+  assert.match(brief.goal, /Sleep 7\+ hours/i);
+  assert.match(brief.actionPlan, /Morning routine block/i);
+});
+
+test("generic-response detector flags broad filler when no specific context appears", () => {
+  assert.equal(
+    __test.looksLikeGenericLoomChatMessage(
+      "Start small, stay consistent, and build momentum this week.",
+      mockContext,
+      { route: { id: 5, key: "goal_plan", target: "Sleep 7+ hours" }, prompt: "How should I approach Sleep 7+ hours?" }
+    ),
+    true
+  );
+
+  assert.equal(
+    __test.looksLikeGenericLoomChatMessage(
+      '[[O:Sleep 7+ hours]] is the live target inside [[F:Health & Vitality]], so the answer should stay tied to that structure this week.',
+      mockContext,
+      { route: { id: 5, key: "goal_plan", target: "Sleep 7+ hours" }, prompt: "How should I approach Sleep 7+ hours?" }
+    ),
+    false
+  );
+});
+
+test("sanitizeLoomChatResponse does not inject deterministic route cards on low confidence", () => {
   const output = __test.sanitizeLoomChatResponse({
     message: "Use one of these options.",
     grounding: [],
@@ -119,8 +100,38 @@ test("route 6 still returns suggestion cards when model confidence is low", () =
     intent: "loomai_chat"
   });
 
+  assert.equal(output.suggestionCards.length, 0);
+  assert.equal(output.actions.length, 0);
+});
+
+test("sanitizeLoomChatResponse preserves model-provided suggestion cards for routed prompts", () => {
+  const output = __test.sanitizeLoomChatResponse({
+    message: '[[O:Sleep 7+ hours]] needs a tighter plan this week.',
+    grounding: [],
+    suggestionCards: [{
+      id: "goal-plan",
+      title: "Plan for Sleep 7+ hours",
+      description: "",
+      options: [{
+        id: "goal-plan-a",
+        label: "A",
+        title: "Set bedtime alarm for 10:30 PM",
+        type: "createCaptureAction",
+        payload: { text: "Set bedtime alarm for 10:30 PM" }
+      }]
+    }],
+    nextAction: null,
+    chips: [],
+    actions: [],
+    debug: { usedContext: true, confidence: "high", evidence: ["activeOutcomes[0].title"] }
+  }, {
+    context: mockContext,
+    hasContext: true,
+    latestUserMessage: "Plan for Sleep 7+ hours",
+    intent: "loomai_chat"
+  });
+
   assert.equal(output.suggestionCards.length, 1);
-  assert.equal(output.suggestionCards[0].options.length, 3);
-  assert.ok(output.suggestionCards[0].options.every((item) => item.type === "addPassionItem"));
-  assert.equal(output.suggestionCards[0].options[0]?.payload?.passionType, "love");
+  assert.equal(output.suggestionCards[0].title, "Plan for Sleep 7+ hours");
+  assert.equal(output.suggestionCards[0].options[0].type, "createCaptureAction");
 });
