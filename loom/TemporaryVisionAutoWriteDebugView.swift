@@ -56,6 +56,7 @@ struct TemporaryVisionAutoWriteDebugView: View {
     @StateObject private var personalizationStore = PersonalizationStore()
     @Query(sort: \DrivingForce.updatedAt, order: .reverse) private var drivingForces: [DrivingForce]
     @Query(sort: \Passion.date, order: .forward) private var passions: [Passion]
+    @Query(sort: \Fulfillment.updatedAt, order: .reverse) private var fulfillments: [Fulfillment]
     @Query(sort: \DiagnosticsInsightsSnapshot.generatedAt, order: .reverse) private var diagnosticsInsightsSnapshots: [DiagnosticsInsightsSnapshot]
     @Query(sort: \PurposeProfileInsightsSnapshot.generatedAt, order: .reverse) private var purposeProfileInsightsSnapshots: [PurposeProfileInsightsSnapshot]
 
@@ -275,7 +276,7 @@ struct TemporaryVisionAutoWriteDebugView: View {
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     } else if mode == .autoGroup {
-                        Text("Sends your existing Capture list (latest up to 25) to AutoGroup using intent autogroup_plan.")
+                        Text("Runs the Apple Intelligence AutoGroup prompt used by Plan Group and shows the structured request/context/response for debugging.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     } else if mode == .resultAutoWrite {
@@ -788,8 +789,19 @@ struct TemporaryVisionAutoWriteDebugView: View {
         responseDurationText = "-"
         usageSummaryText = "-"
         estimatedCostText = "-"
+        rawContextText = ""
         defer { isLoading = false }
         let startedAt = Date()
+
+        guard AppleIntelligenceSupport.isAvailable else {
+            responseStatus = "Apple Intelligence unavailable"
+            rawRequestText = "<no request sent>"
+            rawContextText = ""
+            rawResponseText = "AutoGroup debug is only available on devices and OS versions that support Apple Intelligence."
+            responseDurationText = formatDuration(Date().timeIntervalSince(startedAt))
+            estimatedCostText = "On-device unavailable"
+            return
+        }
 
         let candidates = loadAutoGroupCandidates()
         guard candidates.count >= 6 else {
@@ -802,100 +814,91 @@ struct TemporaryVisionAutoWriteDebugView: View {
         }
 
         do {
+            struct AutoGroupPromptPayload: Encodable {
+                struct Action: Encodable {
+                    let id: String
+                    let text: String
+                }
+
+                let fulfillmentAreas: [String]
+                let actions: [Action]
+            }
+
+            struct AutoGroupDebugRequest: Encodable {
+                let provider: String
+                let feature: String
+                let prompt: String
+                let promptPayload: AutoGroupPromptPayload
+            }
+
             let normalizedItems: [(id: String, text: String)] = candidates.map { item in
                 let cleanText = item.text
                     .replacingOccurrences(of: "\n", with: " ")
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 return (item.id.uuidString, cleanText)
             }
-            let actionLines = normalizedItems.enumerated().map { index, item in
-                "\(index + 1). id=\(item.id) | text=\(item.text)"
-            }
+            let availableAreas = Array(
+                Set(
+                    fulfillments
+                        .map { $0.category.trimmingCharacters(in: .whitespacesAndNewlines) }
+                        .filter { !$0.isEmpty }
+                )
+            )
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+            let promptPayload = AutoGroupPromptPayload(
+                fulfillmentAreas: availableAreas,
+                actions: normalizedItems.map { item in
+                    .init(id: item.id, text: item.text)
+                }
+            )
 
             let instruction = """
             You are helping with Loom Plan Step 3 (Group).
-            Group the provided Capture actions into meaningful topical groups.
+            Group the provided Capture actions into meaningful topical groups using the structured response fields.
 
             Hard rules:
-            - Return ONLY JSON
-            - High-confidence only. If confidence is not high, return confidence="low" and groups=[]
+            - If confidence is not high, return confidence="low" and groups=[]
             - Minimum 2 groups
             - Each group must have at least 3 actions
             - Maximum 8 groups
             - Use only the provided actionIDs
             - Do not duplicate an actionID across groups
             - Prefer grouping by what the actions are related to (topic/domain), not by effort level or urgency
-            - Set fulfillmentArea to an empty string unless an action explicitly names one
+            - For each group, set fulfillmentArea to one available fulfillment area when possible
+            - If a group clearly does not fit any available fulfillment area, use fulfillmentArea="Other"
+            - Use fulfillmentArea="Other" at most once total
             - It is OK to leave low-confidence/ambiguous actions ungrouped if needed
             - If leaving actions ungrouped, still satisfy the minimum grouping rules with the grouped subset
+            - `name` should be short and readable, 2 to 4 words when possible
+            - `reason` should be a short sentence
 
-            Return JSON exactly:
-            {"confidence":"high","reason":"short string","groups":[{"name":"string","fulfillmentArea":"string","actionIDs":["uuid"]}]}
-
-            Capture actions to group (latest up to 25):
-            \(actionLines.joined(separator: "\n"))
+            Input JSON:
+            \(try encodePrettyJSONText(promptPayload))
             """
 
-            let context: [String: Any] = [
-                "capture": [
-                    "totalCount": normalizedItems.count,
-                    "topItems": Array(normalizedItems.prefix(8).map { $0.text })
-                ],
-                "captureItems": normalizedItems.map { item in
-                    [
-                        "id": item.id,
-                        "text": item.text
-                    ]
-                }
-            ]
-            let contextData = try JSONSerialization.data(withJSONObject: context, options: [.prettyPrinted, .sortedKeys])
-            rawContextText = String(data: contextData, encoding: .utf8) ?? "<context encoding failed>"
+            rawContextText = try encodePrettyJSONText(promptPayload)
+            rawRequestText = try encodePrettyJSONText(
+                AutoGroupDebugRequest(
+                    provider: "Apple Intelligence",
+                    feature: "Plan AutoGroup",
+                    prompt: instruction,
+                    promptPayload: promptPayload
+                )
+            )
 
-            let body: [String: Any] = [
-                "messages": [
-                    [
-                        "role": "user",
-                        "content": instruction
-                    ]
-                ],
-                "context": context,
-                "client": [
-                    "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
-                    "platform": "iOS",
-                    "locale": Locale.current.identifier,
-                    "intent": "autogroup_plan",
-                    "screen": "plan_group_debug",
-                    "userLocalDate": Self.localDayKey(),
-                    "timezone": TimeZone.current.identifier
-                ]
-            ]
-
-            let bodyData = try JSONSerialization.data(withJSONObject: body, options: [.prettyPrinted, .sortedKeys])
-            rawRequestText = String(data: bodyData, encoding: .utf8) ?? "<request encoding failed>"
-
-            var request = URLRequest(url: chatEndpointURL)
-            request.httpMethod = "POST"
-            request.timeoutInterval = 60
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = bodyData
-
-            responseStatus = "Sending..."
-            let (data, response) = try await URLSession.shared.data(for: request)
-            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-            let responseText = String(data: data, encoding: .utf8) ?? "<non-UTF8 \(data.count) bytes>"
-            rawResponseText = responseText
-            responseStatus = "HTTP \(status)"
+            responseStatus = "Generating..."
+            let response = try await AppleIntelligenceAutoGroupGenerator.grouping(prompt: instruction)
+            rawResponseText = try encodePrettyJSONText(response)
+            responseStatus = "Completed"
             responseDurationText = formatDuration(Date().timeIntervalSince(startedAt))
-            updateUsageEstimate(from: data, requestData: bodyData, fallbackModel: "gpt-5-mini")
+            usageSummaryText = "Apple Intelligence system model"
+            estimatedCostText = "On-device"
         } catch {
-            let nsError = error as NSError
-            if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorTimedOut {
-                responseStatus = "Request timed out"
-            } else {
-                responseStatus = "Request failed"
-            }
+            responseStatus = "Generation failed"
             rawResponseText = String(describing: error)
             responseDurationText = formatDuration(Date().timeIntervalSince(startedAt))
+            usageSummaryText = "Apple Intelligence system model"
+            estimatedCostText = "On-device"
         }
     }
 

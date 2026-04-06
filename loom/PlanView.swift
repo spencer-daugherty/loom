@@ -1291,6 +1291,7 @@ struct PlanStepThreeView: View {
     @State private var autoGroupOutlineAngle: Double = 0
     @State private var autoGroupIconAnimating: Bool = false
     @State private var autoGroupIconAnimationTask: Task<Void, Never>? = nil
+    @State private var autoGroupTask: Task<Void, Never>? = nil
 
     @State private var poolItemIDs: [UUID] = []
     @State private var chunks: [ChunkContainerState] = []
@@ -1333,19 +1334,6 @@ struct PlanStepThreeView: View {
         var confidence: Double
     }
 
-    private struct AIAutoGroupResponse: Decodable {
-        struct Group: Decodable {
-            var name: String?
-            var fulfillmentArea: String?
-            var actionIDs: [String]?
-        }
-        var confidence: String?
-        var reason: String?
-        var groups: [Group]
-    }
-
-    private let loomAIService = LoomAIService()
-
     private var secondaryButtonTextColor: Color {
         colorScheme == .dark ? Color(.secondaryLabel) : .black
     }
@@ -1383,6 +1371,31 @@ struct PlanStepThreeView: View {
 
     private var selectedLabelIDs: Set<UUID> {
         Set(chunks.compactMap(\.selectionLabelId))
+    }
+
+    private func normalizedAutoGroupAreaKey(_ raw: String) -> String {
+        raw
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+
+    private var autoGroupLabelIDByNormalizedArea: [String: UUID] {
+        var result: [String: UUID] = [:]
+        for label in selectableLabels {
+            let labelKey = normalizedAutoGroupAreaKey(label.label)
+            if !labelKey.isEmpty {
+                result[labelKey] = label.id
+            }
+            let categoryKey = normalizedAutoGroupAreaKey(label.category)
+            if !categoryKey.isEmpty {
+                result[categoryKey] = label.id
+            }
+        }
+        result[normalizedAutoGroupAreaKey(PlanOtherLabel.title)] = PlanOtherLabel.id
+        return result
     }
 
     private func labelsByCategory(for chunkIndex: Int) -> [(category: String, labels: [Step3SelectableLabel])] {
@@ -1690,6 +1703,7 @@ struct PlanStepThreeView: View {
         }
         .onDisappear {
             guard hasInitializedStep3State else { return }
+            cancelAutoGroup()
             isDraggingOverGroupArea = false
             selectedPoolItemIDForTapGrouping = nil
             persistStep3Plan(force: true)
@@ -1882,45 +1896,50 @@ struct PlanStepThreeView: View {
         }
         .padding(.top, isRefreshVisible ? 10 : 0)
         .overlay(alignment: .topTrailing) {
-            Button {
-                Task { await autoGroupRecentCaptureActions() }
-            } label: {
-                HStack(spacing: 6) {
-                    Image("LoomAI")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 27, height: 27)
-                        .rotation3DEffect(
-                            .degrees(isAutoGrouping && autoGroupIconAnimating ? 180 : 0),
-                            axis: (x: 1, y: 0, z: 0)
-                        )
-                    Text("AutoGroup")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(autoGroupGradient)
+            if AppleIntelligenceSupport.isAvailable {
+                Button {
+                    if isAutoGrouping {
+                        cancelAutoGroup()
+                    } else {
+                        startAutoGroup()
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image("LoomAI")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 27, height: 27)
+                            .rotation3DEffect(
+                                .degrees(isAutoGrouping && autoGroupIconAnimating ? 180 : 0),
+                                axis: (x: 1, y: 0, z: 0)
+                            )
+                        Text("AutoGroup")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(autoGroupGradient)
+                    }
+                    .padding(.horizontal, 15)
+                    .padding(.vertical, 9)
+                    .background(
+                        Capsule()
+                            .fill(Color(.systemGroupedBackground))
+                    )
+                    .overlay(
+                        Capsule()
+                            .stroke(autoGroupGradient, lineWidth: 2.25)
+                    )
                 }
-                .padding(.horizontal, 15)
-                .padding(.vertical, 9)
-                .background(
-                    Capsule()
-                        .fill(Color(.systemGroupedBackground))
-                )
-                .overlay(
-                    Capsule()
-                        .stroke(autoGroupGradient, lineWidth: 2.25)
-                )
-            }
-            .buttonStyle(.plain)
-            .disabled(isAutoGrouping)
-            .opacity(isAutoGrouping ? 0.7 : 1)
-            .offset(x: 0, y: -56)
-            .onAppear {
-                guard autoGroupOutlineAngle == 0 else { return }
-                withAnimation(.linear(duration: 8).repeatForever(autoreverses: false)) {
-                    autoGroupOutlineAngle = 360
+                .buttonStyle(.plain)
+                .opacity(isAutoGrouping ? 0.7 : 1)
+                .offset(x: 0, y: -56)
+                .onAppear {
+                    guard autoGroupOutlineAngle == 0 else { return }
+                    withAnimation(.linear(duration: 8).repeatForever(autoreverses: false)) {
+                        autoGroupOutlineAngle = 360
+                    }
                 }
-            }
-            .onChange(of: isAutoGrouping, initial: false) { _, isLoading in
-                setAutoGroupIconLoadingAnimation(isLoading)
+                .onChange(of: isAutoGrouping, initial: false) { _, isLoading in
+                    setAutoGroupIconLoadingAnimation(isLoading)
+                }
             }
         }
     }
@@ -2459,6 +2478,14 @@ struct PlanStepThreeView: View {
     }
 
     private func setChunkSelection(chunkIndex: Int, toLabelId newLabelId: UUID?) {
+        setChunkSelection(chunkIndex: chunkIndex, toLabelId: newLabelId, in: &chunks)
+    }
+
+    private func setChunkSelection(
+        chunkIndex: Int,
+        toLabelId newLabelId: UUID?,
+        in chunks: inout [ChunkContainerState]
+    ) {
         chunks[chunkIndex].selectionLabelId = newLabelId
 
         guard let newLabelId else {
@@ -2856,6 +2883,19 @@ struct PlanStepThreeView: View {
     }
 
     private func moveItem(_ itemID: UUID, toChunkAt chunkIndex: Int) {
+        moveItem(itemID, toChunkAt: chunkIndex, chunks: &chunks, poolItemIDs: &poolItemIDs)
+        if selectedPoolItemIDForTapGrouping == itemID {
+            selectedPoolItemIDForTapGrouping = nil
+        }
+        normalizeEmptyChunksBeyondTopTwo()
+    }
+
+    private func moveItem(
+        _ itemID: UUID,
+        toChunkAt chunkIndex: Int,
+        chunks: inout [ChunkContainerState],
+        poolItemIDs: inout [UUID]
+    ) {
         if let idx = poolItemIDs.firstIndex(of: itemID) {
             poolItemIDs.remove(at: idx)
         }
@@ -2869,10 +2909,6 @@ struct PlanStepThreeView: View {
         if !chunks[chunkIndex].itemIDs.contains(itemID) {
             chunks[chunkIndex].itemIDs.append(itemID)
         }
-        if selectedPoolItemIDForTapGrouping == itemID {
-            selectedPoolItemIDForTapGrouping = nil
-        }
-        normalizeEmptyChunksBeyondTopTwo()
     }
 
     private func moveItemToPool(_ itemID: UUID) {
@@ -2936,6 +2972,10 @@ struct PlanStepThreeView: View {
     }
 
     private func normalizeEmptyChunksBeyondTopTwo() {
+        normalizeEmptyChunksBeyondTopTwo(&chunks)
+    }
+
+    private func normalizeEmptyChunksBeyondTopTwo(_ chunks: inout [ChunkContainerState]) {
         guard chunks.count > 2 else { return }
         let head = Array(chunks.prefix(2))
         let tail = Array(chunks.dropFirst(2))
@@ -2984,7 +3024,10 @@ struct PlanStepThreeView: View {
     private func autoGroupRecentCaptureActions() async {
         guard !isAutoGrouping else { return }
         isAutoGrouping = true
-        defer { isAutoGrouping = false }
+        defer {
+            isAutoGrouping = false
+            autoGroupTask = nil
+        }
 
         let candidates = Array(poolItems.sorted { $0.createdAt > $1.createdAt }.prefix(25))
         let totalPoolCount = poolItems.count
@@ -3001,9 +3044,9 @@ struct PlanStepThreeView: View {
             return
         }
 
-        let aiPlans = await buildAutoGroupPlansViaLoomAI(for: candidates)
-        let fallbackPlans = buildAutoGroupPlans(for: candidates)
-        guard let plans = aiPlans ?? fallbackPlans else {
+        let plans = await buildAutoGroupPlansViaAppleIntelligence(for: candidates)
+        guard !Task.isCancelled else { return }
+        guard let plans else {
             autoGroupFeedback = AutoGroupFeedback(
                 title: "Can't AutoGroup",
                 message: "AutoGroup couldn't confidently group actions. Try grouping them manually or reword to clarify.",
@@ -3058,11 +3101,14 @@ struct PlanStepThreeView: View {
             return
         }
 
-        while chunks.indices.filter({ chunks[$0].itemIDs.isEmpty }).count < requiredNewGroupCount, chunks.count < maxChunks {
-            chunks.append(ChunkContainerState(isLocked: chunks.count < 2))
+        var updatedChunks = chunks
+        var updatedPoolItemIDs = poolItemIDs
+
+        while updatedChunks.indices.filter({ updatedChunks[$0].itemIDs.isEmpty }).count < requiredNewGroupCount, updatedChunks.count < maxChunks {
+            updatedChunks.append(ChunkContainerState(isLocked: updatedChunks.count < 2))
         }
 
-        let targetChunkIndices = Array(chunks.indices.filter { chunks[$0].itemIDs.isEmpty }.prefix(requiredNewGroupCount))
+        let targetChunkIndices = Array(updatedChunks.indices.filter { updatedChunks[$0].itemIDs.isEmpty }.prefix(requiredNewGroupCount))
         guard targetChunkIndices.count == requiredNewGroupCount else {
             autoGroupFeedback = AutoGroupFeedback(
                 title: "Not Enough Group Slots",
@@ -3074,6 +3120,7 @@ struct PlanStepThreeView: View {
 
         var createdTargetCursor = 0
         for (plan, existingTargetIndex) in zip(selectedPlans, selectedExistingTargets) {
+            guard !Task.isCancelled else { return }
             let chunkIndex: Int
             if let existingTargetIndex {
                 chunkIndex = existingTargetIndex
@@ -3082,15 +3129,19 @@ struct PlanStepThreeView: View {
                 createdTargetCursor += 1
             }
             for itemID in plan.itemIDs {
-                moveItem(itemID, toChunkAt: chunkIndex)
+                moveItem(itemID, toChunkAt: chunkIndex, chunks: &updatedChunks, poolItemIDs: &updatedPoolItemIDs)
             }
             if existingTargetIndex == nil, let labelID = plan.fulfillmentLabelID {
-                setChunkSelection(chunkIndex: chunkIndex, toLabelId: labelID)
+                setChunkSelection(chunkIndex: chunkIndex, toLabelId: labelID, in: &updatedChunks)
             } else if existingTargetIndex == nil {
-                setChunkSelection(chunkIndex: chunkIndex, toLabelId: nil)
+                setChunkSelection(chunkIndex: chunkIndex, toLabelId: nil, in: &updatedChunks)
             }
         }
 
+        guard !Task.isCancelled else { return }
+        normalizeEmptyChunksBeyondTopTwo(&updatedChunks)
+        chunks = updatedChunks
+        poolItemIDs = updatedPoolItemIDs
         enforceShowHiddenIfNeeded()
         syncPoolWithVisibility()
         persistStep3Plan()
@@ -3116,6 +3167,17 @@ struct PlanStepThreeView: View {
             message: message,
             canGroupMore: canGroupMore && poolItems.count >= 6
         )
+    }
+
+    private func startAutoGroup() {
+        autoGroupTask?.cancel()
+        autoGroupTask = Task { await autoGroupRecentCaptureActions() }
+    }
+
+    private func cancelAutoGroup() {
+        autoGroupTask?.cancel()
+        autoGroupTask = nil
+        isAutoGrouping = false
     }
 
     private func setAutoGroupIconLoadingAnimation(_ isLoading: Bool) {
@@ -3356,10 +3418,20 @@ struct PlanStepThreeView: View {
         return plans
     }
 
-    private func buildAutoGroupPlansViaLoomAI(for items: [RollingCaptureItem]) async -> [AutoGroupAssignmentPlan]? {
+    private func buildAutoGroupPlansViaAppleIntelligence(for items: [RollingCaptureItem]) async -> [AutoGroupAssignmentPlan]? {
         guard items.count >= 6 else { return nil }
+        guard AppleIntelligenceSupport.isAvailable else { return nil }
 
         do {
+            struct AutoGroupPromptPayload: Encodable {
+                struct Action: Encodable {
+                    let id: String
+                    let text: String
+                }
+                let fulfillmentAreas: [String]
+                let actions: [Action]
+            }
+
             let normalizedItems: [(id: UUID, text: String)] = items.map { item in
                 let cleanText = item.text
                     .replacingOccurrences(of: "\n", with: " ")
@@ -3374,98 +3446,64 @@ struct PlanStepThreeView: View {
                 )
             )
             .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
-            let availableAreaList = availableAreas.joined(separator: ", ")
-            let actionLines = normalizedItems.enumerated().map { index, item in
-                "\(index + 1). id=\(item.id.uuidString) | text=\(item.text)"
-            }
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            let payload = AutoGroupPromptPayload(
+                fulfillmentAreas: availableAreas,
+                actions: normalizedItems.map { item in
+                    .init(id: item.id.uuidString, text: item.text)
+                }
+            )
+            let payloadJSON = ((try? encoder.encode(payload)).flatMap { String(data: $0, encoding: .utf8) }) ?? "{}"
 
             let instruction = """
             You are helping with Loom Plan Step 3 (Group).
-            Group the provided Capture actions into meaningful topical groups.
+            Group the provided Capture actions into meaningful topical groups using the structured response fields.
 
             Hard rules:
-            - Return ONLY JSON
-            - High-confidence only. If confidence is not high, return confidence="low" and groups=[]
+            - If confidence is not high, return confidence="low" and groups=[]
             - Minimum 2 groups
             - Each group must have at least 3 actions
             - Maximum 8 groups
             - Use only the provided actionIDs
             - Do not duplicate an actionID across groups
             - Prefer grouping by what the actions are related to (topic/domain), not by effort level or urgency
-            - For each group, set fulfillmentArea to one available fulfillment area from this list when possible: [\(availableAreaList)]
+            - For each group, set fulfillmentArea to one available fulfillment area when possible
             - If a group clearly does not fit any available fulfillment area, use fulfillmentArea="Other"
             - Use fulfillmentArea="Other" at most once total
             - It is OK to leave low-confidence/ambiguous actions ungrouped if needed
             - If leaving actions ungrouped, still satisfy the minimum grouping rules with the grouped subset
+            - `name` should be short and readable, 2 to 4 words when possible
+            - `reason` should be a short sentence
 
-            Return JSON exactly:
-            {"confidence":"high","reason":"short string","groups":[{"name":"string","fulfillmentArea":"string","actionIDs":["uuid"]}]}
-
-            Capture actions to group (latest up to 25):
-            \(actionLines.joined(separator: "\n"))
+            Input JSON:
+            \(payloadJSON)
             """
 
-            let captureContextItems = normalizedItems.map { item in
-                LoomAIService.AutoGroupContext.CaptureItem(
-                    id: item.id.uuidString,
-                    text: item.text
-                )
-            }
-            let response = try await loomAIService.sendAutoGroupChat(
-                messages: [.init(role: "user", content: instruction)],
-                captureItems: captureContextItems,
-                totalCaptureCount: items.count,
-                intent: "autogroup_plan",
-                screen: "plan_group"
-            )
-
-            let raw = response.message.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard let data = raw.data(using: .utf8) else { return nil }
-            let parsed = try JSONDecoder().decode(AIAutoGroupResponse.self, from: data)
-            guard (parsed.confidence ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "high" else {
+            let response = try await AppleIntelligenceAutoGroupGenerator.grouping(prompt: instruction)
+            guard response.confidence.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "high" else {
                 return nil
             }
 
             let itemIDSet = Set(items.map(\.id))
-            let normalizeAreaKey: (String) -> String = { raw in
-                raw
-                    .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
-                    .lowercased()
-                    .components(separatedBy: CharacterSet.alphanumerics.inverted)
-                    .filter { !$0.isEmpty }
-                    .joined(separator: " ")
-            }
-            var labelByNormalizedArea: [String: UUID] = [:]
-            for label in selectableLabels {
-                let labelKey = normalizeAreaKey(label.label)
-                if !labelKey.isEmpty {
-                    labelByNormalizedArea[labelKey] = label.id
-                }
-                let categoryKey = normalizeAreaKey(label.category)
-                if !categoryKey.isEmpty {
-                    labelByNormalizedArea[categoryKey] = label.id
-                }
-            }
-            labelByNormalizedArea[normalizeAreaKey(PlanOtherLabel.title)] = PlanOtherLabel.id
-
             var seenActionIDs = Set<UUID>()
             var plans: [AutoGroupAssignmentPlan] = []
             var otherAssignedCount = 0
 
-            for group in parsed.groups {
-                let ids = (group.actionIDs ?? []).compactMap(UUID.init(uuidString:))
+            for group in response.groups {
+                let ids = group.actionIDs.compactMap(UUID.init(uuidString:))
                 let validIDs = ids.filter { itemIDSet.contains($0) }
                 guard validIDs.count >= 3 else { continue }
                 guard !validIDs.contains(where: { seenActionIDs.contains($0) }) else { return nil }
                 seenActionIDs.formUnion(validIDs)
 
-                let name = (group.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                let areaRaw = (group.fulfillmentArea ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                let areaKey = normalizeAreaKey(areaRaw)
-                let nameKey = normalizeAreaKey(name)
+                let name = group.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                let areaRaw = group.fulfillmentArea.trimmingCharacters(in: .whitespacesAndNewlines)
+                let areaKey = normalizedAutoGroupAreaKey(areaRaw)
+                let nameKey = normalizedAutoGroupAreaKey(name)
 
                 var fulfillmentLabelID: UUID? = nil
-                if !areaKey.isEmpty, let matched = labelByNormalizedArea[areaKey] {
+                if !areaKey.isEmpty, let matched = autoGroupLabelIDByNormalizedArea[areaKey] {
                     if matched == PlanOtherLabel.id {
                         if otherAssignedCount == 0 {
                             fulfillmentLabelID = matched
@@ -3474,7 +3512,7 @@ struct PlanStepThreeView: View {
                     } else {
                         fulfillmentLabelID = matched
                     }
-                } else if !nameKey.isEmpty, let matched = labelByNormalizedArea[nameKey], matched != PlanOtherLabel.id {
+                } else if !nameKey.isEmpty, let matched = autoGroupLabelIDByNormalizedArea[nameKey], matched != PlanOtherLabel.id {
                     fulfillmentLabelID = matched
                 } else if otherAssignedCount == 0 {
                     // Use "Other" once for a group that doesn't fit any available fulfillment area.
