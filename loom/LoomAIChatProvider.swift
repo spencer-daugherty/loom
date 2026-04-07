@@ -8,6 +8,7 @@ struct LoomAIChatRoute: Equatable {
 }
 
 final class LoomAIChatProvider {
+    private static let unrelatedPromptFallbackMessage = "This seems unrelated to Loom, but here's some Loom-specific help:"
     private enum AppleContextProfile {
         case standard
         case minimal
@@ -571,6 +572,20 @@ extension LoomAIChatProvider {
             )
         }
 
+        if isUnrelatedRedirectResponse(normalized) {
+            return LoomAIService.LoomAIResponse(
+                message: unrelatedPromptFallbackMessage,
+                grounding: normalized.grounding,
+                suggestionCards: [],
+                nextAction: nil,
+                chips: normalized.chips,
+                actions: [],
+                debug: normalized.debug,
+                usage: normalized.usage,
+                elapsedMS: normalized.elapsedMS
+            )
+        }
+
         return normalized
     }
 
@@ -657,6 +672,28 @@ private extension LoomAIChatProvider {
             contextHash: existing?.contextHash ?? context.personalizationHash,
             contextKeys: existing?.contextKeys
         )
+    }
+
+    static func isUnrelatedRedirectResponse(_ response: LoomAIService.LoomAIResponse) -> Bool {
+        let message = normalizeLine(response.message).lowercased()
+        guard !message.isEmpty else { return false }
+
+        let directSignals = [
+            "unrelated to loom",
+            "loom-specific help"
+        ]
+        if directSignals.contains(where: { message.contains($0) }) {
+            return true
+        }
+
+        let chipTitles = response.chips
+            .map(\.title)
+            .map(normalizeLine)
+            .map { $0.lowercased() }
+
+        let hasLifeOSChip = chipTitles.contains("loom ecosystem map")
+        let hasTutorialChip = chipTitles.contains("purpose onboarding")
+        return hasLifeOSChip && hasTutorialChip
     }
 
     static func normalizeGrounding(

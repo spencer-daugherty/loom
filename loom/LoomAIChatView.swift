@@ -126,6 +126,7 @@ struct LoomAIChatView: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 messageBubble(message)
                                 if message.roleRaw == LoomAIChatRole.assistant.rawValue {
+                                    unrelatedPromptLinksView(for: message)
                                     groundingSectionView(items: LoomAIChatMessageGroundingCodec.decode(message.groundingJSON))
                                     suggestionCardsSectionView(
                                         cards: LoomAIChatMessageSuggestionCardsCodec.decode(message.suggestionCardsJSON),
@@ -706,18 +707,20 @@ struct LoomAIChatView: View {
                     }
 
                 if !isUser {
-                    if let providerLabel = assistantProviderLabel(for: message) {
-                        Text(providerLabel)
-                            .font(.caption2.weight(.semibold))
+                    HStack(spacing: 8) {
+                        if let providerLabel = assistantProviderLabel(for: message) {
+                            Text(providerLabel)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 0)
+                        #if DEBUG
+                        Text(messageTimestampLine(message.createdAt))
+                            .font(.caption2)
                             .foregroundStyle(.secondary)
-                            .padding(.horizontal, 4)
+                        #endif
                     }
-                    #if DEBUG
-                    Text(messageTimestampLine(message.createdAt))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 4)
-                    #endif
+                    .padding(.horizontal, 4)
                 }
             }
             .frame(width: isUser ? nil : assistantBubbleWidth, alignment: .leading)
@@ -790,6 +793,10 @@ struct LoomAIChatView: View {
             .replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\r", with: "\n")
 
+        if let trimmedRedirect = trimmedUnrelatedPromptRedirect(in: content) {
+            return trimmedRedirect
+        }
+
         let hasSuggestionCards = !LoomAIChatMessageSuggestionCardsCodec.decode(message.suggestionCardsJSON).isEmpty
         let hasFallbackActions = !LoomAIChatMessageActionsCodec.decode(message.actionsJSON).isEmpty
         let hasNextAction = LoomAIChatMessageNextActionCodec.decode(message.nextActionJSON) != nil
@@ -831,6 +838,16 @@ struct LoomAIChatView: View {
         return trimmed
     }
 
+    private func trimmedUnrelatedPromptRedirect(in content: String) -> String? {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let lower = trimmed.lowercased()
+        guard lower.contains("unrelated to loom"),
+              lower.contains("loom-specific help:") else { return nil }
+        guard let range = trimmed.range(of: "help:", options: [.caseInsensitive]) else { return nil }
+        return String(trimmed[..<range.upperBound])
+    }
+
     private func assistantProviderLabel(for message: LoomAIChatMessage) -> String? {
         let model = LoomAIDebugCodec.decode(message.debugJSON)?.model?
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -841,9 +858,63 @@ struct LoomAIChatView: View {
             return "Apple Intelligence"
         case "openai.worker":
             return "OpenAI"
+        case let value? where value.hasPrefix("loom.local"):
+            return "Automatic"
+        case let value? where value.contains("heuristic"):
+            return "Automatic"
         default:
             return nil
         }
+    }
+
+    @ViewBuilder
+    private func unrelatedPromptLinksView(for message: LoomAIChatMessage) -> some View {
+        if shouldShowUnrelatedPromptLinks(for: message) {
+            VStack(alignment: .leading, spacing: 6) {
+                unrelatedPromptLinkButton(title: "Open LifeOS page") {
+                    NotificationCenter.default.post(name: .loomAIOpenLifeOSInsights, object: nil)
+                }
+                unrelatedPromptLinkButton(title: "Launch tutorial") {
+                    NotificationCenter.default.post(name: .loomAILaunchTutorial, object: nil)
+                }
+            }
+            .padding(.top, 2)
+        }
+    }
+
+    private func shouldShowUnrelatedPromptLinks(for message: LoomAIChatMessage) -> Bool {
+        guard message.roleRaw == LoomAIChatRole.assistant.rawValue else { return false }
+        let content = sanitizedAssistantMessageContent(for: message).lowercased()
+        guard content.contains("unrelated to loom"),
+              content.contains("loom-specific help:") else { return false }
+        let chips = LoomAIChatMessageChipsCodec.decode(message.chipsJSON)
+        let chipTitles = Set(chips.map { $0.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() })
+        return chipTitles.contains("loom ecosystem map") && chipTitles.contains("purpose onboarding")
+    }
+
+    private func unrelatedPromptLinkButton(title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.blue)
+                    .multilineTextAlignment(.leading)
+                Image(systemName: "arrow.up.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.blue.opacity(0.9))
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.blue.opacity(colorScheme == .dark ? 0.16 : 0.08))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.blue.opacity(colorScheme == .dark ? 0.34 : 0.18), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     #if DEBUG

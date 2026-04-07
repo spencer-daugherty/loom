@@ -5,6 +5,8 @@ extension Notification.Name {
     static let loomAIChatThreadSelectionDidChange = Notification.Name("loomAIChatThreadSelectionDidChange")
     static let loomAIChatMessagesDidChange = Notification.Name("loomAIChatMessagesDidChange")
     static let loomAIOpenAddFulfillmentAreaPrefill = Notification.Name("loomAIOpenAddFulfillmentAreaPrefill")
+    static let loomAIOpenLifeOSInsights = Notification.Name("loomAIOpenLifeOSInsights")
+    static let loomAILaunchTutorial = Notification.Name("loomAILaunchTutorial")
 }
 
 @Model

@@ -72,6 +72,10 @@ private struct DarkModeInvertImage: ViewModifier {
 }
 
 struct ContentView: View {
+    @AppStorage(UserSessionStore.Keys.hasSeenOnboarding) private var hasSeenOnboarding = false
+    @AppStorage(UserSessionStore.Keys.hasAccount) private var hasAccount = false
+    @AppStorage(UserSessionStore.Keys.hasCompletedDiagnostic) private var hasCompletedDiagnostic = false
+    @AppStorage(UserSessionStore.Keys.hasSeenDiagnosticInsights) private var hasSeenDiagnosticInsights = false
     @AppStorage(UserSessionStore.Keys.isSubscribed) private var isSubscribed = false
     @AppStorage("enable_projects_feature") private var enableProjectsFeature = false
     @AppStorage("blank_homepage_mode") private var blankHomepageMode = false
@@ -117,6 +121,7 @@ struct ContentView: View {
     @State private var littleWinsShowHiddenPlaceholder = false
     @State private var isPresentingLittleWinsManagerSheet = false
     @State private var isPresentingLittleWinsShareCamera = false
+    @State private var isPresentingLifeOSInsights = false
     @State private var littleWinsScheduleStoreRevision = 0
     @State private var littleWinsIntegrationStoreRevision = 0
     @State private var littleWinsIntegrationDetailTarget: LittleWinsIntegrationDetailTarget? = nil
@@ -523,6 +528,13 @@ struct ContentView: View {
             contentViewNavigationStackBody
                 .navigationDestination(isPresented: $navigateToFulfillmentFromOnboarding) {
                     FulfillmentView()
+                }
+                .navigationDestination(isPresented: $isPresentingLifeOSInsights) {
+                    FulfillmentStartView(
+                        entryMode: .lifeOSInsights,
+                        showsProgressStrip: false,
+                        openedFromPersonalization: true
+                    )
                 }
                 .navigationDestination(item: $onboardingCallCardDestination) { destination in
                     switch destination {
@@ -1084,6 +1096,23 @@ struct ContentView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: .loomAIOpenAddFulfillmentAreaPrefill)) { _ in
                 isPresentingLoomAIFulfillmentAreaPrefill = true
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .loomAIOpenLifeOSInsights)) { _ in
+                if homePageIndex != HomeSwipePage.home.rawValue {
+                    homePageIndex = HomeSwipePage.home.rawValue
+                }
+                DispatchQueue.main.async {
+                    isPresentingLifeOSInsights = true
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .loomAILaunchTutorial)) { _ in
+                hasAccount = true
+                hasCompletedDiagnostic = true
+                hasSeenDiagnosticInsights = true
+                isSubscribed = true
+                hasSeenOnboarding = false
+                hasSeenContentQuickstart = false
+                forceShowContentQuickstartOnce = true
             }
             .onReceive(NotificationCenter.default.publisher(for: .loomSharePayloadReceived)) { note in
                 guard let payloadID = note.object as? String else { return }
