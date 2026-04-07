@@ -80,6 +80,37 @@ private final class ActionViewRuntimeState {
     var autosaveTask: Task<Void, Never>? = nil
 }
 
+private struct ActionChromeMaterialLayer<S: Shape>: View {
+    let shape: S
+    var shadowRadius: CGFloat = 0
+    var shadowY: CGFloat = 0
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        shape
+            .fill(.ultraThinMaterial)
+            .overlay {
+                LinearGradient(
+                    colors: [
+                        Color.white.opacity(colorScheme == .dark ? 0.10 : 0.16),
+                        Color.clear,
+                        Color.black.opacity(colorScheme == .dark ? 0.10 : 0.06)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .clipShape(shape)
+                .allowsHitTesting(false)
+            }
+            .shadow(
+                color: Color.black.opacity(shadowRadius > 0 ? (colorScheme == .dark ? 0.22 : 0.10) : 0),
+                radius: shadowRadius,
+                x: 0,
+                y: shadowY
+            )
+    }
+}
+
 struct ActionView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
@@ -132,6 +163,8 @@ struct ActionView: View {
     @AppStorage("dev_action_blocks_warning_old_blocks")
     private var devActionBlocksWarningOldBlocks: Bool = false
     @State private var actionBlocksSimpleViewEnabled: Bool = false
+    @State private var isSearchPresented: Bool = false
+    @State private var actionSearchText: String = ""
 
     @State private var isShowingInstructions: Bool = false
     @State private var openFilter: FilterMenu? = nil
@@ -183,6 +216,8 @@ struct ActionView: View {
     @State private var deferredPersistor = ActionDeferredPersistor()
     @State private var carriedProfileAppliedActionIDs: Set<UUID> = []
     @State private var dueSnapshotsCache: [String: PlannedActionDueSnapshot] = [:]
+    @FocusState private var isSearchFieldFocused: Bool
+    @FocusState private var isActionEditorFocused: Bool
     private let weekStart: Date
     private static let signposter = OSSignposter(subsystem: "loom", category: "ActionView")
 
@@ -413,6 +448,10 @@ struct ActionView: View {
         return placesCatalog
             .filter { selected.contains($0.id) }
             .sorted { $0.place.localizedCaseInsensitiveCompare($1.place) == .orderedAscending }
+    }
+
+    private var placesCatalogByID: [UUID: SensitivityPlaceCatalogItem] {
+        Dictionary(uniqueKeysWithValues: placesCatalog.map { ($0.id, $0) })
     }
 
     private var availableDurations: [Int] {
@@ -756,6 +795,7 @@ struct ActionView: View {
         let rolesByID: [UUID: String]
         let outcomesByID: [UUID: Outcomes]
         let orderedChunksForDisplay: [PlannedChunk]
+        let visibleChunksForDisplay: [PlannedChunk]
         let filteredByChunk: [UUID: [PlannedChunkAction]]
     }
 
@@ -793,13 +833,24 @@ struct ActionView: View {
         let orderedChunksForDisplay = signposted("compute_ordered_chunks_for_display") {
             orderedWeekChunksForDisplay(executionByAction: executionByAction)
         }
+        let searchedActions = searchFilteredActions(
+            from: filterContext.fullyFilteredActions,
+            notesByAction: notesByAction,
+            attachmentsByAction: attachmentsByAction,
+            resourcesByAction: resourcesByAction,
+            resourceCatalogByID: resourcesCatalogByID,
+            placesByAction: placesByAction
+        )
         let filteredByChunk = signposted("build_filtered_by_chunk") {
             buildFilteredActionsByChunk(
-                filteredActions: filterContext.fullyFilteredActions,
+                filteredActions: searchedActions,
                 executionByAction: executionByAction
             )
         }
-        return RenderState(
+        let visibleChunksForDisplay: [PlannedChunk] = searchQueryTrimmed.isEmpty
+            ? orderedChunksForDisplay
+            : orderedChunksForDisplay.filter { !(filteredByChunk[$0.id] ?? []).isEmpty }
+        let renderState = RenderState(
             defineByAction: defineByAction,
             executionByAction: executionByAction,
             notesByAction: notesByAction,
@@ -813,8 +864,10 @@ struct ActionView: View {
             rolesByID: rolesByID,
             outcomesByID: outcomesByID,
             orderedChunksForDisplay: orderedChunksForDisplay,
+            visibleChunksForDisplay: visibleChunksForDisplay,
             filteredByChunk: filteredByChunk
         )
+        return renderState
     }
 
     var body: some View {
@@ -830,40 +883,17 @@ struct ActionView: View {
     }
 
     private func actionBodyChrome<Content: View>(_ content: Content) -> some View {
-        content
-            .overlay(alignment: .bottom) {
-                if showCompleteHint {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("You cannot complete if any actions are active.")
-                            .font(.footnote)
-                            .fontWeight(.bold)
-
-                        (
-                            Text("Please mark all of your actions to ")
-                            + Text(Image(systemName: "xmark")) + Text(" Done, ")
-                            + Text(Image(systemName: "arrow.right")) + Text(" Recapture for later, or ")
-                            + Text(Image(systemName: "square")) + Text(" Wasn't needed to acheive result (Delete).")
-                        )
-                        .font(.footnote)
-                    }
-                    .multilineTextAlignment(.leading)
-                    .padding(10)
-                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10)
-                            .stroke(Color.black.opacity(0.12), lineWidth: 1)
-                    )
-                    .padding(.horizontal, 4)
-                    .padding(.bottom, 56)
-                    .transition(.opacity)
-                }
+        let chromeBase = content
+            .overlay(alignment: .top) {
+                completeHintOverlay
             }
             .padding(.horizontal)
             .safeAreaPadding(.top)
-            .safeAreaPadding(.bottom)
             .navigationTitle("Action Plan")
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarBackButtonHidden(true)
+            .toolbarBackground(Color.clear, for: .navigationBar)
+            .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button {
@@ -874,26 +904,23 @@ struct ActionView: View {
                 }
 
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    if !areAllActionBlocksCollapsed {
-                        Button(actionBlocksSimpleViewEnabled ? "Full View" : "Simple View") {
-                            actionBlocksSimpleViewEnabled.toggle()
-                        }
-                        .buttonStyle(.plain)
-                        .font(.footnote.weight(.medium))
-                        .foregroundStyle(.blue)
-                    }
+                    headerTrailingControls
                 }
 
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
-                    if isKeyboardVisible {
+                    if isKeyboardVisible && !isSearchPresented {
                         keyboardAccessoryButton
                     }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(Color(.systemBackground))
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                actionBottomInset
+            }
             .coordinateSpace(name: "action-scroll")
+
+        return chromeBase
             .navigationDestination(item: $rearrangeActionsSheetPayload) { sheet in
                 RearrangeActionsSheet(
                     items: sheet.items,
@@ -902,6 +929,91 @@ struct ActionView: View {
                     }
                 )
             }
+    }
+
+    @ViewBuilder
+    private var completeHintOverlay: some View {
+        if showCompleteHint {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("You cannot complete if any actions are active.")
+                    .font(.footnote)
+                    .fontWeight(.bold)
+
+                (
+                    Text("Please mark all of your actions to ")
+                    + Text(Image(systemName: "xmark")) + Text(" Done, ")
+                    + Text(Image(systemName: "arrow.right")) + Text(" Recapture for later, or ")
+                    + Text(Image(systemName: "square")) + Text(" Wasn't needed to acheive result (Delete).")
+                )
+                .font(.footnote)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            .multilineTextAlignment(.leading)
+            .padding(10)
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color.black.opacity(0.12), lineWidth: 1)
+            )
+            .padding(.horizontal, 4)
+            .padding(.top, 8)
+            .transition(.opacity)
+        }
+    }
+
+    private var headerTrailingControls: some View {
+        HStack(spacing: 0) {
+            if isSearchPresented {
+                Button {
+                    actionSearchText = ""
+                    isSearchPresented = false
+                    isSearchFieldFocused = false
+                    dismissKeyboardOnly()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.body.weight(.semibold))
+                        .offset(x: 0.5)
+                        .frame(width: 28, height: 28, alignment: .center)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.blue)
+            } else {
+                if !areAllActionBlocksCollapsed {
+                    Color.clear
+                        .frame(width: 6)
+
+                    Button(actionBlocksSimpleViewEnabled ? "Full View" : "Simple View") {
+                        actionBlocksSimpleViewEnabled.toggle()
+                    }
+                    .buttonStyle(.plain)
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.blue)
+
+                    Divider()
+                        .frame(width: 1, height: 18)
+                        .padding(.horizontal, 8)
+                }
+
+                Button {
+                    isSearchPresented = true
+                    openFilter = nil
+                    DispatchQueue.main.async {
+                        isSearchFieldFocused = true
+                    }
+                } label: {
+                    Image(systemName: "magnifyingglass")
+                        .font(.body.weight(.semibold))
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.blue)
+            }
+
+            Color.clear
+                .frame(width: 6)
+        }
     }
 
     private func actionBodyPresentations<Content: View>(_ content: Content) -> some View {
@@ -1222,8 +1334,10 @@ struct ActionView: View {
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+                commitFocusedActionDraftIfNeeded()
                 isKeyboardVisible = false
                 keyboardHeight = 0
+                isActionEditorFocused = false
                 focusedActionID = nil
                 cleanupPendingBlankActions()
                 cleanupAllBlankActions()
@@ -1235,13 +1349,6 @@ struct ActionView: View {
         VStack(spacing: 0) {
             collapsibleHeader(filterContext: render.filterContext)
             actionScrollSection(render: render)
-
-            Spacer(minLength: 0)
-
-            Color.clear
-                .frame(height: 12)
-
-            actionFooterPrimaryControl
         }
     }
 
@@ -1264,8 +1371,14 @@ struct ActionView: View {
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .center)
                             .padding(.top, 24)
+                    } else if !searchQueryTrimmed.isEmpty && render.visibleChunksForDisplay.isEmpty {
+                        Text("No matching actions found.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.top, 24)
                     } else {
-                        ForEach(render.orderedChunksForDisplay) { chunk in
+                        ForEach(render.visibleChunksForDisplay) { chunk in
                             chunkCard(
                                 chunk,
                                 allActions: render.allByChunk[chunk.id] ?? [],
@@ -1316,10 +1429,16 @@ struct ActionView: View {
             }
             .onChange(of: focusedActionID) { _, id in
                 signposted("on_change_focused_action_id") {
-                    guard let id else { return }
+                    guard let id else {
+                        isActionEditorFocused = false
+                        return
+                    }
                     DispatchQueue.main.async {
                         withAnimation(.easeInOut(duration: 0.2)) {
-                            proxy.scrollTo(id, anchor: .bottom)
+                            proxy.scrollTo(id, anchor: editingActionScrollAnchor)
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            isActionEditorFocused = true
                         }
                     }
                 }
@@ -1329,7 +1448,7 @@ struct ActionView: View {
                     guard let id else { return }
                     DispatchQueue.main.async {
                         withAnimation(.easeInOut(duration: 0.2)) {
-                            proxy.scrollTo(id, anchor: .bottom)
+                            proxy.scrollTo(id, anchor: editingActionScrollAnchor)
                         }
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
                             focusedActionID = id
@@ -1366,7 +1485,7 @@ struct ActionView: View {
                     guard height > 0, let id = focusedActionID else { return }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                         withAnimation(.easeInOut(duration: 0.2)) {
-                            proxy.scrollTo(id, anchor: .bottom)
+                            proxy.scrollTo(id, anchor: editingActionScrollAnchor)
                         }
                     }
                 }
@@ -1374,9 +1493,17 @@ struct ActionView: View {
         }
     }
 
+    private var editingActionScrollAnchor: UnitPoint {
+        UnitPoint(x: 0.5, y: 0.82)
+    }
+
+    private var isEditingActionPresented: Bool {
+        focusedActionID != nil && !isSearchPresented
+    }
+
     private var actionFooterPrimaryControl: some View {
         Group {
-            if !isKeyboardVisible {
+            if !isKeyboardVisible && !isSearchPresented {
                 Button {
                     if canCompleteActions {
                         persistNow()
@@ -1394,6 +1521,59 @@ struct ActionView: View {
             }
         }
         .padding(.bottom, 2)
+    }
+
+    private var actionBottomInset: some View {
+        ZStack(alignment: .bottom) {
+            if !isSearchPresented && !isEditingActionPresented {
+                actionBottomToolbarBackdrop
+            }
+
+            VStack(spacing: 0) {
+                if isEditingActionPresented {
+                    actionEditorBar
+                        .zIndex(1)
+                } else if !isKeyboardVisible && !isSearchPresented {
+                    actionFooterPrimaryControl
+                        .padding(.horizontal)
+                        .padding(.top, 10)
+                        .padding(.bottom, 8)
+                        .zIndex(1)
+                } else if isSearchPresented {
+                    searchBar
+                        .zIndex(1)
+                }
+            }
+        }
+    }
+
+    private var actionBottomToolbarBackdrop: some View {
+        GeometryReader { proxy in
+            ActionChromeMaterialLayer(
+                shape: Rectangle(),
+                shadowRadius: 12,
+                shadowY: -2
+            )
+            .frame(
+                width: proxy.size.width,
+                height: 94 + proxy.safeAreaInsets.bottom,
+                alignment: .bottom
+            )
+            .mask(
+                LinearGradient(
+                    stops: [
+                        .init(color: .clear, location: 0),
+                        .init(color: .black.opacity(0.22), location: 0.58),
+                        .init(color: .black, location: 1)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            .ignoresSafeArea(edges: .bottom)
+        }
+        .allowsHitTesting(false)
     }
 
     private var keyboardAccessoryShowsCheckmark: Bool {
@@ -1430,6 +1610,112 @@ struct ActionView: View {
         .buttonStyle(.plain)
     }
 
+    private var searchQueryTrimmed: String {
+        actionSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var searchBar: some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("Search actions", text: $actionSearchText)
+                    .textInputAutocapitalization(.sentences)
+                    .autocorrectionDisabled(false)
+                    .submitLabel(.search)
+                    .focused($isSearchFieldFocused)
+                    .onSubmit {
+                        dismissKeyboardOnly()
+                    }
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 44)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color(.secondarySystemBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.black.opacity(colorScheme == .dark ? 0.22 : 0.08), lineWidth: 1)
+            )
+
+            Button {
+                actionSearchText = ""
+                isSearchPresented = false
+                isSearchFieldFocused = false
+                dismissKeyboardOnly()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(Color.primary.opacity(0.78))
+                    .frame(width: 44, height: 44)
+                    .background(
+                        Circle()
+                            .fill(Color(.secondarySystemBackground))
+                    )
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal)
+        .padding(.top, 8)
+        .padding(.bottom, max(8, keyboardHeight > 0 ? 8 : 12))
+    }
+
+    private var actionEditorBar: some View {
+        HStack(alignment: .bottom, spacing: 10) {
+            HStack(alignment: .bottom, spacing: 8) {
+                Image(systemName: "square.and.pencil")
+                    .foregroundStyle(.secondary)
+                    .padding(.bottom, 12)
+
+                TextField("Edit action", text: focusedActionDraftBinding, axis: .vertical)
+                    .textInputAutocapitalization(.sentences)
+                    .autocorrectionDisabled(false)
+                    .submitLabel(.return)
+                    .lineLimit(1 ... 6)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .multilineTextAlignment(.leading)
+                    .focused($isActionEditorFocused)
+                    .onSubmit {
+                        dismissKeyboardAndCommit()
+                    }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color(.secondarySystemBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.black.opacity(colorScheme == .dark ? 0.22 : 0.08), lineWidth: 1)
+            )
+
+            keyboardAccessoryButton
+        }
+        .padding(.horizontal)
+        .padding(.top, 8)
+        .padding(.bottom, max(8, keyboardHeight > 0 ? 8 : 12))
+        .onAppear {
+            DispatchQueue.main.async {
+                isActionEditorFocused = true
+            }
+        }
+    }
+
+    private var focusedActionDraftBinding: Binding<String> {
+        Binding(
+            get: {
+                guard let focusedActionID else { return "" }
+                return liveActionDraftByID[focusedActionID] ?? weekActionsByID[focusedActionID]?.text ?? ""
+            },
+            set: { newValue in
+                guard let focusedActionID else { return }
+                liveActionDraftByID[focusedActionID] = newValue
+            }
+        )
+    }
+
     private func collapsibleHeader(filterContext: ActionFilterContext) -> some View {
         VStack(spacing: 8) {
             if !isHeaderCollapsed {
@@ -1437,10 +1723,11 @@ struct ActionView: View {
                 if shouldShowActionBlocksOldCautionCard && !dismissActionBlocksCautionCard {
                     cautionRow
                 }
-                if !areAllActionBlocksCollapsed && !filterContext.orderedVisibleFilterChips.isEmpty {
+                if !isSearchPresented && !areAllActionBlocksCollapsed && !filterContext.orderedVisibleFilterChips.isEmpty {
                     filterChipsRow(filterContext: filterContext)
                 }
-                if !areAllActionBlocksCollapsed,
+                if !isSearchPresented,
+                   !areAllActionBlocksCollapsed,
                    !filterContext.orderedVisibleFilterChips.isEmpty,
                    let openFilter,
                    isFilterMenuAvailable(openFilter, filterContext: filterContext) {
@@ -1574,18 +1861,20 @@ struct ActionView: View {
     private func filterChipsRow(filterContext: ActionFilterContext) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                Button {
-                    resetAllFilters()
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "arrow.clockwise")
-                        Text("refresh")
+                if isAnyFilterApplied {
+                    Button {
+                        resetAllFilters()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.clockwise")
+                            Text("refresh")
+                        }
                     }
+                    .buttonStyle(.plain)
+                    .font(.subheadline)
+                    .foregroundStyle(.gray)
+                    .padding(.trailing, 2)
                 }
-                .buttonStyle(.plain)
-                .font(.subheadline)
-                .foregroundStyle(.gray)
-                .padding(.trailing, 2)
 
                 ForEach(filterContext.orderedVisibleFilterChips, id: \.self) { chip in
                     filterChipView(chip)
@@ -1871,8 +2160,10 @@ struct ActionView: View {
             .overlay(
                 RoundedRectangle(cornerRadius: 14)
                     .stroke(
-                        actionBlocksSimpleViewEnabled ? Color.clear : (colorScheme == .dark ? Color.white.opacity(0.18) : Color.black.opacity(0.12)),
-                        lineWidth: actionBlocksSimpleViewEnabled ? 0 : 1
+                        actionBlocksSimpleViewEnabled
+                        ? fill.opacity(isOtherChunk ? 0.72 : (colorScheme == .dark ? 0.92 : 1.0))
+                        : (colorScheme == .dark ? Color.white.opacity(0.18) : Color.black.opacity(0.12)),
+                        lineWidth: actionBlocksSimpleViewEnabled ? 1.5 : 1
                     )
             )
             .contentShape(Rectangle())
@@ -2424,13 +2715,8 @@ struct ActionView: View {
                 showsReorderHandle: showsReorderHandle,
                 simpleMode: simpleMode,
                 simpleModeFillColor: blockFill,
-                focusedActionID: $focusedActionID,
-                isKeyboardVisible: $isKeyboardVisible,
-                onLiveTextChange: { newValue in
-                    liveActionDraftByID[action.id] = newValue
-                },
-                onCommitText: { newValue in
-                    handleActionTextCommit(action: action, newValue: newValue)
+                onTapText: {
+                    beginEditingAction(action)
                 },
                 onOpenStatus: {
                     actionStatusActionID = ActionSheetID(id: action.id)
@@ -3222,6 +3508,17 @@ struct ActionView: View {
         }
     }
 
+    private func beginEditingAction(_ action: PlannedChunkAction) {
+        actionSearchText = ""
+        isSearchPresented = false
+        isSearchFieldFocused = false
+        liveActionDraftByID[action.id] = action.text
+        focusedActionID = action.id
+        DispatchQueue.main.async {
+            isActionEditorFocused = true
+        }
+    }
+
     private func markAllUncompletedAsRecapture() {
         let executionByAction = executionStateByActionID
         for action in weekActions {
@@ -3377,6 +3674,81 @@ struct ActionView: View {
             }
         }
         return false
+    }
+
+    private func searchFilteredActions(
+        from actions: [PlannedChunkAction],
+        notesByAction: [UUID: PlannedChunkActionNote],
+        attachmentsByAction: [UUID: [PlannedChunkActionAttachment]],
+        resourcesByAction: [UUID: UUID],
+        resourceCatalogByID: [UUID: LeverageResource],
+        placesByAction: [UUID: Set<UUID>]
+    ) -> [PlannedChunkAction] {
+        let query = searchQueryTrimmed
+        guard !query.isEmpty else { return actions }
+        let normalizedQuery = normalizedActionSearchText(query)
+
+        return actions.filter { action in
+            actionMatchesSearch(
+                action,
+                normalizedQuery: normalizedQuery,
+                notesByAction: notesByAction,
+                attachmentsByAction: attachmentsByAction,
+                resourcesByAction: resourcesByAction,
+                resourceCatalogByID: resourceCatalogByID,
+                placesByAction: placesByAction
+            )
+        }
+    }
+
+    private func actionMatchesSearch(
+        _ action: PlannedChunkAction,
+        normalizedQuery: String,
+        notesByAction: [UUID: PlannedChunkActionNote],
+        attachmentsByAction: [UUID: [PlannedChunkActionAttachment]],
+        resourcesByAction: [UUID: UUID],
+        resourceCatalogByID: [UUID: LeverageResource],
+        placesByAction: [UUID: Set<UUID>]
+    ) -> Bool {
+        guard !normalizedQuery.isEmpty else { return true }
+
+        var haystacks: [String] = [action.text]
+
+        if let note = notesByAction[action.id]?.noteText, !note.isEmpty {
+            haystacks.append(note)
+        }
+
+        if let resourceID = resourcesByAction[action.id],
+           let resource = resourceCatalogByID[resourceID] {
+            haystacks.append(resource.value)
+            haystacks.append(resource.kind == .person ? "person" : "tool")
+        }
+
+        if let placeIDs = placesByAction[action.id] {
+            for id in placeIDs {
+                if let place = placesCatalogByID[id]?.place, !place.isEmpty {
+                    haystacks.append(place)
+                }
+            }
+        }
+
+        for attachment in attachmentsByAction[action.id] ?? [] {
+            haystacks.append(attachment.fileName ?? "")
+            haystacks.append(attachment.urlString ?? "")
+            haystacks.append(attachment.kindRaw)
+        }
+
+        return haystacks.contains { value in
+            normalizedActionSearchText(value).contains(normalizedQuery)
+        }
+    }
+
+    private func normalizedActionSearchText(_ value: String) -> String {
+        value
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .lowercased()
     }
 
     private func status(for actionId: UUID) -> ActionExecutionStatus {
@@ -3861,9 +4233,7 @@ struct ActionView: View {
     }
 
     private func dismissKeyboardAndCommit() {
-        if let focusedActionID {
-            liveActionDraftByID[focusedActionID] = weekActionsByID[focusedActionID]?.text ?? ""
-        }
+        commitFocusedActionDraftIfNeeded()
         #if canImport(UIKit)
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         #endif
@@ -3874,6 +4244,12 @@ struct ActionView: View {
         #if canImport(UIKit)
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         #endif
+    }
+
+    private func commitFocusedActionDraftIfNeeded() {
+        guard let focusedActionID, let action = weekActionsByID[focusedActionID] else { return }
+        let draft = liveActionDraftByID[focusedActionID] ?? action.text
+        handleActionTextCommit(action: action, newValue: draft)
     }
 
     private func handleDurationSheetDismiss() {
@@ -5385,106 +5761,6 @@ private extension String {
     }
 }
 
-private struct InlineActionEditor: View {
-    let actionId: UUID
-    let sourceText: String
-    let font: Font
-    let textColor: Color
-    let strike: Bool
-    @Binding var focusedActionID: UUID?
-    @Binding var isKeyboardVisible: Bool
-    let onTextChange: (String) -> Void
-    let onCommit: (String) -> Void
-
-    @State private var text: String
-    @FocusState private var isFocused: Bool
-
-    init(
-        actionId: UUID,
-        sourceText: String,
-        font: Font,
-        textColor: Color,
-        strike: Bool,
-        focusedActionID: Binding<UUID?>,
-        isKeyboardVisible: Binding<Bool>,
-        onTextChange: @escaping (String) -> Void,
-        onCommit: @escaping (String) -> Void
-    ) {
-        self.actionId = actionId
-        self.sourceText = sourceText
-        self.font = font
-        self.textColor = textColor
-        self.strike = strike
-        self._focusedActionID = focusedActionID
-        self._isKeyboardVisible = isKeyboardVisible
-        self.onTextChange = onTextChange
-        self.onCommit = onCommit
-        _text = State(initialValue: sourceText)
-    }
-
-    var body: some View {
-        Group {
-            if focusedActionID == actionId || isFocused {
-                TextField("Action", text: $text, axis: .vertical)
-                    .font(font)
-                    .foregroundStyle(textColor)
-                    .strikethrough(strike, color: textColor)
-                    .lineLimit(3)
-                    .focused($isFocused)
-                    .submitLabel(.return)
-                    .onSubmit {
-                        onCommit(text)
-                        focusedActionID = nil
-                        isFocused = false
-                    }
-            } else {
-                Text(text)
-                    .font(font)
-                    .foregroundStyle(textColor)
-                    .strikethrough(strike, color: textColor)
-                    .lineLimit(3)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        focusedActionID = actionId
-                        DispatchQueue.main.async {
-                            isFocused = true
-                        }
-                    }
-            }
-        }
-        .onChange(of: sourceText) { _, newValue in
-            if newValue != text { text = newValue }
-        }
-        .onChange(of: text) { _, newValue in
-            onTextChange(newValue)
-        }
-        .onChange(of: focusedActionID) { _, newValue in
-            isFocused = (newValue == actionId)
-        }
-        .onChange(of: isFocused) { _, nowFocused in
-            if nowFocused {
-                if focusedActionID != actionId { focusedActionID = actionId }
-            } else {
-                onCommit(text)
-                if focusedActionID == actionId, !isKeyboardVisible {
-                    focusedActionID = nil
-                }
-            }
-        }
-        .onAppear {
-            onTextChange(text)
-            if focusedActionID == actionId {
-                DispatchQueue.main.async { isFocused = true }
-            }
-        }
-        .onDisappear {
-            onTextChange(text)
-            onCommit(text)
-        }
-    }
-}
-
 private struct ActionSwipeRow: View {
     let actionId: UUID
     let text: String
@@ -5504,10 +5780,7 @@ private struct ActionSwipeRow: View {
     let showsReorderHandle: Bool
     let simpleMode: Bool
     let simpleModeFillColor: Color
-    @Binding var focusedActionID: UUID?
-    @Binding var isKeyboardVisible: Bool
-    let onLiveTextChange: (String) -> Void
-    let onCommitText: (String) -> Void
+    let onTapText: () -> Void
     let onOpenStatus: () -> Void
     let onToggleMust: (Bool) -> Void
     let onOpenClock: () -> Void
@@ -5536,10 +5809,7 @@ private struct ActionSwipeRow: View {
         showsReorderHandle: Bool,
         simpleMode: Bool,
         simpleModeFillColor: Color,
-        focusedActionID: Binding<UUID?>,
-        isKeyboardVisible: Binding<Bool>,
-        onLiveTextChange: @escaping (String) -> Void,
-        onCommitText: @escaping (String) -> Void,
+        onTapText: @escaping () -> Void,
         onOpenStatus: @escaping () -> Void,
         onToggleMust: @escaping (Bool) -> Void,
         onOpenClock: @escaping () -> Void,
@@ -5565,10 +5835,7 @@ private struct ActionSwipeRow: View {
         self.showsReorderHandle = showsReorderHandle
         self.simpleMode = simpleMode
         self.simpleModeFillColor = simpleModeFillColor
-        self._focusedActionID = focusedActionID
-        self._isKeyboardVisible = isKeyboardVisible
-        self.onLiveTextChange = onLiveTextChange
-        self.onCommitText = onCommitText
+        self.onTapText = onTapText
         self.onOpenStatus = onOpenStatus
         self.onToggleMust = onToggleMust
         self.onOpenClock = onOpenClock
@@ -5628,7 +5895,21 @@ private struct ActionSwipeRow: View {
 
     private var actionTextColor: Color {
         // Simple View should retain the existing darker text treatment in dark mode.
-        guard !simpleMode else { return inactiveTint }
+        if simpleMode {
+            if isOtherChunk {
+                switch effectiveStatus {
+                case .leveraged:
+                    return Color.black.opacity(0.45)
+                case .done, .carriedToCapture, .notNeeded:
+                    return Color.black.opacity(0.25)
+                case .inProgress:
+                    return accent
+                case .noAction:
+                    return .black
+                }
+            }
+            return inactiveTint
+        }
         guard colorScheme == .dark else { return inactiveTint }
         return isInactive ? Color.white.opacity(0.72) : Color.white
     }
@@ -5675,17 +5956,17 @@ private struct ActionSwipeRow: View {
                         .font(.caption)
                         .foregroundStyle(dueStatusColor)
                 }
-                InlineActionEditor(
-                    actionId: actionId,
-                    sourceText: text,
-                    font: actionFont(status: effectiveStatus),
-                    textColor: actionTextColor,
-                    strike: effectiveStatus == .done || effectiveStatus == .carriedToCapture || effectiveStatus == .notNeeded,
-                    focusedActionID: $focusedActionID,
-                    isKeyboardVisible: $isKeyboardVisible,
-                    onTextChange: onLiveTextChange,
-                    onCommit: onCommitText
-                )
+                Text(text)
+                    .font(actionFont(status: effectiveStatus))
+                    .foregroundStyle(actionTextColor)
+                    .strikethrough(
+                        effectiveStatus == .done || effectiveStatus == .carriedToCapture || effectiveStatus == .notNeeded,
+                        color: actionTextColor
+                    )
+                    .lineLimit(3)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .onTapGesture(perform: onTapText)
 
                 if !simpleMode {
                     HStack(spacing: 18) {
