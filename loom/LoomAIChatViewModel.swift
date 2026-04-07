@@ -367,6 +367,7 @@ final class LoomAIViewModel: ObservableObject {
     @Published var debugFailureDetail: DebugFailureDetail?
     @Published var remainingDailyResponses: Int = 10
     @Published var dailyEstimatedSpendUSD: Double = 0
+    @Published private(set) var activeChatProviderKind: LoomAIChatProvider.Kind
     #if DEBUG
     struct RequestDebugSummary {
         var contextBytes: Int
@@ -376,7 +377,8 @@ final class LoomAIViewModel: ObservableObject {
     @Published var lastRequestDebugSummary: RequestDebugSummary?
     #endif
 
-    private let service = LoomAIService()
+    private let service: LoomAIService
+    private let chatProvider: LoomAIChatProvider
     private var lastSendAt: Date?
     private var lastSendSignature: String?
     private var sendTimestamps: [Date] = []
@@ -388,8 +390,19 @@ final class LoomAIViewModel: ObservableObject {
     private let compactContextDefaultsKey = "loom.ai.context.compact.enabled"
     private let whatIsLoomPromptTitle = "What is Loom?"
     private let whatIsLoomResponseText = "Loom is a life management app that connects your purpose, life areas, goals, and daily actions into one system so you can end stress and live fulfilled."
+    private struct CachedContextSnapshotEntry {
+        let invalidationKey: String
+        let snapshot: LoomAIContextSnapshot
+    }
+    private var cachedContextSnapshotEntry: CachedContextSnapshotEntry?
 
-    init() {
+    init(
+        service: LoomAIService = LoomAIService(),
+        chatProvider: LoomAIChatProvider? = nil
+    ) {
+        self.service = service
+        self.chatProvider = chatProvider ?? LoomAIChatProvider(service: service)
+        self.activeChatProviderKind = (chatProvider ?? LoomAIChatProvider(service: service)).currentKind
         refreshRemainingDailyResponses()
     }
 
@@ -398,10 +411,12 @@ final class LoomAIViewModel: ObservableObject {
     }
 
     var isDailyLimitReached: Bool {
-        !isDailyLimiterDisabled && remainingDailyResponses <= 0
+        guard activeChatProviderKind.usesSpendLimiter else { return false }
+        return !isDailyLimiterDisabled && remainingDailyResponses <= 0
     }
 
     var shouldShowFiveLeftWarning: Bool {
+        guard activeChatProviderKind.usesSpendLimiter else { return false }
         guard !isDailyLimiterDisabled else { return false }
         guard !isDailyLimitReached else { return false }
         return dailyEstimatedSpendUSD >= (DailyChatLimitConfig.maxDailyEstimatedCostUSD * DailyChatLimitConfig.warningThresholdRatio)
@@ -432,8 +447,11 @@ final class LoomAIViewModel: ObservableObject {
         let trimmedDisplay = (displayedUserMessage ?? draft).trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedTransport = (transportMessageOverride ?? draft).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedDisplay.isEmpty, !trimmedTransport.isEmpty, !isSending else { return }
+        activeChatProviderKind = chatProvider.currentKind
+        let purposeVisionMode = purposeVisionAutoWriteMode(for: trimmedTransport, displayText: trimmedDisplay)
+        let requestUsesSpendLimiter = purposeVisionMode != nil || activeChatProviderKind.usesSpendLimiter
         refreshRemainingDailyResponses()
-        guard isDailyLimiterDisabled || remainingDailyResponses > 0 else {
+        guard !requestUsesSpendLimiter || isDailyLimiterDisabled || remainingDailyResponses > 0 else {
             errorMessage = nil
             return
         }
@@ -474,11 +492,9 @@ final class LoomAIViewModel: ObservableObject {
                 try? context.save()
                 draft = ""
             }
+            postChatMessagesDidChange(threadKey: thread.threadKey)
 
-            let history = try context.fetch(FetchDescriptor<LoomAIChatMessage>(
-                sortBy: [SortDescriptor(\LoomAIChatMessage.createdAt, order: .forward)]
-            ))
-            .filter { $0.threadKey == threadKey }
+            let history = try fetchThreadMessages(in: context, threadKey: threadKey)
             let contextSnapshot = compactedSnapshotIfEnabled(try buildContextSnapshot(in: context))
 
             var outgoing = history.suffix(10).map {
@@ -493,8 +509,6 @@ final class LoomAIViewModel: ObservableObject {
             }
 
             if isWhatIsLoomPrompt(trimmedTransport) || isWhatIsLoomPrompt(trimmedDisplay) {
-                let delayNanoseconds = UInt64.random(in: 2_000_000_000...4_000_000_000)
-                try await Task.sleep(nanoseconds: delayNanoseconds)
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
                     let assistant = LoomAIChatMessage(
@@ -508,6 +522,7 @@ final class LoomAIViewModel: ObservableObject {
                     try? context.save()
                     latestSuggestedActions = []
                 }
+                postChatMessagesDidChange(threadKey: thread.threadKey)
                 return
             }
 
@@ -517,7 +532,7 @@ final class LoomAIViewModel: ObservableObject {
             print("[LoomAI] LoomAI contextBytes=\(requestDebug.contextBytes) keys=\(requestDebug.contextKeys) messageCount=\(requestDebug.messageCount)")
             #endif
 
-            if let visionMode = purposeVisionAutoWriteMode(for: trimmedTransport, displayText: trimmedDisplay) {
+            if let visionMode = purposeVisionMode {
                 let currentVision = contextSnapshot.drivingForce?.vision ?? ""
                 let previousSuggestions = previousPurposeVisionSuggestions(from: history)
                 let autowriteResponse = try await service.sendPurposeVisionAutoWrite(
@@ -554,10 +569,11 @@ final class LoomAIViewModel: ObservableObject {
                     followUpPromptChips = enrichedAutowriteResponse.chips.map(\.title)
                     refreshRemainingDailyResponses()
                 }
+                postChatMessagesDidChange(threadKey: thread.threadKey)
                 return
             }
 
-            let response = try await service.sendChat(
+            let providerResponse = try await chatProvider.sendChat(
                 messages: outgoing,
                 context: contextSnapshot,
                 intent: "loomai_chat",
@@ -566,8 +582,12 @@ final class LoomAIViewModel: ObservableObject {
                 timezone: TimeZone.current.identifier,
                 remainingDailyResponses: remainingDailyResponses
             )
+            activeChatProviderKind = providerResponse.provider
+            let response = providerResponse.response
             guard !Task.isCancelled else { return }
-            _ = incrementDailySpendLedger(with: response)
+            if providerResponse.provider.usesSpendLimiter {
+                _ = incrementDailySpendLedger(with: response)
+            }
             let replyText = response.message.trimmingCharacters(in: .whitespacesAndNewlines)
             let finalReply = replyText.isEmpty ? "Empty response from LoomAI proxy." : replyText
             let assistantPreviewMessage = LoomAIChatMessage(
@@ -591,6 +611,7 @@ final class LoomAIViewModel: ObservableObject {
                 followUpPromptChips = response.chips.map(\.title)
                 refreshRemainingDailyResponses()
             }
+            postChatMessagesDidChange(threadKey: thread.threadKey)
             guard !Task.isCancelled else { return }
             let updatedHistory = history + [assistantPreviewMessage]
             if shouldRequestThreadTitle(after: finalReply) {
@@ -636,6 +657,7 @@ final class LoomAIViewModel: ObservableObject {
                 )
                 #endif
             }
+            postChatMessagesDidChange(threadKey: threadKey)
         }
 
     }
@@ -663,9 +685,62 @@ final class LoomAIViewModel: ObservableObject {
         return false
     }
 
+    private func fetchThreadMessages(in context: ModelContext, threadKey: String) throws -> [LoomAIChatMessage] {
+        let descriptor = FetchDescriptor<LoomAIChatMessage>(
+            predicate: #Predicate<LoomAIChatMessage> { message in
+                message.threadKey == threadKey
+            },
+            sortBy: [SortDescriptor(\LoomAIChatMessage.createdAt, order: .forward)]
+        )
+        return try context.fetch(descriptor)
+    }
+
+    private func postChatMessagesDidChange(threadKey: String) {
+        NotificationCenter.default.post(name: .loomAIChatMessagesDidChange, object: threadKey)
+    }
+
+    @MainActor
+    func logCancelledResponse(in context: ModelContext, threadKey: String) {
+        guard let thread = try? ensureThread(in: context, threadKey: threadKey) else { return }
+        let recentMessages = (try? fetchThreadMessages(in: context, threadKey: threadKey)) ?? []
+        if recentMessages.last?.roleRaw == LoomAIChatRole.assistant.rawValue,
+           recentMessages.last?.content.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare("Response cancelled.") == .orderedSame {
+            return
+        }
+
+        let cancelledMessage = LoomAIChatMessage(
+            threadID: thread.id,
+            threadKey: thread.threadKey,
+            roleRaw: LoomAIChatRole.assistant.rawValue,
+            content: "Response cancelled."
+        )
+        context.insert(cancelledMessage)
+        thread.updatedAt = .now
+        try? context.save()
+        latestSuggestedActions = []
+        followUpPromptChips = []
+        postChatMessagesDidChange(threadKey: thread.threadKey)
+    }
+
     private func compactedSnapshotIfEnabled(_ snapshot: LoomAIContextSnapshot) -> LoomAIContextSnapshot {
         let isEnabled = UserDefaults.standard.object(forKey: compactContextDefaultsKey) as? Bool ?? true
         return isEnabled ? snapshot.compactedForLoomAI() : snapshot
+    }
+
+    private func cachedContextSnapshot(
+        in context: ModelContext,
+        invalidationKey: String?
+    ) throws -> LoomAIContextSnapshot {
+        if let invalidationKey,
+           let cachedContextSnapshotEntry,
+           cachedContextSnapshotEntry.invalidationKey == invalidationKey {
+            return cachedContextSnapshotEntry.snapshot
+        }
+        let snapshot = try buildContextSnapshot(in: context)
+        if let invalidationKey {
+            cachedContextSnapshotEntry = .init(invalidationKey: invalidationKey, snapshot: snapshot)
+        }
+        return snapshot
     }
 
     #if DEBUG
@@ -998,13 +1073,17 @@ final class LoomAIViewModel: ObservableObject {
         }
     }
 
-    func refreshSuggestedPromptChips(in context: ModelContext, threadMessages: [LoomAIChatMessage]) {
+    func refreshSuggestedPromptChips(
+        in context: ModelContext,
+        threadMessages: [LoomAIChatMessage],
+        snapshotInvalidationKey: String? = nil
+    ) {
         if !threadMessages.isEmpty {
             suggestedPromptChips = []
             return
         }
         do {
-            let snapshot = try buildContextSnapshot(in: context)
+            let snapshot = try cachedContextSnapshot(in: context, invalidationKey: snapshotInvalidationKey)
             promptChipShuffleCounter &+= 1
             let dynamic = makeDynamicPromptChips(
                 from: snapshot,
@@ -1030,16 +1109,28 @@ final class LoomAIViewModel: ObservableObject {
         }
     }
 
-    func refreshFollowUpPromptChipsIfNeeded(in context: ModelContext, threadMessages: [LoomAIChatMessage]) async {
+    func refreshFollowUpPromptChipsIfNeeded(
+        in context: ModelContext,
+        threadMessages: [LoomAIChatMessage],
+        snapshotInvalidationKey: String? = nil
+    ) async {
         guard !threadMessages.isEmpty else {
             followUpPromptChips = []
             lastFollowUpPromptSourceSignature = nil
             return
         }
-        await refreshFollowUpPromptChipsViaAI(in: context, threadMessages: threadMessages)
+        await refreshFollowUpPromptChipsViaAI(
+            in: context,
+            threadMessages: threadMessages,
+            snapshotInvalidationKey: snapshotInvalidationKey
+        )
     }
 
-    private func refreshFollowUpPromptChipsViaAI(in context: ModelContext, threadMessages: [LoomAIChatMessage]) async {
+    private func refreshFollowUpPromptChipsViaAI(
+        in context: ModelContext,
+        threadMessages: [LoomAIChatMessage],
+        snapshotInvalidationKey: String? = nil
+    ) async {
         guard threadMessages.contains(where: { $0.roleRaw == LoomAIChatRole.assistant.rawValue }) else {
             followUpPromptChips = []
             return
@@ -1055,7 +1146,7 @@ final class LoomAIViewModel: ObservableObject {
         }
 
         do {
-            let snapshot = try buildContextSnapshot(in: context)
+            let snapshot = try cachedContextSnapshot(in: context, invalidationKey: snapshotInvalidationKey)
             promptChipShuffleCounter &+= 1
             let fallback = makeDynamicPromptChips(
                 from: snapshot,
@@ -2388,44 +2479,13 @@ final class LoomAIViewModel: ObservableObject {
         messages: [LoomAIChatMessage],
         contextSnapshot: LoomAIContextSnapshot
     ) async -> String? {
-        let recent = Array(messages.suffix(10))
-        guard !recent.isEmpty else { return nil }
-
-        let transcript = recent.map { message in
-            let role = message.roleRaw.capitalized
-            let content = message.content
-                .replacingOccurrences(of: "\n", with: " ")
-                .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            return "\(role): \(content)"
-        }.joined(separator: "\n")
-
-        let titleInstruction = """
-        Summarize this Loom chat into a short menu title.
-
-        Rules:
-        - Return ONLY the title text (no quotes, no JSON, no labels)
-        - 3 to 7 words preferred
-        - Max 52 characters
-        - Use the user's real topic/goal/problem, not generic wording
-        - Do not start with 'How', 'What', 'Can', 'Should', or 'Help'
-        - No ending punctuation
-
-        Chat transcript:
-        \(transcript)
-        """
-
-        do {
-            let response = try await service.sendChat(
-                messages: [.init(role: "user", content: titleInstruction)],
-                context: contextSnapshot,
-                intent: "chat_thread_title",
-                screen: "loomai_chat_title"
-            )
-            return sanitizeAPISummarizedThreadTitle(response.message)
-        } catch {
-            return nil
-        }
+        activeChatProviderKind = chatProvider.currentKind
+        let rawTitle = await chatProvider.requestThreadTitle(
+            messages: messages,
+            contextSnapshot: contextSnapshot
+        )
+        guard let rawTitle else { return nil }
+        return sanitizeAPISummarizedThreadTitle(rawTitle)
     }
 
     private func purposeVisionAutoWriteMode(for transportText: String, displayText: String) -> String? {

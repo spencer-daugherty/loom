@@ -8,7 +8,6 @@ struct LoomAIChatView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var colorScheme
-    @Query(sort: \LoomAIChatMessage.createdAt, order: .forward) private var allMessages: [LoomAIChatMessage]
     @Query private var fulfillments: [Fulfillment]
     @Query(sort: \Outcomes.end, order: .forward) private var outcomes: [Outcomes]
     @Query private var fulfillmentFocusRows: [FulfillmentFocus]
@@ -28,7 +27,6 @@ struct LoomAIChatView: View {
     @State private var activeThreadKey = LoomAIChatThreadSelectionStore.currentThreadKey()
     @State private var threadMessages: [LoomAIChatMessage] = []
     @State private var latestAssistantMessageIDCache: UUID?
-    @State private var formattedAssistantByMessageID: [UUID: AttributedString] = [:]
     @State private var appliedSuggestedActionIDs: Set<String> = []
     @State private var chipCategoryOverrides: [String: String] = [:]
     @State private var hasEnsuredThread = false
@@ -44,8 +42,10 @@ struct LoomAIChatView: View {
     @State private var transientErrorWorkItem: DispatchWorkItem? = nil
     @State private var transientErrorToken = UUID()
     @State private var deepThinkingDelayTask: Task<Void, Never>? = nil
+    @State private var promptChipRefreshTask: Task<Void, Never>? = nil
     @State private var showDeepThinkingOverlay = false
     @State private var deepThinkingLines: [String] = []
+    @State private var suppressPendingLoadingUI = false
     @FocusState private var isInputFocused: Bool
     private let keyboardTopGap: CGFloat = 12
     private let bestUseLoomChipTitle = "How can I best use Loom?"
@@ -66,6 +66,36 @@ struct LoomAIChatView: View {
 
     private var visiblePromptChips: [String] {
         messages.isEmpty ? viewModel.suggestedPromptChips : viewModel.followUpPromptChips
+    }
+
+    private var shouldShowLoadingUI: Bool {
+        viewModel.isSending && !suppressPendingLoadingUI
+    }
+
+    private var shouldShowSendingControl: Bool {
+        viewModel.isSending && !suppressPendingLoadingUI
+    }
+
+    private var contextSnapshotInvalidationKey: String {
+        let formatter = ISO8601DateFormatter()
+        func stamp(_ date: Date?) -> String {
+            date.map(formatter.string(from:)) ?? "-"
+        }
+
+        let plannedChunkIDs = Set(plannedChunks.map(\.id))
+        let currentThreadStamp = stamp(messages.last?.createdAt)
+        return [
+            "thread=\(activeThreadKey)",
+            "threadStamp=\(currentThreadStamp)",
+            "provider=\(viewModel.activeChatProviderKind.rawValue)",
+            "purpose=\(stamp(drivingForces.map(\.updatedAt).max()))",
+            "passions=\(passions.count)|\(stamp(passions.map(\.date).max()))",
+            "fulfillment=\(fulfillments.count)|\(stamp(fulfillments.map(\.updatedAt).max()))",
+            "outcomes=\(outcomes.count)|\(stamp(outcomes.map(\.updatedAt).max()))",
+            "capture=\(captureItems.count)|\(stamp(captureItems.map(\.createdAt).max()))",
+            "plan=\(plannedChunks.count)|\(plannedChunkIDs.count)|\(stamp(plannedChunkActions.filter { plannedChunkIDs.contains($0.plannedChunkId) }.map(\.createdAt).max()))",
+            "diag=\(stamp(diagnosticsSnapshots.first?.generatedAt))"
+        ].joined(separator: "|")
     }
 
     var body: some View {
@@ -107,9 +137,9 @@ struct LoomAIChatView: View {
                             .id(message.id)
                         }
 
-                        if viewModel.isSending || showDeepThinkingOverlay {
+                        if shouldShowLoadingUI || showDeepThinkingOverlay {
                             VStack(spacing: 8) {
-                                if viewModel.isSending && !showDeepThinkingOverlay {
+                                if shouldShowLoadingUI && !showDeepThinkingOverlay {
                                     HStack(spacing: 8) {
                                         LoomTypingDotsIndicator()
                                     }
@@ -146,17 +176,12 @@ struct LoomAIChatView: View {
                     withAnimation(.easeOut(duration: 0.2)) {
                         proxy.scrollTo(bottomScrollAnchorID, anchor: .bottom)
                     }
-                    viewModel.refreshLatestActions(from: messages)
-                    viewModel.refreshSuggestedPromptChips(in: modelContext, threadMessages: messages)
-                    Task { await viewModel.refreshFollowUpPromptChipsIfNeeded(in: modelContext, threadMessages: messages) }
-                }
-                .onChange(of: allMessages.count) { _, _ in
-                    refreshThreadMessageCache()
-                    if !isActivePage {
-                        needsRefreshWhenActive = true
-                    }
+                    schedulePromptChipRefresh(immediate: true)
                 }
                 .onChange(of: viewModel.isSending) { _, _ in
+                    if !viewModel.isSending {
+                        suppressPendingLoadingUI = false
+                    }
                     updateDeepThinkingState()
                     guard isActivePage else { return }
                     withAnimation(.easeOut(duration: 0.2)) {
@@ -175,9 +200,7 @@ struct LoomAIChatView: View {
                         needsRefreshWhenActive = true
                         return
                     }
-                    viewModel.refreshLatestActions(from: messages)
-                    viewModel.refreshSuggestedPromptChips(in: modelContext, threadMessages: messages)
-                    Task { await viewModel.refreshFollowUpPromptChipsIfNeeded(in: modelContext, threadMessages: messages) }
+                    schedulePromptChipRefresh(immediate: true)
                     DispatchQueue.main.async {
                         proxy.scrollTo(bottomScrollAnchorID, anchor: .bottom)
                     }
@@ -186,9 +209,7 @@ struct LoomAIChatView: View {
                     guard isActive else { return }
                     viewModel.refreshRemainingDailyResponses()
                     if needsRefreshWhenActive {
-                        viewModel.refreshLatestActions(from: messages)
-                        viewModel.refreshSuggestedPromptChips(in: modelContext, threadMessages: messages)
-                        Task { await viewModel.refreshFollowUpPromptChipsIfNeeded(in: modelContext, threadMessages: messages) }
+                        schedulePromptChipRefresh(immediate: true)
                         needsRefreshWhenActive = false
                     }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
@@ -251,11 +272,6 @@ struct LoomAIChatView: View {
             .padding(.horizontal, 12)
             .padding(.top, 8)
             .padding(.bottom, max(8, keyboardHeight > 0 ? keyboardHeight + keyboardTopGap : 8))
-            .background(
-                Rectangle()
-                    .fill(Color(.systemGroupedBackground))
-                    .ignoresSafeArea(edges: .bottom)
-            )
         }
         .alert("Loom", isPresented: $showActionExecutionAlert) {
             Button("OK", role: .cancel) { }
@@ -270,6 +286,8 @@ struct LoomAIChatView: View {
             if !isActive {
                 inputAutoFocusTask?.cancel()
                 inputAutoFocusTask = nil
+                promptChipRefreshTask?.cancel()
+                promptChipRefreshTask = nil
                 deepThinkingDelayTask?.cancel()
                 deepThinkingDelayTask = nil
                 showDeepThinkingOverlay = false
@@ -285,6 +303,8 @@ struct LoomAIChatView: View {
             inputAutoFocusTask = nil
             sendCurrentMessageTask?.cancel()
             sendCurrentMessageTask = nil
+            promptChipRefreshTask?.cancel()
+            promptChipRefreshTask = nil
             cancelledNoticeWorkItem?.cancel()
             cancelledNoticeWorkItem = nil
             transientErrorWorkItem?.cancel()
@@ -322,26 +342,60 @@ struct LoomAIChatView: View {
             activeThreadKey = newKey
             refreshThreadMessageCache()
             if isActivePage {
-                viewModel.refreshLatestActions(from: messages)
-                viewModel.refreshSuggestedPromptChips(in: modelContext, threadMessages: messages)
-                Task { await viewModel.refreshFollowUpPromptChipsIfNeeded(in: modelContext, threadMessages: messages) }
+                schedulePromptChipRefresh(immediate: true)
             } else {
                 needsRefreshWhenActive = true
             }
             _ = try? viewModel.ensureThread(in: modelContext, threadKey: newKey)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .loomAIChatMessagesDidChange)) { note in
+            if let changedThreadKey = note.object as? String,
+               changedThreadKey != activeThreadKey {
+                return
+            }
+            refreshThreadMessageCache()
+            if isActivePage {
+                schedulePromptChipRefresh(immediate: true)
+            } else {
+                needsRefreshWhenActive = true
+            }
+        }
     }
 
     private func refreshThreadMessageCache() {
-        let filtered = allMessages.filter { $0.threadKey == activeThreadKey }
+        let filtered = fetchThreadMessages(threadKey: activeThreadKey)
         threadMessages = filtered
         latestAssistantMessageIDCache = filtered.last(where: { $0.roleRaw == LoomAIChatRole.assistant.rawValue })?.id
-        let validIDs = Set(filtered.map(\.id))
-        formattedAssistantByMessageID = formattedAssistantByMessageID.filter { validIDs.contains($0.key) }
-        for message in filtered where message.roleRaw == LoomAIChatRole.assistant.rawValue {
-            if formattedAssistantByMessageID[message.id] == nil {
-                formattedAssistantByMessageID[message.id] = formattedAssistantAttributedString(message.content)
+    }
+
+    private func fetchThreadMessages(threadKey: String) -> [LoomAIChatMessage] {
+        let descriptor = FetchDescriptor<LoomAIChatMessage>(
+            predicate: #Predicate<LoomAIChatMessage> { message in
+                message.threadKey == threadKey
+            },
+            sortBy: [SortDescriptor(\LoomAIChatMessage.createdAt, order: .forward)]
+        )
+        return (try? modelContext.fetch(descriptor)) ?? []
+    }
+
+    private func schedulePromptChipRefresh(immediate: Bool = false) {
+        promptChipRefreshTask?.cancel()
+        promptChipRefreshTask = Task { @MainActor in
+            if !immediate {
+                try? await Task.sleep(nanoseconds: 180_000_000)
             }
+            guard !Task.isCancelled else { return }
+            viewModel.refreshLatestActions(from: messages)
+            viewModel.refreshSuggestedPromptChips(
+                in: modelContext,
+                threadMessages: messages,
+                snapshotInvalidationKey: contextSnapshotInvalidationKey
+            )
+            await viewModel.refreshFollowUpPromptChipsIfNeeded(
+                in: modelContext,
+                threadMessages: messages,
+                snapshotInvalidationKey: contextSnapshotInvalidationKey
+            )
         }
     }
 
@@ -651,14 +705,20 @@ struct LoomAIChatView: View {
                         }
                     }
 
-                #if DEBUG
                 if !isUser {
+                    if let providerLabel = assistantProviderLabel(for: message) {
+                        Text(providerLabel)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 4)
+                    }
+                    #if DEBUG
                     Text(messageTimestampLine(message.createdAt))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 4)
+                    #endif
                 }
-                #endif
             }
             .frame(width: isUser ? nil : assistantBubbleWidth, alignment: .leading)
             .frame(maxWidth: isUser ? userBubbleMaxWidth : assistantBubbleWidth, alignment: isUser ? .trailing : .leading)
@@ -670,7 +730,7 @@ struct LoomAIChatView: View {
     @ViewBuilder
     private func messageBubbleText(_ message: LoomAIChatMessage, isUser: Bool, assistantContent: String) -> some View {
         if isUser {
-            Text(message.content)
+            userMessageText(message.content)
                 .font(.subheadline)
                 .foregroundStyle(.white)
                 .multilineTextAlignment(.leading)
@@ -683,6 +743,35 @@ struct LoomAIChatView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
         }
+    }
+
+    private func userMessageText(_ content: String) -> Text {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let match = routedChipDisplaySegments(for: trimmed) else {
+            return Text(trimmed)
+        }
+        return Text(match.prefix) + Text(match.reference).bold()
+    }
+
+    private func routedChipDisplaySegments(for content: String) -> (prefix: String, reference: String)? {
+        let prefixes = [
+            "Daily Little Wins for ",
+            "New Mission for ",
+            "New Identity for ",
+            "Next step for ",
+            "Plan for ",
+            "New passions for "
+        ]
+
+        for prefix in prefixes {
+            guard content.count > prefix.count,
+                  content.hasPrefix(prefix) else { continue }
+            let reference = String(content.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !reference.isEmpty else { continue }
+            return (prefix, reference)
+        }
+
+        return nil
     }
 
     private func copyableMessageText(for message: LoomAIChatMessage) -> String {
@@ -742,98 +831,18 @@ struct LoomAIChatView: View {
         return trimmed
     }
 
-    private func formattedAssistantText(for message: LoomAIChatMessage) -> AttributedString {
-        if let cached = formattedAssistantByMessageID[message.id] {
-            return cached
-        }
-        return formattedAssistantAttributedString(message.content)
-    }
+    private func assistantProviderLabel(for message: LoomAIChatMessage) -> String? {
+        let model = LoomAIDebugCodec.decode(message.debugJSON)?.model?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
 
-    private func formattedAssistantAttributedString(_ content: String) -> AttributedString {
-        let displayContent = normalizedAssistantDisplayText(content)
-        var attributed: AttributedString
-        if let parsed = try? AttributedString(
-            markdown: displayContent,
-            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .full)
-        ) {
-            attributed = parsed
-        } else {
-            attributed = AttributedString(displayContent)
-        }
-
-        styleFulfillmentAreaNames(in: &attributed)
-        boldScoreNumbers(in: &attributed)
-        return attributed
-    }
-
-    private func normalizedAssistantDisplayText(_ content: String) -> String {
-        var normalized = content
-            .replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\r", with: "\n")
-
-        let hasInlineNumericSequence =
-            normalized.range(of: #"\d+[\)\.]\s+\S+.*\d+[\)\.]\s+\S+"#, options: .regularExpression) != nil
-
-        guard hasInlineNumericSequence else {
-            return normalized
-        }
-
-        // Break inline numbered sequences onto separate lines.
-        normalized = normalized.replacingOccurrences(
-            of: #"\s+(\d+[\)\.])\s+"#,
-            with: "\n$1 ",
-            options: .regularExpression
-        )
-
-        // Convert "1)" style markers into markdown-numbered list markers.
-        normalized = normalized.replacingOccurrences(
-            of: #"(?m)^(\d+)\)\s+"#,
-            with: "$1. ",
-            options: .regularExpression
-        )
-
-        // Add a blank line between intro text and a following numbered list for markdown parsing.
-        normalized = normalized.replacingOccurrences(
-            of: #":\n(?=\d+\.)"#,
-            with: ":\n\n",
-            options: .regularExpression
-        )
-
-        return normalized
-    }
-
-    private func styleFulfillmentAreaNames(in attributed: inout AttributedString) {
-        let areaNames = [
-            "Career & Business",
-            "Leadership & Impact",
-            "Wealth & Lifestyle",
-            "Mind & Meaning",
-            "Love & Relationships",
-            "Health & Vitality",
-            "Health & Energy"
-        ]
-
-        for name in areaNames {
-            var searchStart = attributed.startIndex
-            while searchStart < attributed.endIndex,
-                  let range = attributed[searchStart...].range(of: name) {
-                attributed[range].font = .subheadline.bold()
-                attributed[range].foregroundColor = FulfillmentCategoryTheme.color(for: name)
-                searchStart = range.upperBound
-            }
-        }
-    }
-
-    private func boldScoreNumbers(in attributed: inout AttributedString) {
-        let source = String(attributed.characters)
-        guard let regex = try? NSRegularExpression(pattern: #"(?<!\d)\d+(?:\.\d+)?(?!\d)"#) else { return }
-        let nsRange = NSRange(source.startIndex..<source.endIndex, in: source)
-        let matches = regex.matches(in: source, options: [], range: nsRange)
-
-        for match in matches.reversed() {
-            guard let stringRange = Range(match.range, in: source),
-                  let attrRange = Range(stringRange, in: attributed) else { continue }
-            attributed[attrRange].font = .subheadline.bold()
+        switch model {
+        case "apple.intelligence":
+            return "Apple Intelligence"
+        case "openai.worker":
+            return "OpenAI"
+        default:
+            return nil
         }
     }
 
@@ -1494,19 +1503,27 @@ struct LoomAIChatView: View {
                 )
 
             Button {
-                startSendingCurrentMessage()
+                if shouldShowSendingControl {
+                    cancelCurrentMessageRequest()
+                } else {
+                    startSendingCurrentMessage()
+                }
             } label: {
                 ZStack {
                     Circle()
                         .fill(
-                            viewModel.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            shouldShowSendingControl
+                            ? Color(.darkGray)
+                            : (
+                                viewModel.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                             ? Color(.tertiarySystemFill)
                             : Color.blue
+                            )
                         )
-                    Image(systemName: "arrow.up")
+                    Image(systemName: shouldShowSendingControl ? "stop.fill" : "arrow.up")
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(
-                            viewModel.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || viewModel.isDailyLimitReached
+                            (!shouldShowSendingControl && (viewModel.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || viewModel.isDailyLimitReached))
                             ? Color.secondary
                             : Color.white
                         )
@@ -1515,7 +1532,7 @@ struct LoomAIChatView: View {
             }
             .buttonStyle(.plain)
             .frame(width: composerControlHeight, height: composerControlHeight, alignment: .bottom)
-            .disabled(viewModel.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || viewModel.isSending || viewModel.isDailyLimitReached)
+            .disabled((!shouldShowSendingControl && viewModel.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) || (!shouldShowSendingControl && viewModel.isDailyLimitReached))
         }
         .frame(minHeight: 56)
     }
@@ -1556,6 +1573,7 @@ struct LoomAIChatView: View {
         transportMessageOverride: String? = nil
     ) {
         guard !viewModel.isSending else { return }
+        suppressPendingLoadingUI = false
         sendCurrentMessageTask?.cancel()
         sendCurrentMessageTask = Task { @MainActor in
             await viewModel.sendCurrentMessage(
@@ -1568,8 +1586,23 @@ struct LoomAIChatView: View {
         }
     }
 
+    private func cancelCurrentMessageRequest() {
+        guard sendCurrentMessageTask != nil || viewModel.isSending else { return }
+        suppressPendingLoadingUI = true
+        sendCurrentMessageTask?.cancel()
+        sendCurrentMessageTask = nil
+        deepThinkingDelayTask?.cancel()
+        deepThinkingDelayTask = nil
+        withAnimation(.easeOut(duration: 0.18)) {
+            showDeepThinkingOverlay = false
+        }
+        viewModel.logCancelledResponse(in: modelContext, threadKey: activeThreadKey)
+        showCancelledNoticeTemporarily()
+    }
+
     private func createNewChatFromPullDown() {
         if sendCurrentMessageTask != nil || viewModel.isSending {
+            suppressPendingLoadingUI = true
             showCancelledNoticeTemporarily()
         }
         sendCurrentMessageTask?.cancel()
@@ -1625,7 +1658,10 @@ struct LoomAIChatView: View {
         showDeepThinkingOverlay = false
 
         deepThinkingDelayTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            let delayNanoseconds: UInt64 = viewModel.activeChatProviderKind == .appleIntelligence
+                ? 2_000_000_000
+                : 3_000_000_000
+            try? await Task.sleep(nanoseconds: delayNanoseconds)
             guard !Task.isCancelled, viewModel.isSending else { return }
             deepThinkingLines = makeDeepThinkingLines()
             withAnimation(.spring(response: 0.35, dampingFraction: 0.88)) {

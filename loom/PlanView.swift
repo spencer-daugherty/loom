@@ -4058,21 +4058,21 @@ struct PlanStepThreeLabelView: View {
             .controlSize(.large)
             .tint(isNextEnabled ? .accentColor : Color(.systemGray3))
         }
-        .padding(.bottom, 2)
     }
 
     private var step4LabelBottomInset: some View {
         VStack(spacing: 0) {
             step4LabelFooter
-                .padding(.horizontal)
-                .padding(.top, 8)
-                .padding(.bottom, 3)
+                .padding(.bottom, 2)
         }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 10)
         .frame(maxWidth: .infinity, alignment: .bottom)
-        .background(alignment: .bottom) {
+        .background {
             step4LabelBottomToolbarBackdrop
+                .padding(.horizontal, -16)
         }
-        .padding(.horizontal, -16)
     }
 
     var body: some View {
@@ -4484,8 +4484,8 @@ struct PlanStepFourResultView: View {
     private let footerPinnedHeight: CGFloat = 68
     private let keyboardFloatingGap: CGFloat = 15
     private let autoWritePillHeight: CGFloat = 45
-    private let resultAutoWriteMinWords = 2
-    private let resultAutoWriteMaxWords = 6
+    private let resultAutoWriteMinWords = 3
+    private let resultAutoWriteMaxWords = 8
     private let otherChunkFixedFill = Color(red: 0.92, green: 0.92, blue: 0.94)
 
     private var secondaryButtonTextColor: Color {
@@ -4957,11 +4957,9 @@ struct PlanStepFourResultView: View {
                     } label: {
                         HStack(alignment: .center, spacing: 10) {
                             Image("LoomAI")
-                                .renderingMode(.template)
                                 .resizable()
                                 .scaledToFit()
                                 .frame(width: 18, height: 18)
-                                .foregroundStyle(Color.white)
                                 .opacity(isApplied ? 0.92 : 1)
 
                             Text(suggestion)
@@ -5074,8 +5072,10 @@ struct PlanStepFourResultView: View {
                     Task { await requestAutoWriteResultSuggestions() }
                 } label: {
                     HStack(alignment: .top, spacing: 6) {
-                        Image(systemName: "apple.intelligence")
-                            .font(.system(size: 23, weight: .semibold))
+                        Image("LoomAI")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 23, height: 23)
                             .frame(width: 27, height: 27)
                             .rotation3DEffect(
                                 .degrees(isLoading && autoWriteIconAnimating ? 180 : 0),
@@ -5156,6 +5156,7 @@ struct PlanStepFourResultView: View {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".!,;:"))
     }
 
     private func truncateWords(_ value: String, maxWords: Int, maxCharacters: Int = 120) -> String {
@@ -5234,6 +5235,40 @@ struct PlanStepFourResultView: View {
         return nonEmpty.allSatisfy(isVagueActionTitle)
     }
 
+    private var weakPlanResultVerbs: Set<String> {
+        [
+            "do", "does", "did", "make", "makes", "made", "handle", "handles", "handled",
+            "manage", "manages", "managed", "work", "works", "worked", "complete", "completes",
+            "completed", "finish", "finishes", "finished", "get", "gets", "got"
+        ]
+    }
+
+    private var strongPlanResultVerbStems: Set<String> {
+        [
+            "acceler", "achiev", "advance", "build", "clarif", "close", "create", "deliver",
+            "driv", "establish", "expand", "finaliz", "grow", "improv", "launch", "organ",
+            "prepar", "restock", "secure", "simplif", "stabiliz", "strength", "unlock"
+        ]
+    }
+
+    private func threeWordActionPhrases(from actions: [String]) -> Set<String> {
+        var phrases = Set<String>()
+        for action in actions {
+            let tokens = action
+                .lowercased()
+                .replacingOccurrences(of: "[^a-z0-9\\s]", with: " ", options: .regularExpression)
+                .split(separator: " ")
+                .map(String.init)
+                .map(normalizedPlanResultToken)
+                .filter { !$0.isEmpty }
+            guard tokens.count >= 3 else { continue }
+            for start in 0...(tokens.count - 3) {
+                phrases.insert(tokens[start..<(start + 3)].joined(separator: " "))
+            }
+        }
+        return phrases
+    }
+
     private func actionKeywordSet(from actions: [String]) -> Set<String> {
         let stopWords: Set<String> = [
             "the", "and", "for", "with", "from", "that", "this", "into", "through",
@@ -5296,17 +5331,22 @@ struct PlanStepFourResultView: View {
     private func isPlanResultSuggestionAcceptable(_ value: String, actions: [String]) -> Bool {
         let normalized = value
             .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "."))
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
         let words = normalized.split(separator: " ")
         guard words.count >= resultAutoWriteMinWords, words.count <= resultAutoWriteMaxWords else { return false }
+        guard !normalized.contains(",") else { return false }
 
-        let actionKeywords = actionKeywordSet(from: actions)
-        guard !actionKeywords.isEmpty else { return false }
+        let firstWord = normalizedPlanResultToken(String(words[0]))
+        guard !firstWord.isEmpty else { return false }
+        guard !weakPlanResultVerbs.contains(firstWord) else { return false }
+        guard strongPlanResultVerbStems.contains(where: { firstWord.hasPrefix($0) }) else { return false }
 
         let stopWords: Set<String> = [
             "the", "and", "for", "with", "from", "that", "this", "into", "through",
             "about", "your", "you", "our", "their", "then", "than", "just", "also",
-            "will", "what", "when", "where", "have", "has", "had", "plan", "planned"
+            "will", "what", "when", "where", "have", "has", "had", "plan", "planned",
+            "task", "tasks", "action", "actions", "result", "weekly", "week"
         ]
         let suggestionKeywords = Set(
             normalized
@@ -5321,15 +5361,39 @@ struct PlanStepFourResultView: View {
                 }
                 .map(normalizedPlanResultToken)
         )
-        for suggestionKeyword in suggestionKeywords {
-            if actionKeywords.contains(suggestionKeyword) {
-                return true
-            }
-            if actionKeywords.contains(where: { planResultTokensLikelyMatch($0, suggestionKeyword) }) {
-                return true
+
+        let genericBadPhrases = [
+            "do weekly tasks", "do tasks", "make progress", "handle everything",
+            "manage tasks", "complete tasks", "finish tasks", "work on tasks"
+        ]
+        let normalizedLower = normalized.lowercased()
+        if genericBadPhrases.contains(where: { normalizedLower == $0 }) {
+            return false
+        }
+
+        let actionKeywords = actionKeywordSet(from: actions)
+        let repeatedKeywordCount = suggestionKeywords.filter { suggestionKeyword in
+            actionKeywords.contains(where: { planResultTokensLikelyMatch($0, suggestionKeyword) })
+        }.count
+        if repeatedKeywordCount >= max(2, suggestionKeywords.count) {
+            return false
+        }
+
+        let repeatedPhrases = threeWordActionPhrases(from: actions)
+        if words.count >= 3 {
+            let normalizedWords = words.map { normalizedPlanResultToken(String($0)) }
+            for start in 0...(normalizedWords.count - 3) {
+                let phrase = normalizedWords[start..<(start + 3)].joined(separator: " ")
+                if repeatedPhrases.contains(phrase) {
+                    return false
+                }
             }
         }
-        return false
+
+        let meaningfulNonVerbWords = words.dropFirst().map { normalizedPlanResultToken(String($0)) }.filter {
+            !$0.isEmpty && !stopWords.contains($0)
+        }
+        return !meaningfulNonVerbWords.isEmpty
     }
 
     private func presentResultAutoWriteErrorPopup() {

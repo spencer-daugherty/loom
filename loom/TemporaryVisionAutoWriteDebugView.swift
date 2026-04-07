@@ -621,8 +621,43 @@ struct TemporaryVisionAutoWriteDebugView: View {
             let userLocalDate = Self.localDayKey()
             let timezone = TimeZone.current.identifier
             let service = LoomAIService()
+            let provider = LoomAIChatProvider(service: service)
+            let providerKind = provider.currentKind
+            let route = LoomAIChatProvider.resolveRoute(
+                latestUserMessage: prompt,
+                context: contextSnapshot
+            )
 
-            let preview = try service.buildChatRequestPreview(
+            if providerKind == .openAIWorker {
+                let preview = try service.buildChatRequestPreview(
+                    messages: messages,
+                    context: contextSnapshot,
+                    intent: "loomai_chat",
+                    screen: "loomai_chat_debug",
+                    userLocalDate: userLocalDate,
+                    timezone: timezone
+                )
+                rawRequestText = try prettyJSONText(from: preview.bodyData)
+                rawContextText = try encodePrettyJSONText(preview.request.context)
+            } else {
+                let appleContext = LoomAIChatProvider.debugAppleChatContext(from: contextSnapshot, route: route)
+                struct AppleDebugPreview: Encodable {
+                    let provider: String
+                    let route: String
+                    let messages: [LoomAIService.TransportMessage]
+                }
+                rawRequestText = try encodePrettyJSONText(
+                    AppleDebugPreview(
+                        provider: providerKind.rawValue,
+                        route: route.map(LoomAIChatProvider.routeDescription(for:)) ?? "",
+                        messages: messages
+                    )
+                )
+                rawContextText = try encodePrettyJSONText(appleContext)
+            }
+
+            responseStatus = "Sending via \(providerKind.rawValue)..."
+            let providerResponse = try await provider.sendChat(
                 messages: messages,
                 context: contextSnapshot,
                 intent: "loomai_chat",
@@ -630,19 +665,7 @@ struct TemporaryVisionAutoWriteDebugView: View {
                 userLocalDate: userLocalDate,
                 timezone: timezone
             )
-
-            rawRequestText = try prettyJSONText(from: preview.bodyData)
-            rawContextText = try encodePrettyJSONText(preview.request.context)
-
-            responseStatus = "Sending..."
-            let response = try await service.sendChat(
-                messages: messages,
-                context: contextSnapshot,
-                intent: "loomai_chat",
-                screen: "loomai_chat_debug",
-                userLocalDate: userLocalDate,
-                timezone: timezone
-            )
+            let response = providerResponse.response
             let responseEnvelope = DebugLoomAIResponseEnvelope(
                 message: response.message,
                 grounding: response.grounding,
@@ -660,11 +683,11 @@ struct TemporaryVisionAutoWriteDebugView: View {
             )
             let responseData = try encodePrettyJSONData(responseEnvelope)
             rawResponseText = String(data: responseData, encoding: .utf8) ?? "<response encoding failed>"
-            responseStatus = "HTTP 200"
+            responseStatus = "OK via \(providerResponse.provider.rawValue)"
             responseDurationText = formatDuration(Date().timeIntervalSince(startedAt))
             updateUsageEstimate(
                 from: responseData,
-                requestData: preview.bodyData,
+                requestData: rawRequestText.data(using: .utf8) ?? Data(),
                 fallbackModel: response.usage?.model ?? "gpt-5.2"
             )
         } catch {

@@ -148,15 +148,46 @@ enum AppleIntelligencePlanResultGenerator {
         guard !cleanedActions.isEmpty else { throw AppleIntelligencePurposeInsightsError.unavailable }
 
         let prompt = """
-        Create one concise weekly result statement from these actions.
+        You are generating one Loom weekly Result from a list of actions.
 
-        Requirements:
+        Goal:
+        - Infer the single unifying outcome the actions contribute toward.
+        - Express the outcome, not the tasks.
+        - Imply why it matters when possible through specific outcome wording.
+
+        Strict output requirements:
         - Return plain text only.
-        - Keep it to 2 to 6 words.
-        - Make it specific and outcome-oriented, not a generic phrase.
-        - Ground it directly in the action list. Do not invent context.
-        - Prefer the clearest end result implied by the actions.
-        - Do not include quotation marks, bullets, numbering, or explanations.
+        - Return exactly one Result.
+        - Start with a strong action verb in imperative form.
+        - Use 3 to 8 words total.
+        - Keep it as a single sentence.
+        - No bullets, numbering, quotes, labels, or explanation.
+        - No commas unless absolutely necessary.
+        - No passive voice.
+        - No filler words.
+        - Do not list or repeat the actions.
+        - Do not copy obvious action phrases from the input.
+        - Avoid weak verbs such as: do, make, handle, manage, work on, complete tasks.
+        - Prefer specific outcome language over vague phrasing.
+
+        Context guidance:
+        - Work tasks: prefer a deliverable, milestone, or productivity outcome.
+        - Personal tasks: prefer a practical life outcome.
+        - Mixed tasks: choose the most logical unifying outcome.
+
+        Good examples:
+        - Finalize key deliverables
+        - Deliver essential assignments
+        - Secure groceries for meals
+        - Restock essential kitchen items
+        - Prepare ingredients for meals
+
+        Bad examples:
+        - Completed tasks: spreadsheet, story, report
+        - Cheese and milk purchased
+        - Do weekly tasks
+        - Handle everything
+        - Make progress on stuff
 
         Actions:
         \(cleanedActions.map { "- \($0)" }.joined(separator: "\n"))
@@ -172,6 +203,255 @@ enum AppleIntelligencePlanResultGenerator {
         }
         #endif
         throw AppleIntelligencePurposeInsightsError.unavailable
+    }
+}
+
+enum AppleIntelligenceLoomChatGenerator {
+    struct Payload: Codable {
+        struct Grounding: Codable {
+            let section: String
+            let field: String
+            let timestamp: String
+        }
+
+        struct ActionPayload: Codable {
+            let text: String?
+            let categoryId: String?
+            let categoryName: String?
+            let identity: String?
+            let replaceIdentity: String?
+            let activity: String?
+            let replaceActivity: String?
+            let passionType: String?
+            let title: String?
+            let measurable: Bool?
+            let unit: String?
+        }
+
+        struct Action: Codable {
+            let id: String
+            let title: String
+            let type: String
+            let payload: ActionPayload
+        }
+
+        struct SuggestionOption: Codable {
+            let id: String
+            let label: String
+            let title: String
+            let type: String
+            let payload: ActionPayload
+        }
+
+        struct SuggestionCard: Codable {
+            let id: String
+            let title: String
+            let description: String
+            let options: [SuggestionOption]
+        }
+
+        struct Chip: Codable {
+            let id: String
+            let title: String
+            let prompt: String
+        }
+
+        struct Debug: Codable {
+            let usedContext: Bool
+            let confidence: String
+            let evidence: [String]
+        }
+
+        let message: String
+        let grounding: [Grounding]
+        let suggestionCards: [SuggestionCard]
+        let nextAction: Action?
+        let chips: [Chip]
+        let actions: [Action]
+        let debug: Debug?
+    }
+
+    static func chat(
+        messages: [LoomAIService.TransportMessage],
+        context: LoomAIContextSnapshot,
+        routeDescription: String?,
+        userLocalDate: String?,
+        timezone: String?
+    ) async throws -> Payload {
+        #if canImport(FoundationModels)
+        if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
+            let model = SystemLanguageModel(useCase: .general)
+            guard model.isAvailable else { throw AppleIntelligencePurposeInsightsError.unavailable }
+            let session = LanguageModelSession(model: model)
+            let prompt = chatPrompt(
+                messages: messages,
+                context: context,
+                routeDescription: routeDescription,
+                userLocalDate: userLocalDate,
+                timezone: timezone
+            )
+            let response = try await session.respond(
+                to: prompt,
+                generating: AppleIntelligenceLoomChatOutput.self
+            )
+            return Payload(
+                message: response.content.message,
+                grounding: response.content.grounding.map {
+                    .init(section: $0.section, field: $0.field, timestamp: $0.timestamp)
+                },
+                suggestionCards: response.content.suggestionCards.map { card in
+                    .init(
+                        id: card.id,
+                        title: card.title,
+                        description: card.description,
+                        options: card.options.map { option in
+                            .init(
+                                id: option.id,
+                                label: option.label,
+                                title: option.title,
+                                type: option.type,
+                                payload: actionPayload(from: option.payload)
+                            )
+                        }
+                    )
+                },
+                nextAction: response.content.nextAction.map {
+                    .init(
+                        id: $0.id,
+                        title: $0.title,
+                        type: $0.type,
+                        payload: actionPayload(from: $0.payload)
+                    )
+                },
+                chips: response.content.chips.map {
+                    .init(id: $0.id, title: $0.title, prompt: $0.prompt)
+                },
+                actions: response.content.actions.map {
+                    .init(
+                        id: $0.id,
+                        title: $0.title,
+                        type: $0.type,
+                        payload: actionPayload(from: $0.payload)
+                    )
+                },
+                debug: response.content.debug.map {
+                    .init(
+                        usedContext: $0.usedContext,
+                        confidence: $0.confidence,
+                        evidence: $0.evidence
+                    )
+                }
+            )
+        }
+        #endif
+        throw AppleIntelligencePurposeInsightsError.unavailable
+    }
+
+    static func threadTitle(transcript: String) async throws -> String {
+        #if canImport(FoundationModels)
+        if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
+            let model = SystemLanguageModel(useCase: .general)
+            guard model.isAvailable else { throw AppleIntelligencePurposeInsightsError.unavailable }
+            let session = LanguageModelSession(model: model)
+            let response = try await session.respond(to: titlePrompt(transcript: transcript))
+            return response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        #endif
+        throw AppleIntelligencePurposeInsightsError.unavailable
+    }
+
+    #if canImport(FoundationModels)
+    @available(iOS 26.0, macOS 26.0, visionOS 26.0, *)
+    private static func actionPayload(
+        from payload: AppleIntelligenceLoomChatActionPayloadOutput
+    ) -> Payload.ActionPayload {
+        Payload.ActionPayload(
+            text: payload.text,
+            categoryId: payload.categoryId,
+            categoryName: payload.categoryName,
+            identity: payload.identity,
+            replaceIdentity: payload.replaceIdentity,
+            activity: payload.activity,
+            replaceActivity: payload.replaceActivity,
+            passionType: payload.passionType,
+            title: payload.title,
+            measurable: payload.measurable,
+            unit: payload.unit
+        )
+    }
+    #endif
+
+    private static func chatPrompt(
+        messages: [LoomAIService.TransportMessage],
+        context: LoomAIContextSnapshot,
+        routeDescription: String?,
+        userLocalDate: String?,
+        timezone: String?
+    ) -> String {
+        struct ChatInput: Codable {
+            let routeDescription: String?
+            let userLocalDate: String?
+            let timezone: String?
+            let messages: [LoomAIService.TransportMessage]
+            let context: LoomAIContextSnapshot
+        }
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.sortedKeys]
+        let payload = ChatInput(
+            routeDescription: routeDescription,
+            userLocalDate: userLocalDate,
+            timezone: timezone,
+            messages: messages,
+            context: context
+        )
+        let payloadJSON = ((try? encoder.encode(payload)).flatMap { String(data: $0, encoding: .utf8) }) ?? "{}"
+
+        return """
+        You are LoomAI inside the Loom app.
+
+        Product behavior:
+        - Be concise, specific, and grounded in the provided Loom context.
+        - Keep the main `message` to 1 to 4 short paragraphs and never put recommendation lists inline.
+        - Put concrete recommendations into `suggestionCards`, `nextAction`, and `actions` only.
+        - Keep suggestion cards executable UI actions, not prose summaries.
+        - If the user asks something unrelated to Loom, gently redirect back to Loom-relevant help in `message` and provide 2 to 4 Loom-relevant `chips`.
+        - Use the provided route description when present. Routes 1 to 7 should usually return at least one executable suggestion card unless confidence is low.
+        - Do not invent facts outside the provided messages and context.
+        - Confidence must be one of `high`, `medium`, or `low`.
+        - `debug.evidence` should name the Loom fields that informed the answer, like `drivingForce.vision` or `activeOutcomes[0].title`.
+        - Only use action types that Loom supports in chat:
+          `updatePurposeVision`
+          `addPassionItem`
+          `updateFulfillmentMission`
+          `addFulfillmentIdentity`
+          `replaceFulfillmentIdentity`
+          `addLittleWin`
+          `replaceLittleWin`
+          `createCaptureAction`
+        - If confidence is low, leave `suggestionCards` and `actions` empty unless the route explicitly demands a very safe grounded option.
+
+        Input JSON:
+        \(payloadJSON)
+        """
+    }
+
+    private static func titlePrompt(transcript: String) -> String {
+        """
+        Summarize this Loom chat into a short menu title.
+
+        Rules:
+        - Return ONLY the title text.
+        - 3 to 7 words preferred.
+        - Max 52 characters.
+        - Use the user's real topic, goal, or problem.
+        - Do not start with How, What, Can, Should, or Help.
+        - No ending punctuation.
+
+        Chat transcript:
+        \(transcript)
+        """
     }
 }
 
@@ -204,5 +484,85 @@ struct AppleIntelligenceAutoGroupGenerableOutput {
     let confidence: String
     let reason: String
     let groups: [AppleIntelligenceAutoGroupGenerableGroupOutput]
+}
+
+@available(iOS 26.0, macOS 26.0, visionOS 26.0, *)
+@Generable
+struct AppleIntelligenceLoomChatGroundingOutput {
+    let section: String
+    let field: String
+    let timestamp: String
+}
+
+@available(iOS 26.0, macOS 26.0, visionOS 26.0, *)
+@Generable
+struct AppleIntelligenceLoomChatActionPayloadOutput {
+    let text: String?
+    let categoryId: String?
+    let categoryName: String?
+    let identity: String?
+    let replaceIdentity: String?
+    let activity: String?
+    let replaceActivity: String?
+    let passionType: String?
+    let title: String?
+    let measurable: Bool?
+    let unit: String?
+}
+
+@available(iOS 26.0, macOS 26.0, visionOS 26.0, *)
+@Generable
+struct AppleIntelligenceLoomChatActionOutput {
+    let id: String
+    let title: String
+    let type: String
+    let payload: AppleIntelligenceLoomChatActionPayloadOutput
+}
+
+@available(iOS 26.0, macOS 26.0, visionOS 26.0, *)
+@Generable
+struct AppleIntelligenceLoomChatSuggestionOptionOutput {
+    let id: String
+    let label: String
+    let title: String
+    let type: String
+    let payload: AppleIntelligenceLoomChatActionPayloadOutput
+}
+
+@available(iOS 26.0, macOS 26.0, visionOS 26.0, *)
+@Generable
+struct AppleIntelligenceLoomChatSuggestionCardOutput {
+    let id: String
+    let title: String
+    let description: String
+    let options: [AppleIntelligenceLoomChatSuggestionOptionOutput]
+}
+
+@available(iOS 26.0, macOS 26.0, visionOS 26.0, *)
+@Generable
+struct AppleIntelligenceLoomChatChipOutput {
+    let id: String
+    let title: String
+    let prompt: String
+}
+
+@available(iOS 26.0, macOS 26.0, visionOS 26.0, *)
+@Generable
+struct AppleIntelligenceLoomChatDebugOutput {
+    let usedContext: Bool
+    let confidence: String
+    let evidence: [String]
+}
+
+@available(iOS 26.0, macOS 26.0, visionOS 26.0, *)
+@Generable
+struct AppleIntelligenceLoomChatOutput {
+    let message: String
+    let grounding: [AppleIntelligenceLoomChatGroundingOutput]
+    let suggestionCards: [AppleIntelligenceLoomChatSuggestionCardOutput]
+    let nextAction: AppleIntelligenceLoomChatActionOutput?
+    let chips: [AppleIntelligenceLoomChatChipOutput]
+    let actions: [AppleIntelligenceLoomChatActionOutput]
+    let debug: AppleIntelligenceLoomChatDebugOutput?
 }
 #endif
