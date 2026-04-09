@@ -983,11 +983,15 @@ struct ActionView: View {
                     Color.clear
                         .frame(width: 6)
 
-                    Button(actionBlocksSimpleViewEnabled ? "Full View" : "Simple View") {
+                    Button {
                         actionBlocksSimpleViewEnabled.toggle()
+                    } label: {
+                        Text(actionBlocksSimpleViewEnabled ? "Full View" : "Simple View")
+                            .font(.footnote.weight(.medium))
+                            .frame(height: 28, alignment: .center)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .font(.footnote.weight(.medium))
                     .foregroundStyle(.blue)
 
                     Divider()
@@ -1663,11 +1667,7 @@ struct ActionView: View {
 
     private var actionEditorBar: some View {
         HStack(alignment: .bottom, spacing: 10) {
-            HStack(alignment: .bottom, spacing: 8) {
-                Image(systemName: "square.and.pencil")
-                    .foregroundStyle(.secondary)
-                    .padding(.bottom, 12)
-
+            HStack(alignment: .top, spacing: 8) {
                 TextField("Edit action", text: focusedActionDraftBinding, axis: .vertical)
                     .textInputAutocapitalization(.sentences)
                     .autocorrectionDisabled(false)
@@ -1681,7 +1681,7 @@ struct ActionView: View {
                     }
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 10)
+            .padding(.vertical, 8)
             .background(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(Color(.secondarySystemBackground))
@@ -1694,7 +1694,7 @@ struct ActionView: View {
             keyboardAccessoryButton
         }
         .padding(.horizontal)
-        .padding(.top, 8)
+        .padding(.top, 2)
         .padding(.bottom, max(8, keyboardHeight > 0 ? 8 : 12))
         .onAppear {
             DispatchQueue.main.async {
