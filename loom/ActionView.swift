@@ -4,6 +4,9 @@ import UniformTypeIdentifiers
 import LinkPresentation
 import CoreImage
 import os
+#if canImport(PhotosUI)
+import PhotosUI
+#endif
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -5412,6 +5415,25 @@ private struct SensitivitySheet: View {
 }
 
 private struct AttachmentsSheet: View {
+    private enum AttachmentImportKind {
+        case file
+        case photo
+    }
+
+    private struct AttachmentPreviewTarget: Identifiable {
+        enum Kind {
+            case link(String)
+            case image(URL)
+            case file(URL)
+            case unavailable(String)
+        }
+
+        let id = UUID()
+        let title: String
+        let kind: Kind
+        var stopAccess: (() -> Void)? = nil
+    }
+
     let attachments: [PlannedChunkActionAttachment]
     let initialNoteText: String
     let onSaveNote: (String) -> Void
@@ -5420,111 +5442,87 @@ private struct AttachmentsSheet: View {
     let onDeleteAttachment: (UUID) -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.openURL) private var openURL
     @State private var linkText: String = ""
     @State private var isNewLinkMode: Bool = false
     @FocusState private var isNoteFocused: Bool
     @FocusState private var isNewLinkFocused: Bool
+    @State private var isAttachmentOptionsPresented: Bool = false
     @State private var isFileImporterPresented: Bool = false
+    @State private var attachmentImportKind: AttachmentImportKind = .file
+    #if canImport(PhotosUI)
+    @State private var isPhotoPickerPresented: Bool = false
+    @State private var selectedPhotoItem: PhotosPickerItem? = nil
+    #endif
     @State private var noteText: String = ""
     @State private var hasSavedNote: Bool = false
-    @StateObject private var previewStore = LoomLinkPreviewStore()
+    @State private var previewTarget: AttachmentPreviewTarget? = nil
+    @ObservedObject private var previewStore = LoomLinkPreviewStore.shared
 
     var body: some View {
         NavigationStack {
             List {
                 Section("Notes") {
-                    TextEditor(text: $noteText)
-                        .focused($isNoteFocused)
-                        .frame(height: 120)
-                    
-                    Button {
-                        isNewLinkMode = true
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                            isNewLinkFocused = true
-                        }
-                    } label: {
-                        HStack(spacing: 10) {
-                            if isNewLinkMode {
+                    VStack(alignment: .leading, spacing: 12) {
+                        TextEditor(text: $noteText)
+                            .focused($isNoteFocused)
+                            .frame(height: 120)
+
+                        if isNewLinkMode {
+                            HStack(spacing: 10) {
                                 TextField("Add link…", text: $linkText)
                                     .focused($isNewLinkFocused)
                                     .submitLabel(.done)
                                     .onSubmit {
                                         commitInlineLink()
                                     }
-                            } else {
-                                Text("+ New Link")
-                                    .fontWeight(.semibold)
-                                    .foregroundStyle(.blue)
-                            }
-                            Spacer()
-                            if isNewLinkMode {
+                                Spacer()
                                 Image(systemName: "checkmark.circle.fill")
                                     .foregroundStyle(.blue)
                             }
                         }
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
 
-                    Button("Attach file…") {
-                        isFileImporterPresented = true
-                    }
-
-                    if linkAttachments.isEmpty && fileAttachments.isEmpty {
-                        Text("No notes or attachments yet.")
-                            .foregroundStyle(.secondary)
-                    }
-
-                    ForEach(linkAttachments) { attachment in
-                        Button {
-                            openAttachment(attachment)
-                        } label: {
-                            LoomLinkBannerCard(
-                                urlString: attachment.urlString ?? "",
-                                preview: previewStore.preview(for: attachment.urlString)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
-                        .swipeActions(edge: .trailing) {
-                            Button(role: .destructive) {
-                                onDeleteAttachment(attachment.id)
-                            } label: {
-                                Text("Delete")
-                            }
-                            .tint(.red)
-                        }
-                    }
-
-                    ForEach(fileAttachments) { attachment in
-                        Button {
-                            openAttachment(attachment)
-                        } label: {
-                            HStack(alignment: .top, spacing: 10) {
-                                Image(systemName: iconName(for: attachment))
-                                    .foregroundStyle(.secondary)
-
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(titleText(for: attachment))
-                                        .font(.subheadline)
-                                        .foregroundStyle(.primary)
-                                        .fixedSize(horizontal: false, vertical: true)
+                        if linkAttachments.isEmpty && fileAttachments.isEmpty {
+                            Text("No notes or attachments yet.")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            VStack(spacing: 10) {
+                                ForEach(linkAttachments) { attachment in
+                                    attachmentCard(
+                                        for: attachment,
+                                        content: {
+                                            LoomLinkBannerCard(
+                                                urlString: attachment.urlString ?? "",
+                                                preview: previewStore.preview(for: attachment.urlString)
+                                            )
+                                        }
+                                    )
                                 }
-                                .frame(maxWidth: .infinity, alignment: .leading)
+
+                                ForEach(fileAttachments) { attachment in
+                                    attachmentCard(
+                                        for: attachment,
+                                        content: {
+                                            fileAttachmentCard(for: attachment)
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        Button {
+                            isAttachmentOptionsPresented = true
+                        } label: {
+                            HStack(spacing: 10) {
+                                Text("Add Attachment")
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(.blue)
+                                Spacer()
                             }
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .swipeActions(edge: .trailing) {
-                            Button(role: .destructive) {
-                                onDeleteAttachment(attachment.id)
-                            } label: {
-                                Text("Delete")
-                            }
-                            .tint(.red)
-                        }
                     }
+                    .padding(.vertical, 2)
                 }
             }
             .fileImporter(
@@ -5536,24 +5534,55 @@ private struct AttachmentsSheet: View {
                 case .success(let urls):
                     guard let url = urls.first else { return }
                     do {
-                        #if os(macOS)
-                        let bookmark = try url.bookmarkData(
-                            options: .withSecurityScope,
-                            includingResourceValuesForKeys: nil,
-                            relativeTo: nil
-                        )
-                        #else
-                        let bookmark = try url.bookmarkData(
+                        let imported = try importAttachmentFile(from: url)
+                        let bookmark = try imported.bookmarkData(
                             options: .minimalBookmark,
                             includingResourceValuesForKeys: nil,
                             relativeTo: nil
                         )
-                        #endif
-                        onAddFile(url, bookmark, url.lastPathComponent)
+                        onAddFile(imported, bookmark, imported.lastPathComponent)
                     } catch { }
                 case .failure:
                     break
                 }
+            }
+            #if canImport(PhotosUI)
+            .photosPicker(
+                isPresented: $isPhotoPickerPresented,
+                selection: $selectedPhotoItem,
+                matching: .images,
+                preferredItemEncoding: .current
+            )
+            .onChange(of: selectedPhotoItem) { _, item in
+                guard let item else { return }
+                Task {
+                    await importSelectedPhoto(item)
+                    await MainActor.run {
+                        selectedPhotoItem = nil
+                    }
+                }
+            }
+            #endif
+            .confirmationDialog("", isPresented: $isAttachmentOptionsPresented, titleVisibility: .hidden) {
+                Button("Link") {
+                    isNewLinkMode = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        isNewLinkFocused = true
+                    }
+                }
+                Button("File") {
+                    attachmentImportKind = .file
+                    isFileImporterPresented = true
+                }
+                Button("Photo") {
+                    #if canImport(PhotosUI)
+                    isPhotoPickerPresented = true
+                    #else
+                    attachmentImportKind = .file
+                    isFileImporterPresented = true
+                    #endif
+                }
+                Button("Cancel", role: .cancel) {}
             }
             .navigationTitle("Notes")
             .navigationBarTitleDisplayMode(.inline)
@@ -5647,6 +5676,44 @@ private struct AttachmentsSheet: View {
                 commitNoteIfNeeded()
             }
         }
+        .sheet(item: $previewTarget, onDismiss: clearPreviewTarget) { preview in
+            switch preview.kind {
+            case .link(let urlString):
+                LoomLinkAttachmentPreviewSheet(urlString: urlString)
+            case .image(let url):
+                #if canImport(UIKit)
+                LoomImageAttachmentPreviewSheet(url: url)
+                    .onDisappear {
+                        preview.stopAccess?()
+                    }
+                #else
+                LoomAttachmentUnavailableSheet(
+                    title: preview.title,
+                    message: "Preview is not available on this device."
+                )
+                .onDisappear {
+                    preview.stopAccess?()
+                }
+                #endif
+            case .file(let url):
+                #if canImport(QuickLook) && canImport(UIKit)
+                LoomQuickLookPreviewSheet(url: url)
+                    .onDisappear {
+                        preview.stopAccess?()
+                    }
+                #else
+                LoomAttachmentUnavailableSheet(
+                    title: preview.title,
+                    message: "Preview is not available on this device."
+                )
+                .onDisappear {
+                    preview.stopAccess?()
+                }
+                #endif
+            case .unavailable(let message):
+                LoomAttachmentUnavailableSheet(title: preview.title, message: message)
+            }
+        }
     }
 
     private func commitNoteIfNeeded() {
@@ -5683,87 +5750,292 @@ private struct AttachmentsSheet: View {
         linkAttachments.compactMap(\.urlString)
     }
 
-    private func iconName(for a: PlannedChunkActionAttachment) -> String {
-        switch a.kind {
-        case .link: return "link"
-        case .note: return "note.text"
-        case .file: return "doc"
+    @ViewBuilder
+    private func attachmentCard<Content: View>(
+        for attachment: PlannedChunkActionAttachment,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        ZStack(alignment: .topTrailing) {
+            Button {
+                previewTarget = previewTarget(for: attachment)
+            } label: {
+                content()
+            }
+            .buttonStyle(.plain)
+
+            Button(role: .destructive) {
+                onDeleteAttachment(attachment.id)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(Color.white)
+                    .frame(width: 18, height: 18)
+                    .background(Circle().fill(Color.black.opacity(0.55)))
+            }
+            .buttonStyle(.plain)
+            .padding(8)
         }
     }
 
-    private func titleText(for a: PlannedChunkActionAttachment) -> String {
-        switch a.kind {
-        case .link:
-            return a.urlString ?? "(link)"
-        case .note:
-            return "Note"
-        case .file:
-            return a.fileName ?? "(file)"
+    @ViewBuilder
+    private func fileAttachmentCard(for attachment: PlannedChunkActionAttachment) -> some View {
+        #if canImport(UIKit)
+        let thumbnail = fileThumbnail(for: attachment)
+        LoomFileBannerCard(
+            title: attachment.fileName ?? "(file)",
+            subtitle: fileSubtitle(for: attachment),
+            tint: fileTint(for: attachment),
+            systemName: fileIconName(for: attachment),
+            thumbnail: thumbnail
+        )
+        #else
+        LoomFileBannerCard(
+            title: attachment.fileName ?? "(file)",
+            subtitle: fileSubtitle(for: attachment),
+            tint: fileTint(for: attachment),
+            systemName: fileIconName(for: attachment)
+        )
+        #endif
+    }
+
+    private func fileSubtitle(for attachment: PlannedChunkActionAttachment) -> String {
+        if attachmentIsImageFile(attachment.fileName) {
+            return "Photo"
+        }
+        let ext = ((attachment.fileName as NSString?)?.pathExtension ?? "").lowercased()
+        if ext.isEmpty { return "Attached file" }
+        return ext.uppercased() + " file"
+    }
+
+    private func fileIconName(for attachment: PlannedChunkActionAttachment) -> String {
+        let ext = ((attachment.fileName as NSString?)?.pathExtension ?? "").lowercased()
+        switch ext {
+        case "pdf":
+            return "doc.richtext"
+        case "png", "jpg", "jpeg", "heic", "gif", "webp":
+            return "photo"
+        case "mov", "mp4", "m4v":
+            return "film"
+        case "zip":
+            return "archivebox"
+        default:
+            return "doc"
         }
     }
 
-    private func openAttachment(_ a: PlannedChunkActionAttachment) {
-        switch a.kind {
-        case .link:
-            if let urlString = a.urlString, let url = URL(string: urlString) {
-                openURL(url)
-            }
-        case .file:
-            guard let data = a.fileBookmarkData else { return }
-            var isStale = false
-            #if os(macOS)
-            if let url = try? URL(
-                resolvingBookmarkData: data,
-                options: [.withoutUI, .withSecurityScope],
-                relativeTo: nil,
-                bookmarkDataIsStale: &isStale
-            ) {
-                let didAccess = url.startAccessingSecurityScopedResource()
-                openURL(url)
-                if didAccess {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                        url.stopAccessingSecurityScopedResource()
-                    }
-                }
-            } else if let url = try? URL(
-                resolvingBookmarkData: data,
-                relativeTo: nil,
-                bookmarkDataIsStale: &isStale
-            ) {
-                openURL(url)
-            }
-            #else
-            if let url = try? URL(
-                resolvingBookmarkData: data,
-                options: [.withoutUI],
-                relativeTo: nil,
-                bookmarkDataIsStale: &isStale
-            ) {
-                let didAccess = url.startAccessingSecurityScopedResource()
-                openURL(url)
-                if didAccess {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                        url.stopAccessingSecurityScopedResource()
-                    }
-                }
-            } else if let url = try? URL(
-                resolvingBookmarkData: data,
-                relativeTo: nil,
-                bookmarkDataIsStale: &isStale
-            ) {
-                let didAccess = url.startAccessingSecurityScopedResource()
-                openURL(url)
-                if didAccess {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                        url.stopAccessingSecurityScopedResource()
-                    }
-                }
-            }
-            #endif
-        case .note:
-            break
+    private func fileTint(for attachment: PlannedChunkActionAttachment) -> Color {
+        #if canImport(UIKit)
+        if attachmentIsImageFile(attachment.fileName),
+           let thumbnail = fileThumbnail(for: attachment),
+           let color = dominantColor(from: thumbnail) {
+            return Color(color)
+        }
+        #endif
+        let ext = ((attachment.fileName as NSString?)?.pathExtension ?? "").lowercased()
+        switch ext {
+        case "pdf":
+            return .red
+        case "png", "jpg", "jpeg", "heic", "gif", "webp":
+            return .blue
+        case "mov", "mp4", "m4v":
+            return .purple
+        case "zip":
+            return .orange
+        default:
+            return Color(.secondaryLabel)
         }
     }
+
+    private func previewTarget(for a: PlannedChunkActionAttachment) -> AttachmentPreviewTarget {
+        switch a.kind {
+        case .link:
+            if let urlString = a.urlString?.trimmingCharacters(in: .whitespacesAndNewlines), !urlString.isEmpty {
+                return AttachmentPreviewTarget(title: "Attachment", kind: .link(urlString))
+            }
+            return AttachmentPreviewTarget(title: a.fileName ?? "Attachment", kind: .unavailable("This link could not be opened."))
+        case .file:
+            guard let resolved = resolvedAttachmentFileURL(a, startAccess: true) else {
+                return AttachmentPreviewTarget(title: a.fileName ?? "Attachment", kind: .unavailable("The selected file is no longer available."))
+            }
+            if attachmentIsImageFile(a.fileName) {
+                return AttachmentPreviewTarget(
+                    title: a.fileName ?? "(file)",
+                    kind: .image(resolved.url),
+                    stopAccess: resolved.stopAccess
+                )
+            }
+            return AttachmentPreviewTarget(
+                title: a.fileName ?? "(file)",
+                kind: .file(resolved.url),
+                stopAccess: resolved.stopAccess
+            )
+        case .note:
+            return AttachmentPreviewTarget(title: "Attachment", kind: .unavailable("Preview is not available for notes."))
+        }
+    }
+
+    private func resolvedAttachmentFileURL(
+        _ attachment: PlannedChunkActionAttachment,
+        startAccess: Bool
+    ) -> (url: URL, stopAccess: (() -> Void)?)? {
+        guard let data = attachment.fileBookmarkData else { return nil }
+        var isStale = false
+        guard let url = try? URL(
+            resolvingBookmarkData: data,
+            options: [.withoutUI],
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        ) else {
+            return nil
+        }
+
+        guard startAccess else {
+            return (url, nil)
+        }
+
+        let didAccess = url.startAccessingSecurityScopedResource()
+        let stopAccess = didAccess ? { url.stopAccessingSecurityScopedResource() } : nil
+        return (url, stopAccess)
+    }
+
+    private func clearPreviewTarget() {
+        previewTarget?.stopAccess?()
+        previewTarget = nil
+    }
+
+    private func importAttachmentFile(from sourceURL: URL) throws -> URL {
+        let startedAccess = sourceURL.startAccessingSecurityScopedResource()
+        defer {
+            if startedAccess {
+                sourceURL.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        let baseDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        let attachmentsDirectory = baseDirectory.appendingPathComponent("ActionAttachmentFiles", isDirectory: true)
+        try FileManager.default.createDirectory(at: attachmentsDirectory, withIntermediateDirectories: true)
+
+        let sanitizedFileName = sanitizedAttachmentFileName(sourceURL.lastPathComponent)
+        let destinationURL = uniqueAttachmentDestinationURL(
+            in: attachmentsDirectory,
+            originalFileName: sanitizedFileName
+        )
+
+        if FileManager.default.fileExists(atPath: destinationURL.path) {
+            try FileManager.default.removeItem(at: destinationURL)
+        }
+        try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
+        return destinationURL
+    }
+
+    #if canImport(PhotosUI)
+    private func importSelectedPhoto(_ item: PhotosPickerItem) async {
+        guard let data = try? await item.loadTransferable(type: Data.self),
+              let imported = try? importAttachmentData(
+                data,
+                preferredFileName: preferredPhotoFileName(for: item)
+              ),
+              let bookmark = try? imported.bookmarkData(
+                options: .minimalBookmark,
+                includingResourceValuesForKeys: nil,
+                relativeTo: nil
+              ) else {
+            return
+        }
+        await MainActor.run {
+            onAddFile(imported, bookmark, imported.lastPathComponent)
+        }
+    }
+
+    private func preferredPhotoFileName(for item: PhotosPickerItem) -> String {
+        let suggested = item.supportedContentTypes.first?.preferredFilenameExtension
+        let ext = (suggested?.isEmpty == false ? suggested! : "jpg")
+        return "Photo.\(ext)"
+    }
+    #endif
+
+    private func importAttachmentData(_ data: Data, preferredFileName: String) throws -> URL {
+        let baseDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        let attachmentsDirectory = baseDirectory.appendingPathComponent("ActionAttachmentFiles", isDirectory: true)
+        try FileManager.default.createDirectory(at: attachmentsDirectory, withIntermediateDirectories: true)
+
+        let sanitizedFileName = sanitizedAttachmentFileName(preferredFileName)
+        let destinationURL = uniqueAttachmentDestinationURL(
+            in: attachmentsDirectory,
+            originalFileName: sanitizedFileName
+        )
+        try data.write(to: destinationURL, options: .atomic)
+        return destinationURL
+    }
+
+    private func uniqueAttachmentDestinationURL(in directory: URL, originalFileName: String) -> URL {
+        let ext = (originalFileName as NSString).pathExtension
+        let baseName = ((originalFileName as NSString).deletingPathExtension).nilIfEmpty ?? "Attachment"
+        let suffix = UUID().uuidString.prefix(8)
+        let finalName = ext.isEmpty ? "\(baseName)-\(suffix)" : "\(baseName)-\(suffix).\(ext)"
+        return directory.appendingPathComponent(finalName, isDirectory: false)
+    }
+
+    private func sanitizedAttachmentFileName(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "Attachment" }
+        let invalid = CharacterSet(charactersIn: "/:\\?%*|\"<>")
+        let components = trimmed.components(separatedBy: invalid)
+        let sanitized = components.joined(separator: "-").nilIfEmpty ?? "Attachment"
+        return sanitized
+    }
+
+    private func attachmentIsImageFile(_ fileName: String?) -> Bool {
+        let ext = ((fileName as NSString?)?.pathExtension ?? "").lowercased()
+        let imageExtensions: Set<String> = ["jpg", "jpeg", "png", "gif", "heic", "heif", "webp", "bmp", "tif", "tiff"]
+        return imageExtensions.contains(ext)
+    }
+
+    #if canImport(UIKit)
+    private func fileThumbnail(for attachment: PlannedChunkActionAttachment) -> UIImage? {
+        guard attachmentIsImageFile(attachment.fileName),
+              let resolved = resolvedAttachmentFileURL(attachment, startAccess: true) else { return nil }
+        defer { resolved.stopAccess?() }
+        return UIImage(contentsOfFile: resolved.url.path)
+    }
+
+    private func dominantColor(from image: UIImage) -> UIColor? {
+        guard let cgImage = image.cgImage else { return nil }
+        let ciImage = CIImage(cgImage: cgImage)
+        let extent = ciImage.extent
+        guard !extent.isEmpty,
+              let filter = CIFilter(
+                name: "CIAreaAverage",
+                parameters: [
+                    kCIInputImageKey: ciImage,
+                    kCIInputExtentKey: CIVector(cgRect: extent)
+                ]
+              ),
+              let outputImage = filter.outputImage else {
+            return nil
+        }
+
+        let context = CIContext(options: [.workingColorSpace: NSNull()])
+        var bitmap = [UInt8](repeating: 0, count: 4)
+        context.render(
+            outputImage,
+            toBitmap: &bitmap,
+            rowBytes: 4,
+            bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
+            format: .RGBA8,
+            colorSpace: nil
+        )
+
+        return UIColor(
+            red: CGFloat(bitmap[0]) / 255,
+            green: CGFloat(bitmap[1]) / 255,
+            blue: CGFloat(bitmap[2]) / 255,
+            alpha: 1
+        )
+    }
+    #endif
 }
 
 private extension String {
