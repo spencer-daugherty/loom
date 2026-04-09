@@ -358,7 +358,7 @@ struct ObjectivesAddView: View {
                                 .font(.subheadline)
                                 .foregroundStyle(Color.black.opacity(0.7))
                                 .padding(.top, 1)
-                            Text("Note: Add Fulfillment Area at the bottom")
+                            Text("Note: Add Fulfillment Area below Reasons")
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(Color.black.opacity(0.7))
                                 .multilineTextAlignment(.leading)
@@ -394,6 +394,11 @@ struct ObjectivesAddView: View {
                 )
                 GoalSection(goal: $goal, focusedField: $focusedField)
                 ReasonsSection(reasons: $reasons, focusedField: $focusedField)
+                CategorySection(
+                    selectedCategory: $selectedCategory,
+                    categories: fulfillmentAreaOptions,
+                    placeholder: Self.categoryPlaceholder
+                )
                 if !isStartEditable {
                     StartedOnSection(startDate: outcome!.start)
                 } else {
@@ -406,11 +411,6 @@ struct ObjectivesAddView: View {
                     measureFormat: $measureFormat,
                     measureDecimalPlaces: $measureDecimalPlaces,
                     focusedField: $focusedField
-                )
-                CategorySection(
-                    selectedCategory: $selectedCategory,
-                    categories: fulfillmentAreaOptions,
-                    placeholder: Self.categoryPlaceholder
                 )
                 if hasSelectedFulfillmentArea {
                     ContributingLittleWinsSection(
@@ -428,7 +428,7 @@ struct ObjectivesAddView: View {
                     )
                 }
             }
-            .navigationTitle(outcome == nil ? "Add Outcome" : (goal.isEmpty ? "Outcome" : goal))
+            .navigationTitle(outcome == nil ? "Add Goal" : (goal.isEmpty ? "Outcome" : goal))
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {

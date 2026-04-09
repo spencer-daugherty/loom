@@ -986,7 +986,7 @@ struct ActionView: View {
                     Button {
                         actionBlocksSimpleViewEnabled.toggle()
                     } label: {
-                        Text(actionBlocksSimpleViewEnabled ? "Full View" : "Simple View")
+                        Text(actionBlocksSimpleViewEnabled ? "Full" : "Simple")
                             .font(.footnote.weight(.medium))
                             .frame(height: 28, alignment: .center)
                             .contentShape(Rectangle())
@@ -1429,8 +1429,9 @@ struct ActionView: View {
                     )
                 )
                 .animation(.interactiveSpring(response: 0.28, dampingFraction: 0.88, blendDuration: 0.12), value: localChunkOrderIDs)
-                .padding(.bottom, max(12, keyboardHeight + 8))
+                .padding(.bottom, scrollContentBottomPadding)
             }
+            .scrollIndicators(.visible)
             .onChange(of: focusedActionID) { _, id in
                 signposted("on_change_focused_action_id") {
                     guard let id else {
@@ -1499,6 +1500,16 @@ struct ActionView: View {
 
     private var editingActionScrollAnchor: UnitPoint {
         UnitPoint(x: 0.5, y: 0.82)
+    }
+
+    private var scrollContentBottomPadding: CGFloat {
+        if isSearchPresented || isEditingActionPresented {
+            return 12
+        }
+        if !isKeyboardVisible {
+            return 12
+        }
+        return 8
     }
 
     private var isEditingActionPresented: Bool {

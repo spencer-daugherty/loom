@@ -3516,7 +3516,7 @@ struct ContentView: View {
             ForEach(dates, id: \.self) { date in
                 let isToday = calendar.isDateInToday(date)
                 let isHeldPreviewDate = calendar.isDate(date, inSameDayAs: littleWinsCalendarPreviewDate ?? .distantPast)
-                let isTodayPreviewOpen = isToday && isHeldPreviewDate
+                let isPreviewOpen = isHeldPreviewDate
                 let completedCardsForDate = isToday ? completedTodayCards : littleWinsCompletedCards(on: date)
                 let historicalPreviewCategories = littleWinsHistoricalCategories(on: date)
                 let hasHistoricalPreview = !historicalPreviewCategories.isEmpty
@@ -3527,7 +3527,7 @@ struct ContentView: View {
                 let miniStackLiftPerCard = min(6, max(4, miniCardHeight * 0.14))
                 let miniStackTopOverflow = CGFloat(max(0, visibleStackCount - 1)) * miniStackLiftPerCard
                 VStack(spacing: 3) {
-                    if isTodayPreviewOpen {
+                    if isPreviewOpen {
                         ZStack {
                             Circle()
                                 .fill(Color.blue)
@@ -3592,7 +3592,7 @@ struct ContentView: View {
                 )
                 .highPriorityGesture(
                     TapGesture().onEnded {
-                    if isTodayPreviewOpen {
+                    if isPreviewOpen {
                         closeLittleWinsCalendarPreview(animated: true)
                         return
                     }
@@ -3738,9 +3738,13 @@ struct ContentView: View {
                                     }
                                 }
                         )
-                        Text("Swipe right to return | Tap text to uncomplete")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.secondary)
+                        Text(
+                            isTodayPreview
+                                ? "Swipe right to return | Tap text to uncomplete"
+                                : "Swipe right to return"
+                        )
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .transition(.opacity.combined(with: .scale(scale: 0.98)))
