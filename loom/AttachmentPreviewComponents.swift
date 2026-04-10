@@ -5,6 +5,9 @@ import Foundation
 #if canImport(CryptoKit)
 import CryptoKit
 #endif
+#if canImport(PDFKit)
+import PDFKit
+#endif
 #if canImport(QuickLook)
 import QuickLook
 #endif
@@ -181,7 +184,8 @@ final class LoomLinkPreviewStore: ObservableObject {
     }
 
     private func loadPreview(for urlString: String) async {
-        guard let url = URL(string: urlString) else { return }
+        guard let url = URL(string: urlString),
+              loomSupportsWebLinkPreview(url) else { return }
         let provider = LPMetadataProvider()
         let metadata = await withCheckedContinuation { continuation in
             provider.startFetchingMetadata(for: url) { metadata, _ in
@@ -219,7 +223,9 @@ final class LoomLinkPreviewStore: ObservableObject {
 
     private func normalizedURLString(_ urlString: String?) -> String? {
         guard let value = urlString?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !value.isEmpty else { return nil }
+              !value.isEmpty,
+              let url = URL(string: value),
+              loomSupportsWebLinkPreview(url) else { return nil }
         return value
     }
 
@@ -388,19 +394,8 @@ final class LoomLinkPreviewStore: ObservableObject {
 struct LoomLinkAttachmentPreviewSheet: View {
     let urlString: String
 
-    @Environment(\.dismiss) private var dismiss
-
     var body: some View {
-        NavigationStack {
-            LoomLinkAttachmentPreviewContent(urlString: urlString)
-                .navigationTitle("Attachment")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Done") { dismiss() }
-                    }
-                }
-        }
+        LoomLinkAttachmentPreviewContent(urlString: urlString)
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
     }
@@ -413,7 +408,8 @@ struct LoomLinkAttachmentPreviewContent: View {
 
     var body: some View {
         Group {
-            if let url = URL(string: urlString) {
+            if let url = URL(string: urlString),
+               loomSupportsWebLinkPreview(url) {
                 #if canImport(SafariServices) && canImport(UIKit)
                 LoomSafariPreview(url: url)
                     .ignoresSafeArea(edges: .bottom)
@@ -434,6 +430,11 @@ struct LoomLinkAttachmentPreviewContent: View {
             previewStore.load(urlStrings: [urlString])
         }
     }
+}
+
+private func loomSupportsWebLinkPreview(_ url: URL) -> Bool {
+    guard let scheme = url.scheme?.lowercased() else { return false }
+    return scheme == "http" || scheme == "https"
 }
 
 struct LoomAttachmentUnavailableSheet: View {
@@ -493,20 +494,7 @@ struct LoomImageAttachmentPreviewSheet: View {
         NavigationStack {
             Group {
                 if let image = UIImage(contentsOfFile: url.path) {
-                    GeometryReader { geometry in
-                        ScrollView([.horizontal, .vertical]) {
-                            Image(uiImage: image)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(
-                                    minWidth: geometry.size.width,
-                                    minHeight: geometry.size.height
-                                )
-                                .padding(20)
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Color.black.opacity(0.96))
-                    }
+                    LoomZoomableImagePreview(image: image)
                     .ignoresSafeArea(edges: .bottom)
                 } else {
                     LoomAttachmentUnavailableContent(
@@ -515,7 +503,7 @@ struct LoomImageAttachmentPreviewSheet: View {
                     )
                 }
             }
-            .navigationTitle("Attachment")
+            .navigationTitle("Photo")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -525,6 +513,242 @@ struct LoomImageAttachmentPreviewSheet: View {
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
+    }
+}
+
+struct LoomZoomableImagePreview: UIViewRepresentable {
+    let image: UIImage
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeUIView(context: Context) -> UIScrollView {
+        let scrollView = UIScrollView()
+        scrollView.delegate = context.coordinator
+        context.coordinator.onDidZoom = { scrollView, imageView in
+            centerImageView(imageView, in: scrollView)
+        }
+        scrollView.backgroundColor = UIColor.black.withAlphaComponent(0.96)
+        scrollView.showsHorizontalScrollIndicator = false
+        scrollView.showsVerticalScrollIndicator = false
+        scrollView.bouncesZoom = true
+        scrollView.maximumZoomScale = 6
+        scrollView.minimumZoomScale = 1
+
+        let imageView = UIImageView(image: image)
+        imageView.contentMode = .scaleAspectFit
+        imageView.clipsToBounds = true
+        context.coordinator.imageView = imageView
+        scrollView.addSubview(imageView)
+
+        let doubleTap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleDoubleTap(_:)))
+        doubleTap.numberOfTapsRequired = 2
+        scrollView.addGestureRecognizer(doubleTap)
+
+        return scrollView
+    }
+
+    func updateUIView(_ scrollView: UIScrollView, context: Context) {
+        guard let imageView = context.coordinator.imageView else { return }
+        imageView.image = image
+        updateLayout(in: scrollView, imageView: imageView, coordinator: context.coordinator)
+    }
+
+    private func updateLayout(
+        in scrollView: UIScrollView,
+        imageView: UIImageView,
+        coordinator: Coordinator
+    ) {
+        let boundsSize = scrollView.bounds.size
+        guard boundsSize.width > 0, boundsSize.height > 0 else { return }
+
+        let imageSize = image.size
+        guard imageSize.width > 0, imageSize.height > 0 else { return }
+
+        let widthScale = boundsSize.width / imageSize.width
+        let heightScale = boundsSize.height / imageSize.height
+        let fitScale = min(widthScale, heightScale)
+        let fittedSize = CGSize(width: imageSize.width * fitScale, height: imageSize.height * fitScale)
+
+        imageView.frame = CGRect(origin: .zero, size: fittedSize)
+        scrollView.contentSize = fittedSize
+        scrollView.minimumZoomScale = 1
+        scrollView.maximumZoomScale = max(6, 1 / max(fitScale, 0.001))
+
+        let imageDidChange = coordinator.lastImageSize != imageSize
+        let needsInitialFit = !coordinator.hasAppliedInitialFit
+        if needsInitialFit || imageDidChange {
+            scrollView.zoomScale = scrollView.minimumZoomScale
+            coordinator.hasAppliedInitialFit = true
+        } else if scrollView.zoomScale < scrollView.minimumZoomScale {
+            scrollView.zoomScale = scrollView.minimumZoomScale
+        } else if scrollView.zoomScale > scrollView.maximumZoomScale {
+            scrollView.zoomScale = scrollView.maximumZoomScale
+        }
+        coordinator.lastImageSize = imageSize
+        coordinator.lastBoundsSize = boundsSize
+
+        centerImageView(imageView, in: scrollView)
+    }
+
+    private func centerImageView(_ imageView: UIImageView, in scrollView: UIScrollView) {
+        let boundsSize = scrollView.bounds.size
+        var frame = imageView.frame
+
+        frame.origin.x = frame.size.width < boundsSize.width ? (boundsSize.width - frame.size.width) / 2 : 0
+        frame.origin.y = frame.size.height < boundsSize.height ? (boundsSize.height - frame.size.height) / 2 : 0
+        imageView.frame = frame
+    }
+
+    final class Coordinator: NSObject, UIScrollViewDelegate {
+        weak var imageView: UIImageView?
+
+        var onDidZoom: ((UIScrollView, UIImageView) -> Void)?
+        var hasAppliedInitialFit = false
+        var lastImageSize: CGSize = .zero
+        var lastBoundsSize: CGSize = .zero
+
+        func viewForZooming(in scrollView: UIScrollView) -> UIView? {
+            imageView
+        }
+
+        func scrollViewDidZoom(_ scrollView: UIScrollView) {
+            guard let imageView else { return }
+            onDidZoom?(scrollView, imageView)
+        }
+
+        @objc func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
+            guard let scrollView = gesture.view as? UIScrollView,
+                  let imageView else { return }
+
+            if scrollView.zoomScale > scrollView.minimumZoomScale + 0.01 {
+                scrollView.setZoomScale(scrollView.minimumZoomScale, animated: true)
+                return
+            }
+
+            let point = gesture.location(in: imageView)
+            let targetZoom = min(scrollView.zoomScale * 2.5, scrollView.maximumZoomScale)
+            let width = scrollView.bounds.width / targetZoom
+            let height = scrollView.bounds.height / targetZoom
+            let rect = CGRect(x: point.x - width / 2, y: point.y - height / 2, width: width, height: height)
+            scrollView.zoom(to: rect, animated: true)
+        }
+    }
+}
+#endif
+
+#if canImport(PDFKit) && canImport(UIKit)
+struct LoomPDFPreviewSheet: View {
+    let url: URL
+    let title: String
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var searchText: String = ""
+    @State private var searchSelections: [PDFSelection] = []
+    @State private var currentSearchIndex: Int = 0
+
+    var body: some View {
+        NavigationStack {
+            LoomPDFPreviewContent(
+                url: url,
+                searchText: searchText,
+                searchSelections: searchSelections,
+                currentSearchIndex: currentSearchIndex
+            )
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search document")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+                if !searchSelections.isEmpty {
+                    ToolbarItemGroup(placement: .topBarTrailing) {
+                        Button {
+                            guard !searchSelections.isEmpty else { return }
+                            currentSearchIndex = max(0, currentSearchIndex - 1)
+                        } label: {
+                            Image(systemName: "chevron.up")
+                        }
+                        .disabled(currentSearchIndex <= 0)
+
+                        Button {
+                            guard !searchSelections.isEmpty else { return }
+                            currentSearchIndex = min(searchSelections.count - 1, currentSearchIndex + 1)
+                        } label: {
+                            Image(systemName: "chevron.down")
+                        }
+                        .disabled(currentSearchIndex >= searchSelections.count - 1)
+                    }
+                }
+            }
+            .onChange(of: searchText) { _, value in
+                refreshSearch(for: value)
+            }
+        }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func refreshSearch(for value: String) {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let document = PDFDocument(url: url), !trimmed.isEmpty else {
+            searchSelections = []
+            currentSearchIndex = 0
+            return
+        }
+
+        let selections = document.findString(trimmed, withOptions: [.caseInsensitive])
+        searchSelections = selections
+        currentSearchIndex = 0
+    }
+}
+
+struct LoomPDFPreviewContent: UIViewRepresentable {
+    let url: URL
+    let searchText: String
+    let searchSelections: [PDFSelection]
+    let currentSearchIndex: Int
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeUIView(context: Context) -> PDFView {
+        let pdfView = PDFView()
+        pdfView.autoScales = true
+        pdfView.displayMode = .singlePageContinuous
+        pdfView.displayDirection = .vertical
+        pdfView.backgroundColor = UIColor.systemBackground
+        pdfView.document = PDFDocument(url: url)
+        context.coordinator.lastURL = url
+        return pdfView
+    }
+
+    func updateUIView(_ pdfView: PDFView, context: Context) {
+        if context.coordinator.lastURL != url {
+            pdfView.document = PDFDocument(url: url)
+            context.coordinator.lastURL = url
+        }
+
+        guard let document = pdfView.document else { return }
+        document.cancelFindString()
+
+        if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            pdfView.highlightedSelections = nil
+            return
+        }
+
+        pdfView.highlightedSelections = searchSelections.isEmpty ? nil : searchSelections
+        guard searchSelections.indices.contains(currentSearchIndex) else { return }
+        let selection = searchSelections[currentSearchIndex]
+        pdfView.go(to: selection)
+        pdfView.setCurrentSelection(selection, animate: false)
+    }
+
+    final class Coordinator {
+        var lastURL: URL?
     }
 }
 #endif

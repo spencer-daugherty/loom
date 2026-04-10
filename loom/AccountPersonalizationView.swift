@@ -51,7 +51,7 @@ struct AccountPersonalizationView: View {
                         openedFromPersonalization: true
                     )
                 } label: {
-                    Text("LifeOS: Connecting the Dots")
+                    Text("Loom Ecosystem")
                 }
             }
 
@@ -628,7 +628,7 @@ struct AccountPersonalizationView: View {
             )
         )
 
-        let monthKey = PurposeProfileInsightsHasher.monthKey()
+        let monthKey = PurposeProfileInsightsHasher.measuredMonthKey()
         let inputsHash = PurposeProfileInsightsHasher.hash(
             diagnostic: diagnostics,
             vision: currentVision,
@@ -644,33 +644,43 @@ struct AccountPersonalizationView: View {
             "Purpose profile refresh request month=\(monthKey) inputsHash=\(String(inputsHash.prefix(8)))"
         )
 
-        let resolvedRecord: PurposeProfileRecord
-        do {
-            let response = try await LoomAIService().fetchPurposeProfileInsights(
-                diagnostic: diagnostics,
-                vision: currentVision,
-                passions: currentPassions
-            )
-            resolvedRecord = PurposeProfilesCatalog.record(named: response.profile) ?? PurposeProfileRecord(
-                profile: response.profile,
-                strength: response.strength,
-                weakness: response.weakness,
-                stressTrigger: response.stressTrigger,
-                breakingPoint: response.breakingPoint
-            )
-            AppDebugActivityLog.log("Personalization", "Purpose profile refreshed profile=\(resolvedRecord.profile)")
-        } catch {
-            resolvedRecord = fallbackRecord
-            AppDebugActivityLog.log("Personalization", "Purpose profile refresh failed, using fallback profile=\(fallbackRecord.profile)")
+        let existingPurposeSnapshot = purposeProfileInsightsSnapshots.first {
+            $0.userKey == userKey && $0.monthKey == monthKey
         }
+        if existingPurposeSnapshot == nil, PurposeProfileInsightsHasher.isMonthlyRefreshBoundary() {
+            let resolvedRecord: PurposeProfileRecord
+            do {
+                let response = try await LoomAIService().fetchPurposeProfileInsights(
+                    diagnostic: diagnostics,
+                    vision: currentVision,
+                    passions: currentPassions
+                )
+                resolvedRecord = PurposeProfilesCatalog.record(named: response.profile) ?? PurposeProfileRecord(
+                    profile: response.profile,
+                    strength: response.strength,
+                    weakness: response.weakness,
+                    stressTrigger: response.stressTrigger,
+                    breakingPoint: response.breakingPoint
+                )
+                AppDebugActivityLog.log("Personalization", "Purpose profile refreshed profile=\(resolvedRecord.profile)")
+            } catch {
+                resolvedRecord = fallbackRecord
+                AppDebugActivityLog.log("Personalization", "Purpose profile refresh failed, using fallback profile=\(fallbackRecord.profile)")
+            }
 
-        upsertPurposeProfileSnapshot(
-            snapshotKey: purposeSnapshotKey,
-            userKey: userKey,
-            monthKey: monthKey,
-            inputsHash: inputsHash,
-            record: resolvedRecord
-        )
+            upsertPurposeProfileSnapshot(
+                snapshotKey: purposeSnapshotKey,
+                userKey: userKey,
+                monthKey: monthKey,
+                inputsHash: inputsHash,
+                record: resolvedRecord
+            )
+        } else {
+            AppDebugActivityLog.log(
+                "Personalization",
+                "Purpose profile refresh skipped month=\(monthKey) boundary=\(PurposeProfileInsightsHasher.isMonthlyRefreshBoundary()) existing=\(existingPurposeSnapshot != nil)"
+            )
+        }
 
         if receivedFreshValidInsights || fallbackDiagnosticsSnapshot != nil {
             upsertDiagnosticsInsightsSnapshot(
@@ -844,7 +854,9 @@ struct AccountPersonalizationView: View {
         inputsHash: String,
         record: PurposeProfileRecord
     ) {
-        if let existing = purposeProfileInsightsSnapshots.first(where: { $0.snapshotKey == snapshotKey }) {
+        if purposeProfileInsightsSnapshots.contains(where: { $0.userKey == userKey && $0.monthKey == monthKey }) {
+            return
+        } else if let existing = purposeProfileInsightsSnapshots.first(where: { $0.snapshotKey == snapshotKey }) {
             existing.generatedAt = .now
             existing.userKey = userKey
             existing.monthKey = monthKey

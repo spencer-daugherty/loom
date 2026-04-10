@@ -1716,13 +1716,13 @@ struct PurposeView: View {
 
     private func latestMonthlyPassionSnapshot(for emotionKey: String) -> PassionScoreSnapshot? {
         guard let passionType = passionType(forEmotionKey: emotionKey) else { return nil }
-        let monthStart = PassionScoringMath.monthWindow(for: .now).monthStart
+        let monthStart = PassionScoringMath.latestCompletedMonthStart(for: .now)
         return latestPassionSnapshot(for: passionType, monthStart: monthStart)
     }
 
     private func previousMonthlyPassionSnapshot(for emotionKey: String) -> PassionScoreSnapshot? {
         guard let passionType = passionType(forEmotionKey: emotionKey) else { return nil }
-        let currentMonthStart = PassionScoringMath.monthWindow(for: .now).monthStart
+        let currentMonthStart = PassionScoringMath.latestCompletedMonthStart(for: .now)
         guard let priorMonthStart = Calendar.current.date(byAdding: .month, value: -1, to: currentMonthStart) else { return nil }
         return latestPassionSnapshot(for: passionType, monthStart: priorMonthStart)
     }
@@ -1760,7 +1760,7 @@ struct PurposeView: View {
     }
 
     private var currentMonthPassionSnapshots: [PassionScoreSnapshot] {
-        let monthStart = PassionScoringMath.monthWindow(for: .now).monthStart
+        let monthStart = PassionScoringMath.latestCompletedMonthStart(for: .now)
         return passionSnapshotsForMonth(monthStart)
     }
 
@@ -2033,7 +2033,7 @@ struct PurposeView: View {
     }
 
     private func refreshPassionScoresForCurrentMonthIfNeeded(force: Bool = false) {
-        let monthStart = PassionScoringMath.monthWindow(for: .now).monthStart
+        let monthStart = PassionScoringMath.latestCompletedMonthStart(for: .now)
         if !force, let last = lastPassionScoreRefreshMonthStart,
            Calendar.current.isDate(last, inSameDayAs: monthStart) {
             return

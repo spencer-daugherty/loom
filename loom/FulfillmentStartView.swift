@@ -1470,7 +1470,7 @@ struct FulfillmentStartView: View {
             case .resources: return "Note Resources"
             case .passions: return "Passions"
             case .summary: return "Summary"
-            case .insights: return "LifeOS: Connecting the Dots"
+            case .insights: return "Loom Ecosystem"
             }
         }
     }
@@ -3779,7 +3779,7 @@ struct FulfillmentStartView: View {
 
     private func lifeOSLatestMonthlyPassionScore(forEmotionKey emotionKey: String) -> Double? {
         guard let type = lifeOSPassionType(forEmotionKey: emotionKey) else { return nil }
-        let monthStart = PassionScoringMath.monthWindow(for: .now).monthStart
+        let monthStart = PassionScoringMath.latestCompletedMonthStart(for: .now)
         return lifeOSLatestPassionSnapshot(for: type, monthStart: monthStart)?.score
     }
 

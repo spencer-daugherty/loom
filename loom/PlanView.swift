@@ -1,6 +1,10 @@
 import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
+import CoreImage
+#if canImport(PhotosUI)
+import PhotosUI
+#endif
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -45,6 +49,10 @@ private struct PlanViewMicrosoftTokenResponse: Decodable {
 private enum PlanViewExternalMutationAction {
     case complete
     case delete
+}
+
+private func actionAttachmentRelativePath(for fileName: String) -> String {
+    "ActionAttachmentFiles/\(fileName)"
 }
 
 private struct PlanStepProgressBar: View {
@@ -5396,6 +5404,108 @@ struct PlanStepFourResultView: View {
         return !meaningfulNonVerbWords.isEmpty
     }
 
+    private func deterministicResultFallback(actions: [String], areaName: String) -> String? {
+        let cleanedActions = actions
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !cleanedActions.isEmpty else { return nil }
+
+        let normalizedArea = areaName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let corpus = cleanedActions.joined(separator: " ").lowercased()
+        let tokens = corpus
+            .replacingOccurrences(of: "[^a-z0-9\\s]", with: " ", options: .regularExpression)
+            .split(separator: " ")
+            .map(String.init)
+        let tokenSet = Set(tokens)
+
+        func containsAny(_ values: Set<String>) -> Bool {
+            !tokenSet.isDisjoint(with: values)
+        }
+
+        let groceryTokens: Set<String> = [
+            "grocery", "groceries", "milk", "cheese", "lettuce", "bread", "fruit", "vegetable",
+            "vegetables", "meal", "meals", "kitchen", "ingredients", "produce"
+        ]
+        if containsAny(groceryTokens) {
+            let options = [
+                "Secure groceries for meals",
+                "Restock essential kitchen items",
+                "Prepare ingredients for meals"
+            ]
+            return options.first(where: { isPlanResultSuggestionAcceptable($0, actions: cleanedActions) })
+        }
+
+        let writingTokens: Set<String> = [
+            "write", "writing", "story", "report", "summary", "draft", "article", "copy", "proposal"
+        ]
+        let deliverableTokens: Set<String> = [
+            "spreadsheet", "report", "story", "deck", "presentation", "proposal", "analysis", "brief"
+        ]
+        let workAreaKeywords: Set<String> = ["career", "business", "work", "job", "client", "promotion", "raise"]
+        if containsAny(writingTokens) || containsAny(deliverableTokens) || normalizedArea.lowercased().range(of: "career|business|work", options: .regularExpression) != nil {
+            let options = [
+                "Finalize key deliverables",
+                "Deliver essential project work",
+                "Advance core career outcomes",
+                "Finalize core written deliverables"
+            ]
+            return options.first(where: { isPlanResultSuggestionAcceptable($0, actions: cleanedActions) })
+                ?? (containsAny(workAreaKeywords) ? "Advance core career outcomes" : "Finalize key deliverables")
+        }
+
+        let householdTokens: Set<String> = [
+            "clean", "laundry", "home", "house", "kitchen", "bathroom", "organize", "closet"
+        ]
+        if containsAny(householdTokens) {
+            let options = [
+                "Restore order at home",
+                "Refresh core home systems",
+                "Prepare home for the week"
+            ]
+            return options.first(where: { isPlanResultSuggestionAcceptable($0, actions: cleanedActions) })
+        }
+
+        let healthTokens: Set<String> = [
+            "workout", "exercise", "gym", "steps", "walk", "run", "sleep", "meal", "weigh"
+        ]
+        if containsAny(healthTokens) || normalizedArea.lowercased().contains("health") {
+            let options = [
+                "Strengthen weekly health momentum",
+                "Stabilize core health routines",
+                "Build steady physical energy"
+            ]
+            return options.first(where: { isPlanResultSuggestionAcceptable($0, actions: cleanedActions) })
+        }
+
+        let relationshipTokens: Set<String> = [
+            "call", "text", "date", "relationship", "friend", "family", "casey", "loved", "check", "checkin"
+        ]
+        if containsAny(relationshipTokens) || normalizedArea.lowercased().contains("relationship") || normalizedArea.lowercased().contains("love") {
+            let options = [
+                "Strengthen key relationships this week",
+                "Deepen consistent relationship care",
+                "Build stronger relationship trust"
+            ]
+            return options.first(where: { isPlanResultSuggestionAcceptable($0, actions: cleanedActions) })
+        }
+
+        let areaOptions: [String]
+        switch normalizedArea.lowercased() {
+        case let value where value.contains("career") || value.contains("business"):
+            areaOptions = ["Advance core career outcomes", "Deliver essential project work"]
+        case let value where value.contains("wealth") || value.contains("finance"):
+            areaOptions = ["Strengthen weekly financial control", "Advance key money priorities"]
+        case let value where value.contains("lifestyle"):
+            areaOptions = ["Prepare meaningful weekly experiences", "Expand intentional life experiences"]
+        case let value where value.contains("health"):
+            areaOptions = ["Strengthen weekly health momentum", "Build steady physical energy"]
+        default:
+            areaOptions = ["Advance meaningful weekly outcomes", "Clarify core weekly priorities", "Strengthen key weekly momentum"]
+        }
+
+        return areaOptions.first(where: { isPlanResultSuggestionAcceptable($0, actions: cleanedActions) })
+    }
+
     private func presentResultAutoWriteErrorPopup() {
         showResultAutoWriteErrorPopup = false
         showResultAutoWriteErrorPopup = true
@@ -5438,19 +5548,38 @@ struct PlanStepFourResultView: View {
                 let response = try await AppleIntelligencePlanResultGenerator.suggestion(actions: actionTitles)
                 let suggestion = truncateWords(response, maxWords: resultAutoWriteMaxWords)
                 guard isPlanResultSuggestionAcceptable(suggestion, actions: actionTitles) else {
-                    failedChunkCount += 1
-                    AppDebugActivityLog.log(
-                        "PlanResultAutoWrite",
-                        "Rejected suggestion for chunk '\(chunkDescriptor)': '\(suggestion)' did not pass action-grounding validation."
-                    )
-                    continue
+                    if let fallback = deterministicResultFallback(actions: actionTitles, areaName: chunkLabel) {
+                        resultAutoWriteSuggestionsByChunk[chunk.id] = fallback
+                        generatedChunkCount += 1
+                        AppDebugActivityLog.log(
+                            "PlanResultAutoWrite",
+                            "Rejected suggestion for chunk '\(chunkDescriptor)': '\(suggestion)' did not pass action-grounding validation. Using deterministic fallback '\(fallback)'."
+                        )
+                        continue
+                    } else {
+                        failedChunkCount += 1
+                        AppDebugActivityLog.log(
+                            "PlanResultAutoWrite",
+                            "Rejected suggestion for chunk '\(chunkDescriptor)': '\(suggestion)' did not pass action-grounding validation."
+                        )
+                        continue
+                    }
                 }
 
                 resultAutoWriteSuggestionsByChunk[chunk.id] = suggestion
                 generatedChunkCount += 1
             } catch {
-                failedChunkCount += 1
-                AppDebugActivityLog.log("PlanResultAutoWrite", "Request failed for chunk '\(chunkDescriptor)': \(error.localizedDescription)")
+                if let fallback = deterministicResultFallback(actions: actionTitles, areaName: chunkLabel) {
+                    resultAutoWriteSuggestionsByChunk[chunk.id] = fallback
+                    generatedChunkCount += 1
+                    AppDebugActivityLog.log(
+                        "PlanResultAutoWrite",
+                        "Request failed for chunk '\(chunkDescriptor)': \(error.localizedDescription). Using deterministic fallback '\(fallback)'."
+                    )
+                } else {
+                    failedChunkCount += 1
+                    AppDebugActivityLog.log("PlanResultAutoWrite", "Request failed for chunk '\(chunkDescriptor)': \(error.localizedDescription)")
+                }
             }
         }
 
@@ -6821,17 +6950,12 @@ struct PlanStepFiveView: View {
         .sheet(item: $attachmentsSheetActionID) { wrapper in
             AttachmentsSheet(
                 attachments: attachmentsForAction(wrapper.id),
-                noteText: Binding(
-                    get: { noteText(forActionId: wrapper.id) },
-                    set: { newValue in
-                        upsertNote(forActionId: wrapper.id) { n in
-                            n.noteText = newValue
-                            n.updatedAt = .now
-                        }
-                        markStep5DirtyAndAutosave()
+                initialNoteText: noteText(forActionId: wrapper.id),
+                onSaveNote: { newValue in
+                    upsertNote(forActionId: wrapper.id) { n in
+                        n.noteText = newValue
+                        n.updatedAt = .now
                     }
-                ),
-                onSaveNote: {
                     markStep5DirtyAndAutosave()
                 },
                 onAddLink: { urlString in
@@ -8705,101 +8829,121 @@ private struct SensitivitySheet: View {
 }
 
 private struct AttachmentsSheet: View {
+    private enum AttachmentImportKind {
+        case file
+        case photo
+    }
+
+    #if canImport(UIKit)
+    private struct FileAttachmentCardPreview {
+        let thumbnail: UIImage?
+        let tint: Color
+    }
+    #endif
+
+    private struct AttachmentPreviewTarget: Identifiable {
+        enum Kind {
+            case link(String)
+            case image(URL)
+            case file(URL)
+            case unavailable(String)
+        }
+
+        let id = UUID()
+        let title: String
+        let kind: Kind
+        var stopAccess: (() -> Void)? = nil
+    }
+
     let attachments: [PlannedChunkActionAttachment]
-    @Binding var noteText: String
-    let onSaveNote: () -> Void
+    let initialNoteText: String
+    let onSaveNote: (String) -> Void
     let onAddLink: (String) -> Void
     let onAddFile: (URL, Data, String) -> Void
     let onDeleteAttachment: (UUID) -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.openURL) private var openURL
     @State private var linkText: String = ""
     @State private var isNewLinkMode: Bool = false
-    @FocusState private var focusedField: FocusedField?
+    @FocusState private var isNoteFocused: Bool
+    @FocusState private var isNewLinkFocused: Bool
+    @State private var isAttachmentOptionsPresented: Bool = false
     @State private var isFileImporterPresented: Bool = false
-
-    private enum FocusedField: Hashable {
-        case notes
-        case newLink
-    }
+    @State private var attachmentImportKind: AttachmentImportKind = .file
+    #if canImport(PhotosUI)
+    @State private var isPhotoPickerPresented: Bool = false
+    @State private var selectedPhotoItem: PhotosPickerItem? = nil
+    #endif
+    @State private var noteText: String = ""
+    @State private var hasSavedNote: Bool = false
+    @State private var previewTarget: AttachmentPreviewTarget? = nil
+    @ObservedObject private var previewStore = LoomLinkPreviewStore.shared
+    #if canImport(UIKit)
+    @State private var fileAttachmentCardPreviews: [UUID: FileAttachmentCardPreview] = [:]
+    #endif
 
     var body: some View {
         NavigationStack {
             List {
                 Section("Notes") {
-                    TextEditor(text: $noteText)
-                        .frame(height: 120)
-                        .focused($focusedField, equals: .notes)
-                }
+                    VStack(alignment: .leading, spacing: 12) {
+                        TextEditor(text: $noteText)
+                            .focused($isNoteFocused)
+                            .frame(height: 120)
 
-                Section("Files and Links") {
-                    Button {
-                        isNewLinkMode = true
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                            focusedField = .newLink
-                        }
-                    } label: {
-                        HStack(spacing: 10) {
-                            if isNewLinkMode {
+                        if isNewLinkMode {
+                            HStack(spacing: 10) {
                                 TextField("Add link…", text: $linkText)
-                                    .focused($focusedField, equals: .newLink)
+                                    .focused($isNewLinkFocused)
                                     .submitLabel(.done)
                                     .onSubmit {
                                         commitInlineLink()
                                     }
-                            } else {
-                                Text("+ New Link")
-                                    .fontWeight(.semibold)
-                                    .foregroundStyle(.blue)
-                            }
-                            Spacer()
-                            if isNewLinkMode {
+                                Spacer()
                                 Image(systemName: "checkmark.circle.fill")
                                     .foregroundStyle(.blue)
                             }
                         }
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
 
-                    Button("Attach file…") {
-                        isFileImporterPresented = true
-                    }
-
-                    if attachments.isEmpty {
-                        Text("No attachments yet.")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(attachments) { a in
-                            Button {
-                                openAttachment(a)
-                            } label: {
-                                HStack(alignment: .top, spacing: 10) {
-                                    Image(systemName: iconName(for: a))
-                                        .foregroundStyle(.secondary)
-
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(titleText(for: a))
-                                            .font(.subheadline)
-                                            .foregroundStyle(.primary)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                    }
-                                    .frame(maxWidth: .infinity, alignment: .leading)
+                        if !linkAttachments.isEmpty || !fileAttachments.isEmpty {
+                            VStack(spacing: 10) {
+                                ForEach(linkAttachments) { attachment in
+                                    attachmentCard(
+                                        for: attachment,
+                                        content: {
+                                            LoomLinkBannerCard(
+                                                urlString: attachment.urlString ?? "",
+                                                preview: previewStore.preview(for: attachment.urlString)
+                                            )
+                                        }
+                                    )
                                 }
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .swipeActions(edge: .trailing) {
-                                Button(role: .destructive) {
-                                    onDeleteAttachment(a.id)
-                                } label: {
-                                    Text("Delete")
+
+                                ForEach(fileAttachments) { attachment in
+                                    attachmentCard(
+                                        for: attachment,
+                                        content: {
+                                            fileAttachmentCard(for: attachment)
+                                        }
+                                    )
                                 }
-                                .tint(.red)
                             }
                         }
+
+                        Button {
+                            isAttachmentOptionsPresented = true
+                        } label: {
+                            HStack(spacing: 10) {
+                                Text("Add Attachment")
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(.blue)
+                                Spacer()
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
                     }
+                    .padding(.vertical, 2)
                 }
             }
             .fileImporter(
@@ -8811,53 +8955,188 @@ private struct AttachmentsSheet: View {
                 case .success(let urls):
                     guard let url = urls.first else { return }
                     do {
-                        #if os(macOS)
-                        let bookmark = try url.bookmarkData(
-                            options: .withSecurityScope,
-                            includingResourceValuesForKeys: nil,
-                            relativeTo: nil
-                        )
-                        #else
-                        let bookmark = try url.bookmarkData(
+                        let imported = try importAttachmentFile(from: url)
+                        let bookmark = try imported.bookmarkData(
                             options: .minimalBookmark,
                             includingResourceValuesForKeys: nil,
                             relativeTo: nil
                         )
-                        #endif
-                        onAddFile(url, bookmark, url.lastPathComponent)
-                    } catch {
-                        // ignore
-                    }
+                        onAddFile(imported, bookmark, imported.lastPathComponent)
+                    } catch { }
                 case .failure:
                     break
                 }
             }
-            .navigationTitle("Attachments")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    keyboardAccessoryButton
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") {
-                        commitInlineLink()
-                        onSaveNote()
-                        dismiss()
+            #if canImport(PhotosUI)
+            .photosPicker(
+                isPresented: $isPhotoPickerPresented,
+                selection: $selectedPhotoItem,
+                matching: .images,
+                preferredItemEncoding: .current
+            )
+            .onChange(of: selectedPhotoItem) { _, item in
+                guard let item else { return }
+                Task {
+                    await importSelectedPhoto(item)
+                    await MainActor.run {
+                        selectedPhotoItem = nil
                     }
                 }
             }
-            .onChange(of: focusedField) { _, newValue in
-                guard newValue != .newLink else { return }
+            #endif
+            .confirmationDialog("", isPresented: $isAttachmentOptionsPresented, titleVisibility: .hidden) {
+                Button("Link") {
+                    isNewLinkMode = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        isNewLinkFocused = true
+                    }
+                }
+                Button("File") {
+                    attachmentImportKind = .file
+                    isFileImporterPresented = true
+                }
+                Button("Photo") {
+                    #if canImport(PhotosUI)
+                    isPhotoPickerPresented = true
+                    #else
+                    attachmentImportKind = .file
+                    isFileImporterPresented = true
+                    #endif
+                }
+                Button("Cancel", role: .cancel) {}
+            }
+            .navigationTitle("Notes")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        commitNoteIfNeeded()
+                        commitInlineLink()
+                        dismiss()
+                    }
+                }
+                ToolbarItemGroup(placement: .keyboard) {
+                    if isNoteFocused {
+                        Spacer(minLength: 0)
+                        keyboardAccessoryButton(
+                            showsCheckmark: !trimmedNoteText.isEmpty,
+                            action: {
+                                if trimmedNoteText.isEmpty {
+                                    isNoteFocused = false
+                                } else {
+                                    isNoteFocused = false
+                                    commitNoteIfNeeded()
+                                    dismiss()
+                                }
+                            }
+                        )
+                    } else if isNewLinkMode && isNewLinkFocused {
+                        Spacer(minLength: 0)
+                        keyboardAccessoryButton(
+                            showsCheckmark: !trimmedInlineLinkValue.isEmpty,
+                            action: {
+                                if trimmedInlineLinkValue.isEmpty {
+                                    isNewLinkFocused = false
+                                } else {
+                                    commitInlineLink()
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+            .onAppear {
+                noteText = initialNoteText
+                hasSavedNote = false
+                previewStore.load(urlStrings: linkAttachments.compactMap(\.urlString))
+                #if canImport(UIKit)
+                preloadFileAttachmentCards(for: fileAttachments)
+                #endif
+            }
+            .onChange(of: isNewLinkFocused) { _, isFocused in
+                guard !isFocused else { return }
                 guard trimmedInlineLinkValue.isEmpty else { return }
                 isNewLinkMode = false
                 linkText = ""
             }
+            .onChange(of: linkAttachmentURLs) { _, urls in
+                previewStore.load(urlStrings: urls)
+            }
+            #if canImport(UIKit)
+            .onChange(of: fileAttachments.map(\.id)) { _, _ in
+                preloadFileAttachmentCards(for: fileAttachments)
+            }
+            #endif
+            .onDisappear {
+                commitNoteIfNeeded()
+            }
+        }
+        .sheet(item: $previewTarget, onDismiss: clearPreviewTarget) { preview in
+            switch preview.kind {
+            case .link(let urlString):
+                LoomLinkAttachmentPreviewSheet(urlString: urlString)
+            case .image(let url):
+                #if canImport(UIKit)
+                LoomImageAttachmentPreviewSheet(url: url)
+                    .onDisappear {
+                        preview.stopAccess?()
+                    }
+                #else
+                LoomAttachmentUnavailableSheet(
+                    title: preview.title,
+                    message: "Preview is not available on this device."
+                )
+                .onDisappear {
+                    preview.stopAccess?()
+                }
+                #endif
+            case .file(let url):
+                #if canImport(PDFKit) && canImport(UIKit)
+                if url.pathExtension.lowercased() == "pdf" {
+                    LoomPDFPreviewSheet(url: url, title: preview.title)
+                        .onDisappear {
+                            preview.stopAccess?()
+                        }
+                } else {
+                    #if canImport(QuickLook)
+                    LoomQuickLookPreviewSheet(url: url)
+                        .onDisappear {
+                            preview.stopAccess?()
+                        }
+                    #else
+                    LoomAttachmentUnavailableSheet(
+                        title: preview.title,
+                        message: "Preview is not available on this device."
+                    )
+                    .onDisappear {
+                        preview.stopAccess?()
+                    }
+                    #endif
+                }
+                #elseif canImport(QuickLook) && canImport(UIKit)
+                LoomQuickLookPreviewSheet(url: url)
+                    .onDisappear {
+                        preview.stopAccess?()
+                    }
+                #else
+                LoomAttachmentUnavailableSheet(
+                    title: preview.title,
+                    message: "Preview is not available on this device."
+                )
+                .onDisappear {
+                    preview.stopAccess?()
+                }
+                #endif
+            case .unavailable(let message):
+                LoomAttachmentUnavailableSheet(title: preview.title, message: message)
+            }
         }
     }
 
-    private var trimmedInlineLinkValue: String {
-        linkText.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func commitNoteIfNeeded() {
+        guard !hasSavedNote else { return }
+        hasSavedNote = true
+        onSaveNote(noteText)
     }
 
     private func commitInlineLink() {
@@ -8865,139 +9144,447 @@ private struct AttachmentsSheet: View {
         onAddLink(trimmedInlineLinkValue)
         linkText = ""
         isNewLinkMode = false
-        focusedField = nil
+        isNewLinkFocused = false
     }
 
-    private var keyboardShowsCheckmark: Bool {
-        switch focusedField {
-        case .notes:
-            return !noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        case .newLink:
-            return !linkText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        case .none:
-            return false
+    private var trimmedNoteText: String {
+        noteText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedInlineLinkValue: String {
+        linkText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var linkAttachments: [PlannedChunkActionAttachment] {
+        attachments.filter { $0.kind == .link }
+    }
+
+    private var fileAttachments: [PlannedChunkActionAttachment] {
+        attachments.filter { $0.kind == .file }
+    }
+
+    private var linkAttachmentURLs: [String] {
+        linkAttachments.compactMap(\.urlString)
+    }
+
+    @ViewBuilder
+    private func attachmentCard<Content: View>(
+        for attachment: PlannedChunkActionAttachment,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        ZStack(alignment: .topTrailing) {
+            Button {
+                previewTarget = previewTarget(for: attachment)
+            } label: {
+                content()
+            }
+            .buttonStyle(.plain)
+
+            Button(role: .destructive) {
+                onDeleteAttachment(attachment.id)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(Color.white)
+                    .frame(width: 28, height: 28)
+                    .background(Circle().fill(Color.black.opacity(0.58)))
+            }
+            .buttonStyle(.plain)
+            .contentShape(Rectangle())
+            .padding(8)
         }
     }
 
-    private var keyboardAccessoryButton: some View {
-        Button {
-            if keyboardShowsCheckmark {
-                handleKeyboardCheckmarkAction()
-            } else {
-                dismissKeyboard()
-            }
-        } label: {
-            Image(systemName: keyboardShowsCheckmark ? "checkmark" : "keyboard.chevron.compact.down")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(keyboardShowsCheckmark ? .white : .primary.opacity(0.85))
-                .frame(width: 38, height: 38)
+    private func keyboardAccessoryButton(
+        showsCheckmark: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: showsCheckmark ? "checkmark" : "keyboard.chevron.compact.down")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(
+                    showsCheckmark
+                        ? Color.white
+                        : Color.primary.opacity(0.85)
+                )
+                .frame(width: 30, height: 30)
                 .background(
-                    Circle().fill(keyboardShowsCheckmark ? Color.blue : Color(.secondarySystemBackground))
+                    Circle().fill(
+                        showsCheckmark
+                            ? Color.blue
+                            : Color(.secondarySystemBackground)
+                    )
+                )
+                .overlay(
+                    Circle()
+                        .stroke(
+                            showsCheckmark
+                                ? Color.blue.opacity(0.9)
+                                : Color.black.opacity(0.08),
+                            lineWidth: 1
+                        )
                 )
         }
         .buttonStyle(.plain)
     }
 
-    private func handleKeyboardCheckmarkAction() {
-        switch focusedField {
-        case .notes:
-            onSaveNote()
-            dismissKeyboard()
-            dismiss()
-        case .newLink:
-            commitInlineLink()
-        case .none:
-            break
-        }
-    }
-
-    private func dismissKeyboard() {
-        focusedField = nil
+    @ViewBuilder
+    private func fileAttachmentCard(for attachment: PlannedChunkActionAttachment) -> some View {
         #if canImport(UIKit)
-        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        let cachedPreview = fileAttachmentCardPreviews[attachment.id]
+        LoomFileBannerCard(
+            title: fileDisplayTitle(for: attachment),
+            subtitle: fileSubtitle(for: attachment),
+            tint: fileTint(for: attachment, cachedPreview: cachedPreview),
+            systemName: fileIconName(for: attachment),
+            thumbnail: cachedPreview?.thumbnail
+        )
+        #else
+        LoomFileBannerCard(
+            title: fileDisplayTitle(for: attachment),
+            subtitle: fileSubtitle(for: attachment),
+            tint: fileTint(for: attachment),
+            systemName: fileIconName(for: attachment)
+        )
         #endif
     }
 
-    private func iconName(for a: PlannedChunkActionAttachment) -> String {
-        switch a.kind {
-        case .link: return "link"
-        case .note: return "note.text"
-        case .file: return "doc"
+    private func fileDisplayTitle(for attachment: PlannedChunkActionAttachment) -> String {
+        if let fileName = attachment.fileName?.trimmingCharacters(in: .whitespacesAndNewlines), !fileName.isEmpty {
+            return fileName
+        }
+        if let resolved = resolvedAttachmentFileURL(attachment, startAccess: true) {
+            defer { resolved.stopAccess?() }
+            let name = resolved.url.lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !name.isEmpty {
+                return name
+            }
+        }
+        return "Attachment"
+    }
+
+    private func fileSubtitle(for attachment: PlannedChunkActionAttachment) -> String {
+        if attachmentIsImageFile(attachment.fileName) {
+            return "Photo"
+        }
+        let ext = fileExtension(for: attachment)
+        if ext.isEmpty { return "Attached file" }
+        return ext.uppercased() + " file"
+    }
+
+    private func fileIconName(for attachment: PlannedChunkActionAttachment) -> String {
+        let ext = fileExtension(for: attachment)
+        switch ext {
+        case "pdf":
+            return "doc.richtext"
+        case "png", "jpg", "jpeg", "heic", "gif", "webp":
+            return "photo"
+        case "mov", "mp4", "m4v":
+            return "film"
+        case "zip":
+            return "archivebox"
+        default:
+            return "doc"
         }
     }
 
-    private func titleText(for a: PlannedChunkActionAttachment) -> String {
+    private func fileTint(
+        for attachment: PlannedChunkActionAttachment,
+        cachedPreview: FileAttachmentCardPreview? = nil
+    ) -> Color {
+        #if canImport(UIKit)
+        if let cachedPreview {
+            return cachedPreview.tint
+        }
+        #endif
+        let ext = fileExtension(for: attachment)
+        switch ext {
+        case "pdf":
+            return .red
+        case "png", "jpg", "jpeg", "heic", "gif", "webp":
+            return .blue
+        case "mov", "mp4", "m4v":
+            return .purple
+        case "zip":
+            return .orange
+        default:
+            return Color(.secondaryLabel)
+        }
+    }
+
+    private func previewTarget(for a: PlannedChunkActionAttachment) -> AttachmentPreviewTarget {
         switch a.kind {
         case .link:
-            return a.urlString ?? "(link)"
+            if let urlString = a.urlString?.trimmingCharacters(in: .whitespacesAndNewlines), !urlString.isEmpty {
+                return AttachmentPreviewTarget(title: "Attachment", kind: .link(urlString))
+            }
+            return AttachmentPreviewTarget(title: a.fileName ?? "Attachment", kind: .unavailable("This link could not be opened."))
+        case .file:
+            guard let resolved = resolvedAttachmentFileURL(a, startAccess: true) else {
+                return AttachmentPreviewTarget(title: a.fileName ?? "Attachment", kind: .unavailable("The selected file is no longer available."))
+            }
+            if attachmentIsImageFile(a) {
+                return AttachmentPreviewTarget(
+                    title: fileDisplayTitle(for: a),
+                    kind: .image(resolved.url),
+                    stopAccess: resolved.stopAccess
+                )
+            }
+            return AttachmentPreviewTarget(
+                title: fileDisplayTitle(for: a),
+                kind: .file(resolved.url),
+                stopAccess: resolved.stopAccess
+            )
         case .note:
-            return "Note"
-        case .file:
-            return a.fileName ?? "(file)"
+            return AttachmentPreviewTarget(title: "Attachment", kind: .unavailable("Preview is not available for notes."))
         }
     }
 
-    private func openAttachment(_ a: PlannedChunkActionAttachment) {
-        switch a.kind {
-        case .link:
-            if let urlString = a.urlString, let url = URL(string: urlString) {
-                openURL(url)
-            }
-        case .file:
-            guard let data = a.fileBookmarkData else { return }
+    private func resolvedAttachmentFileURL(
+        _ attachment: PlannedChunkActionAttachment,
+        startAccess: Bool
+    ) -> (url: URL, stopAccess: (() -> Void)?)? {
+        if let data = attachment.fileBookmarkData {
             var isStale = false
-            #if os(macOS)
-            if let url = try? URL(
-                resolvingBookmarkData: data,
-                options: [.withoutUI, .withSecurityScope],
-                relativeTo: nil,
-                bookmarkDataIsStale: &isStale
-            ) {
-                let didAccess = url.startAccessingSecurityScopedResource()
-                openURL(url)
-                if didAccess {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                        url.stopAccessingSecurityScopedResource()
-                    }
-                }
-            } else if let url = try? URL(
-                resolvingBookmarkData: data,
-                relativeTo: nil,
-                bookmarkDataIsStale: &isStale
-            ) {
-                openURL(url)
-            }
-            #else
             if let url = try? URL(
                 resolvingBookmarkData: data,
                 options: [.withoutUI],
                 relativeTo: nil,
                 bookmarkDataIsStale: &isStale
             ) {
-                let didAccess = url.startAccessingSecurityScopedResource()
-                openURL(url)
-                if didAccess {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                        url.stopAccessingSecurityScopedResource()
-                    }
+                guard startAccess else {
+                    return (url, nil)
                 }
-            } else if let url = try? URL(
-                resolvingBookmarkData: data,
-                relativeTo: nil,
-                bookmarkDataIsStale: &isStale
-            ) {
+
                 let didAccess = url.startAccessingSecurityScopedResource()
-                openURL(url)
-                if didAccess {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                        url.stopAccessingSecurityScopedResource()
-                    }
-                }
+                let stopAccess = didAccess ? { url.stopAccessingSecurityScopedResource() } : nil
+                return (url, stopAccess)
             }
-            #endif
-        case .note:
-            break
         }
+
+        if let localURL = resolvedAppOwnedAttachmentURL(for: attachment), FileManager.default.fileExists(atPath: localURL.path) {
+            return (localURL, nil)
+        }
+
+        return nil
+    }
+
+    private func clearPreviewTarget() {
+        previewTarget?.stopAccess?()
+        previewTarget = nil
+    }
+
+    private func importAttachmentFile(from sourceURL: URL) throws -> URL {
+        let startedAccess = sourceURL.startAccessingSecurityScopedResource()
+        defer {
+            if startedAccess {
+                sourceURL.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        let baseDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        let attachmentsDirectory = baseDirectory.appendingPathComponent("ActionAttachmentFiles", isDirectory: true)
+        try FileManager.default.createDirectory(at: attachmentsDirectory, withIntermediateDirectories: true)
+
+        let sanitizedFileName = sanitizedAttachmentFileName(sourceURL.lastPathComponent)
+        let destinationURL = uniqueAttachmentDestinationURL(
+            in: attachmentsDirectory,
+            originalFileName: sanitizedFileName
+        )
+
+        if FileManager.default.fileExists(atPath: destinationURL.path) {
+            try FileManager.default.removeItem(at: destinationURL)
+        }
+        try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
+        return destinationURL
+    }
+
+    private func resolvedAppOwnedAttachmentURL(for attachment: PlannedChunkActionAttachment) -> URL? {
+        if let path = attachment.urlString?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !path.isEmpty,
+           let url = appOwnedAttachmentURL(relativePath: path) {
+            return url
+        }
+        if let fileName = attachment.fileName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !fileName.isEmpty,
+           let url = appOwnedAttachmentURL(relativePath: actionAttachmentRelativePath(for: fileName)) {
+            return url
+        }
+        return nil
+    }
+
+    private func appOwnedAttachmentURL(relativePath: String) -> URL? {
+        let trimmed = relativePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let components = trimmed.split(separator: "/").map(String.init)
+        guard !components.isEmpty else { return nil }
+        let baseDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        var url = baseDirectory
+        for component in components {
+            url.appendPathComponent(component, isDirectory: false)
+        }
+        return url
+    }
+
+    #if canImport(PhotosUI)
+    private func importSelectedPhoto(_ item: PhotosPickerItem) async {
+        guard let data = try? await item.loadTransferable(type: Data.self),
+              let imported = try? importAttachmentData(
+                data,
+                preferredFileName: preferredPhotoFileName(for: item)
+              ),
+              let bookmark = try? imported.bookmarkData(
+                options: .minimalBookmark,
+                includingResourceValuesForKeys: nil,
+                relativeTo: nil
+              ) else {
+            return
+        }
+        await MainActor.run {
+            onAddFile(imported, bookmark, imported.lastPathComponent)
+        }
+    }
+
+    private func preferredPhotoFileName(for item: PhotosPickerItem) -> String {
+        let suggested = item.supportedContentTypes.first?.preferredFilenameExtension
+        let ext = (suggested?.isEmpty == false ? suggested! : "jpg")
+        return "Photo.\(ext)"
+    }
+    #endif
+
+    private func importAttachmentData(_ data: Data, preferredFileName: String) throws -> URL {
+        let baseDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        let attachmentsDirectory = baseDirectory.appendingPathComponent("ActionAttachmentFiles", isDirectory: true)
+        try FileManager.default.createDirectory(at: attachmentsDirectory, withIntermediateDirectories: true)
+
+        let sanitizedFileName = sanitizedAttachmentFileName(preferredFileName)
+        let destinationURL = uniqueAttachmentDestinationURL(
+            in: attachmentsDirectory,
+            originalFileName: sanitizedFileName
+        )
+        try data.write(to: destinationURL, options: .atomic)
+        return destinationURL
+    }
+
+    private func uniqueAttachmentDestinationURL(in directory: URL, originalFileName: String) -> URL {
+        let ext = (originalFileName as NSString).pathExtension
+        let baseName = ((originalFileName as NSString).deletingPathExtension).nilIfEmpty ?? "Attachment"
+        let suffix = UUID().uuidString.prefix(8)
+        let finalName = ext.isEmpty ? "\(baseName)-\(suffix)" : "\(baseName)-\(suffix).\(ext)"
+        return directory.appendingPathComponent(finalName, isDirectory: false)
+    }
+
+    private func sanitizedAttachmentFileName(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "Attachment" }
+        let invalid = CharacterSet(charactersIn: "/:\\?%*|\"<>")
+        let components = trimmed.components(separatedBy: invalid)
+        let sanitized = components.joined(separator: "-").nilIfEmpty ?? "Attachment"
+        return sanitized
+    }
+
+    private func attachmentIsImageFile(_ fileName: String?) -> Bool {
+        let ext = ((fileName as NSString?)?.pathExtension ?? "").lowercased()
+        let imageExtensions: Set<String> = ["jpg", "jpeg", "png", "gif", "heic", "heif", "webp", "bmp", "tif", "tiff"]
+        return imageExtensions.contains(ext)
+    }
+
+    private func attachmentIsImageFile(_ attachment: PlannedChunkActionAttachment) -> Bool {
+        let imageExtensions: Set<String> = ["jpg", "jpeg", "png", "gif", "heic", "heif", "webp", "bmp", "tif", "tiff"]
+        return imageExtensions.contains(fileExtension(for: attachment))
+    }
+
+    private func fileExtension(for attachment: PlannedChunkActionAttachment) -> String {
+        let direct = ((attachment.fileName as NSString?)?.pathExtension ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        if !direct.isEmpty {
+            return direct
+        }
+        if let resolved = resolvedAttachmentFileURL(attachment, startAccess: true) {
+            defer { resolved.stopAccess?() }
+            return resolved.url.pathExtension.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        }
+        return ""
+    }
+
+    #if canImport(UIKit)
+    private func fileThumbnail(for attachment: PlannedChunkActionAttachment) -> UIImage? {
+        guard attachmentIsImageFile(attachment),
+              let resolved = resolvedAttachmentFileURL(attachment, startAccess: true) else { return nil }
+        defer { resolved.stopAccess?() }
+        return UIImage(contentsOfFile: resolved.url.path)
+    }
+
+    private func preloadFileAttachmentCards(for attachments: [PlannedChunkActionAttachment]) {
+        let liveIDs = Set(attachments.map(\.id))
+        fileAttachmentCardPreviews = fileAttachmentCardPreviews.filter { liveIDs.contains($0.key) }
+
+        let uncached = attachments.filter { fileAttachmentCardPreviews[$0.id] == nil }
+        guard !uncached.isEmpty else { return }
+
+        for attachment in uncached {
+            let preview = makeFileAttachmentCardPreview(for: attachment)
+            fileAttachmentCardPreviews[attachment.id] = preview
+        }
+    }
+
+    private func makeFileAttachmentCardPreview(for attachment: PlannedChunkActionAttachment) -> FileAttachmentCardPreview {
+        if attachmentIsImageFile(attachment),
+           let thumbnail = fileThumbnail(for: attachment) {
+            let tint = dominantColor(from: thumbnail).map(Color.init) ?? .blue
+            return FileAttachmentCardPreview(thumbnail: thumbnail, tint: tint)
+        }
+
+        return FileAttachmentCardPreview(
+            thumbnail: nil,
+            tint: fileTint(for: attachment, cachedPreview: nil)
+        )
+    }
+
+    private func dominantColor(from image: UIImage) -> UIColor? {
+        guard let cgImage = image.cgImage else { return nil }
+        let ciImage = CIImage(cgImage: cgImage)
+        let extent = ciImage.extent
+        guard !extent.isEmpty,
+              let filter = CIFilter(
+                name: "CIAreaAverage",
+                parameters: [
+                    kCIInputImageKey: ciImage,
+                    kCIInputExtentKey: CIVector(cgRect: extent)
+                ]
+              ),
+              let outputImage = filter.outputImage else {
+            return nil
+        }
+
+        let context = CIContext(options: [.workingColorSpace: NSNull()])
+        var bitmap = [UInt8](repeating: 0, count: 4)
+        context.render(
+            outputImage,
+            toBitmap: &bitmap,
+            rowBytes: 4,
+            bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
+            format: .RGBA8,
+            colorSpace: nil
+        )
+
+        return UIColor(
+            red: CGFloat(bitmap[0]) / 255,
+            green: CGFloat(bitmap[1]) / 255,
+            blue: CGFloat(bitmap[2]) / 255,
+            alpha: 1
+        )
+    }
+    #endif
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
     }
 }
 

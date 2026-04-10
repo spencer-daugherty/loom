@@ -2232,7 +2232,7 @@ struct PurposeStartView: View {
             : visionTrimmed
         let passions = currentPassionPhrasesForProfileInsights()
         let userKey = PersonalizationUserIdentity.currentUserKey()
-        let monthKey = PurposeProfileInsightsHasher.monthKey()
+        let monthKey = PurposeProfileInsightsHasher.measuredMonthKey()
         let cycleKey = "\(userKey)|\(monthKey)"
         if !forceRefresh,
            loadedPurposeInsightsCycleKey == cycleKey,
@@ -2240,10 +2240,19 @@ struct PurposeStartView: View {
             return
         }
         if !forceRefresh,
-           let stored = latestPurposeProfileSnapshot(for: userKey),
-           stored.monthKey == monthKey {
+           let stored = purposeProfileSnapshot(for: userKey, monthKey: monthKey) {
             applyPurposeInsightSnapshot(stored)
             loadedPurposeInsightsCycleKey = cycleKey
+            return
+        }
+        guard PurposeProfileInsightsHasher.isMonthlyRefreshBoundary() else {
+            if let stored = latestPurposeProfileSnapshot(for: userKey) {
+                applyPurposeInsightSnapshot(stored)
+                loadedPurposeInsightsCycleKey = cycleKey
+            } else {
+                purposeInsightCards = []
+                purposeInsightProfileName = ""
+            }
             return
         }
 
@@ -2423,6 +2432,12 @@ struct PurposeStartView: View {
         purposeProfileInsightsSnapshots.first(where: { $0.userKey == userKey })
     }
 
+    private func purposeProfileSnapshot(for userKey: String, monthKey: String) -> PurposeProfileInsightsSnapshot? {
+        purposeProfileInsightsSnapshots.first {
+            $0.userKey == userKey && $0.monthKey == monthKey
+        }
+    }
+
     private func applyPurposeInsightSnapshot(_ snapshot: PurposeProfileInsightsSnapshot) {
         let record = PurposeProfileRecord(
             profile: snapshot.profile,
@@ -2445,7 +2460,9 @@ struct PurposeStartView: View {
             monthKey: monthKey,
             inputsHash: inputsHash
         )
-        if let existing = purposeProfileInsightsSnapshots.first(where: { $0.snapshotKey == snapshotKey }) {
+        if purposeProfileInsightsSnapshots.contains(where: { $0.userKey == userKey && $0.monthKey == monthKey }) {
+            return
+        } else if let existing = purposeProfileInsightsSnapshots.first(where: { $0.snapshotKey == snapshotKey }) {
             existing.generatedAt = .now
             existing.profile = record.profile
             existing.strength = record.strength

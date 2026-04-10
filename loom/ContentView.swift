@@ -2259,7 +2259,7 @@ struct ContentView: View {
 
     private func latestMonthlyPassionScore(forEmotionKey emotionKey: String) -> Double? {
         guard let type = passionType(forEmotionKey: emotionKey) else { return nil }
-        let monthStart = PassionScoringMath.monthWindow(for: .now).monthStart
+        let monthStart = PassionScoringMath.latestCompletedMonthStart(for: .now)
         return latestPassionSnapshot(for: type, monthStart: monthStart)?.score
     }
 
@@ -2300,52 +2300,8 @@ struct ContentView: View {
         }
     }
 
-    private func categoryKey(_ raw: String) -> String {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !trimmed.isEmpty else { return "" }
-        let andNormalized = trimmed.replacingOccurrences(of: "&", with: " and ")
-        let cleaned = andNormalized.replacingOccurrences(
-            of: "[^a-z0-9]+",
-            with: " ",
-            options: .regularExpression
-        )
-        return cleaned
-            .split(whereSeparator: \.isWhitespace)
-            .joined(separator: " ")
-    }
-
     private var orderedFulfillmentRecords: [Fulfillment] {
-        let defaults: [(String, UUID)] = [
-            ("Career & Business", PlanLabelSeeder.categoryIDs["Career & Business"]!),
-            ("Leadership & Impact", PlanLabelSeeder.categoryIDs["Leadership & Impact"]!),
-            ("Wealth & Lifestyle", PlanLabelSeeder.categoryIDs["Wealth & Lifestyle"]!),
-            ("Mind & Meaning", PlanLabelSeeder.categoryIDs["Mind & Meaning"]!),
-            ("Love & Relationships", PlanLabelSeeder.categoryIDs["Love & Relationships"]!),
-            ("Health & Vitality", PlanLabelSeeder.categoryIDs["Health & Vitality"]!)
-        ]
-
-        var byID = Dictionary(uniqueKeysWithValues: fulfillments.map { ($0.category_id, $0) })
-        var ordered: [Fulfillment] = []
-        var seen = Set<String>()
-        for (_, id) in defaults {
-            if let record = byID.removeValue(forKey: id) {
-                let key = categoryKey(record.category)
-                guard !key.isEmpty, !seen.contains(key) else { continue }
-                ordered.append(record)
-                seen.insert(key)
-            }
-        }
-        let extras = byID.values
-            .sorted { $0.updatedAt > $1.updatedAt }
-            .filter { row in
-                let key = categoryKey(row.category)
-                guard !key.isEmpty, !seen.contains(key) else { return false }
-                seen.insert(key)
-                return true
-            }
-            .sorted { $0.category.localizedCaseInsensitiveCompare($1.category) == .orderedAscending }
-        ordered.append(contentsOf: extras)
-        return Array(ordered.prefix(7))
+        LittleWinsFulfillmentOrdering.orderedRecords(from: fulfillments)
     }
 
     private func completionCount(for record: Fulfillment) -> Int {
@@ -2372,7 +2328,7 @@ struct ContentView: View {
     }
 
     private func latestFulfillmentWeeklyScore(for record: Fulfillment) -> Double? {
-        let weekStart = FulfillmentScoringMath.weekWindow(for: .now).weekStart
+        let weekStart = FulfillmentScoringMath.latestCompletedWeekStart(for: .now)
         return fulfillmentCategoryScoreSnapshots.first(where: {
             $0.categoryID == record.category_id &&
             Calendar.current.isDate($0.weekStartDate, inSameDayAs: weekStart)
@@ -2380,7 +2336,7 @@ struct ContentView: View {
     }
 
     private func contentFulfillmentWeekDelta(for record: Fulfillment) -> Double? {
-        let currentWeek = FulfillmentScoringMath.weekWindow(for: .now).weekStart
+        let currentWeek = FulfillmentScoringMath.latestCompletedWeekStart(for: .now)
         guard let priorWeek = Calendar.current.date(byAdding: .day, value: -7, to: currentWeek) else { return nil }
         guard let current = fulfillmentCategoryScoreSnapshots.first(where: {
             $0.categoryID == record.category_id && Calendar.current.isDate($0.weekStartDate, inSameDayAs: currentWeek)
@@ -3053,7 +3009,10 @@ struct ContentView: View {
     private func littleWinsMiddlePageContent(proxy: GeometryProxy) -> some View {
         let horizontalPadding: CGFloat = 16
         let cardWidth = max(0, proxy.size.width - (horizontalPadding * 2))
-        let cardHeight = min(max(cardWidth * 1.42, 360), max(380, proxy.size.height - 36))
+        let cardHeight = min(
+            max(cardWidth * LittleWinsCardStyleMetrics.aspectRatio, 360),
+            max(380, proxy.size.height - 36)
+        )
         let cards = littleWinsCards
         let allTodayCards = littleWinsCardsIncludingHiddenToday
         let baselineVisibleCards = littleWinsCards(showHidden: false)
@@ -3287,9 +3246,8 @@ struct ContentView: View {
     }
 
     private func littleWinsMiniStackTopOverflow(forCardCount cardCount: Int) -> CGFloat {
-        let miniCardWidth: CGFloat = 28
-        let miniCardHeight: CGFloat = miniCardWidth * 1.42
-        let miniStackLiftPerCard = min(6, max(4, miniCardHeight * 0.14))
+        let miniCardHeight = LittleWinsCardStyleMetrics.miniCardHeight
+        let miniStackLiftPerCard = LittleWinsCardStyleMetrics.miniCardStackLift(for: miniCardHeight)
         let visibleStackCount = min(7, max(0, cardCount))
         return CGFloat(max(0, visibleStackCount - 1)) * miniStackLiftPerCard
     }
@@ -3521,10 +3479,10 @@ struct ContentView: View {
                 let historicalPreviewCategories = littleWinsHistoricalCategories(on: date)
                 let hasHistoricalPreview = !historicalPreviewCategories.isEmpty
                 let canShowTapPreview = !completedCardsForDate.isEmpty && hasHistoricalPreview
-                let miniCardWidth: CGFloat = 28
-        let miniCardHeight: CGFloat = miniCardWidth * 1.42
+                let miniCardWidth = LittleWinsCardStyleMetrics.miniCardWidth
+                let miniCardHeight = LittleWinsCardStyleMetrics.miniCardHeight
                 let visibleStackCount = min(7, completedCardsForDate.count)
-                let miniStackLiftPerCard = min(6, max(4, miniCardHeight * 0.14))
+                let miniStackLiftPerCard = LittleWinsCardStyleMetrics.miniCardStackLift(for: miniCardHeight)
                 let miniStackTopOverflow = CGFloat(max(0, visibleStackCount - 1)) * miniStackLiftPerCard
                 VStack(spacing: 3) {
                     if isPreviewOpen {
@@ -3628,7 +3586,7 @@ struct ContentView: View {
         usesMatchedGeometry: Bool = true
     ) -> some View {
         let visible = Array(cards.suffix(7))
-        let stackLiftPerCard = min(6, max(4, cardHeight * 0.14))
+        let stackLiftPerCard = LittleWinsCardStyleMetrics.miniCardStackLift(for: cardHeight)
         return ZStack {
             ForEach(Array(visible.enumerated()), id: \.element.id) { index, card in
                 let depth = CGFloat(visible.count - 1 - index)
@@ -3653,14 +3611,13 @@ struct ContentView: View {
         height: CGFloat
     ) -> some View {
         let radarSideCount = max(3, min(7, fulfillmentMetrics.count))
-        return RoundedRectangle(cornerRadius: 4, style: .continuous)
-            .fill(card.cardColor)
-            .frame(width: width, height: height)
-            .overlay {
-                RadarPolygonOutline(sides: radarSideCount)
-                    .stroke(card.titleColor, style: StrokeStyle(lineWidth: 1.8))
-                    .padding(4)
-            }
+        return LittleWinsMiniCardView(
+            fillColor: card.cardColor,
+            strokeColor: card.titleColor,
+            radarSideCount: radarSideCount,
+            width: width,
+            height: height
+        )
     }
 
     private func littleWinsCalendarFullScreenPreview(
@@ -3684,9 +3641,12 @@ struct ContentView: View {
         let totalVerticalSpacing = CGFloat(max(0, targetRowsCount - 1)) * gridSpacing
         let collapsedCardWidth = max(100, (availableWidth - totalHorizontalSpacing) / CGFloat(gridColumnsCount))
         let collapsedCardHeightCap = max(120, (availableHeight - totalVerticalSpacing) / CGFloat(targetRowsCount))
-        let collapsedCardHeight = min(collapsedCardWidth * 1.42, collapsedCardHeightCap)
+        let collapsedCardHeight = min(collapsedCardWidth * LittleWinsCardStyleMetrics.aspectRatio, collapsedCardHeightCap)
         let expandedCardWidth = min(max(240, availableWidth), 420)
-        let expandedCardHeight = min(expandedCardWidth * 1.42, max(220, availableHeight - 20))
+        let expandedCardHeight = min(
+            expandedCardWidth * LittleWinsCardStyleMetrics.aspectRatio,
+            max(220, availableHeight - 20)
+        )
         let gridColumns = Array(
             repeating: GridItem(.flexible(), spacing: gridSpacing, alignment: .top),
             count: gridColumnsCount
@@ -3801,8 +3761,8 @@ struct ContentView: View {
         isUncheckEnabled: Bool,
         onItemTap: ((LittleWinsHistoricalCompletionItem) -> Void)? = nil
     ) -> some View {
-        let baseWidth: CGFloat = 300
-        let baseHeight: CGFloat = baseWidth * 1.42
+        let baseWidth = LittleWinsCardStyleMetrics.referenceWidth
+        let baseHeight = LittleWinsCardStyleMetrics.referenceHeight
         let scale = min(width / baseWidth, height / baseHeight)
         return littleWinsHistoricalPreviewCardBaseView(
             category: category,
@@ -4151,199 +4111,14 @@ struct ContentView: View {
         height: CGFloat,
         radarSideCount: Int
     ) -> some View {
-        let cornerShapeSize: CGFloat = 52
-        let cornerShapePadding: CGFloat = 14
-        let topTitleCutoutWidth = min(max(width * 0.62, 200), width - 86)
-        let bottomTitleCutoutWidth = min(max(width * 0.32, 120), 180)
-        return RoundedRectangle(cornerRadius: 18, style: .continuous)
-            .fill(cardColor)
-            .overlay {
-                littleWinsCardTextPatternBackground(
-                    categoryTitle: patternText,
-                    color: titleColor,
-                    width: width,
-                    height: height
-                )
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(0.12),
-                                Color.clear,
-                                Color.black.opacity(0.02)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-            }
-            .overlay {
-                ZStack {
-                    ForEach(0..<18, id: \.self) { idx in
-                        RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                            .fill(Color.white.opacity(0.05))
-                            .frame(width: width * 0.9, height: 1)
-                            .rotationEffect(.degrees(-14))
-                            .offset(x: -width * 0.14, y: CGFloat(idx) * 16 - (height * 0.38))
-                    }
-                }
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .opacity(0.55)
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(Color.white.opacity(0.28), lineWidth: 1)
-            }
-            .overlay {
-                littleWinsInsetGuideLine(
-                    inset: 18,
-                    cornerRadius: 28,
-                    strokeColor: titleColor.opacity(0.22),
-                    lineWidth: 4,
-                    width: width,
-                    height: height,
-                    topLeadingShapeCutout: .init(width: 112, height: 112),
-                    bottomTrailingShapeCutout: .init(width: 112, height: 112),
-                    shapePadding: cornerShapePadding,
-                    shapeSize: cornerShapeSize,
-                    topCutoutWidth: topTitleCutoutWidth,
-                    bottomCutoutWidth: bottomTitleCutoutWidth
-                )
-            }
-            .overlay {
-                littleWinsInsetGuideLine(
-                    inset: 30,
-                    cornerRadius: 24,
-                    strokeColor: titleColor.opacity(0.14),
-                    lineWidth: 4,
-                    width: width,
-                    height: height,
-                    topLeadingShapeCutout: .init(width: 96, height: 96),
-                    bottomTrailingShapeCutout: .init(width: 96, height: 96),
-                    shapePadding: cornerShapePadding,
-                    shapeSize: cornerShapeSize,
-                    topCutoutWidth: topTitleCutoutWidth,
-                    bottomCutoutWidth: bottomTitleCutoutWidth
-                )
-            }
-            .overlay(alignment: .topLeading) {
-                RadarPolygonOutline(sides: radarSideCount)
-                    .stroke(titleColor, style: StrokeStyle(lineWidth: 6))
-                    .frame(width: cornerShapeSize, height: cornerShapeSize)
-                    .padding(.leading, cornerShapePadding)
-                    .padding(.top, cornerShapePadding)
-                    .opacity(0.9)
-            }
-            .overlay(alignment: .bottomTrailing) {
-                RadarPolygonOutline(sides: radarSideCount)
-                    .stroke(titleColor, style: StrokeStyle(lineWidth: 6))
-                    .frame(width: cornerShapeSize, height: cornerShapeSize)
-                    .padding(.trailing, cornerShapePadding)
-                    .padding(.bottom, cornerShapePadding)
-                    .opacity(0.9)
-            }
-    }
-
-    private func littleWinsInsetGuideLine(
-        inset: CGFloat,
-        cornerRadius: CGFloat,
-        strokeColor: Color,
-        lineWidth: CGFloat,
-        width: CGFloat,
-        height: CGFloat,
-        topLeadingShapeCutout: CGSize = .zero,
-        bottomTrailingShapeCutout: CGSize = .zero
-        ,
-        shapePadding: CGFloat = 14,
-        shapeSize: CGFloat = 52,
-        topCutoutWidth: CGFloat? = nil,
-        bottomCutoutWidth: CGFloat? = nil
-    ) -> some View {
-        let topCutoutWidth = topCutoutWidth ?? min(max(width * 0.34, 120), 190)
-        let bottomCutoutWidth = bottomCutoutWidth ?? min(max(width * 0.56, 180), width - (inset * 2) - 20)
-        let topY = inset
-        let bottomY = height - inset
-        let topLeadingCutoutCenter = CGPoint(
-            x: shapePadding + (shapeSize / 2),
-            y: shapePadding + (shapeSize / 2)
+        LittleWinsCardBackgroundView(
+            cardColor: cardColor,
+            titleColor: titleColor,
+            patternText: patternText,
+            width: width,
+            height: height,
+            radarSideCount: radarSideCount
         )
-        let bottomTrailingCutoutCenter = CGPoint(
-            x: width - shapePadding - (shapeSize / 2),
-            y: height - shapePadding - (shapeSize / 2)
-        )
-
-        return ZStack {
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .inset(by: inset)
-                .stroke(strokeColor, lineWidth: lineWidth)
-
-            Rectangle()
-                .fill(Color.black)
-                .frame(width: topCutoutWidth, height: lineWidth + 10)
-                .position(x: width / 2, y: topY)
-
-            Rectangle()
-                .fill(Color.black)
-                .frame(width: bottomCutoutWidth, height: lineWidth + 10)
-                .position(x: width / 2, y: bottomY)
-        }
-        .compositingGroup()
-        .blendMode(.normal)
-        .mask(
-            Rectangle()
-                .overlay {
-                    Rectangle().fill(Color.white)
-                    Rectangle()
-                        .frame(width: topCutoutWidth, height: lineWidth + 12)
-                        .position(x: width / 2, y: topY)
-                        .blendMode(.destinationOut)
-                    Rectangle()
-                        .frame(width: bottomCutoutWidth, height: lineWidth + 12)
-                        .position(x: width / 2, y: bottomY)
-                        .blendMode(.destinationOut)
-                    if topLeadingShapeCutout != .zero {
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .frame(width: topLeadingShapeCutout.width, height: topLeadingShapeCutout.height)
-                            .position(topLeadingCutoutCenter)
-                            .blendMode(.destinationOut)
-                    }
-                    if bottomTrailingShapeCutout != .zero {
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .frame(width: bottomTrailingShapeCutout.width, height: bottomTrailingShapeCutout.height)
-                            .position(bottomTrailingCutoutCenter)
-                            .blendMode(.destinationOut)
-                    }
-                }
-                .compositingGroup()
-        )
-    }
-
-    private func littleWinsCardTextPatternBackground(
-        categoryTitle: String,
-        color: Color,
-        width: CGFloat,
-        height: CGFloat
-    ) -> some View {
-        let textSize: CGFloat = 8.5 // ~50% of headline-sized "Little Wins" title
-        let rowHeight: CGFloat = 9
-        let rowCount = max(1, Int(ceil(height / rowHeight)) + 2)
-        let repeatedLine = String(repeating: categoryTitle + " ", count: max(8, Int(width / 28)))
-
-        return VStack(alignment: .leading, spacing: 0) {
-            ForEach(0..<rowCount, id: \.self) { row in
-                Text(repeatedLine)
-                    .font(.system(size: textSize, weight: .semibold, design: .rounded))
-                    .foregroundStyle(color.opacity(row.isMultiple(of: 2) ? 0.1 : 0.2))
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 0)
-            }
-        }
-        .frame(width: width, height: height, alignment: .topLeading)
-        .clipped()
-        .allowsHitTesting(false)
     }
 
     private var footer: some View {
@@ -6356,33 +6131,6 @@ private struct ContentHeaderFramePreferenceKey: PreferenceKey {
     static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
         let next = nextValue()
         if next != .zero { value = next }
-    }
-}
-
-private struct RadarPolygonOutline: Shape {
-    let sides: Int
-
-    func path(in rect: CGRect) -> Path {
-        let clampedSides = max(3, min(7, sides))
-        let center = CGPoint(x: rect.midX, y: rect.midY)
-        let radius = min(rect.width, rect.height) / 2
-        let startAngle = -CGFloat.pi / 2
-
-        var path = Path()
-        for idx in 0..<clampedSides {
-            let angle = startAngle + (CGFloat(idx) * 2 * .pi / CGFloat(clampedSides))
-            let point = CGPoint(
-                x: center.x + cos(angle) * radius,
-                y: center.y + sin(angle) * radius
-            )
-            if idx == 0 {
-                path.move(to: point)
-            } else {
-                path.addLine(to: point)
-            }
-        }
-        path.closeSubpath()
-        return path
     }
 }
 

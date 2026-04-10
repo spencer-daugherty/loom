@@ -2145,7 +2145,7 @@ struct FulfillmentView: View {
     }
 
     private func latestFulfillmentWeeklyScore(for record: Fulfillment) -> Double? {
-        let weekStart = FulfillmentScoringMath.weekWindow(for: .now).weekStart
+        let weekStart = FulfillmentScoringMath.latestCompletedWeekStart(for: .now)
         return fulfillmentCategoryScoreSnapshots.first(where: {
             $0.categoryID == record.category_id &&
             Calendar.current.isDate($0.weekStartDate, inSameDayAs: weekStart)
@@ -2153,7 +2153,7 @@ struct FulfillmentView: View {
     }
 
     private func latestFulfillmentWeeklySnapshot(for record: Fulfillment) -> FulfillmentCategoryScoreSnapshot? {
-        let weekStart = FulfillmentScoringMath.weekWindow(for: .now).weekStart
+        let weekStart = FulfillmentScoringMath.latestCompletedWeekStart(for: .now)
         return fulfillmentCategoryScoreSnapshots.first(where: {
             $0.categoryID == record.category_id &&
             Calendar.current.isDate($0.weekStartDate, inSameDayAs: weekStart)
@@ -2161,7 +2161,7 @@ struct FulfillmentView: View {
     }
 
     private func fulfillmentWeekOverWeekDelta(for record: Fulfillment) -> Double? {
-        let currentWeek = FulfillmentScoringMath.weekWindow(for: .now).weekStart
+        let currentWeek = FulfillmentScoringMath.latestCompletedWeekStart(for: .now)
         guard let priorWeek = Calendar.current.date(byAdding: .day, value: -7, to: currentWeek) else { return nil }
         guard let current = fulfillmentCategoryScoreSnapshots.first(where: {
             $0.categoryID == record.category_id && Calendar.current.isDate($0.weekStartDate, inSameDayAs: currentWeek)

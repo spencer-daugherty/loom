@@ -134,6 +134,11 @@ enum FulfillmentScoringMath {
         return FulfillmentWeekWindow(weekStart: start, weekEnd: end)
     }
 
+    static func latestCompletedWeekStart(for date: Date, calendar: Calendar = .current) -> Date {
+        let currentWeekStart = weekWindow(for: date, calendar: calendar).weekStart
+        return calendar.date(byAdding: .day, value: -7, to: currentWeekStart) ?? currentWeekStart
+    }
+
     static func clamp(_ value: Double, _ minValue: Double, _ maxValue: Double) -> Double {
         Swift.min(maxValue, Swift.max(minValue, value))
     }
@@ -190,25 +195,26 @@ struct FulfillmentScoringService {
 
     @discardableResult
     func computeAndPersistCurrentWeek(in context: ModelContext, now: Date = .now) throws -> [FulfillmentCategoryScoreSnapshot] {
-        let window = FulfillmentScoringMath.weekWindow(for: now, calendar: calendar)
-        return try computeAndPersist(weekStartDate: window.weekStart, in: context)
+        let latestCompletedWeekStart = FulfillmentScoringMath.latestCompletedWeekStart(for: now, calendar: calendar)
+        return try computeAndPersist(weekStartDate: latestCompletedWeekStart, in: context)
     }
 
     @discardableResult
     func computeAndBackfillWeeklySnapshots(in context: ModelContext, now: Date = .now, maxLookbackWeeks: Int = 104) throws -> [FulfillmentCategoryScoreSnapshot] {
-        let currentWeekStart = FulfillmentScoringMath.weekWindow(for: now, calendar: calendar).weekStart
-        let earliestCandidate = try earliestRelevantDate(in: context) ?? currentWeekStart
+        let latestCompletedWeekStart = FulfillmentScoringMath.latestCompletedWeekStart(for: now, calendar: calendar)
+        let earliestCandidate = try earliestRelevantDate(in: context) ?? latestCompletedWeekStart
         let earliestWeekStart = FulfillmentScoringMath.weekWindow(for: earliestCandidate, calendar: calendar).weekStart
-        let boundedStart = calendar.date(byAdding: .day, value: -(maxLookbackWeeks - 1) * 7, to: currentWeekStart) ?? earliestWeekStart
+        let boundedStart = calendar.date(byAdding: .day, value: -(maxLookbackWeeks - 1) * 7, to: latestCompletedWeekStart) ?? earliestWeekStart
         let startWeek = max(earliestWeekStart, boundedStart)
+        guard startWeek <= latestCompletedWeekStart else { return [] }
         let existingSnapshots = try context.fetch(FetchDescriptor<FulfillmentCategoryScoreSnapshot>())
         let existingWeekStarts = Set(existingSnapshots.map { calendar.startOfDay(for: $0.weekStartDate) })
 
         var all: [FulfillmentCategoryScoreSnapshot] = []
         var cursor = startWeek
-        while cursor <= currentWeekStart {
+        while cursor <= latestCompletedWeekStart {
             let normalizedCursor = calendar.startOfDay(for: cursor)
-            let shouldCompute = normalizedCursor == calendar.startOfDay(for: currentWeekStart) || !existingWeekStarts.contains(normalizedCursor)
+            let shouldCompute = !existingWeekStarts.contains(normalizedCursor)
             if shouldCompute {
                 let rows = try computeAndPersist(weekStartDate: cursor, in: context)
                 all.append(contentsOf: rows)

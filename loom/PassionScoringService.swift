@@ -179,6 +179,11 @@ enum PassionScoringMath {
         return PassionMonthWindow(monthStart: start, monthEnd: end)
     }
 
+    static func latestCompletedMonthStart(for date: Date, calendar: Calendar = .current) -> Date {
+        let currentMonthStart = monthWindow(for: date, calendar: calendar).monthStart
+        return calendar.date(byAdding: .month, value: -1, to: currentMonthStart) ?? currentMonthStart
+    }
+
     static func clamped01(_ value: Double) -> Double {
         min(1, max(0, value))
     }
@@ -796,10 +801,12 @@ struct PassionScoringService {
     @discardableResult
     func computeAndBackfillMonthlySnapshots(in modelContext: ModelContext, now: Date = .now, maxLookbackMonths: Int = 60) throws -> [PassionScoreSnapshot] {
         let currentMonthStart = PassionScoringMath.monthWindow(for: now, calendar: calendar).monthStart
-        let earliestCandidate = try earliestRelevantDate(in: modelContext) ?? currentMonthStart
+        let latestCompletedMonthStart = PassionScoringMath.latestCompletedMonthStart(for: now, calendar: calendar)
+        let earliestCandidate = try earliestRelevantDate(in: modelContext) ?? latestCompletedMonthStart
         let earliestMonthStart = PassionScoringMath.monthWindow(for: earliestCandidate, calendar: calendar).monthStart
-        let boundedStart = calendar.date(byAdding: .month, value: -(maxLookbackMonths - 1), to: currentMonthStart) ?? earliestMonthStart
+        let boundedStart = calendar.date(byAdding: .month, value: -(maxLookbackMonths - 1), to: latestCompletedMonthStart) ?? earliestMonthStart
         let startMonth = max(earliestMonthStart, boundedStart)
+        guard startMonth <= latestCompletedMonthStart else { return [] }
         var existingSnapshots = try modelContext.fetch(FetchDescriptor<PassionScoreSnapshot>())
 
         if removePrematureCurrentMonthSnapshotsIfNeeded(in: modelContext, snapshots: &existingSnapshots, now: now, currentMonthStart: currentMonthStart) {
@@ -811,24 +818,11 @@ struct PassionScoringService {
         }
 
         let existingMonthStarts = Set(existingSnapshots.map { calendar.startOfDay(for: $0.monthStartDate) })
-        let latestSnapshotCreatedAt = existingSnapshots.map(\.createdAt).max()
-        let minimumSpacing = Double(config.minimumSnapshotSpacingDays) * 86_400
-        let canCreateCurrentMonthSnapshot: Bool = {
-            guard let latestSnapshotCreatedAt else { return true }
-            return now.timeIntervalSince(latestSnapshotCreatedAt) >= minimumSpacing
-        }()
-
         var all: [PassionScoreSnapshot] = []
         var cursor = startMonth
-        let normalizedCurrentMonthStart = calendar.startOfDay(for: currentMonthStart)
-        while cursor <= currentMonthStart {
+        while cursor <= latestCompletedMonthStart {
             let normalizedCursor = calendar.startOfDay(for: cursor)
-            let shouldCompute: Bool
-            if normalizedCursor == normalizedCurrentMonthStart {
-                shouldCompute = !existingMonthStarts.contains(normalizedCursor) && canCreateCurrentMonthSnapshot
-            } else {
-                shouldCompute = !existingMonthStarts.contains(normalizedCursor)
-            }
+            let shouldCompute = !existingMonthStarts.contains(normalizedCursor)
             if shouldCompute {
                 let rows = try computeAndPersistSnapshots(for: cursor, in: modelContext)
                 all.append(contentsOf: rows)

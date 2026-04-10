@@ -52,6 +52,19 @@ enum PurposeProfileInsightsHasher {
         return formatter.string(from: date)
     }
 
+    static func measuredMonthStart(from date: Date = .now, calendar: Calendar = .current) -> Date {
+        let currentMonthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: date)) ?? date
+        return calendar.date(byAdding: .month, value: -1, to: currentMonthStart) ?? currentMonthStart
+    }
+
+    static func measuredMonthKey(from date: Date = .now, calendar: Calendar = .current) -> String {
+        monthKey(from: measuredMonthStart(from: date, calendar: calendar))
+    }
+
+    static func isMonthlyRefreshBoundary(_ date: Date = .now, calendar: Calendar = .current) -> Bool {
+        calendar.component(.day, from: date) == 1
+    }
+
     static func hash(
         diagnostic: DiagnosticAnswers,
         vision: String,

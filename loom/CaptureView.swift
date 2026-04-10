@@ -168,6 +168,7 @@ private struct CaptureSharedCompletedSheetID: Identifiable {
 private struct CaptureAttachmentPreviewTarget: Identifiable, Hashable {
     enum Kind: Hashable {
         case link(String)
+        case image(URL)
         case file(URL)
         case unavailable(String)
     }
@@ -194,7 +195,7 @@ private struct CaptureSharedAttachmentsReadOnlySheet: View {
     let attachments: [CaptureSharedDraftAttachment]
 
     @Environment(\.dismiss) private var dismiss
-    @StateObject private var previewStore = LoomLinkPreviewStore()
+    @ObservedObject private var previewStore = LoomLinkPreviewStore.shared
     @State private var previewTarget: CaptureAttachmentPreviewTarget? = nil
 
     var body: some View {
@@ -257,6 +258,11 @@ private struct CaptureSharedAttachmentsReadOnlySheet: View {
             switch preview.kind {
             case .link(let urlString):
                 LoomLinkAttachmentPreviewSheet(urlString: urlString)
+            case .image(let url):
+                LoomImageAttachmentPreviewSheet(url: url)
+                    .onDisappear {
+                        preview.stopAccess?()
+                    }
             case .file(let url):
                 #if canImport(QuickLook) && canImport(UIKit)
                 LoomQuickLookPreviewSheet(url: url)
@@ -373,7 +379,7 @@ private struct CaptureSharedAttachmentsReadOnlySheet: View {
             return CaptureAttachmentPreviewTarget(
                 id: attachment.id,
                 title: attachment.fileName ?? attachment.title,
-                kind: .file(resolved.url),
+                kind: attachmentIsImage(attachment) ? .image(resolved.url) : .file(resolved.url),
                 stopAccess: resolved.stopAccess
             )
         case .note:
@@ -802,8 +808,8 @@ struct CaptureView: View {
     @State private var sharedAutoWriteHistory: [String] = []
     @State private var sharedCompletedAttachmentsViewerID: CaptureSharedCompletedSheetID? = nil
     @State private var showActiveActionBlocksPage = false
-    @StateObject private var editingAttachmentPreviewStore = LoomLinkPreviewStore()
-    @StateObject private var sharedDraftAttachmentPreviewStore = LoomLinkPreviewStore()
+    @ObservedObject private var editingAttachmentPreviewStore = LoomLinkPreviewStore.shared
+    @ObservedObject private var sharedDraftAttachmentPreviewStore = LoomLinkPreviewStore.shared
     @AppStorage(loomAITroubleshootingDefaultsKey) private var loomAITroubleshootingEnabled = true
 
     init(
@@ -1258,6 +1264,11 @@ struct CaptureView: View {
             switch preview.kind {
             case .link(let urlString):
                 LoomLinkAttachmentPreviewSheet(urlString: urlString)
+            case .image(let url):
+                LoomImageAttachmentPreviewSheet(url: url)
+                    .onDisappear {
+                        preview.stopAccess?()
+                    }
             case .file(let url):
                 #if canImport(QuickLook) && canImport(UIKit)
                 LoomQuickLookPreviewSheet(url: url)
@@ -1734,7 +1745,7 @@ struct CaptureView: View {
             }
         } label: {
             HStack(alignment: .center, spacing: 10) {
-                Image(systemName: "play.fill")
+                Image(systemName: "forward.fill")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(Color.blue)
                     .frame(width: 24)
@@ -1855,6 +1866,14 @@ struct CaptureView: View {
                 .navigationTitle("Attachment")
                 .navigationBarTitleDisplayMode(.inline)
                 .onDisappear {
+                    clearEditingAttachmentPreview()
+                }
+        case .image(let url):
+            LoomImageAttachmentPreviewSheet(url: url)
+                .navigationTitle(preview.title)
+                .navigationBarTitleDisplayMode(.inline)
+                .onDisappear {
+                    preview.stopAccess?()
                     clearEditingAttachmentPreview()
                 }
         case .file(let url):
@@ -2011,32 +2030,29 @@ struct CaptureView: View {
     private var editActionAttachmentsSection: some View {
         if editingItemSourceType == LoomShareSourceType.sharedIn {
             Section("Notes") {
-                TextEditor(text: $editingItemSharedNoteText)
-                    .focused($editActionFocusedField, equals: .notes)
-                    .frame(height: 130)
-                    .scrollContentBackground(.hidden)
-                    .padding(10)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(Color(.secondarySystemBackground))
-                    )
+                VStack(alignment: .leading, spacing: 12) {
+                    TextEditor(text: $editingItemSharedNoteText)
+                        .focused($editActionFocusedField, equals: .notes)
+                        .frame(height: 120)
 
-                if visibleEditingItemSharedAttachments.isEmpty && editingItemSharedNoteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text("No notes or attachments available.")
-                        .foregroundStyle(.secondary)
-                } else if !visibleEditingItemSharedAttachments.isEmpty {
-                    ForEach(visibleEditingItemSharedAttachments) { attachment in
-                        Button {
-                            presentEditingAttachmentPreview(for: attachment)
-                        } label: {
-                            editingAttachmentCard(for: attachment)
-                                .padding(.horizontal, 4)
-                                .contentShape(Rectangle())
+                    if visibleEditingItemSharedAttachments.isEmpty
+                        && editingItemSharedNoteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text("No notes or attachments available.")
+                            .foregroundStyle(.secondary)
+                    } else if !visibleEditingItemSharedAttachments.isEmpty {
+                        VStack(spacing: 10) {
+                            ForEach(visibleEditingItemSharedAttachments) { attachment in
+                                Button {
+                                    presentEditingAttachmentPreview(for: attachment)
+                                } label: {
+                                    editingAttachmentCard(for: attachment)
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
-                        .buttonStyle(.plain)
-                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                     }
                 }
+                .padding(.vertical, 2)
             }
         }
     }
@@ -4057,8 +4073,9 @@ struct CaptureView: View {
             return
         }
 
+        let cleanedNoteText = cleanedSharedNoteText(textTrimmed, attachments: resolvedAttachments)
         sharedDraftActionText = resolvedActionText
-        sharedDraftNoteText = textTrimmed
+        sharedDraftNoteText = cleanedNoteText
         sharedDraftAttachments = resolvedAttachments
         refreshSharedDraftAttachmentPreviewResources()
         showSharedCreateSheet = true
@@ -4104,7 +4121,7 @@ struct CaptureView: View {
             leverageKindRaw: nil,
             leverageValue: nil,
             placeNames: [],
-            noteText: noteText,
+            noteText: cleanedSharedNoteText(noteText, attachments: attachments),
             attachments: attachments.map(\.asCarriedAttachment),
             updatedAtUnix: Date().timeIntervalSince1970
         )
@@ -4199,7 +4216,7 @@ struct CaptureView: View {
             leverageKindRaw: nil,
             leverageValue: nil,
             placeNames: [],
-            noteText: sharedDraftNoteText,
+            noteText: cleanedSharedNoteText(sharedDraftNoteText, attachments: sharedDraftAttachments),
             attachments: sharedDraftAttachments.map(\.asCarriedAttachment),
             updatedAtUnix: Date().timeIntervalSince1970
         )
@@ -4394,6 +4411,71 @@ struct CaptureView: View {
         guard let url = URL(string: urlString), let host = url.host else { return nil }
         let path = url.path.trimmingCharacters(in: .whitespacesAndNewlines)
         return path.isEmpty || path == "/" ? host : "\(host)\(path)"
+    }
+
+    private func cleanedSharedNoteText(
+        _ rawText: String,
+        attachments: [CaptureSharedDraftAttachment]
+    ) -> String {
+        let trimmedRawText = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedRawText.isEmpty, !attachments.isEmpty else { return trimmedRawText }
+
+        let removableLines = Set(attachments.flatMap(sharedAttachmentDuplicateTextCandidates(_:)))
+        guard !removableLines.isEmpty else { return trimmedRawText }
+
+        let cleanedLines = trimmedRawText
+            .components(separatedBy: .newlines)
+            .filter { line in
+                let normalized = normalizedSharedAttachmentDuplicateText(line)
+                return normalized.isEmpty || !removableLines.contains(normalized)
+            }
+
+        return cleanedLines
+            .joined(separator: "\n")
+            .replacingOccurrences(of: "\n{3,}", with: "\n\n", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func sharedAttachmentDuplicateTextCandidates(_ attachment: CaptureSharedDraftAttachment) -> [String] {
+        var candidates: [String] = []
+
+        func add(_ value: String?) {
+            let normalized = normalizedSharedAttachmentDuplicateText(value)
+            guard !normalized.isEmpty else { return }
+            candidates.append(normalized)
+        }
+
+        add(attachment.title)
+        add(attachment.fileName)
+
+        switch attachment.kind {
+        case .link:
+            add(attachment.urlString)
+            if let urlString = attachment.urlString {
+                add(sharedURLHostPath(urlString))
+            }
+        case .file:
+            if let fileName = attachment.fileName {
+                add(URL(fileURLWithPath: fileName).lastPathComponent)
+            }
+            let title = attachment.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !title.isEmpty {
+                add(URL(fileURLWithPath: title).lastPathComponent)
+            }
+        case .note:
+            break
+        }
+
+        return candidates
+    }
+
+    private func normalizedSharedAttachmentDuplicateText(_ raw: String?) -> String {
+        guard let raw else { return "" }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        return trimmed
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .lowercased()
     }
 
     private func stableHash(_ raw: String) -> String {
@@ -4617,7 +4699,7 @@ struct CaptureView: View {
             sharedDraftAttachmentPreviewTarget = CaptureAttachmentPreviewTarget(
                 id: attachment.id,
                 title: attachment.fileName ?? attachment.title,
-                kind: .file(resolved.url),
+                kind: isImageAttachment(attachment) ? .image(resolved.url) : .file(resolved.url),
                 stopAccess: resolved.stopAccess
             )
         case .note:
@@ -4673,7 +4755,7 @@ struct CaptureView: View {
             editingAttachmentPreviewTarget = CaptureAttachmentPreviewTarget(
                 id: attachment.id,
                 title: attachment.fileName ?? attachment.title,
-                kind: .file(resolved.url),
+                kind: isImageAttachment(attachment) ? .image(resolved.url) : .file(resolved.url),
                 stopAccess: resolved.stopAccess
             )
         case .note:
@@ -4867,8 +4949,9 @@ struct CaptureView: View {
         editingItemOriginalAttentionDays = resolvedAttention
         editingItemSourceType = item.sourceType
         let sharedProfile = ActionCarryProfileStore.load(for: item.text)
-        editingItemSharedNoteText = sharedProfile?.noteText ?? ""
-        editingItemSharedAttachments = sharedAttachmentsFromCarryProfile(forText: item.text)
+        let sharedAttachments = sharedAttachmentsFromCarryProfile(forText: item.text)
+        editingItemSharedNoteText = cleanedSharedNoteText(sharedProfile?.noteText ?? "", attachments: sharedAttachments)
+        editingItemSharedAttachments = sharedAttachments
         refreshEditingAttachmentPreviewResources()
         let leverageResourceID = resolvedLeverageResourceID(for: item)
         editingItemLeverageResourceID = leverageResourceID
@@ -5037,7 +5120,7 @@ struct CaptureView: View {
         noteText: String,
         attachments: [CaptureSharedDraftAttachment]
     ) {
-        let trimmedNoteText = noteText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedNoteText = cleanedSharedNoteText(noteText, attachments: attachments)
         if var profile = ActionCarryProfileStore.load(for: text) {
             profile.noteText = trimmedNoteText
             profile.attachments = attachments.map(\.asCarriedAttachment)
