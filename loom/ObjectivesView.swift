@@ -403,17 +403,13 @@ struct ObjectivesView: View {
     }
 
     private func startMeasure(for outcome: Outcomes, latestMeasure: OutcomesMeasure?) -> Double? {
-        if let first = outcomeMeasureEntries.first(where: { $0.outcome_id == outcome.outcome_id }) {
-            return first.measure
-        }
-        return latestMeasure?.measure
+        guard let entryID = OutcomeStartingValueStore.entryID(for: outcome.outcome_id) else { return nil }
+        return outcomeMeasureEntries.first(where: { $0.outcome_id == outcome.outcome_id && $0.id == entryID })?.measure
     }
 
     private func startMeasuredAt(for outcome: Outcomes, latestMeasure: OutcomesMeasure?) -> Date? {
-        if let first = outcomeMeasureEntries.first(where: { $0.outcome_id == outcome.outcome_id }) {
-            return first.measuredAt
-        }
-        return latestMeasure?.measuredAt
+        guard let entryID = OutcomeStartingValueStore.entryID(for: outcome.outcome_id) else { return nil }
+        return outcomeMeasureEntries.first(where: { $0.outcome_id == outcome.outcome_id && $0.id == entryID })?.measuredAt
     }
 
     private func formattedDate(_ date: Date) -> String {

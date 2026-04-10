@@ -1,5 +1,8 @@
 import SwiftUI
 import SwiftData
+#if canImport(UIKit)
+import UIKit
+#endif
 
 private enum OutcomeContributingLittleWinsStore {
     private static let defaultsKey = "outcome_contributing_little_wins_v1"
@@ -240,6 +243,8 @@ struct OutcomeView: View {
     @State private var measureDecimalPlaces: Int = 0
     @State private var updateGoalInput: String = ""
     @State private var updateGoalDate: Date = Calendar.current.startOfDay(for: .now)
+    @State private var isKeyboardVisible: Bool = false
+    @State private var keyboardHeight: CGFloat = 0
     @FocusState private var focusedOutcomeField: OutcomeKeyboardField?
     @FocusState private var isUpdateGoalFieldFocused: Bool
     @State private var completionSuccessLevel: Int = 3
@@ -564,7 +569,8 @@ struct OutcomeView: View {
     }
 
     private var startMeasureValue: Double? {
-        outcomeMeasureEntries.first?.measure ?? latestOutcomeMeasureSnapshot?.measure
+        guard let entryID = OutcomeStartingValueStore.entryID(for: outcome.outcome_id) else { return nil }
+        return outcomeMeasureEntries.first(where: { $0.id == entryID })?.measure
     }
 
     private var isGoalMetNow: Bool {
@@ -630,11 +636,12 @@ struct OutcomeView: View {
                     .frame(height: 44)
 
                     if isMeasurable, let current = parseFormattedDecimalOutcome(measureCurrent), let goalAmount = parseFormattedDecimalOutcome(measureGoal), goalAmount != 0 {
-                        let startMeasure = allMeasureEntries.first(where: { $0.outcome_id == outcome.outcome_id })?.measure ?? current
-                        let startMeasuredAt = allMeasureEntries
-                            .filter { $0.outcome_id == outcome.outcome_id }
-                            .min(by: { $0.measuredAt < $1.measuredAt })?
-                            .measuredAt
+                        let startEntryID = OutcomeStartingValueStore.entryID(for: outcome.outcome_id)
+                        let startEntry = allMeasureEntries.first {
+                            $0.outcome_id == outcome.outcome_id && $0.id == startEntryID
+                        }
+                        let startMeasure = startEntry?.measure
+                        let startMeasuredAt = startEntry?.measuredAt
                         let isStarting = startMeasuredAt.map { Calendar.current.isDate($0, inSameDayAs: latestMeasureDate()) } ?? false
                         MeasurableOutcomeBox(
                             measure: current,
@@ -891,27 +898,14 @@ struct OutcomeView: View {
     }
 
     private var formWithModifiers: some View {
-        formContent
+        let baseForm = formContent
             .navigationTitle(goal.isEmpty ? "Outcome" : goal)
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.visible, for: .navigationBar)
-            .toolbar {
-                ToolbarItemGroup(placement: .keyboard) {
-                    if focusedOutcomeField != nil {
-                        Spacer(minLength: 0)
-                        Button {
-                            guard outcomeFieldKeyboardShowsCheckmark else {
-                                focusedOutcomeField = nil
-                                return
-                            }
-                            focusedOutcomeField = nil
-                        } label: {
-                            keyboardAccessoryIcon(showCheckmark: outcomeFieldKeyboardShowsCheckmark)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                mainOutcomeKeyboardAccessoryInset
             }
+        return baseForm
             .alert("Delete Outcome?", isPresented: $isShowingDeleteOutcomeAlert) {
                 Button("Delete", role: .destructive) {
                     let archivedOutcome = OutcomesArchive(
@@ -990,6 +984,27 @@ struct OutcomeView: View {
                     saveOutcome()
                 }
             }
+#if canImport(UIKit)
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { note in
+                isKeyboardVisible = true
+                if let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect {
+                    keyboardHeight = max(0, frame.height - 34)
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+                isKeyboardVisible = false
+                keyboardHeight = 0
+            }
+#endif
+    }
+
+    @ViewBuilder
+    private var mainOutcomeKeyboardAccessoryInset: some View {
+        if focusedOutcomeField != nil && isKeyboardVisible {
+            keyboardAccessoryBar(showCheckmark: outcomeFieldKeyboardShowsCheckmark) {
+                focusedOutcomeField = nil
+            }
+        }
     }
 
     var body: some View {
@@ -1137,28 +1152,24 @@ struct OutcomeView: View {
                     updateGoalInput = ""
                     triggerUpdateGoalFieldFocus()
                 }
-                .toolbar {
-                    ToolbarItemGroup(placement: .keyboard) {
-                        if isUpdateGoalFieldFocused {
-                            Spacer(minLength: 0)
-                            Button {
-                                guard updateGoalKeyboardShowsCheckmark else {
-                                    isUpdateGoalFieldFocused = false
-                                    return
-                                }
-
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    if isUpdateGoalFieldFocused && isKeyboardVisible {
+                        keyboardAccessoryBar(showCheckmark: updateGoalKeyboardShowsCheckmark) {
+                            guard updateGoalKeyboardShowsCheckmark else {
                                 isUpdateGoalFieldFocused = false
-                                let newGoalValue = parseFormattedDecimalOutcome(updateGoalInput)
-                                if let newGoalValue, newGoalValue != (currentGoalValue ?? 0) {
-                                    saveUpdatedGoal(newGoalValue)
-                                }
-                                isShowingUpdateGoalSheet = false
-                            } label: {
-                                keyboardAccessoryIcon(showCheckmark: updateGoalKeyboardShowsCheckmark)
+                                return
                             }
-                            .buttonStyle(.plain)
+
+                            isUpdateGoalFieldFocused = false
+                            let newGoalValue = parseFormattedDecimalOutcome(updateGoalInput)
+                            if let newGoalValue, newGoalValue != (currentGoalValue ?? 0) {
+                                saveUpdatedGoal(newGoalValue)
+                            }
+                            isShowingUpdateGoalSheet = false
                         }
                     }
+                }
+                .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
                         Button("Cancel") {
                             isShowingUpdateGoalSheet = false
@@ -1289,18 +1300,14 @@ struct OutcomeView: View {
                     completionRecordedDate = Calendar.current.startOfDay(for: .now)
                     selectedCompletionPassionIDs.removeAll()
                 }
-                .toolbar {
-                    ToolbarItemGroup(placement: .keyboard) {
-                        if isCompletionJournalFocused {
-                            Spacer(minLength: 0)
-                            Button {
-                                isCompletionJournalFocused = false
-                            } label: {
-                                keyboardAccessoryIcon(showCheckmark: completionJournalKeyboardShowsCheckmark)
-                            }
-                            .buttonStyle(.plain)
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    if isCompletionJournalFocused && isKeyboardVisible {
+                        keyboardAccessoryBar(showCheckmark: completionJournalKeyboardShowsCheckmark) {
+                            isCompletionJournalFocused = false
                         }
                     }
+                }
+                .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
                         Button("Cancel") { isShowingCompleteOutcomeSheet = false }
                     }
@@ -1693,25 +1700,47 @@ struct OutcomeView: View {
     }
 
     @ViewBuilder
-    private func keyboardAccessoryIcon(showCheckmark: Bool) -> some View {
-        Image(systemName: showCheckmark ? "checkmark" : "keyboard.chevron.compact.down")
-            .font(.system(size: 14, weight: .semibold))
-            .foregroundStyle(showCheckmark ? .white : .primary.opacity(0.85))
-            .frame(width: 30, height: 30)
-            .background(
-                Circle().fill(
-                    showCheckmark
-                        ? Color.blue
-                        : Color(.secondarySystemBackground)
-                )
-            )
-            .overlay(
-                Circle()
-                    .stroke(
-                        Color.black.opacity(showCheckmark ? 0 : 0.08),
-                        lineWidth: 1
+    private func keyboardAccessoryBar(showCheckmark: Bool, action: @escaping () -> Void) -> some View {
+        HStack(spacing: 12) {
+            Spacer(minLength: 0)
+            Button(action: action) {
+                Image(systemName: showCheckmark ? "checkmark" : "keyboard.chevron.compact.down")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(showCheckmark ? .white : .primary.opacity(0.85))
+                    .frame(width: 44, height: 44)
+                    .background(
+                        Circle().fill(
+                            showCheckmark
+                                ? Color.blue
+                                : Color(.secondarySystemBackground)
+                        )
                     )
+                    .overlay(
+                        Circle()
+                            .stroke(
+                                showCheckmark
+                                    ? Color.blue.opacity(0.9)
+                                    : Color.black.opacity(0.08),
+                                lineWidth: 1
+                            )
+                    )
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, max(8, keyboardHeight > 0 ? 8 : 12))
+        .background(
+            LinearGradient(
+                stops: [
+                    .init(color: Color(.systemBackground).opacity(0), location: 0),
+                    .init(color: Color(.systemBackground).opacity(0.92), location: 0.55),
+                    .init(color: Color(.systemBackground), location: 1)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
             )
+        )
     }
 
     private func saveOutcome() {

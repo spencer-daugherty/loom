@@ -16,6 +16,40 @@ extension Notification.Name {
   static let captureItemsDidChange = Notification.Name("captureItemsDidChange")
 }
 
+enum OutcomeStartingValueStore {
+  private static let defaultsKey = "outcomeStartingValueEntryIDs.v1"
+
+  private static func loadMap() -> [String: String] {
+    guard let data = UserDefaults.standard.data(forKey: defaultsKey),
+          let decoded = try? JSONDecoder().decode([String: String].self, from: data) else {
+      return [:]
+    }
+    return decoded
+  }
+
+  private static func saveMap(_ map: [String: String]) {
+    guard let data = try? JSONEncoder().encode(map) else { return }
+    UserDefaults.standard.set(data, forKey: defaultsKey)
+  }
+
+  static func entryID(for outcomeID: UUID) -> UUID? {
+    guard let raw = loadMap()[outcomeID.uuidString] else { return nil }
+    return UUID(uuidString: raw)
+  }
+
+  static func setEntryID(_ entryID: UUID, for outcomeID: UUID) {
+    var map = loadMap()
+    map[outcomeID.uuidString] = entryID.uuidString
+    saveMap(map)
+  }
+
+  static func clearEntryID(for outcomeID: UUID) {
+    var map = loadMap()
+    map.removeValue(forKey: outcomeID.uuidString)
+    saveMap(map)
+  }
+}
+
 struct VacationModeConfig: Codable, Equatable {
   var isEnabled: Bool
   var startDate: Date
@@ -1582,7 +1616,7 @@ final class CompletedOutcomeMeasurePointArchive {
 enum WeeklyMindsetEntry {
   /// Returns the start of the week (in the user's current calendar) for the given date.
   static func weekStart(for date: Date, calendar: Calendar = .current) -> Date {
-    calendar.dateInterval(of: .weekOfYear, for: date)?.start ?? date
+    AppWeekStartStore.weekStart(for: date, base: calendar)
   }
 
   @Model
@@ -2609,7 +2643,18 @@ final class PlannedChunkActionAttachment {
     }
 
     var kind: ActionAttachmentKind {
-        get { ActionAttachmentKind(rawValue: kindRaw) ?? .link }
+        get {
+            if let explicit = ActionAttachmentKind(rawValue: kindRaw) {
+                return explicit
+            }
+            if fileBookmarkData != nil || fileName != nil {
+                return .file
+            }
+            if let urlString, !urlString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return .link
+            }
+            return .note
+        }
         set { kindRaw = newValue.rawValue }
     }
 }

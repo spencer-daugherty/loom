@@ -1190,6 +1190,10 @@ struct AddOutcomeMeasureSheet: View {
         return !trimmed.isEmpty && parseFormattedDecimalChart(measureText) != nil
     }
 
+    private var startingValueEntryID: UUID? {
+        OutcomeStartingValueStore.entryID(for: outcomeID)
+    }
+
     init(outcomeID: UUID, formatRaw: String, unitRaw: String, decimalPlaces: Int) {
         self.outcomeID = outcomeID
         self.formatRaw = formatRaw
@@ -1271,6 +1275,7 @@ struct AddOutcomeMeasureSheet: View {
         guard let current = parseFormattedDecimalChart(measureText) else { return }
         let selectedDay = Calendar.current.startOfDay(for: measuredDate)
         let existingSameDay = entries.filter {
+            $0.id != startingValueEntryID &&
             Calendar.current.isDate($0.measuredAt, inSameDayAs: selectedDay)
         }
         if existingSameDay.isEmpty {
@@ -1324,6 +1329,7 @@ struct AddOutcomeMeasureSheet: View {
     private func persistMeasure(current: Double, measuredDay: Date, overrideExisting: Bool) {
         let goal = goalValue
         let hasExactDuplicateForDay = entries.contains {
+            $0.id != startingValueEntryID &&
             Calendar.current.isDate($0.measuredAt, inSameDayAs: measuredDay) &&
             $0.measure == current &&
             $0.measure_amt == goal
@@ -1360,13 +1366,14 @@ struct AddOutcomeMeasureSheet: View {
 
         if overrideExisting {
             let sameDayEntries = entries.filter {
+                $0.id != startingValueEntryID &&
                 Calendar.current.isDate($0.measuredAt, inSameDayAs: measuredDay)
             }
             if let keep = sameDayEntries.first {
                 keep.measure = current
                 keep.measure_amt = goal
                 keep.measuredAt = measuredDay
-                keep.createdAt = .now
+                keep.createdAt = Date.now
                 keep.format = formatRaw
                 keep.unit = unitRaw
                 keep.decimalPlaces = decimalPlaces
@@ -1442,6 +1449,7 @@ struct OutcomesAllDataView: View {
     @Query private var outcomes: [Outcomes]
     @Query(sort: \OutcomeAnalyticsEvent.occurredAt, order: .reverse) private var allEvents: [OutcomeAnalyticsEvent]
     @State private var isEditingStartingValue = false
+    @State private var startingValueEnabled = false
     @State private var startingValueInput = ""
     @FocusState private var isStartingValueFieldFocused: Bool
 
@@ -1462,14 +1470,19 @@ struct OutcomesAllDataView: View {
         Calendar.current.startOfDay(for: outcomes.first?.start ?? .now)
     }
 
-    private var startDayEntries: [OutcomesMeasureEntry] {
-        entries
-            .filter { Calendar.current.isDate($0.measuredAt, inSameDayAs: outcomeStartDate) }
+    private var startingValueEntryID: UUID? {
+        OutcomeStartingValueStore.entryID(for: outcomeID)
+    }
+
+    private var startingValueEntries: [OutcomesMeasureEntry] {
+        guard let startingValueEntryID else { return [] }
+        return entries
+            .filter { $0.id == startingValueEntryID }
             .sorted { $0.createdAt > $1.createdAt }
     }
 
     private var startingValue: Double {
-        startDayEntries.first?.measure ?? 0
+        startingValueEntries.first?.measure ?? 0
     }
 
     private var mergedMeasureRows: [OutcomesMeasureEntry] {
@@ -1490,7 +1503,8 @@ struct OutcomesAllDataView: View {
     }
 
     private var nonStartingMeasureRows: [OutcomesMeasureEntry] {
-        mergedMeasureRows.filter { !Calendar.current.isDate($0.measuredAt, inSameDayAs: outcomeStartDate) }
+        guard let startingValueEntryID else { return mergedMeasureRows }
+        return mergedMeasureRows.filter { $0.id != startingValueEntryID }
     }
 
     private var goalChangeEvents: [OutcomeAnalyticsEvent] {
@@ -1592,6 +1606,7 @@ struct OutcomesAllDataView: View {
 
             Section {
                 Button {
+                    startingValueEnabled = !startingValueEntries.isEmpty
                     startingValueInput = sanitizeAndFormatDecimalInputChart(
                         startingValue == 0 ? "" : formatted(startingValue),
                         maxFractionDigits: min(3, max(0, decimalPlaces))
@@ -1603,7 +1618,7 @@ struct OutcomesAllDataView: View {
                             .font(.body)
                             .foregroundStyle(.secondary)
                         Spacer()
-                        Text(formatted(startingValue))
+                        Text(startingValueEnabled ? formatted(startingValue) : "Off")
                             .font(.body)
                             .foregroundStyle(.blue)
                         Image(systemName: "chevron.up.chevron.down")
@@ -1631,29 +1646,46 @@ struct OutcomesAllDataView: View {
                     HStack {
                         Text("Starting Value")
                         Spacer()
-                        TextField("0", text: $startingValueInput)
-                            .keyboardType(.decimalPad)
-                            .focused($isStartingValueFieldFocused)
-                            .multilineTextAlignment(.trailing)
-                            .frame(width: 120)
-                            .onChange(of: startingValueInput) { _, newValue in
-                                startingValueInput = sanitizeAndFormatDecimalInputChart(
-                                    newValue,
-                                    maxFractionDigits: min(3, max(0, decimalPlaces))
-                                )
-                            }
+                        Toggle("", isOn: $startingValueEnabled)
+                            .labelsHidden()
+                    }
+                    if startingValueEnabled {
+                        HStack {
+                            Text("Value")
+                            Spacer()
+                            TextField("0", text: $startingValueInput)
+                                .keyboardType(.decimalPad)
+                                .focused($isStartingValueFieldFocused)
+                                .multilineTextAlignment(.trailing)
+                                .frame(width: 120)
+                                .onChange(of: startingValueInput) { _, newValue in
+                                    startingValueInput = sanitizeAndFormatDecimalInputChart(
+                                        newValue,
+                                        maxFractionDigits: min(3, max(0, decimalPlaces))
+                                    )
+                                }
+                        }
                     }
                 }
                 .navigationTitle("Edit Starting Value")
                 .navigationBarTitleDisplayMode(.inline)
                 .onAppear {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                        isStartingValueFieldFocused = true
+                        isStartingValueFieldFocused = startingValueEnabled
+                    }
+                }
+                .onChange(of: startingValueEnabled) { _, enabled in
+                    if enabled {
+                        DispatchQueue.main.async {
+                            isStartingValueFieldFocused = true
+                        }
+                    } else {
+                        isStartingValueFieldFocused = false
                     }
                 }
                 .toolbar {
                     ToolbarItemGroup(placement: .keyboard) {
-                        if isStartingValueFieldFocused {
+                        if isStartingValueFieldFocused && startingValueEnabled {
                             Spacer(minLength: 0)
                             Button {
                                 guard startingValueKeyboardShowsCheckmark else {
@@ -1777,6 +1809,9 @@ struct OutcomesAllDataView: View {
     }
 
     private func deleteMeasureRow(_ row: OutcomesMeasureEntry) {
+        if startingValueEntryID == row.id {
+            OutcomeStartingValueStore.clearEntryID(for: outcomeID)
+        }
         if let persisted = entries.first(where: { $0.id == row.id }) {
             modelContext.insert(
                 OutcomeAnalyticsEvent(
@@ -1809,28 +1844,43 @@ struct OutcomesAllDataView: View {
     }
 
     private func saveStartingValue() {
+        let existingStartingEntries = startingValueEntries
+        if !startingValueEnabled {
+            for row in existingStartingEntries {
+                RecentlyDeletedStore.trash(row, in: modelContext)
+            }
+            OutcomeStartingValueStore.clearEntryID(for: outcomeID)
+            try? modelContext.save()
+            return
+        }
+
         let parsed = parseFormattedDecimalChart(startingValueInput) ?? 0
         let goal = currentGoalValue()
-        if let existing = startDayEntries.first {
+        if let existing = existingStartingEntries.first {
             existing.measure = parsed
             existing.measure_amt = goal
+            existing.measuredAt = outcomeStartDate
             existing.createdAt = .now
             existing.format = formatRaw
             existing.unit = unitRaw
             existing.decimalPlaces = decimalPlaces
+            OutcomeStartingValueStore.setEntryID(existing.id, for: outcomeID)
+            for extra in existingStartingEntries.dropFirst() {
+                RecentlyDeletedStore.trash(extra, in: modelContext)
+            }
         } else {
-            modelContext.insert(
-                OutcomesMeasureEntry(
-                    outcome_id: outcomeID,
-                    measure: parsed,
-                    measure_amt: goal,
-                    measuredAt: outcomeStartDate,
-                    createdAt: .now,
-                    format: formatRaw,
-                    unit: unitRaw,
-                    decimalPlaces: decimalPlaces
-                )
+            let inserted = OutcomesMeasureEntry(
+                outcome_id: outcomeID,
+                measure: parsed,
+                measure_amt: goal,
+                measuredAt: outcomeStartDate,
+                createdAt: .now,
+                format: formatRaw,
+                unit: unitRaw,
+                decimalPlaces: decimalPlaces
             )
+            modelContext.insert(inserted)
+            OutcomeStartingValueStore.setEntryID(inserted.id, for: outcomeID)
         }
         try? modelContext.save()
     }
@@ -1982,10 +2032,8 @@ private struct RecordedDataDetailsView: View {
     }
 
     private func startMeasure(for outcomeId: UUID) -> Double? {
-        if let first = allEntries.first(where: { $0.outcome_id == outcomeId }) {
-            return first.measure
-        }
-        return allSnapshots.first(where: { $0.outcome_id == outcomeId })?.measure
+        guard let entryID = OutcomeStartingValueStore.entryID(for: outcomeId) else { return nil }
+        return allEntries.first(where: { $0.outcome_id == outcomeId && $0.id == entryID })?.measure
     }
 
     private func differenceColor(oldGoal: Double, newGoal: Double, outcomeId: UUID) -> Color {

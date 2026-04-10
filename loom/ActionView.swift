@@ -53,6 +53,10 @@ private struct ActionAttachmentPresence {
     let hasFile: Bool
 }
 
+private func actionAttachmentRelativePath(for fileName: String) -> String {
+    "ActionAttachmentFiles/\(fileName)"
+}
+
 private struct ActionRowRenderContext: Identifiable {
     let action: PlannedChunkAction
     let defineState: PlannedChunkActionDefineState?
@@ -217,6 +221,7 @@ struct ActionView: View {
     @State private var showReflectionFlow: Bool = false
     @State private var dismissActionViewAfterReflect: Bool = false
     @State private var deferredPersistor = ActionDeferredPersistor()
+    @State private var pendingStatusOverridesByActionID: [UUID: ActionExecutionStatus] = [:]
     @State private var carriedProfileAppliedActionIDs: Set<UUID> = []
     @State private var dueSnapshotsCache: [String: PlannedActionDueSnapshot] = [:]
     @FocusState private var isSearchFieldFocused: Bool
@@ -299,7 +304,7 @@ struct ActionView: View {
     ) -> [PlannedChunk] {
         let activeActionIDs = Set(
             weekActions.compactMap { action in
-                let status = executionByAction[action.id]?.status ?? .noAction
+                let status = effectiveExecutionStatus(for: action.id, persisted: executionByAction)
                 return isActiveStatus(status) ? action.id : nil
             }
         )
@@ -376,6 +381,17 @@ struct ActionView: View {
             }
         }
         return result
+    }
+
+    private func effectiveExecutionStatus(
+        for actionId: UUID,
+        persisted executionByAction: [UUID: PlannedChunkActionExecutionState]
+    ) -> ActionExecutionStatus {
+        pendingStatusOverridesByActionID[actionId] ?? executionByAction[actionId]?.status ?? .noAction
+    }
+
+    private func effectiveExecutionStatus(for actionId: UUID) -> ActionExecutionStatus {
+        effectiveExecutionStatus(for: actionId, persisted: executionStateByActionID)
     }
 
     private var notesByActionID: [UUID: PlannedChunkActionNote] {
@@ -479,7 +495,7 @@ struct ActionView: View {
 
     private var inProgressCount: Int {
         let executionByAction = executionStateByActionID
-        return weekActions.filter { (executionByAction[$0.id]?.status ?? .noAction) == .inProgress }.count
+        return weekActions.filter { effectiveExecutionStatus(for: $0.id, persisted: executionByAction) == .inProgress }.count
     }
 
     private var blocksAgeDays: Int? {
@@ -492,7 +508,7 @@ struct ActionView: View {
         guard !weekActions.isEmpty else { return false }
         let executionByAction = executionStateByActionID
         return weekActions.allSatisfy { action in
-            let s = executionByAction[action.id]?.status ?? .noAction
+            let s = effectiveExecutionStatus(for: action.id, persisted: executionByAction)
             return s == .done || s == .carriedToCapture || s == .notNeeded
         }
     }
@@ -500,7 +516,7 @@ struct ActionView: View {
     private var hasUncompletedActions: Bool {
         let executionByAction = executionStateByActionID
         return weekActions.contains { action in
-            let s = executionByAction[action.id]?.status ?? .noAction
+            let s = effectiveExecutionStatus(for: action.id, persisted: executionByAction)
             return s == .noAction || s == .leveraged || s == .inProgress
         }
     }
@@ -606,13 +622,13 @@ struct ActionView: View {
         let contextualAttachmentKinds = ActionAttachmentFilterKind.allCases.filter { attachmentKinds.contains($0) }
 
         let inactiveOnlyCandidateCount = filtered(excluding: [.activeOnly]).filter {
-            isInactiveStatus(executionByAction[$0.id]?.status ?? .noAction)
+            isInactiveStatus(effectiveExecutionStatus(for: $0.id, persisted: executionByAction))
         }.count
         let leveragedOnlyCandidateCount = filtered(excluding: [.leveragedOnly]).filter {
-            (executionByAction[$0.id]?.status ?? .noAction) == .leveraged
+            effectiveExecutionStatus(for: $0.id, persisted: executionByAction) == .leveraged
         }.count
         let inProgressOnlyCandidateCount = filtered(excluding: [.inProgressOnly]).filter {
-            (executionByAction[$0.id]?.status ?? .noAction) == .inProgress
+            effectiveExecutionStatus(for: $0.id, persisted: executionByAction) == .inProgress
         }.count
         let mustsOnlyCandidateCount = filtered(excluding: [.musts]).filter {
             isMust(for: $0.id, defineByAction: defineByAction)
@@ -886,42 +902,45 @@ struct ActionView: View {
     }
 
     private func actionBodyChrome<Content: View>(_ content: Content) -> some View {
-        let chromeBase = content
-            .overlay(alignment: .top) {
-                completeHintOverlay
-            }
-            .padding(.horizontal)
-            .safeAreaPadding(.top)
-            .navigationTitle("Action Plan")
-            .navigationBarTitleDisplayMode(.inline)
-            .navigationBarBackButtonHidden(true)
-            .toolbarBackground(Color.clear, for: .navigationBar)
-            .toolbarBackground(.hidden, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Label("Back", systemImage: "chevron.left")
-                    }
+        let chromeBase = ZStack(alignment: .bottom) {
+            content
+                .padding(.horizontal)
+                .safeAreaPadding(.top)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .overlay(alignment: .top) {
+                    completeHintOverlay
                 }
 
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    headerTrailingControls
+            actionBottomInset
+                .frame(maxWidth: .infinity, alignment: .bottom)
+        }
+        .ignoresSafeArea(edges: .bottom)
+        .navigationTitle("Action Plan")
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true)
+        .toolbarBackground(Color.clear, for: .navigationBar)
+        .toolbarBackground(.hidden, for: .navigationBar)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    dismiss()
+                } label: {
+                    Label("Back", systemImage: "chevron.left")
                 }
+            }
 
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    if isKeyboardVisible && !isSearchPresented {
-                        keyboardAccessoryButton
-                    }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                headerTrailingControls
+            }
+
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                if isKeyboardVisible && !isSearchPresented {
+                    keyboardAccessoryButton
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                actionBottomInset
-            }
-            .coordinateSpace(name: "action-scroll")
+        }
+        .coordinateSpace(name: "action-scroll")
 
         return chromeBase
             .navigationDestination(item: $rearrangeActionsSheetPayload) { sheet in
@@ -1228,21 +1247,22 @@ struct ActionView: View {
                         scheduleAutosave()
                     },
                     onAddFile: { _, bookmarkData, fileName in
+                        let localPath = actionAttachmentRelativePath(for: fileName)
                         modelContext.insert(PlannedChunkActionAttachment(
                             weekStart: currentWeekStart,
                             plannedChunkActionId: wrapper.id,
                             kindRaw: ActionAttachmentKind.file.rawValue,
-                            urlString: nil,
+                            urlString: localPath,
                             fileName: fileName,
                             fileBookmarkData: bookmarkData,
                             createdAt: .now
                         ))
-                        scheduleAutosave()
+                        persistNow()
                     },
                     onDeleteAttachment: { attachmentId in
                         if let a = attachmentsByActionID.values.flatMap({ $0 }).first(where: { $0.id == attachmentId }) {
                             RecentlyDeletedStore.trash(a, in: modelContext)
-                            scheduleAutosave()
+                            persistNow()
                         }
                     }
                 )
@@ -1361,7 +1381,7 @@ struct ActionView: View {
 
     private func actionScrollSection(render: RenderState) -> some View {
         ScrollViewReader { proxy in
-            ScrollView {
+            ScrollView(.vertical, showsIndicators: true) {
                 GeometryReader { geo in
                     Color.clear
                         .preference(
@@ -1510,7 +1530,7 @@ struct ActionView: View {
             return 12
         }
         if !isKeyboardVisible {
-            return 12
+            return 96 + actionBottomSafeAreaInset
         }
         return 8
     }
@@ -1542,56 +1562,58 @@ struct ActionView: View {
     }
 
     private var actionBottomInset: some View {
-        ZStack(alignment: .bottom) {
+        VStack(spacing: 0) {
+            if isEditingActionPresented {
+                actionEditorBar
+                    .zIndex(1)
+            } else if !isKeyboardVisible && !isSearchPresented {
+                actionFooterPrimaryControl
+                    .padding(.horizontal)
+                    .padding(.top, 10)
+                    .padding(.bottom, 8)
+                    .zIndex(1)
+            } else if isSearchPresented {
+                searchBar
+                    .zIndex(1)
+            }
+        }
+        .padding(.bottom, actionBottomSafeAreaInset)
+        .background(alignment: .bottom) {
             if !isSearchPresented && !isEditingActionPresented {
                 actionBottomToolbarBackdrop
             }
-
-            VStack(spacing: 0) {
-                if isEditingActionPresented {
-                    actionEditorBar
-                        .zIndex(1)
-                } else if !isKeyboardVisible && !isSearchPresented {
-                    actionFooterPrimaryControl
-                        .padding(.horizontal)
-                        .padding(.top, 10)
-                        .padding(.bottom, 8)
-                        .zIndex(1)
-                } else if isSearchPresented {
-                    searchBar
-                        .zIndex(1)
-                }
-            }
         }
+        .ignoresSafeArea(edges: .bottom)
     }
 
     private var actionBottomToolbarBackdrop: some View {
-        GeometryReader { proxy in
-            ActionChromeMaterialLayer(
-                shape: Rectangle(),
-                shadowRadius: 12,
-                shadowY: -2
+        ActionChromeMaterialLayer(
+            shape: Rectangle(),
+            shadowRadius: 12,
+            shadowY: -2
+        )
+        .frame(height: 94 + actionBottomSafeAreaInset)
+        .mask(
+            LinearGradient(
+                stops: [
+                    .init(color: .clear, location: 0),
+                    .init(color: .black.opacity(0.22), location: 0.58),
+                    .init(color: .black, location: 1)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
             )
-            .frame(
-                width: proxy.size.width,
-                height: 94 + proxy.safeAreaInsets.bottom,
-                alignment: .bottom
-            )
-            .mask(
-                LinearGradient(
-                    stops: [
-                        .init(color: .clear, location: 0),
-                        .init(color: .black.opacity(0.22), location: 0.58),
-                        .init(color: .black, location: 1)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-            .ignoresSafeArea(edges: .bottom)
-        }
+        )
+        .ignoresSafeArea(edges: .bottom)
         .allowsHitTesting(false)
+    }
+
+    private var actionBottomSafeAreaInset: CGFloat {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow)?
+            .safeAreaInsets.bottom ?? 0
     }
 
     private var keyboardAccessoryShowsCheckmark: Bool {
@@ -2325,13 +2347,13 @@ struct ActionView: View {
     ) -> some View {
         let activeActionsForRearrange = signposted("build_rearrangeable_actions") {
             allForChunk.filter {
-                isActiveStatus(executionByAction[$0.id]?.status ?? .noAction)
+                isActiveStatus(effectiveExecutionStatus(for: $0.id, persisted: executionByAction))
             }
         }
         let rowContexts = signposted("build_row_render_contexts") {
             displayedFiltered.map { action in
                 let defineState = defineByAction[action.id]
-                let status = executionByAction[action.id]?.status ?? .noAction
+                let status = effectiveExecutionStatus(for: action.id, persisted: executionByAction)
                 let selectedResource = resourcesByAction[action.id].flatMap { resourceCatalogByID[$0] }
                 let hasLeverage = selectedResource != nil
                 let leverageIconName: String = {
@@ -2369,7 +2391,7 @@ struct ActionView: View {
             var totalMustMinutes = 0
             var hasActiveActions = false
             for action in totalSource {
-                guard isActiveStatus(executionByAction[action.id]?.status ?? .noAction) else { continue }
+                guard isActiveStatus(effectiveExecutionStatus(for: action.id, persisted: executionByAction)) else { continue }
                 hasActiveActions = true
                 let minutes = defineByAction[action.id]?.timeEstimateMinutes ?? 0
                 totalMinutes += minutes
@@ -2857,14 +2879,14 @@ struct ActionView: View {
         executionByAction: [UUID: PlannedChunkActionExecutionState],
         defineByAction: [UUID: PlannedChunkActionDefineState]
     ) -> some View {
-        let statuses = actions.map { executionByAction[$0.id]?.status ?? .noAction }
+        let statuses = actions.map { effectiveExecutionStatus(for: $0.id, persisted: executionByAction) }
         let totalActionsCount = actions.count
         let inactiveActionsCount = statuses.filter { isCompletedForCollapsedMetrics($0) }.count
         let totalEstimatedMinutes = actions.reduce(0) { partial, action in
             partial + max(0, defineByAction[action.id]?.timeEstimateMinutes ?? 0)
         }
         let inactiveEstimatedMinutes = actions.reduce(0) { partial, action in
-            let status = executionByAction[action.id]?.status ?? .noAction
+            let status = effectiveExecutionStatus(for: action.id, persisted: executionByAction)
             guard isCompletedForCollapsedMetrics(status) else { return partial }
             return partial + max(0, defineByAction[action.id]?.timeEstimateMinutes ?? 0)
         }
@@ -3010,7 +3032,7 @@ struct ActionView: View {
     ) -> some View {
         let usesFullViewPalette = !actionBlocksSimpleViewEnabled
         let usesOtherDarkIconTint = false
-        let statuses = actions.map { executionByAction[$0.id]?.status ?? .noAction }
+        let statuses = actions.map { effectiveExecutionStatus(for: $0.id, persisted: executionByAction) }
         let leveragedCount = statuses.filter { $0 == .leveraged }.count
         let inProgressCount = statuses.filter { $0 == .inProgress }.count
         let doneCount = statuses.filter { $0 == .done }.count
@@ -3536,7 +3558,7 @@ struct ActionView: View {
     private func markAllUncompletedAsRecapture() {
         let executionByAction = executionStateByActionID
         for action in weekActions {
-            let current = executionByAction[action.id]?.status ?? .noAction
+            let current = effectiveExecutionStatus(for: action.id, persisted: executionByAction)
             if current == .noAction || current == .leveraged || current == .inProgress {
                 setStatus(for: action.id, to: .carriedToCapture)
             }
@@ -3552,7 +3574,7 @@ struct ActionView: View {
             var map: [UUID: Int] = [:]
             map.reserveCapacity(filteredActions.count)
             for action in filteredActions {
-                let status = executionByAction[action.id]?.status ?? .noAction
+                let status = effectiveExecutionStatus(for: action.id, persisted: executionByAction)
                 let rank: Int
                 switch status {
                 case .inProgress:
@@ -3608,7 +3630,7 @@ struct ActionView: View {
         excludedFacets: Set<FilterFacet> = []
     ) -> Bool {
         let define = defineByAction[action.id]
-        let status = executionByAction[action.id]?.status ?? .noAction
+        let status = effectiveExecutionStatus(for: action.id, persisted: executionByAction)
 
         if !excludedFacets.contains(.musts) && onlyMusts && !isMust(for: action.id, defineByAction: defineByAction) { return false }
 
@@ -3766,7 +3788,7 @@ struct ActionView: View {
     }
 
     private func status(for actionId: UUID) -> ActionExecutionStatus {
-        return executionStateByActionID[actionId]?.status ?? .noAction
+        return effectiveExecutionStatus(for: actionId)
     }
 
     private func isMust(for actionId: UUID, defineByAction: [UUID: PlannedChunkActionDefineState]) -> Bool {
@@ -3793,6 +3815,7 @@ struct ActionView: View {
     }
 
     private func scheduleStatusPersist(for actionId: UUID, status newStatus: ActionExecutionStatus) {
+        pendingStatusOverridesByActionID[actionId] = newStatus
         signposted("enqueue_status_persist") {
             deferredPersistor.enqueueStatus(for: actionId, status: newStatus, delayNanos: 220_000_000) { @MainActor statuses, musts in
                 self.applyDeferredWrites(statuses: statuses, musts: musts)
@@ -3826,6 +3849,9 @@ struct ActionView: View {
                         state.status = newStatus
                         state.updatedAt = .now
                     }
+                }
+                for actionId in statuses.keys {
+                    pendingStatusOverridesByActionID.removeValue(forKey: actionId)
                 }
             }
             if !musts.isEmpty {
@@ -4089,12 +4115,28 @@ struct ActionView: View {
         var didMutate = false
         var leverageByKindValue = Dictionary(uniqueKeysWithValues: leverageCatalog.map { ($0.kindValueKey, $0) })
         var placesByNormalizedKey = Dictionary(uniqueKeysWithValues: placesCatalog.map { ($0.normalizedKey, $0) })
+        let defineByActionID = Dictionary(grouping: defineStates, by: \.plannedChunkActionId)
+        let executionByActionID = Dictionary(grouping: executionStates, by: \.plannedChunkActionId)
+        let leverageByActionID = Dictionary(grouping: leverageSelections, by: \.plannedChunkActionId)
+        let notesByActionID = Dictionary(grouping: notes, by: \.plannedChunkActionId)
         let placeLinksByActionID = Dictionary(grouping: placeLinks, by: \.plannedChunkActionId)
         let attachmentsByActionID = Dictionary(grouping: attachments, by: \.plannedChunkActionId)
 
         for action in weekActions {
             guard !carriedProfileAppliedActionIDs.contains(action.id) else { continue }
             guard let profile = ActionCarryProfileStore.load(for: action.text) else { continue }
+            guard shouldApplyCarriedProfile(
+                to: action.id,
+                defineByActionID: defineByActionID,
+                executionByActionID: executionByActionID,
+                leverageByActionID: leverageByActionID,
+                notesByActionID: notesByActionID,
+                placeLinksByActionID: placeLinksByActionID,
+                attachmentsByActionID: attachmentsByActionID
+            ) else {
+                carriedProfileAppliedActionIDs.insert(action.id)
+                continue
+            }
 
             upsertDefineState(forActionId: action.id) { st in
                 st.isMust = profile.isMust
@@ -4186,6 +4228,53 @@ struct ActionView: View {
         if didMutate {
             persistNow()
         }
+    }
+
+    private func shouldApplyCarriedProfile(
+        to actionId: UUID,
+        defineByActionID: [UUID: [PlannedChunkActionDefineState]],
+        executionByActionID: [UUID: [PlannedChunkActionExecutionState]],
+        leverageByActionID: [UUID: [PlannedChunkActionLeverageSelection]],
+        notesByActionID: [UUID: [PlannedChunkActionNote]],
+        placeLinksByActionID: [UUID: [PlannedChunkActionSensitivityPlaceLink]],
+        attachmentsByActionID: [UUID: [PlannedChunkActionAttachment]]
+    ) -> Bool {
+        if let define = defineByActionID[actionId]?.max(by: { $0.updatedAt < $1.updatedAt }) {
+            let isDefaultDefine =
+                define.isMust == false &&
+                define.timeEstimateMinutes == nil &&
+                define.sensitiveMorning == true &&
+                define.sensitiveAfternoon == true &&
+                define.sensitiveEvening == true
+            if !isDefaultDefine {
+                return false
+            }
+        }
+
+        if let execution = executionByActionID[actionId]?.max(by: { $0.updatedAt < $1.updatedAt }),
+           execution.status != .noAction {
+            return false
+        }
+
+        if let selection = leverageByActionID[actionId]?.max(by: { $0.updatedAt < $1.updatedAt }),
+           selection.resourceId != nil {
+            return false
+        }
+
+        if let note = notesByActionID[actionId]?.max(by: { $0.updatedAt < $1.updatedAt }),
+           !note.noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return false
+        }
+
+        if !(placeLinksByActionID[actionId] ?? []).isEmpty {
+            return false
+        }
+
+        if !(attachmentsByActionID[actionId] ?? []).isEmpty {
+            return false
+        }
+
+        return true
     }
 
     private func toggleFilterMenu(_ menu: FilterMenu) {
@@ -4282,7 +4371,7 @@ struct ActionView: View {
         let executionByAction = executionStateByActionID
         let active = Set(
             weekActions.compactMap { action in
-                let status = executionByAction[action.id]?.status ?? .noAction
+                let status = effectiveExecutionStatus(for: action.id, persisted: executionByAction)
                 return isActiveStatus(status) ? action.id : nil
             }
         )
@@ -5420,6 +5509,13 @@ private struct AttachmentsSheet: View {
         case photo
     }
 
+    #if canImport(UIKit)
+    private struct FileAttachmentCardPreview {
+        let thumbnail: UIImage?
+        let tint: Color
+    }
+    #endif
+
     private struct AttachmentPreviewTarget: Identifiable {
         enum Kind {
             case link(String)
@@ -5457,6 +5553,9 @@ private struct AttachmentsSheet: View {
     @State private var hasSavedNote: Bool = false
     @State private var previewTarget: AttachmentPreviewTarget? = nil
     @ObservedObject private var previewStore = LoomLinkPreviewStore.shared
+    #if canImport(UIKit)
+    @State private var fileAttachmentCardPreviews: [UUID: FileAttachmentCardPreview] = [:]
+    #endif
 
     var body: some View {
         NavigationStack {
@@ -5481,10 +5580,7 @@ private struct AttachmentsSheet: View {
                             }
                         }
 
-                        if linkAttachments.isEmpty && fileAttachments.isEmpty {
-                            Text("No notes or attachments yet.")
-                                .foregroundStyle(.secondary)
-                        } else {
+                        if !linkAttachments.isEmpty || !fileAttachments.isEmpty {
                             VStack(spacing: 10) {
                                 ForEach(linkAttachments) { attachment in
                                     attachmentCard(
@@ -5597,64 +5693,30 @@ private struct AttachmentsSheet: View {
                 ToolbarItemGroup(placement: .keyboard) {
                     if isNoteFocused {
                         Spacer(minLength: 0)
-                        Button {
-                            if trimmedNoteText.isEmpty {
-                                isNoteFocused = false
-                            } else {
-                                isNoteFocused = false
-                                commitNoteIfNeeded()
-                                dismiss()
+                        keyboardAccessoryButton(
+                            showsCheckmark: !trimmedNoteText.isEmpty,
+                            action: {
+                                if trimmedNoteText.isEmpty {
+                                    isNoteFocused = false
+                                } else {
+                                    isNoteFocused = false
+                                    commitNoteIfNeeded()
+                                    dismiss()
+                                }
                             }
-                        } label: {
-                            Image(systemName: trimmedNoteText.isEmpty ? "keyboard.chevron.compact.down" : "checkmark")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(trimmedNoteText.isEmpty ? Color.primary.opacity(0.85) : Color.white)
-                                .frame(width: 30, height: 30)
-                                .background(
-                                    Circle().fill(
-                                        trimmedNoteText.isEmpty
-                                            ? Color(.secondarySystemBackground)
-                                            : Color.blue
-                                    )
-                                )
-                                .overlay(
-                                    Circle()
-                                        .stroke(
-                                            Color.black.opacity(trimmedNoteText.isEmpty ? 0.08 : 0),
-                                            lineWidth: 1
-                                        )
-                                )
-                        }
-                        .buttonStyle(.plain)
+                        )
                     } else if isNewLinkMode && isNewLinkFocused {
                         Spacer(minLength: 0)
-                        Button {
-                            if trimmedInlineLinkValue.isEmpty {
-                                isNewLinkFocused = false
-                            } else {
-                                commitInlineLink()
+                        keyboardAccessoryButton(
+                            showsCheckmark: !trimmedInlineLinkValue.isEmpty,
+                            action: {
+                                if trimmedInlineLinkValue.isEmpty {
+                                    isNewLinkFocused = false
+                                } else {
+                                    commitInlineLink()
+                                }
                             }
-                        } label: {
-                            Image(systemName: trimmedInlineLinkValue.isEmpty ? "keyboard.chevron.compact.down" : "checkmark")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(trimmedInlineLinkValue.isEmpty ? Color.primary.opacity(0.85) : Color.white)
-                                .frame(width: 30, height: 30)
-                                .background(
-                                    Circle().fill(
-                                        trimmedInlineLinkValue.isEmpty
-                                            ? Color(.secondarySystemBackground)
-                                            : Color.blue
-                                    )
-                                )
-                                .overlay(
-                                    Circle()
-                                        .stroke(
-                                            Color.black.opacity(trimmedInlineLinkValue.isEmpty ? 0.08 : 0),
-                                            lineWidth: 1
-                                        )
-                                )
-                        }
-                        .buttonStyle(.plain)
+                        )
                     }
                 }
             }
@@ -5662,6 +5724,9 @@ private struct AttachmentsSheet: View {
                 noteText = initialNoteText
                 hasSavedNote = false
                 previewStore.load(urlStrings: linkAttachments.compactMap(\.urlString))
+                #if canImport(UIKit)
+                preloadFileAttachmentCards(for: fileAttachments)
+                #endif
             }
             .onChange(of: isNewLinkFocused) { _, isFocused in
                 guard !isFocused else { return }
@@ -5672,6 +5737,11 @@ private struct AttachmentsSheet: View {
             .onChange(of: linkAttachmentURLs) { _, urls in
                 previewStore.load(urlStrings: urls)
             }
+            #if canImport(UIKit)
+            .onChange(of: fileAttachments.map(\.id)) { _, _ in
+                preloadFileAttachmentCards(for: fileAttachments)
+            }
+            #endif
             .onDisappear {
                 commitNoteIfNeeded()
             }
@@ -5696,7 +5766,29 @@ private struct AttachmentsSheet: View {
                 }
                 #endif
             case .file(let url):
-                #if canImport(QuickLook) && canImport(UIKit)
+                #if canImport(PDFKit) && canImport(UIKit)
+                if url.pathExtension.lowercased() == "pdf" {
+                    LoomPDFPreviewSheet(url: url, title: preview.title)
+                        .onDisappear {
+                            preview.stopAccess?()
+                        }
+                } else {
+                    #if canImport(QuickLook)
+                    LoomQuickLookPreviewSheet(url: url)
+                        .onDisappear {
+                            preview.stopAccess?()
+                        }
+                    #else
+                    LoomAttachmentUnavailableSheet(
+                        title: preview.title,
+                        message: "Preview is not available on this device."
+                    )
+                    .onDisappear {
+                        preview.stopAccess?()
+                    }
+                    #endif
+                }
+                #elseif canImport(QuickLook) && canImport(UIKit)
                 LoomQuickLookPreviewSheet(url: url)
                     .onDisappear {
                         preview.stopAccess?()
@@ -5767,30 +5859,64 @@ private struct AttachmentsSheet: View {
                 onDeleteAttachment(attachment.id)
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .bold))
+                    .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(Color.white)
-                    .frame(width: 18, height: 18)
-                    .background(Circle().fill(Color.black.opacity(0.55)))
+                    .frame(width: 28, height: 28)
+                    .background(Circle().fill(Color.black.opacity(0.58)))
             }
             .buttonStyle(.plain)
+            .contentShape(Rectangle())
             .padding(8)
         }
+    }
+
+    private func keyboardAccessoryButton(
+        showsCheckmark: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: showsCheckmark ? "checkmark" : "keyboard.chevron.compact.down")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(
+                    showsCheckmark
+                        ? Color.white
+                        : Color.primary.opacity(0.85)
+                )
+                .frame(width: 30, height: 30)
+                .background(
+                    Circle().fill(
+                        showsCheckmark
+                            ? Color.blue
+                            : Color(.secondarySystemBackground)
+                    )
+                )
+                .overlay(
+                    Circle()
+                        .stroke(
+                            showsCheckmark
+                                ? Color.blue.opacity(0.9)
+                                : Color.black.opacity(0.08),
+                            lineWidth: 1
+                        )
+                )
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder
     private func fileAttachmentCard(for attachment: PlannedChunkActionAttachment) -> some View {
         #if canImport(UIKit)
-        let thumbnail = fileThumbnail(for: attachment)
+        let cachedPreview = fileAttachmentCardPreviews[attachment.id]
         LoomFileBannerCard(
-            title: attachment.fileName ?? "(file)",
+            title: fileDisplayTitle(for: attachment),
             subtitle: fileSubtitle(for: attachment),
-            tint: fileTint(for: attachment),
+            tint: fileTint(for: attachment, cachedPreview: cachedPreview),
             systemName: fileIconName(for: attachment),
-            thumbnail: thumbnail
+            thumbnail: cachedPreview?.thumbnail
         )
         #else
         LoomFileBannerCard(
-            title: attachment.fileName ?? "(file)",
+            title: fileDisplayTitle(for: attachment),
             subtitle: fileSubtitle(for: attachment),
             tint: fileTint(for: attachment),
             systemName: fileIconName(for: attachment)
@@ -5798,17 +5924,31 @@ private struct AttachmentsSheet: View {
         #endif
     }
 
+    private func fileDisplayTitle(for attachment: PlannedChunkActionAttachment) -> String {
+        if let fileName = attachment.fileName?.trimmingCharacters(in: .whitespacesAndNewlines), !fileName.isEmpty {
+            return fileName
+        }
+        if let resolved = resolvedAttachmentFileURL(attachment, startAccess: true) {
+            defer { resolved.stopAccess?() }
+            let name = resolved.url.lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !name.isEmpty {
+                return name
+            }
+        }
+        return "Attachment"
+    }
+
     private func fileSubtitle(for attachment: PlannedChunkActionAttachment) -> String {
         if attachmentIsImageFile(attachment.fileName) {
             return "Photo"
         }
-        let ext = ((attachment.fileName as NSString?)?.pathExtension ?? "").lowercased()
+        let ext = fileExtension(for: attachment)
         if ext.isEmpty { return "Attached file" }
         return ext.uppercased() + " file"
     }
 
     private func fileIconName(for attachment: PlannedChunkActionAttachment) -> String {
-        let ext = ((attachment.fileName as NSString?)?.pathExtension ?? "").lowercased()
+        let ext = fileExtension(for: attachment)
         switch ext {
         case "pdf":
             return "doc.richtext"
@@ -5823,15 +5963,16 @@ private struct AttachmentsSheet: View {
         }
     }
 
-    private func fileTint(for attachment: PlannedChunkActionAttachment) -> Color {
+    private func fileTint(
+        for attachment: PlannedChunkActionAttachment,
+        cachedPreview: FileAttachmentCardPreview? = nil
+    ) -> Color {
         #if canImport(UIKit)
-        if attachmentIsImageFile(attachment.fileName),
-           let thumbnail = fileThumbnail(for: attachment),
-           let color = dominantColor(from: thumbnail) {
-            return Color(color)
+        if let cachedPreview {
+            return cachedPreview.tint
         }
         #endif
-        let ext = ((attachment.fileName as NSString?)?.pathExtension ?? "").lowercased()
+        let ext = fileExtension(for: attachment)
         switch ext {
         case "pdf":
             return .red
@@ -5857,15 +5998,15 @@ private struct AttachmentsSheet: View {
             guard let resolved = resolvedAttachmentFileURL(a, startAccess: true) else {
                 return AttachmentPreviewTarget(title: a.fileName ?? "Attachment", kind: .unavailable("The selected file is no longer available."))
             }
-            if attachmentIsImageFile(a.fileName) {
+            if attachmentIsImageFile(a) {
                 return AttachmentPreviewTarget(
-                    title: a.fileName ?? "(file)",
+                    title: fileDisplayTitle(for: a),
                     kind: .image(resolved.url),
                     stopAccess: resolved.stopAccess
                 )
             }
             return AttachmentPreviewTarget(
-                title: a.fileName ?? "(file)",
+                title: fileDisplayTitle(for: a),
                 kind: .file(resolved.url),
                 stopAccess: resolved.stopAccess
             )
@@ -5878,24 +6019,29 @@ private struct AttachmentsSheet: View {
         _ attachment: PlannedChunkActionAttachment,
         startAccess: Bool
     ) -> (url: URL, stopAccess: (() -> Void)?)? {
-        guard let data = attachment.fileBookmarkData else { return nil }
-        var isStale = false
-        guard let url = try? URL(
-            resolvingBookmarkData: data,
-            options: [.withoutUI],
-            relativeTo: nil,
-            bookmarkDataIsStale: &isStale
-        ) else {
-            return nil
+        if let data = attachment.fileBookmarkData {
+            var isStale = false
+            if let url = try? URL(
+                resolvingBookmarkData: data,
+                options: [.withoutUI],
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            ) {
+                guard startAccess else {
+                    return (url, nil)
+                }
+
+                let didAccess = url.startAccessingSecurityScopedResource()
+                let stopAccess = didAccess ? { url.stopAccessingSecurityScopedResource() } : nil
+                return (url, stopAccess)
+            }
         }
 
-        guard startAccess else {
-            return (url, nil)
+        if let localURL = resolvedAppOwnedAttachmentURL(for: attachment), FileManager.default.fileExists(atPath: localURL.path) {
+            return (localURL, nil)
         }
 
-        let didAccess = url.startAccessingSecurityScopedResource()
-        let stopAccess = didAccess ? { url.stopAccessingSecurityScopedResource() } : nil
-        return (url, stopAccess)
+        return nil
     }
 
     private func clearPreviewTarget() {
@@ -5927,6 +6073,34 @@ private struct AttachmentsSheet: View {
         }
         try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
         return destinationURL
+    }
+
+    private func resolvedAppOwnedAttachmentURL(for attachment: PlannedChunkActionAttachment) -> URL? {
+        if let path = attachment.urlString?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !path.isEmpty,
+           let url = appOwnedAttachmentURL(relativePath: path) {
+            return url
+        }
+        if let fileName = attachment.fileName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !fileName.isEmpty,
+           let url = appOwnedAttachmentURL(relativePath: actionAttachmentRelativePath(for: fileName)) {
+            return url
+        }
+        return nil
+    }
+
+    private func appOwnedAttachmentURL(relativePath: String) -> URL? {
+        let trimmed = relativePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let components = trimmed.split(separator: "/").map(String.init)
+        guard !components.isEmpty else { return nil }
+        let baseDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        var url = baseDirectory
+        for component in components {
+            url.appendPathComponent(component, isDirectory: false)
+        }
+        return url
     }
 
     #if canImport(PhotosUI)
@@ -5993,12 +6167,57 @@ private struct AttachmentsSheet: View {
         return imageExtensions.contains(ext)
     }
 
+    private func attachmentIsImageFile(_ attachment: PlannedChunkActionAttachment) -> Bool {
+        let imageExtensions: Set<String> = ["jpg", "jpeg", "png", "gif", "heic", "heif", "webp", "bmp", "tif", "tiff"]
+        return imageExtensions.contains(fileExtension(for: attachment))
+    }
+
+    private func fileExtension(for attachment: PlannedChunkActionAttachment) -> String {
+        let direct = ((attachment.fileName as NSString?)?.pathExtension ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        if !direct.isEmpty {
+            return direct
+        }
+        if let resolved = resolvedAttachmentFileURL(attachment, startAccess: true) {
+            defer { resolved.stopAccess?() }
+            return resolved.url.pathExtension.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        }
+        return ""
+    }
+
     #if canImport(UIKit)
     private func fileThumbnail(for attachment: PlannedChunkActionAttachment) -> UIImage? {
-        guard attachmentIsImageFile(attachment.fileName),
+        guard attachmentIsImageFile(attachment),
               let resolved = resolvedAttachmentFileURL(attachment, startAccess: true) else { return nil }
         defer { resolved.stopAccess?() }
         return UIImage(contentsOfFile: resolved.url.path)
+    }
+
+    private func preloadFileAttachmentCards(for attachments: [PlannedChunkActionAttachment]) {
+        let liveIDs = Set(attachments.map(\.id))
+        fileAttachmentCardPreviews = fileAttachmentCardPreviews.filter { liveIDs.contains($0.key) }
+
+        let uncached = attachments.filter { fileAttachmentCardPreviews[$0.id] == nil }
+        guard !uncached.isEmpty else { return }
+
+        for attachment in uncached {
+            let preview = makeFileAttachmentCardPreview(for: attachment)
+            fileAttachmentCardPreviews[attachment.id] = preview
+        }
+    }
+
+    private func makeFileAttachmentCardPreview(for attachment: PlannedChunkActionAttachment) -> FileAttachmentCardPreview {
+        if attachmentIsImageFile(attachment),
+           let thumbnail = fileThumbnail(for: attachment) {
+            let tint = dominantColor(from: thumbnail).map(Color.init) ?? .blue
+            return FileAttachmentCardPreview(thumbnail: thumbnail, tint: tint)
+        }
+
+        return FileAttachmentCardPreview(
+            thumbnail: nil,
+            tint: fileTint(for: attachment, cachedPreview: nil)
+        )
     }
 
     private func dominantColor(from image: UIImage) -> UIColor? {

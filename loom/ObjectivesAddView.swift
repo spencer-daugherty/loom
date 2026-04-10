@@ -1,5 +1,8 @@
 import SwiftUI
 import SwiftData
+#if canImport(UIKit)
+import UIKit
+#endif
 
 private enum ObjectivesContributingLittleWinsStore {
     private static let defaultsKey = "outcome_contributing_little_wins_v1"
@@ -122,6 +125,8 @@ struct ObjectivesAddView: View {
     @State private var measureFormat: MeasureFormat = .number
     @State private var measureUnit: String = UnitOption.defaultUnit
     @State private var measureDecimalPlaces: Int = 0
+    @State private var isKeyboardVisible: Bool = false
+    @State private var keyboardHeight: CGFloat = 0
     @FocusState private var focusedField: KeyboardField?
     let onSaved: ((UUID) -> Void)?
     
@@ -448,34 +453,6 @@ struct ObjectivesAddView: View {
                     }
                     .disabled(isSaveDisabled)
                 }
-                ToolbarItemGroup(placement: .keyboard) {
-                    if let focusedField {
-                        Spacer()
-                        Button {
-                            handleKeyboardAccessoryTap(for: focusedField)
-                        } label: {
-                            Image(systemName: keyboardAccessoryShowsCheckmark ? "checkmark" : "keyboard.chevron.compact.down")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(keyboardAccessoryShowsCheckmark ? .white : .primary.opacity(0.85))
-                                .frame(width: 30, height: 30)
-                                .background(
-                                    Circle().fill(
-                                        keyboardAccessoryShowsCheckmark
-                                            ? Color.blue
-                                            : Color(.secondarySystemBackground)
-                                    )
-                                )
-                                .overlay(
-                                    Circle()
-                                        .stroke(
-                                            Color.black.opacity(keyboardAccessoryShowsCheckmark ? 0 : 0.08),
-                                            lineWidth: 1
-                                        )
-                                )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
             }
             .alert("Discard Changes?", isPresented: $isShowingDeleteAlert) {
                 Button("Discard", role: .destructive) { dismiss() }
@@ -526,6 +503,9 @@ struct ObjectivesAddView: View {
                 Text("Are you sure you want to delete this outcome? It will be available for 30 days in Account Manager.")
             }
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            keyboardAccessoryBar
+        }
         .interactiveDismissDisabled(outcome != nil ? hasChanges : showDeleteButton)
         .onAppear {
             hydrateMeasureFromLatestEntry()
@@ -538,6 +518,18 @@ struct ObjectivesAddView: View {
         .onChange(of: selectedCategory) { _, _ in
             pruneContributingLittleWinsSelectionToCurrentCategory()
         }
+#if canImport(UIKit)
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { note in
+            isKeyboardVisible = true
+            if let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect {
+                keyboardHeight = max(0, frame.height - 34)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            isKeyboardVisible = false
+            keyboardHeight = 0
+        }
+#endif
         .sheet(isPresented: $isShowingAddMeasureSheet) {
             if let outcomeID = outcome?.outcome_id {
                 AddOutcomeMeasureSheet(
@@ -787,6 +779,58 @@ struct ObjectivesAddView: View {
         case .measureGoal:
             return !measureGoal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
+    }
+
+    @ViewBuilder
+    private var keyboardAccessoryBar: some View {
+        if let focusedField, isKeyboardVisible {
+            HStack(spacing: 12) {
+                Spacer(minLength: 0)
+                keyboardAccessoryButton(for: focusedField)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, max(8, keyboardHeight > 0 ? 8 : 12))
+            .background(
+                LinearGradient(
+                    stops: [
+                        .init(color: Color(.systemBackground).opacity(0), location: 0),
+                        .init(color: Color(.systemBackground).opacity(0.92), location: 0.55),
+                        .init(color: Color(.systemBackground), location: 1)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+        }
+    }
+
+    private func keyboardAccessoryButton(for field: KeyboardField) -> some View {
+        Button {
+            handleKeyboardAccessoryTap(for: field)
+        } label: {
+            Image(systemName: keyboardAccessoryShowsCheckmark ? "checkmark" : "keyboard.chevron.compact.down")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(keyboardAccessoryShowsCheckmark ? .white : .primary.opacity(0.85))
+                .frame(width: 44, height: 44)
+                .background(
+                    Circle().fill(
+                        keyboardAccessoryShowsCheckmark
+                            ? Color.blue
+                            : Color(.secondarySystemBackground)
+                    )
+                )
+                .overlay(
+                    Circle()
+                        .stroke(
+                            keyboardAccessoryShowsCheckmark
+                                ? Color.blue.opacity(0.9)
+                                : Color.black.opacity(0.08),
+                            lineWidth: 1
+                        )
+                )
+        }
+        .buttonStyle(.plain)
     }
 
     private func handleKeyboardAccessoryTap(for field: KeyboardField) {

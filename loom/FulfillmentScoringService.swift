@@ -129,7 +129,7 @@ struct FulfillmentCategorySignals: Sendable {
 
 enum FulfillmentScoringMath {
     static func weekWindow(for date: Date, calendar: Calendar = .current) -> FulfillmentWeekWindow {
-        let start = calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: date)) ?? date
+        let start = AppWeekStartStore.weekStart(for: date, base: calendar)
         let end = calendar.date(byAdding: .day, value: 7, to: start) ?? start
         return FulfillmentWeekWindow(weekStart: start, weekEnd: end)
     }
@@ -196,6 +196,10 @@ struct FulfillmentScoringService {
     @discardableResult
     func computeAndPersistCurrentWeek(in context: ModelContext, now: Date = .now) throws -> [FulfillmentCategoryScoreSnapshot] {
         let latestCompletedWeekStart = FulfillmentScoringMath.latestCompletedWeekStart(for: now, calendar: calendar)
+        if let firstFullWeekStart = AppWeekStartStore.firstFullWeekStartForCurrentSetting(base: calendar),
+           latestCompletedWeekStart < firstFullWeekStart {
+            return []
+        }
         return try computeAndPersist(weekStartDate: latestCompletedWeekStart, in: context)
     }
 
@@ -205,7 +209,8 @@ struct FulfillmentScoringService {
         let earliestCandidate = try earliestRelevantDate(in: context) ?? latestCompletedWeekStart
         let earliestWeekStart = FulfillmentScoringMath.weekWindow(for: earliestCandidate, calendar: calendar).weekStart
         let boundedStart = calendar.date(byAdding: .day, value: -(maxLookbackWeeks - 1) * 7, to: latestCompletedWeekStart) ?? earliestWeekStart
-        let startWeek = max(earliestWeekStart, boundedStart)
+        let firstFullWeekStart = AppWeekStartStore.firstFullWeekStartForCurrentSetting(base: calendar)
+        let startWeek = max(max(earliestWeekStart, boundedStart), firstFullWeekStart ?? earliestWeekStart)
         guard startWeek <= latestCompletedWeekStart else { return [] }
         let existingSnapshots = try context.fetch(FetchDescriptor<FulfillmentCategoryScoreSnapshot>())
         let existingWeekStarts = Set(existingSnapshots.map { calendar.startOfDay(for: $0.weekStartDate) })

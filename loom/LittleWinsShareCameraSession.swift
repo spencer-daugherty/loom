@@ -15,6 +15,7 @@ final class LittleWinsShareCameraSession: NSObject, ObservableObject {
         qos: .userInitiated
     )
     private let photoOutput = AVCapturePhotoOutput()
+    private let preferredCaptureLongSide: Int32 = 2560
     private var pendingContinuation: CheckedContinuation<UIImage?, Never>?
 
     override init() {
@@ -93,6 +94,7 @@ final class LittleWinsShareCameraSession: NSObject, ObservableObject {
                 let settings = AVCapturePhotoSettings()
                 settings.flashMode = .off
                 settings.maxPhotoDimensions = self.photoOutput.maxPhotoDimensions
+                settings.photoQualityPrioritization = .balanced
 
                 if let connection = self.photoOutput.connection(with: .video),
                    connection.isVideoMirroringSupported {
@@ -130,12 +132,8 @@ final class LittleWinsShareCameraSession: NSObject, ObservableObject {
 
                 if self.session.canAddOutput(self.photoOutput) {
                     self.session.addOutput(self.photoOutput)
-                    if let largestDimensions = device.activeFormat.supportedMaxPhotoDimensions.max(
-                        by: { lhs, rhs in
-                            Int(lhs.width) * Int(lhs.height) < Int(rhs.width) * Int(rhs.height)
-                        }
-                    ) {
-                        self.photoOutput.maxPhotoDimensions = largestDimensions
+                    if let preferredDimensions = self.preferredPhotoDimensions(for: device) {
+                        self.photoOutput.maxPhotoDimensions = preferredDimensions
                     }
                 }
 
@@ -166,6 +164,29 @@ final class LittleWinsShareCameraSession: NSObject, ObservableObject {
             position: position
         )
         return discovery.devices.first
+    }
+
+    private func preferredPhotoDimensions(for device: AVCaptureDevice) -> CMVideoDimensions? {
+        let supported = device.activeFormat.supportedMaxPhotoDimensions
+        guard !supported.isEmpty else { return nil }
+
+        func longSide(_ dimensions: CMVideoDimensions) -> Int32 {
+            max(dimensions.width, dimensions.height)
+        }
+
+        let underOrEqualTarget = supported
+            .filter { longSide($0) <= preferredCaptureLongSide }
+            .max { lhs, rhs in
+                Int(lhs.width) * Int(lhs.height) < Int(rhs.width) * Int(rhs.height)
+            }
+
+        if let underOrEqualTarget {
+            return underOrEqualTarget
+        }
+
+        return supported.min { lhs, rhs in
+            Int(lhs.width) * Int(lhs.height) < Int(rhs.width) * Int(rhs.height)
+        }
     }
 }
 

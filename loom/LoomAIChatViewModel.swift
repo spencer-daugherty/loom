@@ -449,7 +449,8 @@ final class LoomAIViewModel: ObservableObject {
         guard !trimmedDisplay.isEmpty, !trimmedTransport.isEmpty, !isSending else { return }
         activeChatProviderKind = chatProvider.currentKind
         let purposeVisionMode = purposeVisionAutoWriteMode(for: trimmedTransport, displayText: trimmedDisplay)
-        let requestUsesSpendLimiter = purposeVisionMode != nil || activeChatProviderKind.usesSpendLimiter
+        let isLocalShortcutRequest = isWhatIsLoomPrompt(trimmedTransport) || isWhatIsLoomPrompt(trimmedDisplay)
+        let requestUsesSpendLimiter = !isLocalShortcutRequest && (purposeVisionMode != nil || activeChatProviderKind.usesSpendLimiter)
         refreshRemainingDailyResponses()
         guard !requestUsesSpendLimiter || isDailyLimiterDisabled || remainingDailyResponses > 0 else {
             errorMessage = nil
@@ -508,7 +509,7 @@ final class LoomAIViewModel: ObservableObject {
                 )
             }
 
-            if isWhatIsLoomPrompt(trimmedTransport) || isWhatIsLoomPrompt(trimmedDisplay) {
+            if isLocalShortcutRequest {
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
                     let assistant = LoomAIChatMessage(

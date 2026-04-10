@@ -2145,30 +2145,22 @@ struct FulfillmentView: View {
     }
 
     private func latestFulfillmentWeeklyScore(for record: Fulfillment) -> Double? {
-        let weekStart = FulfillmentScoringMath.latestCompletedWeekStart(for: .now)
-        return fulfillmentCategoryScoreSnapshots.first(where: {
-            $0.categoryID == record.category_id &&
-            Calendar.current.isDate($0.weekStartDate, inSameDayAs: weekStart)
-        })?.score
+        latestFulfillmentWeeklySnapshot(for: record)?.score
     }
 
     private func latestFulfillmentWeeklySnapshot(for record: Fulfillment) -> FulfillmentCategoryScoreSnapshot? {
-        let weekStart = FulfillmentScoringMath.latestCompletedWeekStart(for: .now)
-        return fulfillmentCategoryScoreSnapshots.first(where: {
-            $0.categoryID == record.category_id &&
-            Calendar.current.isDate($0.weekStartDate, inSameDayAs: weekStart)
-        })
+        fulfillmentCategoryScoreSnapshots
+            .filter { $0.categoryID == record.category_id }
+            .max { $0.weekStartDate < $1.weekStartDate }
     }
 
     private func fulfillmentWeekOverWeekDelta(for record: Fulfillment) -> Double? {
-        let currentWeek = FulfillmentScoringMath.latestCompletedWeekStart(for: .now)
-        guard let priorWeek = Calendar.current.date(byAdding: .day, value: -7, to: currentWeek) else { return nil }
-        guard let current = fulfillmentCategoryScoreSnapshots.first(where: {
-            $0.categoryID == record.category_id && Calendar.current.isDate($0.weekStartDate, inSameDayAs: currentWeek)
-        })?.score else { return nil }
-        guard let prior = fulfillmentCategoryScoreSnapshots.first(where: {
-            $0.categoryID == record.category_id && Calendar.current.isDate($0.weekStartDate, inSameDayAs: priorWeek)
-        })?.score else { return nil }
+        let snapshots = fulfillmentCategoryScoreSnapshots
+            .filter { $0.categoryID == record.category_id }
+            .sorted { $0.weekStartDate > $1.weekStartDate }
+        guard snapshots.count >= 2 else { return nil }
+        let current = snapshots[0].score
+        let prior = snapshots[1].score
         let currentShown = roundedTenth(current)
         let priorShown = roundedTenth(prior)
         let delta = currentShown - priorShown

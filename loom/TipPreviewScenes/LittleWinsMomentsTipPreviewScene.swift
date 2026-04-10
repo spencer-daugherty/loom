@@ -105,6 +105,14 @@ struct LittleWinsMomentsTipPreviewScene: View {
             completedCardsToday: [healthCard],
             completedCardStylesLast7Days: miniStyles,
             completionCountsLast7Days: [0, 0, 1, 2, 1, 3, 2],
+            fulfillmentAreaColors: [
+                FulfillmentCategoryTheme.color(for: "Career & Business"),
+                FulfillmentCategoryTheme.color(for: "Leadership & Impact"),
+                FulfillmentCategoryTheme.color(for: "Wealth & Lifestyle"),
+                FulfillmentCategoryTheme.color(for: "Mind & Meaning"),
+                FulfillmentCategoryTheme.color(for: "Love & Relationships"),
+                FulfillmentCategoryTheme.color(for: "Health & Vitality")
+            ],
             radarSideCount: 6,
             streak: 5,
             hotStreak: true,

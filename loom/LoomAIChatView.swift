@@ -285,6 +285,7 @@ struct LoomAIChatView: View {
         }
         .onChange(of: isActivePage) { _, isActive in
             if !isActive {
+                cancelCurrentMessageRequest()
                 inputAutoFocusTask?.cancel()
                 inputAutoFocusTask = nil
                 promptChipRefreshTask?.cancel()
@@ -300,10 +301,9 @@ struct LoomAIChatView: View {
             }
         }
         .onDisappear {
+            cancelCurrentMessageRequest()
             inputAutoFocusTask?.cancel()
             inputAutoFocusTask = nil
-            sendCurrentMessageTask?.cancel()
-            sendCurrentMessageTask = nil
             promptChipRefreshTask?.cancel()
             promptChipRefreshTask = nil
             cancelledNoticeWorkItem?.cancel()
@@ -871,7 +871,7 @@ struct LoomAIChatView: View {
     private func unrelatedPromptLinksView(for message: LoomAIChatMessage) -> some View {
         if shouldShowUnrelatedPromptLinks(for: message) {
             VStack(alignment: .leading, spacing: 6) {
-                unrelatedPromptLinkButton(title: "Open LifeOS page") {
+                unrelatedPromptLinkButton(title: "Open Loom Ecosystem") {
                     NotificationCenter.default.post(name: .loomAIOpenLifeOSInsights, object: nil)
                 }
                 unrelatedPromptLinkButton(title: "Launch tutorial") {
@@ -1713,7 +1713,7 @@ struct LoomAIChatView: View {
     }
 
     private func updateDeepThinkingState() {
-        if viewModel.isSending {
+        if viewModel.isSending && !suppressPendingLoadingUI {
             scheduleDeepThinkingOverlay()
         } else {
             deepThinkingDelayTask?.cancel()
@@ -1725,6 +1725,12 @@ struct LoomAIChatView: View {
     }
 
     private func scheduleDeepThinkingOverlay() {
+        guard !suppressPendingLoadingUI else {
+            deepThinkingDelayTask?.cancel()
+            deepThinkingDelayTask = nil
+            showDeepThinkingOverlay = false
+            return
+        }
         deepThinkingDelayTask?.cancel()
         showDeepThinkingOverlay = false
 
@@ -1733,7 +1739,7 @@ struct LoomAIChatView: View {
                 ? 2_000_000_000
                 : 3_000_000_000
             try? await Task.sleep(nanoseconds: delayNanoseconds)
-            guard !Task.isCancelled, viewModel.isSending else { return }
+            guard !Task.isCancelled, viewModel.isSending, !suppressPendingLoadingUI else { return }
             deepThinkingLines = makeDeepThinkingLines()
             withAnimation(.spring(response: 0.35, dampingFraction: 0.88)) {
                 showDeepThinkingOverlay = true
@@ -1820,16 +1826,14 @@ struct LoomAIChatView: View {
             lines.append("Capture List: \(capture.prefix(2).joined(separator: " • "))")
         }
 
-        let currentWeek = Calendar.current.dateInterval(of: .weekOfYear, for: .now)?.start
-        if let currentWeek {
-            let chunkIDs = Set(plannedChunks.filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeek) }.map(\.id))
-            let currentActions = plannedChunkActions
-                .filter { chunkIDs.contains($0.plannedChunkId) }
-                .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-            if !currentActions.isEmpty {
-                lines.append("Action Plan: \(currentActions.prefix(2).joined(separator: " • "))")
-            }
+        let currentWeek = WeeklyMindsetEntry.weekStart(for: .now)
+        let chunkIDs = Set(plannedChunks.filter { Calendar.current.isDate($0.weekStart, inSameDayAs: currentWeek) }.map(\.id))
+        let currentActions = plannedChunkActions
+            .filter { chunkIDs.contains($0.plannedChunkId) }
+            .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        if !currentActions.isEmpty {
+            lines.append("Action Plan: \(currentActions.prefix(2).joined(separator: " • "))")
         }
 
         let fallback = [
@@ -1968,9 +1972,10 @@ private struct LoomAIDeepStateScanningCard: View {
             HStack(spacing: 6) {
                 Image("LoomAI")
                     .resizable()
+                    .renderingMode(.template)
                     .scaledToFit()
                     .frame(width: 12, height: 12)
-                    .opacity(0.92)
+                    .foregroundStyle(Color.white.opacity(0.92))
                 Text("Reading: \(currentSource.title)")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(Color.white.opacity(0.90))

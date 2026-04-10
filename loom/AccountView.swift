@@ -1103,6 +1103,7 @@ struct VacationModeView: View {
     @State private var savedConfig = VacationModeStore.config()
     @State private var isShowingPassionsSheet = false
     @State private var isShowingPreviousVacations = false
+    @State private var isShowingStartVacationForm = false
 
     private var today: Date { Calendar.current.startOfDay(for: .now) }
     private var effectiveStartDate: Date { startToday ? today : startDate }
@@ -1127,88 +1128,73 @@ struct VacationModeView: View {
 
     var body: some View {
         Form {
-            Section("Start Vacation") {
-                if !savedConfig.isEnabled {
-                    HStack {
-                        Text("Today")
-                        Spacer()
-                        Toggle("", isOn: $startToday)
-                            .labelsHidden()
+            if savedConfig.isEnabled {
+                Section("Start Vacation") {
+                    if startToday {
+                        HStack {
+                            Text("Start")
+                            Spacer()
+                            Text(savedConfig.startDate, format: .dateTime.month().day())
+                                .foregroundStyle(.secondary)
+                        }
                     }
-                } else if startToday {
-                    HStack {
-                        Text("Start")
-                        Spacer()
-                        Text(savedConfig.startDate, format: .dateTime.month().day())
-                            .foregroundStyle(.secondary)
+                    if !startToday {
+                        DatePicker(
+                            "Start",
+                            selection: Binding(
+                                get: { max(startDate, today) },
+                                set: { startDate = $0 }
+                            ),
+                            in: today...,
+                            displayedComponents: [.date]
+                        )
                     }
                 }
-                if !startToday {
+
+                Section("End Vacation") {
                     DatePicker(
-                        "Start",
+                        "Return",
                         selection: Binding(
-                            get: { max(startDate, today) },
-                            set: { startDate = $0 }
+                            get: { max(returnDate, minimumReturnDate) },
+                            set: { returnDate = $0 }
                         ),
-                        in: today...,
+                        in: minimumReturnDate...,
                         displayedComponents: [.date]
                     )
                 }
-            }
 
-            Section("End Vacation") {
-                DatePicker(
-                    "Return",
-                    selection: Binding(
-                        get: { max(returnDate, minimumReturnDate) },
-                        set: { returnDate = $0 }
-                    ),
-                    in: minimumReturnDate...,
-                    displayedComponents: [.date]
-                )
-            }
-
-            if !startToday {
-                Section("Reminder") {
-                    HStack {
-                        Text("Vacation Reminder")
-                        Spacer()
-                        Picker("", selection: $attentionDays) {
-                            ForEach(7...60, id: \.self) { dayCount in
-                                Text("\(dayCount) days").tag(dayCount)
+                if !startToday {
+                    Section("Reminder") {
+                        HStack {
+                            Text("Vacation Reminder")
+                            Spacer()
+                            Picker("", selection: $attentionDays) {
+                                ForEach(7...60, id: \.self) { dayCount in
+                                    Text("\(dayCount) days").tag(dayCount)
+                                }
                             }
+                            .pickerStyle(.menu)
                         }
-                        .pickerStyle(.menu)
+
+                        Text("Countdown will display on the top of the Loom homescreen.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-
-                    Text("Countdown will display on the top of the Loom homescreen.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
-            }
 
-            Section("Passions") {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("Select related passions")
-                    Spacer(minLength: 8)
-                    Button("Connect Passions") {
-                        isShowingPassionsSheet = true
+                Section("Passions") {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Select related passions")
+                        Spacer(minLength: 8)
+                        Button("Connect Passions") {
+                            isShowingPassionsSheet = true
+                        }
+                        .foregroundStyle(.blue)
                     }
-                    .foregroundStyle(.blue)
                 }
-            }
 
-            Section {
-                Button("Save") {
-                    let next = currentConfigToSave
-                    VacationModeStore.setConfig(next)
-                    savedConfig = next
-                }
-                .frame(maxWidth: .infinity, alignment: .center)
-                .disabled(!hasChanges)
-
-                if savedConfig.isEnabled {
+                Section {
                     Button("Turn Off Vacation Mode", role: .destructive) {
                         archiveVacationIfEligibleIfNeeded(config: savedConfig, endedByUser: true)
                         let next = VacationModeConfig(
@@ -1222,6 +1208,14 @@ struct VacationModeView: View {
                         savedConfig = next
                         startDate = next.startDate
                         selectedPassionIDs = []
+                        isShowingStartVacationForm = false
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
+                }
+            } else {
+                Section {
+                    Button("Start Vacation") {
+                        isShowingStartVacationForm = true
                     }
                     .frame(maxWidth: .infinity, alignment: .center)
                 }
@@ -1250,6 +1244,7 @@ struct VacationModeView: View {
             returnDate = cfg.returnDate
             attentionDays = cfg.attentionDays
             selectedPassionIDs = cfg.isEnabled ? Set(cfg.passionIDs) : []
+            isShowingStartVacationForm = cfg.isEnabled
         }
         .sheet(isPresented: $isShowingPassionsSheet, onDismiss: {
             persistActiveVacationPassionsIfNeeded()
@@ -1283,6 +1278,106 @@ struct VacationModeView: View {
                 .toolbar {
                     ToolbarItem(placement: .navigationBarTrailing) {
                         Button("Done") { isShowingPassionsSheet = false }
+                    }
+                }
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: Binding(
+            get: { isShowingStartVacationForm && !savedConfig.isEnabled },
+            set: { isShowingStartVacationForm = $0 }
+        )) {
+            NavigationStack {
+                Form {
+                    Section("Start Vacation") {
+                        HStack {
+                            Text("Today")
+                            Spacer()
+                            Toggle("", isOn: $startToday)
+                                .labelsHidden()
+                        }
+
+                        if !startToday {
+                            DatePicker(
+                                "Start",
+                                selection: Binding(
+                                    get: { max(startDate, today) },
+                                    set: { startDate = $0 }
+                                ),
+                                in: today...,
+                                displayedComponents: [.date]
+                            )
+                        }
+                    }
+
+                    Section("End Vacation") {
+                        DatePicker(
+                            "Return",
+                            selection: Binding(
+                                get: { max(returnDate, minimumReturnDate) },
+                                set: { returnDate = $0 }
+                            ),
+                            in: minimumReturnDate...,
+                            displayedComponents: [.date]
+                        )
+                    }
+
+                    if !startToday {
+                        Section("Reminder") {
+                            HStack {
+                                Text("Vacation Reminder")
+                                Spacer()
+                                Picker("", selection: $attentionDays) {
+                                    ForEach(7...60, id: \.self) { dayCount in
+                                        Text("\(dayCount) days").tag(dayCount)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+                            }
+
+                            Text("Countdown will display on the top of the Loom homescreen.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+
+                    Section("Passions") {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text("Select related passions")
+                            Spacer(minLength: 8)
+                            Button("Connect Passions") {
+                                isShowingPassionsSheet = true
+                            }
+                            .foregroundStyle(.blue)
+                        }
+                    }
+
+                    Section {
+                        Button("Save") {
+                            let next = currentConfigToSave
+                            VacationModeStore.setConfig(next)
+                            savedConfig = next
+                            isShowingStartVacationForm = false
+                        }
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .disabled(!hasChanges)
+                    }
+                }
+                .navigationTitle("Start Vacation")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Cancel") {
+                            let cfg = savedConfig.normalized
+                            startToday = true
+                            startDate = cfg.startDate
+                            returnDate = cfg.returnDate
+                            attentionDays = cfg.attentionDays
+                            selectedPassionIDs = []
+                            isShowingStartVacationForm = false
+                        }
                     }
                 }
             }
@@ -1499,6 +1594,7 @@ struct AccountDetailsView: View {
     @AppStorage("loom.subscription_plan") private var subscriptionPlanRaw = SubscriptionPlan.annual.rawValue
     @State private var showSubscriptionSheet = false
     @State private var accountError: String? = nil
+    @State private var weekStartOption: AppWeekStartOption = AppWeekStartStore.current()
     @FocusState private var focusedAccountField: AccountField?
 
     var body: some View {
@@ -1554,6 +1650,27 @@ struct AccountDetailsView: View {
                 .buttonStyle(.plain)
             }
 
+            Section("Calendar Configuration") {
+                Menu {
+                    ForEach([AppWeekStartOption.saturday, .sunday, .monday]) { option in
+                        Button {
+                            saveSelectedWeekStartOption(option)
+                        } label: {
+                            HStack {
+                                Text(option.title)
+                                if weekStartOption == option {
+                                    Spacer()
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    settingsRow(title: "Week start", value: weekStartOption.title, showsChevron: false)
+                }
+                .buttonStyle(.plain)
+            }
+
             if let accountError, !accountError.isEmpty {
                 Section {
                     Text(accountError)
@@ -1575,6 +1692,7 @@ struct AccountDetailsView: View {
         .navigationTitle("Account")
         .onAppear {
             hydrateAccountFieldsFromAuthUserIfAvailable()
+            weekStartOption = AppWeekStartStore.current()
         }
         .sheet(isPresented: $showSubscriptionSheet) {
             NavigationStack {
@@ -1623,6 +1741,13 @@ struct AccountDetailsView: View {
                 }
             }
         }
+    }
+
+    private func saveSelectedWeekStartOption(_ option: AppWeekStartOption) {
+        guard weekStartOption != option else { return }
+        weekStartOption = option
+        AppWeekStartStore.setCurrent(option)
+        ActivePlanSessionStore.setWeekStart(nil)
     }
 
     private var appDisplayName: String {

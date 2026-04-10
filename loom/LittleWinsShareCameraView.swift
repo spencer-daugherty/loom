@@ -47,6 +47,7 @@ struct LittleWinsShareCameraView: View {
     @State private var showCaptureFailureAlert = false
 
     private let ciContext = CIContext()
+    private let maxRenderedCaptureLongSide: CGFloat = 2048
     private var isCameraDenied: Bool {
         cameraSession.authorizationStatus == .denied || cameraSession.authorizationStatus == .restricted
     }
@@ -388,14 +389,15 @@ struct LittleWinsShareCameraView: View {
 
     private func buildCompositedImage(from rawImage: UIImage) async -> UIImage? {
         let normalized = rawImage.loomNormalizedOrientation()
-        guard let filtered = applyFilter(to: normalized, style: selectedFilter) else { return nil }
-        let viewportCropped = cropToLiveViewportAspect(image: filtered)
-        let outputPixelSize = pixelSize(for: viewportCropped)
+        let viewportCropped = cropToLiveViewportAspect(image: normalized)
+        let preparedBase = viewportCropped.loomResizedToFit(maxLongSide: maxRenderedCaptureLongSide)
+        guard let filtered = applyFilter(to: preparedBase, style: selectedFilter) else { return nil }
+        let outputPixelSize = pixelSize(for: filtered)
         guard let overlay = renderOverlayImage(
-            referencePhotoSize: viewportCropped.size,
+            referencePhotoSize: filtered.size,
             outputPixelSize: outputPixelSize
-        ) else { return viewportCropped }
-        return composite(base: viewportCropped, overlay: overlay)
+        ) else { return filtered }
+        return composite(base: filtered, overlay: overlay)
     }
 
     @MainActor
@@ -807,6 +809,7 @@ private enum LittleWinsShareOverlayDataFactory {
     ) -> LittleWinsShareOverlayData {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: .now)
+        let orderedFulfillments = LittleWinsFulfillmentOrdering.orderedRecords(from: fulfillments)
 
         var completionFocusIDsByDay: [Date: Set<UUID>] = [:]
         completionFocusIDsByDay.reserveCapacity(16)
@@ -827,9 +830,9 @@ private enum LittleWinsShareOverlayDataFactory {
                 by: \.category_id
             )
 
-            var cards: [LittleWinsShareOverlayCard] = activeByCategory.compactMap { entry in
-                let categoryID = entry.key
-                let categoryFoci = entry.value
+            return orderedFulfillments.compactMap { record in
+                let categoryID = record.category_id
+                let categoryFoci = (activeByCategory[categoryID] ?? [])
                     .sorted { lhs, rhs in
                         if lhs.rank == rhs.rank {
                             return lhs.activity.localizedCaseInsensitiveCompare(rhs.activity) == .orderedAscending
@@ -855,10 +858,6 @@ private enum LittleWinsShareOverlayDataFactory {
                     wins: rows
                 )
             }
-            cards.sort { lhs, rhs in
-                lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
-            }
-            return cards
         }
 
         let todayCards = cards(on: today)
@@ -909,7 +908,8 @@ private enum LittleWinsShareOverlayDataFactory {
         let totalWeekCompletions = completionCountsLast7Days.reduce(0, +)
         let hotStreak = streak >= 5
         let royalFlushUnlocked = fullHouseStreak >= 7
-        let radarSideCount = max(3, min(7, max(fulfillments.count, 3)))
+        let fulfillmentAreaColors = orderedFulfillments.map { FulfillmentCategoryTheme.color(for: $0.category) }
+        let radarSideCount = max(3, min(7, orderedFulfillments.count))
         let userProfile = buildUserProfile(
             accountName: accountName,
             installDateRaw: installDateRaw,
@@ -933,7 +933,7 @@ private enum LittleWinsShareOverlayDataFactory {
             completedOutcomeMeasurePoints: completedOutcomeMeasurePoints
         )
         let fulfillmentStory = buildFulfillmentStory(
-            fulfillments: fulfillments,
+            fulfillments: orderedFulfillments,
             snapshots: fulfillmentCategoryScoreSnapshots
         )
         let latestInsight = buildLatestInsight(from: diagnosticInsightsSnapshots)
@@ -943,6 +943,7 @@ private enum LittleWinsShareOverlayDataFactory {
             completedCardsToday: completedCardsToday,
             completedCardStylesLast7Days: completedCardStylesLast7Days,
             completionCountsLast7Days: completionCountsLast7Days,
+            fulfillmentAreaColors: fulfillmentAreaColors,
             radarSideCount: radarSideCount,
             streak: streak,
             hotStreak: hotStreak,
@@ -1309,6 +1310,26 @@ private extension UIImage {
         let renderer = UIGraphicsImageRenderer(size: size)
         return renderer.image { _ in
             draw(in: CGRect(origin: .zero, size: size))
+        }
+    }
+
+    func loomResizedToFit(maxLongSide: CGFloat) -> UIImage {
+        guard maxLongSide > 0 else { return self }
+
+        let longestSide = max(size.width, size.height)
+        guard longestSide.isFinite, longestSide > maxLongSide else { return self }
+
+        let scaleFactor = maxLongSide / longestSide
+        let targetSize = CGSize(
+            width: max(1, floor(size.width * scaleFactor)),
+            height: max(1, floor(size.height * scaleFactor))
+        )
+
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: targetSize, format: format)
+        return renderer.image { _ in
+            draw(in: CGRect(origin: .zero, size: targetSize))
         }
     }
 }

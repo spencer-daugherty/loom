@@ -487,6 +487,7 @@ struct LoomAttachmentUnavailableContent: View {
 #if canImport(UIKit)
 struct LoomImageAttachmentPreviewSheet: View {
     let url: URL
+    var showsDoneButton: Bool = true
 
     @Environment(\.dismiss) private var dismiss
 
@@ -506,8 +507,10 @@ struct LoomImageAttachmentPreviewSheet: View {
             .navigationTitle("Photo")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
+                if showsDoneButton {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Done") { dismiss() }
+                    }
                 }
             }
         }

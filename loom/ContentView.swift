@@ -2328,22 +2328,22 @@ struct ContentView: View {
     }
 
     private func latestFulfillmentWeeklyScore(for record: Fulfillment) -> Double? {
-        let weekStart = FulfillmentScoringMath.latestCompletedWeekStart(for: .now)
-        return fulfillmentCategoryScoreSnapshots.first(where: {
-            $0.categoryID == record.category_id &&
-            Calendar.current.isDate($0.weekStartDate, inSameDayAs: weekStart)
-        })?.score
+        latestFulfillmentWeeklySnapshot(for: record)?.score
+    }
+
+    private func latestFulfillmentWeeklySnapshot(for record: Fulfillment) -> FulfillmentCategoryScoreSnapshot? {
+        fulfillmentCategoryScoreSnapshots
+            .filter { $0.categoryID == record.category_id }
+            .max { $0.weekStartDate < $1.weekStartDate }
     }
 
     private func contentFulfillmentWeekDelta(for record: Fulfillment) -> Double? {
-        let currentWeek = FulfillmentScoringMath.latestCompletedWeekStart(for: .now)
-        guard let priorWeek = Calendar.current.date(byAdding: .day, value: -7, to: currentWeek) else { return nil }
-        guard let current = fulfillmentCategoryScoreSnapshots.first(where: {
-            $0.categoryID == record.category_id && Calendar.current.isDate($0.weekStartDate, inSameDayAs: currentWeek)
-        })?.score else { return nil }
-        guard let prior = fulfillmentCategoryScoreSnapshots.first(where: {
-            $0.categoryID == record.category_id && Calendar.current.isDate($0.weekStartDate, inSameDayAs: priorWeek)
-        })?.score else { return nil }
+        let snapshots = fulfillmentCategoryScoreSnapshots
+            .filter { $0.categoryID == record.category_id }
+            .sorted { $0.weekStartDate > $1.weekStartDate }
+        guard snapshots.count >= 2 else { return nil }
+        let current = snapshots[0].score
+        let prior = snapshots[1].score
         let delta = contentRoundedTenth(current) - contentRoundedTenth(prior)
         return abs(delta) < 0.05 ? 0 : delta
     }
@@ -3206,19 +3206,12 @@ struct ContentView: View {
         let vacationConfig = VacationModeStore.config().normalized
         let vacationStart = calendar.startOfDay(for: vacationConfig.startDate)
         let vacationReturn = calendar.startOfDay(for: vacationConfig.returnDate)
-        let postVacationGraceDay = calendar.date(byAdding: .day, value: 1, to: vacationReturn).map { calendar.startOfDay(for: $0) }
-
         func isVacationProtectedNoProgressDay(_ date: Date, hasCompletedCardOnDay: Bool) -> Bool {
             guard !hasCompletedCardOnDay else { return false }
             let day = calendar.startOfDay(for: date)
 
             // Freeze streak breaks during the configured vacation window, even after turning vacation mode off.
             if day >= vacationStart && day <= vacationReturn {
-                return true
-            }
-
-            // After vacation mode is turned off, allow one day to resume before the streak breaks.
-            if let graceDay = postVacationGraceDay, day == graceDay {
                 return true
             }
 

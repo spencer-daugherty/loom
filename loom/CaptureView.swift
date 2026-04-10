@@ -259,7 +259,7 @@ private struct CaptureSharedAttachmentsReadOnlySheet: View {
             case .link(let urlString):
                 LoomLinkAttachmentPreviewSheet(urlString: urlString)
             case .image(let url):
-                LoomImageAttachmentPreviewSheet(url: url)
+                LoomImageAttachmentPreviewSheet(url: url, showsDoneButton: false)
                     .onDisappear {
                         preview.stopAccess?()
                     }
@@ -1265,7 +1265,7 @@ struct CaptureView: View {
             case .link(let urlString):
                 LoomLinkAttachmentPreviewSheet(urlString: urlString)
             case .image(let url):
-                LoomImageAttachmentPreviewSheet(url: url)
+                LoomImageAttachmentPreviewSheet(url: url, showsDoneButton: false)
                     .onDisappear {
                         preview.stopAccess?()
                     }
@@ -1869,7 +1869,7 @@ struct CaptureView: View {
                     clearEditingAttachmentPreview()
                 }
         case .image(let url):
-            LoomImageAttachmentPreviewSheet(url: url)
+            LoomImageAttachmentPreviewSheet(url: url, showsDoneButton: false)
                 .navigationTitle(preview.title)
                 .navigationBarTitleDisplayMode(.inline)
                 .onDisappear {
@@ -3781,7 +3781,7 @@ struct CaptureView: View {
     private func weeklyCandidate(anchorDate: Date, weekday: Int) -> Date {
         let cal = Calendar.current
         let anchor = cal.startOfDay(for: anchorDate)
-        let baseWeek = cal.dateInterval(of: .weekOfYear, for: anchor)?.start ?? anchor
+        let baseWeek = AppWeekStartStore.weekStart(for: anchor, base: cal)
         let offset = (weekday - cal.component(.weekday, from: baseWeek) + 7) % 7
         return cal.date(byAdding: .day, value: offset, to: baseWeek) ?? anchor
     }

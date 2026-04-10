@@ -1,12 +1,6 @@
 import SwiftUI
 import Charts
 
-private enum LittleWinsShareCardMetrics {
-    static let aspectRatio: CGFloat = 1.42
-    static let referenceWidth: CGFloat = 358
-    static let referenceHeight: CGFloat = referenceWidth * aspectRatio
-}
-
 enum LittleWinsShareImageFilter: String, CaseIterable, Identifiable {
     case color
     case mono
@@ -445,6 +439,7 @@ struct LittleWinsShareOverlayData {
     let completedCardsToday: [LittleWinsShareOverlayCard]
     let completedCardStylesLast7Days: [[LittleWinsShareOverlayMiniCardStyle]]
     let completionCountsLast7Days: [Int]
+    let fulfillmentAreaColors: [Color]
     let radarSideCount: Int
     let streak: Int
     let hotStreak: Bool
@@ -481,6 +476,24 @@ struct LittleWinsShareOverlayData {
         if completionCountsLast7Days.count == 7 { return completionCountsLast7Days }
         if completionCountsLast7Days.count > 7 { return Array(completionCountsLast7Days.suffix(7)) }
         return Array(repeating: 0, count: max(0, 7 - completionCountsLast7Days.count)) + completionCountsLast7Days
+    }
+
+    var primaryAccentColor: Color {
+        fulfillmentAreaColors.first ?? featuredCard?.titleColor ?? .blue
+    }
+
+    var secondaryAccentColor: Color {
+        if fulfillmentAreaColors.count > 1 {
+            return fulfillmentAreaColors[1]
+        }
+        return featuredCard?.cardColor ?? primaryAccentColor
+    }
+
+    var tertiaryAccentColor: Color {
+        if fulfillmentAreaColors.count > 2 {
+            return fulfillmentAreaColors[2]
+        }
+        return secondaryAccentColor
     }
 }
 
@@ -552,30 +565,30 @@ struct LittleWinsShareOverlayTemplateView: View {
     private var templateBackdropColors: [Color] {
         switch template.kind {
         case .hotStreak:
-            return [Color.orange.opacity(0.85), Color.red.opacity(0.34), Color.black.opacity(0.88)]
+            return [Color.orange.opacity(0.85), data.primaryAccentColor.opacity(0.28), Color.black.opacity(0.88)]
         case .fullHouse:
-            return [Color.green.opacity(0.72), Color.blue.opacity(0.28), Color.black.opacity(0.88)]
+            return [Color.green.opacity(0.72), data.primaryAccentColor.opacity(0.28), Color.black.opacity(0.88)]
         case .royalFlush:
-            return [Color.yellow.opacity(0.52), Color.orange.opacity(0.34), Color.black.opacity(0.90)]
+            return [Color.yellow.opacity(0.52), data.secondaryAccentColor.opacity(0.28), Color.black.opacity(0.90)]
         case .foundingMember:
-            return [Color.blue.opacity(0.78), Color.teal.opacity(0.34), Color.black.opacity(0.90)]
+            return [data.primaryAccentColor.opacity(0.78), data.secondaryAccentColor.opacity(0.34), Color.black.opacity(0.90)]
         case .starterStory:
-            return [Color.green.opacity(0.58), Color.blue.opacity(0.26), Color.black.opacity(0.88)]
+            return [data.primaryAccentColor.opacity(0.58), data.secondaryAccentColor.opacity(0.26), Color.black.opacity(0.88)]
         case .appleHealthVerified:
-            return [Color.red.opacity(0.76), Color.pink.opacity(0.28), Color.black.opacity(0.90)]
+            return [Color.red.opacity(0.76), data.secondaryAccentColor.opacity(0.24), Color.black.opacity(0.90)]
         case .measuredGoalProgress:
-            return [Color.blue.opacity(0.74), Color.teal.opacity(0.26), Color.black.opacity(0.88)]
+            return [Color.blue.opacity(0.74), data.primaryAccentColor.opacity(0.24), Color.black.opacity(0.88)]
         case .goalAchieved:
-            return [Color.green.opacity(0.66), Color.blue.opacity(0.24), Color.black.opacity(0.88)]
+            return [Color.green.opacity(0.66), data.primaryAccentColor.opacity(0.24), Color.black.opacity(0.88)]
         case .fulfillmentPulse:
             let accent = data.fulfillmentStory?.featuredColor ?? .blue
-            return [accent.opacity(0.74), Color.teal.opacity(0.18), Color.black.opacity(0.90)]
+            return [accent.opacity(0.74), data.secondaryAccentColor.opacity(0.18), Color.black.opacity(0.90)]
         case .weeklyMomentum:
-            return [Color.blue.opacity(0.68), Color.green.opacity(0.20), Color.black.opacity(0.88)]
+            return [data.primaryAccentColor.opacity(0.68), data.secondaryAccentColor.opacity(0.20), Color.black.opacity(0.88)]
         case .insightDrop:
-            return [Color.blue.opacity(0.58), Color.cyan.opacity(0.20), Color.black.opacity(0.90)]
+            return [data.primaryAccentColor.opacity(0.58), data.tertiaryAccentColor.opacity(0.20), Color.black.opacity(0.90)]
         case .todaysWins, .completedWins, .weeklyCalendar, .streak, .fullSnapshot:
-            return [Color.black.opacity(0.76), Color.blue.opacity(0.14), Color.black.opacity(0.92)]
+            return [Color.black.opacity(0.76), data.primaryAccentColor.opacity(0.14), Color.black.opacity(0.92)]
         }
     }
 
@@ -776,10 +789,12 @@ struct LittleWinsShareOverlayTemplateView: View {
     }
 
     private var foundingMemberLayout: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        let accent = data.primaryAccentColor
+
+        return VStack(alignment: .leading, spacing: 14) {
             heroText(
-                title: "Early Loom member.",
-                subtitle: "Annual Founding Member access with lifetime pricing."
+                title: "Founding Member.",
+                subtitle: "Annual access with pricing locked in from Loom's earliest launch window."
             )
 
             HStack(alignment: .top, spacing: 14) {
@@ -792,19 +807,30 @@ struct LittleWinsShareOverlayTemplateView: View {
                             Text("Annual member")
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(.white.opacity(0.78))
-                            statCapsule(title: "First 1,000", accent: .white.opacity(0.88), textColor: .black.opacity(0.82))
+                            statCapsule(
+                                title: data.radarSideCount >= 5 ? "Early Annual" : "Founding Annual",
+                                accent: accent.opacity(0.92),
+                                textColor: .white
+                            )
                         }
                     }
 
                     storyPanel {
-                        Text("Locked annual pricing for life.")
+                        Text("This founder share keeps the real Loom Little Wins card treatment instead of a generic social badge.")
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.white.opacity(0.9))
                     }
                 }
 
-                celebrationSeal(symbol: "rosette", title: "Founder", accent: .blue)
+                celebrationSeal(symbol: "rosette", title: "Founder", accent: accent)
                     .frame(width: 128)
+            }
+
+            if let featuredCard = data.featuredCard {
+                littleWinsCard(featuredCard)
+                    .frame(height: 192)
+            } else {
+                calendarMiniStackBoard
             }
 
             Spacer(minLength: 0)
@@ -1194,7 +1220,11 @@ struct LittleWinsShareOverlayTemplateView: View {
                 ForEach(Array(completedDays.enumerated()), id: \.offset) { _, day in
                     VStack(spacing: 3) {
                         miniCardStack(styles: day.styles)
-                            .frame(width: 28, height: 42, alignment: .top)
+                            .frame(
+                                width: LittleWinsCardStyleMetrics.miniCardWidth,
+                                height: LittleWinsCardStyleMetrics.miniCardHeight + 2,
+                                alignment: .top
+                            )
 
                         Text(day.weekday)
                             .font(.caption2.weight(.semibold))
@@ -1434,7 +1464,7 @@ struct LittleWinsShareOverlayTemplateView: View {
         return LazyVGrid(columns: columns, spacing: 12) {
             ForEach(visibleCards) { card in
                 littleWinsCard(card)
-                    .aspectRatio(1.0 / LittleWinsShareCardMetrics.aspectRatio, contentMode: .fit)
+                    .aspectRatio(1.0 / LittleWinsCardStyleMetrics.aspectRatio, contentMode: .fit)
                     .opacity(cardOpacity)
             }
         }
@@ -1472,13 +1502,16 @@ struct LittleWinsShareOverlayTemplateView: View {
 
     private func miniCardStack(styles: [LittleWinsShareOverlayMiniCardStyle]) -> some View {
         let visibleStyles = Array(styles.suffix(7))
-        let stackLiftPerCard: CGFloat = 5
+        let stackLiftPerCard = LittleWinsCardStyleMetrics.miniCardStackLift(for: LittleWinsCardStyleMetrics.miniCardHeight)
 
         return ZStack {
             if visibleStyles.isEmpty {
-                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                RoundedRectangle(cornerRadius: LittleWinsCardStyleMetrics.miniCardCornerRadius, style: .continuous)
                     .fill(Color(.systemGray5))
-                    .frame(width: 28, height: 40)
+                    .frame(
+                        width: LittleWinsCardStyleMetrics.miniCardWidth,
+                        height: LittleWinsCardStyleMetrics.miniCardHeight
+                    )
                     .overlay {
                         Text("-")
                             .font(.caption.weight(.semibold))
@@ -1497,334 +1530,31 @@ struct LittleWinsShareOverlayTemplateView: View {
     }
 
     private func miniCard(style: LittleWinsShareOverlayMiniCardStyle) -> some View {
-        RoundedRectangle(cornerRadius: 4, style: .continuous)
-            .fill(style.fillColor)
-            .frame(width: 28, height: 40)
-            .overlay {
-                LittleWinsRadarPolygonOutline(sides: data.radarSideCount)
-                    .stroke(style.strokeColor.opacity(0.85), lineWidth: 1.6)
-                    .padding(4)
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: 4, style: .continuous)
-                    .stroke(Color.white.opacity(0.25), lineWidth: 0.8)
-            }
+        LittleWinsMiniCardView(
+            fillColor: style.fillColor,
+            strokeColor: style.strokeColor.opacity(0.85),
+            radarSideCount: data.radarSideCount,
+            width: LittleWinsCardStyleMetrics.miniCardWidth,
+            height: LittleWinsCardStyleMetrics.miniCardHeight
+        )
     }
 
     private func littleWinsCard(_ card: LittleWinsShareOverlayCard) -> some View {
         GeometryReader { proxy in
-            let width = max(proxy.size.width, 1)
-            let height = max(proxy.size.height, 1)
-            let baseWidth = LittleWinsShareCardMetrics.referenceWidth
-            let baseHeight = LittleWinsShareCardMetrics.referenceHeight
-            let scale = min(width / baseWidth, height / baseHeight)
-            let fixedPrimaryText = Color.black.opacity(0.82)
-            let fixedSecondaryText = Color.black.opacity(0.56)
-            let radarSideCount = data.radarSideCount
-            let titleFontSize = max(12, 17 * scale)
-            let rowFontSize = max(11, 36 * scale)
-            let rowIconSize = max(10, 26 * scale)
-            let rowIconFrameWidth = max(14, 30 * scale)
-            let titleHorizontalPadding = max(10, 18 * scale)
-            let titleTopPadding = max(6, 10 * scale)
-            let titleBottomPadding = max(8, 18 * scale)
-            let rowHorizontalPadding = max(14, 38 * scale)
-            let rowVerticalPadding = max(6, 14 * scale)
-            let footerTopPadding = max(6, 10 * scale)
-            let footerBottomPadding = max(8, 14 * scale)
-            let footerFontSize = max(11, 17 * scale)
-            let rowSpacing = max(4, 10 * scale)
-            let rowIconTopPadding = max(1, 6 * scale)
+            let targetWidth = max(proxy.size.width, 1)
+            let targetHeight = max(proxy.size.height, 1)
+            let baseWidth = LittleWinsCardStyleMetrics.referenceWidth
+            let baseHeight = LittleWinsCardStyleMetrics.referenceHeight
+            let scale = min(targetWidth / baseWidth, targetHeight / baseHeight)
 
-            VStack(spacing: 0) {
-                Text(card.title)
-                    .font(.system(size: titleFontSize, weight: .semibold))
-                    .foregroundStyle(card.titleColor)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                    .padding(.horizontal, titleHorizontalPadding)
-                    .padding(.top, titleTopPadding)
-                    .padding(.bottom, titleBottomPadding)
-
-                GeometryReader { middleGeo in
-                    VStack {
-                        Spacer(minLength: 0)
-
-                        VStack(alignment: .leading, spacing: rowSpacing) {
-                            ForEach(card.wins.prefix(4)) { win in
-                                HStack(alignment: .top, spacing: 8) {
-                                    Image(systemName: win.isCompleted ? "checkmark.circle.fill" : "circle")
-                                        .font(.system(size: rowIconSize, weight: .regular))
-                                        .foregroundStyle(win.isCompleted ? card.titleColor : fixedSecondaryText)
-                                        .frame(width: rowIconFrameWidth, alignment: .center)
-                                        .padding(.top, rowIconTopPadding)
-
-                                    Text(win.title)
-                                        .font(.system(size: rowFontSize, weight: .semibold))
-                                        .foregroundStyle(fixedPrimaryText)
-                                        .multilineTextAlignment(.leading)
-                                        .lineLimit(2)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .strikethrough(win.isCompleted, color: fixedPrimaryText.opacity(0.7))
-                                        .opacity(win.isCompleted ? 0.72 : 1)
-                                }
-                            }
-                        }
-
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.horizontal, rowHorizontalPadding)
-                    .padding(.vertical, rowVerticalPadding)
-                    .frame(maxWidth: .infinity, minHeight: middleGeo.size.height, alignment: .center)
-                    .clipped()
-                }
-
-                Spacer(minLength: 0)
-
-                HStack {
-                    Spacer()
-                    Text("Little Wins")
-                        .font(.system(size: footerFontSize, weight: .semibold))
-                        .foregroundStyle(fixedPrimaryText)
-                    Spacer()
-                }
-                .padding(.horizontal, titleHorizontalPadding)
-                .padding(.top, footerTopPadding)
-                .padding(.bottom, footerBottomPadding)
-            }
-            .frame(width: width, height: height, alignment: .top)
-            .background {
-                littleWinsCardBackground(
-                    cardColor: card.cardColor,
-                    titleColor: card.titleColor,
-                    patternText: card.title,
-                    width: width,
-                    height: height,
-                    radarSideCount: radarSideCount,
-                    scale: scale
-                )
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .shadow(color: Color.black.opacity(0.10), radius: 10, x: 0, y: 6)
+            LittleWinsShareScaledCardView(
+                card: card,
+                radarSideCount: data.radarSideCount
+            )
+            .frame(width: baseWidth, height: baseHeight, alignment: .top)
+            .scaleEffect(scale, anchor: .topLeading)
+            .frame(width: targetWidth, height: targetHeight, alignment: .topLeading)
         }
-    }
-
-    private func littleWinsCardBackground(
-        cardColor: Color,
-        titleColor: Color,
-        patternText: String,
-        width: CGFloat,
-        height: CGFloat,
-        radarSideCount: Int,
-        scale: CGFloat
-    ) -> some View {
-        let cornerShapeSize: CGFloat = max(20, 52 * scale)
-        let cornerShapePadding: CGFloat = max(6, 14 * scale)
-        let topTitleCutoutWidth = max(0, min(max(width * 0.62, 200), width - 86))
-        let bottomTitleCutoutWidth = max(0, min(max(width * 0.32, 120), 180))
-        let largeInsetLineWidth = max(1.2, 4 * scale)
-        let secondaryInsetLineWidth = max(1.2, 4 * scale)
-        let shapeLineWidth = max(1.8, 6 * scale)
-
-        return RoundedRectangle(cornerRadius: 18, style: .continuous)
-            .fill(cardColor)
-            .overlay {
-                littleWinsCardTextPatternBackground(
-                    categoryTitle: patternText,
-                    color: titleColor,
-                    width: width,
-                    height: height
-                )
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(0.12),
-                                Color.clear,
-                                Color.black.opacity(0.02)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-            }
-            .overlay {
-                ZStack {
-                    ForEach(0..<18, id: \.self) { idx in
-                        RoundedRectangle(cornerRadius: max(0.6, 1.5 * scale), style: .continuous)
-                            .fill(Color.white.opacity(0.05))
-                            .frame(width: width * 0.9, height: max(0.8, scale))
-                            .rotationEffect(.degrees(-14))
-                            .offset(x: -width * 0.14, y: CGFloat(idx) * (16 * scale) - (height * 0.38))
-                    }
-                }
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .opacity(0.55)
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(Color.white.opacity(0.28), lineWidth: 1)
-            }
-            .overlay {
-                littleWinsInsetGuideLine(
-                    inset: 18,
-                    cornerRadius: 28,
-                    strokeColor: titleColor.opacity(0.22),
-                    lineWidth: largeInsetLineWidth,
-                    width: width,
-                    height: height,
-                    topLeadingShapeCutout: .init(width: 112, height: 112),
-                    bottomTrailingShapeCutout: .init(width: 112, height: 112),
-                    shapePadding: cornerShapePadding,
-                    shapeSize: cornerShapeSize,
-                    topCutoutWidth: topTitleCutoutWidth,
-                    bottomCutoutWidth: bottomTitleCutoutWidth
-                )
-            }
-            .overlay {
-                littleWinsInsetGuideLine(
-                    inset: 30 * scale,
-                    cornerRadius: 24 * scale,
-                    strokeColor: titleColor.opacity(0.14),
-                    lineWidth: secondaryInsetLineWidth,
-                    width: width,
-                    height: height,
-                    topLeadingShapeCutout: .init(width: 96 * scale, height: 96 * scale),
-                    bottomTrailingShapeCutout: .init(width: 96 * scale, height: 96 * scale),
-                    shapePadding: cornerShapePadding,
-                    shapeSize: cornerShapeSize,
-                    topCutoutWidth: topTitleCutoutWidth,
-                    bottomCutoutWidth: bottomTitleCutoutWidth
-                )
-            }
-            .overlay(alignment: .topLeading) {
-                LittleWinsRadarPolygonOutline(sides: radarSideCount)
-                    .stroke(titleColor, style: StrokeStyle(lineWidth: shapeLineWidth))
-                    .frame(width: cornerShapeSize, height: cornerShapeSize)
-                    .padding(.leading, cornerShapePadding)
-                    .padding(.top, cornerShapePadding)
-                    .opacity(0.9)
-            }
-            .overlay(alignment: .bottomTrailing) {
-                LittleWinsRadarPolygonOutline(sides: radarSideCount)
-                    .stroke(titleColor, style: StrokeStyle(lineWidth: shapeLineWidth))
-                    .frame(width: cornerShapeSize, height: cornerShapeSize)
-                    .padding(.trailing, cornerShapePadding)
-                    .padding(.bottom, cornerShapePadding)
-                    .opacity(0.9)
-            }
-    }
-
-    private func littleWinsInsetGuideLine(
-        inset: CGFloat,
-        cornerRadius: CGFloat,
-        strokeColor: Color,
-        lineWidth: CGFloat,
-        width: CGFloat,
-        height: CGFloat,
-        topLeadingShapeCutout: CGSize = .zero,
-        bottomTrailingShapeCutout: CGSize = .zero,
-        shapePadding: CGFloat = 14,
-        shapeSize: CGFloat = 52,
-        topCutoutWidth: CGFloat? = nil,
-        bottomCutoutWidth: CGFloat? = nil
-    ) -> some View {
-        let safeWidth = width.isFinite ? max(width, 0) : 0
-        let safeHeight = height.isFinite ? max(height, 0) : 0
-        let sanitizeDimension: (CGFloat) -> CGFloat = { value in
-            guard value.isFinite else { return 0 }
-            return max(value, 0)
-        }
-
-        let defaultTopCutoutWidth = min(max(safeWidth * 0.34, 120), 190)
-        let defaultBottomCutoutWidth = min(
-            max(safeWidth * 0.56, 180),
-            safeWidth - (inset * 2) - 20
-        )
-        let topCutoutWidth = sanitizeDimension(topCutoutWidth ?? defaultTopCutoutWidth)
-        let bottomCutoutWidth = sanitizeDimension(bottomCutoutWidth ?? defaultBottomCutoutWidth)
-        let topY = inset
-        let bottomY = safeHeight - inset
-        let topLeadingCutoutCenter = CGPoint(
-            x: shapePadding + (shapeSize / 2),
-            y: shapePadding + (shapeSize / 2)
-        )
-        let bottomTrailingCutoutCenter = CGPoint(
-            x: safeWidth - shapePadding - (shapeSize / 2),
-            y: safeHeight - shapePadding - (shapeSize / 2)
-        )
-
-        return ZStack {
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .inset(by: inset)
-                .stroke(strokeColor, lineWidth: lineWidth)
-
-            Rectangle()
-                .fill(Color.black)
-                .frame(width: topCutoutWidth, height: lineWidth + 10)
-                .position(x: safeWidth / 2, y: topY)
-
-            Rectangle()
-                .fill(Color.black)
-                .frame(width: bottomCutoutWidth, height: lineWidth + 10)
-                .position(x: safeWidth / 2, y: bottomY)
-        }
-        .compositingGroup()
-        .blendMode(.normal)
-        .mask(
-            Rectangle()
-                .overlay {
-                    Rectangle().fill(Color(.systemBackground))
-                    Rectangle()
-                        .frame(width: topCutoutWidth, height: lineWidth + 12)
-                        .position(x: safeWidth / 2, y: topY)
-                        .blendMode(.destinationOut)
-                    Rectangle()
-                        .frame(width: bottomCutoutWidth, height: lineWidth + 12)
-                        .position(x: safeWidth / 2, y: bottomY)
-                        .blendMode(.destinationOut)
-                    if topLeadingShapeCutout != .zero {
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .frame(width: topLeadingShapeCutout.width, height: topLeadingShapeCutout.height)
-                            .position(topLeadingCutoutCenter)
-                            .blendMode(.destinationOut)
-                    }
-                    if bottomTrailingShapeCutout != .zero {
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .frame(width: bottomTrailingShapeCutout.width, height: bottomTrailingShapeCutout.height)
-                            .position(bottomTrailingCutoutCenter)
-                            .blendMode(.destinationOut)
-                    }
-                }
-                .compositingGroup()
-        )
-    }
-
-    private func littleWinsCardTextPatternBackground(
-        categoryTitle: String,
-        color: Color,
-        width: CGFloat,
-        height: CGFloat
-    ) -> some View {
-        let textSize: CGFloat = 8.5
-        let rowHeight: CGFloat = 9
-        let rowCount = max(1, Int(ceil(height / rowHeight)) + 2)
-        let repeatedLine = String(repeating: categoryTitle + " ", count: max(8, Int(width / 28)))
-
-        return VStack(alignment: .leading, spacing: 0) {
-            ForEach(0..<rowCount, id: \.self) { row in
-                Text(repeatedLine)
-                    .font(.system(size: textSize, weight: .semibold, design: .rounded))
-                    .foregroundStyle(color.opacity(row.isMultiple(of: 2) ? 0.1 : 0.2))
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .frame(width: width, height: height, alignment: .topLeading)
-        .clipped()
-        .allowsHitTesting(false)
     }
 
     private func fulfillmentDeltaLine(_ delta: Double?) -> String {
@@ -1841,6 +1571,90 @@ struct LittleWinsShareOverlayTemplateView: View {
         formatter.minimumFractionDigits = 0
         formatter.maximumFractionDigits = max(0, decimalPlaces)
         return formatter.string(from: NSNumber(value: value)) ?? String(format: "%.\(max(0, decimalPlaces))f", value)
+    }
+}
+
+private struct LittleWinsShareScaledCardView: View {
+    let card: LittleWinsShareOverlayCard
+    let radarSideCount: Int
+
+    var body: some View {
+        let fixedPrimaryText = Color.black.opacity(0.82)
+        let fixedSecondaryText = Color.black.opacity(0.56)
+
+        return VStack(spacing: 0) {
+            Text(card.title)
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(card.titleColor)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .padding(.horizontal, 18)
+                .padding(.top, 10)
+                .padding(.bottom, 18)
+
+            GeometryReader { middleGeo in
+                VStack {
+                    Spacer(minLength: 0)
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(card.wins.prefix(4)) { win in
+                            HStack(alignment: .top, spacing: 10) {
+                                Image(systemName: win.isCompleted ? "checkmark.circle.fill" : "circle")
+                                    .font(.system(size: 26, weight: .regular))
+                                    .foregroundStyle(win.isCompleted ? card.titleColor : fixedSecondaryText)
+                                    .padding(.top, 6)
+                                    .frame(width: 30, alignment: .center)
+
+                                Text(win.title)
+                                    .font(.system(size: 36, weight: .semibold))
+                                    .foregroundStyle(fixedPrimaryText)
+                                    .multilineTextAlignment(.leading)
+                                    .lineLimit(2)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .strikethrough(win.isCompleted, color: fixedPrimaryText.opacity(0.7))
+                                    .opacity(win.isCompleted ? 0.72 : 1)
+                            }
+                        }
+                    }
+
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 38)
+                .padding(.vertical, 14)
+                .frame(maxWidth: .infinity, minHeight: middleGeo.size.height, alignment: .center)
+                .clipped()
+            }
+
+            Spacer(minLength: 0)
+
+            HStack {
+                Spacer()
+                Text("Little Wins")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(fixedPrimaryText)
+                Spacer()
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 10)
+            .padding(.bottom, 14)
+        }
+        .frame(
+            width: LittleWinsCardStyleMetrics.referenceWidth,
+            height: LittleWinsCardStyleMetrics.referenceHeight,
+            alignment: .top
+        )
+        .background {
+            LittleWinsCardBackgroundView(
+                cardColor: card.cardColor,
+                titleColor: card.titleColor,
+                patternText: card.title,
+                width: LittleWinsCardStyleMetrics.referenceWidth,
+                height: LittleWinsCardStyleMetrics.referenceHeight,
+                radarSideCount: radarSideCount
+            )
+        }
+        .clipShape(RoundedRectangle(cornerRadius: LittleWinsCardStyleMetrics.cornerRadius, style: .continuous))
+        .shadow(color: Color.black.opacity(0.10), radius: 10, x: 0, y: 6)
     }
 }
 
@@ -2081,34 +1895,6 @@ private extension View {
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
                     .stroke(Color.white.opacity(0.18), lineWidth: 1)
             )
-    }
-}
-
-private struct LittleWinsRadarPolygonOutline: Shape {
-    let sides: Int
-
-    func path(in rect: CGRect) -> Path {
-        let sideCount = max(3, min(7, sides))
-        let center = CGPoint(x: rect.midX, y: rect.midY)
-        let radius = min(rect.width, rect.height) / 2
-        let startAngle = -CGFloat.pi / 2
-        var path = Path()
-
-        for index in 0..<sideCount {
-            let angle = startAngle + (CGFloat(index) * 2 * .pi / CGFloat(sideCount))
-            let point = CGPoint(
-                x: center.x + cos(angle) * radius,
-                y: center.y + sin(angle) * radius
-            )
-            if index == 0 {
-                path.move(to: point)
-            } else {
-                path.addLine(to: point)
-            }
-        }
-
-        path.closeSubpath()
-        return path
     }
 }
 
