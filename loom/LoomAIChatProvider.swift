@@ -515,7 +515,8 @@ extension LoomAIChatProvider {
                         existing: normalized.debug,
                         provider: provider,
                         context: context,
-                        lowConfidenceFallback: true
+                        lowConfidenceFallback: true,
+                        hardcodedModel: "loom.local.fallback"
                     ),
                     usage: normalized.usage,
                     elapsedMS: normalized.elapsedMS
@@ -534,7 +535,8 @@ extension LoomAIChatProvider {
                     existing: normalized.debug,
                     provider: provider,
                     context: context,
-                    lowConfidenceFallback: true
+                    lowConfidenceFallback: true,
+                    hardcodedModel: "loom.local.best_use"
                 ),
                 usage: normalized.usage,
                 elapsedMS: normalized.elapsedMS
@@ -551,7 +553,8 @@ extension LoomAIChatProvider {
                     existing: normalized.debug,
                     provider: provider,
                     context: context,
-                    lowConfidenceFallback: false
+                    lowConfidenceFallback: false,
+                    hardcodedModel: nil
                 ),
                 usage: normalized.usage,
                 elapsedMS: normalized.elapsedMS
@@ -566,7 +569,11 @@ extension LoomAIChatProvider {
                 nextAction: normalized.nextAction,
                 chips: normalized.chips,
                 actions: normalized.actions,
-                debug: normalized.debug,
+                debug: hardcodedDebug(
+                    existing: normalized.debug,
+                    context: context,
+                    model: "loom.local.fallback"
+                ),
                 usage: normalized.usage,
                 elapsedMS: normalized.elapsedMS
             )
@@ -580,7 +587,11 @@ extension LoomAIChatProvider {
                 nextAction: nil,
                 chips: normalized.chips,
                 actions: [],
-                debug: normalized.debug,
+                debug: hardcodedDebug(
+                    existing: normalized.debug,
+                    context: context,
+                    model: "loom.local.fallback"
+                ),
                 usage: normalized.usage,
                 elapsedMS: normalized.elapsedMS
             )
@@ -660,13 +671,31 @@ private extension LoomAIChatProvider {
         existing: LoomAIDebug?,
         provider: Kind,
         context: LoomAIContextSnapshot,
-        lowConfidenceFallback: Bool
+        lowConfidenceFallback: Bool,
+        hardcodedModel: String?
     ) -> LoomAIDebug {
         LoomAIDebug(
-            model: existing?.model ?? (provider == .appleIntelligence ? "apple.intelligence" : "openai.worker"),
+            model: hardcodedModel ?? existing?.model ?? (provider == .appleIntelligence ? "apple.intelligence" : "openai.worker"),
             usedContext: existing?.usedContext ?? true,
             claimedUsedContext: existing?.claimedUsedContext ?? existing?.usedContext ?? true,
             confidence: lowConfidenceFallback ? "medium" : normalizedConfidence(existing?.confidence),
+            evidence: normalizedEvidence(existing?.evidence, context: context),
+            contextBytes: existing?.contextBytes,
+            contextHash: existing?.contextHash ?? context.personalizationHash,
+            contextKeys: existing?.contextKeys
+        )
+    }
+
+    static func hardcodedDebug(
+        existing: LoomAIDebug?,
+        context: LoomAIContextSnapshot,
+        model: String
+    ) -> LoomAIDebug {
+        LoomAIDebug(
+            model: model,
+            usedContext: existing?.usedContext ?? true,
+            claimedUsedContext: existing?.claimedUsedContext ?? existing?.usedContext ?? true,
+            confidence: normalizedConfidence(existing?.confidence),
             evidence: normalizedEvidence(existing?.evidence, context: context),
             contextBytes: existing?.contextBytes,
             contextHash: existing?.contextHash ?? context.personalizationHash,

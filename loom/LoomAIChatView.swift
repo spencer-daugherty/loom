@@ -854,6 +854,8 @@ struct LoomAIChatView: View {
             .lowercased()
 
         switch model {
+        case "loom.local.fallback", "loom.local.best_use":
+            return "Hardcoded (Not AI)"
         case "apple.intelligence":
             return "Apple Intelligence"
         case "openai.worker":
