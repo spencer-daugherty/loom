@@ -682,7 +682,8 @@ struct ReflectView: View {
     }
 
     private var shouldShowReadableInsightsCard: Bool {
-        readableInsightsLoading || !(readableInsightsText?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+        guard AppleIntelligenceSupport.isAvailable else { return false }
+        return readableInsightsLoading || !(readableInsightsText?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
     }
 
     private var readableInsightsRequestSignature: String {
@@ -697,7 +698,11 @@ struct ReflectView: View {
 
     @MainActor
     private func requestReadableInsightsIfNeeded() async {
-        guard shouldRenderHeavyInsights else { return }
+        guard shouldRenderHeavyInsights, AppleIntelligenceSupport.isAvailable else {
+            readableInsightsLoading = false
+            readableInsightsText = nil
+            return
+        }
         let signature = readableInsightsRequestSignature
         guard readableInsightsRequestKey != signature else { return }
         readableInsightsRequestKey = signature
@@ -705,19 +710,9 @@ struct ReflectView: View {
         readableInsightsText = nil
 
         do {
-            let loomBuilder = LoomAIViewModel()
-            let contextSnapshot = try loomBuilder.buildContextSnapshot(in: modelContext)
-            let service = LoomAIService()
             let prompt = reflectReadableInsightsPrompt()
-            let response = try await service.sendChat(
-                messages: [
-                    .init(role: "user", content: prompt)
-                ],
-                context: contextSnapshot,
-                intent: "readable_insights_reflect",
-                screen: "reflect_readable_insights"
-            )
-            let text = response.message.trimmingCharacters(in: .whitespacesAndNewlines)
+            let text = try await AppleIntelligencePurposeInsightsGenerator.readableInsight(prompt: prompt)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
             readableInsightsText = text.isEmpty ? nil : limitedReadableInsightsText(text, maxCharacters: 200)
         } catch {
             readableInsightsText = nil
@@ -766,7 +761,7 @@ struct ReflectView: View {
         Create a readable insights summary for a completed Loom Action Blocks session.
 
         Requirements:
-        - Base the insight on ALL available information in APP_CONTEXT plus the session details below.
+        - Base the insight only on the session details below.
         - Return exactly ONE high-signal insight sentence (not a recap/summary of visible stats).
         - Prioritize patterns, implications, or mismatches over repeating totals/counts already shown in the UI.
         - Use practical, plain-language wording (no filler).
@@ -1123,10 +1118,16 @@ struct ReflectView: View {
                     .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
 
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Characteristics")
+                        Text("Action Status")
                             .font(.headline)
+                        let maxStatusValue = max(1, snapshot.flowProfileRows.map(\.1).max() ?? 1)
                         ForEach(snapshot.flowProfileRows, id: \.0) { row in
-                            metricCapsuleRow(title: row.0, value: row.1, tint: row.2)
+                            metricBarRow(
+                                title: row.0,
+                                value: row.1,
+                                maximum: maxStatusValue,
+                                tint: row.2
+                            )
                         }
                     }
                     .padding(10)
@@ -1612,17 +1613,33 @@ struct ReflectView: View {
         .padding(.vertical, 2)
     }
 
-    private func metricCapsuleRow(title: String, value: Int, tint: Color) -> some View {
-        HStack {
+    private func metricBarRow(title: String, value: Int, maximum: Int, tint: Color) -> some View {
+        HStack(alignment: .center, spacing: 10) {
             Text(title)
                 .font(.subheadline)
-            Spacer()
-            Text("\(value)")
-                .font(.subheadline)
-                .fontWeight(.bold)
+            Spacer(minLength: 8)
+            GeometryReader { proxy in
+                let width = proxy.size.width
+                let progress = maximum > 0 ? min(1, max(0, CGFloat(value) / CGFloat(maximum))) : 0
+                let fillWidth = max(44, width * progress)
+
+                HStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    Text("\(value)")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
                 .padding(.horizontal, 10)
-                .padding(.vertical, 3)
-                .background(tint.opacity(0.2), in: Capsule())
+                .frame(width: fillWidth, height: 24, alignment: .leading)
+                .background(
+                    Capsule()
+                        .fill(tint.gradient)
+                )
+                .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            .frame(height: 24)
+            .frame(width: 132)
         }
     }
 
