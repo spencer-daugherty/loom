@@ -1283,6 +1283,7 @@ async function handleLoomAIChat({ request, env, apiKey, payload }) {
     "- Do NOT parrot diagnostic option text verbatim; interpret patterns in your own words.",
     "- Message must feel like Loom knows this exact user: concise, specific, and personalized.",
     "- Never give generic productivity filler, broad motivational language, or reusable advice that could fit anyone.",
+    "- For mission rewrites, never use generic scaffolds like 'I strengthen {area}...', 'steady weekly execution', or 'simple repeatable actions'; ground each option in real goals, purpose, or pressure from APP_CONTEXT.",
     "- Message can be 1-4 short paragraphs maximum. No filler. No hardcoded preambles.",
     "- Never include a sources block, A/B/C option comparisons, or 'which should I add/edit/replace' in message.",
     "- Put recommendations in suggestionCards only (never inline in message).",
@@ -5220,11 +5221,7 @@ function buildRouteSuggestionCards(route, context) {
   }
 
   if (route.id === 2 && categoryId) {
-    const options = [
-      { title: "Mission option A", type: "updateFulfillmentMission", payload: { categoryId, text: `I strengthen ${target} with steady weekly execution and clear standards.` } },
-      { title: "Mission option B", type: "updateFulfillmentMission", payload: { categoryId, text: `I use ${target} to build consistency, reduce stress, and increase follow-through.` } },
-      { title: "Mission option C", type: "updateFulfillmentMission", payload: { categoryId, text: `I treat ${target} as a system I can improve through simple repeatable actions.` } }
-    ];
+    const options = buildGroundedMissionRouteOptions({ categoryId, target, context });
     return [buildCardFromOptions(`Mission options for ${target || "this area"}`, "Choose one mission rewrite.", options, context)];
   }
 
@@ -5308,6 +5305,40 @@ function buildRouteSuggestionCards(route, context) {
   }
 
   return [];
+}
+
+function buildGroundedMissionRouteOptions({ categoryId, target, context }) {
+  const category = resolveCategoryFromRouteTarget(target, context);
+  const categoryName = nonEmptyString(category?.name || target || "this area");
+  const goals = (Array.isArray(context?.activeOutcomes) ? context.activeOutcomes : [])
+    .filter((goal) => nonEmptyString(goal?.category).toLowerCase() === categoryName.toLowerCase())
+    .map((goal) => normalizeModelCopy(nonEmptyString(goal?.title)))
+    .filter(Boolean);
+  const purpose = normalizeModelCopy(nonEmptyString(context?.drivingForce?.purpose || context?.drivingForce?.vision));
+  const pressure = uniqueOrdered([
+    normalizeModelCopy(nonEmptyString(context?.diagnostic?.nextDirection)),
+    normalizeModelCopy(nonEmptyString(context?.diagnostic?.rootCause)),
+    normalizeModelCopy(nonEmptyString(context?.diagnostic?.breaksFirst))
+  ].filter(Boolean))[0] || "";
+  const goalSummary = goals.length >= 2
+    ? `${goals[0]} and ${goals[1]}`
+    : (goals[0] || "");
+  const candidates = uniqueOrdered([
+    goalSummary ? `I use ${categoryName} to make real progress on ${goalSummary}, not just stay busy.` : "",
+    purpose ? `I make ${categoryName} support this direction: ${purpose}.` : "",
+    pressure ? `I keep ${categoryName} clear and honest so ${truncate(pressure, 100)}.` : "",
+    `I define ${categoryName} by visible progress I can point to, not vague effort.`
+  ]
+    .map((item) => normalizeModelCopy(nonEmptyString(item)))
+    .filter((item) => item && !isBannedGenericMissionText(item))
+    .map((item) => truncate(item, 240)))
+    .slice(0, 3);
+
+  return candidates.map((text, index) => ({
+    title: `Mission option ${["A", "B", "C"][index] || "C"}`,
+    type: "updateFulfillmentMission",
+    payload: { categoryId, text }
+  }));
 }
 
 function buildCardFromOptions(title, description, options, context) {
@@ -6320,6 +6351,31 @@ function normalizeActions(input, { confidence, context }) {
   return cleaned;
 }
 
+function isBannedGenericMissionText(text) {
+  const normalized = normalizeModelCopy(nonEmptyString(text)).toLowerCase();
+  if (!normalized) return false;
+
+  const fragments = [
+    "steady weekly execution",
+    "consistent weekly execution",
+    "clear standards",
+    "simple repeatable actions",
+    "build consistency",
+    "reduce stress by following through",
+    "increase follow-through",
+    "following through on the right actions"
+  ];
+  if (fragments.some((fragment) => normalized.includes(fragment))) return true;
+
+  const patterns = [
+    /^i strengthen .+ (with|through) .+$/,
+    /^i use .+ to reduce stress\b.*$/,
+    /^i use .+ to build consistency\b.*$/,
+    /^i treat .+ as a system i (can )?improve\b.*$/
+  ];
+  return patterns.some((pattern) => pattern.test(normalized));
+}
+
 function normalizeActionPayload(type, payload, context) {
   const src = payload && typeof payload === "object" ? payload : {};
   const text = normalizeModelCopy(nonEmptyString(src.text));
@@ -6336,7 +6392,7 @@ function normalizeActionPayload(type, payload, context) {
     }
     case "updateFulfillmentMission": {
       const validCategoryId = normalizeCategoryId(categoryId, categoryName, context);
-      if (!validCategoryId || !text) return null;
+      if (!validCategoryId || !text || isBannedGenericMissionText(text)) return null;
       return { categoryId: validCategoryId, text: truncate(text, 240) };
     }
     case "addFulfillmentIdentity": {
@@ -6624,6 +6680,8 @@ export const __test = {
   collectGrounding,
   buildSuggestionCards,
   looksLikeGenericLoomChatMessage,
+  isBannedGenericMissionText,
+  buildRouteSuggestionCards,
   validateOutput,
   sanitizeLoomChatResponse
 };

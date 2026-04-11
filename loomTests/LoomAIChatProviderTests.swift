@@ -223,6 +223,35 @@ struct LoomAIChatProviderTests {
         #expect(planRoute?.id == 5)
         #expect(planRoute?.target == "Sleep 7+ hours")
     }
+
+    @Test
+    func genericMissionScaffoldsAreRejected() {
+        let payload = LoomAIChatProvider.normalizeActionPayload(
+            type: "updateFulfillmentMission",
+            payload: [
+                "categoryId": "11111111-1111-4111-8111-111111111111",
+                "text": "I strengthen Health & Vitality with steady weekly execution and clear standards."
+            ],
+            context: sampleContext
+        )
+
+        #expect(payload == nil)
+        #expect(LoomAIChatProvider.isBannedGenericMissionText("I treat Health & Vitality as a system I improve through simple repeatable actions."))
+    }
+
+    @Test
+    func routeTwoFallbackMissionOptionsAreGrounded() {
+        let route = LoomAIChatRoute(id: 2, key: "new_mission", label: "New Mission for Health & Vitality", target: "Health & Vitality")
+        let cards = LoomAIChatProvider.routeSuggestionCards(for: route, context: sampleContext)
+
+        #expect(cards.count == 1)
+        #expect(cards[0].options.count == 3)
+        for option in cards[0].options {
+            #expect(option.type == "updateFulfillmentMission")
+            #expect(!(option.payload["text"].map(LoomAIChatProvider.isBannedGenericMissionText) ?? false))
+        }
+        #expect((cards[0].options[0].payload["text"] ?? "").contains("Sleep 7+ hours") || (cards[0].options[0].payload["text"] ?? "").contains("focused follow-through"))
+    }
 }
 
 private let sampleContext = LoomAIContextSnapshot(

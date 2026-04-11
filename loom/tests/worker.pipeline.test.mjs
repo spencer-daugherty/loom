@@ -135,3 +135,56 @@ test("sanitizeLoomChatResponse preserves model-provided suggestion cards for rou
   assert.equal(output.suggestionCards[0].title, "Plan for Sleep 7+ hours");
   assert.equal(output.suggestionCards[0].options[0].type, "createCaptureAction");
 });
+
+test("generic mission rewrites are rejected from action payloads", () => {
+  assert.equal(
+    __test.isBannedGenericMissionText("I strengthen Career & Business with steady weekly execution and clear standards."),
+    true
+  );
+
+  const output = __test.sanitizeLoomChatResponse({
+    message: "Here are options.",
+    grounding: [],
+    suggestionCards: [{
+      id: "mission-options",
+      title: "Mission options for Career & Business",
+      description: "",
+      options: [{
+        id: "mission-a",
+        label: "A",
+        title: "Mission option A",
+        type: "updateFulfillmentMission",
+        payload: {
+          categoryId: "11111111-1111-4111-8111-111111111111",
+          text: "I strengthen Health & Vitality with steady weekly execution and clear standards."
+        }
+      }]
+    }],
+    nextAction: null,
+    chips: [],
+    actions: [],
+    debug: { usedContext: true, confidence: "high", evidence: ["fulfillmentCategories[0].mission"] }
+  }, {
+    context: mockContext,
+    hasContext: true,
+    latestUserMessage: "New Mission for Health & Vitality",
+    intent: "loomai_chat"
+  });
+
+  assert.equal(output.suggestionCards.length, 0);
+  assert.equal(output.actions.length, 0);
+});
+
+test("route 2 fallback mission options are grounded instead of generic scaffolds", () => {
+  const cards = __test.buildRouteSuggestionCards(
+    { id: 2, key: "new_mission", target: "Health & Vitality" },
+    mockContext
+  );
+
+  assert.equal(cards.length, 1);
+  assert.equal(cards[0].options.length, 3);
+  for (const option of cards[0].options) {
+    assert.equal(__test.isBannedGenericMissionText(option.payload.text), false);
+  }
+  assert.match(cards[0].options[0].payload.text, /Sleep 7\+ hours|focused follow-through/i);
+});

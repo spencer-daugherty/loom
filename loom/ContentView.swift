@@ -5882,10 +5882,27 @@ struct ContentView: View {
 
         let now = Date()
         for category in defaultCategories {
+            let defaultMission: String
+            switch category.name {
+            case "Career & Business":
+                defaultMission = "I do career work that creates visible progress, strong leadership, and meaningful contribution."
+            case "Leadership & Impact":
+                defaultMission = "I lead in ways that make people, teams, and decisions stronger."
+            case "Wealth & Lifestyle":
+                defaultMission = "I build financial stability and a lifestyle that gives me more freedom and less noise."
+            case "Mind & Meaning":
+                defaultMission = "I protect clarity, reflection, and inner steadiness so my choices stay intentional."
+            case "Love & Relationships":
+                defaultMission = "I build relationships through presence, honesty, and care people can actually feel."
+            case "Health & Vitality":
+                defaultMission = "I build a strong body and steady energy that support everything else I care about."
+            default:
+                defaultMission = "I define \(category.name) by meaningful progress and clear priorities."
+            }
             if let existing = fulfillments.first(where: { $0.category_id == category.id }) {
                 existing.category = category.name
                 if existing.category_purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    existing.category_purpose = "I strengthen \(category.name) through consistent weekly execution."
+                    existing.category_purpose = defaultMission
                 }
                 existing.updatedAt = now
             } else {
@@ -5896,7 +5913,7 @@ struct ContentView: View {
                         category: category.name,
                         category_identitiy: "Focused Builder",
                         category_vision: "Stable momentum in \(category.name)",
-                        category_purpose: "I strengthen \(category.name) through consistent weekly execution."
+                        category_purpose: defaultMission
                     )
                 )
             }

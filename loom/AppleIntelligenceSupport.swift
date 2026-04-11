@@ -407,15 +407,27 @@ enum AppleIntelligenceLoomChatGenerator {
             context: context
         )
         let payloadJSON = ((try? encoder.encode(payload)).flatMap { String(data: $0, encoding: .utf8) }) ?? "{}"
+        let latestUserMessage = messages.last(where: { $0.role.lowercased() == "user" })?.content ?? ""
+        let route = LoomAIChatProvider.resolveRoute(latestUserMessage: latestUserMessage, context: context)
+        let personalizationBrief = LoomAIChatProvider.appleChatPersonalizationBrief(
+            context: context,
+            route: route,
+            latestUserMessage: latestUserMessage
+        )
 
         return """
         You are LoomAI inside the Loom app.
 
         Product behavior:
         - Be concise, specific, and grounded in the provided Loom context.
+        - The answer must feel personalized to this exact user, not like reusable productivity advice.
         - Keep the main `message` to 1 to 4 short paragraphs and never put recommendation lists inline.
         - Put concrete recommendations into `suggestionCards`, `nextAction`, and `actions` only.
         - Keep suggestion cards executable UI actions, not prose summaries.
+        - When the question is Loom-related and context exists, reference at least 2 concrete Loom details across the response.
+        - Use the personalization brief to keep the answer tailored to the user's current direction, pressure pattern, fulfillment area, goal, action plan, or capture load.
+        - Avoid generic filler such as "start small", "build momentum", "stay consistent", "keep moving", or "one step at a time" unless the user's own context clearly justifies it.
+        - For mission rewrites, never use generic scaffolds like "I strengthen {area}..." or "steady weekly execution"; tie each option to the user's real goals, purpose, or pressure pattern.
         - If the user asks something unrelated to Loom, gently redirect back to Loom-relevant help in `message` and provide 2 to 4 Loom-relevant `chips`.
         - Use the provided route description when present. Routes 1 to 7 should usually return at least one executable suggestion card unless confidence is low.
         - Do not invent facts outside the provided messages and context.
@@ -431,6 +443,9 @@ enum AppleIntelligenceLoomChatGenerator {
           `replaceLittleWin`
           `createCaptureAction`
         - If confidence is low, leave `suggestionCards` and `actions` empty unless the route explicitly demands a very safe grounded option.
+
+        Personalization brief:
+        \(personalizationBrief.isEmpty ? "(none)" : personalizationBrief)
 
         Input JSON:
         \(payloadJSON)
