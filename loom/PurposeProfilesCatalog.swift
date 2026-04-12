@@ -1071,40 +1071,46 @@ enum PurposeProfileMatcher {
         inputs: Inputs,
         catalog: [PurposeProfileRecord] = PurposeProfilesCatalog.all()
     ) -> PurposeProfileRecord {
-        let ranked = rankedMatches(inputs: inputs, catalog: catalog)
-        guard !ranked.isEmpty else { return PurposeProfilesCatalog.fallback() }
-        let seed = buildSeed(from: normalizedInputs(from: inputs))
-        return pickFromTopBand(ranked: ranked, seed: seed)
+        guard
+            let responses = OnboardingQuestionnaireResponses(
+                stressSource: inputs.stress,
+                breakPoint: inputs.breakPoint,
+                selectedAreas: inputs.areas,
+                planningReality: inputs.planning,
+                desiredChange: inputs.desired
+            )
+        else {
+            return PurposeProfilesCatalog.fallback()
+        }
+        let result = OnboardingPersonalityMatcher.match(responses: responses)
+        return catalog.first(where: {
+            PurposeProfilesCatalog.normalized($0.profile) == PurposeProfilesCatalog.normalized(result.winner.profileName)
+        }) ?? PurposeProfilesCatalog.record(named: result.winner.profileName) ?? PurposeProfilesCatalog.fallback()
     }
 
     static func rankedMatches(
         inputs: Inputs,
         catalog: [PurposeProfileRecord] = PurposeProfilesCatalog.all()
     ) -> [ScoredProfile] {
-        guard !catalog.isEmpty else { return [] }
-        let normalized = normalizedInputs(from: inputs)
-        let seed = buildSeed(from: normalized)
-
-        return catalog
-            .map { record in
-                let context = selectionContexts[normalizedKey(record.profile)] ?? emptyContext
-                var score = 0.0
-                score += context.stressWeights[normalized.stress] ?? 0
-                score += context.breakWeights[normalized.breakPoint] ?? 0
-                score += context.planningWeights[normalized.planning] ?? 0
-                score += context.changeWeights[normalized.desired] ?? 0
-                score += areaScore(context.areaWeights, normalizedAreas: normalized.areas)
-                score += signalScore(context.signalWeights, signals: normalized.signals)
-                score += bonusScore(context.comboBonuses, normalized: normalized)
-
-                return ScoredProfile(record: record, score: score)
-            }
-            .sorted { lhs, rhs in
-                if abs(lhs.score - rhs.score) > 0.0001 {
-                    return lhs.score > rhs.score
-                }
-                return tieBreakRank(seed: seed, profile: lhs.record.profile) < tieBreakRank(seed: seed, profile: rhs.record.profile)
-            }
+        guard
+            !catalog.isEmpty,
+            let responses = OnboardingQuestionnaireResponses(
+                stressSource: inputs.stress,
+                breakPoint: inputs.breakPoint,
+                selectedAreas: inputs.areas,
+                planningReality: inputs.planning,
+                desiredChange: inputs.desired
+            )
+        else {
+            return []
+        }
+        let result = OnboardingPersonalityMatcher.match(responses: responses)
+        return result.rankedProfiles.compactMap { ranked in
+            let record = catalog.first(where: {
+                PurposeProfilesCatalog.normalized($0.profile) == PurposeProfilesCatalog.normalized(ranked.profileName)
+            }) ?? PurposeProfilesCatalog.record(named: ranked.profileName)
+            return record.map { ScoredProfile(record: $0, score: ranked.rawScore) }
+        }
     }
 
     private static func pickFromTopBand(ranked: [ScoredProfile], seed: String) -> PurposeProfileRecord {

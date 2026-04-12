@@ -12,6 +12,17 @@ struct AccountPersonalizationView: View {
         var nextDirection: String
     }
 
+    private struct PurposeProfileDisplay {
+        var profile: String
+        var strength: String
+        var weakness: String
+        var stressTrigger: String
+        var breakingPoint: String
+        var confidence: Double?
+        var lowConfidence: Bool
+        var alternatives: [String]
+    }
+
     private enum EditorMode: String, Identifiable {
         case edit
         case reset
@@ -58,9 +69,9 @@ struct AccountPersonalizationView: View {
             Section("Insights") {
                 if let current = personalizationStore.current {
                     VStack(spacing: 12) {
-                        if let profileSnapshot = latestPurposeProfileSnapshot {
-                            purposeProfileSnapshotCard(profileSnapshot)
-                            Text("Personality profile refreshes monthly based on your latest data.")
+                        if let profileDisplay = latestPurposeProfileDisplay {
+                            purposeProfileSnapshotCard(profileDisplay)
+                            Text("Personality profile updates on-device from your current diagnostic answers.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .center)
@@ -614,25 +625,13 @@ struct AccountPersonalizationView: View {
             AppDebugActivityLog.log("Personalization", "Diagnostic insights refresh failed: \(error.localizedDescription)")
         }
 
-        let currentVision = currentVisionForProfileInsights()
-        let currentPassions = currentPassionsForProfileInsights()
-        let fallbackRecord = PurposeProfileMatcher.bestMatch(
-            inputs: .init(
-                stress: diagnostics.stress,
-                breakPoint: diagnostics.breaksFirst,
-                planning: diagnostics.planningStyle,
-                desired: diagnostics.firstChange,
-                areas: diagnostics.areas,
-                vision: currentVision,
-                passions: currentPassions
-            )
-        )
+        let resolvedRecord = snapshot.personalityMatch.winnerRecord
 
         let monthKey = PurposeProfileInsightsHasher.measuredMonthKey()
         let inputsHash = PurposeProfileInsightsHasher.hash(
             diagnostic: diagnostics,
-            vision: currentVision,
-            passions: currentPassions
+            vision: currentVisionForProfileInsights(),
+            passions: currentPassionsForProfileInsights()
         )
         let purposeSnapshotKey = PurposeProfileInsightsHasher.snapshotKey(
             userKey: userKey,
@@ -641,46 +640,15 @@ struct AccountPersonalizationView: View {
         )
         AppDebugActivityLog.log(
             "Personalization",
-            "Purpose profile refresh request month=\(monthKey) inputsHash=\(String(inputsHash.prefix(8)))"
+            "Purpose profile refresh request month=\(monthKey) inputsHash=\(String(inputsHash.prefix(8))) profile=\(resolvedRecord.profile)"
         )
-
-        let existingPurposeSnapshot = purposeProfileInsightsSnapshots.first {
-            $0.userKey == userKey && $0.monthKey == monthKey
-        }
-        if existingPurposeSnapshot == nil, PurposeProfileInsightsHasher.isMonthlyRefreshBoundary() {
-            let resolvedRecord: PurposeProfileRecord
-            do {
-                let response = try await LoomAIService().fetchPurposeProfileInsights(
-                    diagnostic: diagnostics,
-                    vision: currentVision,
-                    passions: currentPassions
-                )
-                resolvedRecord = PurposeProfilesCatalog.record(named: response.profile) ?? PurposeProfileRecord(
-                    profile: response.profile,
-                    strength: response.strength,
-                    weakness: response.weakness,
-                    stressTrigger: response.stressTrigger,
-                    breakingPoint: response.breakingPoint
-                )
-                AppDebugActivityLog.log("Personalization", "Purpose profile refreshed profile=\(resolvedRecord.profile)")
-            } catch {
-                resolvedRecord = fallbackRecord
-                AppDebugActivityLog.log("Personalization", "Purpose profile refresh failed, using fallback profile=\(fallbackRecord.profile)")
-            }
-
-            upsertPurposeProfileSnapshot(
-                snapshotKey: purposeSnapshotKey,
-                userKey: userKey,
-                monthKey: monthKey,
-                inputsHash: inputsHash,
-                record: resolvedRecord
-            )
-        } else {
-            AppDebugActivityLog.log(
-                "Personalization",
-                "Purpose profile refresh skipped month=\(monthKey) boundary=\(PurposeProfileInsightsHasher.isMonthlyRefreshBoundary()) existing=\(existingPurposeSnapshot != nil)"
-            )
-        }
+        upsertPurposeProfileSnapshot(
+            snapshotKey: purposeSnapshotKey,
+            userKey: userKey,
+            monthKey: monthKey,
+            inputsHash: inputsHash,
+            record: resolvedRecord
+        )
 
         if receivedFreshValidInsights || fallbackDiagnosticsSnapshot != nil {
             upsertDiagnosticsInsightsSnapshot(
@@ -885,13 +853,37 @@ struct AccountPersonalizationView: View {
         try? modelContext.save()
     }
 
-    private var latestPurposeProfileSnapshot: PurposeProfileInsightsSnapshot? {
+    private var latestPurposeProfileDisplay: PurposeProfileDisplay? {
+        if let match = personalizationStore.current?.personalityMatch {
+            let record = match.winnerRecord
+            return PurposeProfileDisplay(
+                profile: record.profile,
+                strength: record.strength,
+                weakness: record.weakness,
+                stressTrigger: record.stressTrigger,
+                breakingPoint: record.breakingPoint,
+                confidence: match.confidence,
+                lowConfidence: match.lowConfidence,
+                alternatives: match.alternativeProfileNames
+            )
+        }
+
         let userKey = personalizationStore.userKey
-        return purposeProfileInsightsSnapshots.first(where: { $0.userKey == userKey })
+        guard let snapshot = purposeProfileInsightsSnapshots.first(where: { $0.userKey == userKey }) else { return nil }
+        return PurposeProfileDisplay(
+            profile: snapshot.profile,
+            strength: snapshot.strength,
+            weakness: snapshot.weakness,
+            stressTrigger: snapshot.stressTrigger,
+            breakingPoint: snapshot.breakingPoint,
+            confidence: nil,
+            lowConfidence: false,
+            alternatives: []
+        )
     }
 
     @ViewBuilder
-    private func purposeProfileSnapshotCard(_ snapshot: PurposeProfileInsightsSnapshot) -> some View {
+    private func purposeProfileSnapshotCard(_ profile: PurposeProfileDisplay) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("How Loom sees you (so far)...")
                 .font(.footnote.weight(.semibold))
@@ -899,12 +891,18 @@ struct AccountPersonalizationView: View {
                 .textCase(.uppercase)
                 .tracking(0.4)
 
-            Text(snapshot.profile)
+            Text(profile.profile)
                 .font(.title3.weight(.semibold))
                 .fixedSize(horizontal: false, vertical: true)
 
-            detailRow(title: "Strength", value: snapshot.strength)
-            detailRow(title: "Weakness", value: snapshot.weakness)
+            if let confidence = profile.confidence {
+                Text(profile.lowConfidence ? "Low-confidence match" : "Confidence \(Int((confidence * 100).rounded()))%")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(profile.lowConfidence ? .orange : .secondary)
+            }
+
+            detailRow(title: "Strength", value: profile.strength)
+            detailRow(title: "Weakness", value: profile.weakness)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("Signals")
@@ -917,7 +915,7 @@ struct AccountPersonalizationView: View {
                         .italic()
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-                    Text(snapshot.stressTrigger)
+                    Text(profile.stressTrigger)
                         .font(.subheadline)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -926,10 +924,14 @@ struct AccountPersonalizationView: View {
                         .italic()
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-                    Text(snapshot.breakingPoint)
+                    Text(profile.breakingPoint)
                         .font(.subheadline)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+            }
+
+            if !profile.alternatives.isEmpty {
+                detailRow(title: "Also close", value: profile.alternatives.prefix(2).joined(separator: " • "))
             }
         }
         .padding(14)

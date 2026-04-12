@@ -1708,7 +1708,12 @@ final class LoomAIViewModel: ObservableObject {
             )
         }
         let reflectionJournalSummary = buildReflectionJournalSummary(from: reflectionArchives)
-        let purposeProfileSummary = latestPurposeProfileSnapshot.map { snapshot in
+        let purposeProfileSummary = (personalizationContext?.current.personalityMatch).map { match in
+            LoomAIContextSnapshot.PurposeProfileSummary(
+                profile: match.winner.profileName,
+                generatedAt: personalizationContext?.current.createdAt
+            )
+        } ?? latestPurposeProfileSnapshot.map { snapshot in
             LoomAIContextSnapshot.PurposeProfileSummary(
                 profile: snapshot.profile,
                 generatedAt: snapshot.generatedAt

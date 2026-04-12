@@ -41,7 +41,7 @@ final class PurposeProfileInsightsSnapshot {
 }
 
 enum PurposeProfileInsightsHasher {
-    static let schemaVersion = 4
+    static let schemaVersion = 5
 
     static func monthKey(from date: Date = .now) -> String {
         let formatter = DateFormatter()
@@ -70,14 +70,14 @@ enum PurposeProfileInsightsHasher {
         vision: String,
         passions: [String]
     ) -> String {
+        _ = vision
+        _ = passions
         struct Input: Codable {
             var stress: String
             var breaksFirst: String
             var areas: [String]
             var planningStyle: String
             var firstChange: String
-            var vision: String
-            var passions: [String]
         }
 
         let normalized = Input(
@@ -85,9 +85,7 @@ enum PurposeProfileInsightsHasher {
             breaksFirst: normalize(diagnostic.breaksFirst),
             areas: diagnostic.areas.map(normalize).filter { !$0.isEmpty }.sorted(),
             planningStyle: normalize(diagnostic.planningStyle),
-            firstChange: normalize(diagnostic.firstChange),
-            vision: normalize(vision),
-            passions: passions.map(normalize).filter { !$0.isEmpty }.sorted()
+            firstChange: normalize(diagnostic.firstChange)
         )
 
         guard let data = try? JSONEncoder().encode(normalized) else {

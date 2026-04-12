@@ -1260,17 +1260,7 @@ struct TemporaryVisionAutoWriteDebugView: View {
 
         let currentVision = currentVisionForProfileInsights()
         let currentPassions = currentPassionsForProfileInsights()
-        let fallbackRecord = PurposeProfileMatcher.bestMatch(
-            inputs: .init(
-                stress: diagnostics.stress,
-                breakPoint: diagnostics.breaksFirst,
-                planning: diagnostics.planningStyle,
-                desired: diagnostics.firstChange,
-                areas: diagnostics.areas,
-                vision: currentVision,
-                passions: currentPassions
-            )
-        )
+        let resolvedRecord = snapshot.personalityMatch.winnerRecord
 
         let monthKey = PurposeProfileInsightsHasher.monthKey()
         let inputsHash = PurposeProfileInsightsHasher.hash(
@@ -1285,28 +1275,8 @@ struct TemporaryVisionAutoWriteDebugView: View {
         )
         AppDebugActivityLog.log(
             "Personalization",
-            "Purpose profile refresh request month=\(monthKey) inputsHash=\(String(inputsHash.prefix(8)))"
+            "Purpose profile refresh request month=\(monthKey) inputsHash=\(String(inputsHash.prefix(8))) profile=\(resolvedRecord.profile)"
         )
-
-        let resolvedRecord: PurposeProfileRecord
-        do {
-            let response = try await LoomAIService().fetchPurposeProfileInsights(
-                diagnostic: diagnostics,
-                vision: currentVision,
-                passions: currentPassions
-            )
-            resolvedRecord = PurposeProfilesCatalog.record(named: response.profile) ?? PurposeProfileRecord(
-                profile: response.profile,
-                strength: response.strength,
-                weakness: response.weakness,
-                stressTrigger: response.stressTrigger,
-                breakingPoint: response.breakingPoint
-            )
-            AppDebugActivityLog.log("Personalization", "Purpose profile refreshed profile=\(resolvedRecord.profile)")
-        } catch {
-            resolvedRecord = fallbackRecord
-            AppDebugActivityLog.log("Personalization", "Purpose profile refresh failed, using fallback profile=\(fallbackRecord.profile)")
-        }
 
         upsertPurposeProfileSnapshot(
             snapshotKey: purposeSnapshotKey,

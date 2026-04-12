@@ -2212,7 +2212,7 @@ struct PurposeStartView: View {
     }
 
     private func generatePurposeInsights(forceRefresh: Bool = false) async {
-        guard AppleIntelligenceSupport.isAvailable else {
+        guard let personalizationSnapshot else {
             purposeInsightCards = []
             purposeInsightProfileName = ""
             purposeInsightsTroubleshootingMessage = nil
@@ -2220,39 +2220,16 @@ struct PurposeStartView: View {
             hasTimedOutPurposeInsights = false
             return
         }
-        guard let personalizationSnapshot else {
-            purposeInsightCards = []
-            purposeInsightProfileName = ""
-            return
-        }
 
         let diagnostics = DiagnosticAnswers(snapshot: personalizationSnapshot)
-        let currentVision = visionTrimmed.isEmpty
-            ? currentDrivingForce?.ultimateVision.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            : visionTrimmed
+        let currentVision = currentDrivingForce?.ultimateVision.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let passions = currentPassionPhrasesForProfileInsights()
         let userKey = PersonalizationUserIdentity.currentUserKey()
         let monthKey = PurposeProfileInsightsHasher.measuredMonthKey()
-        let cycleKey = "\(userKey)|\(monthKey)"
+        let cycleKey = "\(userKey)|\(personalizationSnapshot.id.uuidString)|\(personalizationSnapshot.createdAt.timeIntervalSince1970)"
         if !forceRefresh,
            loadedPurposeInsightsCycleKey == cycleKey,
            !purposeInsightCards.isEmpty {
-            return
-        }
-        if !forceRefresh,
-           let stored = purposeProfileSnapshot(for: userKey, monthKey: monthKey) {
-            applyPurposeInsightSnapshot(stored)
-            loadedPurposeInsightsCycleKey = cycleKey
-            return
-        }
-        guard PurposeProfileInsightsHasher.isMonthlyRefreshBoundary() else {
-            if let stored = latestPurposeProfileSnapshot(for: userKey) {
-                applyPurposeInsightSnapshot(stored)
-                loadedPurposeInsightsCycleKey = cycleKey
-            } else {
-                purposeInsightCards = []
-                purposeInsightProfileName = ""
-            }
             return
         }
 
@@ -2266,61 +2243,30 @@ struct PurposeStartView: View {
             isGeneratingPurposeInsights = false
         }
         guard !Task.isCancelled else { return }
+        let matchResult = personalizationSnapshot.personalityMatch
+        let resolvedRecord = matchResult.winnerRecord
         let inputsHash = PurposeProfileInsightsHasher.hash(
             diagnostic: diagnostics,
             vision: currentVision,
             passions: passions
         )
 
-        do {
-            let resolved = try await AppleIntelligencePurposeInsightsGenerator.purposeProfile(
-                diagnostic: diagnostics,
-                vision: currentVision,
-                passions: passions
-            )
-            guard !Task.isCancelled else { return }
-            persistPurposeProfileSnapshot(
-                record: resolved,
-                userKey: userKey,
-                monthKey: monthKey,
-                inputsHash: inputsHash
-            )
-            purposeInsightsTroubleshootingMessage = nil
-            applyPurposeInsightRecord(resolved)
-            loadedPurposeInsightsCycleKey = cycleKey
-        } catch {
-            purposeInsightsTroubleshootingMessage = loomAITroubleshootingDetails(
-                feature: "purpose_start_insights_profile",
-                error: error
-            )
-            if let stored = latestPurposeProfileSnapshot(for: userKey) {
-                applyPurposeInsightSnapshot(stored)
-                loadedPurposeInsightsCycleKey = cycleKey
-                return
-            }
-            purposeInsightCards = []
-            purposeInsightProfileName = ""
-        }
+        persistPurposeProfileSnapshot(
+            record: resolvedRecord,
+            userKey: userKey,
+            monthKey: monthKey,
+            inputsHash: inputsHash
+        )
+        purposeInsightsTroubleshootingMessage = nil
+        applyPurposeInsightRecord(resolvedRecord, match: matchResult)
+        loadedPurposeInsightsCycleKey = cycleKey
+        hasTimedOutPurposeInsights = false
     }
 
     private func restartPurposeInsightsTimeoutWindow() {
-        guard AppleIntelligenceSupport.isAvailable else {
-            hasTimedOutPurposeInsights = false
-            purposeInsightsTimeoutTask?.cancel()
-            return
-        }
         hasTimedOutPurposeInsights = false
         purposeInsightsTimeoutTask?.cancel()
-        purposeInsightsTimeoutTask = Task {
-            try? await Task.sleep(nanoseconds: 60_000_000_000)
-            guard !Task.isCancelled else { return }
-            await MainActor.run {
-                guard step == .insights else { return }
-                guard purposeInsightCards.isEmpty else { return }
-                hasTimedOutPurposeInsights = true
-                showPurposeInsightsTimeoutAlert = true
-            }
-        }
+        showPurposeInsightsTimeoutAlert = false
     }
 
     private func handleAutoStartForStep(_ newStep: Step) {
@@ -2375,15 +2321,21 @@ struct PurposeStartView: View {
         .description
     }
 
-    private func applyPurposeInsightRecord(_ record: PurposeProfileRecord) {
+    private func applyPurposeInsightRecord(
+        _ record: PurposeProfileRecord,
+        match: OnboardingPersonalityMatchResult? = nil
+    ) {
         withAnimation(.easeInOut(duration: 0.24)) {
             purposeInsightProfileName = record.profile
-            purposeInsightCards = purposeInsightCards(for: record)
+            purposeInsightCards = purposeInsightCards(for: record, match: match)
         }
     }
 
-    private func purposeInsightCards(for record: PurposeProfileRecord) -> [PurposeInsightCard] {
-        [
+    private func purposeInsightCards(
+        for record: PurposeProfileRecord,
+        match: OnboardingPersonalityMatchResult? = nil
+    ) -> [PurposeInsightCard] {
+        var cards: [PurposeInsightCard] = [
             PurposeInsightCard(title: "Strength", body: record.strength),
             PurposeInsightCard(title: "Weakness", body: record.weakness),
             PurposeInsightCard(
@@ -2394,6 +2346,17 @@ struct PurposeStartView: View {
                 )
             )
         ]
+
+        if let match, !match.alternativeProfileNames.isEmpty {
+            let label = match.lowConfidence ? "Also close" : "Nearby fits"
+            cards.append(
+                PurposeInsightCard(
+                    title: label,
+                    body: match.alternativeProfileNames.prefix(2).joined(separator: " • ")
+                )
+            )
+        }
+        return cards
     }
 
     private func currentPassionPhrasesForProfileInsights() -> [String] {

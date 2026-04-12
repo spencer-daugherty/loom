@@ -58,6 +58,52 @@ struct LoomAIChatProviderTests {
     }
 
     @Test
+    func appleFailureFallsBackToWorker() async throws {
+        var workerCalled = false
+        let provider = LoomAIChatProvider(
+            availabilityResolver: { true },
+            appleChatHandler: { _, _, _, _, _ in
+                struct SampleFailure: Error {}
+                throw SampleFailure()
+            },
+            workerChatHandler: { _, _, _, _, _, _, _ in
+                workerCalled = true
+                return LoomAIService.LoomAIResponse(
+                    message: "Worker recovered response.",
+                    grounding: [],
+                    suggestionCards: [],
+                    nextAction: nil,
+                    chips: [],
+                    actions: [],
+                    debug: LoomAIDebug(
+                        model: "openai.worker",
+                        usedContext: true,
+                        claimedUsedContext: true,
+                        confidence: "medium",
+                        evidence: ["activeOutcomes[0].title"],
+                        contextBytes: nil,
+                        contextHash: nil,
+                        contextKeys: nil
+                    ),
+                    usage: nil,
+                    elapsedMS: 0
+                )
+            }
+        )
+
+        let result = try await provider.sendChat(
+            messages: [.init(role: "user", content: "How can I best use Loom?")],
+            context: sampleContext,
+            intent: "loomai_chat",
+            screen: "loomai_chat"
+        )
+
+        #expect(result.provider == .openAIWorker)
+        #expect(result.response.message == "Worker recovered response.")
+        #expect(workerCalled)
+    }
+
+    @Test
     func lowConfidenceRouteGetsDeterministicFallbackCards() {
         let route = LoomAIChatProvider.resolveChipIntentRoute("Plan for Sleep 7+ hours")
         let response = LoomAIService.LoomAIResponse(
@@ -258,6 +304,122 @@ struct LoomAIChatProviderTests {
         #expect(normalized.suggestionCards[0].options[0].payload["categoryId"] == "11111111-1111-4111-8111-111111111111")
         #expect(normalized.suggestionCards[0].options[0].payload["activity"] == "Phone off at 10 PM")
         #expect(normalized.debug?.model == "apple.intelligence")
+    }
+
+    @Test
+    func normalizeApplePayloadDropsCardsForNonApprovedGeneralResponses() {
+        let payload = AppleIntelligenceLoomChatGenerator.Payload(
+            message: "Here are some ideas.",
+            grounding: [],
+            suggestionCards: [
+                .init(
+                    id: "general-card",
+                    title: "General suggestions",
+                    description: "",
+                    options: [
+                        .init(
+                            id: "general-a",
+                            label: "A",
+                            title: "Build a weekly plan",
+                            type: "createCaptureAction",
+                            payload: .init(
+                                text: "Build a weekly plan",
+                                categoryId: nil,
+                                categoryName: nil,
+                                identity: nil,
+                                replaceIdentity: nil,
+                                activity: nil,
+                                replaceActivity: nil,
+                                passionType: nil,
+                                title: nil,
+                                measurable: nil,
+                                unit: nil
+                            )
+                        )
+                    ]
+                )
+            ],
+            nextAction: nil,
+            chips: [.init(id: "c1", title: "How can I best use Loom?", prompt: "How can I best use Loom?")],
+            actions: [
+                .init(
+                    id: "general-a",
+                    title: "Build a weekly plan",
+                    type: "createCaptureAction",
+                    payload: .init(
+                        text: "Build a weekly plan",
+                        categoryId: nil,
+                        categoryName: nil,
+                        identity: nil,
+                        replaceIdentity: nil,
+                        activity: nil,
+                        replaceActivity: nil,
+                        passionType: nil,
+                        title: nil,
+                        measurable: nil,
+                        unit: nil
+                    )
+                )
+            ],
+            debug: .init(usedContext: true, confidence: "medium", evidence: ["activeOutcomes[0].title"])
+        )
+
+        let normalized = LoomAIChatProvider.normalizeApplePayload(
+            payload,
+            context: sampleContext,
+            route: nil,
+            elapsedMS: 12
+        )
+
+        #expect(normalized.suggestionCards.isEmpty)
+        #expect(normalized.actions.isEmpty)
+        #expect(normalized.nextAction == nil)
+        #expect(normalized.chips.count == 1)
+    }
+
+    @Test
+    func bestUseLoomFallbackReturnsSuggestionCard() {
+        let fallback = LoomAIChatProvider.buildBestUseLoomFallback(context: sampleContext)
+
+        #expect(fallback.suggestionCards.count == 1)
+        #expect(fallback.suggestionCards[0].options.count == 3)
+        #expect(fallback.actions.count == 3)
+        #expect(fallback.nextAction?.type == "createCaptureAction")
+    }
+
+    @Test
+    func routePlanAcceptanceAllowsPhraseOverlapWithoutExactGoalTitle() {
+        let route = LoomAIChatRoute(id: 5, key: "goal_plan", label: "Plan for Launch Loom Beta Publicly", target: "Launch Loom Beta Publicly")
+        let response = LoomAIService.LoomAIResponse(
+            message: "Here is a plan.",
+            grounding: [],
+            suggestionCards: [
+                .init(
+                    id: "plan-card",
+                    title: "Plan for Launch Loom Beta Publicly",
+                    description: "",
+                    options: [
+                        .init(
+                            id: "plan-a",
+                            label: "A",
+                            title: "Sequence the beta launch milestones",
+                            type: "createCaptureAction",
+                            payload: ["text": "Sequence the beta launch milestones"]
+                        )
+                    ]
+                )
+            ],
+            nextAction: nil,
+            chips: [],
+            actions: [
+                .init(id: "plan-a", title: "Sequence the beta launch milestones", type: "createCaptureAction", payload: ["text": "Sequence the beta launch milestones"])
+            ],
+            debug: LoomAIDebug(model: "apple.intelligence", usedContext: true, claimedUsedContext: true, confidence: "medium", evidence: ["activeOutcomes[0].title"], contextBytes: nil, contextHash: nil, contextKeys: nil),
+            usage: nil,
+            elapsedMS: 0
+        )
+
+        #expect(LoomAIChatProvider.isRouteResponseAcceptable(response, route: route, context: sampleRelationshipContext))
     }
 
     @Test
@@ -622,7 +784,7 @@ private let sampleRelationshipContext = LoomAIContextSnapshot(
     fulfillmentSetup: nil,
     personalization: .init(
         current: PersonalizationSnapshot(
-            id: "974E3E68-4413-44BD-B092-359A40C9657C",
+            id: UUID(uuidString: "974E3E68-4413-44BD-B092-359A40C9657C")!,
             createdAt: Date(timeIntervalSince1970: 1_741_166_000),
             stressSource: "Relationship tension",
             breakPoint: "I get distracted",

@@ -12,6 +12,7 @@ struct PersonalizationSnapshot: Codable, Identifiable, Hashable, Sendable {
     var derivedTags: [String]
     var diagnosticRootCause: String?
     var diagnosticNextDirection: String?
+    var personalityMatch: OnboardingPersonalityMatchResult
 
     init(
         id: UUID = UUID(),
@@ -24,7 +25,8 @@ struct PersonalizationSnapshot: Codable, Identifiable, Hashable, Sendable {
         desiredChange: String,
         derivedTags: [String]? = nil,
         diagnosticRootCause: String? = nil,
-        diagnosticNextDirection: String? = nil
+        diagnosticNextDirection: String? = nil,
+        personalityMatch: OnboardingPersonalityMatchResult? = nil
     ) {
         self.id = id
         self.createdAt = createdAt
@@ -43,6 +45,13 @@ struct PersonalizationSnapshot: Codable, Identifiable, Hashable, Sendable {
         )
         self.diagnosticRootCause = diagnosticRootCause
         self.diagnosticNextDirection = diagnosticNextDirection
+        self.personalityMatch = personalityMatch ?? Self.resolvePersonalityMatch(
+            stressSource: stressSource,
+            breakPoint: breakPoint,
+            lifeAreasSelected: self.lifeAreasSelected,
+            planningReality: planningReality,
+            desiredChange: desiredChange
+        )
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -57,6 +66,7 @@ struct PersonalizationSnapshot: Codable, Identifiable, Hashable, Sendable {
         case derivedTags
         case diagnosticRootCause
         case diagnosticNextDirection
+        case personalityMatch
     }
 
     init(from decoder: Decoder) throws {
@@ -79,6 +89,14 @@ struct PersonalizationSnapshot: Codable, Identifiable, Hashable, Sendable {
         )
         diagnosticRootCause = try container.decodeIfPresent(String.self, forKey: .diagnosticRootCause)
         diagnosticNextDirection = try container.decodeIfPresent(String.self, forKey: .diagnosticNextDirection)
+        personalityMatch = try container.decodeIfPresent(OnboardingPersonalityMatchResult.self, forKey: .personalityMatch)
+            ?? Self.resolvePersonalityMatch(
+                stressSource: stressSource,
+                breakPoint: breakPoint,
+                lifeAreasSelected: lifeAreasSelected,
+                planningReality: planningReality,
+                desiredChange: desiredChange
+            )
     }
 
     static func deriveTags(
@@ -196,6 +214,30 @@ struct PersonalizationSnapshot: Codable, Identifiable, Hashable, Sendable {
             out[trimmed] = key
         }
         return out
+    }
+
+    private static func resolvePersonalityMatch(
+        stressSource: String,
+        breakPoint: String,
+        lifeAreasSelected: [String],
+        planningReality: String,
+        desiredChange: String
+    ) -> OnboardingPersonalityMatchResult {
+        OnboardingPersonalityMatcher.match(
+            stressSource: stressSource,
+            breakPoint: breakPoint,
+            selectedAreas: lifeAreasSelected,
+            planningReality: planningReality,
+            desiredChange: desiredChange
+        ) ?? OnboardingPersonalityMatcher.match(
+            responses: OnboardingQuestionnaireResponses(
+                stressSource: .notSureYet,
+                breakPoint: .notSure,
+                selectedAreas: Array(lifeAreasSelected.prefix(3)),
+                planningReality: .dependsOnDay,
+                desiredChange: .balancedLife
+            )
+        )
     }
 }
 

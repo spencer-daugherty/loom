@@ -97,30 +97,52 @@ final class LoomAIChatProvider {
         switch currentKind {
         case .appleIntelligence:
             let startedAt = CFAbsoluteTimeGetCurrent()
-            let payload = try await (appleChatHandler ?? defaultAppleChatHandler)(
-                messages,
-                context,
-                route,
-                userLocalDate,
-                timezone
-            )
-            let elapsedMS = (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
-            let rawResponse = Self.normalizeApplePayload(
-                payload,
-                context: context,
-                route: route,
-                elapsedMS: elapsedMS
-            )
-            return .init(
-                provider: .appleIntelligence,
-                response: Self.postProcess(
-                    rawResponse,
-                    provider: .appleIntelligence,
+            do {
+                let payload = try await (appleChatHandler ?? defaultAppleChatHandler)(
+                    messages,
+                    context,
+                    route,
+                    userLocalDate,
+                    timezone
+                )
+                let elapsedMS = (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
+                let rawResponse = Self.normalizeApplePayload(
+                    payload,
                     context: context,
                     route: route,
-                    latestUserMessage: messages.last(where: { $0.role.lowercased() == "user" })?.content ?? ""
+                    elapsedMS: elapsedMS
                 )
-            )
+                return .init(
+                    provider: .appleIntelligence,
+                    response: Self.postProcess(
+                        rawResponse,
+                        provider: .appleIntelligence,
+                        context: context,
+                        route: route,
+                        latestUserMessage: messages.last(where: { $0.role.lowercased() == "user" })?.content ?? ""
+                    )
+                )
+            } catch {
+                let workerResponse = try await (workerChatHandler ?? defaultWorkerChatHandler)(
+                    messages,
+                    context,
+                    intent,
+                    screen,
+                    userLocalDate,
+                    timezone,
+                    remainingDailyResponses
+                )
+                return .init(
+                    provider: .openAIWorker,
+                    response: Self.postProcess(
+                        workerResponse,
+                        provider: .openAIWorker,
+                        context: context,
+                        route: route,
+                        latestUserMessage: messages.last(where: { $0.role.lowercased() == "user" })?.content ?? ""
+                    )
+                )
+            }
         case .openAIWorker:
             let workerResponse = try await (workerChatHandler ?? defaultWorkerChatHandler)(
                 messages,
@@ -346,7 +368,7 @@ extension LoomAIChatProvider {
         case 7:
             return "Route 7 Improve my Purpose Vision: return one executable suggestion card with 2 to 3 purpose vision rewrite options."
         case 8:
-            return "Route 8 How can I best use Loom?: return one concise high-leverage recommendation grounded in current Loom context."
+            return "Route 8 How can I best use Loom?: return one executable suggestion card with 2 to 3 high-leverage Loom-use options grounded in current context."
         default:
             return route.label
         }
@@ -515,7 +537,7 @@ extension LoomAIChatProvider {
             !$0.key.isEmpty && !isRouteResponseAcceptable(normalized, route: $0, context: context)
         } ?? false
 
-        if let route, route.id <= 7, (confidence == "low" || missingSuggestions || malformedRouteResponse) {
+        if let route, (1...8).contains(route.id), (confidence == "low" || missingSuggestions || malformedRouteResponse) {
             let fallback = buildRouteFallback(for: route, context: context)
             if !fallback.suggestionCards.isEmpty {
                 let fallbackMessageText = normalized.message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -546,10 +568,10 @@ extension LoomAIChatProvider {
             normalized = LoomAIService.LoomAIResponse(
                 message: fallback.message,
                 grounding: normalized.grounding.isEmpty ? fallback.grounding : normalized.grounding,
-                suggestionCards: [],
-                nextAction: nil,
+                suggestionCards: fallback.suggestionCards,
+                nextAction: fallback.nextAction,
                 chips: fallback.chips,
-                actions: [],
+                actions: fallback.actions,
                 debug: mergeDebug(
                     existing: normalized.debug,
                     provider: provider,
@@ -581,7 +603,7 @@ extension LoomAIChatProvider {
         }
 
         if provider == .appleIntelligence, isGenericAppleChatMessage(normalized.message, context: context, route: route) {
-            if let route, route.id <= 7 {
+            if let route, (1...7).contains(route.id) {
                 let hasUsableRouteSuggestions = isRouteResponseAcceptable(normalized, route: route, context: context)
                 if hasUsableRouteSuggestions {
                     normalized = LoomAIService.LoomAIResponse(
@@ -624,10 +646,10 @@ extension LoomAIChatProvider {
                 normalized = LoomAIService.LoomAIResponse(
                     message: fallback.message,
                     grounding: normalized.grounding.isEmpty ? fallback.grounding : normalized.grounding,
-                    suggestionCards: normalized.suggestionCards,
-                    nextAction: normalized.nextAction,
+                    suggestionCards: normalized.suggestionCards.isEmpty ? fallback.suggestionCards : normalized.suggestionCards,
+                    nextAction: normalized.nextAction ?? fallback.nextAction,
                     chips: normalized.chips.isEmpty ? fallback.chips : normalized.chips,
-                    actions: normalized.actions,
+                    actions: normalized.actions.isEmpty ? fallback.actions : normalized.actions,
                     debug: hardcodedDebug(
                         existing: normalized.debug,
                         context: context,
@@ -700,20 +722,21 @@ extension LoomAIChatProvider {
         route: LoomAIChatRoute?,
         elapsedMS: Double
     ) -> LoomAIService.LoomAIResponse {
+        let responseAllowsCards = allowsSuggestionCards(for: route)
         let normalizedActions = normalizeActions(payload.actions.map {
             .init(id: $0.id, title: $0.title, type: $0.type, payload: payloadMap(from: $0.payload))
         }, confidence: payload.debug?.confidence ?? "medium", context: context, route: route)
 
         let normalizedChips = normalizeChips(payload.chips)
         let chipDerivedActions = routeDerivedActions(from: normalizedChips, route: route, context: context)
-        let actions = normalizedActions.isEmpty ? chipDerivedActions : normalizedActions
+        let actions = responseAllowsCards ? (normalizedActions.isEmpty ? chipDerivedActions : normalizedActions) : []
         let cards = normalizeSuggestionCards(
             payload.suggestionCards,
             context: context,
             confidence: payload.debug?.confidence ?? "medium",
             route: route
         )
-        let mergedCards = cards.isEmpty ? actionsToSuggestionCards(actions) : cards
+        let mergedCards = responseAllowsCards ? (cards.isEmpty ? actionsToSuggestionCards(actions) : cards) : []
         let nextAction = normalizeNextAction(
             payload.nextAction,
             suggestionCards: mergedCards,
@@ -721,7 +744,7 @@ extension LoomAIChatProvider {
             confidence: payload.debug?.confidence ?? "medium",
             route: route
         )
-        let consumedChipTitles = Set((normalizedActions.isEmpty ? chipDerivedActions : []).map { normalizeLine($0.title).lowercased() })
+        let consumedChipTitles = Set((responseAllowsCards && normalizedActions.isEmpty ? chipDerivedActions : []).map { normalizeLine($0.title).lowercased() })
         let chips = consumedChipTitles.isEmpty
             ? normalizedChips
             : normalizedChips.filter { !consumedChipTitles.contains(normalizeLine($0.title).lowercased()) }
@@ -751,7 +774,7 @@ extension LoomAIChatProvider {
     }
 }
 
-private extension LoomAIChatProvider {
+extension LoomAIChatProvider {
     static func threadTranscript(messages: [LoomAIChatMessage]) -> String {
         Array(messages.suffix(10)).map { message in
             let role = message.roleRaw.capitalized
@@ -1228,7 +1251,9 @@ private extension LoomAIChatProvider {
                 let target = normalizeLine(route.target ?? "").lowercased()
                 guard !text.isEmpty else { return false }
                 guard !target.isEmpty else { return true }
-                return text.contains(target) || target.contains(text)
+                return text.contains(target)
+                    || target.contains(text)
+                    || keyPhraseOverlap(in: text, target: target)
             }
         case 6:
             let passionType = normalizePassionType(route.target ?? "love")
@@ -1240,6 +1265,10 @@ private extension LoomAIChatProvider {
                 normalizeLine($0.type) == "updatepurposevision"
                     && !normalizeLine($0.payload["text"] ?? "").isEmpty
             }
+        case 8:
+            return !response.suggestionCards.isEmpty && relevantActions.contains {
+                normalizeLine($0.type).lowercased() == "createcaptureaction"
+            }
         default:
             return true
         }
@@ -1249,6 +1278,13 @@ private extension LoomAIChatProvider {
         _ response: LoomAIService.LoomAIResponse,
         context: LoomAIContextSnapshot
     ) -> Bool {
+        if !response.suggestionCards.isEmpty || !response.actions.isEmpty || response.nextAction != nil {
+            let route = LoomAIChatRoute(id: 8, key: "best_use_loom", label: "How can I best use Loom?", target: nil)
+            if isRouteResponseAcceptable(response, route: route, context: context) {
+                return true
+            }
+        }
+
         let message = normalizeLine(response.message).lowercased()
         guard !message.isEmpty else { return false }
 
@@ -1398,10 +1434,15 @@ private extension LoomAIChatProvider {
         case 7:
             return ["updatepurposevision"]
         case 8:
-            return Set(actionWhitelist.map { $0.lowercased() })
+            return ["createcaptureaction"]
         default:
             return Set(actionWhitelist.map { $0.lowercased() })
         }
+    }
+
+    static func allowsSuggestionCards(for route: LoomAIChatRoute?) -> Bool {
+        guard let route else { return false }
+        return (1...8).contains(route.id)
     }
 
     static func actionWhitelistContains(_ type: String) -> Bool {
@@ -1556,6 +1597,22 @@ private extension LoomAIChatProvider {
             message = "Use Loom as your weekly execution system: keep Purpose, Fulfillment, Goals, and Capture aligned, then turn that into one focused action plan so your week follows your real priorities instead of a flat to-do list."
         }
 
+        let cardOptions: [LoomAISuggestedAction] = {
+            if let primaryGoal {
+                return [
+                    .init(title: "Build this week's plan around \(primaryGoal.title)", type: "createCaptureAction", payload: ["text": "Build this week's plan around \(primaryGoal.title)"]),
+                    .init(title: "Pull the top Capture items for \(primaryGoal.title)", type: "createCaptureAction", payload: ["text": "Pull the top Capture items for \(primaryGoal.title) into this week's plan"]),
+                    .init(title: "Define the next step for \(primaryGoal.title)", type: "createCaptureAction", payload: ["text": "Define the next step for \(primaryGoal.title)"])
+                ]
+            }
+            return [
+                .init(title: "Choose one goal to build this week around", type: "createCaptureAction", payload: ["text": "Choose one goal to build this week around"]),
+                .init(title: "Turn your top priorities into one weekly action plan", type: "createCaptureAction", payload: ["text": "Turn your top priorities into one weekly action plan"]),
+                .init(title: "Review Capture and pull only the highest-leverage items", type: "createCaptureAction", payload: ["text": "Review Capture and pull only the highest-leverage items"])
+            ]
+        }()
+        let suggestionCards = [card(title: "Best way to use Loom this week", options: cardOptions)]
+
         var chips: [LoomAIPromptChip] = []
         if let primaryGoal {
             chips.append(.init(id: slug("plan-\(primaryGoal.title)"), title: "Plan for \(primaryGoal.title)", prompt: "Plan for \(primaryGoal.title)"))
@@ -1573,10 +1630,10 @@ private extension LoomAIChatProvider {
         return LoomAIService.LoomAIResponse(
             message: message,
             grounding: defaultGrounding(context: context),
-            suggestionCards: [],
-            nextAction: nil,
+            suggestionCards: suggestionCards,
+            nextAction: firstAction(from: suggestionCards),
             chips: Array(deduplicatedBestUseChips(chips).prefix(4)),
-            actions: [],
+            actions: flattenSuggestionCards(suggestionCards),
             debug: LoomAIDebug(
                 model: "loom.local.best_use",
                 usedContext: true,
@@ -1645,6 +1702,22 @@ private extension LoomAIChatProvider {
                 LoomAISuggestedAction(title: "Vision option C", type: "updatePurposeVision", payload: ["text": "I live with clear direction, focused execution, and systems that support meaningful growth."])
             ]
             return [card(title: "New Purpose Vision", options: options)]
+        case 8:
+            let options: [LoomAISuggestedAction]
+            if let goal = context.activeOutcomes.first {
+                options = [
+                    .init(title: "Build this week's plan around \(goal.title)", type: "createCaptureAction", payload: ["text": "Build this week's plan around \(goal.title)"]),
+                    .init(title: "Pull the top Capture items for \(goal.title)", type: "createCaptureAction", payload: ["text": "Pull the top Capture items for \(goal.title) into this week's plan"]),
+                    .init(title: "Define the next step for \(goal.title)", type: "createCaptureAction", payload: ["text": "Define the next step for \(goal.title)"])
+                ]
+            } else {
+                options = [
+                    .init(title: "Choose one goal to build this week around", type: "createCaptureAction", payload: ["text": "Choose one goal to build this week around"]),
+                    .init(title: "Turn your top priorities into one weekly action plan", type: "createCaptureAction", payload: ["text": "Turn your top priorities into one weekly action plan"]),
+                    .init(title: "Review Capture and pull only the highest-leverage items", type: "createCaptureAction", payload: ["text": "Review Capture and pull only the highest-leverage items"])
+                ]
+            }
+            return [card(title: "Best way to use Loom this week", options: options)]
         default:
             return []
         }
