@@ -428,6 +428,11 @@ enum AppleIntelligenceLoomChatGenerator {
         - Use the personalization brief to keep the answer tailored to the user's current direction, pressure pattern, fulfillment area, goal, action plan, or capture load.
         - Avoid generic filler such as "start small", "build momentum", "stay consistent", "keep moving", or "one step at a time" unless the user's own context clearly justifies it.
         - For mission rewrites, never use generic scaffolds like "I strengthen {area}..." or "steady weekly execution"; tie each option to the user's real goals, purpose, or pressure pattern.
+        - For routed prompts that ask for executable options, put the actual options in `suggestionCards` or `actions`, not only in `chips`.
+        - For Daily Little Wins, suggest small repeatable actions the user could do on any normal day; avoid generic templates like "{area} reset", "{area} practice", or "track one {area} win".
+        - For Daily Little Wins, use the target fulfillment area's mission, identities, existing little wins, connected passions, broader driving-force passions, and personalization signals to make the options feel specific.
+        - Never turn unrelated capture/admin items like errands, shopping, inbox cleanup, or random saved tasks into Daily Little Wins unless they are clearly tied to the requested fulfillment area.
+        - For Love & Relationships, prefer socially connective actions such as appreciation, check-ins, planning time together, reaching out, listening, or shared activities when the context supports them.
         - If the user asks something unrelated to Loom, gently redirect back to Loom-relevant help in `message` and provide 2 to 4 Loom-relevant `chips`.
         - Use the provided route description when present. Routes 1 to 7 should usually return at least one executable suggestion card unless confidence is low.
         - Do not invent facts outside the provided messages and context.

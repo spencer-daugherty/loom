@@ -208,6 +208,245 @@ struct LoomAIChatProviderTests {
     }
 
     @Test
+    func normalizeApplePayloadInfersRouteCategoryForLittleWinChip() {
+        let payload = AppleIntelligenceLoomChatGenerator.Payload(
+            message: "Here are grounded little wins.",
+            grounding: [],
+            suggestionCards: [
+                .init(
+                    id: "little-wins",
+                    title: "Little Wins for Health & Vitality",
+                    description: "",
+                    options: [
+                        .init(
+                            id: "lw-a",
+                            label: "A",
+                            title: "Phone off at 10 PM",
+                            type: "addLittleWin",
+                            payload: .init(
+                                text: "Phone off at 10 PM",
+                                categoryId: nil,
+                                categoryName: nil,
+                                identity: nil,
+                                replaceIdentity: nil,
+                                activity: nil,
+                                replaceActivity: nil,
+                                passionType: nil,
+                                title: nil,
+                                measurable: nil,
+                                unit: nil
+                            )
+                        )
+                    ]
+                )
+            ],
+            nextAction: nil,
+            chips: [],
+            actions: [],
+            debug: .init(usedContext: true, confidence: "medium", evidence: ["activeOutcomes[0].title"])
+        )
+
+        let normalized = LoomAIChatProvider.normalizeApplePayload(
+            payload,
+            context: sampleContext,
+            route: LoomAIChatRoute(id: 1, key: "little_wins", label: "Daily Little Wins for Health & Vitality", target: "Health & Vitality"),
+            elapsedMS: 12
+        )
+
+        #expect(normalized.suggestionCards.count == 1)
+        #expect(normalized.suggestionCards[0].options.count == 1)
+        #expect(normalized.suggestionCards[0].options[0].payload["categoryId"] == "11111111-1111-4111-8111-111111111111")
+        #expect(normalized.suggestionCards[0].options[0].payload["activity"] == "Phone off at 10 PM")
+        #expect(normalized.debug?.model == "apple.intelligence")
+    }
+
+    @Test
+    func genericAppleMessageDoesNotDowngradeValidRouteSuggestionsToHardcoded() {
+        let route = LoomAIChatRoute(id: 1, key: "little_wins", label: "Daily Little Wins for Health & Vitality", target: "Health & Vitality")
+        let response = LoomAIService.LoomAIResponse(
+            message: "Start small and stay consistent this week.",
+            grounding: [],
+            suggestionCards: [
+                .init(
+                    id: "little-wins",
+                    title: "Little Wins for Health & Vitality",
+                    description: "",
+                    options: [
+                        .init(
+                            id: "lw-a",
+                            label: "A",
+                            title: "Phone off at 10 PM",
+                            type: "addLittleWin",
+                            payload: [
+                                "categoryId": "11111111-1111-4111-8111-111111111111",
+                                "activity": "Phone off at 10 PM",
+                                "appleHealthEligible": "false"
+                            ]
+                        )
+                    ]
+                )
+            ],
+            nextAction: .init(
+                id: "lw-a",
+                title: "Phone off at 10 PM",
+                type: "addLittleWin",
+                payload: [
+                    "categoryId": "11111111-1111-4111-8111-111111111111",
+                    "activity": "Phone off at 10 PM",
+                    "appleHealthEligible": "false"
+                ]
+            ),
+            chips: [],
+            actions: [
+                .init(
+                    id: "lw-a",
+                    title: "Phone off at 10 PM",
+                    type: "addLittleWin",
+                    payload: [
+                        "categoryId": "11111111-1111-4111-8111-111111111111",
+                        "activity": "Phone off at 10 PM",
+                        "appleHealthEligible": "false"
+                    ]
+                )
+            ],
+            debug: LoomAIDebug(
+                model: "apple.intelligence",
+                usedContext: true,
+                claimedUsedContext: true,
+                confidence: "medium",
+                evidence: ["activeOutcomes[0].title"],
+                contextBytes: nil,
+                contextHash: nil,
+                contextKeys: nil
+            ),
+            usage: nil,
+            elapsedMS: 0
+        )
+
+        let processed = LoomAIChatProvider.postProcess(
+            response,
+            provider: .appleIntelligence,
+            context: sampleContext,
+            route: route,
+            latestUserMessage: "Daily Little Wins for Health & Vitality"
+        )
+
+        #expect(processed.debug?.model == "apple.intelligence")
+        #expect(processed.suggestionCards.count == 1)
+        #expect(processed.actions.count == 1)
+        #expect(processed.message.contains("Health & Vitality"))
+    }
+
+    @Test
+    func normalizeApplePayloadConvertsRouteOneChipsIntoLittleWinActions() {
+        let payload = AppleIntelligenceLoomChatGenerator.Payload(
+            message: "Here are a few ideas.",
+            grounding: [],
+            suggestionCards: [],
+            nextAction: nil,
+            chips: [
+                .init(id: "chip1", title: "Daily check-in ritual", prompt: "Start your day with a quick check-in to gauge your loved one's mood."),
+                .init(id: "chip2", title: "Plan a weekend date", prompt: "Plan a surprise date or activity for the weekend.")
+            ],
+            actions: [],
+            debug: .init(usedContext: true, confidence: "medium", evidence: ["personalization.desiredChange"])
+        )
+
+        let normalized = LoomAIChatProvider.normalizeApplePayload(
+            payload,
+            context: sampleRelationshipContext,
+            route: LoomAIChatRoute(id: 1, key: "daily_little_wins", label: "Daily Little Wins for Love & Relationships", target: "Love & Relationships"),
+            elapsedMS: 12
+        )
+
+        #expect(normalized.debug?.model == "apple.intelligence")
+        #expect(normalized.suggestionCards.count == 1)
+        #expect(normalized.actions.count == 2)
+        #expect(normalized.actions[0].type == "addLittleWin")
+        #expect(normalized.actions[0].payload["activity"] == "Daily check-in ritual")
+        #expect(normalized.actions[0].payload["categoryId"] == "55555555-5555-5555-5555-555555555555")
+        #expect(normalized.chips.isEmpty)
+    }
+
+    @Test
+    func normalizeApplePayloadRejectsUnrelatedCaptureItemsForRelationshipLittleWins() {
+        let payload = AppleIntelligenceLoomChatGenerator.Payload(
+            message: "To strengthen Love & Relationships consistently, focus on daily check-ins and nurturing acts.",
+            grounding: [],
+            suggestionCards: [
+                .init(
+                    id: "card-1",
+                    title: "Review Water Softener Deal",
+                    description: "",
+                    options: [
+                        .init(
+                            id: "reviewWaterSoftenerDeal",
+                            label: "A",
+                            title: "Review Water Softener Deal",
+                            type: "addLittleWin",
+                            payload: .init(
+                                text: nil,
+                                categoryId: "55555555-5555-5555-5555-555555555555",
+                                categoryName: nil,
+                                identity: nil,
+                                replaceIdentity: nil,
+                                activity: "Review Water Softener Deal",
+                                replaceActivity: nil,
+                                passionType: nil,
+                                title: nil,
+                                measurable: nil,
+                                unit: nil
+                            )
+                        )
+                    ]
+                )
+            ],
+            nextAction: nil,
+            chips: [],
+            actions: [
+                .init(
+                    id: "reviewWaterSoftenerDeal",
+                    title: "Review Water Softener Deal",
+                    type: "addLittleWin",
+                    payload: .init(
+                        text: nil,
+                        categoryId: "55555555-5555-5555-5555-555555555555",
+                        categoryName: nil,
+                        identity: nil,
+                        replaceIdentity: nil,
+                        activity: "Review Water Softener Deal",
+                        replaceActivity: nil,
+                        passionType: nil,
+                        title: nil,
+                        measurable: nil,
+                        unit: nil
+                    )
+                )
+            ],
+            debug: .init(usedContext: true, confidence: "medium", evidence: ["personalization.desiredChange"])
+        )
+
+        let normalized = LoomAIChatProvider.normalizeApplePayload(
+            payload,
+            context: sampleRelationshipContext,
+            route: LoomAIChatRoute(id: 1, key: "daily_little_wins", label: "Daily Little Wins for Love & Relationships", target: "Love & Relationships"),
+            elapsedMS: 12
+        )
+
+        #expect(normalized.suggestionCards.isEmpty)
+        #expect(normalized.actions.isEmpty)
+        #expect(normalized.debug?.model == "apple.intelligence")
+    }
+
+    @Test
+    func resolveCategoryPrefersRicherDuplicateForRouteTarget() {
+        let resolved = LoomAIChatProvider.resolveCategory(target: "Love & Relationships", context: sampleDuplicateRelationshipContext)
+
+        #expect(resolved?.id == "65D9727D-FD27-48EE-9C9A-FB5ECE55F164")
+        #expect(resolved?.identity.count == 2)
+    }
+
+    @Test
     func heuristicGoalRoutingMatchesGoalPrompts() {
         let nextRoute = LoomAIChatProvider.detectHeuristicIntentRoute(
             "What should I do next for Sleep 7+ hours?",
@@ -317,6 +556,131 @@ private let sampleContext = LoomAIContextSnapshot(
     purposeDraft: nil,
     fulfillmentSetup: nil,
     personalization: nil,
+    reflectionJournal: nil,
+    shareAttachmentPreview: nil
+)
+
+private let sampleRelationshipContext = LoomAIContextSnapshot(
+    generatedAt: Date(timeIntervalSince1970: 1_741_169_600),
+    personalizationHash: "relationship-test-hash",
+    diagnostic: .init(
+        stress: "Relationship tension",
+        breaksFirst: "I get distracted",
+        areas: ["Mindset & Resilience"],
+        planningStyle: "Keep a simple to-do list",
+        firstChange: "I feel balanced across life",
+        rootCause: "Your attention gets pulled away before you can follow through.",
+        nextDirection: "Put your life in order from what matters most."
+    ),
+    drivingForce: .init(
+        vision: "I build a focused life where my days follow my clear choices.",
+        purpose: "I give steady time to meaningful work, strong health, and deep relationships.",
+        passions: [.init(emotion: "love", title: "Making Casey laugh")]
+    ),
+    fulfillmentCategories: [
+        .init(
+            id: "55555555-5555-5555-5555-555555555555",
+            name: "Love & Relationships",
+            colorKey: "red",
+            mission: "Strong relationships help me feel supported and valued.",
+            identity: ["Strong, Loving Husband"],
+            littleWins: ["Connect with a loved one"],
+            resources: [],
+            connectedPassions: ["love: Making Casey laugh"],
+            weeklyScore: 2.9
+        )
+    ],
+    activeOutcomes: [
+        .init(
+            id: "04459DF1-DC0D-4C87-9244-B33A722DAD25",
+            title: "Launch Loom Beta Publicly",
+            category: "Career & Business",
+            endDate: Date(timeIntervalSince1970: 1_741_256_000),
+            measurable: false,
+            progressSummary: "Non-measurable outcome"
+        )
+    ],
+    currentWeekActionBlocks: [],
+    recentActivity: .init(quickCompletesLast7Days: 4, littleWinsCompletionsLast7Days: 2, carryoversLast7Days: 1),
+    capture: .init(totalCount: 12, topItems: ["Get milk"], quickCompletionsLast7Days: 4, recurringRuleCount: 1),
+    recentlyDeleted: nil,
+    sectionTimestamps: .init(
+        purpose: Date(timeIntervalSince1970: 1_741_166_000),
+        fulfillment: Date(timeIntervalSince1970: 1_741_079_600),
+        outcomes: Date(timeIntervalSince1970: 1_740_993_200),
+        capture: Date(timeIntervalSince1970: 1_740_906_800),
+        actionBlocks: Date(timeIntervalSince1970: 1_740_820_400),
+        reflections: nil,
+        diagnostics: Date(timeIntervalSince1970: 1_741_166_000),
+        recentlyDeleted: nil
+    ),
+    purposeProfile: .init(profile: "Steady Alignment Builder", generatedAt: Date(timeIntervalSince1970: 1_741_166_000)),
+    dataInventory: [],
+    appGuide: [],
+    notes: [],
+    purposeDraft: nil,
+    fulfillmentSetup: nil,
+    personalization: .init(
+        current: PersonalizationSnapshot(
+            id: "974E3E68-4413-44BD-B092-359A40C9657C",
+            createdAt: Date(timeIntervalSince1970: 1_741_166_000),
+            stressSource: "Relationship tension",
+            breakPoint: "I get distracted",
+            lifeAreasSelected: ["Mindset & Resilience"],
+            planningReality: "Keep a simple to-do list",
+            desiredChange: "I feel balanced across life",
+            derivedTags: ["relationship_stress"]
+        ),
+        recentChanges: ["1 mo. ago: Stress changed"],
+        historyCount: 41,
+        lastChangedAt: Date(timeIntervalSince1970: 1_741_166_000)
+    ),
+    reflectionJournal: nil,
+    shareAttachmentPreview: nil
+)
+
+private let sampleDuplicateRelationshipContext = LoomAIContextSnapshot(
+    generatedAt: Date(timeIntervalSince1970: 1_741_169_600),
+    personalizationHash: "duplicate-relationship-hash",
+    diagnostic: sampleRelationshipContext.diagnostic,
+    drivingForce: sampleRelationshipContext.drivingForce,
+    fulfillmentCategories: [
+        .init(
+            id: "55555555-5555-5555-5555-555555555555",
+            name: "Love & Relationships",
+            colorKey: "red",
+            mission: "I strengthen Love & Relationships through consistent weekly execution.",
+            identity: ["Calm Executor"],
+            littleWins: ["Send one relationship check-in"],
+            resources: [],
+            connectedPassions: [],
+            weeklyScore: 3
+        ),
+        .init(
+            id: "65D9727D-FD27-48EE-9C9A-FB5ECE55F164",
+            name: "Love & Relationships",
+            colorKey: "red",
+            mission: "Strong relationships help me feel supported and valued. When I consistently show care and attention, I create trust that lasts.",
+            identity: ["Strong, Loving Husband", "Through-it-all Friend"],
+            littleWins: ["Love Casey through words AND acts", "Connect with a loved one"],
+            resources: [],
+            connectedPassions: ["vows: Love Casey forever"],
+            weeklyScore: 2.9
+        )
+    ],
+    activeOutcomes: sampleRelationshipContext.activeOutcomes,
+    currentWeekActionBlocks: [],
+    recentActivity: sampleRelationshipContext.recentActivity,
+    capture: .init(totalCount: 34, topItems: ["Review Water Softener Deal", "See photo", "Get milk"], quickCompletionsLast7Days: 4, recurringRuleCount: 2),
+    recentlyDeleted: nil,
+    sectionTimestamps: sampleRelationshipContext.sectionTimestamps,
+    purposeProfile: sampleRelationshipContext.purposeProfile,
+    dataInventory: [],
+    appGuide: [],
+    notes: [],
+    purposeDraft: nil,
+    fulfillmentSetup: nil,
+    personalization: sampleRelationshipContext.personalization,
     reflectionJournal: nil,
     shareAttachmentPreview: nil
 )

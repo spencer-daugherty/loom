@@ -404,7 +404,13 @@ extension LoomAIChatProvider {
                 weeklyScore: category.weeklyScore
             )
         }
-        compact.activeOutcomes = prioritizedOutcomes(from: compact.activeOutcomes, route: route)
+        let prioritizedGoals = prioritizedOutcomes(from: compact.activeOutcomes, route: route)
+        let routeCategory = resolveCategory(target: route?.target, context: compact)
+        compact.activeOutcomes = relevantOutcomesForAppleRoute(
+            prioritizedGoals,
+            route: route,
+            category: routeCategory
+        )
             .prefix(maxGoals)
             .map { outcome in
                 .init(
@@ -424,7 +430,8 @@ extension LoomAIChatProvider {
                 actions: Array(block.actions.prefix(profile == .standard ? 2 : 1)).map { String($0.prefix(70)) }
             )
         }
-        compact.capture = compact.capture.map { capture in
+        let shouldExcludeCaptureForRoute = route?.id == 1
+        compact.capture = shouldExcludeCaptureForRoute ? nil : compact.capture.map { capture in
             .init(
                 totalCount: capture.totalCount,
                 topItems: Array(capture.topItems.prefix(maxCaptureItems)).map { String($0.prefix(70)) },
@@ -575,22 +582,43 @@ extension LoomAIChatProvider {
 
         if provider == .appleIntelligence, isGenericAppleChatMessage(normalized.message, context: context, route: route) {
             if let route, route.id <= 7 {
-                let fallback = buildRouteFallback(for: route, context: context)
-                normalized = LoomAIService.LoomAIResponse(
-                    message: fallback.message,
-                    grounding: normalized.grounding.isEmpty ? fallback.grounding : normalized.grounding,
-                    suggestionCards: normalized.suggestionCards.isEmpty ? fallback.suggestionCards : normalized.suggestionCards,
-                    nextAction: normalized.nextAction ?? fallback.nextAction,
-                    chips: normalized.chips,
-                    actions: normalized.actions.isEmpty ? fallback.actions : normalized.actions,
-                    debug: hardcodedDebug(
-                        existing: normalized.debug,
-                        context: context,
-                        model: "loom.local.fallback"
-                    ),
-                    usage: normalized.usage,
-                    elapsedMS: normalized.elapsedMS
-                )
+                let hasUsableRouteSuggestions = isRouteResponseAcceptable(normalized, route: route, context: context)
+                if hasUsableRouteSuggestions {
+                    normalized = LoomAIService.LoomAIResponse(
+                        message: contextualFallbackMessage(context: context, route: route),
+                        grounding: normalized.grounding,
+                        suggestionCards: normalized.suggestionCards,
+                        nextAction: normalized.nextAction,
+                        chips: normalized.chips,
+                        actions: normalized.actions,
+                        debug: mergeDebug(
+                            existing: normalized.debug,
+                            provider: provider,
+                            context: context,
+                            lowConfidenceFallback: false,
+                            hardcodedModel: nil
+                        ),
+                        usage: normalized.usage,
+                        elapsedMS: normalized.elapsedMS
+                    )
+                } else {
+                    let fallback = buildRouteFallback(for: route, context: context)
+                    normalized = LoomAIService.LoomAIResponse(
+                        message: fallback.message,
+                        grounding: normalized.grounding.isEmpty ? fallback.grounding : normalized.grounding,
+                        suggestionCards: normalized.suggestionCards.isEmpty ? fallback.suggestionCards : normalized.suggestionCards,
+                        nextAction: normalized.nextAction ?? fallback.nextAction,
+                        chips: normalized.chips,
+                        actions: normalized.actions.isEmpty ? fallback.actions : normalized.actions,
+                        debug: hardcodedDebug(
+                            existing: normalized.debug,
+                            context: context,
+                            model: "loom.local.fallback"
+                        ),
+                        usage: normalized.usage,
+                        elapsedMS: normalized.elapsedMS
+                    )
+                }
             } else if route?.id == 8 {
                 let fallback = buildBestUseLoomFallback(context: context)
                 normalized = LoomAIService.LoomAIResponse(
@@ -672,14 +700,31 @@ extension LoomAIChatProvider {
         route: LoomAIChatRoute?,
         elapsedMS: Double
     ) -> LoomAIService.LoomAIResponse {
-        let actions = normalizeActions(payload.actions.map {
+        let normalizedActions = normalizeActions(payload.actions.map {
             .init(id: $0.id, title: $0.title, type: $0.type, payload: payloadMap(from: $0.payload))
-        }, confidence: payload.debug?.confidence ?? "medium", context: context)
+        }, confidence: payload.debug?.confidence ?? "medium", context: context, route: route)
 
-        let cards = normalizeSuggestionCards(payload.suggestionCards, context: context, confidence: payload.debug?.confidence ?? "medium")
+        let normalizedChips = normalizeChips(payload.chips)
+        let chipDerivedActions = routeDerivedActions(from: normalizedChips, route: route, context: context)
+        let actions = normalizedActions.isEmpty ? chipDerivedActions : normalizedActions
+        let cards = normalizeSuggestionCards(
+            payload.suggestionCards,
+            context: context,
+            confidence: payload.debug?.confidence ?? "medium",
+            route: route
+        )
         let mergedCards = cards.isEmpty ? actionsToSuggestionCards(actions) : cards
-        let nextAction = normalizeNextAction(payload.nextAction, suggestionCards: mergedCards, context: context, confidence: payload.debug?.confidence ?? "medium")
-        let chips = normalizeChips(payload.chips)
+        let nextAction = normalizeNextAction(
+            payload.nextAction,
+            suggestionCards: mergedCards,
+            context: context,
+            confidence: payload.debug?.confidence ?? "medium",
+            route: route
+        )
+        let consumedChipTitles = Set((normalizedActions.isEmpty ? chipDerivedActions : []).map { normalizeLine($0.title).lowercased() })
+        let chips = consumedChipTitles.isEmpty
+            ? normalizedChips
+            : normalizedChips.filter { !consumedChipTitles.contains(normalizeLine($0.title).lowercased()) }
         let grounding = normalizeGrounding(payload.grounding, context: context)
         let debug = LoomAIDebug(
             model: "apple.intelligence",
@@ -813,7 +858,8 @@ private extension LoomAIChatProvider {
     static func normalizeSuggestionCards(
         _ input: [AppleIntelligenceLoomChatGenerator.Payload.SuggestionCard],
         context: LoomAIContextSnapshot,
-        confidence: String
+        confidence: String,
+        route: LoomAIChatRoute?
     ) -> [LoomAISuggestionCard] {
         guard normalizedConfidence(confidence) != "low" else { return [] }
         var seen = Set<String>()
@@ -821,7 +867,7 @@ private extension LoomAIChatProvider {
         for card in input {
             let title = trimmed(card.title, max: 120)
             guard !title.isEmpty else { continue }
-            let options = normalizeSuggestionOptions(card.options, context: context)
+            let options = normalizeSuggestionOptions(card.options, context: context, route: route)
             guard !options.isEmpty else { continue }
             let optionsKey = options.map { option in
                 let payloadKey = option.payload
@@ -840,7 +886,8 @@ private extension LoomAIChatProvider {
 
     static func normalizeSuggestionOptions(
         _ input: [AppleIntelligenceLoomChatGenerator.Payload.SuggestionOption],
-        context: LoomAIContextSnapshot
+        context: LoomAIContextSnapshot,
+        route: LoomAIChatRoute?
     ) -> [LoomAISuggestionOption] {
         var options: [LoomAISuggestionOption] = []
         var seen = Set<String>()
@@ -848,7 +895,12 @@ private extension LoomAIChatProvider {
         for option in input {
             let type = normalizeLine(option.type)
             guard actionWhitelist.contains(type) else { continue }
-            guard let payload = normalizeActionPayload(type: type, payload: payloadMap(from: option.payload), context: context) else { continue }
+            guard let payload = normalizeActionPayload(
+                type: type,
+                payload: payloadMap(from: option.payload),
+                context: context,
+                route: route
+            ) else { continue }
             let title = trimmed(option.title, max: 120)
             guard !title.isEmpty else { continue }
             let key = "\(type)|\(payload.sorted { $0.key < $1.key })"
@@ -870,7 +922,8 @@ private extension LoomAIChatProvider {
     static func normalizeActions(
         _ input: [LoomAISuggestedAction],
         confidence: String,
-        context: LoomAIContextSnapshot
+        context: LoomAIContextSnapshot,
+        route: LoomAIChatRoute?
     ) -> [LoomAISuggestedAction] {
         guard normalizedConfidence(confidence) != "low" else { return [] }
         var actions: [LoomAISuggestedAction] = []
@@ -878,7 +931,7 @@ private extension LoomAIChatProvider {
         for action in input {
             let type = normalizeLine(action.type)
             guard actionWhitelist.contains(type) else { continue }
-            guard let payload = normalizeActionPayload(type: type, payload: action.payload, context: context) else { continue }
+            guard let payload = normalizeActionPayload(type: type, payload: action.payload, context: context, route: route) else { continue }
             let title = trimmed(action.title, max: 120)
             guard !title.isEmpty else { continue }
             let key = "\(type)|\(payload.sorted { $0.key < $1.key })"
@@ -893,7 +946,8 @@ private extension LoomAIChatProvider {
         _ input: AppleIntelligenceLoomChatGenerator.Payload.Action?,
         suggestionCards: [LoomAISuggestionCard],
         context: LoomAIContextSnapshot,
-        confidence: String
+        confidence: String,
+        route: LoomAIChatRoute?
     ) -> LoomAISuggestedAction? {
         if normalizedConfidence(confidence) == "low" {
             return firstAction(from: suggestionCards)
@@ -901,7 +955,12 @@ private extension LoomAIChatProvider {
         if let input {
             let type = normalizeLine(input.type)
             if actionWhitelist.contains(type),
-               let payload = normalizeActionPayload(type: type, payload: payloadMap(from: input.payload), context: context) {
+               let payload = normalizeActionPayload(
+                type: type,
+                payload: payloadMap(from: input.payload),
+                context: context,
+                route: route
+               ) {
                 let title = trimmed(input.title, max: 120)
                 if !title.isEmpty {
                     return .init(id: trimmed(input.id, max: 72, fallback: "\(type)-next"), title: title, type: type, payload: payload)
@@ -924,6 +983,145 @@ private extension LoomAIChatProvider {
             if chips.count >= 4 { break }
         }
         return chips
+    }
+
+    static func routeDerivedActions(
+        from chips: [LoomAIPromptChip],
+        route: LoomAIChatRoute?,
+        context: LoomAIContextSnapshot
+    ) -> [LoomAISuggestedAction] {
+        guard let route, route.id == 1,
+              let category = resolveCategory(target: route.target, context: context) else { return [] }
+
+        let existingLittleWins = Set(
+            category.littleWins
+                .map(normalizeLine)
+                .map { $0.lowercased() }
+                .filter { !$0.isEmpty }
+        )
+
+        var actions: [LoomAISuggestedAction] = []
+        var seen = Set<String>()
+        for chip in chips {
+            let title = normalizeLine(chip.title)
+            let prompt = normalizeLine(chip.prompt)
+            let candidate = actionableLittleWinText(fromChipTitle: title, prompt: prompt, route: route)
+            guard !candidate.isEmpty else { continue }
+            let lowered = candidate.lowercased()
+            guard !existingLittleWins.contains(lowered) else { continue }
+            guard seen.insert(lowered).inserted else { continue }
+            guard isLittleWinActivityAcceptable(candidate, category: category, context: context) else { continue }
+            actions.append(
+                .init(
+                    id: chip.id,
+                    title: candidate,
+                    type: "addLittleWin",
+                    payload: [
+                        "categoryId": category.id,
+                        "activity": candidate,
+                        "appleHealthEligible": "false"
+                    ]
+                )
+            )
+            if actions.count >= 3 { break }
+        }
+        return actions
+    }
+
+    static func actionableLittleWinText(
+        fromChipTitle title: String,
+        prompt: String,
+        route: LoomAIChatRoute
+    ) -> String {
+        let routeLabel = normalizeLine(route.label).lowercased()
+        let promptLower = prompt.lowercased()
+        let titleLower = title.lowercased()
+        let blockedPrefixes = ["what ", "how ", "can ", "should ", "help "]
+        let blockedFragments = ["what other passions", "daily little wins for ", "new mission for ", "new identity for "]
+
+        let candidates = [title, prompt]
+        for raw in candidates {
+            let cleaned = normalizeLine(raw)
+            let lowered = cleaned.lowercased()
+            guard !cleaned.isEmpty else { continue }
+            guard lowered != routeLabel else { continue }
+            guard !blockedPrefixes.contains(where: { lowered.hasPrefix($0) }) else { continue }
+            guard !blockedFragments.contains(where: { lowered.contains($0) }) else { continue }
+            if cleaned.count <= 120 {
+                return cleaned
+            }
+        }
+        guard !title.isEmpty, titleLower != routeLabel, !blockedFragments.contains(where: { titleLower.contains($0) }) else {
+            return ""
+        }
+        guard !blockedPrefixes.contains(where: { promptLower.hasPrefix($0) }) else { return "" }
+        return trimmed(title, max: 120)
+    }
+
+    static func relevantOutcomesForAppleRoute(
+        _ outcomes: [LoomAIContextSnapshot.OutcomeSummary],
+        route: LoomAIChatRoute?,
+        category: LoomAIContextSnapshot.FulfillmentCategorySummary?
+    ) -> [LoomAIContextSnapshot.OutcomeSummary] {
+        guard let route else { return outcomes }
+        switch route.id {
+        case 1, 2, 3:
+            guard let category else { return [] }
+            return outcomes.filter {
+                normalizeLine($0.category).caseInsensitiveCompare(normalizeLine(category.name)) == .orderedSame
+            }
+        default:
+            return outcomes
+        }
+    }
+
+    static func isLittleWinActivityAcceptable(
+        _ activity: String,
+        category: LoomAIContextSnapshot.FulfillmentCategorySummary,
+        context: LoomAIContextSnapshot
+    ) -> Bool {
+        let normalized = normalizeLine(activity)
+        let lower = normalized.lowercased()
+        guard !lower.isEmpty else { return false }
+
+        let genericPatterns = [
+            #"^\d+\s*minute .+ (reset|practice)$"#,
+            #"^track one .+ win$"#,
+            #"^\d+\s*minute step for .+$"#,
+            #"^\d+\s*minute reset for .+$"#,
+            #"^close one open loop for .+$"#
+        ]
+        if genericPatterns.contains(where: { regexMatch($0, in: lower) }) {
+            return false
+        }
+
+        let captureItems = Set((context.capture?.topItems ?? []).map { normalizeLine($0).lowercased() })
+        let relationshipKeywords = [
+            "call", "text", "message", "check-in", "check in", "date", "quality time",
+            "listen", "appreciation", "appreciate", "gratitude", "loved one", "family",
+            "friend", "casey", "connect", "question", "social", "plan time", "hug", "note"
+        ]
+        let generalKeywords = littleWinSignalKeywords(for: category, context: context)
+        let hasGeneralSignal = generalKeywords.contains(where: { !$0.isEmpty && lower.contains($0) })
+        let hasRelationshipSignal = relationshipKeywords.contains(where: { lower.contains($0) })
+
+        if captureItems.contains(lower) && !(hasGeneralSignal || hasRelationshipSignal) {
+            return false
+        }
+
+        let obviousErrandTerms = [
+            "water softener", "milk", "grocery", "groceries", "photo", "invoice", "subscription",
+            "account balance", "expense", "deal", "refund", "receipt", "bill"
+        ]
+        if obviousErrandTerms.contains(where: { lower.contains($0) }) && !(hasGeneralSignal || hasRelationshipSignal) {
+            return false
+        }
+
+        let categoryName = normalizeLine(category.name).lowercased()
+        if categoryName.contains("love") || categoryName.contains("relationship") {
+            return hasRelationshipSignal || hasGeneralSignal
+        }
+        return hasGeneralSignal || !captureItems.contains(lower)
     }
 
     static func normalizedConfidence(_ raw: String?) -> String {
@@ -1226,17 +1424,20 @@ private extension LoomAIChatProvider {
     static func normalizeActionPayload(
         type: String,
         payload: [String: String],
-        context: LoomAIContextSnapshot
+        context: LoomAIContextSnapshot,
+        route: LoomAIChatRoute? = nil
     ) -> [String: String]? {
         let text = trimmed(payload["text"] ?? "", max: 260)
-        let categoryId = payload["categoryId"] ?? payload["categoryID"] ?? ""
-        let categoryName = payload["categoryName"] ?? payload["category"] ?? ""
+        let inferredCategory = route.flatMap { [1, 2, 3].contains($0.id) ? resolveCategory(target: $0.target, context: context) : nil }
+        let categoryId = payload["categoryId"] ?? payload["categoryID"] ?? inferredCategory?.id ?? ""
+        let categoryName = payload["categoryName"] ?? payload["category"] ?? inferredCategory?.name ?? ""
+        let inferredPassionType = route.flatMap { $0.id == 6 ? normalizePassionType($0.target ?? "love") : nil }
 
         switch type {
         case "updatePurposeVision":
             return text.isEmpty ? nil : ["text": text]
         case "addPassionItem":
-            let passionType = normalizePassionType(payload["passionType"] ?? payload["emotion"] ?? "love")
+            let passionType = normalizePassionType(payload["passionType"] ?? payload["emotion"] ?? inferredPassionType ?? "love")
             return text.isEmpty ? nil : ["passionType": passionType, "text": trimmed(text, max: 120)]
         case "updateFulfillmentMission":
             guard let validCategoryId = normalizeCategoryId(categoryId: categoryId, categoryName: categoryName, context: context),
@@ -1265,6 +1466,10 @@ private extension LoomAIChatProvider {
             guard let validCategoryId = normalizeCategoryId(categoryId: categoryId, categoryName: categoryName, context: context) else { return nil }
             let activity = trimmed(payload["activity"] ?? payload["text"] ?? "", max: 140)
             guard !activity.isEmpty else { return nil }
+            if let category = context.fulfillmentCategories.first(where: { $0.id.caseInsensitiveCompare(validCategoryId) == .orderedSame }),
+               !isLittleWinActivityAcceptable(activity, category: category, context: context) {
+                return nil
+            }
             let appleHealthEligible = normalizeBoolString(payload["appleHealthEligible"])
             return ["categoryId": validCategoryId, "activity": activity, "appleHealthEligible": appleHealthEligible]
         case "replaceLittleWin":
@@ -1394,11 +1599,7 @@ private extension LoomAIChatProvider {
         switch route.id {
         case 1:
             guard let category = resolveCategory(target: route.target, context: context) else { return [] }
-            let options = [
-                LoomAISuggestedAction(title: "5 minute \(category.name) reset", type: "addLittleWin", payload: ["categoryId": category.id, "activity": "5 minute \(category.name) reset", "appleHealthEligible": "false"]),
-                LoomAISuggestedAction(title: "10 minute \(category.name) practice", type: "addLittleWin", payload: ["categoryId": category.id, "activity": "10 minute \(category.name) practice", "appleHealthEligible": "false"]),
-                LoomAISuggestedAction(title: "Track one \(category.name) win", type: "addLittleWin", payload: ["categoryId": category.id, "activity": "Track one \(category.name) win", "appleHealthEligible": "false"])
-            ]
+            let options = groundedLittleWinOptions(for: category, context: context)
             return [card(title: "Little Wins for \(category.name)", options: options)]
         case 2:
             guard let category = resolveCategory(target: route.target, context: context) else { return [] }
@@ -1669,6 +1870,129 @@ private extension LoomAIChatProvider {
         })
     }
 
+    static func groundedLittleWinOptions(
+        for category: LoomAIContextSnapshot.FulfillmentCategorySummary,
+        context: LoomAIContextSnapshot
+    ) -> [LoomAISuggestedAction] {
+        let corpus: [String]
+        switch normalizeLine(category.name).lowercased() {
+        case let name where name.contains("love") || name.contains("relationship"):
+            corpus = [
+                "Send appreciation text",
+                "10-minute check-in",
+                "Ask one deeper question",
+                "Offer one act of help",
+                "Plan quality time",
+                "Share one gratitude"
+            ]
+        case let name where name.contains("health") || name.contains("energy"):
+            corpus = [
+                "10-minute walk",
+                "Hydrate before lunch",
+                "Prepare one healthy meal",
+                "Sleep prep 30 minutes early",
+                "15-minute mobility session",
+                "Mindfulness break"
+            ]
+        case let name where name.contains("career") || name.contains("business"):
+            corpus = [
+                "Plan top priorities",
+                "Deep work session",
+                "Follow up contact",
+                "Request feedback",
+                "Protect focus block",
+                "Plan tomorrow priorities"
+            ]
+        case let name where name.contains("wealth") || name.contains("finance"):
+            corpus = [
+                "Review daily spending",
+                "Track one expense",
+                "Check account balances",
+                "Transfer small savings",
+                "Cancel unused subscription",
+                "Pay extra debt"
+            ]
+        default:
+            corpus = [
+                "Plan tomorrow priorities",
+                "Complete one 15-minute task",
+                "Clear one small blocker",
+                "Review progress briefly",
+                "Close one open loop"
+            ]
+        }
+
+        let existing = Set(category.littleWins.map { normalizeLine($0).lowercased() }.filter { !$0.isEmpty })
+        let signalKeywords = Set(littleWinSignalKeywords(for: category, context: context))
+        let ranked = corpus
+            .filter { !existing.contains(normalizeLine($0).lowercased()) }
+            .map { candidate -> (String, Int) in
+                let lower = candidate.lowercased()
+                let score = signalKeywords.reduce(into: 0) { partial, keyword in
+                    if !keyword.isEmpty && lower.contains(keyword) {
+                        partial += 2
+                    }
+                }
+                return (candidate, score)
+            }
+            .sorted { lhs, rhs in
+                if lhs.1 != rhs.1 { return lhs.1 > rhs.1 }
+                return lhs.0 < rhs.0
+            }
+            .map(\.0)
+            .prefix(3)
+
+        return Array(ranked.enumerated().map { index, title in
+            LoomAISuggestedAction(
+                title: title,
+                type: "addLittleWin",
+                payload: [
+                    "categoryId": category.id,
+                    "activity": title,
+                    "appleHealthEligible": normalizeBoolString(title.lowercased().contains("walk") || title.lowercased().contains("sleep") || title.lowercased().contains("mindfulness") ? "true" : "false")
+                ]
+            )
+        })
+    }
+
+    static func littleWinSignalKeywords(
+        for category: LoomAIContextSnapshot.FulfillmentCategorySummary,
+        context: LoomAIContextSnapshot
+    ) -> [String] {
+        let categoryName = normalizeLine(category.name).lowercased()
+        var keywords = category.connectedPassions
+            .map(normalizeLine)
+            .map { $0.lowercased() }
+            .flatMap { value in
+                value.components(separatedBy: CharacterSet.alphanumerics.inverted)
+            }
+            .filter { $0.count >= 4 }
+
+        keywords.append(contentsOf: category.identity.map(normalizeLine).map { $0.lowercased() })
+        keywords.append(contentsOf: category.littleWins.map(normalizeLine).map { $0.lowercased() })
+        keywords.append(contentsOf: (context.drivingForce?.passions ?? []).map { normalizeLine($0.title).lowercased() })
+
+        if categoryName.contains("love") || categoryName.contains("relationship") {
+            keywords.append(contentsOf: [
+                "casey", "family", "friend", "loved", "relationship", "check-in", "check", "text",
+                "message", "date", "quality", "gratitude", "connect", "listen", "question", "appreciation"
+            ])
+        }
+
+        if let desiredChange = context.personalization?.current?.desiredChange {
+            keywords.append(contentsOf: normalizeLine(desiredChange).lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted))
+        }
+        if let stress = context.personalization?.current?.stressSource {
+            keywords.append(contentsOf: normalizeLine(stress).lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted))
+        }
+
+        var seen = Set<String>()
+        return keywords
+            .map { $0.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.count >= 3 }
+            .filter { seen.insert($0).inserted }
+    }
+
     static func resolveCategory(
         target: String?,
         context: LoomAIContextSnapshot
@@ -1676,7 +2000,11 @@ private extension LoomAIChatProvider {
         let categories = context.fulfillmentCategories
         guard !categories.isEmpty else { return nil }
         guard let target = normalizeLine(target ?? "").nilIfEmpty else { return categories.first }
-        return categories.first(where: { $0.name.caseInsensitiveCompare(target) == .orderedSame }) ?? categories.first
+        let exactMatches = categories.filter { $0.name.caseInsensitiveCompare(target) == .orderedSame }
+        if let bestExact = exactMatches.max(by: { categoryContextRichnessScore($0) < categoryContextRichnessScore($1) }) {
+            return bestExact
+        }
+        return categories.first
     }
 
     static func resolveGoal(
@@ -1897,7 +2225,20 @@ private extension LoomAIChatProvider {
         default:
             break
         }
+        score += categoryContextRichnessScore(category)
         return score - (Double(originalIndex) * 0.001)
+    }
+
+    static func categoryContextRichnessScore(_ category: LoomAIContextSnapshot.FulfillmentCategorySummary) -> Double {
+        var score = 0.0
+        score += Double(category.connectedPassions.count) * 8
+        score += Double(category.identity.count) * 4
+        score += Double(category.littleWins.count) * 4
+        score += Double(category.resources.count) * 2
+        let mission = normalizeLine(category.mission).lowercased()
+        if mission.count >= 50 { score += 6 }
+        if !mission.isEmpty && !isBannedGenericMissionText(mission) { score += 8 }
+        return score
     }
 
     static func outcomePriorityScore(
