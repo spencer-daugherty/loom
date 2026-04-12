@@ -50,6 +50,7 @@ struct AccountStepView: View {
     @State private var developerPaywallLaunchTask: Task<Void, Never>?
     @State private var authTapCooldownTask: Task<Void, Never>?
     @State private var isAuthTapCoolingDown = false
+    @State private var presentedLegalDocument: LegalDocument?
 
     var body: some View {
         VStack(spacing: 22) {
@@ -60,7 +61,7 @@ struct AccountStepView: View {
                     .font(.system(size: 39, weight: .bold))
                     .multilineTextAlignment(.center)
 
-                Text("Join the project.")
+                Text("Join the movement.")
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -205,15 +206,40 @@ struct AccountStepView: View {
                     .multilineTextAlignment(.center)
             }
 
-            Text("By continuing you agree to Loom's Terms of Service and Privacy Policy.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
+            VStack(spacing: 2) {
+                Text("By continuing you agree to Loom's")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+
+                HStack(spacing: 4) {
+                    Button("Terms of Service") {
+                        presentedLegalDocument = .terms
+                    }
+                    .buttonStyle(.plain)
+                    .font(.footnote)
+                    .foregroundStyle(Color.accentColor)
+
+                    Text("and")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+
+                    Button("Privacy Policy") {
+                        presentedLegalDocument = .privacy
+                    }
+                    .buttonStyle(.plain)
+                    .font(.footnote)
+                    .foregroundStyle(Color.accentColor)
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
         }
         .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color(.systemBackground).ignoresSafeArea())
+        .sheet(item: $presentedLegalDocument) { document in
+            LegalLinksView(document: document)
+        }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {

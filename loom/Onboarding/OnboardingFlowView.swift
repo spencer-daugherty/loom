@@ -1,4 +1,10 @@
 import SwiftUI
+#if canImport(FirebaseAuth)
+import FirebaseAuth
+#endif
+#if canImport(GoogleSignIn)
+import GoogleSignIn
+#endif
 
 struct OnboardingFlowView: View {
     @EnvironmentObject private var session: UserSessionStore
@@ -70,7 +76,21 @@ struct OnboardingFlowView: View {
     @ViewBuilder
     private var topBar: some View {
         HStack {
+            if isLastPage && session.hasAccount {
+                Button {
+                    signOut()
+                } label: {
+                    Text("Sign out")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+            } else {
+                Spacer(minLength: 0)
+            }
+
             Spacer(minLength: 0)
+
             if !isLastPage {
                 Button {
                     jumpToLastPage()
@@ -127,6 +147,17 @@ struct OnboardingFlowView: View {
                 currentIndex = nextIndex
             }
         }
+    }
+
+    @MainActor
+    private func signOut() {
+#if canImport(FirebaseAuth)
+        try? Auth.auth().signOut()
+#endif
+#if canImport(GoogleSignIn)
+        GIDSignIn.sharedInstance.signOut()
+#endif
+        session.clearAccountSession()
     }
 
     private func jumpToLastPage() {

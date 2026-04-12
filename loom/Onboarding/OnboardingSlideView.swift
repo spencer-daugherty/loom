@@ -210,6 +210,7 @@ struct LoomAIChatPlaceholderView: View {
 
 struct LittleWinsDeckPlaceholderView: View {
     let reduceMotion: Bool
+    let showsShadow: Bool
     @State private var cardOrder: [Int] = [0, 1, 2]
     @State private var checkedByCard: [Int: Set<Int>] = [0: [], 1: [], 2: []]
     @State private var deckTask: Task<Void, Never>?
@@ -217,6 +218,11 @@ struct LittleWinsDeckPlaceholderView: View {
 
     private let cardColors: [Color] = [.blue, .orange, .red]
     private let actionCountsByCard: [Int] = [3, 2, 2]
+
+    init(reduceMotion: Bool, showsShadow: Bool = true) {
+        self.reduceMotion = reduceMotion
+        self.showsShadow = showsShadow
+    }
 
     private func rowSaturationOpacity(for row: Int) -> Double {
         let rotated = (row + rowSaturationPhase) % 3
@@ -305,7 +311,7 @@ struct LittleWinsDeckPlaceholderView: View {
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .offset(y: yOffset)
             .rotationEffect(.degrees(tilt))
-            .shadow(color: .black.opacity(0.08), radius: 3, x: 0, y: 2)
+            .shadow(color: showsShadow ? .black.opacity(0.08) : .clear, radius: 3, x: 0, y: 2)
             .zIndex(Double(10 - depth))
     }
 
@@ -369,6 +375,7 @@ struct LittleWinsDeckPlaceholderView: View {
 
 struct FulfillmentBalancePlaceholderView: View {
     let reduceMotion: Bool
+    let showsShadow: Bool
     @State private var pulse = 0.985
     @State private var rotatingMetrics: [(String, Color, Double)] = []
     @State private var currentCount: Int = 3
@@ -390,6 +397,11 @@ struct FulfillmentBalancePlaceholderView: View {
 
     private var colorPool: [Color] {
         Array(FulfillmentCategoryTheme.palette.prefix(7).map(\.color))
+    }
+
+    init(reduceMotion: Bool, showsShadow: Bool = true) {
+        self.reduceMotion = reduceMotion
+        self.showsShadow = showsShadow
     }
 
     private func randomMetrics(count: Int) -> [(String, Color, Double)] {
@@ -425,7 +437,7 @@ struct FulfillmentBalancePlaceholderView: View {
             .scaleEffect(reduceMotion ? 1 : pulse)
         }
         .shadow(
-            color: Color.black.opacity(reduceMotion ? 0.08 : (pulse > 1.0 ? 0.22 : 0.10)),
+            color: showsShadow ? Color.black.opacity(reduceMotion ? 0.08 : (pulse > 1.0 ? 0.22 : 0.10)) : .clear,
             radius: reduceMotion ? 4 : (pulse > 1.0 ? 16 : 7),
             x: 0,
             y: reduceMotion ? 2 : (pulse > 1.0 ? 8 : 3)
@@ -468,6 +480,7 @@ struct FulfillmentBalancePlaceholderView: View {
 
 struct IdentityVisionPlaceholderView: View {
     let reduceMotion: Bool
+    let showsShadow: Bool
     @State private var lineReveal: CGFloat = 0
     @State private var circlesVisible = false
     @State private var pulse = false
@@ -485,6 +498,11 @@ struct IdentityVisionPlaceholderView: View {
         Color(white: 0.56),
         Color(white: 0.44)
     ]
+
+    init(reduceMotion: Bool, showsShadow: Bool = true) {
+        self.reduceMotion = reduceMotion
+        self.showsShadow = showsShadow
+    }
 
     var body: some View {
         ZStack {
@@ -532,7 +550,7 @@ struct IdentityVisionPlaceholderView: View {
             .padding(.horizontal, 20)
         }
         .shadow(
-            color: Color.black.opacity(reduceMotion ? 0.08 : (pulse ? 0.20 : 0.10)),
+            color: showsShadow ? Color.black.opacity(reduceMotion ? 0.08 : (pulse ? 0.20 : 0.10)) : .clear,
             radius: reduceMotion ? 4 : (pulse ? 14 : 6),
             x: 0,
             y: reduceMotion ? 2 : (pulse ? 7 : 3)

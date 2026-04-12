@@ -487,7 +487,11 @@ struct AccountView: View {
     @State private var showDeveloperPasswordSheet = false
     @State private var developerPasswordInput = ""
     @State private var showDeveloperPasswordError = false
+    @State private var showFeedbackSheet = false
+    @State private var feedbackRating = 0
+    @State private var feedbackDetails = ""
     @State private var showDeveloperPage = false
+    @State private var showDeveloperPaywall = false
     @State private var loomAICostSnapshot = LoomAICostLedger.dailySnapshot()
 
     private func deleteWarningTitle(for scope: DeleteScope) -> String {
@@ -686,6 +690,23 @@ struct AccountView: View {
                 HStack {
                     Spacer()
                     Button {
+                        showFeedbackSheet = true
+                    } label: {
+                        VStack(spacing: 4) {
+                            Image(systemName: "message")
+                            Text("Give App Feedback")
+                        }
+                        .font(.footnote)
+                        .foregroundStyle(.blue)
+                    }
+                    .buttonStyle(.plain)
+                    Spacer()
+                }
+                .listRowSeparator(.hidden)
+
+                HStack {
+                    Spacer()
+                    Button {
                         developerPasswordInput = ""
                         showDeveloperPasswordError = false
                         showDeveloperPasswordSheet = true
@@ -766,6 +787,13 @@ struct AccountView: View {
             .presentationContentInteraction(.scrolls)
             .presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: $showFeedbackSheet) {
+            AppFeedbackSheet(
+                rating: $feedbackRating,
+                details: $feedbackDetails,
+                isPresented: $showFeedbackSheet
+            )
+        }
         .sheet(isPresented: $showDeveloperPasswordSheet) {
             DeveloperAccessSheet(
                 pin: $developerPasswordInput,
@@ -799,13 +827,9 @@ struct AccountView: View {
                         }
 
                         Button {
-                            // Show Account step first, then auto-advance to Paywall via one-time dev flag.
-                            developerLaunchPaywallOnce = true
-                            hasSeenOnboarding = true
-                            hasAccount = false
-                            hasCompletedDiagnostic = true
-                            hasSeenDiagnosticInsights = true
-                            isSubscribed = false
+                            developerLaunchPaywallOnce = false
+                            showDeveloperPage = false
+                            showDeveloperPaywall = true
                         } label: {
                             HStack {
                                 Text("Launch Paywall")
@@ -957,6 +981,19 @@ struct AccountView: View {
                 }
             }
         }
+        .fullScreenCover(isPresented: $showDeveloperPaywall) {
+            NavigationStack {
+                PaywallView()
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button("Done") {
+                                showDeveloperPaywall = false
+                            }
+                        }
+                    }
+            }
+        }
         .onChange(of: blankHomepageMode) { _, isOn in
             if isOn {
                 if setupHomepageMode {
@@ -1080,6 +1117,96 @@ struct AccountView: View {
         guard let rows = try? context.fetch(descriptor) else { return }
         for row in rows {
             context.delete(row)
+        }
+    }
+}
+
+private struct AppFeedbackSheet: View {
+    @Binding var rating: Int
+    @Binding var details: String
+    @Binding var isPresented: Bool
+
+    private let ratingDescriptions: [Int: String] = [
+        1: "Bad",
+        2: "Not great",
+        3: "Okay",
+        4: "Good",
+        5: "Excellent"
+    ]
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 20) {
+                Text("How has Loom impacted your life so far?")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .multilineTextAlignment(.center)
+
+                HStack(spacing: 10) {
+                    Spacer()
+                    ForEach(1...5, id: \.self) { value in
+                        Button {
+                            rating = value
+                        } label: {
+                            Image(systemName: value <= rating ? "star.fill" : "star")
+                                .font(.system(size: 36, weight: .regular))
+                                .foregroundStyle(value <= rating ? .yellow : .secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("\(value) star\(value == 1 ? "" : "s")")
+                    }
+                    Spacer()
+                }
+
+                if let description = ratingDescriptions[rating] {
+                    Text(description)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Tell Us More (Optional)")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    TextField("Add any details you'd like to share.", text: $details, axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                        .lineLimit(4, reservesSpace: true)
+                }
+
+                Spacer(minLength: 0)
+
+                Button {
+                    isPresented = false
+                } label: {
+                    Text("Submit")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(rating == 0)
+            }
+            .padding(20)
+            .navigationTitle("Give App Feedback")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        isPresented = false
+                    } label: {
+                        Image(systemName: "xmark")
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
+        .onDisappear {
+            if !isPresented {
+                rating = 0
+                details = ""
+            }
         }
     }
 }
@@ -1594,6 +1721,7 @@ struct AccountDetailsView: View {
     @AppStorage("loom.subscription_plan") private var subscriptionPlanRaw = SubscriptionPlan.annual.rawValue
     @State private var showSubscriptionSheet = false
     @State private var accountError: String? = nil
+    @State private var showSignOutConfirmation = false
     @State private var weekStartOption: AppWeekStartOption = AppWeekStartStore.current()
     @FocusState private var focusedAccountField: AccountField?
 
@@ -1681,7 +1809,7 @@ struct AccountDetailsView: View {
 
             Section {
                 Button(role: .destructive) {
-                    signOut()
+                    showSignOutConfirmation = true
                 } label: {
                     Text("Sign Out")
                         .frame(maxWidth: .infinity, alignment: .center)
@@ -1710,6 +1838,14 @@ struct AccountDetailsView: View {
             }
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
+        }
+        .confirmationDialog("Sign out of Loom?", isPresented: $showSignOutConfirmation, titleVisibility: .visible) {
+            Button("Sign Out", role: .destructive) {
+                signOut()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("You'll be returned to the login screen.")
         }
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
@@ -4697,6 +4833,7 @@ private struct DeveloperAccessSheet: View {
 
     @FocusState private var isPinFieldFocused: Bool
     @State private var isAutoSubmitting = false
+    @State private var focusTask: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
@@ -4751,9 +4888,15 @@ private struct DeveloperAccessSheet: View {
             .padding()
             .onAppear {
                 pin = String(pin.filter(\.isNumber).prefix(4))
-                DispatchQueue.main.async {
+                focusTask?.cancel()
+                focusTask = Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 300_000_000)
                     isPinFieldFocused = true
                 }
+            }
+            .onDisappear {
+                focusTask?.cancel()
+                focusTask = nil
             }
             .onChange(of: pin) { _, newValue in
                 let normalized = String(newValue.filter(\.isNumber).prefix(4))

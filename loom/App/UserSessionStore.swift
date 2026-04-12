@@ -162,6 +162,7 @@ final class UserSessionStore: ObservableObject {
             }
         }
         setHasAccount(true)
+        restoreReturningUserProgressIfAvailable()
     }
 
     func refreshAppleCredentialStateIfNeeded() async {
@@ -223,6 +224,17 @@ final class UserSessionStore: ObservableObject {
         }
 
         setHasAccount(true)
+        restoreReturningUserProgressIfAvailable()
+    }
+
+    private func restoreReturningUserProgressIfAvailable() {
+        let personalizationState = PersonalizationStore.cachedStateForCurrentUser(defaults: defaults)
+        let hasExistingPersonalization = personalizationState.current != nil || !personalizationState.history.isEmpty
+        guard hasExistingPersonalization else { return }
+
+        setHasSeenOnboarding(true)
+        setHasCompletedDiagnostic(true)
+        setHasSeenDiagnosticInsights(true)
     }
 
     func reloadFromDefaults() {

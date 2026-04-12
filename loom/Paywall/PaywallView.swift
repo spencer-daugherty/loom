@@ -1,101 +1,51 @@
 import SwiftUI
 
 struct PaywallView: View {
+    private enum PaywallLoadingAction {
+        case purchase
+        case restore
+    }
+
     @EnvironmentObject private var session: UserSessionStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
 
     @StateObject private var purchaseManager = PurchaseManager()
-    @State private var selectedPlan: SubscriptionPlan = .annual
+    @State private var selectedPlan: SubscriptionPlan = .lifetime
     @State private var presentedLegalDocument: LegalDocument?
     @State private var isShowingTrialDetails = false
     @State private var previewIndex: Int = 0
     @State private var previewCycleTask: Task<Void, Never>?
     @State private var didLogPaywallViewed = false
-
-    private let trialSummaryText = "Annual includes a 10-day free trial."
-    private let trialDetailText = "Annual includes a 10-day free trial. Payment is charged to your Apple ID after confirmation (or after the trial ends). Subscription renews automatically unless canceled at least 24 hours before renewal. Manage or cancel anytime in Apple ID Settings."
+    @State private var headerHeight: CGFloat = 0
+    @State private var lowerContentHeight: CGFloat = 0
+    @State private var activeLoadingAction: PaywallLoadingAction?
+    private let paywallPreviewBaseScale: CGFloat = 0.7
 
     var body: some View {
         GeometryReader { geo in
-            VStack(alignment: .leading, spacing: 18) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("No Free Lunch")
-                        .font(.largeTitle.weight(.bold))
-                    Text("Join the project to end stress and live fulfilled.")
-                        .font(.body)
-                        .foregroundStyle(.secondary)
-                }
+            let availableHeight = geo.size.height - geo.safeAreaInsets.top - geo.safeAreaInsets.bottom
+            let verticalSpacing = paywallVerticalSpacing(for: availableHeight)
+            let bottomClearance: CGFloat = 20
+            let previewScale = previewBoxScale(
+                for: availableHeight,
+                headerHeight: headerHeight,
+                lowerContentHeight: lowerContentHeight,
+                verticalSpacing: verticalSpacing,
+                bottomClearance: bottomClearance
+            ) * paywallPreviewBaseScale
+            VStack(alignment: .leading, spacing: verticalSpacing) {
+                paywallHeader
+                    .readHeight { headerHeight = $0 }
 
-                Spacer(minLength: 0)
+                onboardingAnimationPreviewBox(scale: previewScale)
 
-                onboardingAnimationPreviewBox
-
-                VStack(spacing: 10) {
-                    planCard(for: .annual)
-                        .accessibilityIdentifier("paywall_plan_annual")
-                    planCard(for: .monthly)
-                        .accessibilityIdentifier("paywall_plan_monthly")
-                }
-                .padding(.top, 6)
-
-                Button {
-                    AnalyticsLogger.log(.purchaseStarted(plan: selectedPlan.rawValue))
-                    Task {
-                        let outcome = await purchaseManager.purchase(plan: selectedPlan, session: session)
-                        switch outcome {
-                        case .success:
-                            AnalyticsLogger.log(.purchaseCompleted(plan: selectedPlan.rawValue))
-                        case .failed(let errorType):
-                            AnalyticsLogger.log(.purchaseFailed(plan: selectedPlan.rawValue, errorType: errorType))
-                        }
-                    }
-                } label: {
-                    if purchaseManager.isProcessing {
-                        ProgressView()
-                            .frame(maxWidth: .infinity)
-                    } else {
-                        Text(selectedPlan.ctaText)
-                            .frame(maxWidth: .infinity)
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .disabled(purchaseManager.isProcessing)
-                .accessibilityIdentifier("paywall_primaryCTA")
-
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(trialSummaryText)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-
-                    Button("Show more") {
-                        isShowingTrialDetails = true
-                    }
-                    .font(.footnote.weight(.semibold))
-                    .buttonStyle(.plain)
-                }
-
-                Button {
-                    Task { await purchaseManager.restorePurchases(session: session) }
-                } label: {
-                    Text("Restore Purchases")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-                .disabled(purchaseManager.isProcessing)
-                .accessibilityIdentifier("paywall_restore")
-
-                HStack(spacing: 16) {
-                    Button("Terms of Use") { presentedLegalDocument = .terms }
-                    Button("Privacy Policy") { presentedLegalDocument = .privacy }
-                }
-                .font(.footnote.weight(.semibold))
-                .padding(.top, 4)
+                paywallLowerContent(for: availableHeight, bottomClearance: bottomClearance)
+                    .readHeight { lowerContentHeight = $0 }
             }
-            .padding(20)
-            .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+            .padding(.top, 20)
+            .padding(.horizontal, 20)
+            .frame(width: geo.size.width, height: availableHeight, alignment: .topLeading)
         }
         .background(Color(.systemBackground).ignoresSafeArea())
         .sheet(item: $presentedLegalDocument) { document in
@@ -104,13 +54,15 @@ struct PaywallView: View {
         .sheet(isPresented: $isShowingTrialDetails) {
             NavigationStack {
                 ScrollView {
-                    Text(trialDetailText)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(20)
+                    if let detailText = selectedPlan.disclosureDetailText {
+                        Text(detailText)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(20)
+                    }
                 }
-                .navigationTitle("Trial Details")
+                .navigationTitle(selectedPlan.detailSheetTitle)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .confirmationAction) {
@@ -153,9 +105,115 @@ struct PaywallView: View {
         }
     }
 
-    private var onboardingAnimationPreviewBox: some View {
+    private var paywallHeader: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("No Free Lunch")
+                .font(.largeTitle.weight(.bold))
+            Text("Join the movement to end stress and live fulfilled.")
+                .font(.body)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private func paywallLowerContent(for screenHeight: CGFloat, bottomClearance: CGFloat) -> some View {
+        let planSpacing = planCardSpacing(for: screenHeight)
+        let planTopPadding = paywallPlanTopPadding(for: screenHeight)
+        let legalTopPadding = paywallLegalTopPadding(for: screenHeight)
+
+        VStack(alignment: .leading, spacing: paywallVerticalSpacing(for: screenHeight)) {
+            VStack(spacing: planSpacing) {
+                planCard(for: .lifetime)
+                    .accessibilityIdentifier("paywall_plan_lifetime")
+                planCard(for: .annual)
+                    .accessibilityIdentifier("paywall_plan_annual")
+                planCard(for: .monthly)
+                    .accessibilityIdentifier("paywall_plan_monthly")
+            }
+            .padding(.top, planTopPadding)
+
+            Button {
+                AnalyticsLogger.log(.purchaseStarted(plan: selectedPlan.rawValue))
+                Task {
+                    activeLoadingAction = .purchase
+                    let outcome = await purchaseManager.purchase(plan: selectedPlan, session: session)
+                    switch outcome {
+                    case .success:
+                        AnalyticsLogger.log(.purchaseCompleted(plan: selectedPlan.rawValue))
+                    case .failed(let errorType):
+                        AnalyticsLogger.log(.purchaseFailed(plan: selectedPlan.rawValue, errorType: errorType))
+                    }
+                    activeLoadingAction = nil
+                }
+            } label: {
+                ZStack {
+                    Text(selectedPlan.ctaText)
+                        .opacity(activeLoadingAction == .purchase ? 0 : 1)
+                    if activeLoadingAction == .purchase {
+                        ProgressView()
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: 24)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(purchaseManager.isProcessing)
+            .accessibilityIdentifier("paywall_primaryCTA")
+
+            Button {
+                Task {
+                    activeLoadingAction = .restore
+                    await purchaseManager.restorePurchases(session: session)
+                    activeLoadingAction = nil
+                }
+            } label: {
+                ZStack {
+                    Text("Restore Purchases")
+                        .opacity(activeLoadingAction == .restore ? 0 : 1)
+                    if activeLoadingAction == .restore {
+                        ProgressView()
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: 24)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .disabled(purchaseManager.isProcessing)
+            .accessibilityIdentifier("paywall_restore")
+
+            if let summaryText = selectedPlan.summaryText {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(summaryText)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+
+                    if selectedPlan.disclosureDetailText != nil {
+                        Button("Show more") {
+                            isShowingTrialDetails = true
+                        }
+                        .font(.footnote.weight(.semibold))
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+
+            HStack(spacing: 16) {
+                Button("Terms of Use") { presentedLegalDocument = .terms }
+                Button("Privacy Policy") { presentedLegalDocument = .privacy }
+            }
+            .font(.footnote.weight(.semibold))
+            .padding(.top, legalTopPadding)
+            .padding(.bottom, bottomClearance)
+            .frame(maxWidth: .infinity, alignment: .center)
+        }
+    }
+
+    private func onboardingAnimationPreviewBox(scale: CGFloat) -> some View {
         let page = OnboardingCopy.pages[previewIndex % max(1, OnboardingCopy.pages.count)]
-        return ZStack {
+        let scaledHeight = 250 * scale
+
+        return ZStack(alignment: .top) {
+            ZStack {
             switch page.visualKind {
             case .strands:
                 StrandAnimationPlaceholderView(
@@ -165,13 +223,13 @@ struct PaywallView: View {
             case .weave:
                 LoomSplashBoxPlaceholderView(reduceMotion: reduceMotion)
             case .identity:
-                IdentityVisionPlaceholderView(reduceMotion: reduceMotion)
+                IdentityVisionPlaceholderView(reduceMotion: reduceMotion, showsShadow: false)
             case .balance:
-                FulfillmentBalancePlaceholderView(reduceMotion: reduceMotion)
+                FulfillmentBalancePlaceholderView(reduceMotion: reduceMotion, showsShadow: false)
             case .execution:
                 TodayMockPlaceholderView(reduceMotion: reduceMotion)
             case .radar:
-                LittleWinsDeckPlaceholderView(reduceMotion: reduceMotion)
+                LittleWinsDeckPlaceholderView(reduceMotion: reduceMotion, showsShadow: false)
             case .summary:
                 LoomAIChatPlaceholderView(reduceMotion: reduceMotion)
             }
@@ -192,9 +250,43 @@ struct PaywallView: View {
             .padding(.trailing, 10)
             .padding(.bottom, 10)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 250, alignment: .top)
+            .scaleEffect(scale, anchor: .top)
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 250)
+        .frame(height: scaledHeight, alignment: .top)
+        .clipped()
+    }
+
+    private func previewBoxScale(
+        for screenHeight: CGFloat,
+        headerHeight: CGFloat,
+        lowerContentHeight: CGFloat,
+        verticalSpacing: CGFloat,
+        bottomClearance: CGFloat
+    ) -> CGFloat {
+        let verticalPadding: CGFloat = 40
+        let reservedHeight = verticalPadding + headerHeight + lowerContentHeight + (verticalSpacing * 2) + bottomClearance
+        let remainingHeight = max(60, screenHeight - reservedHeight)
+        return min(1, max(0.24, remainingHeight / 250))
+    }
+
+    private func paywallVerticalSpacing(for screenHeight: CGFloat) -> CGFloat {
+        screenHeight < 700 ? 10 : 18
+    }
+
+    private func planCardSpacing(for screenHeight: CGFloat) -> CGFloat {
+        screenHeight < 700 ? 8 : 10
+    }
+
+    private func paywallPlanTopPadding(for screenHeight: CGFloat) -> CGFloat {
+        screenHeight < 700 ? 0 : 6
+    }
+
+    private func paywallLegalTopPadding(for screenHeight: CGFloat) -> CGFloat {
+        screenHeight < 700 ? 0 : 4
     }
 
     private func planCard(for plan: SubscriptionPlan) -> some View {
@@ -215,6 +307,11 @@ struct PaywallView: View {
                         Text(tierText)
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                        if let tierDetailText = plan.tierDetailText {
+                            Text(tierDetailText)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     if let trialText = plan.trialText {
                         Text(trialText)
@@ -246,6 +343,26 @@ struct PaywallView: View {
             )
         }
         .buttonStyle(.plain)
+    }
+}
+
+private struct HeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private extension View {
+    func readHeight(_ onChange: @escaping (CGFloat) -> Void) -> some View {
+        background(
+            GeometryReader { geometry in
+                Color.clear
+                    .preference(key: HeightPreferenceKey.self, value: geometry.size.height)
+            }
+        )
+        .onPreferenceChange(HeightPreferenceKey.self, perform: onChange)
     }
 }
 
