@@ -203,6 +203,8 @@ struct OutcomeView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
+    @AppStorage(UserSessionStore.Keys.isSubscribed) private var isSubscribed = false
+    @AppStorage(SubscriptionAccessGate.inactivePurchaseOverrideKey) private var inactivePurchaseOverrideEnabled = false
     @AppStorage("dev_manual_warning_cards_enabled") private var devManualWarningCardsEnabled = false
     @AppStorage("dev_outcome_warning_target_passed") private var devOutcomeWarningTargetPassed = false
     @AppStorage("dev_outcome_warning_goal_achieved") private var devOutcomeWarningGoalAchieved = false
@@ -254,6 +256,13 @@ struct OutcomeView: View {
     @State private var completionRecordedDate: Date = Calendar.current.startOfDay(for: .now)
     @FocusState private var isCompletionJournalFocused: Bool
     @State private var changeTargetDateDraft: Date = .now
+
+    private var hasActiveSubscriptionAccess: Bool {
+        SubscriptionAccessGate.hasActiveSubscription(
+            isSubscribed: isSubscribed,
+            inactivePurchaseOverrideEnabled: inactivePurchaseOverrideEnabled
+        )
+    }
 
     @Query(sort: \OutcomesMeasureEntry.measuredAt, order: .forward) private var allMeasureEntries: [OutcomesMeasureEntry]
     @Query(sort: \OutcomesMeasure.measure_updated, order: .reverse) private var allMeasureSnapshots: [OutcomesMeasure]
@@ -1030,6 +1039,13 @@ struct OutcomeView: View {
                                 Text("No Little Wins found for this Fulfillment Area.")
                                     .foregroundStyle(.secondary)
                                 Button("Manage Little Wins") {
+                                    guard hasActiveSubscriptionAccess else {
+                                        isShowingContributingLittleWinsSheet = false
+                                        DispatchQueue.main.async {
+                                            SubscriptionAccessGate.presentInactiveSubscriptionPaywall()
+                                        }
+                                        return
+                                    }
                                     isShowingContributingLittleWinsSheet = false
                                     DispatchQueue.main.async {
                                         isShowingManageLittleWinsSheet = true

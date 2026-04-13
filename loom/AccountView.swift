@@ -477,6 +477,7 @@ struct AccountView: View {
     @AppStorage("dev_outcome_warning_target_passed") private var devOutcomeWarningTargetPassed = false
     @AppStorage("dev_outcome_warning_goal_achieved") private var devOutcomeWarningGoalAchieved = false
     @AppStorage("dev_action_blocks_warning_old_blocks") private var devActionBlocksWarningOldBlocks = false
+    @AppStorage(SubscriptionAccessGate.inactivePurchaseOverrideKey) private var inactivePurchaseOverrideEnabled = false
     @AppStorage(UserSessionStore.Keys.hasSeenOnboarding) private var hasSeenOnboarding = false
     @AppStorage(UserSessionStore.Keys.hasAccount) private var hasAccount = false
     @AppStorage(UserSessionStore.Keys.hasCompletedDiagnostic) private var hasCompletedDiagnostic = false
@@ -842,6 +843,7 @@ struct AccountView: View {
                     }
 
                     Section("Feature Flags") {
+                        Toggle("Inactive purchase", isOn: $inactivePurchaseOverrideEnabled)
                         Toggle("Enable LoomAI Insights Refresh", isOn: $enableLoomAIInsightsRefresh)
                         Toggle("LoomAI Troubleshooting", isOn: $enableLoomAITroubleshooting)
                         Toggle("LoomAI Debug", isOn: $enableLoomAIDebug)
@@ -1125,6 +1127,8 @@ private struct AppFeedbackSheet: View {
     @Binding var rating: Int
     @Binding var details: String
     @Binding var isPresented: Bool
+    @State private var isSubmitting = false
+    @State private var submissionError: String?
 
     private let ratingDescriptions: [Int: String] = [
         1: "Bad",
@@ -1165,6 +1169,14 @@ private struct AppFeedbackSheet: View {
                         .frame(maxWidth: .infinity, alignment: .center)
                 }
 
+                if let submissionError, !submissionError.isEmpty {
+                    Text(submissionError)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .multilineTextAlignment(.center)
+                }
+
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Tell Us More (Optional)")
                         .font(.footnote.weight(.semibold))
@@ -1178,14 +1190,20 @@ private struct AppFeedbackSheet: View {
                 Spacer(minLength: 0)
 
                 Button {
-                    isPresented = false
+                    submitFeedback()
                 } label: {
-                    Text("Submit")
-                        .frame(maxWidth: .infinity)
+                    ZStack {
+                        Text("Submit")
+                            .opacity(isSubmitting ? 0 : 1)
+                        if isSubmitting {
+                            ProgressView()
+                        }
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 24)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
-                .disabled(rating == 0)
+                .disabled(rating == 0 || isSubmitting)
             }
             .padding(20)
             .navigationTitle("Give App Feedback")
@@ -1193,6 +1211,7 @@ private struct AppFeedbackSheet: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
+                        guard !isSubmitting else { return }
                         isPresented = false
                     } label: {
                         Image(systemName: "xmark")
@@ -1202,10 +1221,50 @@ private struct AppFeedbackSheet: View {
         }
         .presentationDetents([.medium])
         .presentationDragIndicator(.visible)
+        .onChange(of: rating) { _, _ in
+            submissionError = nil
+        }
         .onDisappear {
             if !isPresented {
                 rating = 0
                 details = ""
+                submissionError = nil
+                isSubmitting = false
+            }
+        }
+    }
+
+    private func submitFeedback() {
+        guard !isSubmitting else { return }
+        submissionError = nil
+        isSubmitting = true
+
+        Task {
+            do {
+                #if canImport(FirebaseFirestore)
+                try await AppFeedbackService.shared.submit(rating: rating, details: details)
+                await MainActor.run {
+                    isSubmitting = false
+                    isPresented = false
+                }
+                #else
+                throw NSError(
+                    domain: "AppFeedback",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "Feedback is temporarily unavailable. Please try again later."]
+                )
+                #endif
+            } catch {
+                await MainActor.run {
+                    isSubmitting = false
+                    if let localizedError = error as? LocalizedError,
+                       let message = localizedError.errorDescription,
+                       !message.isEmpty {
+                        submissionError = message
+                    } else {
+                        submissionError = "Could not submit feedback. Please try again."
+                    }
+                }
             }
         }
     }
@@ -1718,6 +1777,7 @@ struct AccountDetailsView: View {
     @AppStorage(UserSessionStore.Keys.authProvider) private var authProvider = ""
     @AppStorage(UserSessionStore.Keys.hasAccount) private var hasAccount = false
     @AppStorage(UserSessionStore.Keys.isSubscribed) private var isSubscribed = false
+    @AppStorage(SubscriptionAccessGate.inactivePurchaseOverrideKey) private var inactivePurchaseOverrideEnabled = false
     @AppStorage("loom.subscription_plan") private var subscriptionPlanRaw = SubscriptionPlan.annual.rawValue
     @State private var showSubscriptionSheet = false
     @State private var accountError: String? = nil
@@ -1893,11 +1953,17 @@ struct AccountDetailsView: View {
     }
 
     private var currentSubscriptionSummary: String {
-        guard isSubscribed else { return "Inactive" }
-        if subscriptionPlanRaw == SubscriptionPlan.monthly.rawValue {
-            return "$15 Monthly"
+        guard SubscriptionAccessGate.hasActiveSubscription(
+            isSubscribed: isSubscribed,
+            inactivePurchaseOverrideEnabled: inactivePurchaseOverrideEnabled
+        ) else { return "Inactive" }
+        if subscriptionPlanRaw == SubscriptionPlan.lifetime.rawValue {
+            return "Founding Member (Lifetime)"
         }
-        return "$99 Annual"
+        if subscriptionPlanRaw == SubscriptionPlan.monthly.rawValue {
+            return "Monthly"
+        }
+        return "Annual (Locked)"
     }
 
     private var accountProviderLabel: String {
@@ -2099,6 +2165,19 @@ private struct AccountSubscriptionView: View {
     let appName: String
     let subscriptionSummary: String
 
+    private var priceText: String {
+        if subscriptionSummary == "Founding Member (Lifetime)" {
+            return "$129 one-time"
+        }
+        if subscriptionSummary == "Monthly" {
+            return "$15 / month"
+        }
+        if subscriptionSummary == "Annual (Locked)" {
+            return "$79 / year"
+        }
+        return "-"
+    }
+
     var body: some View {
         List {
             Section {
@@ -2117,7 +2196,7 @@ private struct AccountSubscriptionView: View {
                 HStack {
                     Text("Price")
                     Spacer()
-                    Text(subscriptionSummary.contains("Monthly") ? "$15 / month" : "$99 / year")
+                    Text(priceText)
                         .foregroundStyle(.secondary)
                 }
             }

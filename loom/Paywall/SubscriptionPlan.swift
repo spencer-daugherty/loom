@@ -8,6 +8,21 @@ enum SubscriptionPlan: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    var storeKitProductID: String {
+        switch self {
+        case .lifetime:
+            return "loom.lifetime"
+        case .annual:
+            return "loom.annual.locked"
+        case .monthly:
+            return "loom.monthly"
+        }
+    }
+
+    static func from(storeKitProductID: String) -> SubscriptionPlan? {
+        allCases.first { $0.storeKitProductID == storeKitProductID }
+    }
+
     private static let foundingMemberEndDate: Date = {
         var components = DateComponents()
         components.calendar = Calendar(identifier: .gregorian)
@@ -37,7 +52,7 @@ enum SubscriptionPlan: String, CaseIterable, Identifiable {
     var title: LocalizedStringKey {
         switch self {
         case .lifetime:
-            return "Lifetime - Founding Member"
+            return "Founding Member (Lifetime)"
         case .annual:
             return "Annual"
         case .monthly:
@@ -133,7 +148,7 @@ enum SubscriptionPlan: String, CaseIterable, Identifiable {
     var detailSheetTitle: LocalizedStringKey {
         switch self {
         case .lifetime:
-            return "Lifetime - Founding Member"
+            return "Founding Member (Lifetime)"
         case .annual:
             return "Annual"
         case .monthly:

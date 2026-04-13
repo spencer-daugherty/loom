@@ -976,7 +976,7 @@ private enum LittleWinsShareOverlayDataFactory {
             installDate: installDate,
             daysSinceInstall: daysSinceInstall,
             isSubscribed: isSubscribed,
-            isFoundingMember: isSubscribed && subscriptionPlanRaw == SubscriptionPlan.annual.rawValue
+            isFoundingMember: isSubscribed && subscriptionPlanRaw == SubscriptionPlan.lifetime.rawValue
         )
     }
 

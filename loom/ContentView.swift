@@ -77,6 +77,7 @@ struct ContentView: View {
     @AppStorage(UserSessionStore.Keys.hasCompletedDiagnostic) private var hasCompletedDiagnostic = false
     @AppStorage(UserSessionStore.Keys.hasSeenDiagnosticInsights) private var hasSeenDiagnosticInsights = false
     @AppStorage(UserSessionStore.Keys.isSubscribed) private var isSubscribed = false
+    @AppStorage(SubscriptionAccessGate.inactivePurchaseOverrideKey) private var inactivePurchaseOverrideEnabled = false
     @AppStorage("enable_projects_feature") private var enableProjectsFeature = false
     @AppStorage("blank_homepage_mode") private var blankHomepageMode = false
     @AppStorage("setup_homepage_mode") private var setupHomepageMode = false
@@ -156,6 +157,7 @@ struct ContentView: View {
     @State private var quickstartIsPageTransitionInFlight = false
     @State private var hasDeferredActionPlanCalloutThisSession = false
     @State private var isPresentingPurposeSetupPaywall = false
+    @State private var isPresentingInactiveSubscriptionPaywall = false
     @State private var pendingPurposeOpenAfterPaywall = false
     @State private var onboardingCallCardDestination: OnboardingCallCardDestination? = nil
 
@@ -186,6 +188,13 @@ struct ContentView: View {
         case social = 0
         case home = 1
         case littleWins = 2
+    }
+
+    private var hasActiveSubscriptionAccess: Bool {
+        SubscriptionAccessGate.hasActiveSubscription(
+            isSubscribed: isSubscribed,
+            inactivePurchaseOverrideEnabled: inactivePurchaseOverrideEnabled
+        )
     }
 
     private enum HomeStartupFocusTarget {
@@ -411,7 +420,7 @@ struct ContentView: View {
     }
 
     private var shouldRequirePaywallBeforePurposeSetup: Bool {
-        !isSubscribed && activeHomeFocusTarget == .purpose && isDrivingForceEmptyState
+        !hasActiveSubscriptionAccess && activeHomeFocusTarget == .purpose && isDrivingForceEmptyState
     }
 
     private var shouldShowFulfillmentOnboardingPulse: Bool {
@@ -960,6 +969,11 @@ struct ContentView: View {
                     PaywallView()
                 }
             }
+            .fullScreenCover(isPresented: $isPresentingInactiveSubscriptionPaywall) {
+                NavigationStack {
+                    PaywallView(bannerMessage: SubscriptionAccessGate.inactiveBannerMessage)
+                }
+            }
             .fullScreenCover(isPresented: $isPresentingLittleWinsShareCamera) {
                 LittleWinsShareCameraView()
             }
@@ -1026,8 +1040,19 @@ struct ContentView: View {
                 }
             }
             .onChange(of: isSubscribed) { _, newValue in
-                guard newValue, isPresentingPurposeSetupPaywall else { return }
-                isPresentingPurposeSetupPaywall = false
+                guard newValue, hasActiveSubscriptionAccess else { return }
+                if isPresentingPurposeSetupPaywall {
+                    isPresentingPurposeSetupPaywall = false
+                }
+                if isPresentingInactiveSubscriptionPaywall {
+                    isPresentingInactiveSubscriptionPaywall = false
+                }
+            }
+            .onChange(of: inactivePurchaseOverrideEnabled) { _, isEnabled in
+                guard !isEnabled, hasActiveSubscriptionAccess else { return }
+                if isPresentingInactiveSubscriptionPaywall {
+                    isPresentingInactiveSubscriptionPaywall = false
+                }
             }
             .onChange(of: isPresentingPurposeSetupPaywall) { _, isPresented in
                 guard !isPresented else { return }
@@ -1052,6 +1077,9 @@ struct ContentView: View {
                     contentQuickstartStepIndex = 0
                     homePageIndex = quickstartPage(for: 0)
                 }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .loomPresentInactiveSubscriptionPaywall)) { _ in
+                presentInactiveSubscriptionPaywall()
             }
             .onChange(of: contentQuickstartStepIndex) { _, newValue in
                 guard shouldShowContentQuickstart else { return }
@@ -3086,6 +3114,10 @@ struct ContentView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
 
                                 Button {
+                                    guard hasActiveSubscriptionAccess else {
+                                        presentInactiveSubscriptionPaywall()
+                                        return
+                                    }
                                     isPresentingLittleWinsManagerSheet = true
                                 } label: {
                                     Text("Manage Little Wins")
@@ -4065,6 +4097,10 @@ struct ContentView: View {
             guard isActiveToday || littleWinsShowHiddenPlaceholder || isInsideFullyHiddenCard || isCompleted else { return }
             guard !littleWinsDeckIsDragging else { return }
             guard Date() >= littleWinsSuppressRowTapUntil else { return }
+            guard hasActiveSubscriptionAccess else {
+                presentInactiveSubscriptionPaywall()
+                return
+            }
             if isIntegrated {
                 presentLittleWinsIntegrationDetails(for: item)
                 return
@@ -4121,6 +4157,10 @@ struct ContentView: View {
         return VStack(spacing: 6) {
             HStack(spacing: 16) {
                 Button(action: {
+                    guard hasActiveSubscriptionAccess else {
+                        presentInactiveSubscriptionPaywall()
+                        return
+                    }
                     isPresentingCaptureView = true
                 }) {
                     captureActionButtonVisual
@@ -4162,36 +4202,62 @@ struct ContentView: View {
                 Group {
                     if isActiveActionFlow {
                         Button(action: {
+                            guard hasActiveSubscriptionAccess else {
+                                presentInactiveSubscriptionPaywall()
+                                return
+                            }
                             playSheetDestination = .action
                         }) {
                             actionBlocksPlayButtonVisual
                         }
                         .buttonStyle(.plain)
                     } else if setupHomepageMode {
-                        NavigationLink {
-                            PlanStartView()
-                        } label: {
-                            actionBlocksPlayButtonVisual
+                        if hasActiveSubscriptionAccess {
+                            NavigationLink {
+                                PlanStartView()
+                            } label: {
+                                actionBlocksPlayButtonVisual
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            Button(action: {
+                                presentInactiveSubscriptionPaywall()
+                            }) {
+                                actionBlocksPlayButtonVisual
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     } else if !canOpenPlanOrActionFlow {
                         Button(action: {
+                            guard hasActiveSubscriptionAccess else {
+                                presentInactiveSubscriptionPaywall()
+                                return
+                            }
                             triggerPlayBlockedFeedback()
                         }) {
                             actionBlocksPlayButtonVisual
                         }
                         .buttonStyle(.plain)
                     } else {
-                        NavigationLink {
-                            if hasCompletedPlanFlowOnce {
-                                PlanView()
-                            } else {
-                                PlanStartView()
+                        if hasActiveSubscriptionAccess {
+                            NavigationLink {
+                                if hasCompletedPlanFlowOnce {
+                                    PlanView()
+                                } else {
+                                    PlanStartView()
+                                }
+                            } label: {
+                                actionBlocksPlayButtonVisual
                             }
-                        } label: {
-                            actionBlocksPlayButtonVisual
+                            .buttonStyle(.plain)
+                        } else {
+                            Button(action: {
+                                presentInactiveSubscriptionPaywall()
+                            }) {
+                                actionBlocksPlayButtonVisual
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
                 .disabled(isFocusedLock && !isActionBlocksAllowedWhileLocked)
@@ -5359,7 +5425,13 @@ struct ContentView: View {
                 .stroke(highlightDrivingRequirement ? Color.red.opacity(0.9) : Color.clear, lineWidth: 2)
         )
         .overlay {
-            if shouldRequirePaywallBeforePurposeSetup {
+            if !hasActiveSubscriptionAccess {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        presentInactiveSubscriptionPaywall()
+                    }
+            } else if shouldRequirePaywallBeforePurposeSetup {
                 Color.clear
                     .contentShape(Rectangle())
                     .onTapGesture {
@@ -5512,7 +5584,13 @@ struct ContentView: View {
         )
         .frame(maxHeight: .infinity)
         .overlay {
-            if isDrivingForceEmptyState && !setupHomepageMode {
+            if !hasActiveSubscriptionAccess {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        presentInactiveSubscriptionPaywall()
+                    }
+            } else if isDrivingForceEmptyState && !setupHomepageMode {
                 Color.clear
                     .contentShape(Rectangle())
                     .onTapGesture {
@@ -5776,7 +5854,13 @@ struct ContentView: View {
         )
         .frame(maxHeight: .infinity)
         .overlay {
-            if !canOpenPlanOrActionFlow {
+            if !hasActiveSubscriptionAccess {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        presentInactiveSubscriptionPaywall()
+                    }
+            } else if !canOpenPlanOrActionFlow {
                 Color.clear
                     .contentShape(Rectangle())
                     .onTapGesture {
@@ -5814,6 +5898,10 @@ struct ContentView: View {
     }
 
     private func openOnboardingCallCardTarget(_ target: HomeStartupFocusTarget) {
+        guard hasActiveSubscriptionAccess else {
+            presentInactiveSubscriptionPaywall()
+            return
+        }
         switch target {
         case .purpose:
             if shouldRequirePaywallBeforePurposeSetup {
@@ -5851,6 +5939,10 @@ struct ContentView: View {
                 openOnboardingCallCardDestination(hasCompletedPlanFlowOnce ? .plan : .planStart)
             }
         }
+    }
+
+    private func presentInactiveSubscriptionPaywall() {
+        isPresentingInactiveSubscriptionPaywall = true
     }
 
     private func ensureDeveloperDemoDataIfNeeded() {

@@ -8,6 +8,8 @@ struct LoomAIChatView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var colorScheme
+    @AppStorage(UserSessionStore.Keys.isSubscribed) private var isSubscribed = false
+    @AppStorage(SubscriptionAccessGate.inactivePurchaseOverrideKey) private var inactivePurchaseOverrideEnabled = false
     @Query private var fulfillments: [Fulfillment]
     @Query(sort: \Outcomes.end, order: .forward) private var outcomes: [Outcomes]
     @Query private var fulfillmentFocusRows: [FulfillmentFocus]
@@ -74,6 +76,13 @@ struct LoomAIChatView: View {
 
     private var shouldShowSendingControl: Bool {
         viewModel.isSending && !suppressPendingLoadingUI
+    }
+
+    private var hasActiveSubscriptionAccess: Bool {
+        SubscriptionAccessGate.hasActiveSubscription(
+            isSubscribed: isSubscribed,
+            inactivePurchaseOverrideEnabled: inactivePurchaseOverrideEnabled
+        )
     }
 
     private var contextSnapshotInvalidationKey: String {
@@ -1574,6 +1583,16 @@ struct LoomAIChatView: View {
                 .overlay(
                     LoomAIAnimatedOutlineBorder(cornerRadius: 12)
                 )
+                .overlay {
+                    if !hasActiveSubscriptionAccess {
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color.clear)
+                            .contentShape(RoundedRectangle(cornerRadius: 12))
+                            .onTapGesture {
+                                SubscriptionAccessGate.presentInactiveSubscriptionPaywall()
+                            }
+                    }
+                }
 
             Button {
                 if shouldShowSendingControl {
@@ -1634,6 +1653,10 @@ struct LoomAIChatView: View {
               !displayTrimmed.isEmpty,
               !viewModel.isSending,
               !viewModel.isDailyLimitReached else { return }
+        guard hasActiveSubscriptionAccess else {
+            SubscriptionAccessGate.presentInactiveSubscriptionPaywall()
+            return
+        }
         viewModel.draft = displayTrimmed
         startSendingCurrentMessage(
             displayedUserMessage: displayTrimmed,
@@ -1646,6 +1669,10 @@ struct LoomAIChatView: View {
         transportMessageOverride: String? = nil
     ) {
         guard !viewModel.isSending else { return }
+        guard hasActiveSubscriptionAccess else {
+            SubscriptionAccessGate.presentInactiveSubscriptionPaywall()
+            return
+        }
         suppressPendingLoadingUI = false
         sendCurrentMessageTask?.cancel()
         sendCurrentMessageTask = Task { @MainActor in

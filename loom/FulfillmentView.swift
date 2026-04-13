@@ -658,6 +658,8 @@ struct FulfillmentView: View {
         }
     }
 
+    @AppStorage(UserSessionStore.Keys.isSubscribed) private var isSubscribed = false
+    @AppStorage(SubscriptionAccessGate.inactivePurchaseOverrideKey) private var inactivePurchaseOverrideEnabled = false
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
@@ -688,6 +690,13 @@ struct FulfillmentView: View {
     @State private var selectedRecoverColorKey: String = ""
     @State private var expandedPreviousID: UUID? = nil
     @State private var isAddingRole = false
+
+    private var hasActiveSubscriptionAccess: Bool {
+        SubscriptionAccessGate.hasActiveSubscription(
+            isSubscribed: isSubscribed,
+            inactivePurchaseOverrideEnabled: inactivePurchaseOverrideEnabled
+        )
+    }
     @State private var newRoleText = ""
     @State private var isAddingFocus = false
     @State private var newFocusText = ""
@@ -1979,6 +1988,10 @@ struct FulfillmentView: View {
                         .foregroundColor(.black)
                     VStack(spacing: 0) {
                         Button {
+                            guard hasActiveSubscriptionAccess else {
+                                SubscriptionAccessGate.presentInactiveSubscriptionPaywall()
+                                return
+                            }
                             if fociForRecord.isEmpty {
                                 presentLittleWinsEditorForNew(record: record)
                             } else {
@@ -2003,6 +2016,10 @@ struct FulfillmentView: View {
                             Divider()
                             ForEach(Array(fociForRecord.enumerated()), id: \.element.id) { index, f in
                                 Button {
+                                    guard hasActiveSubscriptionAccess else {
+                                        SubscriptionAccessGate.presentInactiveSubscriptionPaywall()
+                                        return
+                                    }
                                     presentLittleWinsEditor(for: f, categoryTitle: record.category)
                                 } label: {
                                     HStack(spacing: 0) {

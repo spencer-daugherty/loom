@@ -105,6 +105,8 @@ struct ObjectivesAddView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @AppStorage(UserSessionStore.Keys.isSubscribed) private var isSubscribed = false
+    @AppStorage(SubscriptionAccessGate.inactivePurchaseOverrideKey) private var inactivePurchaseOverrideEnabled = false
 
     @State private var goal: String
     @State private var reasons: String
@@ -137,6 +139,13 @@ struct ObjectivesAddView: View {
     @Query(sort: \OutcomesMeasureEntry.measuredAt, order: .forward) private var allMeasureEntries: [OutcomesMeasureEntry]
 
     private static let categoryPlaceholder = "Select Fulfillment Area"
+
+    private var hasActiveSubscriptionAccess: Bool {
+        SubscriptionAccessGate.hasActiveSubscription(
+            isSubscribed: isSubscribed,
+            inactivePurchaseOverrideEnabled: inactivePurchaseOverrideEnabled
+        )
+    }
 
     private var hasChanges: Bool {
         if let outcome {
@@ -551,6 +560,13 @@ struct ObjectivesAddView: View {
                                 Text("No Little Wins found for this Fulfillment Area.")
                                     .foregroundStyle(.secondary)
                                 Button("Manage Little Wins") {
+                                    guard hasActiveSubscriptionAccess else {
+                                        isShowingContributingLittleWinsSheet = false
+                                        DispatchQueue.main.async {
+                                            SubscriptionAccessGate.presentInactiveSubscriptionPaywall()
+                                        }
+                                        return
+                                    }
                                     isShowingContributingLittleWinsSheet = false
                                     DispatchQueue.main.async {
                                         isShowingManageLittleWinsSheet = true

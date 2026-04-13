@@ -10,6 +10,7 @@ struct RootGateView<MainContent: View>: View {
     private let mainContent: MainContent
 
     @StateObject private var session = UserSessionStore()
+    @StateObject private var purchaseManager = PurchaseManager()
 
     @AppStorage(UserSessionStore.Keys.hasSeenOnboarding) private var hasSeenOnboarding = false
     @AppStorage(UserSessionStore.Keys.hasAccount) private var hasAccount = false
@@ -53,11 +54,13 @@ struct RootGateView<MainContent: View>: View {
         mainContent
             .environmentObject(session)
             .environmentObject(personalizationStore)
+            .environmentObject(purchaseManager)
             .onAppear {
                 consumePendingOnboardingResetIfNeeded()
                 migrateDiagnosticCompletionIfNeeded()
                 initializeInstallDateIfNeeded()
                 syncSessionFromStorage()
+                purchaseManager.configure(session: session)
                 syncGatePresentationState()
                 syncGatePathFromSession(animated: false)
                 trackCoreEntryIfNeeded()
@@ -66,6 +69,9 @@ struct RootGateView<MainContent: View>: View {
                 }
             }
             .task {
+                purchaseManager.configure(session: session)
+                await purchaseManager.loadProducts()
+                await purchaseManager.refreshEntitlements(session: session)
                 #if canImport(AuthenticationServices)
                 await session.refreshAppleCredentialStateIfNeeded()
                 #endif
@@ -143,6 +149,15 @@ struct RootGateView<MainContent: View>: View {
             .overlay(alignment: .bottom) {
                 LoomAITroubleshootingBannerHost()
             }
+            .overlay {
+                if !purchaseManager.hasLoadedEntitlements {
+                    ZStack {
+                        Color(.systemBackground)
+                            .ignoresSafeArea()
+                        ProgressView()
+                    }
+                }
+            }
     }
 
     private var gatePresentationBinding: Binding<Bool> {
@@ -198,6 +213,7 @@ struct RootGateView<MainContent: View>: View {
         }
         .environmentObject(session)
         .environmentObject(personalizationStore)
+        .environmentObject(purchaseManager)
     }
 
     private func syncSessionFromStorage() {

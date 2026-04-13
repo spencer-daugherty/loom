@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		1DCA7F0A2F8C70710087B8ED /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 1DCA7F092F8C70710087B8ED /* FirebaseFirestore */; };
 		1DD77E242F52752C00F08917 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 1DD77E232F52752C00F08917 /* FirebaseAuth */; };
 		1DD77E262F52752C00F08917 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1DD77E252F52752C00F08917 /* FirebaseCore */; };
 		1DD77E292F5275A600F08917 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 1DD77E282F5275A600F08917 /* GoogleSignIn */; };
@@ -108,6 +109,7 @@
 				1DD77E242F52752C00F08917 /* FirebaseAuth in Frameworks */,
 				1DD77E292F5275A600F08917 /* GoogleSignIn in Frameworks */,
 				1DD77E2B2F5275A600F08917 /* GoogleSignInSwift in Frameworks */,
+				1DCA7F0A2F8C70710087B8ED /* FirebaseFirestore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -142,6 +144,7 @@
 				1D8E61DA2DC0526500167931 /* loomTests */,
 				1D8E61E42DC0526500167931 /* loomUITests */,
 				A10000000000000000000003 /* ShareIntoLoomExtension */,
+				1DCA7F082F8C70710087B8ED /* Frameworks */,
 				1D8E61C72DC0526000167931 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -155,6 +158,13 @@
 				A10000000000000000000002 /* Share into Loom.appex */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		1DCA7F082F8C70710087B8ED /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -186,6 +196,7 @@
 				1DD77E252F52752C00F08917 /* FirebaseCore */,
 				1DD77E282F5275A600F08917 /* GoogleSignIn */,
 				1DD77E2A2F5275A600F08917 /* GoogleSignInSwift */,
+				1DCA7F092F8C70710087B8ED /* FirebaseFirestore */,
 			);
 			productName = loom;
 			productReference = 1D8E61C62DC0526000167931 /* loom.app */;
@@ -814,6 +825,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		1DCA7F092F8C70710087B8ED /* FirebaseFirestore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1DD77E222F52752C00F08917 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFirestore;
+		};
 		1DD77E232F52752C00F08917 /* FirebaseAuth */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 1DD77E222F52752C00F08917 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;

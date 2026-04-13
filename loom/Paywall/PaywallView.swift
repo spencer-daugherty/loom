@@ -1,16 +1,18 @@
 import SwiftUI
 
 struct PaywallView: View {
+    let bannerMessage: String?
+
     private enum PaywallLoadingAction {
         case purchase
         case restore
     }
 
     @EnvironmentObject private var session: UserSessionStore
+    @EnvironmentObject private var purchaseManager: PurchaseManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
 
-    @StateObject private var purchaseManager = PurchaseManager()
     @State private var selectedPlan: SubscriptionPlan = .lifetime
     @State private var presentedLegalDocument: LegalDocument?
     @State private var isShowingTrialDetails = false
@@ -21,6 +23,24 @@ struct PaywallView: View {
     @State private var lowerContentHeight: CGFloat = 0
     @State private var activeLoadingAction: PaywallLoadingAction?
     private let paywallPreviewBaseScale: CGFloat = 0.7
+
+    init(bannerMessage: String? = nil) {
+        self.bannerMessage = bannerMessage
+    }
+
+    private var showsInactiveSubscriptionBanner: Bool {
+        if let bannerMessage, !bannerMessage.isEmpty {
+            return true
+        }
+        return false
+    }
+
+    private var effectivePaywallPreviewBaseScale: CGFloat {
+        let bannerAdjustedScale = showsInactiveSubscriptionBanner
+            ? paywallPreviewBaseScale * 0.75
+            : paywallPreviewBaseScale
+        return bannerAdjustedScale
+    }
 
     var body: some View {
         GeometryReader { geo in
@@ -33,8 +53,12 @@ struct PaywallView: View {
                 lowerContentHeight: lowerContentHeight,
                 verticalSpacing: verticalSpacing,
                 bottomClearance: bottomClearance
-            ) * paywallPreviewBaseScale
+            ) * effectivePaywallPreviewBaseScale
             VStack(alignment: .leading, spacing: verticalSpacing) {
+                if let bannerMessage, !bannerMessage.isEmpty {
+                    paywallBanner(message: bannerMessage)
+                }
+
                 paywallHeader
                     .readHeight { headerHeight = $0 }
 
@@ -76,6 +100,7 @@ struct PaywallView: View {
             .presentationDragIndicator(.visible)
         }
         .onAppear {
+            purchaseManager.configure(session: session)
             if !didLogPaywallViewed {
                 didLogPaywallViewed = true
                 AnalyticsLogger.log(.paywallViewed())
@@ -96,7 +121,7 @@ struct PaywallView: View {
         .onDisappear {
             previewCycleTask?.cancel()
             previewCycleTask = nil
-            if !session.isSubscribed {
+            if !purchaseManager.isPremium {
                 AnalyticsLogger.log(.paywallAbandoned(reason: "dismissed"))
             }
         }
@@ -113,6 +138,27 @@ struct PaywallView: View {
                 .font(.body)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    private func paywallBanner(message: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(Color.black.opacity(0.72))
+                .padding(.top, 1)
+
+            Text(message)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.black.opacity(0.76))
+                .fixedSize(horizontal: false, vertical: true)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(red: 0.98, green: 0.92, blue: 0.72))
+        )
     }
 
     @ViewBuilder
@@ -140,6 +186,10 @@ struct PaywallView: View {
                     switch outcome {
                     case .success:
                         AnalyticsLogger.log(.purchaseCompleted(plan: selectedPlan.rawValue))
+                    case .pending:
+                        AnalyticsLogger.log(.purchaseFailed(plan: selectedPlan.rawValue, errorType: "pending"))
+                    case .userCancelled:
+                        break
                     case .failed(let errorType):
                         AnalyticsLogger.log(.purchaseFailed(plan: selectedPlan.rawValue, errorType: errorType))
                     }
@@ -160,26 +210,50 @@ struct PaywallView: View {
             .disabled(purchaseManager.isProcessing)
             .accessibilityIdentifier("paywall_primaryCTA")
 
-            Button {
-                Task {
-                    activeLoadingAction = .restore
-                    await purchaseManager.restorePurchases(session: session)
-                    activeLoadingAction = nil
-                }
-            } label: {
-                ZStack {
-                    Text("Restore Purchases")
-                        .opacity(activeLoadingAction == .restore ? 0 : 1)
-                    if activeLoadingAction == .restore {
-                        ProgressView()
+            if showsInactiveSubscriptionBanner {
+                Button {
+                    Task {
+                        activeLoadingAction = .restore
+                        await purchaseManager.restorePurchases(session: session)
+                        activeLoadingAction = nil
                     }
+                } label: {
+                    ZStack {
+                        Text("Restore Purchases")
+                            .opacity(activeLoadingAction == .restore ? 0 : 1)
+                        if activeLoadingAction == .restore {
+                            ProgressView()
+                        }
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 24)
                 }
-                .frame(maxWidth: .infinity, minHeight: 24)
+                .buttonStyle(.plain)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.blue)
+                .disabled(purchaseManager.isProcessing)
+                .accessibilityIdentifier("paywall_restore")
+            } else {
+                Button {
+                    Task {
+                        activeLoadingAction = .restore
+                        await purchaseManager.restorePurchases(session: session)
+                        activeLoadingAction = nil
+                    }
+                } label: {
+                    ZStack {
+                        Text("Restore Purchases")
+                            .opacity(activeLoadingAction == .restore ? 0 : 1)
+                        if activeLoadingAction == .restore {
+                            ProgressView()
+                        }
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 24)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .disabled(purchaseManager.isProcessing)
+                .accessibilityIdentifier("paywall_restore")
             }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
-            .disabled(purchaseManager.isProcessing)
-            .accessibilityIdentifier("paywall_restore")
 
             if let summaryText = selectedPlan.summaryText {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
