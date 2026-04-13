@@ -817,6 +817,10 @@ struct PassionScoringService {
             existingSnapshots = try modelContext.fetch(FetchDescriptor<PassionScoreSnapshot>())
         }
 
+        if existingSnapshots.isEmpty {
+            return try computeAndPersistSnapshots(for: latestCompletedMonthStart, in: modelContext)
+        }
+
         let existingMonthStarts = Set(existingSnapshots.map { calendar.startOfDay(for: $0.monthStartDate) })
         var all: [PassionScoreSnapshot] = []
         var cursor = startMonth

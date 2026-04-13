@@ -16,11 +16,30 @@ extension Notification.Name {
   static let captureItemsDidChange = Notification.Name("captureItemsDidChange")
 }
 
+enum LoomDefaultsScope {
+  private static let reviewDemoFlagKey = UserSessionStore.Keys.reviewDemoModeEnabled
+  private static let reviewDemoPrefix = "review_demo."
+
+  static func scopedKey(_ baseKey: String, defaults: UserDefaults = .standard) -> String {
+    if defaults.bool(forKey: reviewDemoFlagKey) {
+      return reviewDemoPrefix + baseKey
+    }
+    return baseKey
+  }
+
+  static func clearReviewDemoScopedValues(defaults: UserDefaults = .standard) {
+    for key in defaults.dictionaryRepresentation().keys where key.hasPrefix(reviewDemoPrefix) {
+      defaults.removeObject(forKey: key)
+    }
+  }
+}
+
 enum OutcomeStartingValueStore {
   private static let defaultsKey = "outcomeStartingValueEntryIDs.v1"
 
   private static func loadMap() -> [String: String] {
-    guard let data = UserDefaults.standard.data(forKey: defaultsKey),
+    let scopedKey = LoomDefaultsScope.scopedKey(defaultsKey)
+    guard let data = UserDefaults.standard.data(forKey: scopedKey),
           let decoded = try? JSONDecoder().decode([String: String].self, from: data) else {
       return [:]
     }
@@ -29,7 +48,7 @@ enum OutcomeStartingValueStore {
 
   private static func saveMap(_ map: [String: String]) {
     guard let data = try? JSONEncoder().encode(map) else { return }
-    UserDefaults.standard.set(data, forKey: defaultsKey)
+    UserDefaults.standard.set(data, forKey: LoomDefaultsScope.scopedKey(defaultsKey))
   }
 
   static func entryID(for outcomeID: UUID) -> UUID? {
@@ -427,7 +446,8 @@ enum LittleWinsPassionsStore {
   }
 
   static func allLinks() -> [UUID: [UUID]] {
-    guard let data = UserDefaults.standard.data(forKey: defaultsKey) else { return [:] }
+    let scopedKey = LoomDefaultsScope.scopedKey(defaultsKey)
+    guard let data = UserDefaults.standard.data(forKey: scopedKey) else { return [:] }
     guard let raw = try? JSONDecoder().decode([String: [String]].self, from: data) else {
       return [:]
     }
@@ -476,9 +496,9 @@ enum LittleWinsPassionsStore {
       (focusID.uuidString, Array(Set(passionIDs)).map(\.uuidString))
     })
     if let data = try? JSONEncoder().encode(raw) {
-      UserDefaults.standard.set(data, forKey: defaultsKey)
+      UserDefaults.standard.set(data, forKey: LoomDefaultsScope.scopedKey(defaultsKey))
     } else {
-      UserDefaults.standard.removeObject(forKey: defaultsKey)
+      UserDefaults.standard.removeObject(forKey: LoomDefaultsScope.scopedKey(defaultsKey))
     }
     NotificationCenter.default.post(name: .littleWinsPassionsDidChange, object: nil)
   }
@@ -495,7 +515,8 @@ enum ReflectionPassionsStore {
   private static let defaultsKey = "reflection_passions_v1"
 
   private static func loadMap() -> [String: [Snapshot]] {
-    guard let data = UserDefaults.standard.data(forKey: defaultsKey),
+    let scopedKey = LoomDefaultsScope.scopedKey(defaultsKey)
+    guard let data = UserDefaults.standard.data(forKey: scopedKey),
           let decoded = try? JSONDecoder().decode([String: [Snapshot]].self, from: data) else {
       return [:]
     }
@@ -504,7 +525,7 @@ enum ReflectionPassionsStore {
 
   private static func saveMap(_ map: [String: [Snapshot]]) {
     guard let data = try? JSONEncoder().encode(map) else { return }
-    UserDefaults.standard.set(data, forKey: defaultsKey)
+    UserDefaults.standard.set(data, forKey: LoomDefaultsScope.scopedKey(defaultsKey))
     NotificationCenter.default.post(name: .littleWinsPassionsDidChange, object: nil)
   }
 
@@ -1792,14 +1813,15 @@ enum ActivePlanSessionStore {
   private static let defaultsKey = "activePlanWeekStart.v1"
 
   static func weekStart() -> Date? {
-    UserDefaults.standard.object(forKey: defaultsKey) as? Date
+    UserDefaults.standard.object(forKey: LoomDefaultsScope.scopedKey(defaultsKey)) as? Date
   }
 
   static func setWeekStart(_ date: Date?) {
+    let scopedKey = LoomDefaultsScope.scopedKey(defaultsKey)
     if let date {
-      UserDefaults.standard.set(date, forKey: defaultsKey)
+      UserDefaults.standard.set(date, forKey: scopedKey)
     } else {
-      UserDefaults.standard.removeObject(forKey: defaultsKey)
+      UserDefaults.standard.removeObject(forKey: scopedKey)
     }
   }
 }

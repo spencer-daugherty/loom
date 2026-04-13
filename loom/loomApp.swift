@@ -138,10 +138,69 @@ private enum LoomPersistence {
             }
         }
     }
+
+    static func makeReviewDemoPersistentContainer(generation: Int) -> ModelContainer {
+        if LoomRuntime.isPreviewSafeModeEnabled {
+            return makeInMemoryContainer()
+        }
+
+        do {
+            let appSupportURL = try FileManager.default.url(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask,
+                appropriateFor: nil,
+                create: true
+            )
+            let directoryURL = appSupportURL.appendingPathComponent("LoomStores", isDirectory: true)
+            try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+            cleanupReviewDemoStores(in: directoryURL, keepingGeneration: generation)
+            let storeURL = directoryURL.appendingPathComponent("review-demo-\(max(0, generation)).store")
+            let configuration = ModelConfiguration(
+                "ReviewDemo",
+                schema: Schema(modelTypes),
+                url: storeURL,
+                allowsSave: true,
+                cloudKitDatabase: .none
+            )
+            return try ModelContainer(for: Schema(modelTypes), configurations: [configuration])
+        } catch {
+            fatalError("Failed to initialize review demo ModelContainer: \(error)")
+        }
+    }
+
+    private static func cleanupReviewDemoStores(in directoryURL: URL, keepingGeneration: Int) {
+        let contents = (try? FileManager.default.contentsOfDirectory(
+            at: directoryURL,
+            includingPropertiesForKeys: nil
+        )) ?? []
+        let keepPrefix = "review-demo-\(max(0, keepingGeneration)).store"
+        for url in contents where url.lastPathComponent.hasPrefix("review-demo-") && !url.lastPathComponent.hasPrefix(keepPrefix) {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
 }
 
 private enum LoomPreviewContainerStore {
     static let container = LoomPersistence.makeInMemoryContainer()
+}
+
+private enum LoomPrimaryContainerStore {
+    static let container = LoomPersistence.makeContainer()
+}
+
+private enum LoomReviewDemoContainerStore {
+    private static var containersByGeneration: [Int: ModelContainer] = [:]
+
+    static func container(for generation: Int) -> ModelContainer {
+        let normalizedGeneration = max(0, generation)
+        if let existing = containersByGeneration[normalizedGeneration] {
+            return existing
+        }
+        let created = LoomPersistence.makeReviewDemoPersistentContainer(generation: normalizedGeneration)
+        containersByGeneration[normalizedGeneration] = created
+        containersByGeneration = containersByGeneration.filter { $0.key == normalizedGeneration }
+        return created
+    }
 }
 
 extension View {
@@ -199,55 +258,55 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 @main
 struct loomApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    private let modelContainer = LoomPersistence.makeContainer()
+    @AppStorage(UserSessionStore.Keys.hasAccount) private var hasAccount = false
+    @AppStorage(UserSessionStore.Keys.reviewDemoModeEnabled) private var reviewDemoModeEnabled = false
+    @AppStorage(UserSessionStore.Keys.reviewDemoStoreGeneration) private var reviewDemoStoreGeneration = 0
     @AppStorage(loomAIDebugDefaultsKey) private var enableLoomAIDebug = false
     @AppStorage("loom.showLoomAIDebugPage") private var showLoomAIDebugPage = false
 
     var body: some Scene {
         WindowGroup {
-            ZStack(alignment: .bottomLeading) {
-                Group {
-                    if enableLoomAIDebug && showLoomAIDebugPage {
-                        TemporaryVisionAutoWriteDebugView {
-                            showLoomAIDebugPage = false
-                        }
-                    } else {
-                        RootGateView(presentationStyle: .fullScreen) {
-                            ContentView()
-                                .autocorrectionDisabled(false)
-                                .textInputAutocapitalization(.sentences)
+            LoomModelContainerHost(
+                hasAccount: hasAccount,
+                reviewDemoModeEnabled: reviewDemoModeEnabled,
+                reviewDemoStoreGeneration: reviewDemoStoreGeneration
+            ) {
+                ZStack(alignment: .bottomLeading) {
+                    Group {
+                        if enableLoomAIDebug && showLoomAIDebugPage {
+                            TemporaryVisionAutoWriteDebugView {
+                                showLoomAIDebugPage = false
+                            }
+                        } else {
+                            RootGateView(presentationStyle: .fullScreen) {
+                                ContentView()
+                                    .autocorrectionDisabled(false)
+                                    .textInputAutocapitalization(.sentences)
+                            }
                         }
                     }
-                }
-                .id(enableLoomAIDebug && showLoomAIDebugPage ? "loom-debug-root" : "loom-main-root")
+                    .id(enableLoomAIDebug && showLoomAIDebugPage ? "loom-debug-root" : "loom-main-root")
 
-                if enableLoomAIDebug && !showLoomAIDebugPage {
-                    Button {
-                        showLoomAIDebugPage = true
-                    } label: {
-                        Text("Debug")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(
-                                Capsule(style: .continuous)
-                                    .fill(Color.blue.gradient)
-                            )
+                    if enableLoomAIDebug && !showLoomAIDebugPage {
+                        Button {
+                            showLoomAIDebugPage = true
+                        } label: {
+                            Text("Debug")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(
+                                    Capsule(style: .continuous)
+                                        .fill(Color.blue.gradient)
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.leading, 12)
+                        .padding(.bottom, 14)
+                        .zIndex(10)
                     }
-                    .buttonStyle(.plain)
-                    .padding(.leading, 12)
-                    .padding(.bottom, 14)
-                    .zIndex(10)
                 }
-            }
-            .onOpenURL { url in
-                guard !LoomRuntime.isPreviewSafeModeEnabled else { return }
-                guard !(enableLoomAIDebug && showLoomAIDebugPage) else { return }
-                handleShareIntoLoomURLIfNeeded(url)
-#if canImport(GoogleSignIn)
-                _ = GIDSignIn.sharedInstance.handle(url)
-#endif
             }
             .onAppear {
                 if !enableLoomAIDebug {
@@ -263,7 +322,6 @@ struct loomApp: App {
                 }
             }
         }
-        .modelContainer(modelContainer)
     }
 
     private func handleShareIntoLoomURLIfNeeded(_ url: URL) {
@@ -301,5 +359,100 @@ struct loomApp: App {
             base64 += String(repeating: "=", count: 4 - pad)
         }
         return base64
+    }
+}
+
+private struct LoomModelContainerHost<Content: View>: View {
+    let hasAccount: Bool
+    let reviewDemoModeEnabled: Bool
+    let reviewDemoStoreGeneration: Int
+    let content: Content
+
+    init(
+        hasAccount: Bool,
+        reviewDemoModeEnabled: Bool,
+        reviewDemoStoreGeneration: Int,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.hasAccount = hasAccount
+        self.reviewDemoModeEnabled = reviewDemoModeEnabled
+        self.reviewDemoStoreGeneration = reviewDemoStoreGeneration
+        self.content = content()
+    }
+
+    var body: some View {
+        Group {
+            if reviewDemoModeEnabled && hasAccount {
+                LoomReviewDemoBootstrapView {
+                    content
+                }
+                .modelContainer(LoomReviewDemoContainerStore.container(for: reviewDemoStoreGeneration))
+                .id("loom-review-demo-container-\(reviewDemoStoreGeneration)")
+            } else {
+                content
+                    .modelContainer(LoomPrimaryContainerStore.container)
+                    .id("loom-primary-container")
+            }
+        }
+        .onOpenURL { url in
+            guard !LoomRuntime.isPreviewSafeModeEnabled else { return }
+            handleIncomingURL(url)
+#if canImport(GoogleSignIn)
+            _ = GIDSignIn.sharedInstance.handle(url)
+#endif
+        }
+    }
+
+    private func handleIncomingURL(_ url: URL) {
+        guard url.scheme?.lowercased() == "loom" else { return }
+        let host = (url.host ?? "").lowercased()
+        guard host == "share" else { return }
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return
+        }
+        if let payloadID = components.queryItems?.first(where: { $0.name == "payload" })?.value,
+           !payloadID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            NotificationCenter.default.post(name: .loomSharePayloadReceived, object: payloadID)
+            return
+        }
+        if let inlineValue = components.queryItems?.first(where: { $0.name == "inline" })?.value,
+           let payload = decodeInlineSharePayload(from: inlineValue) {
+            let inlineID = "inline-\(payload.id.uuidString)"
+            ShareIntoLoomBridge.storeInlinePayload(payload, id: inlineID)
+            NotificationCenter.default.post(name: .loomSharePayloadReceived, object: inlineID)
+        }
+    }
+
+    private func decodeInlineSharePayload(from encoded: String) -> ShareIntoLoomPayload? {
+        let base64 = base64URLToBase64(encoded)
+        guard let data = Data(base64Encoded: base64) else { return nil }
+        return try? JSONDecoder().decode(ShareIntoLoomPayload.self, from: data)
+    }
+
+    private func base64URLToBase64(_ value: String) -> String {
+        var base64 = value
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        let pad = base64.count % 4
+        if pad > 0 {
+            base64 += String(repeating: "=", count: 4 - pad)
+        }
+        return base64
+    }
+}
+
+private struct LoomReviewDemoBootstrapView<Content: View>: View {
+    @Environment(\.modelContext) private var modelContext
+    let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .task {
+                LoomDemoWorkspaceSeeder.seedDemoWorkspace(in: modelContext)
+            }
     }
 }

@@ -377,7 +377,6 @@ final class LoomAIViewModel: ObservableObject {
     @Published var lastRequestDebugSummary: RequestDebugSummary?
     #endif
 
-    private let service: LoomAIService
     private let chatProvider: LoomAIChatProvider
     private var lastSendAt: Date?
     private var lastSendSignature: String?
@@ -389,7 +388,6 @@ final class LoomAIViewModel: ObservableObject {
     private let maxPromptChipHistorySize = 36
     private let compactContextDefaultsKey = "loom.ai.context.compact.enabled"
     private let whatIsLoomPromptTitle = "What is Loom?"
-    private let whatIsLoomResponseText = "Loom is a life management app that connects your purpose, life areas, goals, and daily actions into one system so you can end stress and live fulfilled."
     private struct CachedContextSnapshotEntry {
         let invalidationKey: String
         let snapshot: LoomAIContextSnapshot
@@ -400,7 +398,6 @@ final class LoomAIViewModel: ObservableObject {
         service: LoomAIService = LoomAIService(),
         chatProvider: LoomAIChatProvider? = nil
     ) {
-        self.service = service
         self.chatProvider = chatProvider ?? LoomAIChatProvider(service: service)
         self.activeChatProviderKind = (chatProvider ?? LoomAIChatProvider(service: service)).currentKind
         refreshRemainingDailyResponses()
@@ -448,9 +445,7 @@ final class LoomAIViewModel: ObservableObject {
         let trimmedTransport = (transportMessageOverride ?? draft).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedDisplay.isEmpty, !trimmedTransport.isEmpty, !isSending else { return }
         activeChatProviderKind = chatProvider.currentKind
-        let purposeVisionMode = purposeVisionAutoWriteMode(for: trimmedTransport, displayText: trimmedDisplay)
-        let isLocalShortcutRequest = isWhatIsLoomPrompt(trimmedTransport) || isWhatIsLoomPrompt(trimmedDisplay)
-        let requestUsesSpendLimiter = !isLocalShortcutRequest && (purposeVisionMode != nil || activeChatProviderKind.usesSpendLimiter)
+        let requestUsesSpendLimiter = activeChatProviderKind.usesSpendLimiter
         refreshRemainingDailyResponses()
         guard !requestUsesSpendLimiter || isDailyLimiterDisabled || remainingDailyResponses > 0 else {
             errorMessage = nil
@@ -509,70 +504,11 @@ final class LoomAIViewModel: ObservableObject {
                 )
             }
 
-            if isLocalShortcutRequest {
-                guard !Task.isCancelled else { return }
-                await MainActor.run {
-                    let assistant = LoomAIChatMessage(
-                        threadID: thread.id,
-                        threadKey: thread.threadKey,
-                        roleRaw: LoomAIChatRole.assistant.rawValue,
-                        content: whatIsLoomResponseText
-                    )
-                    context.insert(assistant)
-                    thread.updatedAt = .now
-                    try? context.save()
-                    latestSuggestedActions = []
-                }
-                postChatMessagesDidChange(threadKey: thread.threadKey)
-                return
-            }
-
             #if DEBUG
             let requestDebug = makeRequestDebugSummary(context: contextSnapshot, messageCount: outgoing.count)
             lastRequestDebugSummary = requestDebug
             print("[LoomAI] LoomAI contextBytes=\(requestDebug.contextBytes) keys=\(requestDebug.contextKeys) messageCount=\(requestDebug.messageCount)")
             #endif
-
-            if let visionMode = purposeVisionMode {
-                let currentVision = contextSnapshot.drivingForce?.vision ?? ""
-                let previousSuggestions = previousPurposeVisionSuggestions(from: history)
-                let autowriteResponse = try await service.sendPurposeVisionAutoWrite(
-                    currentVision: currentVision,
-                    previousSuggestions: previousSuggestions,
-                    mode: visionMode,
-                    context: contextSnapshot
-                )
-                guard !Task.isCancelled else { return }
-                _ = incrementDailySpendLedger(with: autowriteResponse)
-
-                let enrichedAutowriteResponse = enrichPurposeVisionAutowriteResponse(
-                    autowriteResponse,
-                    mode: visionMode
-                )
-                let finalReply = enrichedAutowriteResponse.message.trimmingCharacters(in: .whitespacesAndNewlines)
-                let assistantPreviewMessage = LoomAIChatMessage(
-                    threadID: thread.id,
-                    threadKey: thread.threadKey,
-                    roleRaw: LoomAIChatRole.assistant.rawValue,
-                    content: finalReply.isEmpty ? "I generated Purpose Vision options below." : finalReply,
-                    chipsJSON: LoomAIChatMessageChipsCodec.encode(enrichedAutowriteResponse.chips),
-                    actionsJSON: LoomAIChatMessageActionsCodec.encode(enrichedAutowriteResponse.actions),
-                    debugJSON: LoomAIDebugCodec.encode(enrichedAutowriteResponse.debug),
-                    groundingJSON: LoomAIChatMessageGroundingCodec.encode(enrichedAutowriteResponse.grounding),
-                    suggestionCardsJSON: LoomAIChatMessageSuggestionCardsCodec.encode(enrichedAutowriteResponse.suggestionCards),
-                    nextActionJSON: LoomAIChatMessageNextActionCodec.encode(enrichedAutowriteResponse.nextAction)
-                )
-                await MainActor.run {
-                    context.insert(assistantPreviewMessage)
-                    thread.updatedAt = .now
-                    try? context.save()
-                    latestSuggestedActions = enrichedAutowriteResponse.actions
-                    followUpPromptChips = enrichedAutowriteResponse.chips.map(\.title)
-                    refreshRemainingDailyResponses()
-                }
-                postChatMessagesDidChange(threadKey: thread.threadKey)
-                return
-            }
 
             let providerResponse = try await chatProvider.sendChat(
                 messages: outgoing,
@@ -590,7 +526,7 @@ final class LoomAIViewModel: ObservableObject {
                 _ = incrementDailySpendLedger(with: response)
             }
             let replyText = response.message.trimmingCharacters(in: .whitespacesAndNewlines)
-            let finalReply = replyText.isEmpty ? "Empty response from LoomAI proxy." : replyText
+            let finalReply = replyText.isEmpty ? LoomAIChatProvider.tryLaterMessage : replyText
             let assistantPreviewMessage = LoomAIChatMessage(
                 threadID: thread.id,
                 threadKey: thread.threadKey,
@@ -623,7 +559,10 @@ final class LoomAIViewModel: ObservableObject {
                     contextSnapshot: contextSnapshot
                 )
             }
-            if response.chips.isEmpty {
+            if providerResponse.provider == .localCompatibility {
+                followUpPromptChips = makeCompatibilityPromptChips(from: contextSnapshot, maxCount: 12)
+                lastFollowUpPromptSourceSignature = nil
+            } else if response.chips.isEmpty {
                 await refreshFollowUpPromptChipsViaAI(in: context, threadMessages: updatedHistory)
             }
         } catch is CancellationError {
@@ -633,7 +572,6 @@ final class LoomAIViewModel: ObservableObject {
                 // User-initiated cancel should only show the transient top "Cancelled" notice.
                 return
             }
-            let message = (error as NSError).localizedDescription
             let serviceError = error as? LoomAIService.LoomAIServiceError
             await MainActor.run {
                 if let thread = try? ensureThread(in: context, threadKey: threadKey) {
@@ -641,7 +579,7 @@ final class LoomAIViewModel: ObservableObject {
                         threadID: thread.id,
                         threadKey: thread.threadKey,
                         roleRaw: LoomAIChatRole.assistant.rawValue,
-                        content: message
+                        content: LoomAIChatProvider.tryLaterMessage
                     )
                     context.insert(assistantError)
                     thread.updatedAt = .now
@@ -649,7 +587,7 @@ final class LoomAIViewModel: ObservableObject {
                 }
                 latestSuggestedActions = []
                 followUpPromptChips = []
-                errorMessage = serviceError?.message == "Could not parse response." ? "AI response format mismatch" : message
+                errorMessage = nil
                 #if DEBUG
                 debugFailureDetail = DebugFailureDetail(
                     statusCode: serviceError?.statusCode,
@@ -790,8 +728,11 @@ final class LoomAIViewModel: ObservableObject {
             errorMessage = nil
             return true
         case "addFulfillmentIdentity":
-            let identity = (action.payload["identity"] ?? action.payload["role"] ?? action.payload["text"] ?? "")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let identity = LoomAIChatProvider.canonicalInsertedValue(
+                actionType: action.type,
+                payload: action.payload,
+                fallbackTitle: action.title
+            )
             guard !identity.isEmpty else {
                 errorMessage = "Identity suggestion is missing the identity text."
                 return false
@@ -813,8 +754,11 @@ final class LoomAIViewModel: ObservableObject {
             errorMessage = nil
             return true
         case "replaceFulfillmentIdentity":
-            let newIdentity = (action.payload["identity"] ?? action.payload["role"] ?? action.payload["text"] ?? "")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let newIdentity = LoomAIChatProvider.canonicalInsertedValue(
+                actionType: action.type,
+                payload: action.payload,
+                fallbackTitle: action.title
+            )
             let replaceIdentity = (action.payload["replaceIdentity"] ?? action.payload["oldIdentity"] ?? "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !newIdentity.isEmpty, !replaceIdentity.isEmpty else {
@@ -863,8 +807,11 @@ final class LoomAIViewModel: ObservableObject {
             errorMessage = nil
             return true
         case "addPassion", "addPassionItem":
-            let passionText = (action.payload["passion"] ?? action.payload["title"] ?? action.payload["text"] ?? "")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let passionText = LoomAIChatProvider.canonicalInsertedValue(
+                actionType: action.type,
+                payload: action.payload,
+                fallbackTitle: action.title
+            )
             let rawEmotion = (action.payload["emotion"] ?? action.payload["passionType"] ?? "love")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .lowercased()
@@ -926,7 +873,13 @@ final class LoomAIViewModel: ObservableObject {
             errorMessage = nil
             return true
         case "createLittleWin", "addLittleWin":
-            let activity = clampedLittleWinActivityText(action.payload["activity"] ?? action.payload["text"] ?? action.title)
+            let activity = clampedLittleWinActivityText(
+                LoomAIChatProvider.canonicalInsertedValue(
+                    actionType: action.type,
+                    payload: action.payload,
+                    fallbackTitle: action.title
+                )
+            )
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !activity.isEmpty else {
                 errorMessage = "Little Win suggestion is missing an activity."
@@ -976,7 +929,13 @@ final class LoomAIViewModel: ObservableObject {
             errorMessage = nil
             return true
         case "replaceLittleWin":
-            let replacementActivity = clampedLittleWinActivityText(action.payload["activity"] ?? action.payload["text"] ?? action.title)
+            let replacementActivity = clampedLittleWinActivityText(
+                LoomAIChatProvider.canonicalInsertedValue(
+                    actionType: action.type,
+                    payload: action.payload,
+                    fallbackTitle: action.title
+                )
+            )
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             let replaceActivity = (action.payload["replaceActivity"] ?? action.payload["oldActivity"] ?? "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1079,12 +1038,18 @@ final class LoomAIViewModel: ObservableObject {
         threadMessages: [LoomAIChatMessage],
         snapshotInvalidationKey: String? = nil
     ) {
+        activeChatProviderKind = chatProvider.currentKind
         if !threadMessages.isEmpty {
             suggestedPromptChips = []
             return
         }
         do {
             let snapshot = try cachedContextSnapshot(in: context, invalidationKey: snapshotInvalidationKey)
+            if activeChatProviderKind == .localCompatibility {
+                suggestedPromptChips = makeCompatibilityPromptChips(from: snapshot, maxCount: 12)
+                followUpPromptChips = []
+                return
+            }
             promptChipShuffleCounter &+= 1
             let dynamic = makeDynamicPromptChips(
                 from: snapshot,
@@ -1115,15 +1080,55 @@ final class LoomAIViewModel: ObservableObject {
         threadMessages: [LoomAIChatMessage],
         snapshotInvalidationKey: String? = nil
     ) async {
+        activeChatProviderKind = chatProvider.currentKind
         guard !threadMessages.isEmpty else {
             followUpPromptChips = []
             lastFollowUpPromptSourceSignature = nil
+            return
+        }
+        if activeChatProviderKind == .localCompatibility {
+            do {
+                let snapshot = try cachedContextSnapshot(in: context, invalidationKey: snapshotInvalidationKey)
+                followUpPromptChips = makeCompatibilityPromptChips(from: snapshot, maxCount: 12)
+                lastFollowUpPromptSourceSignature = nil
+            } catch {
+                followUpPromptChips = []
+            }
             return
         }
         await refreshFollowUpPromptChipsViaAI(
             in: context,
             threadMessages: threadMessages,
             snapshotInvalidationKey: snapshotInvalidationKey
+        )
+    }
+
+    private func makeCompatibilityPromptChips(
+        from snapshot: LoomAIContextSnapshot,
+        maxCount: Int
+    ) -> [String] {
+        var chips: [String] = [whatIsLoomPromptTitle]
+        let categories = snapshot.fulfillmentCategories
+            .map(\.name)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .reduce(into: [String]()) { acc, item in
+                if !acc.contains(where: { $0.caseInsensitiveCompare(item) == .orderedSame }) {
+                    acc.append(item)
+                }
+            }
+        for category in categories {
+            chips.append("Daily Little Wins for \(category)")
+            chips.append("New identities for \(category)")
+        }
+        for passionArea in PassionType.allCases.map(\.rawValue) {
+            chips.append("New passions for \(passionArea)")
+        }
+        return filterChipsWithSelectableLists(
+            chips,
+            categories: categories,
+            outcomes: [],
+            maxCount: maxCount
         )
     }
 
@@ -1469,6 +1474,9 @@ final class LoomAIViewModel: ObservableObject {
             if hasAllowedSuffix(trimmed, prefix: "New Mission for ", options: cleanedCategories) {
                 return true
             }
+            if hasAllowedSuffix(trimmed, prefix: "New identities for ", options: cleanedCategories) {
+                return true
+            }
             if hasAllowedSuffix(trimmed, prefix: "New Identity for ", options: cleanedCategories) {
                 return true
             }
@@ -1499,6 +1507,7 @@ final class LoomAIViewModel: ObservableObject {
         let templatedPrefixes = [
             "daily little wins for ",
             "new mission for ",
+            "new identities for ",
             "new identity for ",
             "new passions for ",
             "next step for ",
@@ -1508,12 +1517,6 @@ final class LoomAIViewModel: ObservableObject {
             return prefix
         }
         return trimmed
-    }
-
-    private func isWhatIsLoomPrompt(_ value: String) -> Bool {
-        value
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .caseInsensitiveCompare(whatIsLoomPromptTitle) == .orderedSame
     }
 
     func buildContextSnapshot(in context: ModelContext) throws -> LoomAIContextSnapshot {
@@ -2492,164 +2495,6 @@ final class LoomAIViewModel: ObservableObject {
         )
         guard let rawTitle else { return nil }
         return sanitizeAPISummarizedThreadTitle(rawTitle)
-    }
-
-    private func purposeVisionAutoWriteMode(for transportText: String, displayText: String) -> String? {
-        let value = "\(transportText) \(displayText)"
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        guard !value.isEmpty else { return nil }
-        if value.contains("reword vision")
-            || value.contains("reword my vision")
-            || value.contains("rewrite my vision")
-            || value.contains("rewrite vision")
-        {
-            return "rewordVision"
-        }
-        if value.contains("new vision")
-            || value.contains("create a new vision")
-            || value.contains("create new vision")
-            || value.contains("create a vision")
-            || value.contains("create vision")
-            || value.contains("improve my purpose vision")
-            || value.contains("improve purpose vision")
-        {
-            return "newVision"
-        }
-        return nil
-    }
-
-    private func previousPurposeVisionSuggestions(from history: [LoomAIChatMessage]) -> [String] {
-        var seen = Set<String>()
-        var results: [String] = []
-
-        for message in history.reversed() where message.roleRaw == LoomAIChatRole.assistant.rawValue {
-            let cards = LoomAIChatMessageSuggestionCardsCodec.decode(message.suggestionCardsJSON)
-            for card in cards {
-                for option in card.options where option.type == "updatePurposeVision" || option.type == "replacePurposeVision" {
-                    let text = (option.payload["text"] ?? option.payload["vision"] ?? option.title)
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                    if text.isEmpty { continue }
-                    let key = text.lowercased()
-                    if seen.insert(key).inserted {
-                        results.append(text)
-                    }
-                    if results.count >= 8 { return results }
-                }
-            }
-
-            if let data = message.content.data(using: .utf8),
-               let payload = try? JSONDecoder().decode(PurposeVisionMessagePayload.self, from: data) {
-                for suggestion in payload.suggestions {
-                    let text = suggestion.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if text.isEmpty { continue }
-                    let key = text.lowercased()
-                    if seen.insert(key).inserted {
-                        results.append(text)
-                    }
-                    if results.count >= 8 { return results }
-                }
-            }
-        }
-
-        return results
-    }
-
-    private func enrichPurposeVisionAutowriteResponse(
-        _ response: LoomAIService.LoomAIResponse,
-        mode: String
-    ) -> LoomAIService.LoomAIResponse {
-        let suggestions = extractPurposeVisionSuggestions(from: response).prefix(3).map { $0 }
-        guard !suggestions.isEmpty else { return response }
-
-        let labels = ["A", "B", "C"]
-        let options = suggestions.enumerated().map { index, suggestion in
-            LoomAISuggestionOption(
-                id: "purpose-vision-option-\(index + 1)",
-                label: labels[min(index, labels.count - 1)],
-                title: suggestion,
-                type: "updatePurposeVision",
-                payload: ["text": suggestion]
-            )
-        }
-        let cardTitle = mode.lowercased() == "rewordvision"
-            ? "Reworded Purpose Vision options"
-            : "New Purpose Vision"
-        let suggestionCards = [
-            LoomAISuggestionCard(
-                id: "purpose-vision-autowrite",
-                title: cardTitle,
-                description: "",
-                options: options
-            )
-        ]
-        let actions = options.map { option in
-            LoomAISuggestedAction(
-                id: option.id,
-                title: option.title,
-                type: option.type,
-                payload: option.payload
-            )
-        }
-        let message = mode.lowercased() == "rewordvision"
-            ? "I generated reworded Purpose Vision options below."
-            : "I generated new Purpose Vision options below."
-        return LoomAIService.LoomAIResponse(
-            message: message,
-            grounding: response.grounding,
-            suggestionCards: suggestionCards,
-            nextAction: nil,
-            chips: response.chips,
-            actions: actions,
-            debug: response.debug,
-            usage: response.usage,
-            elapsedMS: response.elapsedMS
-        )
-    }
-
-    private func extractPurposeVisionSuggestions(from response: LoomAIService.LoomAIResponse) -> [String] {
-        var suggestions: [String] = []
-        var seen = Set<String>()
-
-        for card in response.suggestionCards {
-            for option in card.options where option.type == "updatePurposeVision" || option.type == "replacePurposeVision" {
-                let text = (option.payload["text"] ?? option.payload["vision"] ?? option.title)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                if text.isEmpty { continue }
-                let key = text.lowercased()
-                if seen.insert(key).inserted {
-                    suggestions.append(text)
-                }
-            }
-        }
-
-        for action in response.actions where action.type == "updatePurposeVision" || action.type == "replacePurposeVision" {
-            let text = (action.payload["text"] ?? action.payload["vision"] ?? action.title)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            if text.isEmpty { continue }
-            let key = text.lowercased()
-            if seen.insert(key).inserted {
-                suggestions.append(text)
-            }
-        }
-
-        if let data = response.message.data(using: .utf8),
-           let payload = try? JSONDecoder().decode(PurposeVisionMessagePayload.self, from: data) {
-            for suggestion in payload.suggestions {
-                let text = suggestion.trimmingCharacters(in: .whitespacesAndNewlines)
-                if text.isEmpty { continue }
-                let key = text.lowercased()
-                if seen.insert(key).inserted {
-                    suggestions.append(text)
-                }
-            }
-        }
-
-        return suggestions
-    }
-
-    private struct PurposeVisionMessagePayload: Decodable {
-        var suggestions: [String]
     }
 
     private func shouldRequestThreadTitle(after assistantReply: String) -> Bool {

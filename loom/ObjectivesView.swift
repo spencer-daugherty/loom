@@ -403,13 +403,25 @@ struct ObjectivesView: View {
     }
 
     private func startMeasure(for outcome: Outcomes, latestMeasure: OutcomesMeasure?) -> Double? {
-        guard let entryID = OutcomeStartingValueStore.entryID(for: outcome.outcome_id) else { return nil }
-        return outcomeMeasureEntries.first(where: { $0.outcome_id == outcome.outcome_id && $0.id == entryID })?.measure
+        if let entryID = OutcomeStartingValueStore.entryID(for: outcome.outcome_id),
+           let storedEntry = outcomeMeasureEntries.first(where: { $0.outcome_id == outcome.outcome_id && $0.id == entryID }) {
+            return storedEntry.measure
+        }
+        return outcomeMeasureEntries
+            .filter { $0.outcome_id == outcome.outcome_id }
+            .min(by: { $0.measuredAt < $1.measuredAt })?
+            .measure
     }
 
     private func startMeasuredAt(for outcome: Outcomes, latestMeasure: OutcomesMeasure?) -> Date? {
-        guard let entryID = OutcomeStartingValueStore.entryID(for: outcome.outcome_id) else { return nil }
-        return outcomeMeasureEntries.first(where: { $0.outcome_id == outcome.outcome_id && $0.id == entryID })?.measuredAt
+        if let entryID = OutcomeStartingValueStore.entryID(for: outcome.outcome_id),
+           let storedEntry = outcomeMeasureEntries.first(where: { $0.outcome_id == outcome.outcome_id && $0.id == entryID }) {
+            return storedEntry.measuredAt
+        }
+        return outcomeMeasureEntries
+            .filter { $0.outcome_id == outcome.outcome_id }
+            .min(by: { $0.measuredAt < $1.measuredAt })?
+            .measuredAt
     }
 
     private func formattedDate(_ date: Date) -> String {

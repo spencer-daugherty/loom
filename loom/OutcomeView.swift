@@ -8,7 +8,8 @@ private enum OutcomeContributingLittleWinsStore {
     private static let defaultsKey = "outcome_contributing_little_wins_v1"
 
     private static func loadMap() -> [String: [String]] {
-        guard let data = UserDefaults.standard.data(forKey: defaultsKey),
+        let scopedKey = LoomDefaultsScope.scopedKey(defaultsKey)
+        guard let data = UserDefaults.standard.data(forKey: scopedKey),
               let decoded = try? JSONDecoder().decode([String: [String]].self, from: data) else {
             return [:]
         }
@@ -17,7 +18,7 @@ private enum OutcomeContributingLittleWinsStore {
 
     private static func saveMap(_ map: [String: [String]]) {
         guard let data = try? JSONEncoder().encode(map) else { return }
-        UserDefaults.standard.set(data, forKey: defaultsKey)
+        UserDefaults.standard.set(data, forKey: LoomDefaultsScope.scopedKey(defaultsKey))
     }
 
     static func focusIDs(for outcomeID: UUID) -> [UUID] {
@@ -68,7 +69,8 @@ private enum CompletedOutcomePassionsStore {
     private static let defaultsKey = "completed_outcome_passions_v1"
 
     private static func loadMap() -> [String: [Snapshot]] {
-        guard let data = UserDefaults.standard.data(forKey: defaultsKey),
+        let scopedKey = LoomDefaultsScope.scopedKey(defaultsKey)
+        guard let data = UserDefaults.standard.data(forKey: scopedKey),
               let decoded = try? JSONDecoder().decode([String: [Snapshot]].self, from: data) else {
             return [:]
         }
@@ -77,7 +79,7 @@ private enum CompletedOutcomePassionsStore {
 
     private static func saveMap(_ map: [String: [Snapshot]]) {
         guard let data = try? JSONEncoder().encode(map) else { return }
-        UserDefaults.standard.set(data, forKey: defaultsKey)
+        UserDefaults.standard.set(data, forKey: LoomDefaultsScope.scopedKey(defaultsKey))
     }
 
     static func snapshots(for completedArchiveID: UUID) -> [Snapshot] {
@@ -107,7 +109,8 @@ enum CompletedOutcomeContributingLittleWinsStore {
     private static let defaultsKey = "completed_outcome_contributing_little_wins_v1"
 
     private static func loadMap() -> [String: [Snapshot]] {
-        guard let data = UserDefaults.standard.data(forKey: defaultsKey),
+        let scopedKey = LoomDefaultsScope.scopedKey(defaultsKey)
+        guard let data = UserDefaults.standard.data(forKey: scopedKey),
               let decoded = try? JSONDecoder().decode([String: [Snapshot]].self, from: data) else {
             return [:]
         }
@@ -116,7 +119,7 @@ enum CompletedOutcomeContributingLittleWinsStore {
 
     private static func saveMap(_ map: [String: [Snapshot]]) {
         guard let data = try? JSONEncoder().encode(map) else { return }
-        UserDefaults.standard.set(data, forKey: defaultsKey)
+        UserDefaults.standard.set(data, forKey: LoomDefaultsScope.scopedKey(defaultsKey))
     }
 
     static func snapshots(for completedArchiveID: UUID) -> [Snapshot] {

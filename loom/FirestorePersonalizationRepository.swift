@@ -79,6 +79,35 @@ actor FirestorePersonalizationRepository: PersonalizationRepository {
         }
     }
 
+    func clearState(for userKey: String) async throws {
+        guard let uid = PersonalizationUserIdentity.firebaseUID(from: userKey) else {
+            try await fallback.clearState(for: userKey)
+            return
+        }
+
+        do {
+            let currentRef = db
+                .collection("users")
+                .document(uid)
+                .collection("personalization")
+                .document("current")
+            let historyRef = db
+                .collection("users")
+                .document(uid)
+                .collection("personalization")
+                .document("history")
+                .collection("snapshots")
+
+            try? await currentRef.delete()
+            let historyDocs = try await historyRef.getDocuments()
+            for doc in historyDocs.documents {
+                try? await doc.reference.delete()
+            }
+        } catch {
+            try await fallback.clearState(for: userKey)
+        }
+    }
+
     private static func encodeSnapshot(_ snapshot: PersonalizationSnapshot) -> [String: Any] {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601

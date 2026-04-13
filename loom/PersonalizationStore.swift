@@ -13,6 +13,7 @@ struct PersonalizationSnapshotState: Codable, Sendable {
 protocol PersonalizationRepository: Sendable {
     func loadState(for userKey: String) async throws -> PersonalizationSnapshotState
     func saveState(_ state: PersonalizationSnapshotState, for userKey: String) async throws
+    func clearState(for userKey: String) async throws
 }
 
 actor LocalPersonalizationRepository: PersonalizationRepository {
@@ -47,6 +48,13 @@ actor LocalPersonalizationRepository: PersonalizationRepository {
         encoder.outputFormatting = [.sortedKeys]
         let data = try encoder.encode(state)
         try data.write(to: url, options: [.atomic])
+    }
+
+    func clearState(for userKey: String) async throws {
+        let url = fileURL(for: userKey)
+        if FileManager.default.fileExists(atPath: url.path) {
+            try FileManager.default.removeItem(at: url)
+        }
     }
 
     private func ensureDirectory() throws {
@@ -201,6 +209,18 @@ final class PersonalizationStore: ObservableObject {
             history: history,
             limit: limit
         )
+    }
+
+    func resetCurrentUserState() async {
+        let resolvedUserKey = PersonalizationUserIdentity.currentUserKey()
+        do {
+            try await repository.clearState(for: resolvedUserKey)
+        } catch {
+            AppDebugActivityLog.log("PersonalizationStore", "resetCurrentUserState failed error=\(error.localizedDescription)")
+        }
+        let emptyState = PersonalizationSnapshotState.empty
+        apply(state: emptyState, updateUserKey: false)
+        Self.cacheState(emptyState, for: resolvedUserKey)
     }
 
     static func cachedContextForCurrentUser(defaults: UserDefaults = .standard) -> PersonalizationContextValue? {

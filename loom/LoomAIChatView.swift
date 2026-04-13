@@ -53,6 +53,7 @@ struct LoomAIChatView: View {
     private let bestUseLoomChipTitle = "How can I best use Loom?"
     private let bestUseLoomPrompt = "Based on everything Loom knows about me - my purpose vision, passions, fulfillment areas, goals, personality profile, current activity-explain the single most effective way for me to use Loom right now to reduce stress and live fulfilled."
     private let requestTimedOutMessage = "The request timed out."
+    private let compatibilityNoteText = "Use a device compatible with Apple Intelligence to unlock custom chats"
 
     private var messages: [LoomAIChatMessage] { threadMessages }
     private var assistantBubbleWidth: CGFloat {
@@ -68,6 +69,10 @@ struct LoomAIChatView: View {
 
     private var visiblePromptChips: [String] {
         messages.isEmpty ? viewModel.suggestedPromptChips : viewModel.followUpPromptChips
+    }
+
+    private var supportsCustomChat: Bool {
+        viewModel.activeChatProviderKind == .appleIntelligence
     }
 
     private var shouldShowLoadingUI: Bool {
@@ -277,7 +282,16 @@ struct LoomAIChatView: View {
                 if !visiblePromptChips.isEmpty {
                     suggestedPromptChipBar
                 }
-                composer
+                if !supportsCustomChat {
+                    Text(compatibilityNoteText)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 2)
+                }
+                if supportsCustomChat {
+                    composer
+                }
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)
@@ -290,7 +304,12 @@ struct LoomAIChatView: View {
         }
         .onAppear {
             guard isActivePage else { return }
-            scheduleAutoFocusInput()
+            if supportsCustomChat {
+                scheduleAutoFocusInput()
+            } else {
+                isInputFocused = false
+                dismissKeyboard()
+            }
         }
         .onChange(of: isActivePage) { _, isActive in
             if !isActive {
@@ -305,7 +324,12 @@ struct LoomAIChatView: View {
                 isInputFocused = false
                 dismissKeyboard()
             } else {
-                scheduleAutoFocusInput()
+                if supportsCustomChat {
+                    scheduleAutoFocusInput()
+                } else {
+                    isInputFocused = false
+                    dismissKeyboard()
+                }
                 updateDeepThinkingState()
             }
         }
@@ -681,62 +705,69 @@ struct LoomAIChatView: View {
         )
     }
 
+    @ViewBuilder
     private func messageBubble(_ message: LoomAIChatMessage) -> some View {
         let isUser = message.roleRaw == LoomAIChatRole.user.rawValue
         let assistantContent = isUser ? "" : sanitizedAssistantMessageContent(for: message)
-        return HStack {
-            if isUser { Spacer(minLength: 0) }
-            VStack(alignment: .leading, spacing: 4) {
-                messageBubbleText(message, isUser: isUser, assistantContent: assistantContent)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                    .background(
-                        RoundedRectangle(cornerRadius: 14)
-                            .fill(
-                                isUser
-                                ? Color.accentColor
-                                : (colorScheme == .dark ? Color(.secondarySystemBackground) : Color(.systemGray5))
-                            )
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14)
-                            .stroke(
-                                isUser
-                                ? Color.clear
-                                : Color.primary.opacity(colorScheme == .dark ? 0.08 : 0.10),
-                                lineWidth: 1
-                            )
-                    )
-                    .contextMenu {
-                        Button {
-                            UIPasteboard.general.string = copyableMessageText(for: message)
-                        } label: {
-                            Label("Copy", systemImage: "doc.on.doc")
-                        }
-                    }
+        let shouldShowBubble = isUser
+            || !assistantContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !assistantHasRenderableSuggestions(message)
 
-                if !isUser {
-                    HStack(spacing: 8) {
-                        if let providerLabel = assistantProviderLabel(for: message) {
-                            Text(providerLabel)
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.secondary)
+        if shouldShowBubble {
+            HStack {
+                if isUser { Spacer(minLength: 0) }
+                VStack(alignment: .leading, spacing: 4) {
+                    messageBubbleText(message, isUser: isUser, assistantContent: assistantContent)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 14)
+                                .fill(
+                                    isUser
+                                    ? Color.accentColor
+                                    : (colorScheme == .dark ? Color(.secondarySystemBackground) : Color(.systemGray5))
+                                )
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14)
+                                .stroke(
+                                    isUser
+                                    ? Color.clear
+                                    : Color.primary.opacity(colorScheme == .dark ? 0.08 : 0.10),
+                                    lineWidth: 1
+                                )
+                        )
+                        .contextMenu {
+                            Button {
+                                UIPasteboard.general.string = copyableMessageText(for: message)
+                            } label: {
+                                Label("Copy", systemImage: "doc.on.doc")
+                            }
                         }
-                        Spacer(minLength: 0)
-                        #if DEBUG
-                        Text(messageTimestampLine(message.createdAt))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        #endif
+
+                    if !isUser {
+                        HStack(spacing: 8) {
+                            if let providerLabel = assistantProviderLabel(for: message) {
+                                Text(providerLabel)
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 0)
+                            #if DEBUG
+                            Text(messageTimestampLine(message.createdAt))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            #endif
+                        }
+                        .padding(.horizontal, 4)
                     }
-                    .padding(.horizontal, 4)
                 }
+                .frame(width: isUser ? nil : assistantBubbleWidth, alignment: .leading)
+                .frame(maxWidth: isUser ? userBubbleMaxWidth : assistantBubbleWidth, alignment: isUser ? .trailing : .leading)
+                if !isUser { Spacer(minLength: 0) }
             }
-            .frame(width: isUser ? nil : assistantBubbleWidth, alignment: .leading)
-            .frame(maxWidth: isUser ? userBubbleMaxWidth : assistantBubbleWidth, alignment: isUser ? .trailing : .leading)
-            if !isUser { Spacer(minLength: 0) }
+            .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
         }
-        .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
     }
 
     @ViewBuilder
@@ -749,7 +780,10 @@ struct LoomAIChatView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
         } else {
-            LoomAITokenizedMessageView(content: assistantContent)
+            LoomAITokenizedMessageView(
+                content: assistantContent,
+                highlightReferences: assistantMessageHighlightReferences()
+            )
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
@@ -769,6 +803,7 @@ struct LoomAIChatView: View {
         let prefixes = [
             "Daily Little Wins for ",
             "New Mission for ",
+            "New identities for ",
             "New Identity for ",
             "Next step for ",
             "Plan for ",
@@ -847,6 +882,69 @@ struct LoomAIChatView: View {
         return trimmed
     }
 
+    private func assistantMessageHighlightReferences() -> [LoomAIInlineReference] {
+        var references: [LoomAIInlineReference] = []
+        var seen = Set<String>()
+
+        func appendReference(_ reference: LoomAIInlineReference) {
+            let key = "\(reference.kind)|\(reference.displayText.lowercased())|\(reference.categoryName?.lowercased() ?? "")"
+            guard seen.insert(key).inserted else { return }
+            references.append(reference)
+        }
+
+        let categoryNameByID = Dictionary(uniqueKeysWithValues: fulfillments.map {
+            ($0.category_id, $0.category.trimmingCharacters(in: .whitespacesAndNewlines))
+        })
+
+        for fulfillment in fulfillments {
+            let category = fulfillment.category.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !category.isEmpty else { continue }
+            appendReference(.init(kind: "C", displayText: category, categoryName: category))
+        }
+
+        for outcome in outcomes {
+            let title = outcome.outcome.trimmingCharacters(in: .whitespacesAndNewlines)
+            let category = outcome.category.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty, !category.isEmpty else { continue }
+            appendReference(.init(kind: "C", displayText: title, categoryName: category))
+        }
+
+        for row in fulfillmentFocusRows {
+            let activity = row.activity.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !activity.isEmpty,
+                  let category = categoryNameByID[row.category_id]?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !category.isEmpty else { continue }
+            appendReference(.init(kind: "C", displayText: activity, categoryName: category))
+        }
+
+        for role in fulfillmentRoles {
+            let identity = role.role.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !identity.isEmpty,
+                  let category = categoryNameByID[role.category_id]?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !category.isEmpty else { continue }
+            appendReference(.init(kind: "C", displayText: identity, categoryName: category))
+        }
+
+        for passion in passions {
+            let title = passion.passion.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty else { continue }
+            appendReference(.init(kind: "P", displayText: title, categoryName: nil))
+        }
+
+        return references.sorted {
+            if $0.displayText.count != $1.displayText.count {
+                return $0.displayText.count > $1.displayText.count
+            }
+            return $0.displayText.localizedCaseInsensitiveCompare($1.displayText) == .orderedAscending
+        }
+    }
+
+    private func assistantHasRenderableSuggestions(_ message: LoomAIChatMessage) -> Bool {
+        !LoomAIChatMessageSuggestionCardsCodec.decode(message.suggestionCardsJSON).isEmpty
+            || !LoomAIChatMessageActionsCodec.decode(message.actionsJSON).isEmpty
+            || LoomAIChatMessageNextActionCodec.decode(message.nextActionJSON) != nil
+    }
+
     private func trimmedUnrelatedPromptRedirect(in content: String) -> String? {
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
@@ -862,20 +960,8 @@ struct LoomAIChatView: View {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
 
-        switch model {
-        case "loom.local.fallback", "loom.local.best_use":
-            return "Hardcoded (Not AI)"
-        case "apple.intelligence":
-            return "Apple Intelligence"
-        case "openai.worker":
-            return "OpenAI"
-        case let value? where value.hasPrefix("loom.local"):
-            return "Automatic"
-        case let value? where value.contains("heuristic"):
-            return "Automatic"
-        default:
-            return nil
-        }
+        guard let model else { return nil }
+        return model.hasPrefix("apple.intelligence") ? "Apple Intelligence" : nil
     }
 
     @ViewBuilder
@@ -1277,8 +1363,11 @@ struct LoomAIChatView: View {
 
     private func suggestedIdentityPrimaryText(action: LoomAISuggestedAction, isApplied: Bool) -> some View {
         let category = (action.payload["categoryName"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let identity = (action.payload["identity"] ?? action.payload["role"] ?? action.payload["text"] ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let identity = LoomAIChatProvider.canonicalInsertedValue(
+            actionType: action.type,
+            payload: action.payload,
+            fallbackTitle: action.title
+        )
         let replaceIdentity = (action.payload["replaceIdentity"] ?? action.payload["oldIdentity"] ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let isReplace = action.type == "replaceFulfillmentIdentity"
@@ -1310,8 +1399,11 @@ struct LoomAIChatView: View {
     }
 
     private func suggestedPassionPrimaryText(action: LoomAISuggestedAction, isApplied: Bool) -> some View {
-        let passion = (action.payload["passion"] ?? action.payload["title"] ?? action.payload["text"] ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let passion = LoomAIChatProvider.canonicalInsertedValue(
+            actionType: action.type,
+            payload: action.payload,
+            fallbackTitle: action.title
+        )
         return VStack(alignment: .leading, spacing: 3) {
             if !passion.isEmpty {
                 Text(passion)
@@ -1340,8 +1432,11 @@ struct LoomAIChatView: View {
     }
 
     private func suggestedLittleWinPrimaryText(action: LoomAISuggestedAction, isApplied: Bool) -> some View {
-        let activity = (action.payload["activity"] ?? action.payload["text"] ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let activity = LoomAIChatProvider.canonicalInsertedValue(
+            actionType: action.type,
+            payload: action.payload,
+            fallbackTitle: action.title
+        )
         let isReplace = action.type == "replaceLittleWin"
         let replaced = (action.payload["replaceActivity"] ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1634,6 +1729,13 @@ struct LoomAIChatView: View {
     }
 
     private func scheduleAutoFocusInput() {
+        guard supportsCustomChat else {
+            inputAutoFocusTask?.cancel()
+            inputAutoFocusTask = nil
+            isInputFocused = false
+            dismissKeyboard()
+            return
+        }
         inputAutoFocusTask?.cancel()
         inputAutoFocusTask = Task { @MainActor in
             guard isActivePage else { return }
@@ -2100,6 +2202,12 @@ private struct LoomAIDeepStateScanningCard: View {
     }
 }
 
+private struct LoomAIInlineReference: Hashable {
+    let kind: String
+    let displayText: String
+    let categoryName: String?
+}
+
 private struct LoomAIAnimatedOutlineBorder: View {
     let cornerRadius: CGFloat
     @State private var outlineAngle: Double = 0
@@ -2227,6 +2335,7 @@ private struct LoomAITokenizedMessageView: View {
     }
 
     let content: String
+    let highlightReferences: [LoomAIInlineReference]
 
     private var lines: [[Segment]] {
         let normalized = content
@@ -2234,7 +2343,7 @@ private struct LoomAITokenizedMessageView: View {
             .replacingOccurrences(of: "\r", with: "\n")
         return normalized
             .split(separator: "\n", omittingEmptySubsequences: false)
-            .map { parseSegments(in: String($0)) }
+            .map { autoHighlightedSegments(parseSegments(in: String($0))) }
     }
 
     var body: some View {
@@ -2310,23 +2419,19 @@ private struct LoomAITokenizedMessageView: View {
             case "P":
                 if isPassionReferenceToken(value) {
                     Text(value)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(passionTokenForegroundColor)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(
-                            Capsule(style: .continuous)
-                                .fill(passionTokenBackgroundColor)
-                        )
-                        .overlay(
-                            Capsule(style: .continuous)
-                                .stroke(passionTokenBorderColor, lineWidth: 1)
-                        )
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.primary)
                 } else {
                     Text("\"\(value)\"")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.primary)
                 }
+            case "C":
+                let payload = inlineCategoryTokenPayload(from: value)
+                let base = fixedColor(FulfillmentCategoryTheme.color(for: payload.category))
+                Text(payload.display)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(base)
             case "F":
                 let base = fixedColor(FulfillmentCategoryTheme.color(for: value))
                 Text(value)
@@ -2370,6 +2475,19 @@ private struct LoomAITokenizedMessageView: View {
                 Text(value).font(.subheadline)
             }
         }
+    }
+
+    private func inlineCategoryTokenPayload(from raw: String) -> (display: String, category: String) {
+        let components = raw.components(separatedBy: "||")
+        if components.count >= 2 {
+            let display = components[0].trimmingCharacters(in: .whitespacesAndNewlines)
+            let category = components[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !display.isEmpty, !category.isEmpty {
+                return (display, category)
+            }
+        }
+        let cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (cleaned, cleaned)
     }
 
     private var outcomeTokenForegroundColor: Color {
@@ -2453,7 +2571,7 @@ private struct LoomAITokenizedMessageView: View {
     }
 
     private func parseSegments(in line: String) -> [Segment] {
-        let pattern = #"\[\[(P|F|O|A):([^\]]+)\]\]"#
+        let pattern = #"\[\[([A-Z]):([^\]]+)\]\]"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return [.text(line)] }
         let source = line as NSString
         let range = NSRange(location: 0, length: source.length)
@@ -2481,6 +2599,104 @@ private struct LoomAITokenizedMessageView: View {
             segments.append(.text(source.substring(from: cursor)))
         }
         return segments
+    }
+
+    private func autoHighlightedSegments(_ segments: [Segment]) -> [Segment] {
+        guard !highlightReferences.isEmpty else { return segments }
+        return segments.flatMap { segment in
+            switch segment {
+            case .text(let value):
+                return highlightedPlainTextSegments(in: value)
+            case .token:
+                return [segment]
+            }
+        }
+    }
+
+    private func highlightedPlainTextSegments(in text: String) -> [Segment] {
+        guard !text.isEmpty else { return [.text(text)] }
+
+        var output: [Segment] = []
+        var cursor = text.startIndex
+
+        while cursor < text.endIndex {
+            var bestMatch: (range: Range<String.Index>, reference: LoomAIInlineReference)?
+
+            for reference in highlightReferences {
+                guard let found = rangeOfReference(reference, in: text, from: cursor) else { continue }
+                if let existing = bestMatch {
+                    if found.lowerBound < existing.range.lowerBound {
+                        bestMatch = (found, reference)
+                    }
+                } else {
+                    bestMatch = (found, reference)
+                }
+            }
+
+            guard let match = bestMatch else {
+                output.append(.text(String(text[cursor...])))
+                break
+            }
+
+            if match.range.lowerBound > cursor {
+                output.append(.text(String(text[cursor..<match.range.lowerBound])))
+            }
+
+            let matchedText = String(text[match.range])
+            let tokenValue: String = {
+                switch match.reference.kind {
+                case "C":
+                    let category = match.reference.categoryName ?? matchedText
+                    return "\(matchedText)||\(category)"
+                default:
+                    return matchedText
+                }
+            }()
+            output.append(.token(kind: match.reference.kind, value: tokenValue))
+            cursor = match.range.upperBound
+        }
+
+        return output
+    }
+
+    private func rangeOfReference(
+        _ reference: LoomAIInlineReference,
+        in text: String,
+        from start: String.Index
+    ) -> Range<String.Index>? {
+        let needle = reference.displayText
+        guard !needle.isEmpty, start < text.endIndex || start == text.startIndex else { return nil }
+
+        var searchRange = start..<text.endIndex
+        while let found = text.range(of: needle, options: [.caseInsensitive, .diacriticInsensitive], range: searchRange) {
+            if isReferenceBoundary(found, in: text) {
+                return found
+            }
+            searchRange = found.upperBound..<text.endIndex
+        }
+        return nil
+    }
+
+    private func isReferenceBoundary(_ range: Range<String.Index>, in text: String) -> Bool {
+        func isWordish(_ scalar: UnicodeScalar) -> Bool {
+            CharacterSet.alphanumerics.contains(scalar) || scalar == "_"
+        }
+
+        if range.lowerBound > text.startIndex {
+            let previous = text[text.index(before: range.lowerBound)]
+            if previous.unicodeScalars.contains(where: isWordish) {
+                return false
+            }
+        }
+
+        if range.upperBound < text.endIndex {
+            let next = text[range.upperBound]
+            if next.unicodeScalars.contains(where: isWordish) {
+                return false
+            }
+        }
+
+        return true
     }
 }
 

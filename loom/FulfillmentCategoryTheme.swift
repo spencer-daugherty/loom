@@ -40,12 +40,12 @@ struct FulfillmentCategoryTheme {
     }
 
     static func persistedColorKeys() -> [String: String] {
-        let raw = UserDefaults.standard.dictionary(forKey: userDefaultsKey) as? [String: String] ?? [:]
+        let raw = UserDefaults.standard.dictionary(forKey: LoomDefaultsScope.scopedKey(userDefaultsKey)) as? [String: String] ?? [:]
         return raw.mapValues { $0 == "yellow" ? "brown" : $0 }
     }
 
     static func persistColorKeys(_ map: [String: String]) {
-        UserDefaults.standard.set(map, forKey: userDefaultsKey)
+        UserDefaults.standard.set(map, forKey: LoomDefaultsScope.scopedKey(userDefaultsKey))
     }
 
     static func resolvedColorKeys(for categories: [String]) -> [String: String] {
@@ -130,29 +130,31 @@ struct FulfillmentCategoryTheme {
     }
 
     static func saveCompletedOutcomeColorKey(_ colorKey: String, archiveId: UUID) {
-        var map = UserDefaults.standard.dictionary(forKey: completedOutcomeColorKeyByArchiveKey) as? [String: String] ?? [:]
+        let scopedKey = LoomDefaultsScope.scopedKey(completedOutcomeColorKeyByArchiveKey)
+        var map = UserDefaults.standard.dictionary(forKey: scopedKey) as? [String: String] ?? [:]
         map[archiveId.uuidString] = colorKey
-        UserDefaults.standard.set(map, forKey: completedOutcomeColorKeyByArchiveKey)
+        UserDefaults.standard.set(map, forKey: scopedKey)
     }
 
     static func completedOutcomeColorKey(archiveId: UUID) -> String? {
-        let map = UserDefaults.standard.dictionary(forKey: completedOutcomeColorKeyByArchiveKey) as? [String: String] ?? [:]
+        let map = UserDefaults.standard.dictionary(forKey: LoomDefaultsScope.scopedKey(completedOutcomeColorKeyByArchiveKey)) as? [String: String] ?? [:]
         return map[archiveId.uuidString]
     }
 
     static func saveCompletedActionBlockChunkColorKey(_ colorKey: String, archiveId: UUID, chunkId: UUID) {
-        var map = UserDefaults.standard.dictionary(forKey: completedActionBlockChunkColorKeyByArchiveChunkKey) as? [String: String] ?? [:]
+        let scopedKey = LoomDefaultsScope.scopedKey(completedActionBlockChunkColorKeyByArchiveChunkKey)
+        var map = UserDefaults.standard.dictionary(forKey: scopedKey) as? [String: String] ?? [:]
         map["\(archiveId.uuidString)|\(chunkId.uuidString)"] = colorKey
-        UserDefaults.standard.set(map, forKey: completedActionBlockChunkColorKeyByArchiveChunkKey)
+        UserDefaults.standard.set(map, forKey: scopedKey)
     }
 
     static func completedActionBlockChunkColorKey(archiveId: UUID, chunkId: UUID) -> String? {
-        let map = UserDefaults.standard.dictionary(forKey: completedActionBlockChunkColorKeyByArchiveChunkKey) as? [String: String] ?? [:]
+        let map = UserDefaults.standard.dictionary(forKey: LoomDefaultsScope.scopedKey(completedActionBlockChunkColorKeyByArchiveChunkKey)) as? [String: String] ?? [:]
         return map["\(archiveId.uuidString)|\(chunkId.uuidString)"]
     }
 
     static func categoryAliases() -> [String: String] {
-        UserDefaults.standard.dictionary(forKey: categoryAliasesKey) as? [String: String] ?? [:]
+        UserDefaults.standard.dictionary(forKey: LoomDefaultsScope.scopedKey(categoryAliasesKey)) as? [String: String] ?? [:]
     }
 
     static func saveCategoryAlias(from oldName: String, to newName: String) {
@@ -161,7 +163,7 @@ struct FulfillmentCategoryTheme {
         guard !from.isEmpty, !to.isEmpty else { return }
         var map = categoryAliases()
         map[from.lowercased()] = to
-        UserDefaults.standard.set(map, forKey: categoryAliasesKey)
+        UserDefaults.standard.set(map, forKey: LoomDefaultsScope.scopedKey(categoryAliasesKey))
     }
 
     static func categoryAlias(for previousName: String) -> String? {
@@ -172,9 +174,9 @@ struct FulfillmentCategoryTheme {
 
     static func clearFulfillmentPreferences() {
         let defaults = UserDefaults.standard
-        defaults.removeObject(forKey: userDefaultsKey)
-        defaults.removeObject(forKey: completedOutcomeColorKeyByArchiveKey)
-        defaults.removeObject(forKey: completedActionBlockChunkColorKeyByArchiveChunkKey)
-        defaults.removeObject(forKey: categoryAliasesKey)
+        defaults.removeObject(forKey: LoomDefaultsScope.scopedKey(userDefaultsKey))
+        defaults.removeObject(forKey: LoomDefaultsScope.scopedKey(completedOutcomeColorKeyByArchiveKey))
+        defaults.removeObject(forKey: LoomDefaultsScope.scopedKey(completedActionBlockChunkColorKeyByArchiveChunkKey))
+        defaults.removeObject(forKey: LoomDefaultsScope.scopedKey(categoryAliasesKey))
     }
 }

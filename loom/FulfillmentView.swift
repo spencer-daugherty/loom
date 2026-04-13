@@ -72,19 +72,25 @@ fileprivate enum FulfillmentReadableInsightRuntimeStore {
     private static var textByKey: [String: String] = [:]
 
     static func value(for key: String) -> String? {
-        if let cached = textByKey[key] { return cached }
-        guard let persisted = UserDefaults.standard.string(forKey: defaultsPrefix + key), !persisted.isEmpty else {
+        let scopedKey = scopedDefaultsKey(for: key)
+        if let cached = textByKey[scopedKey] { return cached }
+        guard let persisted = UserDefaults.standard.string(forKey: scopedKey), !persisted.isEmpty else {
             return nil
         }
-        textByKey[key] = persisted
+        textByKey[scopedKey] = persisted
         return persisted
     }
 
     static func set(_ value: String, for key: String) {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        textByKey[key] = trimmed
-        UserDefaults.standard.set(trimmed, forKey: defaultsPrefix + key)
+        let scopedKey = scopedDefaultsKey(for: key)
+        textByKey[scopedKey] = trimmed
+        UserDefaults.standard.set(trimmed, forKey: scopedKey)
+    }
+
+    private static func scopedDefaultsKey(for key: String) -> String {
+        LoomDefaultsScope.scopedKey(defaultsPrefix + key)
     }
 }
 
@@ -1728,7 +1734,7 @@ struct FulfillmentView: View {
                 let selectedIndex = min(max(0, highlightedCategoryIndex), max(0, orderedFulfillments.count - 1))
                 let selected = orderedFulfillments[selectedIndex]
                 let selectedTitle = selected.category
-                let selectedScore = roundedTenth(latestFulfillmentWeeklyScore(for: selected) ?? ((batteryPercentage(for: selected) / 100.0) * 5.0))
+                let selectedScore = roundedTenth(displayFulfillmentWeeklyScore(for: selected))
                 let selectedDelta = fulfillmentWeekOverWeekDelta(for: selected)
                 let selectedInsightSnapshot = latestFulfillmentWeeklySnapshot(for: selected)
 
@@ -2140,11 +2146,12 @@ struct FulfillmentView: View {
         }
     }
 
+    private func displayFulfillmentWeeklyScore(for record: Fulfillment) -> Double {
+        latestFulfillmentWeeklyScore(for: record) ?? 3.0
+    }
+
     private func fulfillmentRadarPercentage(for record: Fulfillment) -> Double {
-        if let score = latestFulfillmentWeeklyScore(for: record) {
-            return (FulfillmentScoringMath.clamp(score, 1, 5) / 5.0) * 100.0
-        }
-        return batteryPercentage(for: record)
+        (FulfillmentScoringMath.clamp(displayFulfillmentWeeklyScore(for: record), 1, 5) / 5.0) * 100.0
     }
 
     private func batteryPercentage(for record: Fulfillment) -> Double {
@@ -5768,9 +5775,12 @@ private struct FulfillmentTrendsView: View {
             weeksByCategory[snap.categoryID, default: []].insert(cal.startOfDay(for: snap.weekStartDate))
         }
 
-        let filtered = allSnapshots.filter { snap in
+        var filtered = allSnapshots.filter { snap in
             if liveCategoryIDs.contains(snap.categoryID) { return true }
             return (weeksByCategory[snap.categoryID]?.count ?? 0) >= 2
+        }
+        if filtered.isEmpty && !fulfillments.isEmpty {
+            filtered = starterSnapshotsForCurrentSetup(calendar: cal)
         }
         cachedFilteredSnapshots = filtered
 
@@ -5895,6 +5905,47 @@ private struct FulfillmentTrendsView: View {
             return
         }
         self.selectedCategoryID = selectedWeekSnapshots.max(by: { $0.score < $1.score })?.categoryID
+    }
+
+    private func starterSnapshotsForCurrentSetup(calendar: Calendar) -> [FulfillmentCategoryScoreSnapshot] {
+        let weekStart = AppWeekStartStore.weekStart(for: .now, base: calendar)
+        return fulfillments.map { fulfillment in
+            let hasVision = !fulfillment.category_vision.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            let hasPurpose = !fulfillment.category_purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            let structure = hasVision && hasPurpose ? 0.68 : (hasVision || hasPurpose ? 0.52 : 0.40)
+            let outcomes = 0.36
+            let actionBlocks = 0.34
+            let littleWins = 0.34
+            let engagement = 0.38
+            let strategicBalance = 0.35
+            let consistency = 0.50
+            let carryoverPenalty = 0.0
+            let evidence = 0.35
+            let targetScore = 3.0
+            let smoothedScore = 3.0
+            let score = 3.0
+
+            return FulfillmentCategoryScoreSnapshot(
+                weekStartDate: weekStart,
+                categoryID: fulfillment.category_id,
+                categoryTitleSnapshot: fulfillment.category,
+                score: score,
+                smoothedScore: smoothedScore,
+                targetScore: targetScore,
+                evidence: evidence,
+                momentum: 0,
+                structure: structure,
+                outcomes: outcomes,
+                actionBlocks: actionBlocks,
+                carryoverPenalty: carryoverPenalty,
+                littleWins: littleWins,
+                engagement: engagement,
+                strategicBalance: strategicBalance,
+                consistency: consistency,
+                createdAt: .now,
+                updatedAt: .now
+            )
+        }
     }
 
     private func buildFulfillmentDisplayOrderCategoryIDs(

@@ -12,6 +12,7 @@ struct PaywallView: View {
     @EnvironmentObject private var purchaseManager: PurchaseManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.openURL) private var openURL
 
     @State private var selectedPlan: SubscriptionPlan = .lifetime
     @State private var presentedLegalDocument: LegalDocument?
@@ -307,7 +308,7 @@ struct PaywallView: View {
 
             HStack(spacing: 16) {
                 Button("Terms of Use") { presentedLegalDocument = .terms }
-                Button("Privacy Policy") { presentedLegalDocument = .privacy }
+                Button("Privacy Policy") { openURL(LoomLegalLinks.privacyPolicyURL) }
             }
             .font(.footnote.weight(.semibold))
             .padding(.top, legalTopPadding)

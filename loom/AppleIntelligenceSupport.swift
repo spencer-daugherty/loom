@@ -347,6 +347,33 @@ enum AppleIntelligenceLoomChatGenerator {
         throw AppleIntelligencePurposeInsightsError.unavailable
     }
 
+    static func chatFallbackText(
+        messages: [LoomAIService.TransportMessage],
+        context: LoomAIContextSnapshot,
+        routeDescription: String?,
+        userLocalDate: String?,
+        timezone: String?
+    ) async throws -> String {
+        #if canImport(FoundationModels)
+        if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
+            let model = SystemLanguageModel(useCase: .general)
+            guard model.isAvailable else { throw AppleIntelligencePurposeInsightsError.unavailable }
+            let session = LanguageModelSession(model: model)
+            let response = try await session.respond(
+                to: chatFallbackPrompt(
+                    messages: messages,
+                    context: context,
+                    routeDescription: routeDescription,
+                    userLocalDate: userLocalDate,
+                    timezone: timezone
+                )
+            )
+            return response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        #endif
+        throw AppleIntelligencePurposeInsightsError.unavailable
+    }
+
     static func threadTitle(transcript: String) async throws -> String {
         #if canImport(FoundationModels)
         if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
@@ -418,36 +445,26 @@ enum AppleIntelligenceLoomChatGenerator {
         return """
         You are LoomAI inside the Loom app.
 
-        Product behavior:
-        - Be concise, specific, and grounded in the provided Loom context.
-        - The answer must feel personalized to this exact user, not like reusable productivity advice.
-        - Keep the main `message` to 1 to 4 short paragraphs and never put recommendation lists inline.
-        - Put concrete recommendations into `suggestionCards`, `nextAction`, and `actions` only.
-        - Keep suggestion cards executable UI actions, not prose summaries.
-        - When the question is Loom-related and context exists, reference at least 2 concrete Loom details across the response.
-        - Use the personalization brief to keep the answer tailored to the user's current direction, pressure pattern, fulfillment area, goal, action plan, or capture load.
-        - Avoid generic filler such as "start small", "build momentum", "stay consistent", "keep moving", or "one step at a time" unless the user's own context clearly justifies it.
-        - For mission rewrites, never use generic scaffolds like "I strengthen {area}..." or "steady weekly execution"; tie each option to the user's real goals, purpose, or pressure pattern.
-        - For routed prompts that ask for executable options, put the actual options in `suggestionCards` or `actions`, not only in `chips`.
-        - For Daily Little Wins, suggest small repeatable actions the user could do on any normal day; avoid generic templates like "{area} reset", "{area} practice", or "track one {area} win".
-        - For Daily Little Wins, use the target fulfillment area's mission, identities, existing little wins, connected passions, broader driving-force passions, and personalization signals to make the options feel specific.
-        - Never turn unrelated capture/admin items like errands, shopping, inbox cleanup, or random saved tasks into Daily Little Wins unless they are clearly tied to the requested fulfillment area.
-        - For Love & Relationships, prefer socially connective actions such as appreciation, check-ins, planning time together, reaching out, listening, or shared activities when the context supports them.
-        - If the user asks something unrelated to Loom, gently redirect back to Loom-relevant help in `message` and provide 2 to 4 Loom-relevant `chips`.
-        - Use the provided route description when present. Routes 1 to 7 should usually return at least one executable suggestion card unless confidence is low.
-        - Do not invent facts outside the provided messages and context.
-        - Confidence must be one of `high`, `medium`, or `low`.
-        - `debug.evidence` should name the Loom fields that informed the answer, like `drivingForce.vision` or `activeOutcomes[0].title`.
-        - Only use action types that Loom supports in chat:
-          `updatePurposeVision`
-          `addPassionItem`
-          `updateFulfillmentMission`
-          `addFulfillmentIdentity`
-          `replaceFulfillmentIdentity`
-          `addLittleWin`
-          `replaceLittleWin`
-          `createCaptureAction`
-        - If confidence is low, leave `suggestionCards` and `actions` empty unless the route explicitly demands a very safe grounded option.
+        Rules:
+        - Ground every answer in the provided Loom messages and context only.
+        - Be specific to this user. Avoid generic productivity filler.
+        - Keep `message` to 1 to 2 short personalized paragraphs.
+        - Suggestion cards are allowed only for approved Loom routes. Otherwise keep `suggestionCards`, `actions`, and `nextAction` empty.
+        - If a route is present and confidence is not low, return 1 executable suggestion card with 2 to 3 options.
+        - Put the real options in `suggestionCards` or `actions`, not only in `chips`.
+        - Every title, label, and prompt must be non-empty visible text.
+        - Never repeat an existing Little Win, Identity, or Passion already in context.
+        - If a target list already has 3 items, use a replacement action and name the exact item being replaced.
+        - For Little Wins, return small repeatable actions that fit a normal day.
+        - For Love & Relationships, prefer appreciation, check-ins, planning time together, listening, or shared experiences when supported by context.
+        - If the request is unrelated to Loom, redirect gently and provide 2 to 4 Loom-relevant chips.
+        - Confidence must be `high`, `medium`, or `low`.
+        - `debug.evidence` should list the Loom fields you used.
+        - Use only these action types:
+          `updatePurposeVision`, `addPassionItem`, `updateFulfillmentMission`, `addFulfillmentIdentity`, `replaceFulfillmentIdentity`, `addLittleWin`, `replaceLittleWin`, `createCaptureAction`
+        - `actions` should mirror the suggestion-card options.
+        - `nextAction`, if present, should match the best suggestion option.
+        - If you cannot produce a valid Loom response, return low confidence with empty suggestion surfaces.
 
         Personalization brief:
         \(personalizationBrief.isEmpty ? "(none)" : personalizationBrief)
@@ -471,6 +488,64 @@ enum AppleIntelligenceLoomChatGenerator {
 
         Chat transcript:
         \(transcript)
+        """
+    }
+
+    private static func chatFallbackPrompt(
+        messages: [LoomAIService.TransportMessage],
+        context: LoomAIContextSnapshot,
+        routeDescription: String?,
+        userLocalDate: String?,
+        timezone: String?
+    ) -> String {
+        struct ChatInput: Codable {
+            let routeDescription: String?
+            let userLocalDate: String?
+            let timezone: String?
+            let messages: [LoomAIService.TransportMessage]
+            let context: LoomAIContextSnapshot
+        }
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.sortedKeys]
+        let payload = ChatInput(
+            routeDescription: routeDescription,
+            userLocalDate: userLocalDate,
+            timezone: timezone,
+            messages: messages,
+            context: context
+        )
+        let payloadJSON = ((try? encoder.encode(payload)).flatMap { String(data: $0, encoding: .utf8) }) ?? "{}"
+
+        return """
+        You are LoomAI inside the Loom app.
+
+        Return plain text only. Do not return JSON.
+
+        Required format:
+        MESSAGE:
+        <1 to 3 short personalized sentences>
+
+        OPTIONS:
+        - <option 1>
+        - <option 2>
+        - <option 3>
+
+        Rules:
+        - Keep MESSAGE personalized to this Loom context.
+        - If a route description is present, include 2 to 3 concrete options under OPTIONS.
+        - If no route description is present, omit OPTIONS entirely.
+        - Each option must be a short standalone phrase that can be shown directly in UI.
+        - Do not repeat existing Little Wins, Identities, or Passions already in context.
+        - If the requested list is already full, suggest a stronger replacement candidate.
+        - For Daily Little Wins, make options specific to the target fulfillment area, identities, little wins, passions, and stress pattern.
+        - For Love & Relationships, prefer appreciation, check-ins, planning time together, listening, or shared experiences when supported by context.
+        - Avoid generic filler.
+        - Do not include explanations or labels beyond MESSAGE and OPTIONS.
+
+        Input JSON:
+        \(payloadJSON)
         """
     }
 }

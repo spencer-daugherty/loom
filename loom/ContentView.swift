@@ -86,6 +86,7 @@ struct ContentView: View {
     @AppStorage("has_seen_content_quickstart_v1") private var hasSeenContentQuickstart = false
     @AppStorage("force_show_content_quickstart_once") private var forceShowContentQuickstartOnce = false
     @AppStorage("developer_demo_mode_enabled") private var developerDemoModeEnabled = false
+    @AppStorage(UserSessionStore.Keys.reviewDemoModeEnabled) private var reviewDemoModeEnabled = false
     @AppStorage("onboarding_capture_notifications_prompted_v1") private var hasPromptedCaptureNotifications = false
     @AppStorage("content_home_objectives_setup_skipped_v1") private var hasSkippedObjectivesSetupStep = false
     @State private var isPresentingCaptureView = false
@@ -1020,7 +1021,7 @@ struct ContentView: View {
                 }
             }
             .onChange(of: isActivePlan) { _, newValue in
-                if newValue == true {
+                if newValue == true, !reviewDemoModeEnabled {
                     playSheetDestination = .action
                 }
             }
@@ -5947,159 +5948,7 @@ struct ContentView: View {
 
     private func ensureDeveloperDemoDataIfNeeded() {
         guard developerDemoModeEnabled else { return }
-
-        let defaultCategories: [(name: String, id: UUID, colorKey: String)] = [
-            ("Career & Business", PlanLabelSeeder.categoryIDs["Career & Business"]!, "blue"),
-            ("Leadership & Impact", PlanLabelSeeder.categoryIDs["Leadership & Impact"]!, "indigo"),
-            ("Wealth & Lifestyle", PlanLabelSeeder.categoryIDs["Wealth & Lifestyle"]!, "green"),
-            ("Mind & Meaning", PlanLabelSeeder.categoryIDs["Mind & Meaning"]!, "purple"),
-            ("Love & Relationships", PlanLabelSeeder.categoryIDs["Love & Relationships"]!, "red"),
-            ("Health & Vitality", PlanLabelSeeder.categoryIDs["Health & Vitality"]!, "orange")
-        ]
-
-        var colorMap = FulfillmentCategoryTheme.persistedColorKeys()
-        for category in defaultCategories {
-            colorMap[category.name] = category.colorKey
-        }
-        FulfillmentCategoryTheme.persistColorKeys(colorMap)
-
-        if drivingForces.isEmpty {
-            modelContext.insert(
-                DrivingForce(
-                    ultimateVision: "I build a focused life where each week moves my core priorities forward with calm execution.",
-                    ultimatePurpose: "I align my daily actions with purpose so progress feels meaningful and sustainable."
-                )
-            )
-        }
-
-        let now = Date()
-        for category in defaultCategories {
-            let defaultMission: String
-            switch category.name {
-            case "Career & Business":
-                defaultMission = "I do career work that creates visible progress, strong leadership, and meaningful contribution."
-            case "Leadership & Impact":
-                defaultMission = "I lead in ways that make people, teams, and decisions stronger."
-            case "Wealth & Lifestyle":
-                defaultMission = "I build financial stability and a lifestyle that gives me more freedom and less noise."
-            case "Mind & Meaning":
-                defaultMission = "I protect clarity, reflection, and inner steadiness so my choices stay intentional."
-            case "Love & Relationships":
-                defaultMission = "I build relationships through presence, honesty, and care people can actually feel."
-            case "Health & Vitality":
-                defaultMission = "I build a strong body and steady energy that support everything else I care about."
-            default:
-                defaultMission = "I define \(category.name) by meaningful progress and clear priorities."
-            }
-            if let existing = fulfillments.first(where: { $0.category_id == category.id }) {
-                existing.category = category.name
-                if existing.category_purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    existing.category_purpose = defaultMission
-                }
-                existing.updatedAt = now
-            } else {
-                modelContext.insert(
-                    Fulfillment(
-                        category_id: category.id,
-                        updatedAt: now,
-                        category: category.name,
-                        category_identitiy: "Focused Builder",
-                        category_vision: "Stable momentum in \(category.name)",
-                        category_purpose: defaultMission
-                    )
-                )
-            }
-        }
-
-        for (index, category) in defaultCategories.enumerated() {
-            if !roles.contains(where: { $0.category_id == category.id }) {
-                modelContext.insert(
-                    FulfillmentRoles(
-                        category_id: category.id,
-                        updatedAt: now,
-                        role: ["Consistent Operator", "Reliable Finisher", "Intentional Planner", "Steady Improver", "Calm Executor", "Disciplined Builder"][index],
-                        rank: 0
-                    )
-                )
-            }
-            if !foci.contains(where: { $0.category_id == category.id }) {
-                modelContext.insert(
-                    FulfillmentFocus(
-                        category_id: category.id,
-                        updatedAt: now,
-                        activity: ["Ship one priority task", "Lead one meaningful outreach", "Review spending and savings", "Read and reflect for 20 minutes", "Send one relationship check-in", "Move for 30 minutes"][index],
-                        rank: 0
-                    )
-                )
-            }
-            if !resources.contains(where: { $0.category_id == category.id }) {
-                modelContext.insert(
-                    FulfillmentResources(
-                        category_id: category.id,
-                        updatedAt: now,
-                        resource: ["Calendar blocking", "Weekly review", "Budget tracker", "Reading routine", "Relationship notes", "Workout plan"][index],
-                        rank: 0
-                    )
-                )
-            }
-        }
-
-        let passionDefaults: [(emotion: String, text: String)] = [
-            ("love", "Meaningful growth"),
-            ("vows", "Long-term integrity"),
-            ("thrill", "Breakthrough progress"),
-            ("just", "Avoid drift and excuses")
-        ]
-        for passion in passionDefaults {
-            if !passions.contains(where: { $0.emotion == passion.emotion }) {
-                modelContext.insert(
-                    Passion(
-                        date: now,
-                        emotion: passion.emotion,
-                        passion: passion.text
-                    )
-                )
-            }
-        }
-
-        for captureText in [
-            "Review weekly priorities",
-            "Plan tomorrow's top 3",
-            "Check budget dashboard",
-            "Send follow-up email",
-            "Schedule workout block",
-            "Read 20 minutes"
-        ] {
-            if !notificationCaptureItems.contains(where: { $0.text.caseInsensitiveCompare(captureText) == .orderedSame }) {
-                modelContext.insert(
-                    RollingCaptureItem(
-                        text: captureText,
-                        isGhost: false,
-                        createdAt: now
-                    )
-                )
-            }
-        }
-
-        if outcomes.isEmpty {
-            let start = Calendar.current.startOfDay(for: now)
-            let end = Calendar.current.date(byAdding: .day, value: 60, to: start) ?? now
-            for (index, category) in defaultCategories.enumerated() {
-                modelContext.insert(
-                    Outcomes(
-                        category: category.name,
-                        updatedAt: now,
-                        outcome: ["Launch core project milestone", "Host one strategic leadership session", "Build 60-day spending plan", "Finish one focused learning track", "Plan two meaningful date nights", "Complete 20 workout sessions"][index],
-                        reasons: "Demo goal for \(category.name)",
-                        start: start,
-                        end: end,
-                        rank: index
-                    )
-                )
-            }
-        }
-
-        try? modelContext.save()
+        LoomDemoWorkspaceSeeder.seedDemoWorkspace(in: modelContext)
     }
 
     private func openOnboardingCallCardDestination(_ destination: OnboardingCallCardDestination) {

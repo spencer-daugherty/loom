@@ -376,6 +376,7 @@ struct CompletedActionBlocksDetailView: View {
                 ForEach(chunkOrder, id: \.self) { chunkId in
                     let first = actionsByChunk[chunkId]?.first
                     let chunkAccent = chunkAccent(for: chunkId)
+                    let chunkCategoryTitle = completedChunkCategoryTitle(for: first)
                     let chunkResult = actionsByChunk[chunkId]?
                         .compactMap { $0.resultText?.trimmingCharacters(in: .whitespacesAndNewlines) }
                         .first(where: { !$0.isEmpty })
@@ -383,7 +384,7 @@ struct CompletedActionBlocksDetailView: View {
                         .compactMap { $0.purposeText?.trimmingCharacters(in: .whitespacesAndNewlines) }
                         .first(where: { !$0.isEmpty })
                     VStack(alignment: .leading, spacing: 10) {
-                        smallPill(icon: "tag.fill", text: "Fulfillment Area: \(first?.chunkCategory ?? "")")
+                        smallPill(icon: "tag.fill", text: "Fulfillment Area: \(chunkCategoryTitle)")
 
                         if let chunkResult, !chunkResult.isEmpty {
                             smallPill(icon: "target", text: "Result: \(chunkResult)")
@@ -418,98 +419,127 @@ struct CompletedActionBlocksDetailView: View {
         let inProgress = actions.filter { status(for: $0) == .inProgress }.count
         let carried = actions.filter { status(for: $0) == .carriedToCapture }.count
         let notNeeded = actions.filter { status(for: $0) == .notNeeded }.count
-        let musts = actions.filter(\.isMust).count
-        let durations = actions.compactMap(\.durationMinutes)
-        let avg = durations.isEmpty ? 0 : Int(Double(durations.reduce(0, +)) / Double(durations.count))
-        let noteCount = actions.filter(\.hasNote).count
-        let linkCount = actions.reduce(0) { $0 + $1.linkAttachmentCount }
-        let fileCount = actions.reduce(0) { $0 + $1.fileAttachmentCount }
+        let completionRatio = total == 0 ? 0 : Double(done) / Double(total)
+        let carriedRatio = total == 0 ? 0 : Double(carried) / Double(total)
 
         let productiveDayRows: [CompletedProductiveRow] = {
             let cal = Calendar.current
             let days = (0..<7).compactMap { cal.date(byAdding: .day, value: $0, to: session.weekStart) }
             let doneActions = actions.filter { status(for: $0) == .done }
-            let mustDoneActions = actions.filter { status(for: $0) == .done && $0.isMust }
+            let notNeededActions = actions.filter { status(for: $0) == .notNeeded }
             let doneDay = cal.startOfDay(for: session.completedAt)
             let doneMap: [Date: Int] = doneActions.isEmpty ? [:] : [doneDay: doneActions.count]
-            let mustDoneMap: [Date: Int] = mustDoneActions.isEmpty ? [:] : [doneDay: mustDoneActions.count]
+            let notNeededMap: [Date: Int] = notNeededActions.isEmpty ? [:] : [doneDay: notNeededActions.count]
             return days.map { d in
                 let key = cal.startOfDay(for: d)
                 return CompletedProductiveRow(
                     day: DateFormatter.shortWeekday.string(from: d),
-                    completed: doneMap[key, default: 0],
-                    musts: mustDoneMap[key, default: 0]
+                    done: doneMap[key, default: 0],
+                    notNeeded: notNeededMap[key, default: 0]
                 )
             }
         }()
 
         let flowProfileRows: [(String, Int, Color)] = [
-            ("Musts", musts, .gray.opacity(0.65)),
             ("Recapture for later", carried, .gray.opacity(0.6)),
-            ("Didn't need to be done (Delete)", notNeeded, .gray.opacity(0.5)),
+            ("Didn't need to be done", notNeeded, .gray.opacity(0.5)),
             ("Assigned", leveraged, .gray.opacity(0.7)),
             ("In progress", inProgress, .gray.opacity(0.55))
         ]
 
-        let categoryBreakdown: [(String, Int)] = {
-            let grouped = Dictionary(grouping: actions, by: \.chunkCategory)
-            return grouped.map { ($0.key, $0.value.count) }.sorted { $0.1 > $1.1 }
+        let fulfillmentAreaRows: [(String, Int, Color)] = {
+            let grouped = Dictionary(grouping: actions, by: completedChunkCategoryTitle(for:))
+            return grouped
+                .map { category, rows in
+                    (category, rows.count, chunkAccent(for: rows.first?.plannedChunkId ?? UUID()))
+                }
+                .sorted { $0.1 > $1.1 }
         }()
 
         let connectedOutcomeTexts = outcomes.map(\.outcomeText).filter { !$0.isEmpty }
 
         let carriedActions = actions.filter { status(for: $0) == .carriedToCapture }
 
-        let topPlace = topValue(
-            in: actions
-                .flatMap { $0.placeNamesCSV.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) } }
-                .filter { !$0.isEmpty }
-        )
-        let topPerson = topValue(
-            in: actions
-                .filter { ($0.leverageKindRaw ?? "").lowercased() == "person" }
-                .compactMap(\.leverageValue)
-                .filter { !$0.isEmpty }
-        )
-        let topTool = topValue(
-            in: actions
-                .filter { ($0.leverageKindRaw ?? "").lowercased() == "tool" }
-                .compactMap(\.leverageValue)
-                .filter { !$0.isEmpty }
-        )
-        let topTimeOfDay: String? = nil
+        let productiveSignals: [CompletedProductiveSignalRow] = {
+            let doneActions = actions.filter { status(for: $0) == .done }
+            var counts: [String: (label: String, count: Int, typeLabel: String)] = [:]
+
+            for action in doneActions {
+                let places = action.placeNamesCSV
+                    .split(separator: ",")
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                for place in places {
+                    let key = "place:\(place.lowercased())"
+                    let existing = counts[key] ?? (place, 0, "Place")
+                    counts[key] = (existing.label, existing.count + 1, existing.typeLabel)
+                }
+
+                if let leverageValue = action.leverageValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !leverageValue.isEmpty {
+                    let kindLabel = (action.leverageKindRaw ?? "").lowercased() == "person" ? "Person" : "Tool"
+                    let key = "\(kindLabel.lowercased()):\(leverageValue.lowercased())"
+                    let existing = counts[key] ?? (leverageValue, 0, kindLabel)
+                    counts[key] = (existing.label, existing.count + 1, existing.typeLabel)
+                }
+            }
+
+            return counts
+                .map { key, value in
+                    CompletedProductiveSignalRow(
+                        id: key,
+                        label: value.label,
+                        count: value.count,
+                        typeLabel: value.typeLabel
+                    )
+                }
+                .sorted { lhs, rhs in
+                    if lhs.count == rhs.count {
+                        if lhs.typeLabel == rhs.typeLabel {
+                            return lhs.label.localizedCaseInsensitiveCompare(rhs.label) == .orderedAscending
+                        }
+                        return lhs.typeLabel.localizedCaseInsensitiveCompare(rhs.typeLabel) == .orderedAscending
+                    }
+                    return lhs.count > rhs.count
+                }
+        }()
 
         return ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(spacing: 10) {
-                    summaryTile(title: "Tasks Closed", value: "\(done)/\(max(total, 1))", detail: "\(total == 0 ? 0 : Int((Double(done)/Double(total))*100))% done")
-                    summaryTile(title: "Average Duration", value: formatMinutes(avg), detail: "\(durations.count) estimated")
+                    summaryTile(title: "Tasks Done", value: "\(Int(completionRatio * 100))%", detail: "\(done)/\(max(total, 1)) done")
+                    summaryTile(title: "Carried Actions", value: "\(Int(carriedRatio * 100))%", detail: "\(carried)/\(max(total, 1)) carried")
                 }
                 HStack(spacing: 10) {
-                    summaryTile(title: "Started", value: shortDate(session.startedAt), detail: "Complete: \(shortDate(session.completedAt))")
+                    summaryTile(title: "Started", value: shortDate(session.startedAt), detail: "Completed: \(shortDate(session.completedAt))")
                     let days = max(1, (Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: session.startedAt), to: Calendar.current.startOfDay(for: session.completedAt)).day ?? 0) + 1)
                     summaryTile(title: "Elapsed", value: "\(days)d", detail: "from start to complete")
                 }
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Productive signals")
-                        .font(.headline)
-
-                    signalRow(icon: "mappin.and.ellipse", title: "Place", value: topPlace ?? "No pattern yet")
-                    signalRow(icon: "person.fill", title: "Person", value: topPerson ?? "No pattern yet")
-                    signalRow(icon: "wrench.and.screwdriver.fill", title: "Tool", value: topTool ?? "No pattern yet")
-                    signalRow(icon: "clock.fill", title: "Time", value: topTimeOfDay ?? "No pattern yet")
+                if productiveSignals.count >= 2 {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Productive signals")
+                            .font(.headline)
+                        ForEach(productiveSignals) { row in
+                            productiveSignalCountRow(row)
+                        }
+                    }
+                    .padding(10)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
                 }
-                .padding(10)
-                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Productive days").font(.headline)
+                    Text("Productive Days").font(.headline)
+                    HStack(spacing: 12) {
+                        chartLegendChip(color: .blue, label: "Done")
+                        chartLegendChip(color: .gray, label: "Didn't need to be done")
+                    }
+                    .font(.caption)
                     Chart(productiveDayRows) { r in
-                        BarMark(x: .value("Day", r.day), y: .value("Completed", r.completed))
-                            .foregroundStyle(Color.gray.opacity(0.75).gradient)
-                        BarMark(x: .value("Day", r.day), y: .value("Must", r.musts))
-                            .foregroundStyle(Color.gray.opacity(0.45).gradient)
+                        BarMark(x: .value("Day", r.day), y: .value("Done", r.done))
+                            .foregroundStyle(Color.blue.gradient)
+                        BarMark(x: .value("Day", r.day), y: .value("Didn't need", r.notNeeded))
+                            .foregroundStyle(Color.gray.gradient)
                     }
                     .frame(height: 180)
                 }
@@ -517,29 +547,29 @@ struct CompletedActionBlocksDetailView: View {
                 .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Flow profile").font(.headline)
+                    Text("Action Status").font(.headline)
+                    let maxStatusValue = max(1, flowProfileRows.map(\.1).max() ?? 1)
                     ForEach(flowProfileRows, id: \.0) { row in
-                        metricCapsuleRow(title: row.0, value: row.1, tint: row.2)
+                        metricBarRow(title: row.0, value: row.1, maximum: maxStatusValue, tint: row.2)
                     }
-                    Text("Notes: \(noteCount)  Links: \(linkCount)  Files: \(fileCount)")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
                 }
                 .padding(10)
                 .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
 
-                if !categoryBreakdown.isEmpty {
+                if !fulfillmentAreaRows.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Categories")
+                        Text("Fulfillment Areas")
                             .font(.headline)
-                        ForEach(categoryBreakdown, id: \.0) { row in
-                            HStack {
-                                Text(row.0)
-                                Spacer()
-                                Text("\(row.1)")
-                                    .fontWeight(.bold)
-                            }
-                            .font(.subheadline)
+                        Text("Projection score impact from Action Plan completion.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        ForEach(fulfillmentAreaRows, id: \.0) { row in
+                            metricCapsuleRowColoredTitle(
+                                title: row.0,
+                                value: row.1,
+                                textColor: row.2,
+                                tint: row.2.opacity(0.22)
+                            )
                         }
                     }
                     .padding(10)
@@ -548,11 +578,11 @@ struct CompletedActionBlocksDetailView: View {
 
                 if !connectedOutcomeTexts.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Outcomes connected")
+                        Text("Outcomes Connected")
                             .font(.headline)
                         ForEach(connectedOutcomeTexts, id: \.self) { text in
-                            Text("• \(text)")
-                                .font(.subheadline)
+                            Text(text)
+                                .font(.subheadline.weight(.bold))
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
@@ -593,48 +623,98 @@ struct CompletedActionBlocksDetailView: View {
         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
     }
 
-    private func signalRow(icon: String, title: String, value: String) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: icon)
-                .foregroundStyle(.secondary)
-                .frame(width: 18)
-            Text("\(title):")
-                .fontWeight(.semibold)
-            Text(value)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-            Spacer(minLength: 0)
+    private func productiveSignalCountRow(_ row: CompletedProductiveSignalRow) -> some View {
+        HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(row.label)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text(row.typeLabel)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            HStack(spacing: 8) {
+                Text("\(row.count)")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 3)
+                    .background(Color(.systemGray5), in: Capsule())
+            }
         }
-        .font(.subheadline)
+        .padding(.vertical, 2)
     }
 
-    private func metricCapsuleRow(title: String, value: Int, tint: Color) -> some View {
+    private func metricCapsuleRowColoredTitle(title: String, value: Int, textColor: Color, tint: Color) -> some View {
         HStack {
             Text(title)
-                .font(.subheadline)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(textColor)
             Spacer()
             Text("\(value)")
-                .font(.subheadline.weight(.bold))
+                .font(.subheadline)
+                .fontWeight(.bold)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 3)
-                .background(tint.opacity(0.2), in: Capsule())
+                .background(tint, in: Capsule())
+        }
+    }
+
+    private func metricBarRow(title: String, value: Int, maximum: Int, tint: Color) -> some View {
+        let greytoneFill = LinearGradient(
+            colors: [
+                Color(.systemGray3),
+                Color(.systemGray2)
+            ],
+            startPoint: .leading,
+            endPoint: .trailing
+        )
+        return HStack {
+            Text(title)
+                .font(.subheadline)
+            Spacer(minLength: 8)
+            GeometryReader { proxy in
+                let width = proxy.size.width
+                let progress = maximum > 0 ? min(1, max(0, CGFloat(value) / CGFloat(maximum))) : 0
+                let fillWidth = max(44, width * progress)
+
+                HStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    Text("\(value)")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+                .padding(.horizontal, 10)
+                .frame(width: fillWidth, height: 24, alignment: .leading)
+                .background(
+                    Capsule()
+                        .fill(greytoneFill)
+                )
+                .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            .frame(height: 24)
+            .frame(width: 132)
+        }
+    }
+
+    private func chartLegendChip(color: Color, label: String) -> some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(color)
+                .frame(width: 8, height: 8)
+            Text(label)
+                .foregroundStyle(.secondary)
         }
     }
 
     private var journalView: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Achievements").font(.headline)
+                Text("Journal")
+                    .font(.headline)
                 Text(session.achievementsText.isEmpty ? "—" : session.achievementsText)
-                    .foregroundStyle(.secondary)
-
-                Text("Magic Moments").font(.headline)
-                Text(session.magicMomentsText.isEmpty ? "—" : session.magicMomentsText)
-                    .foregroundStyle(.secondary)
-
-                Text("Power Question: What have I given?").font(.headline)
-                Text(session.powerQuestionText.isEmpty ? "—" : session.powerQuestionText)
                     .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -812,12 +892,29 @@ struct CompletedActionBlocksDetailView: View {
         if let key = FulfillmentCategoryTheme.completedActionBlockChunkColorKey(archiveId: session.id, chunkId: chunkId) {
             return FulfillmentCategoryTheme.color(forKey: key)
         }
-        if let category = actionsByChunk[chunkId]?.first?.chunkCategory, !category.isEmpty {
+        let category = completedChunkCategoryTitle(for: actionsByChunk[chunkId]?.first)
+        if !category.isEmpty {
             return FulfillmentCategoryTheme.color(for: category)
         }
         let palette: [Color] = [.blue, .mint, .orange, .indigo, .teal, .pink, .green]
         let index = abs(chunkId.hashValue) % palette.count
         return palette[index]
+    }
+
+    private func completedChunkCategoryTitle(for action: ActionBlocksReflectionArchiveAction?) -> String {
+        guard let action else { return PlanOtherLabel.title }
+
+        let category = action.chunkCategory.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !category.isEmpty {
+            return category
+        }
+
+        let label = action.chunkLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !label.isEmpty {
+            return label
+        }
+
+        return PlanOtherLabel.title
     }
 
     private func formatMinutes(_ mins: Int) -> String {
@@ -848,11 +945,18 @@ struct CompletedActionBlocksDetailView: View {
     }
 }
 
+private struct CompletedProductiveSignalRow: Identifiable {
+    let id: String
+    let label: String
+    let count: Int
+    let typeLabel: String
+}
+
 private struct CompletedProductiveRow: Identifiable {
     let id = UUID()
     let day: String
-    let completed: Int
-    let musts: Int
+    let done: Int
+    let notNeeded: Int
 }
 
 private extension DateFormatter {
@@ -1014,8 +1118,8 @@ private struct CompletedAttachmentsSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("Notes") {
-                    if !normalizedNoteText.isEmpty {
+                if !normalizedNoteText.isEmpty {
+                    Section("Notes") {
                         Text(normalizedNoteText)
                             .foregroundStyle(.primary)
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
@@ -1025,9 +1129,6 @@ private struct CompletedAttachmentsSheet: View {
                                     }
                                 }
                             }
-                    } else {
-                        Text(action.hasNote ? "(saved note)" : "No note.")
-                            .foregroundStyle(.secondary)
                     }
                 }
 

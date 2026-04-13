@@ -74,12 +74,14 @@ struct TemporaryVisionAutoWriteDebugView: View {
     @State private var estimatedCostText: String = "-"
     @State private var loomAIDebugChips: [LoomAIPromptChip] = []
     @State private var loomAIDebugEvidence: [String] = []
+    @State private var loomAIDebugDetails: LoomAIDebug?
     @State private var lastDiagnosticRunSnapshot: PersonalizationSnapshot?
     @State private var lastDiagnosticRunHash: String?
     @State private var lastDiagnosticRunSnapshotKey: String?
     @State private var requestCopied = false
     @State private var responseCopied = false
     @State private var contextCopied = false
+    @State private var attemptDiagnosticsCopied = false
     @State private var allCopied = false
     @State private var copyAllCopied = false
     @FocusState private var isInputFocused: Bool
@@ -267,6 +269,14 @@ struct TemporaryVisionAutoWriteDebugView: View {
                                 }
                             }
                         }
+
+                        if let diagnosticsText = loomAIAttemptDiagnosticsText() {
+                            Group {
+                                Text("Apple Attempt Diagnostics")
+                                    .font(.caption.weight(.semibold))
+                                copyableCodeBlock(diagnosticsText, copied: $attemptDiagnosticsCopied)
+                            }
+                        }
                     } else if mode == .diagnostic {
                         Text("Runs the same save-and-refresh path as Edit diagnostic answers in Personalization, using randomized diagnostic answers.")
                             .font(.subheadline)
@@ -375,6 +385,7 @@ struct TemporaryVisionAutoWriteDebugView: View {
                     await refreshLoomAIDebugChips()
                 } else {
                     loomAIDebugEvidence = []
+                    loomAIDebugDetails = nil
                 }
             }
         }
@@ -600,6 +611,7 @@ struct TemporaryVisionAutoWriteDebugView: View {
         usageSummaryText = "-"
         estimatedCostText = "-"
         loomAIDebugEvidence = []
+        loomAIDebugDetails = nil
         defer { isLoading = false }
         let startedAt = Date()
 
@@ -628,17 +640,22 @@ struct TemporaryVisionAutoWriteDebugView: View {
                 context: contextSnapshot
             )
 
-            if providerKind == .openAIWorker {
-                let preview = try service.buildChatRequestPreview(
-                    messages: messages,
-                    context: contextSnapshot,
-                    intent: "loomai_chat",
-                    screen: "loomai_chat_debug",
-                    userLocalDate: userLocalDate,
-                    timezone: timezone
+            if providerKind == .localCompatibility {
+                struct LocalDebugPreview: Encodable {
+                    let provider: String
+                    let route: String
+                    let messages: [LoomAIService.TransportMessage]
+                    let note: String
+                }
+                rawRequestText = try encodePrettyJSONText(
+                    LocalDebugPreview(
+                        provider: providerKind.rawValue,
+                        route: route.map(LoomAIChatProvider.routeDescription(for:)) ?? "",
+                        messages: messages,
+                        note: "Compatibility-mode responses are generated locally from current Loom context."
+                    )
                 )
-                rawRequestText = try prettyJSONText(from: preview.bodyData)
-                rawContextText = try encodePrettyJSONText(preview.request.context)
+                rawContextText = try encodePrettyJSONText(contextSnapshot)
             } else {
                 let appleContext = LoomAIChatProvider.debugAppleChatContext(from: contextSnapshot, route: route)
                 struct AppleDebugPreview: Encodable {
@@ -677,6 +694,7 @@ struct TemporaryVisionAutoWriteDebugView: View {
                 usage: response.usage
             )
             loomAIDebugEvidence = response.debug?.evidence ?? []
+            loomAIDebugDetails = response.debug
             loomAIDebugChips = mergedDebugChips(
                 preferred: buildAllLoomAIDebugChips(from: contextSnapshot),
                 server: response.chips
@@ -698,6 +716,7 @@ struct TemporaryVisionAutoWriteDebugView: View {
                 responseStatus = "Request failed"
             }
             loomAIDebugEvidence = []
+            loomAIDebugDetails = nil
             rawResponseText = String(describing: error)
             responseDurationText = formatDuration(Date().timeIntervalSince(startedAt))
         }
@@ -721,6 +740,7 @@ struct TemporaryVisionAutoWriteDebugView: View {
         estimatedCostText = "-"
         rawContextText = ""
         loomAIDebugEvidence = []
+        loomAIDebugDetails = nil
         defer { isLoading = false }
         let startedAt = Date()
 
@@ -751,6 +771,7 @@ struct TemporaryVisionAutoWriteDebugView: View {
             responseStatus = "HTTP 200"
             responseDurationText = formatDuration(Date().timeIntervalSince(startedAt))
             loomAIDebugEvidence = diagnosticDebugEvidence(from: envelope.debug)
+            loomAIDebugDetails = envelope.debug
             updateUsageEstimate(from: responseData, requestData: bodyData, fallbackModel: envelope.usage?.model ?? "gpt-5.1")
         } catch {
             let nsError = error as NSError
@@ -760,6 +781,7 @@ struct TemporaryVisionAutoWriteDebugView: View {
                 responseStatus = "Request failed"
             }
             loomAIDebugEvidence = []
+            loomAIDebugDetails = nil
             rawResponseText = String(describing: error)
             responseDurationText = formatDuration(Date().timeIntervalSince(startedAt))
         }
@@ -1543,6 +1565,7 @@ struct TemporaryVisionAutoWriteDebugView: View {
             guard !loomAIDebugEvidence.isEmpty else { return "<none>" }
             return loomAIDebugEvidence.map { "• \($0)" }.joined(separator: "\n")
         }()
+        let attemptDiagnosticsText = loomAIAttemptDiagnosticsText() ?? "<none>"
 
         let header = """
         Loom Debug Export
@@ -1570,6 +1593,11 @@ struct TemporaryVisionAutoWriteDebugView: View {
         let evidence = """
         Worker Debug Evidence
         \(evidenceText)
+        """
+
+        let attemptDiagnostics = """
+        Apple Attempt Diagnostics
+        \(attemptDiagnosticsText)
         """
 
         let request = """
@@ -1602,6 +1630,7 @@ struct TemporaryVisionAutoWriteDebugView: View {
             inputs,
             chips,
             evidence,
+            attemptDiagnostics,
             request,
             context,
             response,
@@ -1747,6 +1776,27 @@ struct TemporaryVisionAutoWriteDebugView: View {
             return evidence
         }
         return []
+    }
+
+    private func loomAIAttemptDiagnosticsText() -> String? {
+        guard let debug = loomAIDebugDetails else { return nil }
+        let rows: [(String, String?)] = [
+            ("structuredAttemptStatus", debug.structuredAttemptStatus),
+            ("structuredAttemptError", debug.structuredAttemptError),
+            ("structuredRawPayloadJSON", debug.structuredRawPayloadJSON),
+            ("textFallbackStatus", debug.textFallbackStatus),
+            ("textFallbackError", debug.textFallbackError),
+            ("textFallbackRawText", debug.textFallbackRawText),
+            ("finalFailureReason", debug.finalFailureReason)
+        ]
+        let nonEmptyRows = rows.compactMap { key, value -> String? in
+            guard let value else { return nil }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            return "\(key):\n\(trimmed)"
+        }
+        guard !nonEmptyRows.isEmpty else { return nil }
+        return nonEmptyRows.joined(separator: "\n\n")
     }
 }
 

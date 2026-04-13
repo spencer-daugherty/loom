@@ -8,7 +8,8 @@ private enum ObjectivesContributingLittleWinsStore {
     private static let defaultsKey = "outcome_contributing_little_wins_v1"
 
     private static func loadMap() -> [String: [String]] {
-        guard let data = UserDefaults.standard.data(forKey: defaultsKey),
+        let scopedKey = LoomDefaultsScope.scopedKey(defaultsKey)
+        guard let data = UserDefaults.standard.data(forKey: scopedKey),
               let decoded = try? JSONDecoder().decode([String: [String]].self, from: data) else {
             return [:]
         }
@@ -17,7 +18,7 @@ private enum ObjectivesContributingLittleWinsStore {
 
     private static func saveMap(_ map: [String: [String]]) {
         guard let data = try? JSONEncoder().encode(map) else { return }
-        UserDefaults.standard.set(data, forKey: defaultsKey)
+        UserDefaults.standard.set(data, forKey: LoomDefaultsScope.scopedKey(defaultsKey))
     }
 
     static func focusIDs(for outcomeID: UUID) -> [UUID] {

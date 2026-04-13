@@ -437,6 +437,7 @@ struct DataItem: Identifiable, Hashable {
     }
 }
 
+
 #Preview {
     NavigationStack {
         AccountView()
@@ -461,6 +462,7 @@ struct AccountView: View {
 
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
     @Query private var fulfillments: [Fulfillment]
     @AppStorage(loomAIInsightsRefreshToggleDefaultsKey) private var enableLoomAIInsightsRefresh = false
     @AppStorage("enable_projects_feature") private var enableProjectsFeature = false
@@ -715,7 +717,7 @@ struct AccountView: View {
                     .font(.footnote.weight(.semibold))
 
                     Button("Privacy Policy") {
-                        presentedLegalDocument = .privacy
+                        openURL(LoomLegalLinks.privacyPolicyURL)
                     }
                     .buttonStyle(.plain)
                     .font(.footnote.weight(.semibold))

@@ -545,7 +545,19 @@ struct ReflectView: View {
     }
 
     private var currentOtherContributionFulfillmentRows: [Fulfillment] {
-        fulfillments.sorted { lhs, rhs in
+        let uniqueRows = Dictionary(grouping: fulfillments) { row in
+                row.category
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+                    .lowercased()
+            }
+            .compactMap { _, rows in
+                rows.max { lhs, rhs in
+                    lhs.updatedAt < rhs.updatedAt
+                }
+            }
+
+        return uniqueRows.sorted { lhs, rhs in
             lhs.category.localizedCaseInsensitiveCompare(rhs.category) == .orderedAscending
         }
     }
@@ -1081,7 +1093,7 @@ struct ReflectView: View {
                     }
 
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Productive days")
+                        Text("Productive Days")
                             .font(.headline)
                         HStack(spacing: 12) {
                             chartLegendChip(color: .blue, label: "Done")
@@ -1614,7 +1626,15 @@ struct ReflectView: View {
     }
 
     private func metricBarRow(title: String, value: Int, maximum: Int, tint: Color) -> some View {
-        HStack(alignment: .center, spacing: 10) {
+        let greytoneFill = LinearGradient(
+            colors: [
+                Color(.systemGray3),
+                Color(.systemGray2)
+            ],
+            startPoint: .leading,
+            endPoint: .trailing
+        )
+        return HStack(alignment: .center, spacing: 10) {
             Text(title)
                 .font(.subheadline)
             Spacer(minLength: 8)
@@ -1634,7 +1654,7 @@ struct ReflectView: View {
                 .frame(width: fillWidth, height: 24, alignment: .leading)
                 .background(
                     Capsule()
-                        .fill(tint.gradient)
+                        .fill(greytoneFill)
                 )
                 .frame(maxWidth: .infinity, alignment: .trailing)
             }

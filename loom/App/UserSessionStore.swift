@@ -25,6 +25,8 @@ final class UserSessionStore: ObservableObject {
         static let authProvider = "auth_provider"
         static let accountName = "account_name"
         static let accountEmail = "account_email"
+        static let reviewDemoModeEnabled = "review_demo_mode_enabled"
+        static let reviewDemoStoreGeneration = "review_demo_store_generation"
     }
 
     @Published private(set) var hasSeenOnboarding: Bool
@@ -128,6 +130,16 @@ final class UserSessionStore: ObservableObject {
         defaults.set(value, forKey: Keys.isSubscribed)
     }
 
+    func setReviewDemoModeEnabled(_ value: Bool) {
+        defaults.set(value, forKey: Keys.reviewDemoModeEnabled)
+    }
+
+    func bumpReviewDemoStoreGeneration() -> Int {
+        let nextValue = defaults.integer(forKey: Keys.reviewDemoStoreGeneration) + 1
+        defaults.set(nextValue, forKey: Keys.reviewDemoStoreGeneration)
+        return nextValue
+    }
+
     func setAppleUserID(_ value: String?) {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if trimmed.isEmpty {
@@ -142,6 +154,7 @@ final class UserSessionStore: ObservableObject {
         setHasCompletedDiagnostic(false)
         setHasSeenDiagnosticInsights(false)
         setIsSubscribed(false)
+        setReviewDemoModeEnabled(false)
         defaults.removeObject(forKey: Keys.appleUserID)
         defaults.removeObject(forKey: Keys.googleUserID)
         defaults.removeObject(forKey: Keys.authProvider)
@@ -149,6 +162,7 @@ final class UserSessionStore: ObservableObject {
 
     #if canImport(AuthenticationServices)
     func completeSignInWithApple(_ credential: ASAuthorizationAppleIDCredential) {
+        setReviewDemoModeEnabled(false)
         setAppleUserID(credential.user)
         defaults.set("apple", forKey: Keys.authProvider)
         if let email = credential.email?.trimmingCharacters(in: .whitespacesAndNewlines), !email.isEmpty {
@@ -205,6 +219,7 @@ final class UserSessionStore: ObservableObject {
         email: String?,
         fullName: String?
     ) {
+        setReviewDemoModeEnabled(false)
         let trimmedUserID = userID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if trimmedUserID.isEmpty {
             defaults.removeObject(forKey: Keys.googleUserID)
@@ -212,6 +227,30 @@ final class UserSessionStore: ObservableObject {
             defaults.set(trimmedUserID, forKey: Keys.googleUserID)
         }
         defaults.set("google", forKey: Keys.authProvider)
+
+        let trimmedEmail = email?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !trimmedEmail.isEmpty {
+            defaults.set(trimmedEmail, forKey: Keys.accountEmail)
+        }
+
+        let trimmedName = fullName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !trimmedName.isEmpty {
+            defaults.set(trimmedName, forKey: Keys.accountName)
+        }
+
+        setHasAccount(true)
+        restoreReturningUserProgressIfAvailable()
+    }
+
+    func completeSignInWithEmail(
+        userID: String?,
+        email: String?,
+        fullName: String?
+    ) {
+        defaults.set("email", forKey: Keys.authProvider)
+        defaults.removeObject(forKey: Keys.googleUserID)
+        defaults.removeObject(forKey: Keys.appleUserID)
+        _ = userID
 
         let trimmedEmail = email?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !trimmedEmail.isEmpty {

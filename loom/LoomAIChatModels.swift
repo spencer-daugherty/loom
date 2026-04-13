@@ -199,6 +199,13 @@ struct LoomAIDebug: Codable, Hashable {
     var contextBytes: Int?
     var contextHash: String?
     var contextKeys: [String]?
+    var structuredAttemptStatus: String? = nil
+    var structuredAttemptError: String? = nil
+    var structuredRawPayloadJSON: String? = nil
+    var textFallbackStatus: String? = nil
+    var textFallbackError: String? = nil
+    var textFallbackRawText: String? = nil
+    var finalFailureReason: String? = nil
 }
 
 enum LoomAIChatMessageActionsCodec {
