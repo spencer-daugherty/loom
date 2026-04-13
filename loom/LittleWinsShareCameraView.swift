@@ -105,8 +105,9 @@ struct LittleWinsShareCameraView: View {
             }
         }
         .task {
+            selectedTemplateID = LittleWinsShareTemplateCatalog.sortedTemplates.first?.id ?? "todaysWins"
+            selectedFilter = LittleWinsShareImageFilter.allCases.first ?? .color
             await prepareCameraIfNeeded()
-            selectFirstEligibleTemplateIfNeeded()
         }
         .onDisappear {
             cameraSession.stopSession()
@@ -412,12 +413,6 @@ struct LittleWinsShareCameraView: View {
         renderer.scale = overlayScale
         renderer.proposedSize = .init(width: referenceWidth, height: referenceHeight)
         return renderer.uiImage
-    }
-
-    private func selectFirstEligibleTemplateIfNeeded() {
-        guard selectedTemplateLockReason != nil else { return }
-        guard let firstEligible = templates.first(where: { $0.isEligible(in: overlayData) }) else { return }
-        selectedTemplateID = firstEligible.id
     }
 
     private func applyFilter(to image: UIImage, style: LittleWinsShareImageFilter) -> UIImage? {
