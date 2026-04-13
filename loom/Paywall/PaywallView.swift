@@ -22,6 +22,7 @@ struct PaywallView: View {
     @State private var headerHeight: CGFloat = 0
     @State private var lowerContentHeight: CGFloat = 0
     @State private var activeLoadingAction: PaywallLoadingAction?
+    @State private var restoreStatusMessage: String?
     private let paywallPreviewBaseScale: CGFloat = 0.7
 
     init(bannerMessage: String? = nil) {
@@ -132,9 +133,9 @@ struct PaywallView: View {
 
     private var paywallHeader: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("No Free Lunch")
+            Text(showsInactiveSubscriptionBanner ? "Subscription Required" : "Choose a Plan")
                 .font(.largeTitle.weight(.bold))
-            Text("Join the movement to end stress and live fulfilled.")
+            Text("Select a subscription or lifetime access option to continue using Loom.")
                 .font(.body)
                 .foregroundStyle(.secondary)
         }
@@ -181,6 +182,7 @@ struct PaywallView: View {
             Button {
                 AnalyticsLogger.log(.purchaseStarted(plan: selectedPlan.rawValue))
                 Task {
+                    restoreStatusMessage = nil
                     activeLoadingAction = .purchase
                     let outcome = await purchaseManager.purchase(plan: selectedPlan, session: session)
                     switch outcome {
@@ -213,8 +215,17 @@ struct PaywallView: View {
             if showsInactiveSubscriptionBanner {
                 Button {
                     Task {
+                        restoreStatusMessage = nil
                         activeLoadingAction = .restore
-                        await purchaseManager.restorePurchases(session: session)
+                        let outcome = await purchaseManager.restorePurchases(session: session)
+                        switch outcome {
+                        case .restoredActiveEntitlement:
+                            restoreStatusMessage = "Purchases restored."
+                        case .noActivePurchasesFound:
+                            restoreStatusMessage = "No active purchases were found for this Apple ID."
+                        case .failed:
+                            restoreStatusMessage = "Restore failed. Please try again."
+                        }
                         activeLoadingAction = nil
                     }
                 } label: {
@@ -235,8 +246,17 @@ struct PaywallView: View {
             } else {
                 Button {
                     Task {
+                        restoreStatusMessage = nil
                         activeLoadingAction = .restore
-                        await purchaseManager.restorePurchases(session: session)
+                        let outcome = await purchaseManager.restorePurchases(session: session)
+                        switch outcome {
+                        case .restoredActiveEntitlement:
+                            restoreStatusMessage = "Purchases restored."
+                        case .noActivePurchasesFound:
+                            restoreStatusMessage = "No active purchases were found for this Apple ID."
+                        case .failed:
+                            restoreStatusMessage = "Restore failed. Please try again."
+                        }
                         activeLoadingAction = nil
                     }
                 } label: {
@@ -255,6 +275,13 @@ struct PaywallView: View {
                 .accessibilityIdentifier("paywall_restore")
             }
 
+            if let restoreStatusMessage, !restoreStatusMessage.isEmpty {
+                Text(restoreStatusMessage)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             if let summaryText = selectedPlan.summaryText {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(summaryText)
@@ -269,6 +296,13 @@ struct PaywallView: View {
                         .buttonStyle(.plain)
                     }
                 }
+            }
+
+            if selectedPlan != .lifetime {
+                Text("Manage or cancel subscriptions anytime in Apple Account Settings.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             HStack(spacing: 16) {

@@ -10,6 +10,12 @@ final class PurchaseManager: ObservableObject {
         case failed(errorType: String)
     }
 
+    enum RestoreOutcome: Equatable {
+        case restoredActiveEntitlement
+        case noActivePurchasesFound
+        case failed(errorType: String)
+    }
+
     @Published private(set) var products: [Product] = []
     @Published private(set) var ownedProductIDs: Set<String> = []
     @Published private(set) var isPremium = false
@@ -131,12 +137,12 @@ final class PurchaseManager: ObservableObject {
         }
     }
 
-    func restorePurchases(session: UserSessionStore? = nil) async {
+    func restorePurchases(session: UserSessionStore? = nil) async -> RestoreOutcome {
         if let session {
             configure(session: session)
         }
 
-        guard !isProcessing else { return }
+        guard !isProcessing else { return .failed(errorType: "busy") }
         isProcessing = true
         defer { isProcessing = false }
 
@@ -144,9 +150,12 @@ final class PurchaseManager: ObservableObject {
             try await AppStore.sync()
         } catch {
             log("Restore purchases failed: \(error.localizedDescription)")
+            await refreshEntitlements()
+            return .failed(errorType: "sync_failed")
         }
 
         await refreshEntitlements()
+        return isPremium ? .restoredActiveEntitlement : .noActivePurchasesFound
     }
 
     private func observeTransactionUpdates() -> Task<Void, Never> {

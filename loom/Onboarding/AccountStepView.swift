@@ -213,7 +213,7 @@ struct AccountStepView: View {
                     .multilineTextAlignment(.center)
 
                 HStack(spacing: 4) {
-                    Button("Terms of Service") {
+                    Button("Terms of Use") {
                         presentedLegalDocument = .terms
                     }
                     .buttonStyle(.plain)

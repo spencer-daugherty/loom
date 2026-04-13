@@ -126,11 +126,11 @@ enum SubscriptionPlan: String, CaseIterable, Identifiable {
     var summaryText: LocalizedStringKey? {
         switch self {
         case .lifetime:
-            return "Founding Member lifetime access. First 1,000. Ends May 31, 2026."
+            return "$129 one-time purchase. No subscription renewal."
         case .annual:
-            return "Annual includes a 10-day free trial."
+            return "10-day free trial, then $79/year unless canceled at least 24 hours before the trial or current period ends."
         case .monthly:
-            return "Monthly renews every month until canceled."
+            return "$15/month. Renews automatically unless canceled at least 24 hours before the end of the current period."
         }
     }
 

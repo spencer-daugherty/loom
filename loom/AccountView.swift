@@ -491,6 +491,7 @@ struct AccountView: View {
     @State private var showFeedbackSheet = false
     @State private var feedbackRating = 0
     @State private var feedbackDetails = ""
+    @State private var presentedLegalDocument: LegalDocument?
     @State private var showDeveloperPage = false
     @State private var showDeveloperPaywall = false
     @State private var loomAICostSnapshot = LoomAICostLedger.dailySnapshot()
@@ -705,6 +706,24 @@ struct AccountView: View {
                 }
                 .listRowSeparator(.hidden)
 
+                HStack(spacing: 16) {
+                    Spacer()
+                    Button("Terms of Use") {
+                        presentedLegalDocument = .terms
+                    }
+                    .buttonStyle(.plain)
+                    .font(.footnote.weight(.semibold))
+
+                    Button("Privacy Policy") {
+                        presentedLegalDocument = .privacy
+                    }
+                    .buttonStyle(.plain)
+                    .font(.footnote.weight(.semibold))
+                    Spacer()
+                }
+                .foregroundStyle(.blue)
+                .listRowSeparator(.hidden)
+
                 HStack {
                     Spacer()
                     Button {
@@ -794,6 +813,9 @@ struct AccountView: View {
                 details: $feedbackDetails,
                 isPresented: $showFeedbackSheet
             )
+        }
+        .sheet(item: $presentedLegalDocument) { document in
+            LegalLinksView(document: document)
         }
         .sheet(isPresented: $showDeveloperPasswordSheet) {
             DeveloperAccessSheet(
