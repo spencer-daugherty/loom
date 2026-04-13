@@ -651,7 +651,9 @@ struct OutcomeView: View {
                         let startEntryID = OutcomeStartingValueStore.entryID(for: outcome.outcome_id)
                         let startEntry = allMeasureEntries.first {
                             $0.outcome_id == outcome.outcome_id && $0.id == startEntryID
-                        }
+                        } ?? allMeasureEntries
+                            .filter { $0.outcome_id == outcome.outcome_id }
+                            .min(by: { $0.measuredAt < $1.measuredAt })
                         let startMeasure = startEntry?.measure
                         let startMeasuredAt = startEntry?.measuredAt
                         let isStarting = startMeasuredAt.map { Calendar.current.isDate($0, inSameDayAs: latestMeasureDate()) } ?? false
