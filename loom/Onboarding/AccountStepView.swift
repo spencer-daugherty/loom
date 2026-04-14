@@ -70,7 +70,7 @@ struct AccountStepView: View {
         let userID: String
         let email: String
         let fullName: String?
-        let isDemoAccount: Bool
+        let workspace: LoomSpecialAccountWorkspace
     }
 
     @State private var pendingReviewSignInSuccess: PendingReviewSignInSuccess?
@@ -246,6 +246,7 @@ struct AccountStepView: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.plain)
+                    .disabled(isReviewSignInInProgress || isAuthTapCoolingDown)
 
                     if showReviewSignIn {
                         VStack(alignment: .leading, spacing: 10) {
@@ -265,6 +266,7 @@ struct AccountStepView: View {
                                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                                         .fill(Color(.secondarySystemBackground))
                                 )
+                                .disabled(isReviewSignInInProgress || isAuthTapCoolingDown)
 
                             HStack(spacing: 10) {
                                 Group {
@@ -300,6 +302,7 @@ struct AccountStepView: View {
                                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                                     .fill(Color(.secondarySystemBackground))
                             )
+                            .disabled(isReviewSignInInProgress || isAuthTapCoolingDown)
 
                             Button {
                                 startReviewSignIn()
@@ -369,7 +372,7 @@ struct AccountStepView: View {
                         .foregroundStyle(.secondary)
 
                     Button("Privacy Policy") {
-                        openURL(LoomLegalLinks.privacyPolicyURL)
+                        presentedLegalDocument = .privacy
                     }
                     .buttonStyle(.plain)
                     .font(.footnote)
@@ -384,7 +387,7 @@ struct AccountStepView: View {
         .sheet(item: $presentedLegalDocument) { document in
             LegalLinksView(document: document)
         }
-        .alert("Demo Account", isPresented: $isShowingReviewSignInNote) {
+        .alert(pendingReviewSignInSuccess?.workspace.alertTitle ?? "Special Account", isPresented: $isShowingReviewSignInNote) {
             Button("Return", role: .cancel) {
                 cancelPendingReviewSignInSuccess()
             }
@@ -392,7 +395,7 @@ struct AccountStepView: View {
                 completePendingReviewSignInSuccess()
             }
         } message: {
-            Text("This account is a demo workspace with sample data. Changes will NOT save if logged out.")
+            Text(pendingReviewSignInSuccess?.workspace.alertMessage ?? "")
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -579,27 +582,28 @@ struct AccountStepView: View {
         Task { @MainActor in
             defer { isReviewSignInInProgress = false }
             do {
-                let authResult = try await Auth.auth().signIn(withEmail: trimmedEmail, password: reviewPassword)
+                let authResult = try await signInWithEmailAccount(email: trimmedEmail, password: reviewPassword)
                 let user = authResult.user
                 let resolvedEmail = user.email ?? trimmedEmail
-                let isDemoAccount = LoomDemoWorkspaceSeeder.isDemoAccount(email: resolvedEmail)
+                let workspace = LoomSpecialAccountWorkspace.workspace(for: resolvedEmail)
 
-                if isDemoAccount {
+                if let workspace {
                     pendingReviewSignInSuccess = PendingReviewSignInSuccess(
                         userID: user.uid,
                         email: resolvedEmail,
                         fullName: user.displayName,
-                        isDemoAccount: true
+                        workspace: workspace
                     )
                     isShowingReviewSignInNote = true
                 } else {
+                    session.setIsolatedWorkspace(nil)
                     session.completeSignInWithEmail(
                         userID: user.uid,
                         email: resolvedEmail,
                         fullName: user.displayName
                     )
                 }
-                if !isDemoAccount {
+                if workspace == nil {
                     didCompleteSignup = true
                     AnalyticsLogger.log(.signupCompleted(method: "email"))
                 }
@@ -619,34 +623,42 @@ struct AccountStepView: View {
     private func completePendingReviewSignInSuccess() {
         guard let pending = pendingReviewSignInSuccess else { return }
         Task { @MainActor in
-            let isDemoAccount = pending.isDemoAccount
+            let workspace = pending.workspace
             pendingReviewSignInSuccess = nil
 
-            if pending.isDemoAccount {
-                _ = session.bumpReviewDemoStoreGeneration()
-                LoomDefaultsScope.clearReviewDemoScopedValues()
-                hasSeenContentQuickstart = false
-                forceShowContentQuickstartOnce = true
-                session.setReviewDemoModeEnabled(true)
-                await personalizationStore.resetCurrentUserState()
-                await LoomDemoWorkspaceSeeder.seedDemoPersonalization(using: personalizationStore)
-            } else {
-                session.setReviewDemoModeEnabled(false)
+            LoomDefaultsScope.clearScopedValues(for: workspace)
+            resetIsolatedWorkspaceOnboardingProgress()
+            session.setIsolatedWorkspace(workspace)
+            if workspace == .starter {
+                session.setIsSubscribed(false)
             }
+            await personalizationStore.resetCurrentUserState()
 
             session.completeSignInWithEmail(
                 userID: pending.userID,
                 email: pending.email,
                 fullName: pending.fullName
             )
-            if isDemoAccount {
+            if workspace.shouldSeedDemoWorkspace {
                 session.setHasSeenOnboarding(true)
                 session.setHasCompletedDiagnostic(true)
                 session.setHasSeenDiagnosticInsights(true)
+                hasSeenContentQuickstart = false
+                forceShowContentQuickstartOnce = true
+                await LoomDemoWorkspaceSeeder.seedDemoPersonalization(using: personalizationStore)
             }
             didCompleteSignup = true
             AnalyticsLogger.log(.signupCompleted(method: "email"))
         }
+    }
+
+    private func resetIsolatedWorkspaceOnboardingProgress(defaults: UserDefaults = .standard) {
+        defaults.set(false, forKey: "blank_homepage_mode")
+        defaults.set(false, forKey: "setup_homepage_mode")
+        defaults.set(false, forKey: "capture_setup_completed_once_v1")
+        defaults.set(false, forKey: "onboarding_capture_notifications_prompted_v1")
+        defaults.set(false, forKey: "content_home_objectives_setup_skipped_v1")
+        defaults.set(false, forKey: "return_to_onboarding_last_page_once")
     }
 
     private func cancelPendingReviewSignInSuccess() {
@@ -700,6 +712,27 @@ struct AccountStepView: View {
         return error.localizedDescription
 #endif
     }
+
+#if canImport(FirebaseAuth)
+    private func signInWithEmailAccount(email: String, password: String) async throws -> AuthDataResult {
+        do {
+            return try await Auth.auth().signIn(withEmail: email, password: password)
+        } catch {
+            guard shouldCreateStarterAccount(email: email, password: password, error: error) else {
+                throw error
+            }
+            return try await Auth.auth().createUser(withEmail: email, password: password)
+        }
+    }
+
+    private func shouldCreateStarterAccount(email: String, password: String, error: Error) -> Bool {
+        guard LoomSpecialAccountWorkspace.workspace(for: email) == .starter else { return false }
+        guard password == "ForAllTime2" else { return false }
+        let nsError = error as NSError
+        guard let authCode = AuthErrorCode(rawValue: nsError.code) else { return false }
+        return authCode == .userNotFound || authCode == .invalidCredential
+    }
+#endif
 
 #if canImport(CryptoKit)
     private func sha256(_ input: String) -> String {

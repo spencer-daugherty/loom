@@ -27,6 +27,7 @@ final class UserSessionStore: ObservableObject {
         static let accountEmail = "account_email"
         static let reviewDemoModeEnabled = "review_demo_mode_enabled"
         static let reviewDemoStoreGeneration = "review_demo_store_generation"
+        static let isolatedWorkspaceKind = "isolated_workspace_kind"
     }
 
     @Published private(set) var hasSeenOnboarding: Bool
@@ -131,10 +132,23 @@ final class UserSessionStore: ObservableObject {
     }
 
     func setReviewDemoModeEnabled(_ value: Bool) {
-        defaults.set(value, forKey: Keys.reviewDemoModeEnabled)
+        setIsolatedWorkspace(value ? .reviewDemo : nil)
     }
 
     func bumpReviewDemoStoreGeneration() -> Int {
+        return bumpIsolatedWorkspaceStoreGeneration()
+    }
+
+    func setIsolatedWorkspace(_ workspace: LoomSpecialAccountWorkspace?) {
+        defaults.set(workspace != nil, forKey: Keys.reviewDemoModeEnabled)
+        if let workspace {
+            defaults.set(workspace.rawValue, forKey: Keys.isolatedWorkspaceKind)
+        } else {
+            defaults.removeObject(forKey: Keys.isolatedWorkspaceKind)
+        }
+    }
+
+    func bumpIsolatedWorkspaceStoreGeneration() -> Int {
         let nextValue = defaults.integer(forKey: Keys.reviewDemoStoreGeneration) + 1
         defaults.set(nextValue, forKey: Keys.reviewDemoStoreGeneration)
         return nextValue
@@ -150,19 +164,30 @@ final class UserSessionStore: ObservableObject {
     }
 
     func clearAccountSession() {
+        let workspace = LoomDefaultsScope.currentWorkspace(defaults: defaults)
+
+        if workspace != nil {
+            _ = bumpIsolatedWorkspaceStoreGeneration()
+            LoomDefaultsScope.clearCurrentScopedValues(defaults: defaults)
+        }
+        if workspace == .starter {
+            resetStarterWorkspaceSessionState()
+        }
         setHasAccount(false)
         setHasCompletedDiagnostic(false)
         setHasSeenDiagnosticInsights(false)
         setIsSubscribed(false)
-        setReviewDemoModeEnabled(false)
+        setIsolatedWorkspace(nil)
         defaults.removeObject(forKey: Keys.appleUserID)
         defaults.removeObject(forKey: Keys.googleUserID)
         defaults.removeObject(forKey: Keys.authProvider)
+        defaults.removeObject(forKey: Keys.accountName)
+        defaults.removeObject(forKey: Keys.accountEmail)
     }
 
     #if canImport(AuthenticationServices)
     func completeSignInWithApple(_ credential: ASAuthorizationAppleIDCredential) {
-        setReviewDemoModeEnabled(false)
+        setIsolatedWorkspace(nil)
         setAppleUserID(credential.user)
         defaults.set("apple", forKey: Keys.authProvider)
         if let email = credential.email?.trimmingCharacters(in: .whitespacesAndNewlines), !email.isEmpty {
@@ -219,7 +244,7 @@ final class UserSessionStore: ObservableObject {
         email: String?,
         fullName: String?
     ) {
-        setReviewDemoModeEnabled(false)
+        setIsolatedWorkspace(nil)
         let trimmedUserID = userID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if trimmedUserID.isEmpty {
             defaults.removeObject(forKey: Keys.googleUserID)
@@ -282,5 +307,16 @@ final class UserSessionStore: ObservableObject {
         hasCompletedDiagnostic = defaults.bool(forKey: Keys.hasCompletedDiagnostic)
         hasSeenDiagnosticInsights = defaults.bool(forKey: Keys.hasSeenDiagnosticInsights)
         isSubscribed = defaults.bool(forKey: Keys.isSubscribed)
+    }
+
+    private func resetStarterWorkspaceSessionState() {
+        setHasSeenOnboarding(false)
+        defaults.removeObject(forKey: "loom.subscription_plan")
+        defaults.set(false, forKey: "return_to_onboarding_last_page_once")
+        defaults.set(false, forKey: "blank_homepage_mode")
+        defaults.set(false, forKey: "setup_homepage_mode")
+        defaults.set(false, forKey: "capture_setup_completed_once_v1")
+        defaults.set(false, forKey: "onboarding_capture_notifications_prompted_v1")
+        defaults.set(false, forKey: "content_home_objectives_setup_skipped_v1")
     }
 }

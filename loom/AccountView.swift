@@ -474,6 +474,7 @@ struct AccountView: View {
     @AppStorage("developer_launch_paywall_once") private var developerLaunchPaywallOnce = false
     @AppStorage(loomAITroubleshootingDefaultsKey) private var enableLoomAITroubleshooting = true
     @AppStorage(loomAIDebugDefaultsKey) private var enableLoomAIDebug = false
+    @AppStorage(loomAIDisableAppleIntelligenceDefaultsKey) private var disableAppleIntelligence = false
     @AppStorage("loomAI.dev.disableDailyLimiter") private var disableLoomAIDailyLimiter = false
     @AppStorage("dev_manual_warning_cards_enabled") private var devManualWarningCardsEnabled = false
     @AppStorage("dev_outcome_warning_target_passed") private var devOutcomeWarningTargetPassed = false
@@ -717,7 +718,7 @@ struct AccountView: View {
                     .font(.footnote.weight(.semibold))
 
                     Button("Privacy Policy") {
-                        openURL(LoomLegalLinks.privacyPolicyURL)
+                        presentedLegalDocument = .privacy
                     }
                     .buttonStyle(.plain)
                     .font(.footnote.weight(.semibold))
@@ -871,6 +872,7 @@ struct AccountView: View {
                         Toggle("Enable LoomAI Insights Refresh", isOn: $enableLoomAIInsightsRefresh)
                         Toggle("LoomAI Troubleshooting", isOn: $enableLoomAITroubleshooting)
                         Toggle("LoomAI Debug", isOn: $enableLoomAIDebug)
+                        Toggle("Disable Apple Intelligence", isOn: $disableAppleIntelligence)
                         Toggle("Disable LoomAI Daily Limiter", isOn: $disableLoomAIDailyLimiter)
                         Toggle("Enable Projects", isOn: $enableProjectsFeature)
                         Toggle("Onboarding", isOn: $onboardingResetOnNextLaunch)
@@ -1788,14 +1790,12 @@ struct VacationModeView: View {
 struct AccountDetailsView: View {
     private enum AccountField: Hashable {
         case name
-        case email
-        case phone
     }
 
     @EnvironmentObject private var session: UserSessionStore
+    @EnvironmentObject private var personalizationStore: PersonalizationStore
     @AppStorage("account_name") private var accountName = ""
     @AppStorage("account_email") private var accountEmail = ""
-    @AppStorage("account_phone") private var accountPhone = ""
     @AppStorage(UserSessionStore.Keys.appleUserID) private var appleUserID = ""
     @AppStorage(UserSessionStore.Keys.googleUserID) private var googleUserID = ""
     @AppStorage(UserSessionStore.Keys.authProvider) private var authProvider = ""
@@ -1828,30 +1828,10 @@ struct AccountDetailsView: View {
                     }
                 )
 
-                inlineEditableRow(
+                settingsRow(
                     title: "Email",
-                    placeholder: "name@example.com",
-                    text: $accountEmail,
-                    field: .email,
-                    keyboardType: .emailAddress,
-                    capitalization: .never,
-                    disableAutocorrection: true,
-                    submitLabel: .done,
-                    onSubmit: {
-                        Task { await saveEmailToAuthIfNeeded() }
-                    }
-                )
-
-                inlineEditableRow(
-                    title: "Phone",
-                    placeholder: "(555) 123-4567",
-                    text: $accountPhone,
-                    field: .phone,
-                    keyboardType: .phonePad,
-                    capitalization: .never,
-                    disableAutocorrection: true,
-                    submitLabel: .done,
-                    onSubmit: nil
+                    value: accountEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "—" : accountEmail,
+                    showsChevron: false
                 )
 
                 Button {
@@ -1925,7 +1905,9 @@ struct AccountDetailsView: View {
         }
         .confirmationDialog("Sign out of Loom?", isPresented: $showSignOutConfirmation, titleVisibility: .visible) {
             Button("Sign Out", role: .destructive) {
-                signOut()
+                Task {
+                    await signOut()
+                }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -1977,6 +1959,9 @@ struct AccountDetailsView: View {
     }
 
     private var currentSubscriptionSummary: String {
+        if SubscriptionAccessGate.shouldForceInactiveSubscription() && !isSubscribed {
+            return "Not Purchased"
+        }
         guard SubscriptionAccessGate.hasActiveSubscription(
             isSubscribed: isSubscribed,
             inactivePurchaseOverrideEnabled: inactivePurchaseOverrideEnabled
@@ -2061,10 +2046,6 @@ struct AccountDetailsView: View {
         switch field {
         case .name:
             return !accountName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        case .email:
-            return !accountEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        case .phone:
-            return !accountPhone.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
     }
 
@@ -2078,15 +2059,15 @@ struct AccountDetailsView: View {
         switch field {
         case .name:
             Task { await saveDisplayNameToAuthIfNeeded() }
-        case .email:
-            Task { await saveEmailToAuthIfNeeded() }
-        case .phone:
-            break
         }
     }
 
     @MainActor
-    private func signOut() {
+    private func signOut() async {
+        let isolatedWorkspace = LoomDefaultsScope.currentWorkspace()
+        if isolatedWorkspace != nil {
+            await personalizationStore.resetCurrentUserState()
+        }
 #if canImport(FirebaseAuth)
         do {
             try Auth.auth().signOut()
@@ -2105,7 +2086,6 @@ struct AccountDetailsView: View {
         isSubscribed = false
         accountName = ""
         accountEmail = ""
-        accountPhone = ""
         accountError = nil
         session.clearAccountSession()
     }
@@ -2167,21 +2147,6 @@ struct AccountDetailsView: View {
 #endif
     }
 
-    @MainActor
-    private func saveEmailToAuthIfNeeded() async {
-        let trimmedEmail = accountEmail.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedEmail.isEmpty else { return }
-#if canImport(FirebaseAuth)
-        guard let user = Auth.auth().currentUser else { return }
-        guard (user.email ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased() != trimmedEmail.lowercased() else { return }
-        do {
-            try await user.sendEmailVerification(beforeUpdatingEmail: trimmedEmail)
-            accountError = "Verification sent to update your email."
-        } catch {
-            accountError = "Could not start email update. You may need to sign in again."
-        }
-#endif
-    }
 }
 
 private struct AccountSubscriptionView: View {

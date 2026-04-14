@@ -26,7 +26,6 @@ enum LoomLegalLinks {
 
 struct LegalLinksView: View {
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.openURL) private var openURL
 
     let document: LegalDocument
 
@@ -40,7 +39,7 @@ struct LegalLinksView: View {
                     case .terms:
                         termsContent
                     case .privacy:
-                        EmptyView()
+                        privacyContent
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -55,11 +54,6 @@ struct LegalLinksView: View {
                     }
                 }
             }
-        }
-        .onAppear {
-            guard document == .privacy else { return }
-            openURL(LoomLegalLinks.privacyPolicyURL)
-            dismiss()
         }
         .sheet(
             isPresented: Binding(
@@ -92,18 +86,69 @@ struct LegalLinksView: View {
                 ]
             )
 
-            Button {
-                presentedURL = LoomLegalLinks.standardEULAURL
-            } label: {
+            Link(destination: LoomLegalLinks.standardEULAURL) {
                 HStack(spacing: 8) {
-                    Image(systemName: "safari")
+                    Image(systemName: "arrow.up.right.square")
                     Text("Open Apple's Standard EULA")
                 }
                 .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
 
+            Button {
+                presentedURL = LoomLegalLinks.standardEULAURL
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "safari")
+                    Text("Preview Terms in App")
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+
             Text(LoomLegalLinks.standardEULAURL.absoluteString)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+        }
+    }
+
+    private var privacyContent: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            legalLead(
+                "Loom's Privacy Policy is hosted externally and explains what data Loom collects, how it is used, and how to contact the developer about privacy requests."
+            )
+
+            LegalSection(
+                title: "What You'll Find",
+                items: [
+                    "What information Loom collects and stores.",
+                    "How analytics, purchases, and account data are handled.",
+                    "How to request support or ask privacy-related questions."
+                ]
+            )
+
+            Link(destination: LoomLegalLinks.privacyPolicyURL) {
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.up.right.square")
+                    Text("Open Privacy Policy")
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+
+            Button {
+                presentedURL = LoomLegalLinks.privacyPolicyURL
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "safari")
+                    Text("Preview Privacy Policy in App")
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+
+            Text(LoomLegalLinks.privacyPolicyURL.absoluteString)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)

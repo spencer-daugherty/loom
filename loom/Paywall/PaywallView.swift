@@ -12,8 +12,6 @@ struct PaywallView: View {
     @EnvironmentObject private var purchaseManager: PurchaseManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.openURL) private var openURL
-
     @State private var selectedPlan: SubscriptionPlan = .lifetime
     @State private var presentedLegalDocument: LegalDocument?
     @State private var isShowingTrialDetails = false
@@ -80,13 +78,21 @@ struct PaywallView: View {
         .sheet(isPresented: $isShowingTrialDetails) {
             NavigationStack {
                 ScrollView {
-                    if let detailText = selectedPlan.disclosureDetailText {
-                        Text(detailText)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(20)
+                    VStack(alignment: .leading, spacing: 14) {
+                        if let manageText = selectedPlan.manageOrCancelText {
+                            Text(manageText)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        if let detailText = selectedPlan.disclosureDetailText {
+                            Text(detailText)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
+                    .padding(20)
                 }
                 .navigationTitle(selectedPlan.detailSheetTitle)
                 .navigationBarTitleDisplayMode(.inline)
@@ -134,9 +140,9 @@ struct PaywallView: View {
 
     private var paywallHeader: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(showsInactiveSubscriptionBanner ? "Subscription Required" : "Choose a Plan")
+            Text("No Free Lunch")
                 .font(.largeTitle.weight(.bold))
-            Text("Select a subscription or lifetime access option to continue using Loom.")
+            Text("Join the movement to end stress and live fulfilled.")
                 .font(.body)
                 .foregroundStyle(.secondary)
         }
@@ -299,16 +305,9 @@ struct PaywallView: View {
                 }
             }
 
-            if selectedPlan != .lifetime {
-                Text("Manage or cancel subscriptions anytime in Apple Account Settings.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
             HStack(spacing: 16) {
                 Button("Terms of Use") { presentedLegalDocument = .terms }
-                Button("Privacy Policy") { openURL(LoomLegalLinks.privacyPolicyURL) }
+                Button("Privacy Policy") { presentedLegalDocument = .privacy }
             }
             .font(.footnote.weight(.semibold))
             .padding(.top, legalTopPadding)
