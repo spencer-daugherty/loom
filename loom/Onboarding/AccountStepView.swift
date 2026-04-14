@@ -388,9 +388,6 @@ struct AccountStepView: View {
             LegalLinksView(document: document)
         }
         .alert(pendingReviewSignInSuccess?.workspace.alertTitle ?? "Special Account", isPresented: $isShowingReviewSignInNote) {
-            Button("Return", role: .cancel) {
-                cancelPendingReviewSignInSuccess()
-            }
             Button("Continue") {
                 completePendingReviewSignInSuccess()
             }
@@ -631,6 +628,7 @@ struct AccountStepView: View {
             session.setIsolatedWorkspace(workspace)
             if workspace == .starter {
                 session.setIsSubscribed(false)
+                SubscriptionAccessGate.setStarterEntitlementAccess(false)
             }
             await personalizationStore.resetCurrentUserState()
 

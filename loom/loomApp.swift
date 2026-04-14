@@ -139,7 +139,10 @@ private enum LoomPersistence {
         }
     }
 
-    static func makeReviewDemoPersistentContainer(generation: Int) -> ModelContainer {
+    static func makeIsolatedPersistentContainer(
+        workspace: LoomSpecialAccountWorkspace,
+        generation: Int
+    ) -> ModelContainer {
         if LoomRuntime.isPreviewSafeModeEnabled {
             return makeInMemoryContainer()
         }
@@ -153,10 +156,9 @@ private enum LoomPersistence {
             )
             let directoryURL = appSupportURL.appendingPathComponent("LoomStores", isDirectory: true)
             try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
-            cleanupReviewDemoStores(in: directoryURL, keepingGeneration: generation)
-            let storeURL = directoryURL.appendingPathComponent("review-demo-\(max(0, generation)).store")
+            let storeURL = directoryURL.appendingPathComponent("\(workspace.storeFilePrefix)-\(max(0, generation)).store")
             let configuration = ModelConfiguration(
-                "ReviewDemo",
+                workspace.rawValue,
                 schema: Schema(modelTypes),
                 url: storeURL,
                 allowsSave: true,
@@ -164,18 +166,7 @@ private enum LoomPersistence {
             )
             return try ModelContainer(for: Schema(modelTypes), configurations: [configuration])
         } catch {
-            fatalError("Failed to initialize review demo ModelContainer: \(error)")
-        }
-    }
-
-    private static func cleanupReviewDemoStores(in directoryURL: URL, keepingGeneration: Int) {
-        let contents = (try? FileManager.default.contentsOfDirectory(
-            at: directoryURL,
-            includingPropertiesForKeys: nil
-        )) ?? []
-        let keepPrefix = "review-demo-\(max(0, keepingGeneration)).store"
-        for url in contents where url.lastPathComponent.hasPrefix("review-demo-") && !url.lastPathComponent.hasPrefix(keepPrefix) {
-            try? FileManager.default.removeItem(at: url)
+            fatalError("Failed to initialize isolated ModelContainer: \(error)")
         }
     }
 }
@@ -188,17 +179,20 @@ private enum LoomPrimaryContainerStore {
     static let container = LoomPersistence.makeContainer()
 }
 
-private enum LoomReviewDemoContainerStore {
-    private static var containersByGeneration: [Int: ModelContainer] = [:]
+private enum LoomIsolatedContainerStore {
+    private static var containersByKey: [String: ModelContainer] = [:]
 
-    static func container(for generation: Int) -> ModelContainer {
+    static func container(for workspace: LoomSpecialAccountWorkspace, generation: Int) -> ModelContainer {
         let normalizedGeneration = max(0, generation)
-        if let existing = containersByGeneration[normalizedGeneration] {
+        let cacheKey = "\(workspace.rawValue)#\(normalizedGeneration)"
+        if let existing = containersByKey[cacheKey] {
             return existing
         }
-        let created = LoomPersistence.makeReviewDemoPersistentContainer(generation: normalizedGeneration)
-        containersByGeneration[normalizedGeneration] = created
-        containersByGeneration = containersByGeneration.filter { $0.key == normalizedGeneration }
+        let created = LoomPersistence.makeIsolatedPersistentContainer(
+            workspace: workspace,
+            generation: normalizedGeneration
+        )
+        containersByKey[cacheKey] = created
         return created
     }
 }
@@ -261,6 +255,7 @@ struct loomApp: App {
     @AppStorage(UserSessionStore.Keys.hasAccount) private var hasAccount = false
     @AppStorage(UserSessionStore.Keys.reviewDemoModeEnabled) private var reviewDemoModeEnabled = false
     @AppStorage(UserSessionStore.Keys.reviewDemoStoreGeneration) private var reviewDemoStoreGeneration = 0
+    @AppStorage(UserSessionStore.Keys.isolatedWorkspaceKind) private var isolatedWorkspaceKind = ""
     @AppStorage(loomAIDebugDefaultsKey) private var enableLoomAIDebug = false
     @AppStorage("loom.showLoomAIDebugPage") private var showLoomAIDebugPage = false
 
@@ -269,7 +264,8 @@ struct loomApp: App {
             LoomModelContainerHost(
                 hasAccount: hasAccount,
                 reviewDemoModeEnabled: reviewDemoModeEnabled,
-                reviewDemoStoreGeneration: reviewDemoStoreGeneration
+                reviewDemoStoreGeneration: reviewDemoStoreGeneration,
+                isolatedWorkspaceKind: isolatedWorkspaceKind
             ) {
                 ZStack(alignment: .bottomLeading) {
                     Group {
@@ -366,28 +362,31 @@ private struct LoomModelContainerHost<Content: View>: View {
     let hasAccount: Bool
     let reviewDemoModeEnabled: Bool
     let reviewDemoStoreGeneration: Int
+    let isolatedWorkspaceKind: String
     let content: Content
 
     init(
         hasAccount: Bool,
         reviewDemoModeEnabled: Bool,
         reviewDemoStoreGeneration: Int,
+        isolatedWorkspaceKind: String,
         @ViewBuilder content: () -> Content
     ) {
         self.hasAccount = hasAccount
         self.reviewDemoModeEnabled = reviewDemoModeEnabled
         self.reviewDemoStoreGeneration = reviewDemoStoreGeneration
+        self.isolatedWorkspaceKind = isolatedWorkspaceKind
         self.content = content()
     }
 
     var body: some View {
         Group {
-            if reviewDemoModeEnabled && hasAccount {
-                LoomReviewDemoBootstrapView {
+            if let workspace = resolvedWorkspace {
+                LoomIsolatedWorkspaceBootstrapView(workspace: workspace) {
                     content
                 }
-                .modelContainer(LoomReviewDemoContainerStore.container(for: reviewDemoStoreGeneration))
-                .id("loom-review-demo-container-\(reviewDemoStoreGeneration)")
+                .modelContainer(LoomIsolatedContainerStore.container(for: workspace, generation: reviewDemoStoreGeneration))
+                .id("loom-isolated-container-\(workspace.rawValue)-\(reviewDemoStoreGeneration)")
             } else {
                 content
                     .modelContainer(LoomPrimaryContainerStore.container)
@@ -401,6 +400,15 @@ private struct LoomModelContainerHost<Content: View>: View {
             _ = GIDSignIn.sharedInstance.handle(url)
 #endif
         }
+    }
+
+    private var resolvedWorkspace: LoomSpecialAccountWorkspace? {
+        guard reviewDemoModeEnabled else { return nil }
+        let normalizedKind = isolatedWorkspaceKind.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let workspace = LoomSpecialAccountWorkspace(rawValue: normalizedKind) {
+            return workspace
+        }
+        return .reviewDemo
     }
 
     private func handleIncomingURL(_ url: URL) {
@@ -441,17 +449,23 @@ private struct LoomModelContainerHost<Content: View>: View {
     }
 }
 
-private struct LoomReviewDemoBootstrapView<Content: View>: View {
+private struct LoomIsolatedWorkspaceBootstrapView<Content: View>: View {
     @Environment(\.modelContext) private var modelContext
+    let workspace: LoomSpecialAccountWorkspace
     let content: Content
 
-    init(@ViewBuilder content: () -> Content) {
+    init(
+        workspace: LoomSpecialAccountWorkspace,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.workspace = workspace
         self.content = content()
     }
 
     var body: some View {
         content
             .task {
+                guard workspace.shouldSeedDemoWorkspace else { return }
                 LoomDemoWorkspaceSeeder.seedDemoWorkspace(in: modelContext)
             }
     }

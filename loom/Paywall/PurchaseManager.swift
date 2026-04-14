@@ -68,6 +68,13 @@ final class PurchaseManager: ObservableObject {
             configure(session: session)
         }
 
+        if SubscriptionAccessGate.shouldForceInactiveSubscription(),
+           !SubscriptionAccessGate.allowsStarterEntitlementAccess(defaults: defaults) {
+            applyEntitlementSnapshot(activeProductIDs: [])
+            hasLoadedEntitlements = true
+            return
+        }
+
         var activeProductIDs = Set<String>()
         let now = Date()
 
@@ -113,6 +120,9 @@ final class PurchaseManager: ObservableObject {
                 switch verification {
                 case .verified(let transaction):
                     await transaction.finish()
+                    if SubscriptionAccessGate.shouldForceInactiveSubscription() {
+                        SubscriptionAccessGate.setStarterEntitlementAccess(true, defaults: defaults)
+                    }
                     await refreshEntitlements()
                     return .success
                 case .unverified(let transaction, let error):
@@ -154,6 +164,9 @@ final class PurchaseManager: ObservableObject {
             return .failed(errorType: "sync_failed")
         }
 
+        if SubscriptionAccessGate.shouldForceInactiveSubscription() {
+            SubscriptionAccessGate.setStarterEntitlementAccess(true, defaults: defaults)
+        }
         await refreshEntitlements()
         return isPremium ? .restoredActiveEntitlement : .noActivePurchasesFound
     }
@@ -188,10 +201,13 @@ final class PurchaseManager: ObservableObject {
         }
 
         activePlan = resolvedPlan
-        isPremium = resolvedPlan != nil
+        let hasEntitlement = resolvedPlan != nil
+        isPremium = hasEntitlement
 
         if let resolvedPlan {
             defaults.set(resolvedPlan.rawValue, forKey: "loom.subscription_plan")
+        } else {
+            defaults.removeObject(forKey: "loom.subscription_plan")
         }
         defaults.set(isPremium, forKey: UserSessionStore.Keys.isSubscribed)
         session?.setIsSubscribed(isPremium)

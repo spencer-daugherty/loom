@@ -96,6 +96,15 @@ enum SubscriptionPlan: String, CaseIterable, Identifiable {
         }
     }
 
+    var originalPriceText: String? {
+        switch self {
+        case .annual:
+            return "$180"
+        case .lifetime, .monthly:
+            return nil
+        }
+    }
+
     var trialText: LocalizedStringKey? {
         switch self {
         case .lifetime:
@@ -103,7 +112,7 @@ enum SubscriptionPlan: String, CaseIterable, Identifiable {
         case .annual:
             return "10-day free trial"
         case .monthly:
-            return "Cancel anytime"
+            return "Most flexible, cancel anytime"
         }
     }
 
@@ -128,9 +137,18 @@ enum SubscriptionPlan: String, CaseIterable, Identifiable {
         case .lifetime:
             return "$129 one-time purchase. No subscription renewal."
         case .annual:
-            return "10-day free trial, then $79/year unless canceled at least 24 hours before the trial or current period ends."
+            return "Manage or cancel subscriptions anytime in Apple Account Settings."
         case .monthly:
-            return "$15/month. Renews automatically unless canceled at least 24 hours before the end of the current period."
+            return "Manage or cancel subscriptions anytime in Apple Account Settings."
+        }
+    }
+
+    var manageOrCancelText: LocalizedStringKey? {
+        switch self {
+        case .lifetime:
+            return nil
+        case .annual, .monthly:
+            return "Manage or cancel subscriptions anytime in Apple Account Settings."
         }
     }
 

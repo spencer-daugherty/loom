@@ -219,68 +219,36 @@ struct PaywallView: View {
             .disabled(purchaseManager.isProcessing)
             .accessibilityIdentifier("paywall_primaryCTA")
 
-            if showsInactiveSubscriptionBanner {
-                Button {
-                    Task {
-                        restoreStatusMessage = nil
-                        activeLoadingAction = .restore
-                        let outcome = await purchaseManager.restorePurchases(session: session)
-                        switch outcome {
-                        case .restoredActiveEntitlement:
-                            restoreStatusMessage = "Purchases restored."
-                        case .noActivePurchasesFound:
-                            restoreStatusMessage = "No active purchases were found for this Apple ID."
-                        case .failed:
-                            restoreStatusMessage = "Restore failed. Please try again."
-                        }
-                        activeLoadingAction = nil
+            Button {
+                Task {
+                    restoreStatusMessage = nil
+                    activeLoadingAction = .restore
+                    let outcome = await purchaseManager.restorePurchases(session: session)
+                    switch outcome {
+                    case .restoredActiveEntitlement:
+                        restoreStatusMessage = "Purchases restored."
+                    case .noActivePurchasesFound:
+                        restoreStatusMessage = "No active purchases were found for this Apple ID."
+                    case .failed:
+                        restoreStatusMessage = "Restore failed. Please try again."
                     }
-                } label: {
-                    ZStack {
-                        Text("Restore Purchases")
-                            .opacity(activeLoadingAction == .restore ? 0 : 1)
-                        if activeLoadingAction == .restore {
-                            ProgressView()
-                        }
-                    }
-                    .frame(maxWidth: .infinity, minHeight: 24)
+                    activeLoadingAction = nil
                 }
-                .buttonStyle(.plain)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.blue)
-                .disabled(purchaseManager.isProcessing)
-                .accessibilityIdentifier("paywall_restore")
-            } else {
-                Button {
-                    Task {
-                        restoreStatusMessage = nil
-                        activeLoadingAction = .restore
-                        let outcome = await purchaseManager.restorePurchases(session: session)
-                        switch outcome {
-                        case .restoredActiveEntitlement:
-                            restoreStatusMessage = "Purchases restored."
-                        case .noActivePurchasesFound:
-                            restoreStatusMessage = "No active purchases were found for this Apple ID."
-                        case .failed:
-                            restoreStatusMessage = "Restore failed. Please try again."
-                        }
-                        activeLoadingAction = nil
+            } label: {
+                ZStack {
+                    Text("Restore Purchases")
+                        .opacity(activeLoadingAction == .restore ? 0 : 1)
+                    if activeLoadingAction == .restore {
+                        ProgressView()
                     }
-                } label: {
-                    ZStack {
-                        Text("Restore Purchases")
-                            .opacity(activeLoadingAction == .restore ? 0 : 1)
-                        if activeLoadingAction == .restore {
-                            ProgressView()
-                        }
-                    }
-                    .frame(maxWidth: .infinity, minHeight: 24)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-                .disabled(purchaseManager.isProcessing)
-                .accessibilityIdentifier("paywall_restore")
+                .frame(maxWidth: .infinity, minHeight: 24)
             }
+            .buttonStyle(.plain)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.blue)
+            .disabled(purchaseManager.isProcessing)
+            .accessibilityIdentifier("paywall_restore")
 
             if let restoreStatusMessage, !restoreStatusMessage.isEmpty {
                 Text(restoreStatusMessage)
@@ -408,9 +376,17 @@ struct PaywallView: View {
                     Text(plan.title)
                         .font(.headline)
                         .foregroundStyle(.primary)
-                    Text(plan.priceText)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
+                    HStack(spacing: 6) {
+                        if let originalPriceText = plan.originalPriceText {
+                            Text(originalPriceText)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .strikethrough()
+                        }
+                        Text(plan.priceText)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                    }
                     if let tierText = plan.tierText {
                         Text(tierText)
                             .font(.caption)

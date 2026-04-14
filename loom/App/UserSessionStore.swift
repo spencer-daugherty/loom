@@ -311,6 +311,7 @@ final class UserSessionStore: ObservableObject {
 
     private func resetStarterWorkspaceSessionState() {
         setHasSeenOnboarding(false)
+        SubscriptionAccessGate.setStarterEntitlementAccess(false, defaults: defaults)
         defaults.removeObject(forKey: "loom.subscription_plan")
         defaults.set(false, forKey: "return_to_onboarding_last_page_once")
         defaults.set(false, forKey: "blank_homepage_mode")
