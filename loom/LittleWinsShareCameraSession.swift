@@ -221,28 +221,32 @@ struct LittleWinsShareCameraPreview: UIViewRepresentable {
 
     final class PreviewView: UIView {
         override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
-
-        var previewLayer: AVCaptureVideoPreviewLayer {
-            guard let layer = layer as? AVCaptureVideoPreviewLayer else {
-                fatalError("Expected AVCaptureVideoPreviewLayer.")
-            }
-            return layer
-        }
     }
 
     func makeUIView(context: Context) -> PreviewView {
         let view = PreviewView()
         view.backgroundColor = .black
-        view.previewLayer.videoGravity = .resizeAspectFill
-        view.previewLayer.session = session
+        configurePreviewLayer(for: view)
         return view
     }
 
     func updateUIView(_ uiView: PreviewView, context: Context) {
-        uiView.previewLayer.session = session
-        uiView.previewLayer.videoGravity = .resizeAspectFill
+        configurePreviewLayer(for: uiView)
+    }
 
-        if let connection = uiView.previewLayer.connection, connection.isVideoMirroringSupported {
+    private func configurePreviewLayer(for view: PreviewView) {
+        guard let previewLayer = view.layer as? AVCaptureVideoPreviewLayer else {
+            AppDebugActivityLog.log(
+                "LittleWinsCamera",
+                "Preview layer was not AVCaptureVideoPreviewLayer; showing blank camera preview instead of crashing"
+            )
+            return
+        }
+
+        previewLayer.session = session
+        previewLayer.videoGravity = .resizeAspectFill
+
+        if let connection = previewLayer.connection, connection.isVideoMirroringSupported {
             connection.automaticallyAdjustsVideoMirroring = false
             connection.isVideoMirrored = isMirrored
         }

@@ -1,14 +1,119 @@
 import SwiftUI
 import SwiftData
 import UserNotifications
+import StoreKit
+#if canImport(AuthenticationServices)
+import AuthenticationServices
+#endif
+#if canImport(UIKit)
+import UIKit
+#endif
 #if canImport(FirebaseAuth)
 import FirebaseAuth
+#endif
+#if canImport(FirebaseCore)
+import FirebaseCore
 #endif
 #if canImport(GoogleSignIn)
 import GoogleSignIn
 #endif
 
 fileprivate let loomAIInsightsRefreshToggleDefaultsKey = "loom.enableLoomAIInsightsRefresh"
+private let firebaseGoogleProviderID = "google.com"
+private let firebaseEmailProviderID = "password"
+
+private enum AccountDataDeletion {
+    static func deleteAllData(in context: ModelContext) {
+        deleteAllRows(DrivingForce.self, in: context)
+        deleteAllRows(DrivingForceArchive.self, in: context)
+        deleteAllRows(Passion.self, in: context)
+        deleteAllRows(PassionArchive.self, in: context)
+        deleteAllRows(PassionFulfillmentJoin.self, in: context)
+        deleteAllRows(PassionFulfillmentJoinArchive.self, in: context)
+        deleteAllRows(Fulfillment.self, in: context)
+        deleteAllRows(FulfillmentArchive.self, in: context)
+        deleteAllRows(FulfillmentRoles.self, in: context)
+        deleteAllRows(FulfillmentRolesArchive.self, in: context)
+        deleteAllRows(FulfillmentFocus.self, in: context)
+        deleteAllRows(FulfillmentFocusArchive.self, in: context)
+        deleteAllRows(LittleWinsDailyCompletion.self, in: context)
+        deleteAllRows(FulfillmentResources.self, in: context)
+        deleteAllRows(FulfillmentResourcesArchive.self, in: context)
+        deleteAllRows(ReplacedFulfillmentCategoryArchive.self, in: context)
+        deleteAllRows(Outcomes.self, in: context)
+        deleteAllRows(OutcomesArchive.self, in: context)
+        deleteAllRows(OutcomesMeasure.self, in: context)
+        deleteAllRows(OutcomesMeasureArchive.self, in: context)
+        deleteAllRows(OutcomesMeasureEntry.self, in: context)
+        deleteAllRows(OutcomeAnalyticsEvent.self, in: context)
+        deleteAllRows(CompletedOutcomeArchive.self, in: context)
+        deleteAllRows(CompletedOutcomeContributionArchive.self, in: context)
+        deleteAllRows(CompletedOutcomeMeasurePointArchive.self, in: context)
+        deleteAllRows(WeeklyMindsetEntry.Fields.self, in: context)
+        deleteAllRows(ActivePlanState.self, in: context)
+        deleteAllRows(RollingCaptureItem.self, in: context)
+        deleteAllRows(QuickCompletedCaptureItem.self, in: context)
+        deleteAllRows(RecurringCaptureRule.self, in: context)
+        deleteAllRows(RecurringCaptureDispatch.self, in: context)
+        deleteAllRows(RecentlyDeletedItem.self, in: context)
+        deleteAllRows(PlannedChunkActionAdHocMarker.self, in: context)
+        deleteAllRows(ActionBlocksReflectionArchive.self, in: context)
+        deleteAllRows(ActionBlocksReflectionArchiveAction.self, in: context)
+        deleteAllRows(ActionBlocksReflectionArchiveOutcome.self, in: context)
+        deleteAllRows(ActionBlocksReflectionOutcomeContribution.self, in: context)
+        deleteAllRows(ActionBlocksReflectionOtherContribution.self, in: context)
+        deleteAllRows(PlanLabel.self, in: context)
+        deleteAllRows(PlanChunkSelection.self, in: context)
+        deleteAllRows(PlannedChunk.self, in: context)
+        deleteAllRows(PlannedChunkAction.self, in: context)
+        deleteAllRows(PlannedChunkStepFourState.self, in: context)
+        deleteAllRows(PlannedChunkOutcomeLink.self, in: context)
+        deleteAllRows(PlannedChunkActionDefineState.self, in: context)
+        deleteAllRows(PlannedChunkActionExecutionState.self, in: context)
+        deleteAllRows(LeverageResource.self, in: context)
+        deleteAllRows(PlannedChunkActionLeverageSelection.self, in: context)
+        deleteAllRows(SensitivityPlaceCatalogItem.self, in: context)
+        deleteAllRows(PlannedChunkActionSensitivityPlaceLink.self, in: context)
+        deleteAllRows(PlannedChunkActionNote.self, in: context)
+        deleteAllRows(PlannedChunkActionAttachment.self, in: context)
+        deleteAllRows(PlannedChunkActionLeverageItem.self, in: context)
+        deleteAllRows(PlannedChunkActionSensitivityPlace.self, in: context)
+        FulfillmentCategoryTheme.clearFulfillmentPreferences()
+        UserDefaults.standard.removeObject(forKey: "fulfillment_start_onboarding_draft_v1")
+        try? context.save()
+    }
+
+    static func deleteFulfillmentData(in context: ModelContext) {
+        deleteAllRows(PassionFulfillmentJoin.self, in: context)
+        deleteAllRows(PassionFulfillmentJoinArchive.self, in: context)
+        deleteAllRows(Fulfillment.self, in: context)
+        deleteAllRows(FulfillmentArchive.self, in: context)
+        deleteAllRows(FulfillmentRoles.self, in: context)
+        deleteAllRows(FulfillmentRolesArchive.self, in: context)
+        deleteAllRows(FulfillmentFocus.self, in: context)
+        deleteAllRows(FulfillmentFocusArchive.self, in: context)
+        deleteAllRows(FulfillmentResources.self, in: context)
+        deleteAllRows(FulfillmentResourcesArchive.self, in: context)
+        deleteAllRows(ReplacedFulfillmentCategoryArchive.self, in: context)
+        deleteAllRows(LittleWinsDailyCompletion.self, in: context)
+        FulfillmentCategoryTheme.clearFulfillmentPreferences()
+        UserDefaults.standard.removeObject(forKey: "fulfillment_start_onboarding_draft_v1")
+        try? context.save()
+    }
+
+    static func deleteLittleWinsData(in context: ModelContext) {
+        deleteAllRows(LittleWinsDailyCompletion.self, in: context)
+        try? context.save()
+    }
+
+    private static func deleteAllRows<T: PersistentModel>(_ type: T.Type, in context: ModelContext) {
+        let descriptor = FetchDescriptor<T>()
+        guard let rows = try? context.fetch(descriptor) else { return }
+        for row in rows {
+            context.delete(row)
+        }
+    }
+}
 
 // MARK: - Flattened Display Model
 struct DataItem: Identifiable, Hashable {
@@ -463,6 +568,7 @@ struct AccountView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
+    @EnvironmentObject private var session: UserSessionStore
     @Query private var fulfillments: [Fulfillment]
     @AppStorage(loomAIInsightsRefreshToggleDefaultsKey) private var enableLoomAIInsightsRefresh = false
     @AppStorage("enable_projects_feature") private var enableProjectsFeature = false
@@ -497,6 +603,7 @@ struct AccountView: View {
     @State private var presentedLegalDocument: LegalDocument?
     @State private var showDeveloperPage = false
     @State private var showDeveloperPaywall = false
+    @State private var showResetReviewOnboardingDemoConfirmation = false
     @State private var loomAICostSnapshot = LoomAICostLedger.dailySnapshot()
 
     private func deleteWarningTitle(for scope: DeleteScope) -> String {
@@ -548,6 +655,11 @@ struct AccountView: View {
         LoomAICostLedger.resetToday()
         UserDefaults.standard.removeObject(forKey: legacyLoomAIChatDailyLimitDefaultsKey)
         refreshLoomAICostSnapshot()
+    }
+
+    private func resetReviewOnboardingDemoWorkspace() {
+        LoomSpecialAccountWorkspace.reviewOnboardingDemo.setAllowsAutoCreate(true)
+        session.resetIsolatedWorkspaceForNextSignIn(.reviewOnboardingDemo)
     }
 
     private func costProgress(spent: Double, limit: Double) -> Double {
@@ -840,6 +952,13 @@ struct AccountView: View {
             NavigationStack {
                 List {
                     Section {
+                        Button(role: .destructive) {
+                            showResetReviewOnboardingDemoConfirmation = true
+                        } label: {
+                            Text("Reset demo@loomlife.us")
+                                .foregroundStyle(.red)
+                        }
+
                         NavigationLink {
                             ManageRawDataView()
                         } label: {
@@ -1007,6 +1126,14 @@ struct AccountView: View {
                 .onAppear {
                     refreshLoomAICostSnapshot()
                 }
+                .alert("Reset demo@loomlife.us?", isPresented: $showResetReviewOnboardingDemoConfirmation) {
+                    Button("Reset Demo Account", role: .destructive) {
+                        resetReviewOnboardingDemoWorkspace()
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("All current data and changes for demo@loomlife.us will be lost. If that account is currently signed in, the reset will apply after it signs out and the next sign in will treat it like a new account.")
+                }
             }
         }
         .fullScreenCover(isPresented: $showDeveloperPaywall) {
@@ -1060,92 +1187,15 @@ struct AccountView: View {
     }
 
     private func permanentlyDeleteAllData() {
-        deleteAllRows(DrivingForce.self)
-        deleteAllRows(DrivingForceArchive.self)
-        deleteAllRows(Passion.self)
-        deleteAllRows(PassionArchive.self)
-        deleteAllRows(PassionFulfillmentJoin.self)
-        deleteAllRows(PassionFulfillmentJoinArchive.self)
-        deleteAllRows(Fulfillment.self)
-        deleteAllRows(FulfillmentArchive.self)
-        deleteAllRows(FulfillmentRoles.self)
-        deleteAllRows(FulfillmentRolesArchive.self)
-        deleteAllRows(FulfillmentFocus.self)
-        deleteAllRows(FulfillmentFocusArchive.self)
-        deleteAllRows(LittleWinsDailyCompletion.self)
-        deleteAllRows(FulfillmentResources.self)
-        deleteAllRows(FulfillmentResourcesArchive.self)
-        deleteAllRows(ReplacedFulfillmentCategoryArchive.self)
-        deleteAllRows(Outcomes.self)
-        deleteAllRows(OutcomesArchive.self)
-        deleteAllRows(OutcomesMeasure.self)
-        deleteAllRows(OutcomesMeasureArchive.self)
-        deleteAllRows(OutcomesMeasureEntry.self)
-        deleteAllRows(OutcomeAnalyticsEvent.self)
-        deleteAllRows(CompletedOutcomeArchive.self)
-        deleteAllRows(CompletedOutcomeContributionArchive.self)
-        deleteAllRows(CompletedOutcomeMeasurePointArchive.self)
-        deleteAllRows(WeeklyMindsetEntry.Fields.self)
-        deleteAllRows(ActivePlanState.self)
-        deleteAllRows(RollingCaptureItem.self)
-        deleteAllRows(QuickCompletedCaptureItem.self)
-        deleteAllRows(RecurringCaptureRule.self)
-        deleteAllRows(RecurringCaptureDispatch.self)
-        deleteAllRows(RecentlyDeletedItem.self)
-        deleteAllRows(PlannedChunkActionAdHocMarker.self)
-        deleteAllRows(ActionBlocksReflectionArchive.self)
-        deleteAllRows(ActionBlocksReflectionArchiveAction.self)
-        deleteAllRows(ActionBlocksReflectionArchiveOutcome.self)
-        deleteAllRows(ActionBlocksReflectionOutcomeContribution.self)
-        deleteAllRows(ActionBlocksReflectionOtherContribution.self)
-        deleteAllRows(PlanLabel.self)
-        deleteAllRows(PlanChunkSelection.self)
-        deleteAllRows(PlannedChunk.self)
-        deleteAllRows(PlannedChunkAction.self)
-        deleteAllRows(PlannedChunkStepFourState.self)
-        deleteAllRows(PlannedChunkOutcomeLink.self)
-        deleteAllRows(PlannedChunkActionDefineState.self)
-        deleteAllRows(PlannedChunkActionExecutionState.self)
-        deleteAllRows(LeverageResource.self)
-        deleteAllRows(PlannedChunkActionLeverageSelection.self)
-        deleteAllRows(SensitivityPlaceCatalogItem.self)
-        deleteAllRows(PlannedChunkActionSensitivityPlaceLink.self)
-        deleteAllRows(PlannedChunkActionNote.self)
-        deleteAllRows(PlannedChunkActionAttachment.self)
-        deleteAllRows(PlannedChunkActionLeverageItem.self)
-        deleteAllRows(PlannedChunkActionSensitivityPlace.self)
-        try? context.save()
+        AccountDataDeletion.deleteAllData(in: context)
     }
 
     private func permanentlyDeleteFulfillmentData() {
-        deleteAllRows(PassionFulfillmentJoin.self)
-        deleteAllRows(PassionFulfillmentJoinArchive.self)
-        deleteAllRows(Fulfillment.self)
-        deleteAllRows(FulfillmentArchive.self)
-        deleteAllRows(FulfillmentRoles.self)
-        deleteAllRows(FulfillmentRolesArchive.self)
-        deleteAllRows(FulfillmentFocus.self)
-        deleteAllRows(FulfillmentFocusArchive.self)
-        deleteAllRows(FulfillmentResources.self)
-        deleteAllRows(FulfillmentResourcesArchive.self)
-        deleteAllRows(ReplacedFulfillmentCategoryArchive.self)
-        deleteAllRows(LittleWinsDailyCompletion.self)
-        FulfillmentCategoryTheme.clearFulfillmentPreferences()
-        UserDefaults.standard.removeObject(forKey: "fulfillment_start_onboarding_draft_v1")
-        try? context.save()
+        AccountDataDeletion.deleteFulfillmentData(in: context)
     }
 
     private func permanentlyDeleteLittleWinsData() {
-        deleteAllRows(LittleWinsDailyCompletion.self)
-        try? context.save()
-    }
-
-    private func deleteAllRows<T: PersistentModel>(_ type: T.Type) {
-        let descriptor = FetchDescriptor<T>()
-        guard let rows = try? context.fetch(descriptor) else { return }
-        for row in rows {
-            context.delete(row)
-        }
+        AccountDataDeletion.deleteLittleWinsData(in: context)
     }
 }
 
@@ -1792,8 +1842,18 @@ struct AccountDetailsView: View {
         case name
     }
 
+    private enum AccountDeletionProvider {
+        case apple
+        case google
+        case email
+        case unknown
+    }
+
+    @Environment(\.modelContext) private var context
+    @Environment(\.openURL) private var openURL
     @EnvironmentObject private var session: UserSessionStore
     @EnvironmentObject private var personalizationStore: PersonalizationStore
+    @EnvironmentObject private var purchaseManager: PurchaseManager
     @AppStorage("account_name") private var accountName = ""
     @AppStorage("account_email") private var accountEmail = ""
     @AppStorage(UserSessionStore.Keys.appleUserID) private var appleUserID = ""
@@ -1803,9 +1863,16 @@ struct AccountDetailsView: View {
     @AppStorage(UserSessionStore.Keys.isSubscribed) private var isSubscribed = false
     @AppStorage(SubscriptionAccessGate.inactivePurchaseOverrideKey) private var inactivePurchaseOverrideEnabled = false
     @AppStorage("loom.subscription_plan") private var subscriptionPlanRaw = SubscriptionPlan.annual.rawValue
-    @State private var showSubscriptionSheet = false
     @State private var accountError: String? = nil
     @State private var showSignOutConfirmation = false
+    @State private var showDeleteAccountSheet = false
+    @State private var showSeeAllPlans = false
+    @State private var deleteAccountConfirmationWord = ""
+    @State private var deleteAccountPassword = ""
+    @State private var deleteAccountError: String? = nil
+    @State private var isDeletingAccount = false
+    @State private var isRestoringPurchases = false
+    @State private var restorePurchasesMessage: String? = nil
     @State private var weekStartOption: AppWeekStartOption = AppWeekStartStore.current()
     @FocusState private var focusedAccountField: AccountField?
 
@@ -1835,9 +1902,47 @@ struct AccountDetailsView: View {
                 )
 
                 Button {
-                    showSubscriptionSheet = true
+                    restorePurchasesMessage = nil
+                    Task {
+                        await openAppleSubscriptionManagement()
+                    }
                 } label: {
-                    settingsRow(title: "Subscription", value: currentSubscriptionSummary)
+                    subscriptionSettingsRow
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    Task {
+                        await restorePurchases()
+                    }
+                } label: {
+                    Text("Restore Purchases")
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
+                .buttonStyle(.plain)
+                .font(.body.weight(.medium))
+                .foregroundStyle(.blue)
+                .disabled(isRestoringPurchases || purchaseManager.isProcessing)
+
+                if let restorePurchasesMessage, !restorePurchasesMessage.isEmpty {
+                    Text(restorePurchasesMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+
+            Section {
+                Button {
+                    showSeeAllPlans = true
+                } label: {
+                    HStack {
+                        Text("See All Plans")
+                        Spacer(minLength: 8)
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 .buttonStyle(.plain)
             }
@@ -1879,29 +1984,25 @@ struct AccountDetailsView: View {
                         .frame(maxWidth: .infinity, alignment: .center)
                 }
             }
+
+            Section {
+                Button(role: .destructive) {
+                    deleteAccountConfirmationWord = ""
+                    deleteAccountPassword = ""
+                    deleteAccountError = nil
+                    showDeleteAccountSheet = true
+                } label: {
+                    Text("Delete Account")
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
+                .disabled(isDeletingAccount)
+            }
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Account")
         .onAppear {
             hydrateAccountFieldsFromAuthUserIfAvailable()
             weekStartOption = AppWeekStartStore.current()
-        }
-        .sheet(isPresented: $showSubscriptionSheet) {
-            NavigationStack {
-                AccountSubscriptionView(
-                    appName: appDisplayName,
-                    subscriptionSummary: currentSubscriptionSummary
-                )
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button("Done") {
-                            showSubscriptionSheet = false
-                        }
-                    }
-                }
-            }
-            .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.visible)
         }
         .confirmationDialog("Sign out of Loom?", isPresented: $showSignOutConfirmation, titleVisibility: .visible) {
             Button("Sign Out", role: .destructive) {
@@ -1912,6 +2013,93 @@ struct AccountDetailsView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("You'll be returned to the login screen.")
+        }
+        .fullScreenCover(isPresented: $showSeeAllPlans) {
+            PaywallView(mode: .managePaywall)
+                .environmentObject(session)
+                .environmentObject(purchaseManager)
+        }
+        .sheet(isPresented: $showDeleteAccountSheet) {
+            NavigationStack {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text("Delete Account")
+                            .font(.headline.weight(.bold))
+                            .foregroundStyle(.red)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .multilineTextAlignment(.center)
+
+                        Text(deleteAccountInstructionText)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .multilineTextAlignment(.center)
+
+                        TextField("DELETE", text: $deleteAccountConfirmationWord)
+                            .textFieldStyle(.roundedBorder)
+                            .textInputAutocapitalization(.characters)
+                            .autocorrectionDisabled(true)
+
+                        if deletionProvider == .email {
+                            SecureField("Password", text: $deleteAccountPassword)
+                                .textFieldStyle(.roundedBorder)
+                                .textContentType(.password)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled(true)
+                        }
+
+                        if let deleteAccountError, !deleteAccountError.isEmpty {
+                            Text(deleteAccountError)
+                                .font(.footnote)
+                                .foregroundStyle(.red)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        VStack(spacing: 10) {
+                            Button(role: .destructive) {
+                                Task {
+                                    await deleteAccount()
+                                }
+                            } label: {
+                                HStack {
+                                    Spacer()
+                                    if isDeletingAccount {
+                                        ProgressView()
+                                            .progressViewStyle(.circular)
+                                            .tint(.white)
+                                    } else {
+                                        Text("Permanently Delete Account")
+                                    }
+                                    Spacer()
+                                }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.red)
+                            .controlSize(.large)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .disabled(!canSubmitAccountDeletion || isDeletingAccount)
+
+                            Button("Cancel") {
+                                deleteAccountPassword = ""
+                                showDeleteAccountSheet = false
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(.gray)
+                            .controlSize(.large)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .disabled(isDeletingAccount)
+                        }
+                        .padding(.top, 4)
+                    }
+                    .padding(16)
+                    .scrollDismissesKeyboard(.interactively)
+                }
+            }
+            .interactiveDismissDisabled(isDeletingAccount)
+            .presentationDetents([.medium, .large])
+            .presentationContentInteraction(.scrolls)
+            .presentationDragIndicator(.visible)
         }
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
@@ -1995,6 +2183,59 @@ struct AccountDetailsView: View {
         return "Email"
     }
 
+    private var deletionProvider: AccountDeletionProvider {
+#if canImport(FirebaseAuth)
+        if let user = Auth.auth().currentUser {
+            let providers = Set(user.providerData.map(\.providerID))
+            if providers.contains(AuthProviderID.apple.rawValue) {
+                return .apple
+            }
+            if providers.contains(firebaseGoogleProviderID) {
+                return .google
+            }
+            if providers.contains(firebaseEmailProviderID) {
+                return .email
+            }
+        }
+#endif
+
+        let normalizedProvider = authProvider.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch normalizedProvider {
+        case "apple":
+            return .apple
+        case "google":
+            return .google
+        case "email":
+            return .email
+        default:
+            return .unknown
+        }
+    }
+
+    private var deleteAccountInstructionText: String {
+        switch deletionProvider {
+        case .apple:
+            return "This permanently deletes your Loom account and removes your personalization history and app data from this device. App Store subscriptions are managed by Apple and are not canceled automatically. If needed, cancel the subscription separately in Apple Account Settings before deleting your account. To continue, type \"DELETE\" below. You will also be asked to confirm with Sign in with Apple so Apple can revoke the authorization token."
+        case .google:
+            return "This permanently deletes your Loom account and removes your personalization history and app data from this device. App Store subscriptions are managed by Apple and are not canceled automatically. If needed, cancel the subscription separately in Apple Account Settings before deleting your account. To continue, type \"DELETE\" below. You may be asked to confirm with Google before deletion finishes."
+        case .email:
+            return "This permanently deletes your Loom account and removes your personalization history and app data from this device. App Store subscriptions are managed by Apple and are not canceled automatically. If needed, cancel the subscription separately in Apple Account Settings before deleting your account. To continue, type \"DELETE\" below and enter your password."
+        case .unknown:
+            return "This permanently deletes your Loom account and removes your personalization history and app data from this device. App Store subscriptions are managed by Apple and are not canceled automatically. If needed, cancel the subscription separately in Apple Account Settings before deleting your account. To continue, type \"DELETE\" below."
+        }
+    }
+
+    private var canSubmitAccountDeletion: Bool {
+        let hasConfirmationWord = deleteAccountConfirmationWord
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased() == "DELETE"
+        guard hasConfirmationWord else { return false }
+        if deletionProvider == .email {
+            return !deleteAccountPassword.isEmpty
+        }
+        return true
+    }
+
     @ViewBuilder
     private func settingsRow(title: String, value: String, showsChevron: Bool = true) -> some View {
         HStack {
@@ -2041,6 +2282,25 @@ struct AccountDetailsView: View {
         }
     }
 
+    private var subscriptionSettingsRow: some View {
+        HStack {
+            Text("Subscription")
+            Spacer(minLength: 8)
+            if isRestoringPurchases {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Text(currentSubscriptionSummary)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+        }
+    }
+
     private var keyboardAccessoryShowsCheckmark: Bool {
         guard let field = focusedAccountField else { return false }
         switch field {
@@ -2065,9 +2325,7 @@ struct AccountDetailsView: View {
     @MainActor
     private func signOut() async {
         let isolatedWorkspace = LoomDefaultsScope.currentWorkspace()
-        if isolatedWorkspace != nil {
-            await personalizationStore.resetCurrentUserState()
-        }
+        let personalizationUserKey = isolatedWorkspace != nil ? PersonalizationUserIdentity.currentUserKey() : nil
 #if canImport(FirebaseAuth)
         do {
             try Auth.auth().signOut()
@@ -2076,6 +2334,103 @@ struct AccountDetailsView: View {
             return
         }
 #endif
+        clearLocalAccountSession()
+        if let personalizationUserKey {
+            Task {
+                await personalizationStore.resetState(for: personalizationUserKey)
+            }
+        }
+    }
+
+    @MainActor
+    private func restorePurchases() async {
+        guard !isRestoringPurchases else { return }
+        isRestoringPurchases = true
+        restorePurchasesMessage = nil
+        accountError = nil
+        defer { isRestoringPurchases = false }
+
+        let outcome = await purchaseManager.restorePurchases(session: session)
+        switch outcome {
+        case .restoredActiveEntitlement:
+            restorePurchasesMessage = "Purchases restored."
+        case .noActivePurchasesFound:
+            restorePurchasesMessage = "No active purchases were found for this Apple ID."
+        case .failed:
+            restorePurchasesMessage = "Restore failed. Please try again."
+        }
+    }
+
+    @MainActor
+    private func openAppleSubscriptionManagement() async {
+#if canImport(UIKit)
+        accountError = nil
+
+        if purchaseManager.products.isEmpty {
+            await purchaseManager.loadProducts()
+        }
+
+        let activeWindowScene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive }
+
+        if let activeWindowScene {
+            do {
+                try await AppStore.showManageSubscriptions(in: activeWindowScene)
+                return
+            } catch {
+                AppDebugActivityLog.log(
+                    "AccountDetailsView",
+                    "showManageSubscriptions failed error=\(error.localizedDescription)"
+                )
+            }
+        }
+#endif
+
+        guard let fallbackURL = URL(string: "https://apps.apple.com/account/subscriptions") else {
+            accountError = "Unable to open Apple subscription management right now."
+            return
+        }
+        openURL(fallbackURL)
+    }
+
+    @MainActor
+    private func deleteAccount() async {
+        guard !isDeletingAccount else { return }
+        isDeletingAccount = true
+        accountError = nil
+        deleteAccountError = nil
+
+        let personalizationUserKey = PersonalizationUserIdentity.currentUserKey()
+        let deletedWorkspace = resolvedWorkspaceForDeletingAccount()
+
+#if canImport(FirebaseAuth)
+        if let user = Auth.auth().currentUser {
+            do {
+                try await prepareAuthenticatedUserForDeletion(user)
+                try await user.delete()
+            } catch {
+                deleteAccountError = deleteAccountErrorMessage(for: error)
+                isDeletingAccount = false
+                return
+            }
+        }
+#endif
+
+        if deletedWorkspace == .reviewOnboardingDemo {
+            deletedWorkspace?.setAllowsAutoCreate(false)
+            session.resetIsolatedWorkspaceForNextSignIn(.reviewOnboardingDemo)
+        }
+        await personalizationStore.resetState(for: personalizationUserKey)
+        AccountDataDeletion.deleteAllData(in: context)
+        deleteAccountPassword = ""
+        showDeleteAccountSheet = false
+        clearLocalAccountSession()
+        isDeletingAccount = false
+    }
+
+    @MainActor
+    private func clearLocalAccountSession() {
 #if canImport(GoogleSignIn)
         GIDSignIn.sharedInstance.signOut()
 #endif
@@ -2089,6 +2444,166 @@ struct AccountDetailsView: View {
         accountError = nil
         session.clearAccountSession()
     }
+
+    private func resolvedWorkspaceForDeletingAccount() -> LoomSpecialAccountWorkspace? {
+        let normalizedAccountEmail = accountEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !normalizedAccountEmail.isEmpty {
+            return LoomSpecialAccountWorkspace.workspace(for: normalizedAccountEmail)
+        }
+#if canImport(FirebaseAuth)
+        let authEmail = Auth.auth().currentUser?.email?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !authEmail.isEmpty {
+            return LoomSpecialAccountWorkspace.workspace(for: authEmail)
+        }
+#endif
+        return nil
+    }
+
+    private func deleteAccountErrorMessage(for error: Error) -> String {
+        if let deletionError = error as? AccountDeletionFlowError {
+            return deletionError.errorDescription ?? "Unable to delete this account right now. Please try again."
+        }
+#if canImport(FirebaseAuth)
+        let nsError = error as NSError
+        guard let authCode = AuthErrorCode(rawValue: nsError.code) else {
+            return "Unable to delete this account right now. Please try again."
+        }
+
+        switch authCode {
+        case .requiresRecentLogin:
+            return "Please verify this account again and then retry deletion."
+        case .wrongPassword, .invalidCredential:
+            return "The password or sign-in confirmation did not match this account."
+        case .networkError:
+            return "Deleting your account needs a network connection."
+        default:
+            return "Unable to delete this account right now. Please try again."
+        }
+#else
+        return "Unable to delete this account right now. Please try again."
+#endif
+    }
+
+#if canImport(FirebaseAuth)
+    @MainActor
+    private func prepareAuthenticatedUserForDeletion(_ user: User) async throws {
+        switch deletionProvider {
+        case .apple:
+            try await reauthenticateAndRevokeApple(for: user)
+        case .google:
+            try await reauthenticateGoogle(for: user)
+        case .email:
+            try await reauthenticateEmail(for: user)
+        case .unknown:
+            break
+        }
+    }
+
+    @MainActor
+    private func reauthenticateEmail(for user: User) async throws {
+        let resolvedEmail = (user.email?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            ? user.email?.trimmingCharacters(in: .whitespacesAndNewlines)
+            : nil)
+            ?? (accountEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? nil
+                : accountEmail.trimmingCharacters(in: .whitespacesAndNewlines))
+        guard let resolvedEmail else {
+            throw AccountDeletionFlowError.emailUnavailable
+        }
+        guard !deleteAccountPassword.isEmpty else {
+            throw AccountDeletionFlowError.passwordRequired
+        }
+        let credential = EmailAuthProvider.credential(withEmail: resolvedEmail, password: deleteAccountPassword)
+        _ = try await user.reauthenticate(with: credential)
+    }
+
+    @MainActor
+    private func reauthenticateGoogle(for user: User) async throws {
+#if canImport(GoogleSignIn) && canImport(FirebaseCore) && canImport(UIKit)
+        guard let clientID = FirebaseApp.app()?.options.clientID, !clientID.isEmpty else {
+            throw AccountDeletionFlowError.googleConfigurationUnavailable
+        }
+        guard let presentingController = topViewController() else {
+            throw AccountDeletionFlowError.googlePresentationUnavailable
+        }
+
+        GIDSignIn.sharedInstance.configuration = GIDConfiguration(clientID: clientID)
+        let result = try await GIDSignIn.sharedInstance.signIn(withPresenting: presentingController)
+        guard let idToken = result.user.idToken?.tokenString else {
+            throw AccountDeletionFlowError.googleCredentialUnavailable
+        }
+
+        let credential = GoogleAuthProvider.credential(
+            withIDToken: idToken,
+            accessToken: result.user.accessToken.tokenString
+        )
+        _ = try await user.reauthenticate(with: credential)
+#else
+        throw AccountDeletionFlowError.googleConfigurationUnavailable
+#endif
+    }
+
+    @MainActor
+    private func reauthenticateAndRevokeApple(for user: User) async throws {
+#if canImport(AuthenticationServices) && canImport(UIKit)
+        let appleCredential = try await requestAppleCredentialForDeletion()
+        guard let tokenData = appleCredential.identityToken,
+              let idTokenString = String(data: tokenData, encoding: .utf8) else {
+            throw AccountDeletionFlowError.appleIdentityTokenUnavailable
+        }
+        guard let authorizationCodeData = appleCredential.authorizationCode,
+              let authorizationCode = String(data: authorizationCodeData, encoding: .utf8),
+              !authorizationCode.isEmpty else {
+            throw AccountDeletionFlowError.appleAuthorizationCodeUnavailable
+        }
+
+        let credential = OAuthProvider.appleCredential(
+            withIDToken: idTokenString,
+            rawNonce: nil,
+            fullName: appleCredential.fullName
+        )
+        _ = try await user.reauthenticate(with: credential)
+        try await Auth.auth().revokeToken(withAuthorizationCode: authorizationCode)
+#else
+        throw AccountDeletionFlowError.applePresentationUnavailable
+#endif
+    }
+#endif
+
+#if canImport(AuthenticationServices) && canImport(UIKit)
+    @MainActor
+    private func requestAppleCredentialForDeletion() async throws -> ASAuthorizationAppleIDCredential {
+        guard let presentingController = topViewController(),
+              let anchor = presentingController.view.window else {
+            throw AccountDeletionFlowError.applePresentationUnavailable
+        }
+        let coordinator = AppleAccountDeletionAuthorizationCoordinator(anchor: anchor)
+        return try await coordinator.authorize()
+    }
+#endif
+
+#if canImport(UIKit)
+    private func topViewController(
+        from root: UIViewController? = UIApplication.shared
+            .connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first(where: { $0.activationState == .foregroundActive })?
+            .windows
+            .first(where: \.isKeyWindow)?
+            .rootViewController
+    ) -> UIViewController? {
+        if let nav = root as? UINavigationController {
+            return topViewController(from: nav.visibleViewController)
+        }
+        if let tab = root as? UITabBarController {
+            return topViewController(from: tab.selectedViewController)
+        }
+        if let presented = root?.presentedViewController {
+            return topViewController(from: presented)
+        }
+        return root
+    }
+#endif
 
     @MainActor
     private func hydrateAccountFieldsFromAuthUserIfAvailable() {
@@ -2149,66 +2664,350 @@ struct AccountDetailsView: View {
 
 }
 
+private enum AccountDeletionFlowError: LocalizedError {
+    case passwordRequired
+    case emailUnavailable
+    case googleConfigurationUnavailable
+    case googlePresentationUnavailable
+    case googleCredentialUnavailable
+    case applePresentationUnavailable
+    case appleIdentityTokenUnavailable
+    case appleAuthorizationCodeUnavailable
+
+    var errorDescription: String? {
+        switch self {
+        case .passwordRequired:
+            return "Enter your password to delete this account."
+        case .emailUnavailable:
+            return "This email account cannot be re-verified right now."
+        case .googleConfigurationUnavailable:
+            return "Google sign in is not available right now."
+        case .googlePresentationUnavailable:
+            return "Unable to present Google sign in for account verification."
+        case .googleCredentialUnavailable:
+            return "Google verification did not return the credentials needed to delete this account."
+        case .applePresentationUnavailable:
+            return "Unable to present Sign in with Apple for account verification."
+        case .appleIdentityTokenUnavailable:
+            return "Sign in with Apple did not return a valid identity token."
+        case .appleAuthorizationCodeUnavailable:
+            return "Sign in with Apple did not return the authorization code needed to revoke access."
+        }
+    }
+}
+
+#if canImport(AuthenticationServices) && canImport(UIKit)
+private final class AppleAccountDeletionAuthorizationCoordinator: NSObject, ASAuthorizationControllerDelegate, ASAuthorizationControllerPresentationContextProviding {
+    private let anchor: ASPresentationAnchor
+    private var continuation: CheckedContinuation<ASAuthorizationAppleIDCredential, Error>?
+
+    init(anchor: ASPresentationAnchor) {
+        self.anchor = anchor
+    }
+
+    @MainActor
+    func authorize() async throws -> ASAuthorizationAppleIDCredential {
+        try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+            let provider = ASAuthorizationAppleIDProvider()
+            let request = provider.createRequest()
+            let controller = ASAuthorizationController(authorizationRequests: [request])
+            controller.delegate = self
+            controller.presentationContextProvider = self
+            controller.performRequests()
+        }
+    }
+
+    func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
+        anchor
+    }
+
+    func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization authorization: ASAuthorization) {
+        guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential else {
+            continuation?.resume(throwing: AccountDeletionFlowError.appleIdentityTokenUnavailable)
+            continuation = nil
+            return
+        }
+        continuation?.resume(returning: credential)
+        continuation = nil
+    }
+
+    func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {
+        continuation?.resume(throwing: error)
+        continuation = nil
+    }
+}
+#endif
+
 private struct AccountSubscriptionView: View {
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
+    @EnvironmentObject private var session: UserSessionStore
+    @EnvironmentObject private var purchaseManager: PurchaseManager
     let appName: String
     let subscriptionSummary: String
+    @State private var showPlansPaywall = false
+    @State private var showSubscriptionInfoSheet = false
+    @State private var presentedLegalDocument: LegalDocument?
+
+    private var resolvedPlan: SubscriptionPlan? {
+        if let activePlan = purchaseManager.activePlan {
+            return activePlan
+        }
+        switch subscriptionSummary {
+        case "Founding Member (Lifetime)":
+            return .lifetime
+        case "Monthly":
+            return .monthly
+        case "Annual (Locked)":
+            return .annual
+        default:
+            return nil
+        }
+    }
+
+    private var activePlanLabel: String {
+        resolvedPlan?.plainTitle ?? subscriptionSummary
+    }
 
     private var priceText: String {
-        if subscriptionSummary == "Founding Member (Lifetime)" {
+        switch resolvedPlan {
+        case .lifetime:
             return "$129 one-time"
-        }
-        if subscriptionSummary == "Monthly" {
+        case .monthly:
             return "$15 / month"
-        }
-        if subscriptionSummary == "Annual (Locked)" {
+        case .annual:
             return "$79 / year"
+        case nil:
+            return "No active purchase"
         }
-        return "-"
+    }
+
+    private var renewalLineText: String? {
+        switch resolvedPlan {
+        case .lifetime:
+            return "Never renews"
+        case .annual, .monthly:
+            guard let date = purchaseManager.activePlanPeriodEndDate else { return nil }
+            let prefix = purchaseManager.activePlanWillAutoRenew == false ? "Expires" : "Renews"
+            return "\(prefix) \(date.formatted(.dateTime.month(.wide).day()))"
+        case nil:
+            return nil
+        }
+    }
+
+    private var canCancelAutoRenewingSubscription: Bool {
+        resolvedPlan == .annual || resolvedPlan == .monthly
+    }
+
+    private var cancelHelperText: String? {
+        guard canCancelAutoRenewingSubscription, let date = purchaseManager.activePlanPeriodEndDate else { return nil }
+        return "If you cancel now, you can still access your subscription until \(date.formatted(.dateTime.month(.wide).day()))."
     }
 
     var body: some View {
-        List {
-            Section {
-                HStack {
-                    Text("App")
-                    Spacer()
+        ZStack {
+            Color(.systemGroupedBackground)
+                .ignoresSafeArea()
+
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 18) {
+                    headerBar
+                    subscriptionCard
+
+                    if canCancelAutoRenewingSubscription {
+                        Button(role: .destructive) {
+                            openManageSubscriptions()
+                        } label: {
+                            Text("Cancel Subscription")
+                                .font(.body.weight(.medium))
+                                .foregroundStyle(.red)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 48)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                        .fill(Color(.systemBackground))
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    if let cancelHelperText {
+                        Text(cancelHelperText)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 8)
+                    }
+
+                    Button("About Subscriptions and Privacy") {
+                        showSubscriptionInfoSheet = true
+                    }
+                    .buttonStyle(.plain)
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.blue)
+                    .padding(.top, 18)
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 18)
+                .padding(.bottom, 24)
+            }
+        }
+        .toolbar(.hidden, for: .navigationBar)
+        .sheet(item: $presentedLegalDocument) { document in
+            LegalLinksView(document: document)
+        }
+        .sheet(isPresented: $showSubscriptionInfoSheet) {
+            SubscriptionAboutSheet { document in
+                presentedLegalDocument = document
+            }
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
+        }
+        .fullScreenCover(isPresented: $showPlansPaywall) {
+            PaywallView(mode: .managePaywall)
+                .environmentObject(session)
+                .environmentObject(purchaseManager)
+        }
+    }
+
+    private var headerBar: some View {
+        ZStack {
+            Text("Edit Subscription")
+                .font(.headline.weight(.semibold))
+
+            HStack {
+                Spacer()
+                Button("Done") {
+                    dismiss()
+                }
+                .font(.body.weight(.medium))
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 12)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(Color(.systemBackground))
+                )
+            }
+        }
+    }
+
+    private var subscriptionCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(Color(.secondarySystemBackground))
+                    Image("logo")
+                        .resizable()
+                        .scaledToFit()
+                        .padding(6)
+                }
+                .frame(width: 34, height: 34)
+
+                VStack(alignment: .leading, spacing: 2) {
                     Text(appName)
-                        .foregroundStyle(.secondary)
+                        .font(.title3.weight(.semibold))
+                    Text(activePlanLabel)
+                        .font(.headline)
+                        .foregroundStyle(.primary.opacity(0.82))
                 }
-                HStack {
-                    Text("Subscription")
-                    Spacer()
-                    Text(subscriptionSummary)
-                        .foregroundStyle(.secondary)
+
+                Spacer(minLength: 0)
+
+                Button {
+                    showPlansPaywall = true
+                } label: {
+                    HStack(spacing: 3) {
+                        Text("See All Plans")
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(.blue)
                 }
-                HStack {
-                    Text("Price")
-                    Spacer()
-                    Text(priceText)
-                        .foregroundStyle(.secondary)
-                }
+                .buttonStyle(.plain)
             }
 
-            Section {
-                Button("See All Plans") {
-                    openManageSubscriptions()
-                }
-                Button(role: .destructive) {
-                    openManageSubscriptions()
-                } label: {
-                    Text("Cancel Subscription")
+            Divider()
+
+            VStack(alignment: .leading, spacing: 10) {
+                subscriptionDetailRow(icon: "creditcard", text: priceText)
+                if let renewalLineText {
+                    subscriptionDetailRow(icon: "calendar", text: renewalLineText)
                 }
             }
         }
-        .listStyle(.insetGrouped)
-        .navigationTitle("Edit Subscription")
-        .navigationBarTitleDisplayMode(.inline)
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(Color(.systemBackground))
+        )
+    }
+
+    private func subscriptionDetailRow(icon: String, text: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 14)
+            Text(text)
+                .font(.body)
+                .foregroundStyle(.primary)
+        }
     }
 
     private func openManageSubscriptions() {
         guard let url = URL(string: "https://apps.apple.com/account/subscriptions") else { return }
         openURL(url)
+    }
+}
+
+private struct SubscriptionAboutSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let onShowLegalDocument: (LegalDocument) -> Void
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Subscriptions") {
+                    Link(destination: LoomLegalLinks.subscriptionSupportURL) {
+                        Label("Apple Subscription Help", systemImage: "arrow.up.right.square")
+                    }
+                }
+
+                Section("Legal") {
+                    Button {
+                        dismiss()
+                        DispatchQueue.main.async {
+                            onShowLegalDocument(.privacy)
+                        }
+                    } label: {
+                        Label("Privacy Policy", systemImage: "hand.raised")
+                    }
+
+                    Button {
+                        dismiss()
+                        DispatchQueue.main.async {
+                            onShowLegalDocument(.terms)
+                        }
+                    } label: {
+                        Label("Terms of Use", systemImage: "doc.text")
+                    }
+                }
+            }
+            .navigationTitle("About Subscriptions")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -4504,67 +5303,28 @@ private func fulfillmentCategoryColor(for category: String) -> Color {
 }
 
 private struct DemoPlanViewContainer: View {
-    private let demoContainer: ModelContainer = {
-        let schema: [any PersistentModel.Type] = [
-            DrivingForce.self,
-            DrivingForceArchive.self,
-            Passion.self,
-            PassionArchive.self,
-            PassionFulfillmentJoin.self,
-            PassionFulfillmentJoinArchive.self,
-            Fulfillment.self,
-            FulfillmentArchive.self,
-            FulfillmentRoles.self,
-            FulfillmentRolesArchive.self,
-            FulfillmentFocus.self,
-            FulfillmentFocusArchive.self,
-            FulfillmentResources.self,
-            FulfillmentResourcesArchive.self,
-            ReplacedFulfillmentCategoryArchive.self,
-            Outcomes.self,
-            OutcomesArchive.self,
-            OutcomesMeasure.self,
-            OutcomesMeasureArchive.self,
-            WeeklyMindsetEntry.Fields.self,
-            ActivePlanState.self,
-            RollingCaptureItem.self,
-            QuickCompletedCaptureItem.self,
-            RecurringCaptureRule.self,
-            RecurringCaptureDispatch.self,
-            PlannedChunkActionAdHocMarker.self,
-            ActionBlocksReflectionArchive.self,
-            ActionBlocksReflectionArchiveAction.self,
-            ActionBlocksReflectionArchiveOutcome.self,
-            ActionBlocksReflectionOtherContribution.self,
-            PlanLabel.self,
-            PlanChunkSelection.self,
-            PlannedChunk.self,
-            PlannedChunkAction.self,
-            PlannedChunkStepFourState.self,
-            PlannedChunkOutcomeLink.self,
-            PlannedChunkActionDefineState.self,
-            PlannedChunkActionExecutionState.self,
-            LeverageResource.self,
-            PlannedChunkActionLeverageSelection.self,
-            SensitivityPlaceCatalogItem.self,
-            PlannedChunkActionSensitivityPlaceLink.self,
-            PlannedChunkActionNote.self,
-            PlannedChunkActionAttachment.self,
-            PlannedChunkActionLeverageItem.self,
-            PlannedChunkActionSensitivityPlace.self,
-        ]
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
-        do {
-            let demoSchema = Schema(schema)
-            return try ModelContainer(for: demoSchema, configurations: config)
-        } catch {
-            fatalError("Failed to create demo model container: \(error)")
-        }
-    }()
+    private let demoContainer = LoomPersistence.makeInMemoryContainer()
 
     var body: some View {
-        PlanView()
-            .modelContainer(demoContainer)
+        Group {
+            if let demoContainer {
+                PlanView()
+                    .modelContainer(demoContainer)
+            } else {
+                VStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 22))
+                        .foregroundStyle(.orange)
+                    Text("Plan preview unavailable.")
+                        .font(.headline)
+                    Text("The in-memory demo container could not be created.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(24)
+            }
+        }
     }
 }
 

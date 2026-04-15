@@ -1,8 +1,138 @@
 import Foundation
 import SwiftData
 
+enum LoomSpecialAccountWorkspace: String {
+    case reviewDemo = "review-demo"
+    case reviewOnboardingDemo = "review-onboarding-demo"
+    case starter = "starter"
+
+    static let reviewDemoAccountEmail = "test@loom.app"
+    static let reviewOnboardingDemoAccountEmail = "demo@loomlife.us"
+    static let starterAccountEmail = "start@loom.app"
+
+    static func workspace(for email: String) -> LoomSpecialAccountWorkspace? {
+        switch email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case reviewDemoAccountEmail:
+            return .reviewDemo
+        case reviewOnboardingDemoAccountEmail:
+            return .reviewOnboardingDemo
+        case starterAccountEmail:
+            return .starter
+        default:
+            return nil
+        }
+    }
+
+    var shouldSeedDemoWorkspace: Bool {
+        self == .reviewDemo || self == .reviewOnboardingDemo
+    }
+
+    var shouldAutoCompleteGatesAfterSignIn: Bool {
+        self == .reviewDemo
+    }
+
+    var shouldPrefillDiagnosticDuringOnboarding: Bool {
+        self == .reviewOnboardingDemo
+    }
+
+    var shouldForceFreshSetupAppearanceDuringQuickTour: Bool {
+        self == .reviewOnboardingDemo
+    }
+
+    var usesDefaultMonthlySubscription: Bool {
+        self == .reviewDemo
+    }
+
+    var preservesWorkspaceStateAcrossLogout: Bool {
+        self == .reviewOnboardingDemo
+    }
+
+    var bootstrapDefaultsKey: String {
+        defaultsPrefix + "bootstrap_completed_v1"
+    }
+
+    var pendingResetDefaultsKey: String {
+        defaultsPrefix + "reset_on_next_sign_out_v1"
+    }
+
+    var autoCreateEnabledDefaultsKey: String? {
+        switch self {
+        case .reviewOnboardingDemo:
+            return defaultsPrefix + "auto_create_enabled_v1"
+        case .reviewDemo, .starter:
+            return nil
+        }
+    }
+
+    var storeGenerationDefaultsKey: String {
+        switch self {
+        case .reviewDemo:
+            return UserSessionStore.Keys.reviewDemoStoreGeneration
+        case .reviewOnboardingDemo:
+            return UserSessionStore.Keys.reviewOnboardingDemoStoreGeneration
+        case .starter:
+            return UserSessionStore.Keys.starterStoreGeneration
+        }
+    }
+
+    var alertTitle: String {
+        switch self {
+        case .reviewDemo:
+            return "Demo Account"
+        case .reviewOnboardingDemo:
+            return "Review Demo Account"
+        case .starter:
+            return "Isolated Workspace"
+        }
+    }
+
+    var alertMessage: String {
+        switch self {
+        case .reviewDemo:
+            return "This account is a demo workspace with sample data. Changes will NOT save if logged out."
+        case .reviewOnboardingDemo:
+            return "This account is a review demo workspace with preloaded sample data, but it still follows the normal onboarding flow. Changes will NOT save if logged out."
+        case .starter:
+            return "This account is a temporary empty workspace. Changes reset after sign out."
+        }
+    }
+
+    var storeFilePrefix: String {
+        switch self {
+        case .reviewDemo:
+            return "review-demo"
+        case .reviewOnboardingDemo:
+            return "review-onboarding-demo"
+        case .starter:
+            return "starter-isolated"
+        }
+    }
+
+    var defaultsPrefix: String {
+        switch self {
+        case .reviewDemo:
+            return "review_demo."
+        case .reviewOnboardingDemo:
+            return "review_onboarding_demo."
+        case .starter:
+            return "starter_isolated."
+        }
+    }
+
+    func allowsAutoCreate(defaults: UserDefaults = .standard) -> Bool {
+        guard let key = autoCreateEnabledDefaultsKey else { return true }
+        guard defaults.object(forKey: key) != nil else { return true }
+        return defaults.bool(forKey: key)
+    }
+
+    func setAllowsAutoCreate(_ isEnabled: Bool, defaults: UserDefaults = .standard) {
+        guard let key = autoCreateEnabledDefaultsKey else { return }
+        defaults.set(isEnabled, forKey: key)
+    }
+}
+
 enum LoomDemoWorkspaceSeeder {
-    static let reviewAccountEmail = "test@loom.app"
+    static let reviewAccountEmail = LoomSpecialAccountWorkspace.reviewDemoAccountEmail
 
     private static let outcomeContributingLittleWinsDefaultsKey = "outcome_contributing_little_wins_v1"
 
@@ -116,7 +246,8 @@ enum LoomDemoWorkspaceSeeder {
     }
 
     static func isDemoAccount(email: String) -> Bool {
-        email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == reviewAccountEmail
+        guard let workspace = LoomSpecialAccountWorkspace.workspace(for: email) else { return false }
+        return workspace.shouldSeedDemoWorkspace
     }
 
     static func demoPersonalizationDraft() -> PersonalizationDraft {
@@ -1296,7 +1427,8 @@ enum LoomDemoWorkspaceSeeder {
             CaptureSeed(id: uuid("00000000-0000-0000-0000-000000000b02"), text: "Draft notes for promotion check-in", dueOffsetDays: 3, attentionDays: 7),
             CaptureSeed(id: uuid("00000000-0000-0000-0000-000000000b03"), text: "Book dentist appointment", dueOffsetDays: nil, attentionDays: nil),
             CaptureSeed(id: uuid("00000000-0000-0000-0000-000000000b04"), text: "Research moving checklist for future home", dueOffsetDays: nil, attentionDays: nil),
-            CaptureSeed(id: uuid("00000000-0000-0000-0000-000000000b05"), text: "Invite a friend to coffee next week", dueOffsetDays: 5, attentionDays: 7)
+            CaptureSeed(id: uuid("00000000-0000-0000-0000-000000000b05"), text: "Invite a friend to coffee next week", dueOffsetDays: 5, attentionDays: 7),
+            CaptureSeed(id: uuid("00000000-0000-0000-0000-000000000b06"), text: "Compare quotes for movers and storage", dueOffsetDays: nil, attentionDays: nil)
         ]
     }
 }

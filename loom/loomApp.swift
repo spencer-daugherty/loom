@@ -30,7 +30,7 @@ private enum LoomRuntime {
     }
 }
 
-private enum LoomPersistence {
+enum LoomPersistence {
     static let modelTypes: [any PersistentModel.Type] = [
         DrivingForce.self,
         DrivingForceArchive.self,
@@ -106,16 +106,20 @@ private enum LoomPersistence {
         PlannedChunkActionSensitivityPlace.self,
     ]
 
-    static func makeInMemoryContainer() -> ModelContainer {
+    static func makeInMemoryContainer() -> ModelContainer? {
         let previewConfiguration = ModelConfiguration(isStoredInMemoryOnly: true)
         do {
             return try ModelContainer(for: Schema(modelTypes), configurations: [previewConfiguration])
         } catch {
-            fatalError("Failed to initialize in-memory ModelContainer: \(error)")
+            AppDebugActivityLog.log(
+                "Persistence",
+                "In-memory ModelContainer init failed error=\(error.localizedDescription)"
+            )
+            return nil
         }
     }
 
-    static func makeContainer() -> ModelContainer {
+    static func makeContainer() -> ModelContainer? {
         if LoomRuntime.isPreviewSafeModeEnabled {
             return makeInMemoryContainer()
         }
@@ -125,16 +129,20 @@ private enum LoomPersistence {
             let cloudKitConfiguration = ModelConfiguration(cloudKitDatabase: .automatic)
             return try ModelContainer(for: Schema(modelTypes), configurations: [cloudKitConfiguration])
         } catch {
+            AppDebugActivityLog.log(
+                "Persistence",
+                "Primary CloudKit ModelContainer init failed error=\(error.localizedDescription)"
+            )
             // Fallback lets app boot even if CloudKit capability/container is not configured yet.
             let localConfiguration = ModelConfiguration(cloudKitDatabase: .none)
             do {
                 return try ModelContainer(for: Schema(modelTypes), configurations: [localConfiguration])
             } catch {
-                if LoomRuntime.isPreviewSafeModeEnabled {
-                    return makeInMemoryContainer()
-                } else {
-                    fatalError("Failed to initialize both CloudKit and local ModelContainer: \(error)")
-                }
+                AppDebugActivityLog.log(
+                    "Persistence",
+                    "Primary local ModelContainer init failed error=\(error.localizedDescription); falling back to in-memory store"
+                )
+                return makeInMemoryContainer()
             }
         }
     }
@@ -142,7 +150,7 @@ private enum LoomPersistence {
     static func makeIsolatedPersistentContainer(
         workspace: LoomSpecialAccountWorkspace,
         generation: Int
-    ) -> ModelContainer {
+    ) -> ModelContainer? {
         if LoomRuntime.isPreviewSafeModeEnabled {
             return makeInMemoryContainer()
         }
@@ -166,7 +174,11 @@ private enum LoomPersistence {
             )
             return try ModelContainer(for: Schema(modelTypes), configurations: [configuration])
         } catch {
-            fatalError("Failed to initialize isolated ModelContainer: \(error)")
+            AppDebugActivityLog.log(
+                "Persistence",
+                "Isolated ModelContainer init failed workspace=\(workspace.rawValue) generation=\(max(0, generation)) error=\(error.localizedDescription); falling back to in-memory isolated store"
+            )
+            return makeInMemoryContainer()
         }
     }
 }
@@ -182,7 +194,7 @@ private enum LoomPrimaryContainerStore {
 private enum LoomIsolatedContainerStore {
     private static var containersByKey: [String: ModelContainer] = [:]
 
-    static func container(for workspace: LoomSpecialAccountWorkspace, generation: Int) -> ModelContainer {
+    static func container(for workspace: LoomSpecialAccountWorkspace, generation: Int) -> ModelContainer? {
         let normalizedGeneration = max(0, generation)
         let cacheKey = "\(workspace.rawValue)#\(normalizedGeneration)"
         if let existing = containersByKey[cacheKey] {
@@ -192,14 +204,20 @@ private enum LoomIsolatedContainerStore {
             workspace: workspace,
             generation: normalizedGeneration
         )
+        guard let created else { return nil }
         containersByKey[cacheKey] = created
         return created
     }
 }
 
 extension View {
+    @ViewBuilder
     func loomPreviewContainer() -> some View {
-        modelContainer(LoomPreviewContainerStore.container)
+        if let container = LoomPreviewContainerStore.container {
+            modelContainer(container)
+        } else {
+            self
+        }
     }
 }
 
@@ -255,6 +273,8 @@ struct loomApp: App {
     @AppStorage(UserSessionStore.Keys.hasAccount) private var hasAccount = false
     @AppStorage(UserSessionStore.Keys.reviewDemoModeEnabled) private var reviewDemoModeEnabled = false
     @AppStorage(UserSessionStore.Keys.reviewDemoStoreGeneration) private var reviewDemoStoreGeneration = 0
+    @AppStorage(UserSessionStore.Keys.reviewOnboardingDemoStoreGeneration) private var reviewOnboardingDemoStoreGeneration = 0
+    @AppStorage(UserSessionStore.Keys.starterStoreGeneration) private var starterStoreGeneration = 0
     @AppStorage(UserSessionStore.Keys.isolatedWorkspaceKind) private var isolatedWorkspaceKind = ""
     @AppStorage(loomAIDebugDefaultsKey) private var enableLoomAIDebug = false
     @AppStorage("loom.showLoomAIDebugPage") private var showLoomAIDebugPage = false
@@ -265,6 +285,8 @@ struct loomApp: App {
                 hasAccount: hasAccount,
                 reviewDemoModeEnabled: reviewDemoModeEnabled,
                 reviewDemoStoreGeneration: reviewDemoStoreGeneration,
+                reviewOnboardingDemoStoreGeneration: reviewOnboardingDemoStoreGeneration,
+                starterStoreGeneration: starterStoreGeneration,
                 isolatedWorkspaceKind: isolatedWorkspaceKind
             ) {
                 ZStack(alignment: .bottomLeading) {
@@ -362,6 +384,8 @@ private struct LoomModelContainerHost<Content: View>: View {
     let hasAccount: Bool
     let reviewDemoModeEnabled: Bool
     let reviewDemoStoreGeneration: Int
+    let reviewOnboardingDemoStoreGeneration: Int
+    let starterStoreGeneration: Int
     let isolatedWorkspaceKind: String
     let content: Content
 
@@ -369,28 +393,35 @@ private struct LoomModelContainerHost<Content: View>: View {
         hasAccount: Bool,
         reviewDemoModeEnabled: Bool,
         reviewDemoStoreGeneration: Int,
+        reviewOnboardingDemoStoreGeneration: Int,
+        starterStoreGeneration: Int,
         isolatedWorkspaceKind: String,
         @ViewBuilder content: () -> Content
     ) {
         self.hasAccount = hasAccount
         self.reviewDemoModeEnabled = reviewDemoModeEnabled
         self.reviewDemoStoreGeneration = reviewDemoStoreGeneration
+        self.reviewOnboardingDemoStoreGeneration = reviewOnboardingDemoStoreGeneration
+        self.starterStoreGeneration = starterStoreGeneration
         self.isolatedWorkspaceKind = isolatedWorkspaceKind
         self.content = content()
     }
 
     var body: some View {
         Group {
-            if let workspace = resolvedWorkspace {
+            if let workspace = resolvedWorkspace,
+               let container = LoomIsolatedContainerStore.container(for: workspace, generation: storeGeneration(for: workspace)) {
                 LoomIsolatedWorkspaceBootstrapView(workspace: workspace) {
                     content
                 }
-                .modelContainer(LoomIsolatedContainerStore.container(for: workspace, generation: reviewDemoStoreGeneration))
-                .id("loom-isolated-container-\(workspace.rawValue)-\(reviewDemoStoreGeneration)")
-            } else {
+                .modelContainer(container)
+                .id("loom-isolated-container-\(workspace.rawValue)-\(storeGeneration(for: workspace))")
+            } else if let container = LoomPrimaryContainerStore.container {
                 content
-                    .modelContainer(LoomPrimaryContainerStore.container)
+                    .modelContainer(container)
                     .id("loom-primary-container")
+            } else {
+                LoomPersistenceFailureView()
             }
         }
         .onOpenURL { url in
@@ -409,6 +440,23 @@ private struct LoomModelContainerHost<Content: View>: View {
             return workspace
         }
         return .reviewDemo
+    }
+
+    private func storeGeneration(for workspace: LoomSpecialAccountWorkspace) -> Int {
+        switch workspace {
+        case .reviewDemo:
+            return reviewDemoStoreGeneration
+        case .reviewOnboardingDemo:
+            if UserDefaults.standard.object(forKey: UserSessionStore.Keys.reviewOnboardingDemoStoreGeneration) != nil {
+                return reviewOnboardingDemoStoreGeneration
+            }
+            return reviewDemoStoreGeneration
+        case .starter:
+            if UserDefaults.standard.object(forKey: UserSessionStore.Keys.starterStoreGeneration) != nil {
+                return starterStoreGeneration
+            }
+            return reviewDemoStoreGeneration
+        }
     }
 
     private func handleIncomingURL(_ url: URL) {
@@ -446,6 +494,25 @@ private struct LoomModelContainerHost<Content: View>: View {
             base64 += String(repeating: "=", count: 4 - pad)
         }
         return base64
+    }
+}
+
+private struct LoomPersistenceFailureView: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 28))
+                .foregroundStyle(.orange)
+            Text("Loom couldn't start its local data store.")
+                .font(.headline)
+            Text("Please close and reopen the app. If this continues, reinstall Loom or contact support.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemBackground).ignoresSafeArea())
     }
 }
 

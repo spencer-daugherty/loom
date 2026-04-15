@@ -621,30 +621,50 @@ struct AccountStepView: View {
         guard let pending = pendingReviewSignInSuccess else { return }
         Task { @MainActor in
             let workspace = pending.workspace
+            let defaults = UserDefaults.standard
+            let hasCompletedWorkspaceBootstrap = defaults.bool(forKey: workspace.bootstrapDefaultsKey)
+            let shouldResetWorkspaceForThisSignIn = !workspace.preservesWorkspaceStateAcrossLogout || !hasCompletedWorkspaceBootstrap
             pendingReviewSignInSuccess = nil
 
-            LoomDefaultsScope.clearScopedValues(for: workspace)
-            resetIsolatedWorkspaceOnboardingProgress()
+            if shouldResetWorkspaceForThisSignIn {
+                LoomDefaultsScope.clearScopedValues(for: workspace)
+                resetIsolatedWorkspaceOnboardingProgress(defaults: defaults)
+            }
             session.setIsolatedWorkspace(workspace)
             if workspace == .starter {
                 session.setIsSubscribed(false)
                 SubscriptionAccessGate.setStarterEntitlementAccess(false)
+                SubscriptionAccessGate.setStarterPreferredProductID(nil)
             }
-            await personalizationStore.resetCurrentUserState()
+            if shouldResetWorkspaceForThisSignIn {
+                await personalizationStore.resetCurrentUserState()
+            }
 
             session.completeSignInWithEmail(
                 userID: pending.userID,
                 email: pending.email,
                 fullName: pending.fullName
             )
-            if workspace.shouldSeedDemoWorkspace {
-                session.setHasSeenOnboarding(true)
-                session.setHasCompletedDiagnostic(true)
-                session.setHasSeenDiagnosticInsights(true)
-                hasSeenContentQuickstart = false
-                forceShowContentQuickstartOnce = true
-                await LoomDemoWorkspaceSeeder.seedDemoPersonalization(using: personalizationStore)
+            if workspace == .reviewOnboardingDemo {
+                session.setIsSubscribed(false)
+                UserDefaults.standard.removeObject(forKey: "loom.subscription_plan")
+            } else if workspace.usesDefaultMonthlySubscription {
+                session.setIsSubscribed(true)
+                UserDefaults.standard.set(SubscriptionPlan.monthly.rawValue, forKey: "loom.subscription_plan")
             }
+            if workspace.shouldSeedDemoWorkspace {
+                if shouldResetWorkspaceForThisSignIn {
+                    hasSeenContentQuickstart = false
+                    forceShowContentQuickstartOnce = true
+                }
+                if workspace.shouldAutoCompleteGatesAfterSignIn {
+                    session.setHasSeenOnboarding(true)
+                    session.setHasCompletedDiagnostic(true)
+                    session.setHasSeenDiagnosticInsights(true)
+                    await LoomDemoWorkspaceSeeder.seedDemoPersonalization(using: personalizationStore)
+                }
+            }
+            defaults.set(true, forKey: workspace.bootstrapDefaultsKey)
             didCompleteSignup = true
             AnalyticsLogger.log(.signupCompleted(method: "email"))
         }
@@ -716,16 +736,26 @@ struct AccountStepView: View {
         do {
             return try await Auth.auth().signIn(withEmail: email, password: password)
         } catch {
-            guard shouldCreateStarterAccount(email: email, password: password, error: error) else {
+            guard shouldCreateSpecialWorkspaceAccount(email: email, password: password, error: error) else {
                 throw error
             }
             return try await Auth.auth().createUser(withEmail: email, password: password)
         }
     }
 
-    private func shouldCreateStarterAccount(email: String, password: String, error: Error) -> Bool {
-        guard LoomSpecialAccountWorkspace.workspace(for: email) == .starter else { return false }
-        guard password == "ForAllTime2" else { return false }
+    private func shouldCreateSpecialWorkspaceAccount(email: String, password: String, error: Error) -> Bool {
+        guard let workspace = LoomSpecialAccountWorkspace.workspace(for: email) else { return false }
+        guard workspace.allowsAutoCreate() else { return false }
+        let expectedPassword: String
+        switch workspace {
+        case .starter:
+            expectedPassword = "ForAllTime2"
+        case .reviewOnboardingDemo:
+            expectedPassword = "ForAllTime3"
+        case .reviewDemo:
+            return false
+        }
+        guard password == expectedPassword else { return false }
         let nsError = error as NSError
         guard let authCode = AuthErrorCode(rawValue: nsError.code) else { return false }
         return authCode == .userNotFound || authCode == .invalidCredential

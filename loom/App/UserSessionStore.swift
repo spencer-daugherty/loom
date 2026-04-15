@@ -27,6 +27,8 @@ final class UserSessionStore: ObservableObject {
         static let accountEmail = "account_email"
         static let reviewDemoModeEnabled = "review_demo_mode_enabled"
         static let reviewDemoStoreGeneration = "review_demo_store_generation"
+        static let reviewOnboardingDemoStoreGeneration = "review_onboarding_demo_store_generation"
+        static let starterStoreGeneration = "starter_store_generation"
         static let isolatedWorkspaceKind = "isolated_workspace_kind"
     }
 
@@ -136,7 +138,7 @@ final class UserSessionStore: ObservableObject {
     }
 
     func bumpReviewDemoStoreGeneration() -> Int {
-        return bumpIsolatedWorkspaceStoreGeneration()
+        return bumpIsolatedWorkspaceStoreGeneration(for: .reviewDemo)
     }
 
     func setIsolatedWorkspace(_ workspace: LoomSpecialAccountWorkspace?) {
@@ -148,10 +150,37 @@ final class UserSessionStore: ObservableObject {
         }
     }
 
-    func bumpIsolatedWorkspaceStoreGeneration() -> Int {
-        let nextValue = defaults.integer(forKey: Keys.reviewDemoStoreGeneration) + 1
-        defaults.set(nextValue, forKey: Keys.reviewDemoStoreGeneration)
+    func isolatedWorkspaceStoreGeneration(for workspace: LoomSpecialAccountWorkspace) -> Int {
+        let key = workspace.storeGenerationDefaultsKey
+        if defaults.object(forKey: key) != nil {
+            return defaults.integer(forKey: key)
+        }
+
+        // Migrate older installs that used one shared isolated-store generation counter.
+        let legacyValue = defaults.integer(forKey: Keys.reviewDemoStoreGeneration)
+        if legacyValue > 0, workspace != .reviewDemo {
+            defaults.set(legacyValue, forKey: key)
+            return legacyValue
+        }
+
+        return defaults.integer(forKey: key)
+    }
+
+    func bumpIsolatedWorkspaceStoreGeneration(for workspace: LoomSpecialAccountWorkspace? = nil) -> Int {
+        let resolvedWorkspace = workspace ?? LoomDefaultsScope.currentWorkspace(defaults: defaults) ?? .reviewDemo
+        let key = resolvedWorkspace.storeGenerationDefaultsKey
+        let nextValue = isolatedWorkspaceStoreGeneration(for: resolvedWorkspace) + 1
+        defaults.set(nextValue, forKey: key)
         return nextValue
+    }
+
+    func resetIsolatedWorkspaceForNextSignIn(_ workspace: LoomSpecialAccountWorkspace) {
+        let currentWorkspace = LoomDefaultsScope.currentWorkspace(defaults: defaults)
+        if currentWorkspace == workspace && hasAccount {
+            defaults.set(true, forKey: workspace.pendingResetDefaultsKey)
+            return
+        }
+        clearPersistedWorkspaceState(for: workspace)
     }
 
     func setAppleUserID(_ value: String?) {
@@ -166,9 +195,13 @@ final class UserSessionStore: ObservableObject {
     func clearAccountSession() {
         let workspace = LoomDefaultsScope.currentWorkspace(defaults: defaults)
 
-        if workspace != nil {
-            _ = bumpIsolatedWorkspaceStoreGeneration()
-            LoomDefaultsScope.clearCurrentScopedValues(defaults: defaults)
+        if let workspace {
+            let shouldResetWorkspace =
+                !workspace.preservesWorkspaceStateAcrossLogout ||
+                defaults.bool(forKey: workspace.pendingResetDefaultsKey)
+            if shouldResetWorkspace {
+                clearPersistedWorkspaceState(for: workspace)
+            }
         }
         if workspace == .starter {
             resetStarterWorkspaceSessionState()
@@ -183,6 +216,13 @@ final class UserSessionStore: ObservableObject {
         defaults.removeObject(forKey: Keys.authProvider)
         defaults.removeObject(forKey: Keys.accountName)
         defaults.removeObject(forKey: Keys.accountEmail)
+    }
+
+    private func clearPersistedWorkspaceState(for workspace: LoomSpecialAccountWorkspace) {
+        _ = bumpIsolatedWorkspaceStoreGeneration(for: workspace)
+        LoomDefaultsScope.clearScopedValues(for: workspace, defaults: defaults)
+        defaults.removeObject(forKey: workspace.bootstrapDefaultsKey)
+        defaults.removeObject(forKey: workspace.pendingResetDefaultsKey)
     }
 
     #if canImport(AuthenticationServices)
@@ -310,8 +350,9 @@ final class UserSessionStore: ObservableObject {
     }
 
     private func resetStarterWorkspaceSessionState() {
-        setHasSeenOnboarding(false)
+        setHasSeenOnboarding(true)
         SubscriptionAccessGate.setStarterEntitlementAccess(false, defaults: defaults)
+        SubscriptionAccessGate.setStarterPreferredProductID(nil, defaults: defaults)
         defaults.removeObject(forKey: "loom.subscription_plan")
         defaults.set(false, forKey: "return_to_onboarding_last_page_once")
         defaults.set(false, forKey: "blank_homepage_mode")
