@@ -32,6 +32,8 @@ struct LoomAIContextSnapshot: Codable {
         var endDate: Date
         var measurable: Bool
         var progressSummary: String
+        var reason: String
+        var contributingLittleWins: [String]
     }
     struct ActionBlockSummary: Codable {
         var category: String
@@ -1330,16 +1332,12 @@ final class LoomAIViewModel: ObservableObject {
                 !isLowSignal($0.title)
             }
             .sorted { $0.endDate < $1.endDate }
-        if let nextOutcome = pickOne(Array(nearTermOutcomes.prefix(4))) {
-            add("outcomes", "Next step for \(nextOutcome.title)")
-        }
         let rotatingOutcomeTitles = nearTermOutcomes
             .map(\.title)
             .map(normalized)
                 .filter { $0.count >= 5 && !isLowSignal($0) }
                 .prefix(3)
         for outcomeTitle in rotatingOutcomeTitles {
-            add("outcome_rotate", "Next step for \(outcomeTitle)")
             add("outcome_rotate", "Plan for \(outcomeTitle)")
         }
 
@@ -1523,9 +1521,6 @@ final class LoomAIViewModel: ObservableObject {
             if hasAllowedSuffix(trimmed, prefix: "New Identity for ", options: cleanedCategories) {
                 return true
             }
-            if hasAllowedSuffix(trimmed, prefix: "Next step for ", options: cleanedOutcomes) {
-                return true
-            }
             if hasAllowedSuffix(trimmed, prefix: "Plan for ", options: cleanedOutcomes) {
                 return true
             }
@@ -1627,6 +1622,7 @@ final class LoomAIViewModel: ObservableObject {
         let passionByID = Dictionary(uniqueKeysWithValues: passions.map { ($0.passion_id, $0) })
         let rolesByCategory = Dictionary(grouping: roles, by: \.category_id)
         let fociByCategory = Dictionary(grouping: foci, by: \.category_id)
+        let focusByID = Dictionary(uniqueKeysWithValues: foci.map { ($0.id, $0) })
         let resourcesByCategory = Dictionary(grouping: resources, by: \.category_id)
         let scoreByCategory: [UUID: FulfillmentCategoryScoreSnapshot] = Dictionary(
             uniqueKeysWithValues: Dictionary(grouping: fulfillmentScores, by: \.categoryID).compactMap { (pair: (key: UUID, value: [FulfillmentCategoryScoreSnapshot])) in
@@ -1651,6 +1647,7 @@ final class LoomAIViewModel: ObservableObject {
 
         let measureByOutcome = Dictionary(uniqueKeysWithValues: outcomeMeasures.map { ($0.outcome_id, $0) })
         let measureEntriesByOutcome = Dictionary(grouping: outcomeMeasureEntries, by: \.outcome_id)
+        let contributingLittleWinIDsByOutcome = Self.outcomeContributingLittleWinIDs()
 
         let activeOutcomes = outcomes
             .filter { $0.end >= now }
@@ -1660,6 +1657,16 @@ final class LoomAIViewModel: ObservableObject {
                 let measure = measureByOutcome[outcome.outcome_id]
                 let entries = (measureEntriesByOutcome[outcome.outcome_id] ?? []).sorted { $0.measuredAt < $1.measuredAt }
                 let measurable = measure != nil
+                let reason = outcome.reasons
+                    .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let contributingLittleWins = (contributingLittleWinIDsByOutcome[outcome.outcome_id] ?? [])
+                    .compactMap { focusByID[$0]?.activity }
+                    .map {
+                        $0.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                    }
+                    .filter { !$0.isEmpty }
                 let summary: String
                 if let measure {
                     let latest = entries.last?.measure ?? measure.measure
@@ -1673,7 +1680,9 @@ final class LoomAIViewModel: ObservableObject {
                     category: outcome.category,
                     endDate: outcome.end,
                     measurable: measurable,
-                    progressSummary: summary
+                    progressSummary: summary,
+                    reason: reason,
+                    contributingLittleWins: Array(contributingLittleWins.prefix(3))
                 )
             }
 
@@ -2457,6 +2466,22 @@ final class LoomAIViewModel: ObservableObject {
 
     private func roundToTenths(_ value: Double) -> Double {
         (value * 10).rounded() / 10
+    }
+
+    private static func outcomeContributingLittleWinIDs() -> [UUID: [UUID]] {
+        let scopedKey = LoomDefaultsScope.scopedKey("outcome_contributing_little_wins_v1")
+        guard let data = UserDefaults.standard.data(forKey: scopedKey),
+              let decoded = try? JSONDecoder().decode([String: [String]].self, from: data) else {
+            return [:]
+        }
+
+        return decoded.reduce(into: [UUID: [UUID]]()) { partialResult, pair in
+            guard let outcomeID = UUID(uuidString: pair.key) else { return }
+            let focusIDs = pair.value.compactMap(UUID.init(uuidString:))
+            if !focusIDs.isEmpty {
+                partialResult[outcomeID] = focusIDs
+            }
+        }
     }
 
     private static func sha256Hex(_ value: String) -> String {

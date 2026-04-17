@@ -29,7 +29,8 @@ struct LoomAIChatView: View {
     @State private var activeThreadKey = LoomAIChatThreadSelectionStore.currentThreadKey()
     @State private var threadMessages: [LoomAIChatMessage] = []
     @State private var latestAssistantMessageIDCache: UUID?
-    @State private var appliedSuggestedActionIDs: Set<String> = []
+    @State private var appliedSuggestedActionSnapshots: [String: LoomAISuggestedAction] = [:]
+    @State private var inFlightSuggestedActionSnapshots: [String: LoomAISuggestedAction] = [:]
     @State private var chipCategoryOverrides: [String: String] = [:]
     @State private var hasEnsuredThread = false
     @State private var needsRefreshWhenActive = true
@@ -46,14 +47,15 @@ struct LoomAIChatView: View {
     @State private var deepThinkingDelayTask: Task<Void, Never>? = nil
     @State private var promptChipRefreshTask: Task<Void, Never>? = nil
     @State private var showDeepThinkingOverlay = false
-    @State private var deepThinkingLines: [String] = []
+    @State private var deepThinkingTrace: [LoomAIDeepSearchTraceStep] = []
     @State private var suppressPendingLoadingUI = false
     @FocusState private var isInputFocused: Bool
+    @AppStorage(loomAICustomChatDefaultsKey) private var enableLoomAICustomChat = false
     private let keyboardTopGap: CGFloat = 12
     private let bestUseLoomChipTitle = "How can I best use Loom?"
-    private let bestUseLoomPrompt = "Based on everything Loom knows about me - my purpose vision, passions, fulfillment areas, goals, personality profile, current activity-explain the single most effective way for me to use Loom right now to reduce stress and live fulfilled."
     private let requestTimedOutMessage = "The request timed out."
-    private let compatibilityNoteText = "Use a device compatible with Apple Intelligence to unlock custom chats"
+    private let compatibilityNoteText = "Use a device compatible with Apple Intelligence for better personalization"
+    private let appleModelStatusText = "Running LoomAI Mark I model on Apple Intelligence"
 
     private var messages: [LoomAIChatMessage] { threadMessages }
     private var assistantBubbleWidth: CGFloat {
@@ -72,7 +74,27 @@ struct LoomAIChatView: View {
     }
 
     private var supportsCustomChat: Bool {
+        viewModel.activeChatProviderKind == .appleIntelligence && enableLoomAICustomChat
+    }
+
+    private var shouldShowCompatibilityNote: Bool {
+        viewModel.activeChatProviderKind != .appleIntelligence
+    }
+
+    private var shouldShowAppleModelStatus: Bool {
         viewModel.activeChatProviderKind == .appleIntelligence
+    }
+
+    private var promptChipVerticalPadding: CGFloat {
+        16
+    }
+
+    private var promptBarTopPadding: CGFloat {
+        supportsCustomChat ? 8 : 4
+    }
+
+    private var promptBarBottomPadding: CGFloat {
+        supportsCustomChat ? max(8, keyboardHeight > 0 ? keyboardHeight + keyboardTopGap : 8) : 4
     }
 
     private var shouldShowLoadingUI: Bool {
@@ -113,6 +135,7 @@ struct LoomAIChatView: View {
     }
 
     var body: some View {
+        let resolvedActionMap = resolvedVisibleSuggestionActionMap()
         VStack(spacing: 10) {
             if viewModel.isDailyLimitReached {
                 LoomAIInlineLimitNotice(text: "Daily LoomAI limit reached. Resets tomorrow.")
@@ -145,7 +168,8 @@ struct LoomAIChatView: View {
                                     suggestionCardsSectionView(
                                         cards: LoomAIChatMessageSuggestionCardsCodec.decode(message.suggestionCardsJSON),
                                         fallbackActions: LoomAIChatMessageActionsCodec.decode(message.actionsJSON),
-                                        nextAction: LoomAIChatMessageNextActionCodec.decode(message.nextActionJSON)
+                                        nextAction: LoomAIChatMessageNextActionCodec.decode(message.nextActionJSON),
+                                        resolvedActionMap: resolvedActionMap
                                     )
                                 }
                             }
@@ -161,7 +185,7 @@ struct LoomAIChatView: View {
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                 }
                                 if showDeepThinkingOverlay {
-                                    LoomAIDeepStateScanningCard(lines: deepThinkingLines)
+                                    LoomAIDeepStateScanningCard(steps: deepThinkingTrace)
                                     .transition(.opacity)
                                 }
                             }
@@ -182,7 +206,8 @@ struct LoomAIChatView: View {
                 }
                 .onChange(of: messages.last?.id) { _, newID in
                     guard newID != nil else { return }
-                    appliedSuggestedActionIDs = []
+                    appliedSuggestedActionSnapshots = [:]
+                    inFlightSuggestedActionSnapshots = [:]
                     chipCategoryOverrides = [:]
                     guard isActivePage else {
                         needsRefreshWhenActive = true
@@ -282,11 +307,20 @@ struct LoomAIChatView: View {
                 if !visiblePromptChips.isEmpty {
                     suggestedPromptChipBar
                 }
-                if !supportsCustomChat {
+                if shouldShowCompatibilityNote {
                     Text(compatibilityNoteText)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 2)
+                }
+                if shouldShowAppleModelStatus {
+                    Text(appleModelStatusText)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .multilineTextAlignment(.center)
                         .padding(.horizontal, 2)
                 }
                 if supportsCustomChat {
@@ -294,8 +328,8 @@ struct LoomAIChatView: View {
                 }
             }
             .padding(.horizontal, 12)
-            .padding(.top, 8)
-            .padding(.bottom, max(8, keyboardHeight > 0 ? keyboardHeight + keyboardTopGap : 8))
+            .padding(.top, promptBarTopPadding)
+            .padding(.bottom, promptBarBottomPadding)
         }
         .alert("Loom", isPresented: $showActionExecutionAlert) {
             Button("OK", role: .cancel) { }
@@ -517,7 +551,7 @@ struct LoomAIChatView: View {
                     .foregroundStyle(.primary)
                     .padding(.leading, 12)
                     .padding(.trailing, highlightedToken == nil ? 12 : 8)
-                    .padding(.vertical, 8)
+                    .padding(.vertical, promptChipVerticalPadding)
             }
             .buttonStyle(.plain)
 
@@ -544,7 +578,7 @@ struct LoomAIChatView: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(highlightColor)
                         .padding(.horizontal, 8)
-                        .padding(.vertical, 8)
+                        .padding(.vertical, promptChipVerticalPadding)
                 }
                 .buttonStyle(.plain)
             }
@@ -659,13 +693,13 @@ struct LoomAIChatView: View {
     }
 
     private func resolvedPromptChipPrompt(for originalChip: String, resolvedTitle: String) -> String {
-        if isBestUseLoomChip(originalChip) || isBestUseLoomChip(resolvedTitle) {
-            return bestUseLoomPrompt
-        }
         guard !messages.isEmpty else { return resolvedTitle }
         let latestAssistant = messages.last(where: { $0.roleRaw == LoomAIChatRole.assistant.rawValue })
         let chips = LoomAIChatMessageChipsCodec.decode(latestAssistant?.chipsJSON)
         if let match = chips.first(where: { $0.title.caseInsensitiveCompare(originalChip) == .orderedSame }) {
+            if isBestUseLoomChip(originalChip) || isBestUseLoomChip(resolvedTitle) {
+                return resolvedTitle
+            }
             return chipCategoryOverrides[originalChip] ?? match.prompt
         }
         return resolvedTitle
@@ -782,11 +816,10 @@ struct LoomAIChatView: View {
         } else {
             LoomAITokenizedMessageView(
                 content: assistantContent,
-                highlightReferences: assistantMessageHighlightReferences()
+                highlightReferences: assistantMessageHighlightReferences(for: message)
             )
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .multilineTextAlignment(.leading)
-                .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
         }
     }
@@ -882,14 +915,35 @@ struct LoomAIChatView: View {
         return trimmed
     }
 
-    private func assistantMessageHighlightReferences() -> [LoomAIInlineReference] {
+    private func assistantMessageHighlightReferences(for message: LoomAIChatMessage) -> [LoomAIInlineReference] {
         var references: [LoomAIInlineReference] = []
         var seen = Set<String>()
+        let decodedAnnotations = LoomAIChatMessageAnnotationsCodec.decode(message.messageAnnotationsJSON)
 
         func appendReference(_ reference: LoomAIInlineReference) {
             let key = "\(reference.kind)|\(reference.displayText.lowercased())|\(reference.categoryName?.lowercased() ?? "")"
             guard seen.insert(key).inserted else { return }
             references.append(reference)
+        }
+
+        if !decodedAnnotations.isEmpty {
+            for annotation in decodedAnnotations {
+                let text = annotation.displayText.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty else { continue }
+                appendReference(
+                    .init(
+                        kind: annotation.kind,
+                        displayText: text,
+                        categoryName: annotation.categoryName?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    )
+                )
+            }
+            return references.sorted {
+                if $0.displayText.count != $1.displayText.count {
+                    return $0.displayText.count > $1.displayText.count
+                }
+                return $0.displayText.localizedCaseInsensitiveCompare($1.displayText) == .orderedAscending
+            }
         }
 
         let categoryNameByID = Dictionary(uniqueKeysWithValues: fulfillments.map {
@@ -956,12 +1010,24 @@ struct LoomAIChatView: View {
     }
 
     private func assistantProviderLabel(for message: LoomAIChatMessage) -> String? {
-        let model = LoomAIDebugCodec.decode(message.debugJSON)?.model?
+        let debug = LoomAIDebugCodec.decode(message.debugJSON)
+        if let suggestionSource = debug?.suggestionSource?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !suggestionSource.isEmpty {
+            return suggestionSource
+        }
+
+        let model = debug?.model?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
 
         guard let model else { return nil }
-        return model.hasPrefix("apple.intelligence") ? "Apple Intelligence" : nil
+        if model.hasPrefix("apple.intelligence") {
+            return "Apple Intelligence"
+        }
+        if model.hasPrefix("loom.local.compatibility") {
+            return "Loom Database"
+        }
+        return nil
     }
 
     @ViewBuilder
@@ -1139,27 +1205,28 @@ struct LoomAIChatView: View {
     private func suggestionCardsSectionView(
         cards: [LoomAISuggestionCard],
         fallbackActions: [LoomAISuggestedAction],
-        nextAction: LoomAISuggestedAction?
+        nextAction: LoomAISuggestedAction?,
+        resolvedActionMap: [String: LoomAISuggestedAction]
     ) -> some View {
         let cardsActions = suggestionCardActions(from: cards)
         let hasCards = !cards.isEmpty
         let hasFallback = !fallbackActions.isEmpty
         let dedupedFallback = deduplicatedActions(fallbackActions)
-        let next = deduplicatedNextAction(nextAction, existing: cardsActions + dedupedFallback)
+        let next = hasCards ? nil : deduplicatedNextAction(nextAction, existing: cardsActions + dedupedFallback)
 
         if hasCards || hasFallback || next != nil {
             VStack(alignment: .leading, spacing: 8) {
                 if hasCards {
                     ForEach(cards) { card in
-                        suggestionCardView(card)
+                        suggestionCardView(card, resolvedActionMap: resolvedActionMap)
                     }
                 } else if hasFallback {
-                    suggestedActionsView(actions: dedupedFallback)
+                    suggestedActionsView(actions: dedupedFallback, resolvedActionMap: resolvedActionMap)
                 }
 
                 if let next {
                     VStack(alignment: .leading, spacing: 6) {
-                        suggestedActionButton(next)
+                        suggestedActionButton(next, resolvedActionMap: resolvedActionMap)
                     }
                 }
             }
@@ -1167,12 +1234,23 @@ struct LoomAIChatView: View {
         }
     }
 
-    private func suggestionCardView(_ card: LoomAISuggestionCard) -> some View {
-        let cardHeading = card.title.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func suggestionCardView(
+        _ card: LoomAISuggestionCard,
+        resolvedActionMap: [String: LoomAISuggestedAction]
+    ) -> some View {
+        let options = card.options.map(suggestionOptionToAction)
+        let resolvedOptions = options.map { resolvedActionMap[suggestedActionStateKey($0)] ?? $0 }
+        let cardHeading = displayedSuggestionCardHeading(for: card, actions: resolvedOptions)
         return VStack(alignment: .leading, spacing: 6) {
-            let options = card.options.map(suggestionOptionToAction)
+            if !cardHeading.isEmpty {
+                Text(cardHeading)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
+                    .padding(.horizontal, 12)
+            }
             ForEach(options) { action in
-                suggestedActionButton(action, cardHeading: cardHeading)
+                suggestedActionButton(action, resolvedActionMap: resolvedActionMap)
             }
         }
         .padding(.horizontal, 10)
@@ -1229,13 +1307,321 @@ struct LoomAIChatView: View {
         return hasMatch ? nil : action
     }
 
+    private enum SuggestedCapacityFamily: Hashable {
+        case identity
+        case littleWin
+    }
+
+    private struct SuggestedReplacementPoolKey: Hashable {
+        let family: SuggestedCapacityFamily
+        let categoryID: UUID
+    }
+
+    private let suggestionUnavailableReasonKey = "__loomUnavailableReason"
+
+    private func suggestedActionStateKey(_ action: LoomAISuggestedAction) -> String {
+        let payloadKey = action.payload
+            .sorted { $0.key < $1.key }
+            .map { "\($0.key)=\($0.value)" }
+            .joined(separator: "&")
+        return "\(action.id)|\(action.type.lowercased())|\(payloadKey)|\(action.title)"
+    }
+
+    private func visibleSuggestionActionsInDisplayOrder() -> [LoomAISuggestedAction] {
+        var actions: [LoomAISuggestedAction] = []
+        for message in messages where message.roleRaw == LoomAIChatRole.assistant.rawValue {
+            let cards = LoomAIChatMessageSuggestionCardsCodec.decode(message.suggestionCardsJSON)
+            let fallbackActions = deduplicatedActions(LoomAIChatMessageActionsCodec.decode(message.actionsJSON))
+            let cardsActions = suggestionCardActions(from: cards)
+            let nextAction = cards.isEmpty
+                ? deduplicatedNextAction(
+                    LoomAIChatMessageNextActionCodec.decode(message.nextActionJSON),
+                    existing: cardsActions + fallbackActions
+                )
+                : nil
+
+            if !cards.isEmpty {
+                actions.append(contentsOf: cardsActions)
+            } else {
+                actions.append(contentsOf: fallbackActions)
+                if let nextAction {
+                    actions.append(nextAction)
+                }
+            }
+        }
+        return actions
+    }
+
+    private func currentResolvedSuggestedAction(for action: LoomAISuggestedAction) -> LoomAISuggestedAction {
+        let stateKey = suggestedActionStateKey(action)
+        return appliedSuggestedActionSnapshots[stateKey]
+            ?? inFlightSuggestedActionSnapshots[stateKey]
+            ?? resolvedVisibleSuggestionActionMap()[stateKey]
+            ?? action
+    }
+
+    private func resolvedVisibleSuggestionActionMap() -> [String: LoomAISuggestedAction] {
+        let visibleActions = visibleSuggestionActionsInDisplayOrder()
+        var displayOrderByID: [String: Int] = [:]
+        for (offset, action) in visibleActions.enumerated() {
+            displayOrderByID[suggestedActionStateKey(action)] = offset
+        }
+        let sortedInFlight = inFlightSuggestedActionSnapshots
+            .sorted { lhs, rhs in
+                let left = displayOrderByID[lhs.key] ?? .max
+                let right = displayOrderByID[rhs.key] ?? .max
+                if left != right { return left < right }
+                return lhs.key < rhs.key
+            }
+            .map(\.value)
+
+        var resolvedByID: [String: LoomAISuggestedAction] = [:]
+        var optimisticItems = replacementPoolItemsByKey()
+        var reservedTargets: [SuggestedReplacementPoolKey: Set<String>] = [:]
+
+        for action in sortedInFlight {
+            guard let poolKey = replacementPoolKey(for: action) else { continue }
+            optimisticItems[poolKey] = applyingOptimisticAction(
+                action,
+                to: optimisticItems[poolKey] ?? [],
+                family: poolKey.family
+            )
+            if let replaceTarget = explicitReplacementTarget(for: action, family: poolKey.family) {
+                reservedTargets[poolKey, default: []].insert(normalizedReplacementValue(replaceTarget, family: poolKey.family))
+            }
+        }
+
+        for rawAction in visibleActions {
+            let stateKey = suggestedActionStateKey(rawAction)
+            if let applied = appliedSuggestedActionSnapshots[stateKey] {
+                resolvedByID[stateKey] = applied
+                continue
+            }
+            if let inFlight = inFlightSuggestedActionSnapshots[stateKey] {
+                resolvedByID[stateKey] = inFlight
+                continue
+            }
+
+            guard let poolKey = replacementPoolKey(for: rawAction) else {
+                resolvedByID[stateKey] = rawAction
+                continue
+            }
+
+            let poolItems = optimisticItems[poolKey] ?? []
+            let currentReserved = reservedTargets[poolKey] ?? []
+            let resolved = resolveCapacityLimitedAction(
+                rawAction,
+                family: poolKey.family,
+                currentItems: poolItems,
+                reservedTargets: currentReserved
+            )
+            resolvedByID[stateKey] = resolved
+
+            if let replaceTarget = explicitReplacementTarget(for: resolved, family: poolKey.family) {
+                reservedTargets[poolKey, default: []].insert(normalizedReplacementValue(replaceTarget, family: poolKey.family))
+            }
+        }
+
+        return resolvedByID
+    }
+
+    private func replacementPoolItemsByKey() -> [SuggestedReplacementPoolKey: [String]] {
+        var items: [SuggestedReplacementPoolKey: [String]] = [:]
+
+        for category in fulfillments {
+            let identityRows = fulfillmentRoles
+                .filter { $0.category_id == category.category_id }
+                .sorted {
+                    if $0.rank != $1.rank { return $0.rank < $1.rank }
+                    return $0.updatedAt < $1.updatedAt
+                }
+                .map { $0.role.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            items[SuggestedReplacementPoolKey(family: .identity, categoryID: category.category_id)] = identityRows
+
+            let littleWinRows = fulfillmentFocusRows
+                .filter { $0.category_id == category.category_id }
+                .sorted {
+                    if $0.rank != $1.rank { return $0.rank < $1.rank }
+                    return $0.updatedAt < $1.updatedAt
+                }
+                .map { $0.activity.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            items[SuggestedReplacementPoolKey(family: .littleWin, categoryID: category.category_id)] = littleWinRows
+        }
+
+        return items
+    }
+
+    private func replacementPoolKey(for action: LoomAISuggestedAction) -> SuggestedReplacementPoolKey? {
+        let lowerType = action.type.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let family: SuggestedCapacityFamily
+        if lowerType == "addfulfillmentidentity" || lowerType == "replacefulfillmentidentity" {
+            family = .identity
+        } else if lowerType == "createlittlewin" || lowerType == "addlittlewin" || lowerType == "replacelittlewin" {
+            family = .littleWin
+        } else {
+            return nil
+        }
+
+        guard let categoryID = resolvedSuggestedActionCategoryID(for: action) else { return nil }
+        return SuggestedReplacementPoolKey(family: family, categoryID: categoryID)
+    }
+
+    private func resolveCapacityLimitedAction(
+        _ rawAction: LoomAISuggestedAction,
+        family: SuggestedCapacityFamily,
+        currentItems: [String],
+        reservedTargets: Set<String>
+    ) -> LoomAISuggestedAction {
+        let incoming = LoomAIChatProvider.canonicalInsertedValue(
+            actionType: rawAction.type,
+            payload: rawAction.payload,
+            fallbackTitle: rawAction.title
+        )
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !incoming.isEmpty else { return rawAction }
+
+        let normalizedIncoming = normalizedReplacementValue(incoming, family: family)
+        let currentCount = currentItems.count
+        let explicitTarget = explicitReplacementTarget(for: rawAction, family: family)
+        let replaceType = family == .identity ? "replaceFulfillmentIdentity" : "replaceLittleWin"
+        let addType: String = {
+            switch family {
+            case .identity:
+                return "addFulfillmentIdentity"
+            case .littleWin:
+                return rawAction.type == "createLittleWin" ? "createLittleWin" : "addLittleWin"
+            }
+        }()
+
+        if currentCount < 3 {
+            var payload = rawAction.payload
+            payload.removeValue(forKey: "replaceIdentity")
+            payload.removeValue(forKey: "oldIdentity")
+            payload.removeValue(forKey: "replaceActivity")
+            payload.removeValue(forKey: "oldActivity")
+            payload.removeValue(forKey: suggestionUnavailableReasonKey)
+            return LoomAISuggestedAction(
+                id: rawAction.id,
+                title: rawAction.title,
+                type: addType,
+                payload: payload
+            )
+        }
+
+        let availableTargets = currentItems.filter { item in
+            let normalized = normalizedReplacementValue(item, family: family)
+            return normalized != normalizedIncoming && !reservedTargets.contains(normalized)
+        }
+
+        if family == .identity,
+           let replaceIdentity = LoomAIChatProvider.selectIdentityReplacement(
+            explicitTarget: explicitTarget,
+            proposedIdentity: incoming,
+            existing: availableTargets
+           ) {
+            var payload = rawAction.payload
+            payload["replaceIdentity"] = replaceIdentity
+            payload.removeValue(forKey: "oldIdentity")
+            payload.removeValue(forKey: suggestionUnavailableReasonKey)
+            return LoomAISuggestedAction(id: rawAction.id, title: rawAction.title, type: replaceType, payload: payload)
+        }
+
+        if family == .littleWin,
+           let replaceActivity = LoomAIChatProvider.selectLittleWinReplacement(
+            explicitTarget: explicitTarget,
+            proposedActivity: incoming,
+            existing: availableTargets
+           ) {
+            var payload = rawAction.payload
+            payload["replaceActivity"] = replaceActivity
+            payload.removeValue(forKey: "oldActivity")
+            payload.removeValue(forKey: suggestionUnavailableReasonKey)
+            return LoomAISuggestedAction(id: rawAction.id, title: rawAction.title, type: replaceType, payload: payload)
+        }
+
+        var payload = rawAction.payload
+        payload.removeValue(forKey: "replaceIdentity")
+        payload.removeValue(forKey: "oldIdentity")
+        payload.removeValue(forKey: "replaceActivity")
+        payload.removeValue(forKey: "oldActivity")
+        payload[suggestionUnavailableReasonKey] = "No unique replacement available right now."
+        return LoomAISuggestedAction(id: rawAction.id, title: rawAction.title, type: replaceType, payload: payload)
+    }
+
+    private func applyingOptimisticAction(
+        _ action: LoomAISuggestedAction,
+        to currentItems: [String],
+        family: SuggestedCapacityFamily
+    ) -> [String] {
+        let incoming = LoomAIChatProvider.canonicalInsertedValue(
+            actionType: action.type,
+            payload: action.payload,
+            fallbackTitle: action.title
+        )
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !incoming.isEmpty else { return currentItems }
+
+        let normalizedIncoming = normalizedReplacementValue(incoming, family: family)
+        var items = currentItems
+
+        if let replaceTarget = explicitReplacementTarget(for: action, family: family) {
+            let normalizedReplace = normalizedReplacementValue(replaceTarget, family: family)
+            if let index = items.firstIndex(where: { normalizedReplacementValue($0, family: family) == normalizedReplace }) {
+                items[index] = incoming
+            } else if !items.contains(where: { normalizedReplacementValue($0, family: family) == normalizedIncoming }) {
+                items.append(incoming)
+            }
+            return items
+        }
+
+        if !items.contains(where: { normalizedReplacementValue($0, family: family) == normalizedIncoming }) {
+            items.append(incoming)
+        }
+        return items
+    }
+
+    private func explicitReplacementTarget(
+        for action: LoomAISuggestedAction,
+        family: SuggestedCapacityFamily
+    ) -> String? {
+        let raw: String
+        switch family {
+        case .identity:
+            raw = action.payload["replaceIdentity"] ?? action.payload["oldIdentity"] ?? ""
+        case .littleWin:
+            raw = action.payload["replaceActivity"] ?? action.payload["oldActivity"] ?? ""
+        }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func normalizedReplacementValue(_ value: String, family: SuggestedCapacityFamily) -> String {
+        switch family {
+        case .identity:
+            return LoomAIChatProvider.normalizedComparisonKey(value)
+        case .littleWin:
+            return normalizedSuggestedLittleWinText(value)
+        }
+    }
+
+    private func suggestedActionUnavailableReason(for action: LoomAISuggestedAction) -> String? {
+        let reason = (action.payload[suggestionUnavailableReasonKey] ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return reason.isEmpty ? nil : reason
+    }
+
     @ViewBuilder
-    private func suggestedActionsView(actions: [LoomAISuggestedAction]) -> some View {
+    private func suggestedActionsView(
+        actions: [LoomAISuggestedAction],
+        resolvedActionMap: [String: LoomAISuggestedAction]
+    ) -> some View {
         if !actions.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(actions) { action in
-                        suggestedActionButton(action)
+                        suggestedActionButton(action, resolvedActionMap: resolvedActionMap)
                     }
                 }
             }
@@ -1243,33 +1629,46 @@ struct LoomAIChatView: View {
         }
     }
 
-    private func suggestedActionButton(_ action: LoomAISuggestedAction, cardHeading: String? = nil) -> some View {
-        let isApplied = appliedSuggestedActionIDs.contains(action.id) || isSuggestedActionPersistentlyApplied(action)
+    private func suggestedActionButton(
+        _ action: LoomAISuggestedAction,
+        resolvedActionMap: [String: LoomAISuggestedAction]
+    ) -> some View {
+        let stateKey = suggestedActionStateKey(action)
+        let resolvedAction = appliedSuggestedActionSnapshots[stateKey]
+            ?? inFlightSuggestedActionSnapshots[stateKey]
+            ?? resolvedActionMap[stateKey]
+            ?? action
+        let isApplied = appliedSuggestedActionSnapshots[stateKey] != nil || isSuggestedActionPersistentlyApplied(resolvedAction)
+        let isBusy = inFlightSuggestedActionSnapshots[stateKey] != nil
+        let unavailableReason = suggestedActionUnavailableReason(for: resolvedAction)
         return Button {
-            guard !isApplied else { return }
-            let didApply = viewModel.executeSuggestedAction(action, in: modelContext)
+            let executionAction = currentResolvedSuggestedAction(for: action)
+            let currentlyApplied = appliedSuggestedActionSnapshots[stateKey] != nil || isSuggestedActionPersistentlyApplied(executionAction)
+            let currentlyBusy = inFlightSuggestedActionSnapshots[stateKey] != nil
+            let currentUnavailable = suggestedActionUnavailableReason(for: executionAction)
+            guard !currentlyApplied, !currentlyBusy, currentUnavailable == nil else { return }
+
+            inFlightSuggestedActionSnapshots[stateKey] = executionAction
+            let didApply = viewModel.executeSuggestedAction(executionAction, in: modelContext)
             if let error = viewModel.errorMessage, !error.isEmpty {
+                inFlightSuggestedActionSnapshots.removeValue(forKey: stateKey)
                 actionExecutionAlertText = error
                 showActionExecutionAlert = true
             } else if didApply {
-                appliedSuggestedActionIDs.insert(action.id)
+                appliedSuggestedActionSnapshots[stateKey] = executionAction
+                inFlightSuggestedActionSnapshots.removeValue(forKey: stateKey)
+            } else {
+                inFlightSuggestedActionSnapshots.removeValue(forKey: stateKey)
             }
         } label: {
             HStack(alignment: .top, spacing: 10) {
-                suggestedActionLeadingIcon(for: action, isApplied: isApplied)
+                suggestedActionLeadingIcon(for: resolvedAction, isApplied: isApplied)
                     .padding(.top, 1)
 
                 VStack(alignment: .leading, spacing: 3) {
-                    if let heading = cardHeading?.trimmingCharacters(in: .whitespacesAndNewlines), !heading.isEmpty {
-                        Text(heading)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(suggestedActionSecondaryColor(isApplied: isApplied))
-                            .multilineTextAlignment(.leading)
-                    }
+                    suggestedActionPrimaryText(for: resolvedAction, isApplied: isApplied)
 
-                    suggestedActionPrimaryText(for: action, isApplied: isApplied)
-
-                    if let subtitle = suggestedActionSubtitle(for: action), !subtitle.isEmpty {
+                    if let subtitle = suggestedActionSubtitle(for: resolvedAction), !subtitle.isEmpty {
                         Text(subtitle)
                             .font(.caption)
                             .foregroundStyle(suggestedActionSecondaryColor(isApplied: isApplied))
@@ -1292,7 +1691,8 @@ struct LoomAIChatView: View {
             )
         }
         .buttonStyle(.plain)
-        .disabled(isApplied)
+        .disabled(isApplied || isBusy || unavailableReason != nil)
+        .opacity(isApplied || isBusy || unavailableReason != nil ? 0.78 : 1)
     }
 
     private func suggestedActionLeadingIcon(for _: LoomAISuggestedAction, isApplied: Bool) -> some View {
@@ -1308,9 +1708,7 @@ struct LoomAIChatView: View {
     private func suggestedActionPrimaryText(for action: LoomAISuggestedAction, isApplied: Bool) -> some View {
         if let identityDraft = extractedIdentityDraft(from: action) {
             suggestedSimpleTwoLineAction(
-                topLine: isApplied
-                    ? "Added Identity to \(identityDraft.category):"
-                    : "Add Identity to \(identityDraft.category):",
+                topLine: "",
                 detail: identityDraft.identity,
                 isApplied: isApplied
             )
@@ -1318,7 +1716,7 @@ struct LoomAIChatView: View {
             suggestedLittleWinPrimaryText(action: action, isApplied: isApplied)
         } else if action.type == "replaceFulfillmentMission" || action.type == "updateFulfillmentMission" {
             suggestedSimpleTwoLineAction(
-                topLine: missionTopLine(for: action, isApplied: isApplied),
+                topLine: "",
                 detail: action.payload["mission"] ?? action.payload["text"] ?? action.payload["purpose"] ?? action.title,
                 isApplied: isApplied
             )
@@ -1362,28 +1760,15 @@ struct LoomAIChatView: View {
     }
 
     private func suggestedIdentityPrimaryText(action: LoomAISuggestedAction, isApplied: Bool) -> some View {
-        let category = (action.payload["categoryName"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let identity = LoomAIChatProvider.canonicalInsertedValue(
             actionType: action.type,
             payload: action.payload,
             fallbackTitle: action.title
         )
-        let replaceIdentity = (action.payload["replaceIdentity"] ?? action.payload["oldIdentity"] ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let isReplace = action.type == "replaceFulfillmentIdentity"
-        let top = isReplace
-            ? (category.isEmpty ? "Replace Identity:" : "Replace Identity in \(category):")
-            : ""
-        let appliedTop = isReplace
-            ? top.replacingOccurrences(of: "Replace ", with: "Replaced ", options: [.anchored])
-            : ""
+        let replaceIdentity = effectiveIdentityReplacementName(for: action)
+        let isReplace = effectiveIsIdentityReplacement(for: action)
 
         return VStack(alignment: .leading, spacing: 3) {
-            if isReplace {
-                Text(isApplied ? appliedTop : top)
-                    .font(.subheadline.italic())
-                    .foregroundStyle(suggestedActionPrimaryColor(isApplied: isApplied).opacity(isApplied ? 0.88 : 0.95))
-            }
             if !identity.isEmpty {
                 Text(identity)
                     .font(.subheadline.weight(.bold))
@@ -1437,9 +1822,8 @@ struct LoomAIChatView: View {
             payload: action.payload,
             fallbackTitle: action.title
         )
-        let isReplace = action.type == "replaceLittleWin"
-        let replaced = (action.payload["replaceActivity"] ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let isReplace = effectiveIsLittleWinReplacement(for: action)
+        let replaced = effectiveLittleWinReplacementName(for: action)
 
         return VStack(alignment: .leading, spacing: 3) {
             if !activity.isEmpty {
@@ -1530,19 +1914,22 @@ struct LoomAIChatView: View {
     }
 
     private func suggestedActionSubtitle(for action: LoomAISuggestedAction) -> String? {
+        if let unavailableReason = suggestedActionUnavailableReason(for: action) {
+            return unavailableReason
+        }
         switch action.type {
         case "createLittleWin", "addLittleWin":
             return nil
         case "replaceLittleWin":
             return nil
         case "replaceFulfillmentMission", "updateFulfillmentMission":
-            return missionActionSubtitle(action)
+            return nil
         case "addFulfillmentIdentity":
-            return categoryOnlySubtitle(action, fallback: "Adds a new identity role.")
+            return nil
         case "replaceFulfillmentIdentity":
-            return categoryOnlySubtitle(action, fallback: "")
+            return nil
         case "replacePurposeVision", "updatePurposeVision":
-            return "Updates your Purpose Vision."
+            return nil
         case "addPassion", "addPassionItem":
             return nil
         case "launchAddFulfillmentAreaPrefill":
@@ -1623,6 +2010,138 @@ struct LoomAIChatView: View {
         identity = normalizedSuggestionOptionTitle(identity)
         guard !category.isEmpty, !identity.isEmpty else { return nil }
         return (category, identity)
+    }
+
+    private func effectiveIdentityTopLine(for action: LoomAISuggestedAction, fallbackCategory: String, isApplied: Bool) -> String {
+        let category = resolvedSuggestedActionCategoryName(for: action) ?? fallbackCategory
+        if effectiveIsIdentityReplacement(for: action) {
+            return isApplied
+                ? (category.isEmpty ? "Replaced Identity:" : "Replaced Identity in \(category):")
+                : (category.isEmpty ? "Replace Identity:" : "Replace Identity in \(category):")
+        }
+        return isApplied
+            ? "Added Identity to \(category):"
+            : "Add Identity to \(category):"
+    }
+
+    private func displayedSuggestionCardHeading(
+        for card: LoomAISuggestionCard,
+        actions: [LoomAISuggestedAction]
+    ) -> String {
+        let fallback = card.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let firstAction = actions.first(where: { appliedSuggestedActionSnapshots[suggestedActionStateKey($0)] == nil })
+                ?? actions.first else { return fallback }
+
+        switch firstAction.type {
+        case "createLittleWin", "addLittleWin", "replaceLittleWin":
+            let category = resolvedSuggestedActionCategoryName(for: firstAction)
+                ?? (firstAction.payload["categoryName"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let isReplace = effectiveIsLittleWinReplacement(for: firstAction)
+            if category.isEmpty {
+                return isReplace ? "Tap to Replace Little Win" : "Tap to Add Little Win"
+            }
+            return isReplace ? "Tap to Replace Little Win in \(category)" : "Tap to Add Little Win to \(category)"
+        case "addFulfillmentIdentity", "replaceFulfillmentIdentity":
+            let category = resolvedSuggestedActionCategoryName(for: firstAction)
+                ?? (firstAction.payload["categoryName"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let isReplace = effectiveIsIdentityReplacement(for: firstAction)
+            if category.isEmpty {
+                return isReplace ? "Tap to Replace Identity" : "Tap to Add Identity"
+            }
+            return isReplace ? "Tap to Replace Identity in \(category)" : "Tap to Add Identity to \(category)"
+        case "createCaptureAction":
+            return "Tap to Add Action to Capture"
+        default:
+            return fallback
+        }
+    }
+
+    private func effectiveIsIdentityReplacement(for action: LoomAISuggestedAction) -> Bool {
+        action.type == "replaceFulfillmentIdentity" ||
+            (action.payload["replaceIdentity"] ?? action.payload["oldIdentity"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+    }
+
+    private func effectiveIdentityReplacementName(for action: LoomAISuggestedAction) -> String {
+        let explicit = (action.payload["replaceIdentity"] ?? action.payload["oldIdentity"] ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return explicit
+    }
+
+    private func effectiveIsLittleWinReplacement(for action: LoomAISuggestedAction) -> Bool {
+        action.type == "replaceLittleWin" ||
+            (action.payload["replaceActivity"] ?? action.payload["oldActivity"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+    }
+
+    private func effectiveLittleWinReplacementName(for action: LoomAISuggestedAction) -> String {
+        let explicit = (action.payload["replaceActivity"] ?? action.payload["oldActivity"] ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return explicit
+    }
+
+    private func resolvedSuggestedActionCategoryID(for action: LoomAISuggestedAction) -> UUID? {
+        if let raw = action.payload["categoryID"] ?? action.payload["categoryId"], let id = UUID(uuidString: raw) {
+            return id
+        }
+        if let name = action.payload["categoryName"]?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
+            return fulfillments.first(where: { $0.category.caseInsensitiveCompare(name) == .orderedSame })?.category_id
+        }
+        return nil
+    }
+
+    private func resolvedSuggestedActionCategoryName(for action: LoomAISuggestedAction) -> String? {
+        if let name = action.payload["categoryName"]?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
+            return name
+        }
+        if let id = resolvedSuggestedActionCategoryID(for: action) {
+            return fulfillments.first(where: { $0.category_id == id })?.category
+        }
+        return nil
+    }
+
+    private func existingIdentityRows(for action: LoomAISuggestedAction) -> [FulfillmentRoles] {
+        guard let categoryID = resolvedSuggestedActionCategoryID(for: action) else { return [] }
+        return fulfillmentRoles
+            .filter { $0.category_id == categoryID }
+            .sorted { lhs, rhs in
+                if lhs.rank != rhs.rank { return lhs.rank < rhs.rank }
+                return lhs.updatedAt < rhs.updatedAt
+            }
+    }
+
+    private func existingLittleWinRows(for action: LoomAISuggestedAction) -> [FulfillmentFocus] {
+        guard let categoryID = resolvedSuggestedActionCategoryID(for: action) else { return [] }
+        return fulfillmentFocusRows
+            .filter { $0.category_id == categoryID }
+            .sorted { lhs, rhs in
+                if lhs.rank != rhs.rank { return lhs.rank < rhs.rank }
+                return lhs.updatedAt < rhs.updatedAt
+            }
+    }
+
+    private func oldestIdentityNameToRotate(for action: LoomAISuggestedAction) -> String? {
+        let incoming = LoomAIChatProvider.canonicalInsertedValue(
+            actionType: action.type,
+            payload: action.payload,
+            fallbackTitle: action.title
+        )
+        return existingIdentityRows(for: action)
+            .first(where: { $0.role.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare(incoming) != .orderedSame })?
+            .role
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func oldestLittleWinNameToRotate(for action: LoomAISuggestedAction) -> String? {
+        let incoming = normalizedSuggestedLittleWinText(
+            LoomAIChatProvider.canonicalInsertedValue(
+                actionType: action.type,
+                payload: action.payload,
+                fallbackTitle: action.title
+            )
+        )
+        return existingLittleWinRows(for: action)
+            .first(where: { normalizedSuggestedLittleWinText($0.activity) != incoming })?
+            .activity
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func suggestedActionPrimaryColor(isApplied: Bool) -> Color {
@@ -1762,13 +2281,15 @@ struct LoomAIChatView: View {
         viewModel.draft = displayTrimmed
         startSendingCurrentMessage(
             displayedUserMessage: displayTrimmed,
-            transportMessageOverride: trimmed
+            transportMessageOverride: trimmed,
+            artificialResponseDelayNanoseconds: randomChipResponseDelayNanoseconds()
         )
     }
 
     private func startSendingCurrentMessage(
         displayedUserMessage: String? = nil,
-        transportMessageOverride: String? = nil
+        transportMessageOverride: String? = nil,
+        artificialResponseDelayNanoseconds: UInt64 = 0
     ) {
         guard !viewModel.isSending else { return }
         guard hasActiveSubscriptionAccess else {
@@ -1782,10 +2303,15 @@ struct LoomAIChatView: View {
                 in: modelContext,
                 threadKey: activeThreadKey,
                 displayedUserMessage: displayedUserMessage,
-                transportMessageOverride: transportMessageOverride
+                transportMessageOverride: transportMessageOverride,
+                artificialResponseDelayNanoseconds: artificialResponseDelayNanoseconds
             )
             sendCurrentMessageTask = nil
         }
+    }
+
+    private func randomChipResponseDelayNanoseconds() -> UInt64 {
+        UInt64.random(in: 1_000_000_000 ... 3_000_000_000)
     }
 
     private func cancelCurrentMessageRequest() {
@@ -1871,44 +2397,60 @@ struct LoomAIChatView: View {
                 : 3_000_000_000
             try? await Task.sleep(nanoseconds: delayNanoseconds)
             guard !Task.isCancelled, viewModel.isSending, !suppressPendingLoadingUI else { return }
-            deepThinkingLines = makeDeepThinkingLines()
+            deepThinkingTrace = makeDeepThinkingTrace()
             withAnimation(.spring(response: 0.35, dampingFraction: 0.88)) {
                 showDeepThinkingOverlay = true
             }
         }
     }
 
-    private func makeDeepThinkingLines() -> [String] {
-        var lines: [String] = []
+    private func makeDeepThinkingTrace() -> [LoomAIDeepSearchTraceStep] {
+        if !viewModel.pendingDeepSearchTrace.isEmpty {
+            return viewModel.pendingDeepSearchTrace
+        }
+
+        var steps: [LoomAIDeepSearchTraceStep] = []
+        func appendStep(title: String, preview: String, sourceKind: String) {
+            let cleaned = preview.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !cleaned.isEmpty else { return }
+            steps.append(
+                .init(
+                    title: title,
+                    preview: String(cleaned.prefix(180)),
+                    sourceKind: sourceKind,
+                    order: steps.count
+                )
+            )
+        }
 
         if let personalization = PersonalizationStore.cachedContextForCurrentUser()?.current {
             let areas = personalization.lifeAreasSelected.prefix(2).joined(separator: ", ")
-            lines.append("How Loom See's You (So Far): \(personalization.stressSource)")
+            appendStep(title: "Stress source", preview: personalization.stressSource, sourceKind: "diagnostic")
             if !areas.isEmpty {
-                lines.append("How Loom See's You (So Far): life areas \(areas)")
+                appendStep(title: "Selected life areas", preview: areas, sourceKind: "areas")
             }
-            lines.append("How Loom See's You (So Far): planning reality \(personalization.planningReality)")
+            appendStep(title: "Planning reality", preview: personalization.planningReality, sourceKind: "diagnostic")
         }
 
         if let diagnostics = diagnosticsSnapshots.first {
             let rootCause = diagnostics.rootCauseText.trimmingCharacters(in: .whitespacesAndNewlines)
             if !rootCause.isEmpty {
-                lines.append("Root Cause: \(rootCause)")
+                appendStep(title: "Root cause", preview: rootCause, sourceKind: "diagnostic")
             }
             let nextDirection = diagnostics.nextDirectionText.trimmingCharacters(in: .whitespacesAndNewlines)
             if !nextDirection.isEmpty {
-                lines.append("Next Direction: \(nextDirection)")
+                appendStep(title: "Next direction", preview: nextDirection, sourceKind: "diagnostic")
             }
         }
 
         if let goal = outcomes.first {
             let goalTitle = goal.outcome.trimmingCharacters(in: .whitespacesAndNewlines)
             if !goalTitle.isEmpty {
-                lines.append("Goal: \(goalTitle)")
+                appendStep(title: "Goal", preview: goalTitle, sourceKind: "goal")
             }
             let goalReason = goal.reasons.trimmingCharacters(in: .whitespacesAndNewlines)
             if !goalReason.isEmpty {
-                lines.append("Goal Reason: \(goalReason)")
+                appendStep(title: "Goal reason", preview: goalReason, sourceKind: "goal")
             }
         }
 
@@ -1916,8 +2458,8 @@ struct LoomAIChatView: View {
             .map { $0.category.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         if !areaNames.isEmpty {
-            lines.append("Fulfillment Areas: \(areaNames.prefix(3).joined(separator: ", "))")
-            lines.append("Fulfillment Graph: \(areaNames.count) areas, \(fulfillmentFocusRows.count) little wins, \(outcomes.count) goals")
+            appendStep(title: "Fulfillment areas", preview: areaNames.prefix(3).joined(separator: ", "), sourceKind: "fulfillment")
+            appendStep(title: "Fulfillment graph", preview: "\(areaNames.count) areas, \(fulfillmentFocusRows.count) little wins, \(outcomes.count) goals", sourceKind: "fulfillment")
         }
 
         let identities = fulfillmentRoles
@@ -1925,7 +2467,7 @@ struct LoomAIChatView: View {
             .map { $0.role.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         if let identity = identities.first {
-            lines.append("Identity: \(identity)")
+            appendStep(title: "Identity", preview: identity, sourceKind: "identity")
         }
 
         let littleWins = fulfillmentFocusRows
@@ -1933,19 +2475,19 @@ struct LoomAIChatView: View {
             .map { $0.activity.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         if let littleWin = littleWins.first {
-            lines.append("Little Wins: \(littleWin)")
+            appendStep(title: "Little Win", preview: littleWin, sourceKind: "little_win")
         }
 
         if let vision = drivingForces.first?.ultimateVision.trimmingCharacters(in: .whitespacesAndNewlines),
            !vision.isEmpty {
-            lines.append("Vision: \(vision)")
+            appendStep(title: "Vision", preview: vision, sourceKind: "vision")
         }
 
         let passionTitles = passions
             .map { $0.passion.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         if !passionTitles.isEmpty {
-            lines.append("Passions: \(passionTitles.prefix(2).joined(separator: ", "))")
+            appendStep(title: "Passions", preview: passionTitles.prefix(2).joined(separator: ", "), sourceKind: "passions")
         }
 
         let capture = captureItems
@@ -1954,7 +2496,7 @@ struct LoomAIChatView: View {
             .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         if !capture.isEmpty {
-            lines.append("Capture List: \(capture.prefix(2).joined(separator: " • "))")
+            appendStep(title: "Capture list", preview: capture.prefix(2).joined(separator: " • "), sourceKind: "capture")
         }
 
         let currentWeek = WeeklyMindsetEntry.weekStart(for: .now)
@@ -1964,20 +2506,14 @@ struct LoomAIChatView: View {
             .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         if !currentActions.isEmpty {
-            lines.append("Action Plan: \(currentActions.prefix(2).joined(separator: " • "))")
+            appendStep(title: "Action plan", preview: currentActions.prefix(2).joined(separator: " • "), sourceKind: "week")
         }
-
-        let fallback = [
-            "Searching purpose and personalization signals...",
-            "Searching root cause and next direction...",
-            "Searching goals, reasons, and fulfillment graph...",
-            "Searching identity, passions, and little wins...",
-            "Searching capture list and action plans..."
-        ]
-
-        let merged = (lines + fallback).map { String($0.prefix(180)) }.filter { !$0.isEmpty }
-        let randomized = merged.shuffled()
-        return Array(randomized.prefix(max(6, min(14, randomized.count))))
+        if steps.isEmpty {
+            return [
+                .init(title: "Searching Loom context", preview: "Reading your current Loom context and recent activity", sourceKind: "fallback", order: 0)
+            ]
+        }
+        return Array(steps.prefix(6))
     }
 
     private func updateKeyboardHeight(_ note: Notification) {
@@ -2054,14 +2590,15 @@ private struct LoomAIDeepStateScanningCard: View {
         let preview: String
     }
 
-    let lines: [String]
+    let steps: [LoomAIDeepSearchTraceStep]
 
     @State private var activeIndex = 0
-    @State private var incomingIndex = 0
-    @State private var isTransitioning = false
     @State private var cycleTask: Task<Void, Never>? = nil
-    private let baseTextAreaMinHeight: CGFloat = 88
-    private let cardHeightScale: CGFloat = 0.8
+    @State private var previewOffset: CGFloat = 0
+    @State private var previewContentHeight: CGFloat = 0
+    @State private var viewportHeight: CGFloat = 0
+    private let baseTextAreaMinHeight: CGFloat = 96
+    private let cardHeightScale: CGFloat = 0.82
 
     private var textAreaMinHeight: CGFloat {
         baseTextAreaMinHeight * cardHeightScale
@@ -2072,20 +2609,14 @@ private struct LoomAIDeepStateScanningCard: View {
     }
 
     private var sources: [SourceLine] {
-        let parsed = lines.map { line -> SourceLine in
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard let separator = trimmed.firstIndex(of: ":") else {
-                return SourceLine(title: "Searching Sources", preview: trimmed)
-            }
-            let prefix = String(trimmed[..<separator]).trimmingCharacters(in: .whitespacesAndNewlines)
-            let suffix = String(trimmed[trimmed.index(after: separator)...]).trimmingCharacters(in: .whitespacesAndNewlines)
-            return SourceLine(
-                title: prefix.isEmpty ? "Searching Sources" : prefix,
-                preview: suffix.isEmpty ? trimmed : suffix
+        let parsed = steps.map { step in
+            SourceLine(
+                title: step.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Reading Loom Context" : step.title,
+                preview: step.preview.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Reading your current Loom context..." : step.preview
             )
         }
         if parsed.isEmpty {
-            return [SourceLine(title: "Searching Sources", preview: "Searching your Loom context...")]
+            return [SourceLine(title: "Reading Loom Context", preview: "Reading your current Loom context...")]
         }
         return parsed
     }
@@ -2094,8 +2625,8 @@ private struct LoomAIDeepStateScanningCard: View {
         sources[min(max(activeIndex, 0), max(0, sources.count - 1))]
     }
 
-    private var nextSource: SourceLine {
-        sources[min(max(incomingIndex, 0), max(0, sources.count - 1))]
+    private var previewTextWidth: CGFloat {
+        cardWidth - 24
     }
 
     var body: some View {
@@ -2107,25 +2638,33 @@ private struct LoomAIDeepStateScanningCard: View {
                     .scaledToFit()
                     .frame(width: 12, height: 12)
                     .foregroundStyle(Color.white.opacity(0.92))
-                Text("Reading: \(currentSource.title)")
+                Text("Deep Search")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(Color.white.opacity(0.90))
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
 
-            ZStack(alignment: .topLeading) {
-                textLayer(nextSource.preview)
-                    .opacity(isTransitioning ? 1 : 0)
-                    .offset(y: isTransitioning ? 0 : 18)
+            Text(currentSource.title)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(Color.white.opacity(0.72))
+                .lineLimit(1)
 
-                textLayer(currentSource.preview)
-                    .opacity(isTransitioning ? 0 : 1)
-                    .offset(y: isTransitioning ? -18 : 0)
+            GeometryReader { geometry in
+                scrollingTextLayer
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .clipped()
+                .onAppear {
+                    viewportHeight = geometry.size.height
+                }
+                .onChange(of: geometry.size.height) { _, newValue in
+                    viewportHeight = newValue
+                }
+                .onPreferenceChange(LoomAIDeepPreviewHeightPreferenceKey.self) { height in
+                    previewContentHeight = height
+                }
             }
-            .frame(maxWidth: .infinity, minHeight: textAreaMinHeight, alignment: .topLeading)
-            .mask(verticalEdgeFadeMask)
-            .animation(.easeInOut(duration: 0.45), value: isTransitioning)
+            .frame(maxWidth: .infinity, minHeight: textAreaMinHeight, maxHeight: textAreaMinHeight, alignment: .topLeading)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -2150,55 +2689,72 @@ private struct LoomAIDeepStateScanningCard: View {
         }
         .onChange(of: sources.count) { _, _ in
             activeIndex = min(activeIndex, max(0, sources.count - 1))
-            incomingIndex = min(incomingIndex, max(0, sources.count - 1))
-            if sources.count > 1, cycleTask == nil {
-                startCycling()
-            } else if sources.count <= 1 {
-                cycleTask?.cancel()
-                cycleTask = nil
-                isTransitioning = false
-            }
+            startCycling()
         }
     }
 
-    private func textLayer(_ text: String) -> some View {
-        Text(text)
+    private var scrollingTextLayer: some View {
+        Text(currentSource.preview)
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(Color.white.opacity(0.96))
             .multilineTextAlignment(.leading)
-            .lineLimit(4)
             .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var verticalEdgeFadeMask: some View {
-        LinearGradient(
-            stops: [
-                .init(color: .clear, location: 0.00),
-                .init(color: .black, location: 0.16),
-                .init(color: .black, location: 0.84),
-                .init(color: .clear, location: 1.00)
-            ],
-            startPoint: .top,
-            endPoint: .bottom
-        )
+            .frame(width: previewTextWidth, alignment: .leading)
+            .offset(y: previewOffset)
+            .background(
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: LoomAIDeepPreviewHeightPreferenceKey.self,
+                        value: proxy.size.height
+                    )
+                }
+            )
     }
 
     private func startCycling() {
         cycleTask?.cancel()
-        guard sources.count > 1 else { return }
+        activeIndex = min(activeIndex, max(0, sources.count - 1))
+        previewOffset = 0
+        guard !sources.isEmpty else { return }
         cycleTask = Task { @MainActor in
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 1_150_000_000)
+                previewOffset = 0
+                try? await Task.sleep(nanoseconds: 180_000_000)
                 guard !Task.isCancelled else { break }
-                incomingIndex = (activeIndex + 1) % sources.count
-                isTransitioning = true
-                try? await Task.sleep(nanoseconds: 500_000_000)
+
+                let preview = currentSource.preview
+                let characterCount = max(preview.count, 1)
+                let overflow = max(0, previewContentHeight - max(viewportHeight, textAreaMinHeight))
+                if overflow > 10 {
+                    let panDuration = min(8.8, max(2.8, Double(overflow) / 18.0))
+                    withAnimation(.linear(duration: panDuration)) {
+                        previewOffset = -overflow
+                    }
+                    try? await Task.sleep(nanoseconds: UInt64(panDuration * 1_000_000_000))
+                    guard !Task.isCancelled else { break }
+                    try? await Task.sleep(nanoseconds: 320_000_000)
+                } else {
+                    let dwellSeconds = min(2.8, 1.1 + (Double(characterCount) * 0.004))
+                    try? await Task.sleep(nanoseconds: UInt64(dwellSeconds * 1_000_000_000))
+                }
                 guard !Task.isCancelled else { break }
-                activeIndex = incomingIndex
-                isTransitioning = false
+
+                try? await Task.sleep(nanoseconds: 140_000_000)
+                guard !Task.isCancelled else { break }
+
+                if sources.count > 1 {
+                    activeIndex = (activeIndex + 1) % sources.count
+                }
             }
         }
+    }
+}
+
+private struct LoomAIDeepPreviewHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 
@@ -2347,134 +2903,139 @@ private struct LoomAITokenizedMessageView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-                let pieces = tokenPieces(from: line)
-                if pieces.isEmpty {
-                    Text("")
-                        .font(.subheadline)
-                } else {
-                    LoomTokenFlowLayout(horizontalSpacing: 4, verticalSpacing: 6) {
-                        ForEach(Array(pieces.enumerated()), id: \.offset) { _, piece in
-                            pieceView(piece)
-                        }
-                    }
-                }
+        Text(attributedContent)
+            .font(.subheadline)
+            .foregroundStyle(.primary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var attributedContent: AttributedString {
+        var output = AttributedString()
+        for (index, line) in lines.enumerated() {
+            output.append(attributedString(from: line))
+            if index < lines.count - 1 {
+                output.append(AttributedString("\n"))
             }
         }
+        return output
     }
 
-    private enum Piece: Hashable {
-        case text(String)
-        case purposeText(String)
-        case token(kind: String, value: String)
-    }
-
-    private func tokenPieces(from segments: [Segment]) -> [Piece] {
-        var out: [Piece] = []
+    private func attributedString(from segments: [Segment]) -> AttributedString {
+        var output = AttributedString()
         for segment in segments {
             switch segment {
             case .text(let value):
-                let chunks = value
-                    .split(whereSeparator: { $0.isWhitespace })
-                    .map(String.init)
-                    .filter { !$0.isEmpty }
-                for chunk in chunks {
-                    out.append(.text(chunk))
-                }
+                output.append(styledInlineText(value))
             case .token(let kind, let value):
-                if kind == "P", !isPassionReferenceToken(value) {
-                    let words = value
-                        .split(whereSeparator: { $0.isWhitespace })
-                        .map(String.init)
-                        .filter { !$0.isEmpty }
-                    if words.isEmpty { continue }
-                    for (index, word) in words.enumerated() {
-                        var token = word
-                        if index == 0 { token = "\"\(token)" }
-                        if index == words.count - 1 { token = "\(token)\"" }
-                        out.append(.purposeText(token))
-                    }
-                } else {
-                    out.append(.token(kind: kind, value: value))
-                }
+                output.append(styledToken(kind: kind, value: value))
             }
         }
-        return out
+        return output
     }
 
-    @ViewBuilder
-    private func pieceView(_ piece: Piece) -> some View {
-        switch piece {
-        case .text(let value):
-            Text(value)
-                .font(.subheadline)
-                .foregroundStyle(.primary)
-        case .purposeText(let value):
-            Text(value)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.primary)
-        case .token(let kind, let value):
-            switch kind {
-            case "P":
-                if isPassionReferenceToken(value) {
-                    Text(value)
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(.primary)
-                } else {
-                    Text("\"\(value)\"")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
-                }
-            case "C":
-                let payload = inlineCategoryTokenPayload(from: value)
-                let base = fixedColor(FulfillmentCategoryTheme.color(for: payload.category))
-                Text(payload.display)
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(base)
-            case "F":
-                let base = fixedColor(FulfillmentCategoryTheme.color(for: value))
-                Text(value)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(base)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(
-                        Capsule(style: .continuous)
-                            .fill(lightened(base, amount: 0.82))
-                    )
-                    .overlay(
-                        Capsule(style: .continuous)
-                            .stroke(base.opacity(0.42), lineWidth: 1)
-                    )
-            case "O":
-                Text(value)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(outcomeTokenForegroundColor)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(
-                        Capsule(style: .continuous)
-                            .fill(outcomeTokenBackgroundColor)
-                    )
-                    .overlay(
-                        Capsule(style: .continuous)
-                            .stroke(outcomeTokenBorderColor, lineWidth: 1)
-                    )
-            case "A":
-                Text(value)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.primary.opacity(0.85))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(
-                        Capsule(style: .continuous)
-                            .fill(Color.primary.opacity(0.10))
-                    )
-            default:
-                Text(value).font(.subheadline)
+    private func styledInlineText(_ value: String) -> AttributedString {
+        var attributed = AttributedString(value)
+        attributed.font = .subheadline
+        attributed.foregroundColor = .primary
+        return attributed
+    }
+
+    private func styledToken(kind: String, value: String) -> AttributedString {
+        switch kind {
+        case "P":
+            if isPassionReferenceToken(value) {
+                return highlightedText(
+                    value,
+                    font: .subheadline.weight(.semibold),
+                    foreground: passionTokenForegroundColor,
+                    background: passionTokenBackgroundColor
+                )
             }
+            return highlightedText(
+                "\"\(value)\"",
+                font: .subheadline.weight(.semibold),
+                foreground: .primary,
+                background: Color(.tertiarySystemFill)
+            )
+        case "C":
+            let payload = inlineCategoryTokenPayload(from: value)
+            let base = fixedColor(FulfillmentCategoryTheme.color(for: payload.category))
+            return highlightedText(
+                payload.display,
+                font: .subheadline.weight(.semibold),
+                foreground: base,
+                background: lightened(base, amount: 0.87)
+            )
+        case "I":
+            let payload = inlineCategoryTokenPayload(from: value)
+            let base = fixedColor(FulfillmentCategoryTheme.color(for: payload.category))
+            return highlightedText(
+                payload.display,
+                font: .subheadline.weight(.semibold),
+                foreground: base,
+                background: lightened(base, amount: 0.87)
+            )
+        case "M":
+            let payload = inlineCategoryTokenPayload(from: value)
+            let base = fixedColor(FulfillmentCategoryTheme.color(for: payload.category))
+            return highlightedText(
+                payload.display,
+                font: .subheadline.italic(),
+                foreground: base,
+                background: lightened(base, amount: 0.90)
+            )
+        case "F":
+            let base = fixedColor(FulfillmentCategoryTheme.color(for: value))
+            return highlightedText(
+                value,
+                font: .subheadline.weight(.semibold),
+                foreground: base,
+                background: lightened(base, amount: 0.87)
+            )
+        case "O":
+            return highlightedText(
+                value,
+                font: .subheadline.weight(.semibold),
+                foreground: outcomeTokenForegroundColor,
+                background: outcomeTokenBackgroundColor
+            )
+        case "A":
+            return highlightedText(
+                value,
+                font: .subheadline.weight(.semibold),
+                foreground: .primary.opacity(0.88),
+                background: Color.primary.opacity(0.10)
+            )
+        case "N":
+            return highlightedText(
+                value,
+                font: .subheadline.weight(.semibold),
+                foreground: .primary.opacity(0.88),
+                background: Color(.secondarySystemFill)
+            )
+        case "V":
+            return highlightedText(
+                value,
+                font: .subheadline.italic(),
+                foreground: .primary.opacity(0.90),
+                background: Color(.secondarySystemFill)
+            )
+        default:
+            return styledInlineText(value)
         }
+    }
+
+    private func highlightedText(
+        _ value: String,
+        font: Font,
+        foreground: Color,
+        background: Color
+    ) -> AttributedString {
+        var attributed = AttributedString(value)
+        attributed.font = font
+        attributed.foregroundColor = foreground
+        attributed.backgroundColor = background
+        return attributed
     }
 
     private func inlineCategoryTokenPayload(from raw: String) -> (display: String, category: String) {
@@ -2498,10 +3059,6 @@ private struct LoomAITokenizedMessageView: View {
         Color(red: 0.87, green: 0.92, blue: 0.99)
     }
 
-    private var outcomeTokenBorderColor: Color {
-        Color(red: 0.46, green: 0.63, blue: 0.90)
-    }
-
     private var passionTokenForegroundColor: Color {
         Color(red: 0.26, green: 0.26, blue: 0.28)
     }
@@ -2509,11 +3066,6 @@ private struct LoomAITokenizedMessageView: View {
     private var passionTokenBackgroundColor: Color {
         Color(red: 0.92, green: 0.92, blue: 0.93)
     }
-
-    private var passionTokenBorderColor: Color {
-        Color(red: 0.72, green: 0.72, blue: 0.74)
-    }
-
     private func isPassionReferenceToken(_ value: String) -> Bool {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !trimmed.isEmpty else { return false }
@@ -2645,7 +3197,7 @@ private struct LoomAITokenizedMessageView: View {
             let matchedText = String(text[match.range])
             let tokenValue: String = {
                 switch match.reference.kind {
-                case "C":
+                case "C", "I", "M":
                     let category = match.reference.categoryName ?? matchedText
                     return "\(matchedText)||\(category)"
                 default:
@@ -2674,7 +3226,25 @@ private struct LoomAITokenizedMessageView: View {
             }
             searchRange = found.upperBound..<text.endIndex
         }
-        return nil
+
+        let tokens = needle
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !tokens.isEmpty else { return nil }
+
+        let escaped = tokens.map(NSRegularExpression.escapedPattern(for:)).joined(separator: #"[^\p{L}\p{N}]+"#)
+        let pattern = #"\b\#(escaped)\b"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return nil
+        }
+        let nsRange = NSRange(searchRange, in: text)
+        guard let match = regex.firstMatch(in: text, options: [], range: nsRange),
+              let range = Range(match.range, in: text),
+              isReferenceBoundary(range, in: text) else {
+            return nil
+        }
+        return range
     }
 
     private func isReferenceBoundary(_ range: Range<String.Index>, in text: String) -> Bool {
@@ -2697,68 +3267,5 @@ private struct LoomAITokenizedMessageView: View {
         }
 
         return true
-    }
-}
-
-private struct LoomTokenFlowLayout: Layout {
-    var horizontalSpacing: CGFloat = 4
-    var verticalSpacing: CGFloat = 6
-
-    func sizeThatFits(
-        proposal: ProposedViewSize,
-        subviews: Subviews,
-        cache _: inout ()
-    ) -> CGSize {
-        let maxWidth = proposal.width ?? .infinity
-        var point = CGPoint.zero
-        var lineHeight: CGFloat = 0
-        var maxLineWidth: CGFloat = 0
-
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-            if point.x > 0, point.x + size.width > maxWidth {
-                point.x = 0
-                point.y += lineHeight + verticalSpacing
-                lineHeight = 0
-            }
-            maxLineWidth = max(maxLineWidth, point.x + size.width)
-            lineHeight = max(lineHeight, size.height)
-            point.x += size.width + horizontalSpacing
-        }
-
-        let totalHeight = point.y + lineHeight
-        let resolvedWidth: CGFloat = {
-            guard maxWidth.isFinite else { return maxLineWidth }
-            return min(maxLineWidth, maxWidth)
-        }()
-        return CGSize(
-            width: resolvedWidth.isFinite ? max(0, resolvedWidth) : 0,
-            height: totalHeight
-        )
-    }
-
-    func placeSubviews(
-        in bounds: CGRect,
-        proposal _: ProposedViewSize,
-        subviews: Subviews,
-        cache _: inout ()
-    ) {
-        var point = CGPoint(x: bounds.minX, y: bounds.minY)
-        var lineHeight: CGFloat = 0
-
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-            if point.x > bounds.minX, point.x + size.width > bounds.maxX {
-                point.x = bounds.minX
-                point.y += lineHeight + verticalSpacing
-                lineHeight = 0
-            }
-            subview.place(
-                at: point,
-                proposal: ProposedViewSize(width: size.width, height: size.height)
-            )
-            lineHeight = max(lineHeight, size.height)
-            point.x += size.width + horizontalSpacing
-        }
     }
 }

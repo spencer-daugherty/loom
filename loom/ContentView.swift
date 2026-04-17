@@ -82,7 +82,6 @@ struct ContentView: View {
     @AppStorage("blank_homepage_mode") private var blankHomepageMode = false
     @AppStorage("setup_homepage_mode") private var setupHomepageMode = false
     @AppStorage("capture_setup_completed_once_v1") private var hasCompletedCaptureSetupOnce = false
-    @AppStorage("has_completed_plan_flow_once") private var hasCompletedPlanFlowOnce = false
     @AppStorage("has_seen_content_quickstart_v1") private var hasSeenContentQuickstart = false
     @AppStorage("force_show_content_quickstart_once") private var forceShowContentQuickstartOnce = false
     @AppStorage("developer_demo_mode_enabled") private var developerDemoModeEnabled = false
@@ -162,6 +161,12 @@ struct ContentView: View {
     @State private var pendingPurposeOpenAfterPaywall = false
     @State private var onboardingCallCardDestination: OnboardingCallCardDestination? = nil
 
+    private let loomAIAppleModelName = "Mark I"
+
+    private var shouldShowLoomAIAppleModelName: Bool {
+        AppleIntelligenceSupport.isAvailable
+    }
+
     private enum PlayDestination: String, Identifiable, Hashable {
         case action
         var id: String { rawValue }
@@ -196,6 +201,10 @@ struct ContentView: View {
             isSubscribed: isSubscribed,
             inactivePurchaseOverrideEnabled: inactivePurchaseOverrideEnabled
         )
+    }
+
+    private var shouldPresentStarterPaywallAsNewUser: Bool {
+        SubscriptionAccessGate.shouldForceInactiveSubscription()
     }
 
     private enum HomeStartupFocusTarget {
@@ -373,16 +382,26 @@ struct ContentView: View {
         hasCompletedPlanFlowOnce || !drivingForces.isEmpty || !fulfillments.isEmpty || !outcomes.isEmpty || !passions.isEmpty
     }
 
+    private var shouldForceFreshSetupCardsForReviewQuickTour: Bool {
+        guard shouldShowContentQuickstart,
+              let workspace = LoomDefaultsScope.currentWorkspace() else { return false }
+        return workspace.shouldForceFreshSetupAppearanceDuringQuickTour
+    }
+
+    private var hasCompletedPlanFlowOnce: Bool {
+        PlanFlowProgressStore.hasCompletedPlanFlowOnceForCurrentUser()
+    }
+
     private var isDrivingForceEmptyState: Bool {
-        shouldShowBlankHomepageAppearance || !hasDrivingForceData
+        shouldShowBlankHomepageAppearance || shouldForceFreshSetupCardsForReviewQuickTour || !hasDrivingForceData
     }
 
     private var isFulfillmentEmptyState: Bool {
-        shouldShowBlankHomepageAppearance || fulfillmentMetrics.isEmpty
+        shouldShowBlankHomepageAppearance || shouldForceFreshSetupCardsForReviewQuickTour || fulfillmentMetrics.isEmpty
     }
 
     private var isObjectivesEmptyState: Bool {
-        shouldShowBlankHomepageAppearance || (outcomes.isEmpty && !enableProjectsFeature)
+        shouldShowBlankHomepageAppearance || shouldForceFreshSetupCardsForReviewQuickTour || (outcomes.isEmpty && !enableProjectsFeature)
     }
 
     private var hasCompletedPurposeSetup: Bool {
@@ -402,7 +421,7 @@ struct ContentView: View {
     }
 
     private var canOpenPlanOrActionFlow: Bool {
-        if setupHomepageMode { return true }
+        if setupHomepageMode || shouldForceFreshSetupCardsForReviewQuickTour { return true }
         return !isDrivingForceEmptyState && !isFulfillmentEmptyState
     }
 
@@ -442,8 +461,7 @@ struct ContentView: View {
 
     private func markCaptureSetupCompletedIfNeeded() {
         guard !hasCompletedCaptureSetupOnce else { return }
-        let hasAdvancedPastCaptureSetup = hasDeferredActionPlanCalloutThisSession || isActiveActionFlow || hasCompletedPlanFlowOnce
-        guard notificationCaptureItems.count >= 6 || hasAdvancedPastCaptureSetup else { return }
+        guard notificationCaptureItems.count >= 6 else { return }
         hasCompletedCaptureSetupOnce = true
     }
 
@@ -465,19 +483,27 @@ struct ContentView: View {
         return activeHomeFocusTarget != nil
     }
 
-    private var onboardingCallCardContent: (title: String, step: String)? {
+    private var onboardingCallCardContent: (title: String, step: String, subtitle: String?)? {
         switch activeHomeFocusTarget {
         case .purpose:
-            return ("Set Your Purpose", "1/5")
+            return ("Set Your Purpose", "1/5", nil)
         case .fulfillment:
-            return ("Set Fulfillment", "2/5")
+            return ("Set Fulfillment", "2/5", nil)
         case .objectives:
-            return ("Optional: Add a Long-Term Goal", "3/5")
+            return ("Optional: Add a Long-Term Goal", "3/5", nil)
         case .capture:
-            return ("Master To Do List", "4/5")
+            let requiredCount = 6
+            let remainingCount = max(0, requiredCount - notificationCaptureItems.count)
+            let subtitle: String
+            if remainingCount > 0 {
+                subtitle = "Add \(remainingCount) more action\(remainingCount == 1 ? "" : "s") to continue."
+            } else {
+                subtitle = "Add 6 actions to continue."
+            }
+            return ("Master To Do List", "4/5", subtitle)
         case .actionBlocks:
             let stepPrefix = hasCompletedPlanFlowOnce ? "" : "5/5"
-            return ("Start Weekly Action Plan", stepPrefix)
+            return ("Start Weekly Action Plan", stepPrefix, nil)
         case .none:
             return nil
         }
@@ -508,6 +534,11 @@ struct ContentView: View {
     private func hasPassedOnboardingStep(_ target: HomeStartupFocusTarget) -> Bool {
         guard let current = activeHomeFocusTarget else { return true }
         return onboardingStepOrder(target) < onboardingStepOrder(current)
+    }
+
+    private func hasReachedOnboardingStep(_ target: HomeStartupFocusTarget) -> Bool {
+        guard let current = activeHomeFocusTarget else { return true }
+        return onboardingStepOrder(target) <= onboardingStepOrder(current)
     }
 
     private var splashMetricsFallback: [(String, Color, Double)] {
@@ -570,17 +601,18 @@ struct ContentView: View {
     }
 
     private var contentViewNavigationStackBody: some View {
-        ZStack {
+        let shouldRenderSplash = showSplash && hasAccount
+        return ZStack {
             Color(.systemGroupedBackground)
                 .ignoresSafeArea()
 
             GeometryReader { proxy in
                 contentViewGeometryContent(proxy: proxy)
             }
-            .opacity(showSplash ? 0.001 : 1)
-            .allowsHitTesting(!showSplash)
+            .opacity(shouldRenderSplash ? 0.001 : 1)
+            .allowsHitTesting(!shouldRenderSplash)
 
-            if showSplash {
+            if shouldRenderSplash {
                 LoadingSplashView(
                     metrics: splashMetrics,
                     namespace: graphNamespace,
@@ -972,7 +1004,11 @@ struct ContentView: View {
             }
             .fullScreenCover(isPresented: $isPresentingInactiveSubscriptionPaywall) {
                 NavigationStack {
-                    PaywallView(bannerMessage: SubscriptionAccessGate.inactiveBannerMessage)
+                    PaywallView(
+                        bannerMessage: shouldPresentStarterPaywallAsNewUser
+                            ? nil
+                            : SubscriptionAccessGate.inactiveBannerMessage
+                    )
                 }
             }
             .fullScreenCover(isPresented: $isPresentingLittleWinsShareCamera) {
@@ -980,7 +1016,7 @@ struct ContentView: View {
             }
             .sheet(isPresented: $isPresentingCaptureView) {
                 CaptureView(
-                    forceSetupWelcome: activeHomeFocusTarget == .capture && shouldLockToFocusedHomeTarget,
+                    forceSetupWelcome: activeHomeFocusTarget == .capture,
                     pendingSharePayloadID: pendingSharePayloadID,
                     onSharePayloadHandled: { handledID in
                         if pendingSharePayloadID == handledID {
@@ -1013,7 +1049,7 @@ struct ContentView: View {
             }
     }
 
-    private var contentViewLifecycleLayer: some View {
+    private var contentViewLifecyclePrimaryObservers: some View {
         contentViewPresentationLayer
             .onAppear {
                 if isDeveloperDemoMode {
@@ -1040,6 +1076,10 @@ struct ContentView: View {
                     ensureDeveloperDemoDataIfNeeded()
                 }
             }
+    }
+
+    private var contentViewLifecycleSecondaryObservers: some View {
+        contentViewLifecyclePrimaryObservers
             .onChange(of: isSubscribed) { _, newValue in
                 guard newValue, hasActiveSubscriptionAccess else { return }
                 if isPresentingPurposeSetupPaywall {
@@ -1079,6 +1119,10 @@ struct ContentView: View {
                     homePageIndex = quickstartPage(for: 0)
                 }
             }
+    }
+
+    private var contentViewLifecycleNotificationObservers: some View {
+        contentViewLifecycleSecondaryObservers
             .onReceive(NotificationCenter.default.publisher(for: .loomPresentInactiveSubscriptionPaywall)) { _ in
                 presentInactiveSubscriptionPaywall()
             }
@@ -1092,28 +1136,10 @@ struct ContentView: View {
                     }
                 }
             }
-            .onAppear {
-                beginStartupPreparationIfNeeded()
-                syncActivePlanSessionStore()
-                refreshFulfillmentCategoryScoresForCurrentWeek()
-                markCaptureSetupCompletedIfNeeded()
-                presentPendingSharePayloadIfAvailable()
-                if isActiveActionFlow {
-                    setupHomepageMode = false
-                }
-                if !hasSeenContentQuickstart && isLikelyExistingInstall && !forceShowContentQuickstartOnce {
-                    hasSeenContentQuickstart = true
-                }
-                if shouldShowContentQuickstart {
-                    homePageIndex = quickstartPage(for: contentQuickstartStepIndex)
-                }
-                if shouldShowAnyOnboardingBounce {
-                    bounceDrivingCardOnce()
-                }
-                if shouldShowLittleWinsLogoDot {
-                    bounceLittleWinsLogoDotOnce()
-                }
+            .onChange(of: hasAccount) { _, newValue in
+                handleHasAccountChanged(newValue)
             }
+            .onAppear(perform: handleContentViewAppear)
             .onDisappear {
                 notificationPermissionRequestTask?.cancel()
                 notificationPermissionRequestTask = nil
@@ -1152,6 +1178,47 @@ struct ContentView: View {
                 dismissVacationModeBanner = false
                 refreshFulfillmentCategoryScoresForCurrentWeek()
             }
+    }
+
+    private var contentViewLifecycleLayer: some View {
+        contentViewLifecycleNotificationObservers
+    }
+
+    private func handleHasAccountChanged(_ hasAccount: Bool) {
+        if !hasAccount {
+            showSplash = false
+            splashMinimumElapsed = true
+            splashPreparationFinished = true
+        }
+    }
+
+    private func handleContentViewAppear() {
+        if hasAccount {
+            beginStartupPreparationIfNeeded()
+        } else {
+            showSplash = false
+            splashMinimumElapsed = true
+            splashPreparationFinished = true
+        }
+        syncActivePlanSessionStore()
+        refreshFulfillmentCategoryScoresForCurrentWeek()
+        markCaptureSetupCompletedIfNeeded()
+        presentPendingSharePayloadIfAvailable()
+        if isActiveActionFlow {
+            setupHomepageMode = false
+        }
+        if !hasSeenContentQuickstart && isLikelyExistingInstall && !forceShowContentQuickstartOnce {
+            hasSeenContentQuickstart = true
+        }
+        if shouldShowContentQuickstart {
+            homePageIndex = quickstartPage(for: contentQuickstartStepIndex)
+        }
+        if shouldShowAnyOnboardingBounce {
+            bounceDrivingCardOnce()
+        }
+        if shouldShowLittleWinsLogoDot {
+            bounceLittleWinsLogoDotOnce()
+        }
     }
 
     private var contentViewBounceObservers: some View {
@@ -2466,9 +2533,17 @@ struct ContentView: View {
                                     showLoomAIChatMenu.toggle()
                                 }
                             } label: {
-                                loomAIHeaderMenuGlyph(isOpen: showLoomAIChatMenu)
-                                    .frame(width: 28, height: 22, alignment: .leading)
-                                    .padding(6)
+                                HStack(spacing: 6) {
+                                    loomAIHeaderMenuGlyph(isOpen: showLoomAIChatMenu)
+                                        .frame(width: 28, height: 22, alignment: .leading)
+                                    if shouldShowLoomAIAppleModelName {
+                                        Text(loomAIAppleModelName)
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                }
+                                .padding(6)
                             }
                             .buttonStyle(.plain)
                             .contentShape(Rectangle())
@@ -4153,11 +4228,14 @@ struct ContentView: View {
 
     private var footer: some View {
         let isFocusedLock = shouldLockToFocusedHomeTarget
+        let canOpenCaptureFooterTarget = hasReachedOnboardingStep(.capture)
+        let canOpenActionBlocksFooterTarget = hasReachedOnboardingStep(.actionBlocks)
         let isCaptureAllowedWhileLocked = activeHomeFocusTarget == .capture || hasPassedOnboardingStep(.capture)
         let isActionBlocksAllowedWhileLocked = activeHomeFocusTarget == .actionBlocks || hasPassedOnboardingStep(.actionBlocks)
         return VStack(spacing: 6) {
             HStack(spacing: 16) {
                 Button(action: {
+                    guard canOpenCaptureFooterTarget else { return }
                     guard hasActiveSubscriptionAccess else {
                         presentInactiveSubscriptionPaywall()
                         return
@@ -4168,7 +4246,7 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.plain)
-                .disabled(isFocusedLock && !isCaptureAllowedWhileLocked)
+                .disabled((isFocusedLock && !isCaptureAllowedWhileLocked) || !canOpenCaptureFooterTarget)
                 .scaleEffect(
                     shouldShowCaptureOnboardingPulse
                         ? (drivingCardBounceOn ? 1.012 : 1.0)
@@ -4191,6 +4269,7 @@ struct ContentView: View {
                         onboardingCallCard(
                             title: callCard.title,
                             step: callCard.step,
+                            subtitle: callCard.subtitle,
                             leadingButtonLabel: shouldShowCaptureBackButton ? "Back" : nil,
                             leadingButtonAction: shouldShowCaptureBackButton ? returnToObjectivesSetupStep : nil,
                             cardTapAction: { openOnboardingCallCardTarget(.capture) }
@@ -4203,6 +4282,7 @@ struct ContentView: View {
                 Group {
                     if isActiveActionFlow {
                         Button(action: {
+                            guard canOpenActionBlocksFooterTarget else { return }
                             guard hasActiveSubscriptionAccess else {
                                 presentInactiveSubscriptionPaywall()
                                 return
@@ -4222,6 +4302,7 @@ struct ContentView: View {
                             .buttonStyle(.plain)
                         } else {
                             Button(action: {
+                                guard canOpenActionBlocksFooterTarget else { return }
                                 presentInactiveSubscriptionPaywall()
                             }) {
                                 actionBlocksPlayButtonVisual
@@ -4230,6 +4311,7 @@ struct ContentView: View {
                         }
                     } else if !canOpenPlanOrActionFlow {
                         Button(action: {
+                            guard canOpenActionBlocksFooterTarget else { return }
                             guard hasActiveSubscriptionAccess else {
                                 presentInactiveSubscriptionPaywall()
                                 return
@@ -4253,6 +4335,7 @@ struct ContentView: View {
                             .buttonStyle(.plain)
                         } else {
                             Button(action: {
+                                guard canOpenActionBlocksFooterTarget else { return }
                                 presentInactiveSubscriptionPaywall()
                             }) {
                                 actionBlocksPlayButtonVisual
@@ -4261,7 +4344,7 @@ struct ContentView: View {
                         }
                     }
                 }
-                .disabled(isFocusedLock && !isActionBlocksAllowedWhileLocked)
+                .disabled((isFocusedLock && !isActionBlocksAllowedWhileLocked) || !canOpenActionBlocksFooterTarget)
                 .scaleEffect(
                     shouldShowActionBlocksOnboardingBounce
                         ? (drivingCardBounceOn ? 1.012 : 1.0)
@@ -4284,6 +4367,7 @@ struct ContentView: View {
                         onboardingCallCard(
                             title: callCard.title,
                             step: callCard.step,
+                            subtitle: callCard.subtitle,
                             trailingButtonLabel: shouldShowActionPlanLaterButton ? "later" : nil,
                             trailingButtonAction: shouldShowActionPlanLaterButton ? skipActionPlanSetupStep : nil,
                             cardTapAction: { openOnboardingCallCardTarget(.actionBlocks) },
@@ -4366,6 +4450,7 @@ struct ContentView: View {
     private func onboardingCallCard(
         title: String,
         step: String,
+        subtitle: String? = nil,
         leadingButtonLabel: String? = nil,
         leadingButtonAction: (() -> Void)? = nil,
         trailingButtonLabel: String? = nil,
@@ -4381,44 +4466,60 @@ struct ContentView: View {
         let calloutSecondaryText = isDark ? Color(red: 0.35, green: 0.35, blue: 0.38) : Color(.systemGray4)
         return VStack(spacing: 0) {
             VStack(spacing: 0) {
-                HStack(spacing: 8) {
-                    if let leadingButtonLabel, let leadingButtonAction {
-                        Text(leadingButtonLabel)
-                            .font(.system(size: 13.5, weight: .semibold))
-                            .foregroundStyle(.blue)
-                            .contentShape(Rectangle())
-                            .highPriorityGesture(
-                                TapGesture().onEnded {
-                                    leadingButtonAction()
-                                }
-                            )
-                    }
+                VStack(alignment: .leading, spacing: subtitle == nil ? 0 : 5) {
                     HStack(spacing: 8) {
-                        if !step.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            Text(step)
-                                .font(.system(size: 13.75, weight: .semibold))
-                                .foregroundStyle(calloutSecondaryText)
+                        if let leadingButtonLabel, let leadingButtonAction {
+                            Text(leadingButtonLabel)
+                                .font(.system(size: 13.5, weight: .semibold))
+                                .foregroundStyle(.blue)
+                                .contentShape(Rectangle())
+                                .highPriorityGesture(
+                                    TapGesture().onEnded {
+                                        leadingButtonAction()
+                                    }
+                                )
                         }
-                        Text(title)
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(calloutPrimaryText)
-                        Spacer(minLength: 0)
+                        HStack(spacing: 8) {
+                            if !step.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                Text(step)
+                                    .font(.system(size: 13.75, weight: .semibold))
+                                    .foregroundStyle(calloutSecondaryText)
+                            }
+                            Text(title)
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(calloutPrimaryText)
+                            Spacer(minLength: 0)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                        .highPriorityGesture(
+                            TapGesture().onEnded {
+                                cardTapAction?()
+                            }
+                        )
+                        if let trailingButtonLabel, let trailingButtonAction {
+                            Text(trailingButtonLabel)
+                                .font(.system(size: 13.5, weight: .semibold))
+                                .foregroundStyle(.blue)
+                                .contentShape(Rectangle())
+                                .highPriorityGesture(
+                                    TapGesture().onEnded {
+                                        trailingButtonAction()
+                                    }
+                                )
+                        }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                    .highPriorityGesture(
-                        TapGesture().onEnded {
-                            cardTapAction?()
-                        }
-                    )
-                    if let trailingButtonLabel, let trailingButtonAction {
-                        Text(trailingButtonLabel)
-                            .font(.system(size: 13.5, weight: .semibold))
-                            .foregroundStyle(.blue)
+
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.system(size: 12.5, weight: .medium))
+                            .foregroundStyle(calloutSecondaryText)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
                             .contentShape(Rectangle())
                             .highPriorityGesture(
                                 TapGesture().onEnded {
-                                    trailingButtonAction()
+                                    cardTapAction?()
                                 }
                             )
                     }

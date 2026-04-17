@@ -246,7 +246,11 @@ fileprivate func fulfillmentReadableInsightOutcomeSummaries(
                 category: $0.category,
                 endDate: $0.end,
                 measurable: false,
-                progressSummary: "Active outcome"
+                progressSummary: "Active outcome",
+                reason: $0.reasons
+                    .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                contributingLittleWins: []
             )
         }
 }

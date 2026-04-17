@@ -81,6 +81,8 @@ struct LoomAIService {
                 var category: String? = nil
                 var measurable: Bool? = nil
                 var progressSummary: String? = nil
+                var reason: String? = nil
+                var contributingLittleWins: [String]? = nil
                 var emotion: String? = nil
                 var relatedPassions: [LoomAIContextSnapshot.PassionSummary]? = nil
                 var vision: String? = nil
@@ -168,6 +170,7 @@ struct LoomAIService {
     struct LoomAIResponse: Decodable {
         let message: String
         let grounding: [LoomAIGroundingItem]
+        let messageAnnotations: [LoomAIMessageAnnotation]
         let suggestionCards: [LoomAISuggestionCard]
         let nextAction: LoomAISuggestedAction?
         let chips: [LoomAIPromptChip]
@@ -180,6 +183,7 @@ struct LoomAIService {
             case message
             case reply
             case grounding
+            case messageAnnotations
             case suggestionCards
             case nextAction
             case chips
@@ -191,6 +195,7 @@ struct LoomAIService {
         init(
             message: String,
             grounding: [LoomAIGroundingItem] = [],
+            messageAnnotations: [LoomAIMessageAnnotation] = [],
             suggestionCards: [LoomAISuggestionCard] = [],
             nextAction: LoomAISuggestedAction? = nil,
             chips: [LoomAIPromptChip] = [],
@@ -201,6 +206,7 @@ struct LoomAIService {
         ) {
             self.message = message
             self.grounding = grounding
+            self.messageAnnotations = messageAnnotations
             self.suggestionCards = suggestionCards
             self.nextAction = nextAction
             self.chips = chips
@@ -217,6 +223,7 @@ struct LoomAIService {
                 ?? ""
             self.message = message
             self.grounding = (try? container.decode([LoomAIGroundingItem].self, forKey: .grounding)) ?? []
+            self.messageAnnotations = (try? container.decode([LoomAIMessageAnnotation].self, forKey: .messageAnnotations)) ?? []
             self.suggestionCards = (try? container.decode([LoomAISuggestionCard].self, forKey: .suggestionCards)) ?? []
             self.nextAction = try? container.decode(LoomAISuggestedAction.self, forKey: .nextAction)
             self.chips = (try? container.decode([LoomAIPromptChip].self, forKey: .chips)) ?? []
@@ -518,90 +525,8 @@ struct LoomAIService {
         diagnostic: DiagnosticAnswers,
         client: DiagnosticInsightsClient
     ) async throws -> DiagnosticInsights {
-        let startedAt = CFAbsoluteTimeGetCurrent()
-        let encoder = JSONEncoder()
-        let body = try encoder.encode(DiagnosticInsightsRequest(diagnostic: diagnostic, client: client))
-
-        func performRequest(timeout: TimeInterval) async throws -> DiagnosticInsights {
-            var request = URLRequest(url: diagnosticBaseURL.appendingPathComponent("diagnostic/insights"))
-            request.httpMethod = "POST"
-            request.timeoutInterval = timeout
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = body
-
-            let (data, response) = try await session.data(for: request)
-            guard let http = response as? HTTPURLResponse else {
-                throw LoomAIServiceError(message: "Bad server response.", statusCode: nil, contentType: nil, rawBody: nil)
-            }
-            let rawBody = String(data: data, encoding: .utf8) ?? "<non-UTF8 \(data.count) bytes>"
-
-            guard (200...299).contains(http.statusCode) else {
-                throw LoomAIServiceError(
-                    message: "HTTP \(http.statusCode): \(rawBody)",
-                    statusCode: http.statusCode,
-                    contentType: http.value(forHTTPHeaderField: "Content-Type"),
-                    rawBody: rawBody
-                )
-            }
-
-            do {
-                let decoded = try JSONDecoder().decode(DiagnosticInsights.self, from: data)
-                let root = decoded.rootCause.trimmingCharacters(in: .whitespacesAndNewlines)
-                let next = decoded.nextDirection.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !root.isEmpty, !next.isEmpty else {
-                    throw LoomAIServiceError(
-                        message: "Invalid diagnostic insights payload.",
-                        statusCode: http.statusCode,
-                        contentType: http.value(forHTTPHeaderField: "Content-Type"),
-                        rawBody: rawBody
-                    )
-                }
-                return .init(
-                    rootCause: root,
-                    nextDirection: next,
-                    debug: decoded.debug,
-                    usage: decoded.usage
-                )
-            } catch {
-                throw LoomAIServiceError(
-                    message: "Invalid diagnostic insights JSON.",
-                    statusCode: http.statusCode,
-                    contentType: http.value(forHTTPHeaderField: "Content-Type"),
-                    rawBody: rawBody
-                )
-            }
-        }
-
-        var lastError: Error?
-        for timeout in [45.0, 75.0, 75.0] {
-            do {
-                let insights = try await performRequest(timeout: timeout)
-                reportSlowDiagnosticInsightsIfNeeded(
-                    insights: insights,
-                    elapsedMS: (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
-                )
-                LoomAICostLedger.record(
-                    response: LoomAIResponse(
-                        message: insights.rootCause + "\n" + insights.nextDirection,
-                        debug: insights.debug,
-                        usage: insights.usage
-                    ),
-                    intent: "diagnostic_insights"
-                )
-                return insights
-            } catch {
-                lastError = error
-                guard shouldRetryDiagnosticInsights(for: error) else {
-                    throw error
-                }
-            }
-        }
-        throw lastError ?? LoomAIServiceError(
-            message: "Diagnostic insights request failed.",
-            statusCode: nil,
-            contentType: nil,
-            rawBody: nil
-        )
+        _ = client
+        return LocalDiagnosticInsightsEngine.generate(diagnostic: diagnostic)
     }
 
     func sendChat(
@@ -1092,6 +1017,7 @@ struct LoomAIService {
             drivingForce: drivingForce
         )
         let currentReality = buildCurrentRealityLayer(
+            snapshot: snapshot,
             route: route,
             targetObject: targetObject,
             fulfillment: fulfillment,
@@ -1189,7 +1115,9 @@ struct LoomAIService {
                 title: trimmedOrNil(goal.title, max: 96),
                 category: trimmedOrNil(goal.category, max: 72),
                 measurable: goal.measurable,
-                progressSummary: trimmedOrNil(goal.progressSummary, max: 140)
+                progressSummary: trimmedOrNil(goal.progressSummary, max: 140),
+                reason: trimmedOrNil(goal.reason, max: 220),
+                contributingLittleWins: cleanStringList(goal.contributingLittleWins, maxItems: 3, maxChars: 72, minLength: 2, allowJunk: false)
             )
         case 6:
             let emotion = normalizedPassionType(route.target ?? "love")
@@ -1220,6 +1148,7 @@ struct LoomAIService {
     }
 
     private func buildCurrentRealityLayer(
+        snapshot: LoomAIContextSnapshot,
         route: ChipIntentRoute?,
         targetObject: LoomAIIntentContextPack.Layers.TargetObjectLayer?,
         fulfillment: [LoomAIContextSnapshot.FulfillmentCategorySummary],
@@ -1259,6 +1188,33 @@ struct LoomAIService {
             scopedFulfillment = Array(scopedFulfillment.prefix(1))
             scopedBlocks = filterActionBlocks(weekBlocks, target: targetGoal.isEmpty ? goalCategory : targetGoal)
             scopedBlocks = Array(scopedBlocks.prefix(2))
+        case 6:
+            let emotion = normalizedPassionType(route?.target ?? "love")
+            scopedFulfillment = fulfillment.filter { category in
+                category.connectedPassions.contains { raw in
+                    let prefix = raw.components(separatedBy: ":").first ?? ""
+                    return normalizedPassionType(prefix) == emotion
+                }
+            }
+            scopedFulfillment = Array(scopedFulfillment.prefix(2))
+            scopedGoals = []
+            scopedBlocks = []
+        case 7:
+            let selectedAreas = Set(
+                (snapshot.diagnostic?.areas ?? [])
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                    .filter { !$0.isEmpty }
+            )
+            if selectedAreas.isEmpty {
+                scopedFulfillment = Array(fulfillment.prefix(2))
+            } else {
+                scopedFulfillment = fulfillment.filter {
+                    selectedAreas.contains($0.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+                }
+                scopedFulfillment = Array(scopedFulfillment.prefix(2))
+            }
+            scopedGoals = []
+            scopedBlocks = []
         case 8:
             scopedFulfillment = Array(fulfillment.prefix(2))
             scopedGoals = Array(goals.prefix(3))
@@ -1294,7 +1250,7 @@ struct LoomAIService {
 
     private func shouldIncludeStableBlocks(for routeID: Int?) -> Bool {
         guard let routeID else { return true }
-        return routeID == 8
+        return routeID == 5 || routeID == 8
     }
 
     private func stableContextHash(
@@ -1416,6 +1372,8 @@ struct LoomAIService {
             let id = trimmedOrEmpty(item.id, max: 40)
             let category = trimmedOrEmpty(item.category, max: 72)
             let progressSummary = trimmedOrEmpty(item.progressSummary, max: 140)
+            let reason = trimmedOrEmpty(item.reason, max: 220)
+            let contributingLittleWins = cleanStringList(item.contributingLittleWins, maxItems: 3, maxChars: 72, minLength: 2, allowJunk: false)
             let key = "\(id.lowercased())|\(title.lowercased())"
             guard seen.insert(key).inserted else { continue }
             output.append(
@@ -1425,7 +1383,9 @@ struct LoomAIService {
                     category: category,
                     endDate: item.endDate,
                     measurable: item.measurable,
-                    progressSummary: progressSummary
+                    progressSummary: progressSummary,
+                    reason: reason,
+                    contributingLittleWins: contributingLittleWins
                 )
             )
             if output.count >= 4 { break }

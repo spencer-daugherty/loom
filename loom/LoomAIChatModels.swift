@@ -44,6 +44,7 @@ final class LoomAIChatMessage {
     var actionsJSON: String?
     var debugJSON: String?
     var groundingJSON: String?
+    var messageAnnotationsJSON: String?
     var suggestionCardsJSON: String?
     var nextActionJSON: String?
 
@@ -58,6 +59,7 @@ final class LoomAIChatMessage {
         actionsJSON: String? = nil,
         debugJSON: String? = nil,
         groundingJSON: String? = nil,
+        messageAnnotationsJSON: String? = nil,
         suggestionCardsJSON: String? = nil,
         nextActionJSON: String? = nil
     ) {
@@ -71,6 +73,7 @@ final class LoomAIChatMessage {
         self.actionsJSON = actionsJSON
         self.debugJSON = debugJSON
         self.groundingJSON = groundingJSON
+        self.messageAnnotationsJSON = messageAnnotationsJSON
         self.suggestionCardsJSON = suggestionCardsJSON
         self.nextActionJSON = nextActionJSON
     }
@@ -178,6 +181,28 @@ struct LoomAISuggestionCard: Codable, Identifiable, Hashable {
     var options: [LoomAISuggestionOption]
 }
 
+struct LoomAIMessageAnnotation: Codable, Identifiable, Hashable {
+    var kind: String
+    var displayText: String
+    var categoryName: String?
+
+    var id: String {
+        let category = categoryName?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        return "\(kind.lowercased())|\(displayText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())|\(category)"
+    }
+}
+
+struct LoomAIDeepSearchTraceStep: Identifiable, Hashable {
+    var title: String
+    var preview: String
+    var sourceKind: String
+    var order: Int
+
+    var id: String {
+        "\(order)|\(sourceKind.lowercased())|\(title.lowercased())|\(preview.lowercased())"
+    }
+}
+
 struct LoomAIPromptChip: Codable, Identifiable, Hashable {
     var id: String
     var title: String
@@ -192,6 +217,7 @@ struct LoomAIPromptChip: Codable, Identifiable, Hashable {
 
 struct LoomAIDebug: Codable, Hashable {
     var model: String?
+    var suggestionSource: String? = nil
     var usedContext: Bool?
     var claimedUsedContext: Bool?
     var confidence: String?
@@ -274,6 +300,20 @@ enum LoomAIChatMessageSuggestionCardsCodec {
     static func decode(_ json: String?) -> [LoomAISuggestionCard] {
         guard let json, let data = json.data(using: .utf8) else { return [] }
         return (try? JSONDecoder().decode([LoomAISuggestionCard].self, from: data)) ?? []
+    }
+}
+
+enum LoomAIChatMessageAnnotationsCodec {
+    static func encode(_ annotations: [LoomAIMessageAnnotation]) -> String? {
+        guard !annotations.isEmpty else { return nil }
+        let encoder = JSONEncoder()
+        guard let data = try? encoder.encode(annotations) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func decode(_ json: String?) -> [LoomAIMessageAnnotation] {
+        guard let json, let data = json.data(using: .utf8) else { return [] }
+        return (try? JSONDecoder().decode([LoomAIMessageAnnotation].self, from: data)) ?? []
     }
 }
 

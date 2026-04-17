@@ -3,6 +3,8 @@ import UIKit
 
 let loomAITroubleshootingDefaultsKey = "loom.enableLoomAITroubleshooting"
 let loomAIDebugDefaultsKey = "loom.enableLoomAIDebug"
+let loomAIDisableAppleIntelligenceDefaultsKey = "loom.disableAppleIntelligence"
+let loomAICustomChatDefaultsKey = "loom.enableLoomAICustomChat"
 let loomAISlowResponseThresholdMS: Double = 5_000
 
 func registerLoomAITroubleshootingDefaultIfNeeded() {
@@ -11,6 +13,12 @@ func registerLoomAITroubleshootingDefaultIfNeeded() {
     defaults.set(false, forKey: loomAITroubleshootingDefaultsKey)
     if defaults.object(forKey: loomAIDebugDefaultsKey) == nil {
         defaults.set(false, forKey: loomAIDebugDefaultsKey)
+    }
+    if defaults.object(forKey: loomAIDisableAppleIntelligenceDefaultsKey) == nil {
+        defaults.set(false, forKey: loomAIDisableAppleIntelligenceDefaultsKey)
+    }
+    if defaults.object(forKey: loomAICustomChatDefaultsKey) == nil {
+        defaults.set(false, forKey: loomAICustomChatDefaultsKey)
     }
 }
 
