@@ -693,15 +693,13 @@ private struct DiagnosticInsightsSkeletonStack: View {
                             .font(.body)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
-                        Text("This placeholder line represents incoming LoomAI text.")
-                            .font(.body)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(Color.secondary.opacity(0.18))
+                            .frame(maxWidth: .infinity, minHeight: 14, maxHeight: 14)
                         if index != 1 {
-                            Text("Second placeholder sentence while diagnostics load.")
-                                .font(.body)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
+                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                .fill(Color.secondary.opacity(0.14))
+                                .frame(width: 220, height: 14)
                         }
                     }
                     .redacted(reason: .placeholder)

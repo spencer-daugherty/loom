@@ -295,6 +295,8 @@ struct TipPhonePreview: View {
             AssignActionsTipPreviewScene(step: step, isAnimated: shouldAnimateScene)
         case .shareToLoom:
             ShareToLoomTipPreviewScene(step: step, isAnimated: shouldAnimateScene)
+        case .widgets:
+            WidgetsTipPreviewScene(step: step, isAnimated: shouldAnimateScene)
         case .loomAIChat:
             LoomAIChatTipPreviewScene(step: step, isAnimated: shouldAnimateScene)
         case .loomAIAutoWrite:

@@ -89,7 +89,6 @@ struct TemporaryVisionAutoWriteDebugView: View {
     private let autoWriteEndpointURL = URL(string: "https://loom-ai-minimal.spence0927.workers.dev/purpose/vision/autowrite")!
     private let chatEndpointURL = URL(string: "https://loom-ai-minimal.spence0927.workers.dev/chat")!
     private let diagnosticInsightsEndpointURL = URL(string: "https://loom-ai-minimal.spence0927.workers.dev/diagnostic/insights")!
-    private let purposeProfileInsightsEndpointURL = URL(string: "https://loom-ai-minimal.spence0927.workers.dev/purpose/insights/profile")!
     private let encoder = JSONEncoder()
 
     private static let diagnosticStressOptions: [String] = [
@@ -701,7 +700,12 @@ struct TemporaryVisionAutoWriteDebugView: View {
             )
             let responseData = try encodePrettyJSONData(responseEnvelope)
             rawResponseText = String(data: responseData, encoding: .utf8) ?? "<response encoding failed>"
-            responseStatus = "OK via \(providerResponse.provider.rawValue)"
+            if let suggestionSource = response.debug?.suggestionSource?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !suggestionSource.isEmpty {
+                responseStatus = "OK via \(providerResponse.provider.rawValue) · Suggestions: \(suggestionSource)"
+            } else {
+                responseStatus = "OK via \(providerResponse.provider.rawValue)"
+            }
             responseDurationText = formatDuration(Date().timeIntervalSince(startedAt))
             updateUsageEstimate(
                 from: responseData,
@@ -798,24 +802,55 @@ struct TemporaryVisionAutoWriteDebugView: View {
         let startedAt = Date()
 
         do {
-            let body = makeRandomPurposeProfileRequestBody()
+            let draft = makeRandomDiagnosticDraft()
+            let snapshot = PersonalizationSnapshot(
+                stressSource: draft.stressSource ?? "Not sure yet",
+                breakPoint: draft.breakPoint ?? "I’m not sure",
+                lifeAreasSelected: draft.lifeAreasSelected,
+                lifeAreaColorKeys: draft.lifeAreaColorKeys,
+                planningReality: draft.planningReality ?? "It depends on the day",
+                desiredChange: draft.desiredChange ?? "I feel balanced across life"
+            )
+            let body: [String: Any] = [
+                "diagnostic": [
+                    "stress": snapshot.stressSource,
+                    "breaksFirst": snapshot.breakPoint,
+                    "areas": snapshot.lifeAreasSelected,
+                    "planningStyle": snapshot.planningReality,
+                    "firstChange": snapshot.desiredChange
+                ],
+                "client": [
+                    "platform": "iOS",
+                    "intent": "purpose_profile_insights",
+                    "screen": "purpose_profile_debug",
+                    "mode": "local_questionnaire_only"
+                ]
+            ]
             let bodyData = try JSONSerialization.data(withJSONObject: body, options: [.prettyPrinted, .sortedKeys])
             rawRequestText = String(data: bodyData, encoding: .utf8) ?? "<request encoding failed>"
 
-            var request = URLRequest(url: purposeProfileInsightsEndpointURL)
-            request.httpMethod = "POST"
-            request.timeoutInterval = 45
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = bodyData
-
-            responseStatus = "Sending..."
-            let (data, response) = try await URLSession.shared.data(for: request)
-            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-            let responseText = String(data: data, encoding: .utf8) ?? "<non-UTF8 \(data.count) bytes>"
-            rawResponseText = responseText
-            responseStatus = "HTTP \(status)"
+            let match = snapshot.personalityMatch
+            let record = match.winnerRecord
+            let responseObject: [String: Any] = [
+                "profile": record.profile,
+                "strength": record.strength,
+                "weakness": record.weakness,
+                "stressTrigger": record.stressTrigger,
+                "breakingPoint": record.breakingPoint,
+                "debug": [
+                    "model": "local-questionnaire-match",
+                    "confidence": match.lowConfidence ? "low" : "high",
+                    "evidence": [
+                        "Profile selected from the original questionnaire-only matcher.",
+                        "Top alternatives: \(match.alternativeProfileNames.prefix(2).joined(separator: ", "))"
+                    ]
+                ]
+            ]
+            let responseData = try JSONSerialization.data(withJSONObject: responseObject, options: [.prettyPrinted, .sortedKeys])
+            rawResponseText = String(data: responseData, encoding: .utf8) ?? "<response encoding failed>"
+            responseStatus = "Local match"
             responseDurationText = formatDuration(Date().timeIntervalSince(startedAt))
-            updateUsageEstimate(from: data, requestData: bodyData, fallbackModel: "gpt-5-mini")
+            updateUsageEstimate(from: responseData, requestData: bodyData, fallbackModel: "local-questionnaire-match")
         } catch {
             let nsError = error as NSError
             if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorTimedOut {
@@ -1280,16 +1315,10 @@ struct TemporaryVisionAutoWriteDebugView: View {
             AppDebugActivityLog.log("Personalization", "Diagnostic insights refresh failed: \(error.localizedDescription)")
         }
 
-        let currentVision = currentVisionForProfileInsights()
-        let currentPassions = currentPassionsForProfileInsights()
         let resolvedRecord = snapshot.personalityMatch.winnerRecord
 
         let monthKey = PurposeProfileInsightsHasher.monthKey()
-        let inputsHash = PurposeProfileInsightsHasher.hash(
-            diagnostic: diagnostics,
-            vision: currentVision,
-            passions: currentPassions
-        )
+        let inputsHash = PurposeProfileInsightsHasher.hash(diagnostic: diagnostics)
         let purposeSnapshotKey = PurposeProfileInsightsHasher.snapshotKey(
             userKey: userKey,
             monthKey: monthKey,
@@ -1572,6 +1601,7 @@ struct TemporaryVisionAutoWriteDebugView: View {
         timestamp: \(ISO8601DateFormatter().string(from: Date()))
         mode: \(modeDescription)
         status: \(responseStatus)
+        suggestionSource: \(loomAIDebugDetails?.suggestionSource?.isEmpty == false ? loomAIDebugDetails?.suggestionSource ?? "<none>" : "<none>")
         duration: \(responseDurationText)
         usage: \(usageSummaryText)
         estimatedCost: \(estimatedCostText)

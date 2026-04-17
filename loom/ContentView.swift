@@ -2191,11 +2191,6 @@ struct ContentView: View {
             ("Status", statusText),
             ("Connection", connectedText)
         ]
-        if config.source == .screenTime,
-           let summary = config.screenTimeSelectionSummary,
-           !summary.isEmpty {
-            rows.append(("Selection", summary))
-        }
         if let lastSyncText {
             rows.append(("Last sync", lastSyncText))
         }

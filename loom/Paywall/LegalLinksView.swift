@@ -12,7 +12,7 @@ enum LegalDocument: String, Identifiable {
     var title: String {
         switch self {
         case .terms:
-            return "Terms of Use"
+            return "Standard License Agreement"
         case .privacy:
             return "Privacy Policy"
         }
@@ -22,6 +22,7 @@ enum LegalDocument: String, Identifiable {
 enum LoomLegalLinks {
     static let standardEULAURL = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
     static let privacyPolicyURL = URL(string: "https://spencer-daugherty.github.io/loom/")!
+    static let subscriptionSupportURL = URL(string: "https://support.apple.com/billing")!
 }
 
 struct LegalLinksView: View {
@@ -74,7 +75,7 @@ struct LegalLinksView: View {
     private var termsContent: some View {
         VStack(alignment: .leading, spacing: 18) {
             legalLead(
-                "Loom uses Apple's Standard Licensed Application End User License Agreement as its Terms of Use."
+                "Loom uses Apple's Standard Licensed Application End User License Agreement as its Standard License Agreement."
             )
 
             LegalSection(

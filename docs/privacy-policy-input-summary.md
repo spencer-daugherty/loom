@@ -21,7 +21,7 @@ Project reviewed: Loom iOS app
 - CloudKit through SwiftData model storage
 - Apple Intelligence when available on supported devices
 - HealthKit
-- FamilyControls / Screen Time authorization
+- Apple Health read authorization
 - UserNotifications
 - Camera and Photos frameworks
 
@@ -111,14 +111,13 @@ Project reviewed: Loom iOS app
 - LoomAI features also use user context to generate personalized suggestions, plans, and rewrites.
 - Privacy policy should disclose that the app creates inferred personalization and profile data from user responses and in-app behavior/context.
 
-## Health, Wellness, and Screen Time Data
+## Health and Wellness Data
 - If the user opts in, Loom requests HealthKit read access for supported metrics including:
   - steps
   - workout minutes
   - sleep data
-- The app also supports FamilyControls / Screen Time authorization for Little Wins integrations and stores user selections of apps, categories, and web domains.
-- Health and Screen Time usage appears to be optional and permission-based.
-- Privacy policy should clearly state these integrations are optional and user-controlled.
+- Health usage appears to be optional and permission-based.
+- Privacy policy should clearly state Health integration is optional and user-controlled.
 
 ## Camera, Photos, Notifications, and Imported Media
 - Loom requests camera permission for the Little Wins share camera.
@@ -146,7 +145,6 @@ Project reviewed: Loom iOS app
 ## Sensitive / High-Risk Areas The Policy Should Explicitly Cover
 - Free-form personal text entered into goals, purpose, reflections, relationship notes, and LoomAI chat
 - Health data access
-- Screen Time / FamilyControls selections
 - AI processing and vendor chain
 - Cloud sync and Firebase sync
 - Account identity data
@@ -170,4 +168,4 @@ Project reviewed: Loom iOS app
 ## App Review / Metadata Follow-Up
 - A final hosted Privacy Policy URL still needs to be supplied in App Store Connect.
 - If desired, the app can also read a hosted privacy-policy URL from an Info.plist `PrivacyPolicyURL` value for the in-app link destination.
-- Terms of Use can rely on Apple’s Standard EULA.
+- License Agreement can rely on Apple’s Standard EULA.

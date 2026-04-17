@@ -20,7 +20,7 @@ enum SubscriptionAccessGate {
         workspace: LoomSpecialAccountWorkspace? = LoomDefaultsScope.currentWorkspace()
     ) -> SubscriptionPlan? {
         switch workspace {
-        case .reviewDemo:
+        case .reviewDemo, .reviewOnboardingDemo:
             return .monthly
         default:
             return nil

@@ -438,8 +438,7 @@
 				INFOPLIST_FILE = loom/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Loom;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
-				INFOPLIST_KEY_NSHealthShareUsageDescription = "Loom uses Apple Health data you choose to connect to automatically track Little Wins progress.";
-				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Loom updates Apple Health data you choose to connect to automatically track Little Wins progress.";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "Loom reads Apple Health data you choose to connect to automatically track Little Wins progress. Loom does not write data to Apple Health.";
 				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "Loom needs full access to your reminders to sync active tasks into Capture.";
 				INFOPLIST_KEY_NSRemindersUsageDescription = "Loom needs access to your reminders to sync active tasks into Capture.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -475,8 +474,7 @@
 				INFOPLIST_FILE = loom/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Loom;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
-				INFOPLIST_KEY_NSHealthShareUsageDescription = "Loom uses Apple Health data you choose to connect to automatically track Little Wins progress.";
-				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Loom updates Apple Health data you choose to connect to automatically track Little Wins progress.";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "Loom reads Apple Health data you choose to connect to automatically track Little Wins progress. Loom does not write data to Apple Health.";
 				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "Loom needs full access to your reminders to sync active tasks into Capture.";
 				INFOPLIST_KEY_NSRemindersUsageDescription = "Loom needs access to your reminders to sync active tasks into Capture.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;

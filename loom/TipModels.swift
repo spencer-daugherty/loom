@@ -9,6 +9,7 @@ enum TipPreviewType: String {
     case appleHealthIntegration
     case assignActions
     case shareToLoom
+    case widgets
     case loomAIChat
     case loomAIAutoWrite
     case loomAIEmailAssist
@@ -21,6 +22,7 @@ enum TipFeature: String, CaseIterable, Identifiable {
     case appleHealthIntegration
     case assignActions
     case shareToLoom
+    case widgets
     case loomAIChat
     case loomAIAutoWrite
     case loomAIEmailAssist
@@ -30,7 +32,7 @@ enum TipFeature: String, CaseIterable, Identifiable {
 
     var hubSection: TipHubSection {
         switch self {
-        case .loomAIEmailAssist, .loomAIAgent:
+        case .widgets, .loomAIEmailAssist, .loomAIAgent:
             return .inDevelopment
         default:
             return .tips
@@ -49,6 +51,8 @@ enum TipFeature: String, CaseIterable, Identifiable {
             return "Assign Actions"
         case .shareToLoom:
             return "Share to Loom"
+        case .widgets:
+            return "Widgets"
         case .loomAIChat:
             return "LoomAI Chat"
         case .loomAIAutoWrite:
@@ -72,6 +76,8 @@ enum TipFeature: String, CaseIterable, Identifiable {
             return "Assign actions to people or places to strengthen accountability context."
         case .shareToLoom:
             return "Save photos, links, and notes straight into Capture from any app."
+        case .widgets:
+            return "Pin focused Loom widgets to your Home Screen for fast visibility and one-tap momentum."
         case .loomAIChat:
             return "Ask LoomAI for focused help and get suggestion cards you can apply fast."
         case .loomAIAutoWrite:
@@ -95,6 +101,8 @@ enum TipFeature: String, CaseIterable, Identifiable {
             return "Tag an action to a person or place when context matters. It keeps responsibility clear inside your plan without changing how your workflow moves."
         case .shareToLoom:
             return "Share anything into Loom from other apps. Photos, website links, and note text arrive in one Capture flow so you can turn incoming context into action fast."
+        case .widgets:
+            return "Widgets will bring your most important Loom context onto the Home Screen, including focus areas, quick capture entry points, and progress snapshots that keep momentum visible throughout the day."
         case .loomAIChat:
             return "Chat with LoomAI to clarify priorities, unblock execution, and get structured options. Suggestion cards help you move from idea to action quickly."
         case .loomAIAutoWrite:
@@ -118,6 +126,8 @@ enum TipFeature: String, CaseIterable, Identifiable {
             return .assignActions
         case .shareToLoom:
             return .shareToLoom
+        case .widgets:
+            return .widgets
         case .loomAIChat:
             return .loomAIChat
         case .loomAIAutoWrite:
@@ -141,6 +151,8 @@ enum TipFeature: String, CaseIterable, Identifiable {
             return "person.fill"
         case .shareToLoom:
             return "square.and.arrow.up"
+        case .widgets:
+            return "square.grid.2x2"
         case .loomAIChat:
             return "bubble.left.and.bubble.right"
         case .loomAIAutoWrite:
@@ -163,6 +175,8 @@ enum TipFeature: String, CaseIterable, Identifiable {
 
     var isComingSoon: Bool {
         switch self {
+        case .widgets:
+            return true
         case .appleHealthIntegration:
             return !TipFeatureSupport.healthDataAvailable
         default:
@@ -176,7 +190,7 @@ enum TipFeature: String, CaseIterable, Identifiable {
             return 5
         case .loomAIAgent:
             return 16
-        case .littleWinsMoments, .loomAIPersonalization, .assignActions, .shareToLoom, .loomAIChat, .loomAIAutoWrite, .loomAIEmailAssist:
+        case .littleWinsMoments, .loomAIPersonalization, .assignActions, .shareToLoom, .widgets, .loomAIChat, .loomAIAutoWrite, .loomAIEmailAssist:
             return 4
         }
     }

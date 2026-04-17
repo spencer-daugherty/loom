@@ -1,8 +1,5 @@
 import Foundation
 import SwiftData
-#if canImport(FamilyControls)
-import FamilyControls
-#endif
 #if canImport(HealthKit)
 import HealthKit
 #endif
@@ -18,19 +15,42 @@ extension Notification.Name {
 
 enum LoomDefaultsScope {
   private static let reviewDemoFlagKey = UserSessionStore.Keys.reviewDemoModeEnabled
-  private static let reviewDemoPrefix = "review_demo."
+  private static let isolatedWorkspaceKindKey = UserSessionStore.Keys.isolatedWorkspaceKind
 
   static func scopedKey(_ baseKey: String, defaults: UserDefaults = .standard) -> String {
-    if defaults.bool(forKey: reviewDemoFlagKey) {
-      return reviewDemoPrefix + baseKey
+    if let workspace = currentWorkspace(defaults: defaults) {
+      return workspace.defaultsPrefix + baseKey
     }
     return baseKey
   }
 
-  static func clearReviewDemoScopedValues(defaults: UserDefaults = .standard) {
-    for key in defaults.dictionaryRepresentation().keys where key.hasPrefix(reviewDemoPrefix) {
+  static func currentWorkspace(defaults: UserDefaults = .standard) -> LoomSpecialAccountWorkspace? {
+    guard defaults.bool(forKey: reviewDemoFlagKey) else { return nil }
+    guard let rawValue = defaults.string(forKey: isolatedWorkspaceKindKey)?
+      .trimmingCharacters(in: .whitespacesAndNewlines),
+      let workspace = LoomSpecialAccountWorkspace(rawValue: rawValue) else {
+      return .reviewDemo
+    }
+    return workspace
+  }
+
+  static func clearScopedValues(
+    for workspace: LoomSpecialAccountWorkspace,
+    defaults: UserDefaults = .standard
+  ) {
+    let prefix = workspace.defaultsPrefix
+    for key in defaults.dictionaryRepresentation().keys where key.hasPrefix(prefix) {
       defaults.removeObject(forKey: key)
     }
+  }
+
+  static func clearReviewDemoScopedValues(defaults: UserDefaults = .standard) {
+    clearScopedValues(for: .reviewDemo, defaults: defaults)
+  }
+
+  static func clearCurrentScopedValues(defaults: UserDefaults = .standard) {
+    guard let workspace = currentWorkspace(defaults: defaults) else { return }
+    clearScopedValues(for: workspace, defaults: defaults)
   }
 }
 
@@ -169,7 +189,8 @@ enum VacationModeStore {
   private static let defaultsKey = "vacationModeConfig.v1"
 
   static func config() -> VacationModeConfig {
-    guard let data = UserDefaults.standard.data(forKey: defaultsKey),
+    let scopedKey = LoomDefaultsScope.scopedKey(defaultsKey)
+    guard let data = UserDefaults.standard.data(forKey: scopedKey),
           let decoded = try? JSONDecoder().decode(VacationModeConfig.self, from: data) else {
       return .default
     }
@@ -178,8 +199,9 @@ enum VacationModeStore {
 
   static func setConfig(_ config: VacationModeConfig) {
     let normalized = config.normalized
+    let scopedKey = LoomDefaultsScope.scopedKey(defaultsKey)
     if let data = try? JSONEncoder().encode(normalized) {
-      UserDefaults.standard.set(data, forKey: defaultsKey)
+      UserDefaults.standard.set(data, forKey: scopedKey)
     }
     NotificationCenter.default.post(name: .vacationModeDidChange, object: nil)
   }
@@ -227,7 +249,8 @@ enum LittleWinsScheduleStore {
   }
 
   static func allRules() -> [UUID: LittleWinsScheduleRule] {
-    guard let data = UserDefaults.standard.data(forKey: defaultsKey) else { return [:] }
+    let scopedKey = LoomDefaultsScope.scopedKey(defaultsKey)
+    guard let data = UserDefaults.standard.data(forKey: scopedKey) else { return [:] }
     guard let raw = try? JSONDecoder().decode([String: LittleWinsScheduleRule].self, from: data) else {
       return [:]
     }
@@ -271,10 +294,11 @@ enum LittleWinsScheduleStore {
 
   private static func saveAllRules(_ rules: [UUID: LittleWinsScheduleRule]) {
     let raw = Dictionary(uniqueKeysWithValues: rules.map { ($0.key.uuidString, $0.value.normalized) })
+    let scopedKey = LoomDefaultsScope.scopedKey(defaultsKey)
     if let data = try? JSONEncoder().encode(raw) {
-      UserDefaults.standard.set(data, forKey: defaultsKey)
+      UserDefaults.standard.set(data, forKey: scopedKey)
     } else {
-      UserDefaults.standard.removeObject(forKey: defaultsKey)
+      UserDefaults.standard.removeObject(forKey: scopedKey)
     }
     NotificationCenter.default.post(name: .littleWinsScheduleDidChange, object: nil)
   }
@@ -283,19 +307,16 @@ enum LittleWinsScheduleStore {
 struct LittleWinsIntegrationConfig: Codable, Equatable {
   enum Source: String, Codable, CaseIterable {
     case appleHealth
-    case screenTime
 
     var title: String {
       switch self {
       case .appleHealth: return "Apple Health"
-      case .screenTime: return "Screen Time"
       }
     }
 
     var iconName: String {
       switch self {
       case .appleHealth: return "heart"
-      case .screenTime: return "hourglass"
       }
     }
   }
@@ -304,16 +325,12 @@ struct LittleWinsIntegrationConfig: Codable, Equatable {
     case steps
     case workoutMinutes
     case sleepHours
-    case socialMediaMinutes
-    case totalScreenTimeMinutes
 
     var title: String {
       switch self {
       case .steps: return "Steps"
       case .workoutMinutes: return "Workout Minutes"
       case .sleepHours: return "Sleep Hours"
-      case .socialMediaMinutes: return "Social Media"
-      case .totalScreenTimeMinutes: return "Total Screen Time"
       }
     }
 
@@ -322,8 +339,6 @@ struct LittleWinsIntegrationConfig: Codable, Equatable {
       case .steps: return "steps"
       case .workoutMinutes: return "min"
       case .sleepHours: return "hours"
-      case .socialMediaMinutes: return "min"
-      case .totalScreenTimeMinutes: return "min"
       }
     }
 
@@ -332,15 +347,12 @@ struct LittleWinsIntegrationConfig: Codable, Equatable {
       case .steps: return 10_000
       case .workoutMinutes: return 60
       case .sleepHours: return 7
-      case .socialMediaMinutes: return 30
-      case .totalScreenTimeMinutes: return 60
       }
     }
 
     static func options(for source: Source) -> [Metric] {
       switch source {
       case .appleHealth: return [.steps, .workoutMinutes, .sleepHours]
-      case .screenTime: return [.socialMediaMinutes, .totalScreenTimeMinutes]
       }
     }
   }
@@ -351,7 +363,6 @@ struct LittleWinsIntegrationConfig: Codable, Equatable {
   var targetValue: Double
   var progressValue: Double
   var isConnected: Bool
-  var screenTimeSelectionSummary: String?
   var updatedAtUnix: TimeInterval
 
   static func `default`(for source: Source) -> LittleWinsIntegrationConfig {
@@ -363,7 +374,6 @@ struct LittleWinsIntegrationConfig: Codable, Equatable {
       targetValue: metric.defaultTarget,
       progressValue: 0,
       isConnected: false,
-      screenTimeSelectionSummary: nil,
       updatedAtUnix: Date().timeIntervalSince1970
     )
   }
@@ -375,9 +385,6 @@ struct LittleWinsIntegrationConfig: Codable, Equatable {
     }
     copy.targetValue = max(1, copy.targetValue)
     copy.progressValue = max(0, copy.progressValue)
-    if copy.source != .screenTime {
-      copy.screenTimeSelectionSummary = nil
-    }
     return copy
   }
 
@@ -392,17 +399,99 @@ struct LittleWinsIntegrationConfig: Codable, Equatable {
 }
 
 enum LittleWinsIntegrationStore {
-  private static let defaultsKey = "littleWinsIntegrationConfigs.v1"
+  private static let defaultsKey = "littleWinsIntegrationConfigs.v2"
+  private static let legacyDefaultsKey = "littleWinsIntegrationConfigs.v1"
+
+  private enum LegacySource: String, Codable {
+    case appleHealth
+    case screenTime
+  }
+
+  private enum LegacyMetric: String, Codable {
+    case steps
+    case workoutMinutes
+    case sleepHours
+    case socialMediaMinutes
+    case totalScreenTimeMinutes
+  }
+
+  private struct LegacyConfig: Codable {
+    var isEnabled: Bool
+    var source: LegacySource
+    var metric: LegacyMetric
+    var targetValue: Double
+    var progressValue: Double
+    var isConnected: Bool
+    var screenTimeSelectionSummary: String?
+    var updatedAtUnix: TimeInterval
+
+    func migrated() -> LittleWinsIntegrationConfig? {
+      guard source == .appleHealth else { return nil }
+
+      let migratedMetric: LittleWinsIntegrationConfig.Metric
+      switch metric {
+      case .steps:
+        migratedMetric = .steps
+      case .workoutMinutes:
+        migratedMetric = .workoutMinutes
+      case .sleepHours:
+        migratedMetric = .sleepHours
+      case .socialMediaMinutes, .totalScreenTimeMinutes:
+        return nil
+      }
+
+      return LittleWinsIntegrationConfig(
+        isEnabled: isEnabled,
+        source: .appleHealth,
+        metric: migratedMetric,
+        targetValue: targetValue,
+        progressValue: progressValue,
+        isConnected: isConnected,
+        updatedAtUnix: updatedAtUnix
+      ).normalized
+    }
+  }
 
   static func config(for focusID: UUID) -> LittleWinsIntegrationConfig? {
     allConfigs()[focusID]?.normalized
   }
 
   static func allConfigs() -> [UUID: LittleWinsIntegrationConfig] {
-    guard let data = UserDefaults.standard.data(forKey: defaultsKey) else { return [:] }
+    if let current = loadCurrentConfigs() {
+      return current
+    }
+    return migrateLegacyConfigsIfNeeded()
+  }
+
+  private static func loadCurrentConfigs() -> [UUID: LittleWinsIntegrationConfig]? {
+    let scopedKey = LoomDefaultsScope.scopedKey(defaultsKey)
+    guard let data = UserDefaults.standard.data(forKey: scopedKey) else { return nil }
     guard let raw = try? JSONDecoder().decode([String: LittleWinsIntegrationConfig].self, from: data) else {
       return [:]
     }
+    return normalizedMap(from: raw)
+  }
+
+  private static func migrateLegacyConfigsIfNeeded() -> [UUID: LittleWinsIntegrationConfig] {
+    let scopedLegacyKey = LoomDefaultsScope.scopedKey(legacyDefaultsKey)
+    guard let data = UserDefaults.standard.data(forKey: scopedLegacyKey) else { return [:] }
+    guard let raw = try? JSONDecoder().decode([String: LegacyConfig].self, from: data) else {
+      UserDefaults.standard.removeObject(forKey: scopedLegacyKey)
+      return [:]
+    }
+
+    var result: [UUID: LittleWinsIntegrationConfig] = [:]
+    for (key, value) in raw {
+      guard let id = UUID(uuidString: key) else { continue }
+      guard let migrated = value.migrated() else { continue }
+      result[id] = migrated
+    }
+    save(result)
+    UserDefaults.standard.removeObject(forKey: scopedLegacyKey)
+    return result
+  }
+
+  private static func normalizedMap(from raw: [String: LittleWinsIntegrationConfig]) -> [UUID: LittleWinsIntegrationConfig] {
     var result: [UUID: LittleWinsIntegrationConfig] = [:]
     for (key, value) in raw {
       guard let id = UUID(uuidString: key) else { continue }
@@ -429,10 +518,11 @@ enum LittleWinsIntegrationStore {
 
   private static func save(_ map: [UUID: LittleWinsIntegrationConfig]) {
     let raw = Dictionary(uniqueKeysWithValues: map.map { ($0.key.uuidString, $0.value.normalized) })
+    let scopedKey = LoomDefaultsScope.scopedKey(defaultsKey)
     if let data = try? JSONEncoder().encode(raw) {
-      UserDefaults.standard.set(data, forKey: defaultsKey)
+      UserDefaults.standard.set(data, forKey: scopedKey)
     } else {
-      UserDefaults.standard.removeObject(forKey: defaultsKey)
+      UserDefaults.standard.removeObject(forKey: scopedKey)
     }
     NotificationCenter.default.post(name: .littleWinsIntegrationDidChange, object: nil)
   }
@@ -558,65 +648,12 @@ enum ReflectionPassionsStore {
   }
 }
 
-#if canImport(FamilyControls)
-enum LittleWinsScreenTimeBridge {
-  private enum BridgeError: LocalizedError {
-    case unavailable
-
-    var errorDescription: String? {
-      switch self {
-      case .unavailable:
-        return "Screen Time controls are not available on this device."
-      }
-    }
-  }
-
-  static func requestAuthorization(completion: @escaping (Result<Void, Error>) -> Void) {
-    Task {
-      do {
-        try await AuthorizationCenter.shared.requestAuthorization(for: .individual)
-        await MainActor.run {
-          completion(.success(()))
-        }
-      } catch {
-        await MainActor.run {
-          completion(.failure(error))
-        }
-      }
-    }
-  }
-
-  static func selectionSummary(for selection: FamilyActivitySelection) -> String {
-    let appCount = selection.applicationTokens.count
-    let categoryCount = selection.categoryTokens.count
-    let webCount = selection.webDomainTokens.count
-    var parts: [String] = []
-    if appCount > 0 { parts.append("\(appCount) app\(appCount == 1 ? "" : "s")") }
-    if categoryCount > 0 { parts.append("\(categoryCount) categor\(categoryCount == 1 ? "y" : "ies")") }
-    if webCount > 0 { parts.append("\(webCount) site\(webCount == 1 ? "" : "s")") }
-    return parts.isEmpty ? "No apps or categories selected" : parts.joined(separator: ", ")
-  }
-}
-#else
-enum LittleWinsScreenTimeBridge {
-  private enum BridgeError: LocalizedError {
-    case unavailable
-    var errorDescription: String? { "Screen Time controls are not available on this device." }
-  }
-
-  static func requestAuthorization(completion: @escaping (Result<Void, Error>) -> Void) {
-    completion(.failure(BridgeError.unavailable))
-  }
-}
-#endif
-
 #if canImport(HealthKit)
 enum LittleWinsHealthKitBridge {
   private static let store = HKHealthStore()
 
   private enum BridgeError: LocalizedError {
     case unavailable
-    case unsupportedMetric
     case typeUnavailable
     case authorizationDenied
 
@@ -624,8 +661,6 @@ enum LittleWinsHealthKitBridge {
       switch self {
       case .unavailable:
         return "Apple Health is not available on this device."
-      case .unsupportedMetric:
-        return "This metric is not supported by Apple Health."
       case .typeUnavailable:
         return "The Apple Health data type is unavailable."
       case .authorizationDenied:
@@ -728,8 +763,6 @@ enum LittleWinsHealthKitBridge {
       readWorkoutMinutes(on: day, completion: completion)
     case .sleepHours:
       readSleepHours(on: day, completion: completion)
-    case .socialMediaMinutes, .totalScreenTimeMinutes:
-      completion(.failure(BridgeError.unsupportedMetric))
     }
   }
 

@@ -213,14 +213,20 @@ final class PersonalizationStore: ObservableObject {
 
     func resetCurrentUserState() async {
         let resolvedUserKey = PersonalizationUserIdentity.currentUserKey()
+        await resetState(for: resolvedUserKey)
+    }
+
+    func resetState(for userKey: String) async {
         do {
-            try await repository.clearState(for: resolvedUserKey)
+            try await repository.clearState(for: userKey)
         } catch {
             AppDebugActivityLog.log("PersonalizationStore", "resetCurrentUserState failed error=\(error.localizedDescription)")
         }
         let emptyState = PersonalizationSnapshotState.empty
-        apply(state: emptyState, updateUserKey: false)
-        Self.cacheState(emptyState, for: resolvedUserKey)
+        if self.userKey == userKey {
+            apply(state: emptyState, updateUserKey: false)
+        }
+        Self.cacheState(emptyState, for: userKey)
     }
 
     static func cachedContextForCurrentUser(defaults: UserDefaults = .standard) -> PersonalizationContextValue? {

@@ -13,115 +13,115 @@ enum PurposeProfilesCatalog {
     private static let builtInRecords: [PurposeProfileRecord] = [
         PurposeProfileRecord(
             profile: "Strategic Integrator",
-            strength: "Translates ambitious direction into shared structure others can execute.",
-            weakness: "Over-integration risk; excessive synthesis and stakeholder harmony can slow decisive tradeoffs.",
-            stressTrigger: "Competing stakeholder priorities",
-            breakingPoint: "Decision velocity (alignment continues past usefulness)"
+            strength: "Turns big ideas into a shared plan people can follow.",
+            weakness: "Can spend too long combining ideas and keeping everyone aligned, which slows hard decisions.",
+            stressTrigger: "Too many priorities from different people",
+            breakingPoint: "Decision speed (alignment keeps going after it stops helping)"
         ),
         PurposeProfileRecord(
             profile: "Structured Clarity Driver",
-            strength: "Forces clarity early and turns fuzzy ideas into sharp priorities and standards.",
-            weakness: "May prematurely close exploration and create resistance if others feel bulldozed.",
-            stressTrigger: "Ambiguity and slow consensus",
-            breakingPoint: "Interpersonal smoothness (communication becomes blunt)"
+            strength: "Creates clarity early and turns fuzzy ideas into clear priorities and standards.",
+            weakness: "May shut down exploration too soon and cause pushback if others feel steamrolled.",
+            stressTrigger: "Unclear situations and slow agreement",
+            breakingPoint: "Communication tone (can become blunt)"
         ),
         PurposeProfileRecord(
             profile: "Adaptive Catalyst",
             strength: "Generates momentum through experimentation and social energy.",
-            weakness: "Follow-through can weaken when novelty fades without external structure.",
-            stressTrigger: "Rigid plans and gatekeeping",
-            breakingPoint: "Execution consistency (many starts, uneven finishes)"
+            weakness: "Follow-through can fade when the novelty wears off and there is no outside structure.",
+            stressTrigger: "Rigid plans and blocked access",
+            breakingPoint: "Consistency (many starts, uneven finishes)"
         ),
         PurposeProfileRecord(
             profile: "Rapid Experimenter",
-            strength: "Challenges assumptions quickly and converts uncertainty into data through action.",
+            strength: "Questions assumptions quickly and turns uncertainty into learning through action.",
             weakness: "Can create churn if direction changes too frequently.",
             stressTrigger: "Slow decision cycles",
-            breakingPoint: "Context continuity (frequent pivots disrupt shared direction)"
+            breakingPoint: "Shared direction (frequent pivots make it hard to stay aligned)"
         ),
         PurposeProfileRecord(
             profile: "Momentum Builder",
-            strength: "Builds sustainable cadence through clear plans and human buy-in.",
-            weakness: "May prioritize feasibility over bold upside.",
-            stressTrigger: "Resource constraints and morale dips",
-            breakingPoint: "Ambition (scope narrows to maintain stability)"
+            strength: "Builds a steady rhythm through clear plans and support from others.",
+            weakness: "May choose what feels safer over what could have bigger upside.",
+            stressTrigger: "Low resources and low morale",
+            breakingPoint: "Ambition (scope narrows to keep things stable)"
         ),
         PurposeProfileRecord(
             profile: "Operational Commander",
-            strength: "Executes effectively under constraints; prioritizes, assigns, and enforces standards.",
-            weakness: "Relationship debt accumulates if pressure becomes constant critique.",
+            strength: "Works well under pressure by setting priorities, assigning work, and enforcing standards.",
+            weakness: "Relationships can suffer if pressure turns into constant criticism.",
             stressTrigger: "Missed commitments",
-            breakingPoint: "Patience (tolerance for variance collapses)"
+            breakingPoint: "Patience (tolerance for variation drops fast)"
         ),
         PurposeProfileRecord(
             profile: "Adaptive Stabilizer",
             strength: "Maintains progress when conditions shift through flexible coordination.",
-            weakness: "Absorbs too much responsibility and becomes an informal buffer.",
+            weakness: "Can take on too much responsibility and end up buffering everyone else.",
             stressTrigger: "Last-minute changes and interpersonal conflict",
-            breakingPoint: "Boundary clarity (over-commitment reduces consistency)"
+            breakingPoint: "Boundaries (over-committing reduces consistency)"
         ),
         PurposeProfileRecord(
             profile: "Crisis Navigator",
-            strength: "Cuts through noise during chaos with strong triage and improvisation.",
-            weakness: "Long-term systems may be neglected; urgency becomes the default mode.",
-            stressTrigger: "Bureaucracy and slow escalation paths",
-            breakingPoint: "Long-horizon planning (defaults to firefighting)"
+            strength: "Cuts through chaos by sorting what matters first and adapting quickly.",
+            weakness: "Long-term systems can get ignored when urgency becomes the default.",
+            stressTrigger: "Red tape and slow escalation",
+            breakingPoint: "Long-term planning (falls back to constant emergencies)"
         ),
         PurposeProfileRecord(
             profile: "Purpose-Led Planner",
             strength: "Maintains long-term direction through disciplined planning tied to values.",
-            weakness: "Initiation friction; preparation can delay execution.",
+            weakness: "Getting started can be hard because preparation can delay action.",
             stressTrigger: "Noisy inputs and constant context switching",
-            breakingPoint: "Start energy (stalling at launch)"
+            breakingPoint: "Start energy (stalls at launch)"
         ),
         PurposeProfileRecord(
             profile: "Analytical Architect",
-            strength: "Builds rigorous systems and frameworks that withstand scrutiny.",
-            weakness: "Under-communication can create misunderstanding.",
+            strength: "Builds strong systems and frameworks that hold up under review.",
+            weakness: "If they do not explain their thinking enough, others can misunderstand.",
             stressTrigger: "Sloppy reasoning or vague definitions",
-            breakingPoint: "Collaboration flow (withdraws rather than translating ideas)"
+            breakingPoint: "Collaboration flow (withdraws instead of explaining ideas)"
         ),
         PurposeProfileRecord(
             profile: "Reflective Synthesizer",
-            strength: "Connects disparate ideas into coherent insight without seeking attention.",
-            weakness: "Structure avoidance may prevent insights from becoming outcomes.",
-            stressTrigger: "Tight deadlines and forced specificity",
-            breakingPoint: "Deliverable packaging (refining replaces shipping)"
+            strength: "Connects very different ideas into clear insight without needing attention.",
+            weakness: "Avoiding structure can keep good insight from turning into results.",
+            stressTrigger: "Tight deadlines and pressure to be overly specific",
+            breakingPoint: "Shipping the work (keeps refining instead of finishing)"
         ),
         PurposeProfileRecord(
             profile: "Independent Pathfinder",
-            strength: "Explores difficult problems autonomously with high learning velocity.",
-            weakness: "Independence may create coordination costs for teams.",
-            stressTrigger: "Micromanagement",
-            breakingPoint: "Team predictability (disappears into solo iteration)"
+            strength: "Explores hard problems alone and learns quickly.",
+            weakness: "Working too independently can make teamwork harder.",
+            stressTrigger: "Being closely controlled",
+            breakingPoint: "Team predictability (disappears into solo work)"
         ),
         PurposeProfileRecord(
             profile: "Steady Alignment Builder",
             strength: "Builds trust through reliability, consistency, and steady relationships.",
-            weakness: "Avoids hard conversations too long to preserve harmony.",
+            weakness: "May avoid hard conversations for too long to keep the peace.",
             stressTrigger: "Interpersonal tension",
-            breakingPoint: "Truth-telling (issues get smoothed over until they erupt)"
+            breakingPoint: "Truth-telling (smooths things over until they finally erupt)"
         ),
         PurposeProfileRecord(
             profile: "Quality Sentinel",
             strength: "Protects standards and identifies risks before failure occurs.",
-            weakness: "Excess scrutiny can slow progress.",
+            weakness: "Too much scrutiny can slow progress.",
             stressTrigger: "Unclear ownership and sloppy execution",
-            breakingPoint: "Speed (momentum sacrificed for certainty)"
+            breakingPoint: "Speed (gives up momentum to get certainty)"
         ),
         PurposeProfileRecord(
             profile: "Supportive Adapter",
             strength: "Maintains stability through calm responsiveness and quiet problem solving.",
-            weakness: "Becomes invisible if priorities are not self-defined.",
+            weakness: "Can fade into the background if they do not define their own priorities.",
             stressTrigger: "Unclear expectations",
-            breakingPoint: "Self-prioritization (work fragments across others' needs)"
+            breakingPoint: "Personal priorities (work breaks apart across other people's needs)"
         ),
         PurposeProfileRecord(
             profile: "Pragmatic Realist",
-            strength: "Identifies what will work now and communicates it plainly.",
-            weakness: "May neglect inspiration and relationship repair.",
+            strength: "Sees what will work now and says it plainly.",
+            weakness: "May overlook inspiration and relationship repair.",
             stressTrigger: "Emotionally driven decisions",
-            breakingPoint: "Influence (truth delivered without adoption)"
+            breakingPoint: "Influence (speaks the truth but does not bring others with them)"
         )
     ]
     private static let mergedRecords: [PurposeProfileRecord] = mergeParsedWithBuiltIn(parsed: parsedRecords)

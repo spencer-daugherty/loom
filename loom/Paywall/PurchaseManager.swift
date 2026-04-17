@@ -3,6 +3,39 @@ import StoreKit
 
 @MainActor
 final class PurchaseManager: ObservableObject {
+    struct PlanPresentation: Equatable {
+        let title: String
+        let priceText: String
+        let originalPriceText: String?
+        let tierText: String?
+        let tierDetailText: String?
+        let trialText: String?
+        let trialDetailText: String?
+        let summaryText: String?
+        let manageOrCancelText: String?
+        let disclosureDetailText: String?
+        let detailSheetTitle: String
+        let ctaTitle: String
+    }
+
+    enum PlanAction: Equatable {
+        case purchaseNew
+        case currentPlan
+        case scheduledAutoRenewChange(from: SubscriptionPlan, to: SubscriptionPlan, effectiveDate: Date?)
+        case switchAutoRenewable(from: SubscriptionPlan, to: SubscriptionPlan)
+        case purchaseLifetimeAlongsideAutoRenewing(current: SubscriptionPlan)
+        case includedWithLifetime
+
+        var allowsPurchase: Bool {
+            switch self {
+            case .purchaseNew, .switchAutoRenewable, .purchaseLifetimeAlongsideAutoRenewing:
+                return true
+            case .currentPlan, .scheduledAutoRenewChange, .includedWithLifetime:
+                return false
+            }
+        }
+    }
+
     enum PurchaseOutcome: Equatable {
         case success
         case pending
@@ -20,8 +53,15 @@ final class PurchaseManager: ObservableObject {
     @Published private(set) var ownedProductIDs: Set<String> = []
     @Published private(set) var isPremium = false
     @Published private(set) var activePlan: SubscriptionPlan?
+    @Published private(set) var activePlanPeriodEndDate: Date?
+    @Published private(set) var activePlanWillAutoRenew: Bool?
+    @Published private(set) var pendingAutoRenewPlan: SubscriptionPlan?
+    @Published private(set) var pendingAutoRenewEffectiveDate: Date?
     @Published private(set) var isProcessing = false
     @Published private(set) var hasLoadedEntitlements = false
+    @Published private(set) var isLoadingProducts = false
+    @Published private(set) var missingProductIDs: Set<String> = []
+    @Published private(set) var productCatalogErrorDescription: String?
 
     private let defaults: UserDefaults
     private var productsByID: [String: Product] = [:]
@@ -45,7 +85,53 @@ final class PurchaseManager: ObservableObject {
         productsByID[plan.storeKitProductID]
     }
 
+    func presentation(for plan: SubscriptionPlan) -> PlanPresentation {
+        let product = product(for: plan)
+        let introOffer = introductoryOffer(for: plan, product: product)
+        let trialLabel = introOffer.flatMap(freeTrialLabel(for:))
+
+        return PlanPresentation(
+            title: plan.title,
+            priceText: displayPriceText(for: plan, product: product),
+            originalPriceText: originalComparisonPriceText(for: plan),
+            tierText: plan.tierText,
+            tierDetailText: plan.tierDetailText,
+            trialText: trialText(for: plan, introOfferLabel: trialLabel),
+            trialDetailText: trialDetailText(for: plan),
+            summaryText: summaryText(for: plan, product: product),
+            manageOrCancelText: plan.manageOrCancelText,
+            disclosureDetailText: disclosureDetailText(for: plan, introOfferLabel: trialLabel),
+            detailSheetTitle: plan.detailSheetTitle,
+            ctaTitle: ctaTitle(for: plan, introOfferLabel: trialLabel)
+        )
+    }
+
+    func planAction(for plan: SubscriptionPlan) -> PlanAction {
+        guard let activePlan else { return .purchaseNew }
+        if activePlan == plan {
+            return .currentPlan
+        }
+        if let pendingAutoRenewPlan, pendingAutoRenewPlan == plan {
+            return .scheduledAutoRenewChange(
+                from: activePlan,
+                to: plan,
+                effectiveDate: pendingAutoRenewEffectiveDate
+            )
+        }
+        if activePlan == .lifetime {
+            return .includedWithLifetime
+        }
+        if plan == .lifetime {
+            return .purchaseLifetimeAlongsideAutoRenewing(current: activePlan)
+        }
+        return .switchAutoRenewable(from: activePlan, to: plan)
+    }
+
     func loadProducts() async {
+        guard !isLoadingProducts else { return }
+        isLoadingProducts = true
+        defer { isLoadingProducts = false }
+
         do {
             let fetchedProducts = try await Product.products(for: SubscriptionPlan.allCases.map(\.storeKitProductID))
             let mappedProducts = Dictionary(uniqueKeysWithValues: fetchedProducts.map { ($0.id, $0) })
@@ -54,10 +140,14 @@ final class PurchaseManager: ObservableObject {
                 log("Missing products from App Store Connect: \(missingProductIDs.sorted().joined(separator: ", "))")
             }
 
+            self.missingProductIDs = missingProductIDs
+            productCatalogErrorDescription = nil
             productsByID = mappedProducts
             products = SubscriptionPlan.allCases.compactMap { mappedProducts[$0.storeKitProductID] }
         } catch {
             log("Failed to load products: \(error.localizedDescription)")
+            missingProductIDs = Set(SubscriptionPlan.allCases.map(\.storeKitProductID))
+            productCatalogErrorDescription = error.localizedDescription
             productsByID = [:]
             products = []
         }
@@ -68,14 +158,23 @@ final class PurchaseManager: ObservableObject {
             configure(session: session)
         }
 
+        if let defaultPlan = SubscriptionAccessGate.defaultPlan() {
+            clearPendingAutoRenewChange()
+            applyEntitlementSnapshot(activeProductIDs: [defaultPlan.storeKitProductID], expirationDatesByProductID: [:])
+            hasLoadedEntitlements = true
+            return
+        }
+
         if SubscriptionAccessGate.shouldForceInactiveSubscription(),
            !SubscriptionAccessGate.allowsStarterEntitlementAccess(defaults: defaults) {
-            applyEntitlementSnapshot(activeProductIDs: [])
+            clearPendingAutoRenewChange()
+            applyEntitlementSnapshot(activeProductIDs: [], expirationDatesByProductID: [:])
             hasLoadedEntitlements = true
             return
         }
 
         var activeProductIDs = Set<String>()
+        var expirationDatesByProductID: [String: Date] = [:]
         let now = Date()
 
         for await entitlement in Transaction.currentEntitlements {
@@ -87,12 +186,19 @@ final class PurchaseManager: ObservableObject {
                 }
                 guard SubscriptionPlan.from(storeKitProductID: transaction.productID) != nil else { continue }
                 activeProductIDs.insert(transaction.productID)
+                if let expirationDate = transaction.expirationDate {
+                    let currentDate = expirationDatesByProductID[transaction.productID]
+                    if currentDate == nil || expirationDate > currentDate! {
+                        expirationDatesByProductID[transaction.productID] = expirationDate
+                    }
+                }
             case .unverified(let transaction, let error):
                 log("Ignoring unverified entitlement \(transaction.productID): \(error.localizedDescription)")
             }
         }
 
-        applyEntitlementSnapshot(activeProductIDs: activeProductIDs)
+        applyEntitlementSnapshot(activeProductIDs: activeProductIDs, expirationDatesByProductID: expirationDatesByProductID)
+        await refreshAutoRenewStatusIfNeeded()
         hasLoadedEntitlements = true
     }
 
@@ -102,6 +208,19 @@ final class PurchaseManager: ObservableObject {
         }
 
         guard !isProcessing else { return .failed(errorType: "busy") }
+        let action = planAction(for: plan)
+        if !action.allowsPurchase {
+            switch action {
+            case .currentPlan:
+                return .failed(errorType: "already_current_plan")
+            case .scheduledAutoRenewChange:
+                return .failed(errorType: "already_pending_plan_change")
+            case .includedWithLifetime:
+                return .failed(errorType: "included_with_lifetime")
+            case .purchaseNew, .switchAutoRenewable, .purchaseLifetimeAlongsideAutoRenewing:
+                return .failed(errorType: "purchase_not_allowed")
+            }
+        }
         if product(for: plan) == nil {
             await loadProducts()
         }
@@ -122,6 +241,15 @@ final class PurchaseManager: ObservableObject {
                     await transaction.finish()
                     if SubscriptionAccessGate.shouldForceInactiveSubscription() {
                         SubscriptionAccessGate.setStarterEntitlementAccess(true, defaults: defaults)
+                        SubscriptionAccessGate.setStarterPreferredProductID(transaction.productID, defaults: defaults)
+                    }
+                    switch action {
+                    case .purchaseNew, .purchaseLifetimeAlongsideAutoRenewing:
+                        applyOptimisticEntitlementSnapshot(forPurchasedProductID: transaction.productID)
+                    case .switchAutoRenewable:
+                        clearPendingAutoRenewChange()
+                    case .currentPlan, .scheduledAutoRenewChange, .includedWithLifetime:
+                        break
                     }
                     await refreshEntitlements()
                     return .success
@@ -166,6 +294,7 @@ final class PurchaseManager: ObservableObject {
 
         if SubscriptionAccessGate.shouldForceInactiveSubscription() {
             SubscriptionAccessGate.setStarterEntitlementAccess(true, defaults: defaults)
+            SubscriptionAccessGate.setStarterPreferredProductID(nil, defaults: defaults)
         }
         await refreshEntitlements()
         return isPremium ? .restoredActiveEntitlement : .noActivePurchasesFound
@@ -186,11 +315,20 @@ final class PurchaseManager: ObservableObject {
         }
     }
 
-    private func applyEntitlementSnapshot(activeProductIDs: Set<String>) {
+    private func applyEntitlementSnapshot(
+        activeProductIDs: Set<String>,
+        expirationDatesByProductID: [String: Date] = [:]
+    ) {
         ownedProductIDs = activeProductIDs
 
         let resolvedPlan: SubscriptionPlan?
-        if activeProductIDs.contains(SubscriptionPlan.lifetime.storeKitProductID) {
+        if SubscriptionAccessGate.shouldForceInactiveSubscription(),
+           SubscriptionAccessGate.allowsStarterEntitlementAccess(defaults: defaults),
+           let preferredProductID = SubscriptionAccessGate.starterPreferredProductID(defaults: defaults),
+           activeProductIDs.contains(preferredProductID),
+           let preferredPlan = SubscriptionPlan.from(storeKitProductID: preferredProductID) {
+            resolvedPlan = preferredPlan
+        } else if activeProductIDs.contains(SubscriptionPlan.lifetime.storeKitProductID) {
             resolvedPlan = .lifetime
         } else if activeProductIDs.contains(SubscriptionPlan.annual.storeKitProductID) {
             resolvedPlan = .annual
@@ -200,7 +338,18 @@ final class PurchaseManager: ObservableObject {
             resolvedPlan = nil
         }
 
+        if SubscriptionAccessGate.shouldForceInactiveSubscription(),
+           let preferredProductID = SubscriptionAccessGate.starterPreferredProductID(defaults: defaults),
+           !activeProductIDs.contains(preferredProductID) {
+            SubscriptionAccessGate.setStarterPreferredProductID(nil, defaults: defaults)
+        }
+
         activePlan = resolvedPlan
+        activePlanPeriodEndDate = resolvedPlan.flatMap { expirationDatesByProductID[$0.storeKitProductID] }
+        activePlanWillAutoRenew = resolvedPlan == .lifetime ? false : nil
+        if resolvedPlan == nil || resolvedPlan == .lifetime {
+            clearPendingAutoRenewChange()
+        }
         let hasEntitlement = resolvedPlan != nil
         isPremium = hasEntitlement
 
@@ -211,6 +360,190 @@ final class PurchaseManager: ObservableObject {
         }
         defaults.set(isPremium, forKey: UserSessionStore.Keys.isSubscribed)
         session?.setIsSubscribed(isPremium)
+    }
+
+    private func applyOptimisticEntitlementSnapshot(forPurchasedProductID productID: String) {
+        guard SubscriptionPlan.from(storeKitProductID: productID) != nil else { return }
+        applyEntitlementSnapshot(activeProductIDs: [productID])
+        hasLoadedEntitlements = true
+    }
+
+    private func refreshAutoRenewStatusIfNeeded() async {
+        guard let activePlan, activePlan == .annual || activePlan == .monthly else {
+            if activePlan == nil {
+                activePlanPeriodEndDate = nil
+                activePlanWillAutoRenew = nil
+            }
+            clearPendingAutoRenewChange()
+            return
+        }
+        if product(for: activePlan) == nil {
+            await loadProducts()
+        }
+        clearPendingAutoRenewChange()
+        guard let product = product(for: activePlan), let subscription = product.subscription else { return }
+
+        do {
+            let statuses = try await subscription.status
+            for status in statuses {
+                let verifiedTransaction: Transaction
+                switch status.transaction {
+                case .verified(let transaction):
+                    guard transaction.productID == activePlan.storeKitProductID else { continue }
+                    verifiedTransaction = transaction
+                    if let expirationDate = transaction.expirationDate {
+                        activePlanPeriodEndDate = expirationDate
+                    }
+                case .unverified:
+                    continue
+                }
+
+                switch status.renewalInfo {
+                case .verified(let renewalInfo):
+                    guard renewalInfo.currentProductID == activePlan.storeKitProductID else { continue }
+                    activePlanWillAutoRenew = renewalInfo.willAutoRenew
+                    if let renewalDate = renewalInfo.renewalDate {
+                        activePlanPeriodEndDate = renewalDate
+                        pendingAutoRenewEffectiveDate = renewalDate
+                    } else {
+                        pendingAutoRenewEffectiveDate = verifiedTransaction.expirationDate
+                    }
+                    if let autoRenewPreference = renewalInfo.autoRenewPreference,
+                       autoRenewPreference != renewalInfo.currentProductID,
+                       let pendingPlan = SubscriptionPlan.from(storeKitProductID: autoRenewPreference) {
+                        pendingAutoRenewPlan = pendingPlan
+                    } else {
+                        clearPendingAutoRenewChange()
+                    }
+                    return
+                case .unverified(_, let error):
+                    log("Ignoring unverified renewal info for \(activePlan.storeKitProductID): \(error.localizedDescription)")
+                }
+            }
+        } catch {
+            log("Failed to load subscription status for \(activePlan.storeKitProductID): \(error.localizedDescription)")
+        }
+    }
+
+    private func clearPendingAutoRenewChange() {
+        pendingAutoRenewPlan = nil
+        pendingAutoRenewEffectiveDate = nil
+    }
+
+    private func displayPriceText(for plan: SubscriptionPlan, product: Product?) -> String {
+        guard let product else { return plan.priceText }
+
+        switch plan {
+        case .lifetime:
+            return "\(product.displayPrice) one-time"
+        case .annual:
+            return "\(product.displayPrice) / year"
+        case .monthly:
+            return "\(product.displayPrice) / month"
+        }
+    }
+
+    private func originalComparisonPriceText(for plan: SubscriptionPlan) -> String? {
+        guard plan == .annual, let monthlyProduct = product(for: .monthly) else { return nil }
+        let yearlyEquivalent = monthlyProduct.price * Decimal(12)
+        return yearlyEquivalent.formatted(monthlyProduct.priceFormatStyle)
+    }
+
+    private func introductoryOffer(for plan: SubscriptionPlan, product: Product?) -> Product.SubscriptionOffer? {
+        guard plan == .annual, let product else { return nil }
+        return product.subscription?.introductoryOffer
+    }
+
+    private func trialText(for plan: SubscriptionPlan, introOfferLabel: String?) -> String? {
+        switch plan {
+        case .annual:
+            return introOfferLabel
+        case .monthly:
+            return plan.trialText
+        case .lifetime:
+            return nil
+        }
+    }
+
+    private func trialDetailText(for plan: SubscriptionPlan) -> String? {
+        switch plan {
+        case .annual, .monthly, .lifetime:
+            return plan.trialDetailText
+        }
+    }
+
+    private func summaryText(for plan: SubscriptionPlan, product: Product?) -> String? {
+        switch plan {
+        case .lifetime:
+            let livePrice = product?.displayPrice ?? plan.priceText.replacingOccurrences(of: " one-time", with: "")
+            return "\(livePrice) one-time purchase. No subscription renewal."
+        case .annual, .monthly:
+            return plan.summaryText
+        }
+    }
+
+    private func disclosureDetailText(for plan: SubscriptionPlan, introOfferLabel: String?) -> String? {
+        switch plan {
+        case .lifetime:
+            return plan.disclosureDetailText
+        case .annual:
+            let pricingLockText = "This offer ends June 30, 2026."
+            if let introOfferLabel {
+                return "Annual (Early Adopter) includes a \(introOfferLabel). \(pricingLockText). Payment will be charged to your Apple ID at the end of the trial period unless canceled at least 24 hours before the trial ends. Subscription renews automatically unless canceled at least 24 hours before the end of the current period. Your account will be charged for renewal within 24 hours prior to the end of the current period. You can manage or cancel your subscription anytime in your Apple ID account settings."
+            }
+            return "Annual (Early Adopter) is billed to your Apple ID after purchase confirmation. \(pricingLockText). Subscription renews automatically unless canceled at least 24 hours before the end of the current period. Your account will be charged for renewal within 24 hours prior to the end of the current period. You can manage or cancel your subscription anytime in your Apple ID account settings."
+        case .monthly:
+            return plan.disclosureDetailText
+        }
+    }
+
+    private func ctaTitle(for plan: SubscriptionPlan, introOfferLabel: String?) -> String {
+        switch plan {
+        case .annual:
+            if let introOfferLabel {
+                return "Start \(titleCased(label: introOfferLabel))"
+            }
+            return "Subscribe Annual"
+        case .lifetime, .monthly:
+            return plan.plainCTATitle
+        }
+    }
+
+    private func freeTrialLabel(for offer: Product.SubscriptionOffer) -> String? {
+        guard offer.paymentMode == .freeTrial else { return nil }
+        return "\(hyphenated(period: offer.period)) free trial"
+    }
+
+    private func hyphenated(period: Product.SubscriptionPeriod) -> String {
+        let unit: String
+        switch period.unit {
+        case .day:
+            unit = "day"
+        case .week:
+            unit = "week"
+        case .month:
+            unit = "month"
+        case .year:
+            unit = "year"
+        @unknown default:
+            unit = "period"
+        }
+        return "\(period.value)-\(unit)"
+    }
+
+    private func titleCased(label: String) -> String {
+        label
+            .split(separator: " ")
+            .map { word in
+                word
+                    .split(separator: "-")
+                    .map { component in
+                        guard let firstCharacter = component.first else { return "" }
+                        return firstCharacter.uppercased() + String(component.dropFirst())
+                    }
+                    .joined(separator: "-")
+            }
+            .joined(separator: " ")
     }
 
     private func log(_ message: String) {

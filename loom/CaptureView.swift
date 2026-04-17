@@ -759,6 +759,16 @@ struct CaptureView: View {
     private var microsoftTodoAccessToken: String = ""
     @AppStorage("capture_microsoft_todo_refresh_token")
     private var microsoftTodoRefreshToken: String = ""
+
+    private var isSpecialAccountWorkspace: Bool {
+        LoomDefaultsScope.currentWorkspace() != nil
+    }
+    private var showsAppleRemindersIntegration: Bool {
+        true
+    }
+    private var effectiveAppleRemindersConnected: Bool {
+        !isSpecialAccountWorkspace && appleRemindersConnected
+    }
     @AppStorage("capture_microsoft_todo_access_expiry_unix")
     private var microsoftTodoAccessExpiryUnix: Double = 0
     @AppStorage("capture_default_due_date_attention_days")
@@ -1037,14 +1047,14 @@ struct CaptureView: View {
         !isSearchMode && !activeActionBlockOptions.isEmpty
     }
     private var captureSetupCautionText: String {
-        if hasMetCaptureSetupRequirement {
-            return "You can swipe down to dismiss when you're done adding to dos"
-        }
-        let noun = captureSetupRemainingToDoCount == 1 ? "task" : "tasks"
-        return "Add \(captureSetupRemainingToDoCount) to do \(noun)"
+        let noun = captureSetupRemainingToDoCount == 1 ? "action" : "actions"
+        return "Add \(captureSetupRemainingToDoCount) more \(noun) to continue."
     }
     private var shouldShowCaptureIntro: Bool {
         ((shouldUseCaptureSetupFlow && captureSetupDidContinue) || (!shouldUseCaptureSetupFlow && allItems.isEmpty)) && !isSearchMode
+    }
+    private var shouldShowCaptureIntroSupplementalRows: Bool {
+        allItems.isEmpty
     }
     private var shouldShowCaptureIntroHeaderInList: Bool {
         !shouldUseCaptureSetupFlow && allItems.isEmpty && !isSearchMode
@@ -1175,7 +1185,7 @@ struct CaptureView: View {
                         runAutoUnhideIfNeeded()
                         dedupeCaptureItemsIfNeeded()
                         runRecurringDispatchIfNeeded()
-                        if appleRemindersConnected {
+                        if showsAppleRemindersIntegration && effectiveAppleRemindersConnected {
                             syncAppleRemindersIntoCapture()
                         }
                         if googleTasksConnected {
@@ -1204,7 +1214,7 @@ struct CaptureView: View {
                         runAutoUnhideIfNeeded()
                         dedupeCaptureItemsIfNeeded()
                         runRecurringDispatchIfNeeded()
-                        if appleRemindersConnected {
+                        if showsAppleRemindersIntegration && effectiveAppleRemindersConnected {
                             syncAppleRemindersIntoCapture()
                         }
                         if googleTasksConnected {
@@ -1498,7 +1508,7 @@ struct CaptureView: View {
                     .listRowBackground(Color.clear)
                 }
 
-                if captureIntroShowsSettingsDemoRow {
+                if shouldShowCaptureIntroSupplementalRows && captureIntroShowsSettingsDemoRow {
                     captureIntroDemoSwipeRow(
                         text: "Set recurring actions, set due date reminders, and integrate in settings.",
                         trailingActionLabel: nil,
@@ -1515,20 +1525,22 @@ struct CaptureView: View {
                     .listRowBackground(Color.clear)
                 }
 
-                captureIntroDemoSwipeRow(
-                    text: "Hide and see hidden tasks that need a reminder later by clicking the toggle.",
-                    trailingActionLabel: nil,
-                    trailingTint: nil,
-                    leadingActionLabel: nil,
-                    leadingTint: nil,
-                    trailingIconName: nil,
-                    leadingSystemIconName: ghostClockIconName,
-                    onLeadingCommit: nil,
-                    onTrailingCommit: nil
-                )
-                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
-                .listRowSeparator(.hidden)
-                .listRowBackground(Color.clear)
+                if shouldShowCaptureIntroSupplementalRows {
+                    captureIntroDemoSwipeRow(
+                        text: "Hide and see hidden tasks that need a reminder later by clicking the toggle.",
+                        trailingActionLabel: nil,
+                        trailingTint: nil,
+                        leadingActionLabel: nil,
+                        leadingTint: nil,
+                        trailingIconName: nil,
+                        leadingSystemIconName: ghostClockIconName,
+                        onLeadingCommit: nil,
+                        onTrailingCommit: nil
+                    )
+                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                }
             }
 
             ForEach(displayItems) { item in
@@ -2465,10 +2477,12 @@ struct CaptureView: View {
                 .font(.subheadline)
                 .foregroundStyle(Color.black.opacity(0.7))
                 .padding(.top, 1)
+
             Text(captureSetupCautionText)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(Color.black.opacity(0.7))
                 .multilineTextAlignment(.leading)
+
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 10)
@@ -2798,8 +2812,10 @@ struct CaptureView: View {
     private func dataSourcesSection() -> some View {
         Section {
             VStack(spacing: 8) {
-                dataSourceRow(title: "Apple Reminders", icon: "list.bullet", enabled: true) {
-                    showAppleRemindersSheet = true
+                if showsAppleRemindersIntegration {
+                    dataSourceRow(title: "Apple Reminders", icon: "list.bullet", enabled: true) {
+                        showAppleRemindersSheet = true
+                    }
                 }
             }
             .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
@@ -2851,9 +2867,9 @@ struct CaptureView: View {
             List {
                 Section {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text(appleRemindersConnected ? "Apple Reminders is connected." : "Connect Apple Reminders to sync active reminders into Capture.")
+                        Text(effectiveAppleRemindersConnected ? "Apple Reminders is connected." : "Connect Apple Reminders to sync active reminders into Capture.")
                             .font(.body)
-                        if appleRemindersLastSyncUnix > 0 {
+                        if effectiveAppleRemindersConnected && appleRemindersLastSyncUnix > 0 {
                             Text("Last sync: \(formatDate(Date(timeIntervalSince1970: appleRemindersLastSyncUnix)))")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -2876,7 +2892,7 @@ struct CaptureView: View {
                                 ProgressView()
                                     .controlSize(.small)
                             }
-                            Text(appleRemindersConnected ? "Sync Now" : "Connect & Sync")
+                            Text(effectiveAppleRemindersConnected ? "Sync Now" : "Connect & Sync")
                                 .fontWeight(.semibold)
                         }
                     }
@@ -2885,7 +2901,7 @@ struct CaptureView: View {
                     Button("Disconnect", role: .destructive) {
                         disconnectAppleReminders()
                     }
-                    .disabled(isSyncingAppleReminders || !appleRemindersConnected)
+                    .disabled(isSyncingAppleReminders || !effectiveAppleRemindersConnected)
                 }
 
                 Section("Folders") {
@@ -5418,6 +5434,10 @@ struct CaptureView: View {
     }
 
     private func syncAppleRemindersIntoCapture() {
+        guard !isSpecialAccountWorkspace else {
+            appleRemindersStatusMessage = "Apple Reminders stays disconnected in this workspace."
+            return
+        }
         #if canImport(EventKit)
         let store = EKEventStore()
         isSyncingAppleReminders = true

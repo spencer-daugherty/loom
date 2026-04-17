@@ -183,6 +183,10 @@ final class UserSessionStore: ObservableObject {
         clearPersistedWorkspaceState(for: workspace)
     }
 
+    func resetIsolatedWorkspaceImmediately(_ workspace: LoomSpecialAccountWorkspace) {
+        clearPersistedWorkspaceState(for: workspace)
+    }
+
     func setAppleUserID(_ value: String?) {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if trimmed.isEmpty {

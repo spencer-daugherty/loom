@@ -2435,7 +2435,7 @@ final class LoomAIViewModel: ObservableObject {
             .init(
                 id: "little_wins_integrations",
                 title: "Little Wins & Integrations",
-                summary: "Little Wins can be scheduled any day or selected weekdays, linked to passions, and connected to integrations like Apple Health/Screen Time that contribute completion signals.",
+                summary: "Little Wins can be scheduled any day or selected weekdays, linked to passions, and connected to Apple Health progress signals.",
                 relatedSections: ["little_wins", "supporting_catalogs"]
             ),
             .init(

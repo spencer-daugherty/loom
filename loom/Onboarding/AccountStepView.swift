@@ -360,7 +360,7 @@ struct AccountStepView: View {
                     .multilineTextAlignment(.center)
 
                 HStack(spacing: 4) {
-                    Button("Terms of Use") {
+                    Button("Standard License Agreement") {
                         presentedLegalDocument = .terms
                     }
                     .buttonStyle(.plain)
@@ -645,12 +645,12 @@ struct AccountStepView: View {
                 email: pending.email,
                 fullName: pending.fullName
             )
-            if workspace == .reviewOnboardingDemo {
-                session.setIsSubscribed(false)
-                UserDefaults.standard.removeObject(forKey: "loom.subscription_plan")
-            } else if workspace.usesDefaultMonthlySubscription {
+            if workspace.usesDefaultMonthlySubscription {
                 session.setIsSubscribed(true)
                 UserDefaults.standard.set(SubscriptionPlan.monthly.rawValue, forKey: "loom.subscription_plan")
+            } else {
+                session.setIsSubscribed(false)
+                UserDefaults.standard.removeObject(forKey: "loom.subscription_plan")
             }
             if workspace.shouldSeedDemoWorkspace {
                 if shouldResetWorkspaceForThisSignIn {

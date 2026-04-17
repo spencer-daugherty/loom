@@ -1577,7 +1577,7 @@ struct ActionView: View {
                     .zIndex(1)
             }
         }
-        .padding(.bottom, actionBottomSafeAreaInset)
+        .padding(.bottom, actionBottomOverlayInset)
         .background(alignment: .bottom) {
             if !isSearchPresented && !isEditingActionPresented {
                 actionBottomToolbarBackdrop
@@ -1614,6 +1614,10 @@ struct ActionView: View {
             .flatMap(\.windows)
             .first(where: \.isKeyWindow)?
             .safeAreaInsets.bottom ?? 0
+    }
+
+    private var actionBottomOverlayInset: CGFloat {
+        isKeyboardVisible ? keyboardHeight : actionBottomSafeAreaInset
     }
 
     private var keyboardAccessoryShowsCheckmark: Bool {

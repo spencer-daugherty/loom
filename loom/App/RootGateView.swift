@@ -118,6 +118,9 @@ struct RootGateView<MainContent: View>: View {
                 syncGatePresentationState()
                 syncGatePathFromSession()
                 trackCoreEntryIfNeeded()
+                Task {
+                    await purchaseManager.refreshEntitlements(session: session)
+                }
                 Task { await personalizationStore.reloadForCurrentUser() }
             }
             .onChange(of: session.hasCompletedDiagnostic) { _, value in
@@ -183,7 +186,7 @@ struct RootGateView<MainContent: View>: View {
                     case .account:
                         AccountStepView()
                     case .diagnostic:
-                        DiagnosticFlowView(mode: .onboarding, initialDraft: diagnosticPrefillDraft) { draft, _ in
+                        DiagnosticFlowView(mode: .onboarding, initialDraft: resolvedDiagnosticPrefillDraft) { draft, _ in
                             let saved = try? await personalizationStore.saveSnapshot(from: draft, source: .onboarding)
                             guard saved != nil else { return }
                             diagnosticPrefillDraft = nil
@@ -228,6 +231,17 @@ struct RootGateView<MainContent: View>: View {
         session.setHasCompletedDiagnostic(hasCompletedDiagnostic)
         session.setHasSeenDiagnosticInsights(hasSeenDiagnosticInsights)
         session.setIsSubscribed(isSubscribed)
+    }
+
+    private var resolvedDiagnosticPrefillDraft: PersonalizationDraft? {
+        if let diagnosticPrefillDraft {
+            return diagnosticPrefillDraft
+        }
+        guard let workspace = LoomDefaultsScope.currentWorkspace(), workspace.shouldPrefillDiagnosticDuringOnboarding else {
+            return nil
+        }
+        guard session.hasAccount, !session.hasCompletedDiagnostic else { return nil }
+        return LoomDemoWorkspaceSeeder.demoPersonalizationDraft()
     }
 
     private func syncGatePresentationState() {

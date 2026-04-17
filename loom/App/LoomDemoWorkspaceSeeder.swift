@@ -40,7 +40,7 @@ enum LoomSpecialAccountWorkspace: String {
     }
 
     var usesDefaultMonthlySubscription: Bool {
-        self == .reviewDemo
+        self == .reviewDemo || self == .reviewOnboardingDemo
     }
 
     var preservesWorkspaceStateAcrossLogout: Bool {

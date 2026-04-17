@@ -1,9 +1,6 @@
 import SwiftUI
 import SwiftData
 import Charts
-#if canImport(FamilyControls)
-import FamilyControls
-#endif
 
 #Preview {
     NavigationStack {
@@ -5401,14 +5398,10 @@ private struct LittleWinIntegrationSetupSheet: View {
     @State private var isConnecting = false
     @State private var isRefreshingHealthProgress = false
     @State private var healthStatusMessage: String? = nil
-    @State private var isShowingScreenTimePicker = false
     @State private var selectedMetric: LittleWinsIntegrationConfig.Metric? = nil
     @State private var selectedTargetValue: Double? = nil
     @State private var showAppleHealthAccessAlert = false
     @State private var appleHealthAccessAlertBody = ""
-#if canImport(FamilyControls)
-    @State private var screenTimeSelection = FamilyActivitySelection()
-#endif
 
     private var metricOptions: [LittleWinsIntegrationConfig.Metric] {
         LittleWinsIntegrationConfig.Metric.options(for: source)
@@ -5470,16 +5463,6 @@ private struct LittleWinIntegrationSetupSheet: View {
                                     .lineLimit(1)
                                     .minimumScaleFactor(0.8)
                             }
-                        }
-                    }
-                    if source == .screenTime, config.isConnected {
-                        Button("Select Apps & Categories") {
-                            openScreenTimePicker()
-                        }
-                        if let summary = config.screenTimeSelectionSummary, !summary.isEmpty {
-                            Text(summary)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
                         }
                     }
                     if let healthStatusMessage, !healthStatusMessage.isEmpty {
@@ -5639,28 +5622,6 @@ private struct LittleWinIntegrationSetupSheet: View {
                 selectedTargetValue = nil
             }
         }
-#if canImport(FamilyControls)
-        .sheet(isPresented: $isShowingScreenTimePicker) {
-            NavigationStack {
-                FamilyActivityPicker(selection: $screenTimeSelection)
-                    .navigationTitle("Select Apps")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .navigationBarLeading) {
-                            Button("Cancel") { isShowingScreenTimePicker = false }
-                        }
-                        ToolbarItem(placement: .navigationBarTrailing) {
-                            Button("Done") {
-                                config.screenTimeSelectionSummary = LittleWinsScreenTimeBridge.selectionSummary(for: screenTimeSelection)
-                                config.updatedAtUnix = Date().timeIntervalSince1970
-                                isShowingScreenTimePicker = false
-                            }
-                        }
-                    }
-            }
-            .presentationDetents([.large])
-        }
-#endif
     }
 
     private func targetOptions(for metric: LittleWinsIntegrationConfig.Metric) -> [Double] {
@@ -5671,10 +5632,6 @@ private struct LittleWinIntegrationSetupSheet: View {
             return [10, 20, 30, 45, 60, 90]
         case .sleepHours:
             return [5.0, 6.0, 6.5, 7.0, 7.5, 8.0, 9.0]
-        case .socialMediaMinutes:
-            return [15, 30, 45, 60, 90, 120]
-        case .totalScreenTimeMinutes:
-            return [30, 60, 90, 120, 180, 240]
         }
     }
 
@@ -5694,38 +5651,7 @@ private struct LittleWinIntegrationSetupSheet: View {
             healthStatusMessage = nil
             return
         }
-        if source == .screenTime {
-            connectScreenTime()
-            return
-        }
         connectAppleHealth()
-    }
-
-    private func connectScreenTime() {
-        isConnecting = true
-        healthStatusMessage = nil
-        LittleWinsScreenTimeBridge.requestAuthorization { result in
-            DispatchQueue.main.async {
-                isConnecting = false
-                switch result {
-                case .success:
-                    config.isConnected = true
-                    config.updatedAtUnix = Date().timeIntervalSince1970
-                    healthStatusMessage = nil
-                case .failure(let error):
-                    config.isConnected = false
-                    healthStatusMessage = error.localizedDescription
-                }
-            }
-        }
-    }
-
-    private func openScreenTimePicker() {
-#if canImport(FamilyControls)
-        isShowingScreenTimePicker = true
-#else
-        healthStatusMessage = "Screen Time app/category picker is not available on this device."
-#endif
     }
 
     private func connectAppleHealth() {

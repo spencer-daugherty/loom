@@ -661,6 +661,25 @@ struct AccountView: View {
         refreshLoomAICostSnapshot()
     }
 
+    private var appVersionLabel: String {
+        let bundle = Bundle.main
+        let version = (bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let build = (bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        if !version.isEmpty && !build.isEmpty {
+            return "Version \(version) (\(build))"
+        }
+        if !version.isEmpty {
+            return "Version \(version)"
+        }
+        if !build.isEmpty {
+            return "Build \(build)"
+        }
+        return "Loom"
+    }
+
     private func resetReviewOnboardingDemoWorkspace() {
         LoomSpecialAccountWorkspace.reviewOnboardingDemo.setAllowsAutoCreate(true)
         session.resetIsolatedWorkspaceImmediately(.reviewOnboardingDemo)
@@ -857,7 +876,7 @@ struct AccountView: View {
             Section {
                 HStack {
                     Spacer()
-                    Text("Version: 0.1.0-alpha.7")
+                    Text(appVersionLabel)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -883,7 +902,7 @@ struct AccountView: View {
 
                 HStack(spacing: 16) {
                     Spacer()
-                    Button("License Agreement") {
+                    Button("Standard License Agreement") {
                         presentedLegalDocument = .terms
                     }
                     .buttonStyle(.plain)
@@ -3081,7 +3100,7 @@ private struct SubscriptionAboutSheet: View {
                             onShowLegalDocument(.terms)
                         }
                     } label: {
-                        Label("License Agreement", systemImage: "doc.text")
+                        Label("Standard License Agreement", systemImage: "doc.text")
                     }
                 }
             }
