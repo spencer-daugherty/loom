@@ -2966,6 +2966,31 @@ private struct LoomAITokenizedMessageView: View {
                 foreground: base,
                 background: lightened(base, amount: 0.87)
             )
+        case "G":
+            let payload = inlineCategoryTokenPayload(from: value)
+            let base = fixedColor(FulfillmentCategoryTheme.color(for: payload.category))
+            return highlightedText(
+                payload.display,
+                font: .subheadline.weight(.semibold),
+                foreground: base,
+                background: lightened(base, amount: 0.87)
+            )
+        case "R":
+            let payload = inlineCategoryTokenPayload(from: value)
+            let base = fixedColor(FulfillmentCategoryTheme.color(for: payload.category))
+            return highlightedText(
+                payload.display,
+                font: .subheadline.italic(),
+                foreground: base,
+                background: lightened(base, amount: 0.90)
+            )
+        case "S":
+            return highlightedText(
+                value,
+                font: .subheadline.weight(.bold),
+                foreground: Color.black.opacity(0.88),
+                background: Color(red: 0.94, green: 0.94, blue: 0.95)
+            )
         case "I":
             let payload = inlineCategoryTokenPayload(from: value)
             let base = fixedColor(FulfillmentCategoryTheme.color(for: payload.category))
@@ -3197,7 +3222,7 @@ private struct LoomAITokenizedMessageView: View {
             let matchedText = String(text[match.range])
             let tokenValue: String = {
                 switch match.reference.kind {
-                case "C", "I", "M":
+                case "C", "G", "I", "M", "R":
                     let category = match.reference.categoryName ?? matchedText
                     return "\(matchedText)||\(category)"
                 default:

@@ -473,7 +473,7 @@ extension LoomAIChatProvider {
         case 3:
             return "The previous result was invalid because it returned activities instead of identities. Return only 2 or 3 identity phrases for this exact area. Do not return hobbies, plans, or tasks."
         case 5:
-            return "The previous result was invalid because it did not improve the goal through Loom support actions. Return only 2 or 3 short personalized capture actions for this exact goal. Focus on Loom levers like connecting a Contributing Little Win, clarifying the goal reason, naming one blocker, or defining one weekly support action. Do not return Little Wins, mission rewrites, identity phrases, or generic planning advice."
+            return "The previous result was invalid because it did not coach the goal through the right Loom support layer. Return only 2 or 3 short personalized capture actions for this exact goal, plus a 3 to 5 sentence coaching message ending with a colon. Stay inside the goal's real support area. Focus on one support lever such as connecting a Contributing Little Win, clarifying why the goal matters, naming one blocker, defining one weekly support move, or adding accountability. Do not return Little Wins, mission rewrites, identity phrases, generic planning advice, unrelated categories, or third-person advice about someone else's progress."
         case 6:
             return "The previous result was invalid because it returned tasks instead of passions. Return only 2 or 3 passion-style phrases or titles for this exact passion type."
         case 7:
@@ -558,6 +558,9 @@ extension LoomAIChatProvider {
             - No activities, hobbies, habits, plans, or projects.
             """
         case 5:
+            let goal = resolveGoalStrict(target: route.target, context: context) ?? resolveGoal(target: route.target, context: context)
+            let category = goalPlanSupportCategory(goal: goal, context: context)
+            let lever = goalPlanSupportLever(goal: goal, category: category, context: context)
             return """
             Add exactly \(missingCount) more unique capture actions for the goal \(route.target ?? "this goal").\(exclusionBlock)
             Return only this format:
@@ -566,8 +569,10 @@ extension LoomAIChatProvider {
 
             Rules:
             - Each option must be a short personalized action to add to Capture.
-            - Focus on Loom support levers like connecting a Contributing Little Win, clarifying the goal reason, naming one blocker, or defining one weekly support action.
-            - Do not return Little Wins, identity phrases, mission rewrites, or generic planning advice.
+            - Keep every option aligned to this coaching focus: \(goalPlanPromptFocus(lever: lever, goal: goal, category: category)).
+            - Stay inside the goal's actual support area\(category.map { " (\($0.name))" } ?? "") and do not borrow unrelated categories, action blocks, or capture items.
+            - Real-world support moves are allowed only when they directly move the user's goal forward, such as accountability, prep, scheduling, or blocker removal.
+            - Do not return Little Wins, identity phrases, mission rewrites, generic planning advice, or third-person advice about someone else's progress.
             """
         case 6:
             return """
@@ -1031,8 +1036,12 @@ extension LoomAIChatProvider {
         let routeID = route?.id
         let shouldKeepGuide = routeID == 8 || route == nil
         var compact = snapshot.minimalized().compactedForLoomAI()
-        let routeCategory = resolveCategory(target: route?.target, context: compact)
-        let routeGoal = resolveGoal(target: route?.target, context: compact)
+        let routeGoal = routeID == 5
+            ? resolveGoalStrict(target: route?.target, context: compact)
+            : resolveGoal(target: route?.target, context: compact)
+        let routeCategory = routeID == 5
+            ? goalPlanSupportCategory(goal: routeGoal, context: compact)
+            : resolveCategory(target: route?.target, context: compact)
         let relevantCategories = appleRelevantCategories(
             from: compact,
             route: route,
@@ -2791,24 +2800,114 @@ extension LoomAIChatProvider {
         let text = normalizeLine(action.payload["text"] ?? action.title).lowercased()
         guard !text.isEmpty else { return false }
 
-        let goal = resolveGoal(target: route.target, context: context)
+        let goal = resolveGoalStrict(target: route.target, context: context) ?? resolveGoal(target: route.target, context: context)
+        let category = goalPlanSupportCategory(goal: goal, context: context)
         let goalTitle = normalizeLine(goal?.title ?? route.target ?? "").lowercased()
-        let categoryName = normalizeLine(goal?.category ?? "").lowercased()
+        let categoryName = normalizeLine(category?.name ?? goal?.category ?? "").lowercased()
+        let theme = goalPlanTheme(goal: goal, category: category)
+
         let leverSignals = [
             "contributing little win",
-            "capture",
-            "goal reason",
-            "why this goal matters",
-            "blocker",
-            "action block",
+            "accountability",
             "weekly support",
-            "weekly step",
-            "clarify"
+            "weekly block",
+            "weekly workout",
+            "meal prep",
+            "prep",
+            "blocker",
+            "obstacle",
+            "reason this matters",
+            "why this goal matters",
+            "why this matters",
+            "capture",
+            "support",
+            "schedule",
+            "plan",
+            "weigh-in",
+            "habit"
         ]
         let hasRelevantSignal = leverSignals.contains(where: text.contains)
         let matchesGoal = !goalTitle.isEmpty && (text.contains(goalTitle) || keyPhraseOverlap(in: text, target: goalTitle))
-        let matchesCategory = !categoryName.isEmpty && text.contains(categoryName)
-        return hasRelevantSignal || matchesGoal || matchesCategory
+        let matchesCategory = !categoryName.isEmpty && (text.contains(categoryName) || keyPhraseOverlap(in: text, target: categoryName))
+        let hasUserOwnedSupportLanguage = [
+            "i ",
+            "my ",
+            "for me",
+            "for this week",
+            "for next week",
+            "this goal",
+            "accountability",
+            "with me",
+            "join me",
+            "support"
+        ].contains(where: text.contains)
+
+        let blockedThirdPartyPhrases = [
+            "their progress",
+            "their goal",
+            "friend's progress",
+            "loved one's progress",
+            "someone else's"
+        ]
+        if blockedThirdPartyPhrases.contains(where: text.contains) {
+            return false
+        }
+
+        let unrelatedRelationshipPhrases = [
+            "deep conversation",
+            "relationship time",
+            "date night",
+            "thoughtful message",
+            "check in with friend",
+            "give undivided attention",
+            "loved one"
+        ]
+        if theme != .relationships,
+           unrelatedRelationshipPhrases.contains(where: text.contains),
+           !["accountability", "support", "with me", "join me", "weigh-in", "walk with"].contains(where: text.contains) {
+            return false
+        }
+
+        if let capture = context.capture {
+            let topItems = capture.topItems.map { normalizeLine($0).lowercased() }.filter { !$0.isEmpty }
+            if topItems.contains(where: { $0 == text || normalizedComparisonKey($0) == normalizedComparisonKey(text) }),
+               !matchesGoal,
+               !matchesCategory {
+                return false
+            }
+        }
+
+        switch theme {
+        case .health:
+            let healthSignals = ["walk", "meal", "protein", "workout", "sleep", "weigh", "prep", "gym", "steps", "accountability", "habit"]
+            if healthSignals.contains(where: text.contains) {
+                return true
+            }
+        case .finance:
+            let financeSignals = ["budget", "save", "transfer", "spending", "debt", "account", "payment", "auto-transfer"]
+            if financeSignals.contains(where: text.contains) {
+                return true
+            }
+        case .career:
+            let careerSignals = ["feedback", "manager", "project", "portfolio", "application", "pitch", "follow-up", "focus block"]
+            if careerSignals.contains(where: text.contains) {
+                return true
+            }
+        case .relationships:
+            let relationshipSignals = ["conversation", "date", "friend", "partner", "listen", "message", "quality time"]
+            if relationshipSignals.contains(where: text.contains) {
+                return true
+            }
+        case .lifestyle:
+            let lifestyleSignals = ["book", "class", "museum", "trail", "trip", "experience", "explore", "adventure"]
+            if lifestyleSignals.contains(where: text.contains) {
+                return true
+            }
+        case .generic:
+            break
+        }
+
+        return (hasRelevantSignal || matchesGoal || matchesCategory) && hasUserOwnedSupportLanguage
     }
 
     static func isRouteMessageAcceptable(
@@ -2833,7 +2932,11 @@ extension LoomAIChatProvider {
                 .filter { !$0.isEmpty }
                 .count
         )
-        guard sentenceCount <= 2 else { return false }
+        if route.id == 5 {
+            guard sentenceCount >= 3 && sentenceCount <= 5 else { return false }
+        } else {
+            guard sentenceCount <= 2 else { return false }
+        }
 
         let categoryName = resolveCategory(target: route.target, context: context).map(\.name).map(normalizeLine).map { $0.lowercased() } ?? ""
         let goalTitle = resolveGoal(target: route.target, context: context).map(\.title).map(normalizeLine).map { $0.lowercased() } ?? normalizeLine(route.target ?? "").lowercased()
@@ -2855,8 +2958,26 @@ extension LoomAIChatProvider {
             let signals = ["next step", "next steps", "first move", "clear next move"]
             return signals.contains(where: text.contains) || (!goalTitle.isEmpty && text.contains(goalTitle))
         case 5:
-            let signals = ["capture", "support", "contributing little win", "goal reason", "blocker", "action block", "weekly support", "follow through", "follow-through"]
-            return signals.contains(where: text.contains) || (!goalTitle.isEmpty && text.contains(goalTitle))
+            let signals = ["capture", "support", "contributing little win", "goal reason", "blocker", "action block", "weekly support", "accountability", "follow through", "follow-through"]
+            let coachSignals = [
+                "that matters because",
+                "missing support layer",
+                "bigger gap",
+                "crowded out",
+                "start with one of these",
+                "this goal will move faster"
+            ]
+            let goal = resolveGoalStrict(target: route.target, context: context) ?? resolveGoal(target: route.target, context: context)
+            let category = goalPlanSupportCategory(goal: goal, context: context)
+            let theme = goalPlanTheme(goal: goal, category: category)
+            let blockedRelationshipSignals = ["relationship time", "deep conversation", "date night", "friend or loved one", "loved one"]
+            if theme != .relationships,
+               blockedRelationshipSignals.contains(where: text.contains),
+               !["accountability", "support", "join me", "with me"].contains(where: text.contains) {
+                return false
+            }
+            return (signals.contains(where: text.contains) || coachSignals.contains(where: text.contains))
+                && (!goalTitle.isEmpty ? text.contains(goalTitle) || keyPhraseOverlap(in: text, target: goalTitle) : true)
         case 6:
             let signals = ["passion", "conviction", "interest", "direction", "energ"]
             let blockedSignals = ["capture action", "weekly challenge", "little win", "habit"]
@@ -2916,8 +3037,12 @@ extension LoomAIChatProvider {
         route: LoomAIChatRoute,
         context: LoomAIContextSnapshot
     ) -> LoomAIFormattedRouteMessage {
-        let category = resolveCategory(target: route.target, context: context)
-        let goal = resolveGoal(target: route.target, context: context)
+        let goal = route.id == 5
+            ? (resolveGoalStrict(target: route.target, context: context) ?? resolveGoal(target: route.target, context: context))
+            : resolveGoal(target: route.target, context: context)
+        let category = route.id == 5
+            ? goalPlanSupportCategory(goal: goal, context: context)
+            : resolveCategory(target: route.target, context: context)
         let missionSummary = category.flatMap(missionFocusSummary(for:))
         let purpose = normalizedPurposeDirection(for: context)
         let identity = category?.identity
@@ -3004,21 +3129,26 @@ extension LoomAIChatProvider {
             ].compactMap { $0 }
         case 5:
             let goalTitle = goal?.title ?? (route.target ?? "this goal")
-            let area = category?.name
-            message = buildTwoSentenceRouteMessage(
-                sentenceOne: "\(goalTitle) will move faster when its Loom support is clearer",
-                sentenceTwo: personalizedLeadIn(
-                    base: "these capture actions fit best",
-                    primary: goalPlanSupportCue(goal: goal, category: category, context: context),
-                    secondary: area.map { "\($0) as the supporting area" }
-                ),
-                endsWithColon: true
-            )
-            annotations = [
-                neutralAnnotation(goalTitle),
-                area.flatMap { categoryAnnotation($0, categoryName: $0) },
-                neutralAnnotation(goalPlanSupportCue(goal: goal, category: category, context: context))
-            ].compactMap { $0 }
+            let supportCategory = goalPlanSupportCategory(goal: goal, context: context) ?? category
+            message = buildGoalPlanCoachMessage(goal: goal, category: supportCategory, context: context)
+            var route5Annotations: [LoomAIMessageAnnotation] = []
+            route5Annotations.append(contentsOf: [
+                supportCategory.flatMap { goalAnnotation(goalTitle, categoryName: $0.name) },
+                progressAnnotation(goal?.progressSummary),
+                supportCategory.flatMap { goalReasonAnnotation(goal?.reason, categoryName: $0.name) },
+                supportCategory.flatMap { categoryAnnotation($0.name, categoryName: $0.name) }
+            ].compactMap { $0 })
+            if let supportCategory,
+               let mission = normalizeLine(supportCategory.mission).nilIfEmpty,
+               normalizeLine(goal?.reason ?? "").isEmpty {
+                route5Annotations.append(missionAnnotation(mission, categoryName: supportCategory.name)!)
+            } else if supportCategory == nil {
+                route5Annotations.append(contentsOf: [
+                    neutralAnnotation(goalTitle),
+                    progressAnnotation(goal?.progressSummary)
+                ].compactMap { $0 })
+            }
+            annotations = route5Annotations
         case 6:
             let passionLabel = displayPassionLabel(for: normalizePassionType(route.target ?? "love"))
             let existingPassion = (context.drivingForce?.passions ?? [])
@@ -3207,10 +3337,11 @@ extension LoomAIChatProvider {
         context: LoomAIContextSnapshot,
         route: LoomAIChatRoute
     ) -> String {
-        let goal = resolveGoal(target: route.target, context: context)
-        let category = goal.flatMap { resolveCategory(target: $0.category, context: context) }
+        let goal = resolveGoalStrict(target: route.target, context: context) ?? resolveGoal(target: route.target, context: context)
+        let category = goalPlanSupportCategory(goal: goal, context: context)
+        let lever = goalPlanSupportLever(goal: goal, category: category, context: context)
         var lines = [
-            "Route meaning: Plan improves how this goal is supported inside Loom. Explain the clearest practical support gap, then suggest only capture actions that help the user fix it."
+            "Route meaning: Plan improves how this goal is supported inside Loom. Act like a coach. Explain the clearest practical support gap, why it matters, and then suggest only capture actions that help the user fix it."
         ]
         if let goal {
             lines.append("Goal: \(goal.title)")
@@ -3226,6 +3357,8 @@ extension LoomAIChatProvider {
                 lines.append("Current contributing little wins: none connected yet")
             }
         }
+        lines.append("Coach focus: \(goalPlanPromptFocus(lever: lever, goal: goal, category: category))")
+        lines.append("Why this lever matters: \(trimmed(lever.rationale, max: 180))")
         if let category {
             lines.append("Supporting area: \(category.name)")
             if let mission = normalizeLine(category.mission).nilIfEmpty {
@@ -3238,7 +3371,7 @@ extension LoomAIChatProvider {
                 lines.append("Available little wins in this area: \(category.littleWins.prefix(3).joined(separator: ", "))")
             }
         }
-        if let block = relevantActionBlock(context: context, route: route, goal: goal, category: category) {
+        if let block = goalPlanRelevantActionBlock(context: context, goal: goal, category: category) {
             lines.append("Current action block: \(block.title)")
             if !block.actions.isEmpty {
                 lines.append("Action block actions: \(block.actions.prefix(3).joined(separator: ", "))")
@@ -3246,12 +3379,10 @@ extension LoomAIChatProvider {
         }
         if let capture = context.capture, capture.totalCount > 0 {
             lines.append("Capture load: \(capture.totalCount) items")
-            if !capture.topItems.isEmpty {
-                lines.append("Top capture items: \(capture.topItems.prefix(3).joined(separator: " | "))")
+            let relevantCaptureItems = relevantGoalPlanCaptureItems(goal: goal, category: category, context: context)
+            if !relevantCaptureItems.isEmpty {
+                lines.append("Relevant capture items: \(relevantCaptureItems.prefix(3).joined(separator: " | "))")
             }
-        }
-        if let purpose = normalizedPurposeDirection(for: context) {
-            lines.append("Purpose direction: \(purpose)")
         }
         if let cue = bestRouteDiagnosticCue(for: context) {
             lines.append("Pressure cue: \(String(cue.prefix(140)))")
@@ -3388,9 +3519,15 @@ extension LoomAIChatProvider {
             return "- Keep `suggestionCards`, `actions`, `nextAction`, and `chips` empty."
         }
 
-        let messageRule: String = route.id == 8
-            ? "- `message` must be 1 or 2 sentences, Loom-specific, and should not end with a colon."
-            : "- `message` must be 1 or 2 sentences, personalized to this route, and the final sentence must end with a colon."
+        let messageRule: String = {
+            if route.id == 8 {
+                return "- `message` must be 1 or 2 sentences, Loom-specific, and should not end with a colon."
+            }
+            if route.id == 5 {
+                return "- `message` must be 3 to 5 sentences, coach-like, personalized to this goal, and the final sentence must end with a colon."
+            }
+            return "- `message` must be 1 or 2 sentences, personalized to this route, and the final sentence must end with a colon."
+        }()
 
         switch route.id {
         case 1:
@@ -3434,9 +3571,11 @@ extension LoomAIChatProvider {
             \(messageRule)
             - Return exactly 1 suggestion card with 2 or 3 capture-action options.
             - Every option must normalize to `createCaptureAction`.
-            - Use the message to explain the clearest support improvement for this goal inside Loom, such as connecting a Contributing Little Win, clarifying the goal reason, naming a blocker, or defining one weekly action-plan move.
+            - Use the message like a coach: restate the goal, name the clearest support gap, explain why that gap matters, and then lead into the capture actions below.
+            - Stay inside this exact goal and its real support area. Never borrow a different fulfillment area, unrelated action block, or unrelated capture item.
             - Each option must be a short personalized capture action the user could add to Capture right now.
-            - Do not return Little Wins, plans-as-titles, mission rewrites, identity phrases, or generic motivation.
+            - Real-world support moves are allowed only when they directly move this goal forward and are phrased as user-owned actions, such as accountability, prep, scheduling, or blocker removal.
+            - Do not return Little Wins, plans-as-titles, mission rewrites, identity phrases, generic motivation, or third-person advice about someone else's progress.
             - Keep the card title route-relevant and short. Leave the card description empty or very short.
             """
         case 6:
@@ -3482,6 +3621,25 @@ extension LoomAIChatProvider {
             return """
             MESSAGE:
             <1 to 2 short Loom-specific sentences>
+            """
+        }
+
+        if route.id == 5 {
+            return """
+            MESSAGE:
+            <3 to 5 coaching sentences ending with a colon>
+
+            OPTIONS:
+            - <capture action 1>
+            - <capture action 2>
+            - <capture action 3>
+
+            Route-specific rules:
+            - Each option must be a short personalized capture action that improves how this goal is supported in Loom.
+            - Keep the message coach-like: restate the goal, name the clearest support gap, explain why it matters, then lead into the options.
+            - Focus on Loom levers like Contributing Little Wins, weekly support, blocker removal, accountability, or clarifying why the goal matters.
+            - Do not return Little Wins, mission rewrites, identity phrases, generic planning advice, or third-person advice about someone else's progress.
+            - Return 2 or 3 options when possible, but return 1 if only 1 strong option is available.
             """
         }
 
@@ -3613,6 +3771,461 @@ extension LoomAIChatProvider {
         }
     }
 
+    enum GoalPlanTheme {
+        case health
+        case finance
+        case career
+        case relationships
+        case lifestyle
+        case generic
+    }
+
+    enum GoalPlanSupportLeverKind {
+        case connectContributingLittleWin
+        case clarifyGoalReason
+        case defineWeeklySupportMove
+        case nameBlockerAndFix
+        case addAccountabilitySupport
+        case reduceConflictingLoad
+    }
+
+    struct GoalPlanSupportLever {
+        var kind: GoalPlanSupportLeverKind
+        var shortLabel: String
+        var rationale: String
+        var captureActions: [String]
+    }
+
+    static func resolveCategoryStrict(
+        target: String?,
+        context: LoomAIContextSnapshot
+    ) -> LoomAIContextSnapshot.FulfillmentCategorySummary? {
+        let categories = context.fulfillmentCategories
+        guard !categories.isEmpty else { return nil }
+        guard let target = normalizeLine(target ?? "").nilIfEmpty else { return nil }
+        let exactMatches = categories.filter { $0.name.caseInsensitiveCompare(target) == .orderedSame }
+        return exactMatches.max(by: { categoryContextRichnessScore($0) < categoryContextRichnessScore($1) })
+    }
+
+    static func resolveGoalStrict(
+        target: String?,
+        context: LoomAIContextSnapshot
+    ) -> LoomAIContextSnapshot.OutcomeSummary? {
+        let goals = context.activeOutcomes
+        guard !goals.isEmpty else { return nil }
+        guard let target = normalizeLine(target ?? "").nilIfEmpty else { return nil }
+        return goals.first(where: { $0.title.caseInsensitiveCompare(target) == .orderedSame })
+    }
+
+    static func inferredColorKey(for categoryName: String) -> String {
+        let lower = normalizeLine(categoryName).lowercased()
+        if lower.contains("health") || lower.contains("energy") || lower.contains("fitness") {
+            return "red"
+        }
+        if lower.contains("wealth") || lower.contains("finance") || lower.contains("money") {
+            return "green"
+        }
+        if lower.contains("love") || lower.contains("relationship") {
+            return "pink"
+        }
+        if lower.contains("career") || lower.contains("business") {
+            return "blue"
+        }
+        if lower.contains("lifestyle") || lower.contains("experience") {
+            return "indigo"
+        }
+        if lower.contains("learning") || lower.contains("education") {
+            return "orange"
+        }
+        if lower.contains("faith") || lower.contains("spiritual") {
+            return "purple"
+        }
+        return "gray"
+    }
+
+    static func virtualGoalPlanSupportCategory(
+        categoryName: String,
+        context: LoomAIContextSnapshot
+    ) -> LoomAIContextSnapshot.FulfillmentCategorySummary {
+        let normalizedName = normalizeLine(categoryName).nilIfEmpty ?? "this area"
+        let connected = (context.drivingForce?.passions ?? [])
+            .prefix(2)
+            .map { "\(normalizePassionType($0.emotion)): \($0.title)" }
+        let mission = missionSuggestionExamples(for: normalizedName).first ?? "I strengthen this area because it supports the rest of my life when consistency matters most."
+        return .init(
+            id: "virtual-\(slug(normalizedName))",
+            name: normalizedName,
+            colorKey: inferredColorKey(for: normalizedName),
+            mission: mission,
+            identity: Array(defaultIdentitySuggestionPool(for: normalizedName).prefix(3)),
+            littleWins: Array(littleWinSuggestionPool(for: normalizedName).prefix(3)),
+            resources: [],
+            connectedPassions: connected,
+            weeklyScore: nil
+        )
+    }
+
+    static func goalPlanSupportCategory(
+        goal: LoomAIContextSnapshot.OutcomeSummary?,
+        context: LoomAIContextSnapshot
+    ) -> LoomAIContextSnapshot.FulfillmentCategorySummary? {
+        guard let goal else { return nil }
+        if let category = resolveCategoryStrict(target: goal.category, context: context) {
+            return category
+        }
+        guard let categoryName = normalizeLine(goal.category).nilIfEmpty else { return nil }
+        return virtualGoalPlanSupportCategory(categoryName: categoryName, context: context)
+    }
+
+    static func goalPlanTheme(
+        goal: LoomAIContextSnapshot.OutcomeSummary?,
+        category: LoomAIContextSnapshot.FulfillmentCategorySummary?
+    ) -> GoalPlanTheme {
+        let source = "\(normalizeLine(goal?.title ?? "")) \(normalizeLine(goal?.reason ?? "")) \(normalizeLine(category?.name ?? goal?.category ?? ""))".lowercased()
+        if regexMatch(#"\b(lose|loss|weight|lbs?|kg|fat|diet|walk|gym|cardio|health|energy|sleep|steps)\b"#, in: source) {
+            return .health
+        }
+        if regexMatch(#"\b(save|debt|money|finance|budget|income|net worth|invest|home down payment)\b"#, in: source) {
+            return .finance
+        }
+        if regexMatch(#"\b(promotion|raise|career|business|work|client|portfolio|manager)\b"#, in: source) {
+            return .career
+        }
+        if regexMatch(#"\b(friend|relationship|partner|marriage|love|circle|connection|conversation)\b"#, in: source) {
+            return .relationships
+        }
+        if regexMatch(#"\b(lifestyle|experience|travel|book|hobby|adventure|festival)\b"#, in: source) {
+            return .lifestyle
+        }
+        return .generic
+    }
+
+    static func goalPlanRelevantActionBlock(
+        context: LoomAIContextSnapshot,
+        goal: LoomAIContextSnapshot.OutcomeSummary?,
+        category: LoomAIContextSnapshot.FulfillmentCategorySummary?
+    ) -> LoomAIContextSnapshot.ActionBlockSummary? {
+        let goalTitle = normalizeLine(goal?.title ?? "").lowercased()
+        let categoryName = normalizeLine(category?.name ?? goal?.category ?? "").lowercased()
+        guard !goalTitle.isEmpty || !categoryName.isEmpty else { return nil }
+
+        return context.currentWeekActionBlocks.first(where: { block in
+            let title = normalizeLine(block.title).lowercased()
+            let blockCategory = normalizeLine(block.category).lowercased()
+            if !goalTitle.isEmpty && (title.contains(goalTitle) || keyPhraseOverlap(in: title, target: goalTitle)) {
+                return true
+            }
+            if !categoryName.isEmpty && (blockCategory == categoryName || title.contains(categoryName)) {
+                return true
+            }
+            return false
+        })
+    }
+
+    static func relevantGoalPlanCaptureItems(
+        goal: LoomAIContextSnapshot.OutcomeSummary?,
+        category: LoomAIContextSnapshot.FulfillmentCategorySummary?,
+        context: LoomAIContextSnapshot
+    ) -> [String] {
+        guard let capture = context.capture else { return [] }
+        let goalTitle = normalizeLine(goal?.title ?? "").lowercased()
+        let categoryName = normalizeLine(category?.name ?? goal?.category ?? "").lowercased()
+        return capture.topItems
+            .map(normalizeLine)
+            .filter { !$0.isEmpty }
+            .filter { item in
+                let lower = item.lowercased()
+                if !goalTitle.isEmpty && (lower.contains(goalTitle) || keyPhraseOverlap(in: lower, target: goalTitle)) {
+                    return true
+                }
+                if !categoryName.isEmpty && (lower.contains(categoryName) || keyPhraseOverlap(in: lower, target: categoryName)) {
+                    return true
+                }
+                return false
+            }
+    }
+
+    static func goalPlanSupportLever(
+        goal: LoomAIContextSnapshot.OutcomeSummary?,
+        category: LoomAIContextSnapshot.FulfillmentCategorySummary?,
+        context: LoomAIContextSnapshot
+    ) -> GoalPlanSupportLever {
+        let goalReason = normalizeLine(goal?.reason ?? "").nilIfEmpty
+        let block = goalPlanRelevantActionBlock(context: context, goal: goal, category: category)
+        let theme = goalPlanTheme(goal: goal, category: category)
+        let contributingLittleWins = goal?.contributingLittleWins.map(normalizeLine).filter { !$0.isEmpty } ?? []
+        let categoryLittleWins = category?.littleWins.map(normalizeLine).filter { !$0.isEmpty } ?? []
+        let captureLoad = context.capture?.totalCount ?? 0
+
+        if contributingLittleWins.isEmpty, let firstLittleWin = categoryLittleWins.first {
+            return GoalPlanSupportLever(
+                kind: .connectContributingLittleWin,
+                shortLabel: "connect a Contributing Little Win",
+                rationale: goalReason ?? "that daily support is still too loose for consistent follow-through",
+                captureActions: goalPlanCaptureActions(
+                    kind: .connectContributingLittleWin,
+                    theme: theme,
+                    seedLittleWin: firstLittleWin
+                )
+            )
+        }
+
+        if goalReason == nil || (goalReason?.count ?? 0) < 40 {
+            return GoalPlanSupportLever(
+                kind: .clarifyGoalReason,
+                shortLabel: "clarify why this goal matters",
+                rationale: "a sharper reason makes it easier to choose the right support actions when urgency takes over",
+                captureActions: goalPlanCaptureActions(
+                    kind: .clarifyGoalReason,
+                    theme: theme,
+                    seedLittleWin: nil
+                )
+            )
+        }
+
+        if block == nil {
+            return GoalPlanSupportLever(
+                kind: .defineWeeklySupportMove,
+                shortLabel: "define one weekly support move",
+                rationale: goalReason ?? "this goal has no matching weekly support layer yet",
+                captureActions: goalPlanCaptureActions(
+                    kind: .defineWeeklySupportMove,
+                    theme: theme,
+                    seedLittleWin: nil
+                )
+            )
+        }
+
+        if captureLoad >= 5 {
+            return GoalPlanSupportLever(
+                kind: .reduceConflictingLoad,
+                shortLabel: "reduce conflicting load around the goal",
+                rationale: "too many open items make it easier for this goal to get crowded out",
+                captureActions: goalPlanCaptureActions(
+                    kind: .reduceConflictingLoad,
+                    theme: theme,
+                    seedLittleWin: nil
+                )
+            )
+        }
+
+        if theme == .health || theme == .finance || theme == .career {
+            return GoalPlanSupportLever(
+                kind: .addAccountabilitySupport,
+                shortLabel: "add accountability or outside support",
+                rationale: goalReason ?? "a visible support loop makes consistency easier when momentum fades",
+                captureActions: goalPlanCaptureActions(
+                    kind: .addAccountabilitySupport,
+                    theme: theme,
+                    seedLittleWin: nil
+                )
+            )
+        }
+
+        return GoalPlanSupportLever(
+            kind: .nameBlockerAndFix,
+            shortLabel: "name the main blocker and one fix",
+            rationale: goalReason ?? "the next bottleneck is probably practical, not motivational",
+            captureActions: goalPlanCaptureActions(
+                kind: .nameBlockerAndFix,
+                theme: theme,
+                seedLittleWin: nil
+            )
+        )
+    }
+
+    static func goalPlanCaptureActions(
+        kind: GoalPlanSupportLeverKind,
+        theme: GoalPlanTheme,
+        seedLittleWin: String?
+    ) -> [String] {
+        switch kind {
+        case .connectContributingLittleWin:
+            var actions: [String] = []
+            if let seedLittleWin {
+                actions.append("Connect \"\(seedLittleWin)\" as a Contributing Little Win")
+            }
+            switch theme {
+            case .health:
+                actions.append(contentsOf: [
+                    "Add the one daily health habit most tied to progress as a Contributing Little Win",
+                    "Capture the easiest habit to repeat every day for this goal"
+                ])
+            case .finance:
+                actions.append(contentsOf: [
+                    "Connect one daily money habit as a Contributing Little Win",
+                    "Capture the one financial habit that should support this goal every week"
+                ])
+            default:
+                actions.append(contentsOf: [
+                    "Capture the one repeatable habit that should support this goal",
+                    "Add the smallest supporting action you can repeat this week"
+                ])
+            }
+            return actions
+        case .clarifyGoalReason:
+            return [
+                "Write one sentence for why this goal matters this season",
+                "Capture the specific payoff that makes this goal worth protecting",
+                "Write the one reason you want to follow through even when motivation dips"
+            ]
+        case .defineWeeklySupportMove:
+            switch theme {
+            case .health:
+                return [
+                    "Schedule three workout windows for next week",
+                    "Choose one weigh-in day and one prep window for the week",
+                    "Block one grocery and meal-prep window for next week"
+                ]
+            case .finance:
+                return [
+                    "Schedule one weekly money review block",
+                    "Choose one day to move money toward this goal each week",
+                    "Block one weekly check-in to review progress and the next action"
+                ]
+            case .career:
+                return [
+                    "Block one focused work session for the highest-leverage step",
+                    "Schedule one weekly review for progress and next actions",
+                    "Choose one protected window next week for work that directly moves this goal"
+                ]
+            default:
+                return [
+                    "Schedule one weekly support block for this goal",
+                    "Choose one protected window next week for the next meaningful step",
+                    "Capture the weekly action that should support this goal first"
+                ]
+            }
+        case .nameBlockerAndFix:
+            switch theme {
+            case .health:
+                return [
+                    "Write the time of day you usually get off track and one better default",
+                    "Name the main blocker to eating or moving well this week and one fix",
+                    "Capture the one environment change that would make the healthy choice easier"
+                ]
+            default:
+                return [
+                    "Write the main blocker slowing this goal and one practical fix",
+                    "Capture the one thing most likely to knock this goal off track this week",
+                    "Name one friction point and the simplest way to remove it"
+                ]
+            }
+        case .addAccountabilitySupport:
+            switch theme {
+            case .health:
+                return [
+                    "Ask one friend to be an accountability partner for weekly check-ins",
+                    "Ask someone to join you for one walk or workout this week",
+                    "Set one weekly check-in to report your progress to someone you trust"
+                ]
+            case .finance:
+                return [
+                    "Ask one trusted person to review your progress with you this month",
+                    "Set one accountability check-in for your savings or debt progress",
+                    "Capture who you can ask to help you stay consistent with this goal"
+                ]
+            case .career:
+                return [
+                    "Ask one mentor or manager for accountability on the next milestone",
+                    "Set one follow-up check-in with someone who can keep this goal visible",
+                    "Capture who should know about this goal so you stay committed to it"
+                ]
+            default:
+                return [
+                    "Ask one person to help keep this goal visible each week",
+                    "Set one accountability check-in for progress on this goal",
+                    "Capture who can help you stay consistent with this goal"
+                ]
+            }
+        case .reduceConflictingLoad:
+            return [
+                "List the capture items that do not support this goal this week",
+                "Choose one open item to defer so this goal gets a cleaner lane",
+                "Capture the one competing priority most likely to crowd this out"
+            ]
+        }
+    }
+
+    static func goalPlanCoachGapSentence(
+        lever: GoalPlanSupportLever,
+        goal: LoomAIContextSnapshot.OutcomeSummary?,
+        category: LoomAIContextSnapshot.FulfillmentCategorySummary?
+    ) -> String {
+        switch lever.kind {
+        case .connectContributingLittleWin:
+            if let categoryName = normalizeLine(category?.name ?? goal?.category ?? "").nilIfEmpty {
+                return "The missing support layer is one repeatable \(categoryName) action that stays attached to this goal during the week."
+            }
+            return "The missing support layer is one repeatable action that keeps this goal supported during the week."
+        case .clarifyGoalReason:
+            return "The bigger gap is making the why visible enough that this goal still feels worth protecting when urgency takes over."
+        case .defineWeeklySupportMove:
+            return "The missing support layer is one weekly structure that protects this goal before the week gets rewritten."
+        case .nameBlockerAndFix:
+            return "The next bottleneck looks practical, so the most useful move is naming the friction and removing one clear obstacle."
+        case .addAccountabilitySupport:
+            return "This goal needs a visible support loop, because outside accountability makes follow-through easier when momentum dips."
+        case .reduceConflictingLoad:
+            return "This goal is getting crowded out by competing inputs, so the next move is clearing one conflicting demand."
+        }
+    }
+
+    static func goalPlanPromptFocus(
+        lever: GoalPlanSupportLever,
+        goal: LoomAIContextSnapshot.OutcomeSummary?,
+        category: LoomAIContextSnapshot.FulfillmentCategorySummary?
+    ) -> String {
+        switch lever.kind {
+        case .connectContributingLittleWin:
+            if let categoryName = normalizeLine(category?.name ?? goal?.category ?? "").nilIfEmpty {
+                return "attach one repeatable \(categoryName) support habit or Contributing Little Win"
+            }
+            return "attach one repeatable support habit or Contributing Little Win"
+        case .clarifyGoalReason:
+            return "make the reason for this goal clearer and easier to protect"
+        case .defineWeeklySupportMove:
+            return "create one weekly structure that keeps this goal visible"
+        case .nameBlockerAndFix:
+            return "identify the main blocker and remove one practical obstacle"
+        case .addAccountabilitySupport:
+            return "add accountability or outside support that keeps this goal visible"
+        case .reduceConflictingLoad:
+            return "clear one competing demand so this goal has room"
+        }
+    }
+
+    static func buildGoalPlanCoachMessage(
+        goal: LoomAIContextSnapshot.OutcomeSummary?,
+        category: LoomAIContextSnapshot.FulfillmentCategorySummary?,
+        context: LoomAIContextSnapshot
+    ) -> String {
+        let goalTitle = goal?.title ?? "this goal"
+        let progress = normalizeLine(goal?.progressSummary ?? "").nilIfEmpty
+        let reason = normalizeLine(goal?.reason ?? "").nilIfEmpty
+        let mission = normalizeLine(category?.mission ?? "").nilIfEmpty
+        let lever = goalPlanSupportLever(goal: goal, category: category, context: context)
+
+        var sentences: [String] = []
+        if let progress {
+            sentences.append("\(goalTitle) is at \(progress) right now, so the next gain comes from better support around the goal.")
+        } else {
+            sentences.append("\(goalTitle) will move faster when the support around it is clearer and easier to repeat.")
+        }
+        sentences.append(goalPlanCoachGapSentence(lever: lever, goal: goal, category: category))
+        if let reason {
+            let lowered = normalizeSentenceFragment(reason)
+            sentences.append("That matters because \(lowered).")
+        } else if let mission {
+            let lowered = normalizeSentenceFragment(mission)
+            sentences.append("That matters because \(category?.name ?? "this area") works best when \(lowered).")
+        } else {
+            sentences.append("That matters because clear support makes follow-through more reliable when urgency and carryover start competing.")
+        }
+        sentences.append("Start with one of these capture actions to lock in better support this week:")
+        return sentences.joined(separator: " ")
+    }
+
     static func nextStepLoadCue(
         context: LoomAIContextSnapshot,
         goal: LoomAIContextSnapshot.OutcomeSummary?,
@@ -3632,21 +4245,7 @@ extension LoomAIChatProvider {
         category: LoomAIContextSnapshot.FulfillmentCategorySummary?,
         context: LoomAIContextSnapshot
     ) -> String? {
-        if let goal, goal.contributingLittleWins.isEmpty,
-           let category,
-           !category.littleWins.isEmpty {
-            return "no Contributing Little Wins are connected yet"
-        }
-        if let goal, let reason = normalizeLine(goal.reason).nilIfEmpty {
-            return "the reason this goal matters: \(String(reason.prefix(120)))"
-        }
-        if let block = relevantActionBlock(context: context, route: nil, goal: goal, category: category) {
-            return "your current action block \(block.title)"
-        }
-        if let capture = context.capture, capture.totalCount > 0 {
-            return "your current capture load of \(capture.totalCount) items"
-        }
-        return bestRouteDiagnosticCue(for: context)
+        goalPlanSupportLever(goal: goal, category: category, context: context).shortLabel
     }
 
     static func bestRouteDiagnosticCue(for context: LoomAIContextSnapshot) -> String? {
@@ -3708,8 +4307,36 @@ extension LoomAIChatProvider {
         context: LoomAIContextSnapshot,
         route: LoomAIChatRoute
     ) -> [LoomAIMessageAnnotation] {
-        let category = resolveCategory(target: route.target, context: context)
-        let goal = resolveGoal(target: route.target, context: context)
+        let goal = route.id == 5
+            ? (resolveGoalStrict(target: route.target, context: context) ?? resolveGoal(target: route.target, context: context))
+            : resolveGoal(target: route.target, context: context)
+        let category = route.id == 5
+            ? goalPlanSupportCategory(goal: goal, context: context)
+            : resolveCategory(target: route.target, context: context)
+        if route.id == 5 {
+            var annotations: [LoomAIMessageAnnotation] = []
+            let goalLabel = goal?.title ?? route.target ?? "this goal"
+            if let category {
+                annotations.append(contentsOf: [
+                    goalAnnotation(goalLabel, categoryName: category.name),
+                    progressAnnotation(goal?.progressSummary),
+                    goalReasonAnnotation(goal?.reason, categoryName: category.name),
+                    categoryAnnotation(category.name, categoryName: category.name)
+                ].compactMap { $0 })
+
+                if normalizeLine(goal?.reason ?? "").isEmpty,
+                   let mission = normalizeLine(category.mission).nilIfEmpty {
+                    annotations.append(missionAnnotation(mission, categoryName: category.name)!)
+                }
+            } else {
+                annotations.append(contentsOf: [
+                    neutralAnnotation(goalLabel),
+                    progressAnnotation(goal?.progressSummary)
+                ].compactMap { $0 })
+            }
+            return annotations
+        }
+
         var annotations: [LoomAIMessageAnnotation] = []
 
         if let category {
@@ -3815,6 +4442,21 @@ extension LoomAIChatProvider {
         return .init(kind: "V", displayText: cleaned, categoryName: nil)
     }
 
+    static func goalAnnotation(_ text: String?, categoryName: String) -> LoomAIMessageAnnotation? {
+        guard let cleaned = normalizeLine(text ?? "").nilIfEmpty else { return nil }
+        return .init(kind: "G", displayText: cleaned, categoryName: categoryName)
+    }
+
+    static func goalReasonAnnotation(_ text: String?, categoryName: String) -> LoomAIMessageAnnotation? {
+        guard let cleaned = normalizeLine(text ?? "").nilIfEmpty else { return nil }
+        return .init(kind: "R", displayText: cleaned, categoryName: categoryName)
+    }
+
+    static func progressAnnotation(_ text: String?) -> LoomAIMessageAnnotation? {
+        guard let cleaned = normalizeLine(text ?? "").nilIfEmpty else { return nil }
+        return .init(kind: "S", displayText: cleaned, categoryName: nil)
+    }
+
     static func neutralAnnotation(_ text: String?) -> LoomAIMessageAnnotation? {
         guard let cleaned = normalizeLine(text ?? "").nilIfEmpty else { return nil }
         return .init(kind: "N", displayText: cleaned, categoryName: nil)
@@ -3903,9 +4545,20 @@ extension LoomAIChatProvider {
             )
         }
 
-        let cards = response.suggestionCards
-        let actions = response.actions.isEmpty ? flattenSuggestionCards(cards) : response.actions
-        let nextAction = cards.isEmpty ? (response.nextAction ?? firstAction(from: cards)) : nil
+        let route5Actions: [LoomAISuggestedAction]? = route.id == 5
+            ? Array(dedupedSuggestionActions(
+                from: flattenSuggestionCards(response.suggestionCards)
+                    + response.actions
+                    + (response.nextAction.map { [$0] } ?? [])
+            ).prefix(routeSuggestionCountPolicy(for: route)?.max ?? 3))
+            : nil
+        let cards = route.id == 5
+            ? (route5Actions.map { actionsToSuggestionCards($0, route: route) } ?? [])
+            : response.suggestionCards
+        let actions = route.id == 5
+            ? (route5Actions ?? [])
+            : (response.actions.isEmpty ? flattenSuggestionCards(cards) : response.actions)
+        let nextAction = route.id == 5 ? nil : (cards.isEmpty ? (response.nextAction ?? firstAction(from: cards)) : nil)
         let formattedMessage = formattedRouteMessage(
             preferred: response.message,
             route: route,
@@ -3966,6 +4619,7 @@ extension LoomAIChatProvider {
             ("these next steps fit best:", "this next step fits best:"),
             ("these plan options fit best:", "this plan option fits best:"),
             ("these capture actions fit best:", "this capture action fits best:"),
+            ("Start with one of these capture actions to lock in better support this week:", "Start with this capture action to lock in better support this week:"),
             ("these additions fit best:", "this addition fits best:"),
             ("these rewrites fit best:", "this rewrite fits best:")
         ]
@@ -4022,10 +4676,19 @@ extension LoomAIChatProvider {
     ) -> String {
         let matchedGoal = findBestGoalMatch(from: latestUserMessage, context: context)
         let matchedCategory = findBestCategoryMatch(from: latestUserMessage, context: context)
-        let routeGoal = (route.map { [4, 5].contains($0.id) } ?? false) ? resolveGoal(target: route?.target, context: context) : nil
-        let routeCategory = (route.map { [1, 2, 3].contains($0.id) } ?? false) ? resolveCategory(target: route?.target, context: context) : nil
+        let routeGoal = (route.map { [4, 5].contains($0.id) } ?? false)
+            ? (route?.id == 5 ? resolveGoalStrict(target: route?.target, context: context) : resolveGoal(target: route?.target, context: context))
+            : nil
+        let routeCategory = (route.map { [1, 2, 3].contains($0.id) } ?? false)
+            ? resolveCategory(target: route?.target, context: context)
+            : (route?.id == 5 ? goalPlanSupportCategory(goal: routeGoal, context: context) : nil)
         let goal = routeGoal ?? matchedGoal ?? context.activeOutcomes.first
-        let category = routeCategory ?? matchedCategory ?? goal.flatMap { resolveCategory(target: $0.category, context: context) } ?? context.fulfillmentCategories.first
+        let category: LoomAIContextSnapshot.FulfillmentCategorySummary? = {
+            if route?.id == 5 {
+                return routeCategory ?? goalPlanSupportCategory(goal: goal, context: context)
+            }
+            return routeCategory ?? matchedCategory ?? goal.flatMap { resolveCategory(target: $0.category, context: context) } ?? context.fulfillmentCategories.first
+        }()
 
         var parts: [String] = []
         if let direction = normalizedPurposeDirection(for: context) {
@@ -4051,15 +4714,31 @@ extension LoomAIChatProvider {
             if let goal {
                 let goalSummary = normalizeLine(goal.progressSummary).nilIfEmpty.map { "\(goal.title) | \($0)" } ?? goal.title
                 parts.append("Goal: \(String(goalSummary.prefix(180)))")
+                if route?.id == 5, let reason = normalizeLine(goal.reason).nilIfEmpty {
+                    parts.append("Goal reason: \(String(reason.prefix(160)))")
+                }
+                if route?.id == 5, !goal.contributingLittleWins.isEmpty {
+                    parts.append("Contributing Little Wins: \(goal.contributingLittleWins.prefix(3).joined(separator: ", "))")
+                }
             }
             if let category {
                 parts.append("Supporting fulfillment area: \(category.name)")
+                if route?.id == 5, let mission = normalizeLine(category.mission).nilIfEmpty {
+                    parts.append("Supporting area mission: \(String(mission.prefix(150)))")
+                }
             }
-            if let block = relevantActionBlock(context: context, route: route, goal: goal, category: category) {
+            let block = route?.id == 5
+                ? goalPlanRelevantActionBlock(context: context, goal: goal, category: category)
+                : relevantActionBlock(context: context, route: route, goal: goal, category: category)
+            if let block {
                 parts.append("Current action block: \(String(block.title.prefix(140)))")
             }
             if let capture = context.capture, capture.totalCount > 0 {
                 parts.append("Capture load: \(capture.totalCount) capture items")
+            }
+            if route?.id == 5 {
+                let lever = goalPlanSupportLever(goal: goal, category: category, context: context)
+                parts.append("Coach focus: \(goalPlanPromptFocus(lever: lever, goal: goal, category: category))")
             }
         case 6:
             let currentPassions = (context.drivingForce?.passions ?? [])
@@ -4474,7 +5153,7 @@ extension LoomAIChatProvider {
             )
             return [card(title: normalizedSuggestionCardHeading(route: route, options: options), options: options)]
         case 5:
-            let goal = resolveGoal(target: route.target, context: context)
+            let goal = resolveGoalStrict(target: route.target, context: context) ?? resolveGoal(target: route.target, context: context)
             let goalTitle = goal?.title ?? (route.target ?? "this goal")
             let options = compatibilityGoalExecutionOptions(
                 goalName: goalTitle,
@@ -4963,7 +5642,7 @@ extension LoomAIChatProvider {
                 return [matchedCategory]
             }
             return Array(prioritized.prefix(1))
-        case 4, 5:
+        case 4:
             if let matchedCategory {
                 return [matchedCategory]
             }
@@ -4974,6 +5653,15 @@ extension LoomAIChatProvider {
                 return [goalCategory]
             }
             return Array(prioritized.prefix(1))
+        case 5:
+            if let matchedCategory {
+                return [matchedCategory]
+            }
+            if let matchedGoal,
+               let goalCategory = goalPlanSupportCategory(goal: matchedGoal, context: context) {
+                return [goalCategory]
+            }
+            return []
         case 6:
             let normalizedPassion = normalizePassionType(route.target ?? "love")
             let matched = prioritized.filter { category in
@@ -5021,11 +5709,16 @@ extension LoomAIChatProvider {
             return Array(prioritized.filter {
                 normalizeLine($0.category).caseInsensitiveCompare(normalizeLine(matchedCategory.name)) == .orderedSame
             }.prefix(1))
-        case 4, 5:
+        case 4:
             if let matchedGoal {
                 return [matchedGoal]
             }
             return Array(prioritized.prefix(1))
+        case 5:
+            if let matchedGoal {
+                return [matchedGoal]
+            }
+            return []
         case 6, 7:
             return []
         case 8:
@@ -5049,7 +5742,13 @@ extension LoomAIChatProvider {
         category: LoomAIContextSnapshot.FulfillmentCategorySummary?,
         goal: LoomAIContextSnapshot.OutcomeSummary?
     ) -> [LoomAIContextSnapshot.ActionBlockSummary] {
-        guard let block = relevantActionBlock(context: context, route: route, goal: goal, category: category) else {
+        let block: LoomAIContextSnapshot.ActionBlockSummary?
+        if route?.id == 5 {
+            block = goalPlanRelevantActionBlock(context: context, goal: goal, category: category)
+        } else {
+            block = relevantActionBlock(context: context, route: route, goal: goal, category: category)
+        }
+        guard let block else {
             return []
         }
         return [block]
@@ -5185,11 +5884,14 @@ extension LoomAIChatProvider {
         variant: CompatibilityGoalRouteVariant
     ) -> [LoomAISuggestedAction] {
         let normalizedGoal = normalizeLine(goalName).nilIfEmpty ?? "this goal"
-        let goal = context.activeOutcomes.first {
-            normalizeLine($0.title).caseInsensitiveCompare(normalizedGoal) == .orderedSame
-        }
+        let goal = resolveGoalStrict(target: normalizedGoal, context: context)
+            ?? context.activeOutcomes.first {
+                normalizeLine($0.title).caseInsensitiveCompare(normalizedGoal) == .orderedSame
+            }
         let templates = compatibilityGoalExecutionTemplates(goalName: normalizedGoal, variant: variant)
-        let category = resolveCategory(target: goalCategory, context: context)
+        let category = variant == .plan
+            ? goalPlanSupportCategory(goal: goal, context: context)
+            : resolveCategory(target: goalCategory, context: context)
         let routeID = variant == .next ? 4 : 5
         let route = LoomAIChatRoute(
             id: routeID,
@@ -5321,36 +6023,9 @@ extension LoomAIChatProvider {
         category: LoomAIContextSnapshot.FulfillmentCategorySummary?,
         context: LoomAIContextSnapshot
     ) -> [String] {
-        let shortGoal = trimmed(goalName, max: 64)
-        let goalReason = normalizeLine(goal?.reason ?? "").nilIfEmpty
-        let contributingLittleWins = goal?.contributingLittleWins
-            .map(normalizeLine)
-            .filter { !$0.isEmpty } ?? []
-        let categoryLittleWins = category?.littleWins
-            .map(normalizeLine)
-            .filter { !$0.isEmpty } ?? []
-        let block = relevantActionBlock(context: context, route: nil, goal: goal, category: category)
-
-        var candidates: [String] = []
-        if contributingLittleWins.isEmpty, let firstLittleWin = categoryLittleWins.first {
-            candidates.append("Connect the Contributing Little Win \"\(firstLittleWin)\" to \(shortGoal)")
-        }
-        if let goalReason, !goalReason.isEmpty {
-            candidates.append("Capture the clearest reason \(shortGoal) matters: \(String(goalReason.prefix(90)))")
-        } else {
-            candidates.append("Capture one sentence explaining why \(shortGoal) matters right now")
-        }
-        if let block {
-            candidates.append("Capture the next weekly support action that belongs under \(block.title) for \(shortGoal)")
-        } else {
-            candidates.append("Capture the next weekly action that would make \(shortGoal) easier to follow through on")
-        }
-        candidates.append("Capture the main blocker slowing \(shortGoal) and one practical fix")
-        if let category {
-            candidates.append("Capture one way \(category.name) can better support \(shortGoal) this week")
-        }
-
-        return candidates.reduce(into: [String]()) { partialResult, candidate in
+        let supportCategory = goalPlanSupportCategory(goal: goal, context: context) ?? category
+        let lever = goalPlanSupportLever(goal: goal, category: supportCategory, context: context)
+        return lever.captureActions.reduce(into: [String]()) { partialResult, candidate in
             let cleaned = trimmed(candidate, max: 160)
             guard !cleaned.isEmpty else { return }
             if !partialResult.contains(where: { normalizedComparisonKey($0) == normalizedComparisonKey(cleaned) }) {
@@ -6439,7 +7114,7 @@ extension LoomAIChatProvider {
         category: LoomAIContextSnapshot.FulfillmentCategorySummary?
     ) -> LoomAIContextSnapshot.ActionBlockSummary? {
         let routeTarget = normalizeLine(route?.target ?? "").lowercased()
-        return context.currentWeekActionBlocks.first(where: { block in
+        let matched = context.currentWeekActionBlocks.first(where: { block in
             let title = normalizeLine(block.title).lowercased()
             let blockCategory = normalizeLine(block.category).lowercased()
             if !routeTarget.isEmpty, title.contains(routeTarget) || blockCategory.contains(routeTarget) {
@@ -6452,7 +7127,11 @@ extension LoomAIChatProvider {
                 return true
             }
             return false
-        }) ?? context.currentWeekActionBlocks.first
+        })
+        if route?.id == 5 {
+            return matched
+        }
+        return matched ?? context.currentWeekActionBlocks.first
     }
 
     static func payloadMap(from payload: AppleIntelligenceLoomChatGenerator.Payload.ActionPayload) -> [String: String] {
@@ -6533,6 +7212,13 @@ extension LoomAIChatProvider {
             .replacingOccurrences(of: "\r", with: "\n")
             .replacingOccurrences(of: #"\n{3,}"#, with: "\n\n", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func normalizeSentenceFragment(_ value: String) -> String {
+        let cleaned = normalizeLine(value)
+            .trimmingCharacters(in: CharacterSet(charactersIn: " .,:;!?"))
+        guard let first = cleaned.first else { return cleaned }
+        return String(first).lowercased() + cleaned.dropFirst()
     }
 
     static func trimmed(_ value: String, max: Int, fallback: String = "") -> String {
