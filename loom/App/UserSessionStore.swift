@@ -27,8 +27,6 @@ final class UserSessionStore: ObservableObject {
         static let accountEmail = "account_email"
         static let reviewDemoModeEnabled = "review_demo_mode_enabled"
         static let reviewDemoStoreGeneration = "review_demo_store_generation"
-        static let reviewOnboardingDemoStoreGeneration = "review_onboarding_demo_store_generation"
-        static let starterStoreGeneration = "starter_store_generation"
         static let isolatedWorkspaceKind = "isolated_workspace_kind"
     }
 
@@ -207,9 +205,6 @@ final class UserSessionStore: ObservableObject {
                 clearPersistedWorkspaceState(for: workspace)
             }
         }
-        if workspace == .starter {
-            resetStarterWorkspaceSessionState()
-        }
         setHasAccount(false)
         setHasCompletedDiagnostic(false)
         setHasSeenDiagnosticInsights(false)
@@ -220,6 +215,7 @@ final class UserSessionStore: ObservableObject {
         defaults.removeObject(forKey: Keys.authProvider)
         defaults.removeObject(forKey: Keys.accountName)
         defaults.removeObject(forKey: Keys.accountEmail)
+        TestDemoProvisioningService.clearLocalProvisioningState(defaults: defaults)
     }
 
     private func clearPersistedWorkspaceState(for workspace: LoomSpecialAccountWorkspace) {
@@ -244,8 +240,7 @@ final class UserSessionStore: ObservableObject {
                 defaults.set(rendered, forKey: Keys.accountName)
             }
         }
-        setHasAccount(true)
-        restoreReturningUserProgressIfAvailable()
+        applySuccessfulSignInGateState()
     }
 
     func refreshAppleCredentialStateIfNeeded() async {
@@ -307,8 +302,7 @@ final class UserSessionStore: ObservableObject {
             defaults.set(trimmedName, forKey: Keys.accountName)
         }
 
-        setHasAccount(true)
-        restoreReturningUserProgressIfAvailable()
+        applySuccessfulSignInGateState()
     }
 
     func completeSignInWithEmail(
@@ -331,18 +325,46 @@ final class UserSessionStore: ObservableObject {
             defaults.set(trimmedName, forKey: Keys.accountName)
         }
 
-        setHasAccount(true)
-        restoreReturningUserProgressIfAvailable()
+        applySuccessfulSignInGateState()
     }
 
-    private func restoreReturningUserProgressIfAvailable() {
-        let personalizationState = PersonalizationStore.cachedStateForCurrentUser(defaults: defaults)
-        let hasExistingPersonalization = personalizationState.current != nil || !personalizationState.history.isEmpty
-        guard hasExistingPersonalization else { return }
+    private func applySuccessfulSignInGateState() {
+        let hasExistingPersonalization = hasPersistedProgressForCurrentUser()
+        let resolvedHasSeenOnboarding = hasSeenOnboarding || hasExistingPersonalization
+        let resolvedHasCompletedDiagnostic = hasCompletedDiagnostic || hasExistingPersonalization
+        let resolvedHasSeenDiagnosticInsights = hasSeenDiagnosticInsights || hasExistingPersonalization
+        applyGateState(
+            hasSeenOnboarding: resolvedHasSeenOnboarding,
+            hasAccount: true,
+            hasCompletedDiagnostic: resolvedHasCompletedDiagnostic,
+            hasSeenDiagnosticInsights: resolvedHasSeenDiagnosticInsights
+        )
+    }
 
-        setHasSeenOnboarding(true)
-        setHasCompletedDiagnostic(true)
-        setHasSeenDiagnosticInsights(true)
+    private func hasPersistedProgressForCurrentUser() -> Bool {
+        let personalizationState = PersonalizationStore.cachedStateForCurrentUser(defaults: defaults)
+        return personalizationState.current != nil || !personalizationState.history.isEmpty
+    }
+
+    private func applyGateState(
+        hasSeenOnboarding: Bool,
+        hasAccount: Bool,
+        hasCompletedDiagnostic: Bool,
+        hasSeenDiagnosticInsights: Bool
+    ) {
+        let resolvedHasCompletedDiagnostic = hasAccount ? hasCompletedDiagnostic : false
+        let resolvedHasSeenDiagnosticInsights =
+            (hasAccount && resolvedHasCompletedDiagnostic) ? hasSeenDiagnosticInsights : false
+
+        self.hasSeenOnboarding = hasSeenOnboarding
+        self.hasAccount = hasAccount
+        self.hasCompletedDiagnostic = resolvedHasCompletedDiagnostic
+        self.hasSeenDiagnosticInsights = resolvedHasSeenDiagnosticInsights
+
+        defaults.set(hasSeenOnboarding, forKey: Keys.hasSeenOnboarding)
+        defaults.set(hasAccount, forKey: Keys.hasAccount)
+        defaults.set(resolvedHasCompletedDiagnostic, forKey: Keys.hasCompletedDiagnostic)
+        defaults.set(resolvedHasSeenDiagnosticInsights, forKey: Keys.hasSeenDiagnosticInsights)
     }
 
     func reloadFromDefaults() {
@@ -353,16 +375,4 @@ final class UserSessionStore: ObservableObject {
         isSubscribed = defaults.bool(forKey: Keys.isSubscribed)
     }
 
-    private func resetStarterWorkspaceSessionState() {
-        setHasSeenOnboarding(true)
-        SubscriptionAccessGate.setStarterEntitlementAccess(false, defaults: defaults)
-        SubscriptionAccessGate.setStarterPreferredProductID(nil, defaults: defaults)
-        defaults.removeObject(forKey: "loom.subscription_plan")
-        defaults.set(false, forKey: "return_to_onboarding_last_page_once")
-        defaults.set(false, forKey: "blank_homepage_mode")
-        defaults.set(false, forKey: "setup_homepage_mode")
-        defaults.set(false, forKey: "capture_setup_completed_once_v1")
-        defaults.set(false, forKey: "onboarding_capture_notifications_prompted_v1")
-        defaults.set(false, forKey: "content_home_objectives_setup_skipped_v1")
-    }
 }

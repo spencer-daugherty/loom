@@ -38,17 +38,7 @@ enum LittleWinsFulfillmentOrdering {
     }
 
     private static func categoryKey(_ raw: String) -> String {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !trimmed.isEmpty else { return "" }
-        let andNormalized = trimmed.replacingOccurrences(of: "&", with: " and ")
-        let cleaned = andNormalized.replacingOccurrences(
-            of: "[^a-z0-9]+",
-            with: " ",
-            options: .regularExpression
-        )
-        return cleaned
-            .split(whereSeparator: \.isWhitespace)
-            .joined(separator: " ")
+        FulfillmentCategoryIdentity.normalizedKey(raw)
     }
 }
 

@@ -18,7 +18,6 @@ Project reviewed: Loom iOS app
 - Firebase Firestore
 - Google Sign-In
 - StoreKit 2
-- CloudKit through SwiftData model storage
 - Apple Intelligence when available on supported devices
 - HealthKit
 - Apple Health read authorization
@@ -54,13 +53,12 @@ Project reviewed: Loom iOS app
 
 ## Local Storage and On-Device Persistence
 - Main app content is stored with SwiftData.
-- The app attempts to use CloudKit-backed SwiftData storage when available, with local fallback if CloudKit is unavailable.
+- The reviewed app configuration stores the main SwiftData database locally on device.
 - Some personalization state is also cached in JSON files under Application Support.
 - Additional lightweight settings and state are stored in `UserDefaults`.
 - Camera snapshots can be saved to the user’s Photos library only when the user explicitly chooses Save.
 
 ## Sync and Remote Storage
-- SwiftData content may sync through Apple CloudKit when the user has iCloud-backed sync available.
 - Personalization snapshots may sync to Firebase Firestore for authenticated Firebase users.
   - Firestore path used in code:
     - `users/{uid}/personalization/current`
@@ -89,20 +87,10 @@ Project reviewed: Loom iOS app
 ## AI Features and Data Flow
 - Loom includes AI-assisted onboarding, chat, and suggestion-generation features.
 - The app supports Apple Intelligence generation on supported devices.
-- The app also includes a remote AI service path through:
-  - `https://loom-ai-minimal.spence0927.workers.dev`
-- The checked-in worker code (`loom/worker.js`) sends requests to OpenAI’s Responses API.
-- The AI request payloads can include:
-  - chat messages
-  - personalization and onboarding summaries
-  - fulfillment, goal, and capture context
-  - action-block and current-reality context
-  - client metadata such as app version, locale, timezone, request IDs, request hashes, and remaining daily response counts
-- Current runtime behavior indicates Apple Intelligence requests can still fall back to the remote worker on certain failures.
+- On devices without Apple Intelligence, the app now relies on local compatibility logic and local suggestion tables instead of Loom-hosted remote AI processing.
 - Privacy policy should clearly disclose:
-  - what user text may be sent off device
   - that Apple Intelligence may be used on device when available
-  - that remote AI processing may involve Loom’s worker and OpenAI
+  - that unsupported devices use local on-device compatibility logic instead of Apple Intelligence
 
 ## Personalization and Inference
 - The app computes onboarding personality/profile matching deterministically on device.
@@ -139,27 +127,22 @@ Project reviewed: Loom iOS app
 - Firestore personalization snapshots for authenticated users
 - Firestore app feedback submissions
 - Google Sign-In authentication flows
-- AI requests sent to Loom’s worker and then OpenAI when the worker path is used
-- CloudKit sync data for SwiftData-backed app content when enabled
 
 ## Sensitive / High-Risk Areas The Policy Should Explicitly Cover
 - Free-form personal text entered into goals, purpose, reflections, relationship notes, and LoomAI chat
 - Health data access
-- AI processing and vendor chain
-- Cloud sync and Firebase sync
+- AI processing and on-device personalization
+- Firebase sync
 - Account identity data
 - User-generated photos or saved camera outputs
 
 ## Edge Cases and Open Questions For The Final Policy Writer
-- Confirm whether all SwiftData model types are intended to sync through CloudKit in production, or whether some sensitive models should remain local-only.
 - Confirm the final production hosting/domain for the Privacy Policy URL that will be used in App Store Connect.
-- Confirm whether the remote AI worker always uses OpenAI in production, and whether any additional vendors, retention controls, or logging layers exist outside this repo.
 - Confirm the intended retention/deletion policy for:
   - Firestore personalization history
   - Firestore app feedback
   - Firebase Analytics data
   - Crashlytics data
-  - AI worker logs and upstream model-provider logs
 - Confirm whether imported user photos are ever uploaded anywhere, or remain device-local only.
 - Confirm whether notification content can include sensitive personal text.
 - Confirm whether account deletion or data deletion requests will be handled only in-app or also through an external support/contact flow.

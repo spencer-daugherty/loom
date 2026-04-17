@@ -54,6 +54,761 @@ enum LoomDefaultsScope {
   }
 }
 
+enum FulfillmentCategoryIdentity {
+  static let repairKey = "loom.fulfillmentDuplicateRepair.v1"
+
+  static let defaultTitlesByKey: [String: String] = [
+    normalizedKey("Career & Business"): "Career & Business",
+    normalizedKey("Leadership & Impact"): "Leadership & Impact",
+    normalizedKey("Wealth & Lifestyle"): "Wealth & Lifestyle",
+    normalizedKey("Mind & Meaning"): "Mind & Meaning",
+    normalizedKey("Love & Relationships"): "Love & Relationships",
+    normalizedKey("Health & Vitality"): "Health & Vitality",
+  ]
+
+  static func normalizedKey(_ raw: String) -> String {
+    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    guard !trimmed.isEmpty else { return "" }
+    let andNormalized = trimmed.replacingOccurrences(of: "&", with: " and ")
+    let cleaned = andNormalized.replacingOccurrences(
+      of: "[^a-z0-9]+",
+      with: " ",
+      options: .regularExpression
+    )
+    return cleaned
+      .split(whereSeparator: \.isWhitespace)
+      .joined(separator: " ")
+  }
+
+  static func trimDisplayName(_ raw: String) -> String {
+    raw.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  static func canonicalDisplayName(for names: [String], fallback: String = "Fulfillment Area") -> String {
+    let trimmed = names
+      .map(trimDisplayName)
+      .filter { !$0.isEmpty }
+    guard let first = trimmed.first else { return fallback }
+    let key = normalizedKey(first)
+    if let defaultTitle = defaultTitlesByKey[key] {
+      return defaultTitle
+    }
+    return trimmed.last ?? fallback
+  }
+
+  static func groupedRows<T>(
+    from rows: [T],
+    name: (T) -> String
+  ) -> [String: [T]] {
+    Dictionary(grouping: rows) { row in
+      normalizedKey(name(row))
+    }.filter { !$0.key.isEmpty }
+  }
+
+  static func canonicalRows(from rows: [Fulfillment]) -> [Fulfillment] {
+    groupedRows(from: rows, name: { $0.category })
+      .values
+      .compactMap { canonicalRow(from: $0) }
+      .sorted { lhs, rhs in
+        canonicalDisplayName(for: [lhs.category])
+          .localizedCaseInsensitiveCompare(canonicalDisplayName(for: [rhs.category])) == .orderedAscending
+      }
+  }
+
+  static func canonicalRow(from rows: [Fulfillment]) -> Fulfillment? {
+    rows.max { lhs, rhs in
+      canonicalRowSortTuple(lhs) < canonicalRowSortTuple(rhs)
+    }
+  }
+
+  static func canonicalRowSortTuple(_ row: Fulfillment) -> (Int, Int, Date, String) {
+    let normalized = normalizedKey(row.category)
+    let isDefault = defaultTitlesByKey[normalized] != nil ? 1 : 0
+    let contentWeight = [
+      row.category_identitiy,
+      row.category_vision,
+      row.category_purpose,
+    ].reduce(0) { partial, value in
+      partial + (trimDisplayName(value).isEmpty ? 0 : 1)
+    }
+    return (isDefault, contentWeight, row.updatedAt, row.category_id.uuidString)
+  }
+
+  static func matches(_ lhs: String, _ rhs: String) -> Bool {
+    normalizedKey(lhs) == normalizedKey(rhs)
+  }
+}
+
+enum FulfillmentDuplicateRepair {
+  @MainActor
+  static func runIfNeeded(in context: ModelContext, force: Bool = false) {
+    let defaults = UserDefaults.standard
+    if !force && defaults.bool(forKey: LoomDefaultsScope.scopedKey(FulfillmentCategoryIdentity.repairKey)) {
+      return
+    }
+
+    do {
+      let didRepair = try repairActiveFulfillments(in: context)
+      defaults.set(true, forKey: LoomDefaultsScope.scopedKey(FulfillmentCategoryIdentity.repairKey))
+      if didRepair {
+        AppDebugActivityLog.log("FulfillmentDuplicateRepair", "Completed fulfillment duplicate repair.")
+      }
+    } catch {
+      AppDebugActivityLog.log(
+        "FulfillmentDuplicateRepair",
+        "Repair failed error=\(error.localizedDescription)"
+      )
+    }
+  }
+
+  private struct DuplicateGroup {
+    let normalizedKey: String
+    let canonicalTitle: String
+    let canonical: Fulfillment
+    let duplicates: [Fulfillment]
+  }
+
+  @MainActor
+  private static func repairActiveFulfillments(in context: ModelContext) throws -> Bool {
+    let fulfillments = try context.fetch(FetchDescriptor<Fulfillment>())
+    let grouped = FulfillmentCategoryIdentity.groupedRows(from: fulfillments, name: { $0.category })
+    let duplicateGroups = grouped.compactMap { key, rows -> DuplicateGroup? in
+      guard rows.count > 1, let canonical = canonicalRow(from: rows, in: context) else { return nil }
+      let canonicalTitle = canonicalDisplayTitle(for: rows)
+      let duplicates = rows.filter { $0.category_id != canonical.category_id }
+      guard !duplicates.isEmpty else { return nil }
+      return DuplicateGroup(
+        normalizedKey: key,
+        canonicalTitle: canonicalTitle,
+        canonical: canonical,
+        duplicates: duplicates
+      )
+    }
+    guard !duplicateGroups.isEmpty else { return false }
+
+    let roles = try context.fetch(FetchDescriptor<FulfillmentRoles>())
+    let foci = try context.fetch(FetchDescriptor<FulfillmentFocus>())
+    let resources = try context.fetch(FetchDescriptor<FulfillmentResources>())
+    let joins = try context.fetch(FetchDescriptor<PassionFulfillmentJoin>())
+    let planLabels = try context.fetch(FetchDescriptor<PlanLabel>())
+    let chunkSelections = try context.fetch(FetchDescriptor<PlanChunkSelection>())
+    let plannedChunks = try context.fetch(FetchDescriptor<PlannedChunk>())
+    let plannedChunkStates = try context.fetch(FetchDescriptor<PlannedChunkStepFourState>())
+    let outcomes = try context.fetch(FetchDescriptor<Outcomes>())
+    let outcomeArchives = try context.fetch(FetchDescriptor<OutcomesArchive>())
+    let completions = try context.fetch(FetchDescriptor<LittleWinsDailyCompletion>())
+    let snapshots = try context.fetch(FetchDescriptor<FulfillmentCategoryScoreSnapshot>())
+
+    var roleIDRemap: [UUID: UUID] = [:]
+    var focusIDRemap: [UUID: UUID] = [:]
+    var labelIDRemap: [UUID: UUID] = [:]
+    var didRepair = false
+
+    for group in duplicateGroups {
+      let losingIDs = Set(group.duplicates.map(\.category_id))
+      mergeScalarCategoryFields(into: group.canonical, from: group.duplicates, canonicalTitle: group.canonicalTitle)
+
+      for role in roles where losingIDs.contains(role.category_id) {
+        role.category_id = group.canonical.category_id
+        didRepair = true
+      }
+      for focus in foci where losingIDs.contains(focus.category_id) {
+        focus.category_id = group.canonical.category_id
+        didRepair = true
+      }
+      for resource in resources where losingIDs.contains(resource.category_id) {
+        resource.category_id = group.canonical.category_id
+        didRepair = true
+      }
+      for join in joins where losingIDs.contains(join.category_id) {
+        join.category_id = group.canonical.category_id
+        didRepair = true
+      }
+      for label in planLabels where losingIDs.contains(label.categoryId) {
+        label.categoryId = group.canonical.category_id
+        label.category = group.canonicalTitle
+        didRepair = true
+      }
+      for selection in chunkSelections {
+        guard let categoryID = selection.categoryId, losingIDs.contains(categoryID) else { continue }
+        selection.categoryId = group.canonical.category_id
+        selection.category = group.canonicalTitle
+        didRepair = true
+      }
+      for chunk in plannedChunks where losingIDs.contains(chunk.categoryId) {
+        chunk.categoryId = group.canonical.category_id
+        chunk.category = group.canonicalTitle
+        didRepair = true
+      }
+      for completion in completions {
+        guard let categoryID = completion.categoryIdSnapshot, losingIDs.contains(categoryID) else { continue }
+        completion.categoryIdSnapshot = group.canonical.category_id
+        completion.categoryTitleSnapshot = group.canonicalTitle
+        didRepair = true
+      }
+      for snapshot in snapshots where losingIDs.contains(snapshot.categoryID) {
+        snapshot.categoryID = group.canonical.category_id
+        snapshot.categoryTitleSnapshot = group.canonicalTitle
+        snapshot.weekCategoryKey = FulfillmentCategoryScoreSnapshot.makeKey(
+          weekStartDate: snapshot.weekStartDate,
+          categoryID: group.canonical.category_id
+        )
+        didRepair = true
+      }
+
+      for outcome in outcomes where FulfillmentCategoryIdentity.normalizedKey(outcome.category) == group.normalizedKey {
+        outcome.category = group.canonicalTitle
+      }
+      for archive in outcomeArchives where FulfillmentCategoryIdentity.normalizedKey(archive.category) == group.normalizedKey {
+        archive.category = group.canonicalTitle
+      }
+      for selection in chunkSelections where FulfillmentCategoryIdentity.normalizedKey(selection.category ?? "") == group.normalizedKey {
+        selection.category = group.canonicalTitle
+      }
+      for chunk in plannedChunks where FulfillmentCategoryIdentity.normalizedKey(chunk.category) == group.normalizedKey {
+        chunk.category = group.canonicalTitle
+      }
+      for label in planLabels where FulfillmentCategoryIdentity.normalizedKey(label.category) == group.normalizedKey {
+        label.category = group.canonicalTitle
+      }
+
+      let categoryRoleRows = roles
+        .filter { $0.category_id == group.canonical.category_id }
+        .sorted { lhs, rhs in
+          if lhs.rank != rhs.rank { return lhs.rank < rhs.rank }
+          if lhs.updatedAt != rhs.updatedAt { return lhs.updatedAt > rhs.updatedAt }
+          return lhs.id.uuidString < rhs.id.uuidString
+        }
+      roleIDRemap.merge(
+        dedupeCategoryRows(
+          rows: categoryRoleRows,
+          key: { $0.role },
+          merge: { kept, dropped in
+            if kept.role.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+              kept.role = dropped.role
+            }
+            kept.updatedAt = max(kept.updatedAt, dropped.updatedAt)
+          },
+          delete: { context.delete($0) }
+        ),
+        uniquingKeysWith: { current, _ in current }
+      )
+      resequenceRoles(for: group.canonical.category_id, roles: roles)
+
+      let categoryFocusRows = foci
+        .filter { $0.category_id == group.canonical.category_id }
+        .sorted { lhs, rhs in
+          if lhs.rank != rhs.rank { return lhs.rank < rhs.rank }
+          if lhs.updatedAt != rhs.updatedAt { return lhs.updatedAt > rhs.updatedAt }
+          return lhs.id.uuidString < rhs.id.uuidString
+        }
+      focusIDRemap.merge(
+        dedupeCategoryRows(
+          rows: categoryFocusRows,
+          key: { $0.activity },
+          merge: { kept, dropped in
+            if kept.activity.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+              kept.activity = dropped.activity
+            }
+            kept.updatedAt = max(kept.updatedAt, dropped.updatedAt)
+          },
+          delete: { context.delete($0) }
+        ),
+        uniquingKeysWith: { current, _ in current }
+      )
+      resequenceFoci(for: group.canonical.category_id, foci: foci)
+
+      let categoryResourceRows = resources
+        .filter { $0.category_id == group.canonical.category_id }
+        .sorted { lhs, rhs in
+          if lhs.rank != rhs.rank { return lhs.rank < rhs.rank }
+          if lhs.updatedAt != rhs.updatedAt { return lhs.updatedAt > rhs.updatedAt }
+          return lhs.id.uuidString < rhs.id.uuidString
+        }
+      _ = dedupeCategoryRows(
+        rows: categoryResourceRows,
+        key: { $0.resource },
+        merge: { kept, dropped in
+          if kept.resource.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            kept.resource = dropped.resource
+          }
+          kept.updatedAt = max(kept.updatedAt, dropped.updatedAt)
+        },
+        delete: { context.delete($0) }
+      )
+      resequenceResources(for: group.canonical.category_id, resources: resources)
+
+      dedupePassionJoins(for: group.canonical.category_id, joins: joins, delete: { context.delete($0) })
+
+      labelIDRemap.merge(
+        dedupePlanLabels(
+          for: group.canonical.category_id,
+          categoryTitle: group.canonicalTitle,
+          labels: planLabels,
+          delete: { context.delete($0) }
+        ),
+        uniquingKeysWith: { current, _ in current }
+      )
+
+      for duplicate in group.duplicates {
+        archiveDuplicateIfNeeded(duplicate, roles: roles, foci: foci, resources: resources, joins: joins, in: context)
+        context.delete(duplicate)
+        didRepair = true
+      }
+    }
+
+    if !roleIDRemap.isEmpty {
+      for state in plannedChunkStates {
+        guard let roleID = state.connectedRoleId, let mapped = roleIDRemap[roleID] else { continue }
+        state.connectedRoleId = mapped
+        didRepair = true
+      }
+    }
+
+    if !focusIDRemap.isEmpty {
+      for completion in completions {
+        guard let mapped = focusIDRemap[completion.focusId] else { continue }
+        completion.focusId = mapped
+        didRepair = true
+      }
+      LittleWinsScheduleStore.remapFocusIDs(focusIDRemap)
+      LittleWinsIntegrationStore.remapFocusIDs(focusIDRemap)
+      LittleWinsPassionsStore.remapFocusIDs(focusIDRemap)
+      OutcomeContributingLittleWinsDefaults.remapFocusIDs(focusIDRemap)
+      CompletedOutcomeContributingLittleWinsDefaults.remapFocusIDs(focusIDRemap)
+    }
+
+    if !labelIDRemap.isEmpty {
+      for selection in chunkSelections {
+        guard let labelID = selection.labelId, let mapped = labelIDRemap[labelID] else { continue }
+        selection.labelId = mapped
+        didRepair = true
+      }
+      for chunk in plannedChunks {
+        if let mapped = labelIDRemap[chunk.labelId] {
+          chunk.labelId = mapped
+          didRepair = true
+        }
+      }
+    }
+
+    if dedupeSnapshotsAfterRemap(snapshots, delete: { context.delete($0) }) {
+      didRepair = true
+    }
+
+    if didRepair {
+      try context.save()
+    }
+    return didRepair
+  }
+
+  @MainActor
+  private static func canonicalRow(from rows: [Fulfillment], in context: ModelContext) -> Fulfillment? {
+    let roleCounts = Dictionary(grouping: (try? context.fetch(FetchDescriptor<FulfillmentRoles>())) ?? [], by: \.category_id)
+      .mapValues(\.count)
+    let focusCounts = Dictionary(grouping: (try? context.fetch(FetchDescriptor<FulfillmentFocus>())) ?? [], by: \.category_id)
+      .mapValues(\.count)
+    let resourceCounts = Dictionary(grouping: (try? context.fetch(FetchDescriptor<FulfillmentResources>())) ?? [], by: \.category_id)
+      .mapValues(\.count)
+    let joinCounts = Dictionary(grouping: (try? context.fetch(FetchDescriptor<PassionFulfillmentJoin>())) ?? [], by: \.category_id)
+      .mapValues(\.count)
+    let planLabelCounts = Dictionary(grouping: (try? context.fetch(FetchDescriptor<PlanLabel>())) ?? [], by: \.categoryId)
+      .mapValues(\.count)
+    let chunkSelectionCounts = Dictionary(
+      grouping: ((try? context.fetch(FetchDescriptor<PlanChunkSelection>())) ?? []).compactMap { selection -> UUID? in
+        selection.categoryId
+      },
+      by: { $0 }
+    ).mapValues(\.count)
+    let chunkCounts = Dictionary(grouping: (try? context.fetch(FetchDescriptor<PlannedChunk>())) ?? [], by: \.categoryId)
+      .mapValues(\.count)
+
+    return rows.max(by: isLowerPriority)
+
+    func candidateScore(_ row: Fulfillment) -> CandidateScore {
+      let normalized = FulfillmentCategoryIdentity.normalizedKey(row.category)
+      let isDefault = FulfillmentCategoryIdentity.defaultTitlesByKey[normalized] != nil ? 1 : 0
+      let roleCount = roleCounts[row.category_id] ?? 0
+      let focusCount = focusCounts[row.category_id] ?? 0
+      let resourceCount = resourceCounts[row.category_id] ?? 0
+      let joinCount = joinCounts[row.category_id] ?? 0
+      let planLabelCount = planLabelCounts[row.category_id] ?? 0
+      let chunkSelectionCount = chunkSelectionCounts[row.category_id] ?? 0
+      let chunkCount = chunkCounts[row.category_id] ?? 0
+      let referenceCount =
+        roleCount +
+        focusCount +
+        resourceCount +
+        joinCount +
+        planLabelCount +
+        chunkSelectionCount +
+        chunkCount
+      let contentWeight = [
+        row.category_identitiy,
+        row.category_vision,
+        row.category_purpose,
+      ].reduce(0) { partial, value in
+        partial + (value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0 : 1)
+      }
+      let titleWeight = row.category.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0 : 1
+      return CandidateScore(
+        isDefault: isDefault,
+        referenceCount: referenceCount,
+        contentWeight: contentWeight,
+        titleWeight: titleWeight,
+        roleCount: roleCount,
+        focusCount: focusCount,
+        resourceCount: resourceCount,
+        joinCount: joinCount,
+        updatedAt: row.updatedAt,
+        uuidString: row.category_id.uuidString
+      )
+    }
+
+    func isLowerPriority(_ lhs: Fulfillment, _ rhs: Fulfillment) -> Bool {
+      let lhsScore = candidateScore(lhs)
+      let rhsScore = candidateScore(rhs)
+      if lhsScore.isDefault != rhsScore.isDefault { return lhsScore.isDefault < rhsScore.isDefault }
+      if lhsScore.referenceCount != rhsScore.referenceCount { return lhsScore.referenceCount < rhsScore.referenceCount }
+      if lhsScore.contentWeight != rhsScore.contentWeight { return lhsScore.contentWeight < rhsScore.contentWeight }
+      if lhsScore.titleWeight != rhsScore.titleWeight { return lhsScore.titleWeight < rhsScore.titleWeight }
+      if lhsScore.roleCount != rhsScore.roleCount { return lhsScore.roleCount < rhsScore.roleCount }
+      if lhsScore.focusCount != rhsScore.focusCount { return lhsScore.focusCount < rhsScore.focusCount }
+      if lhsScore.resourceCount != rhsScore.resourceCount { return lhsScore.resourceCount < rhsScore.resourceCount }
+      if lhsScore.joinCount != rhsScore.joinCount { return lhsScore.joinCount < rhsScore.joinCount }
+      if lhsScore.updatedAt != rhsScore.updatedAt { return lhsScore.updatedAt < rhsScore.updatedAt }
+      return lhsScore.uuidString < rhsScore.uuidString
+    }
+  }
+
+  private struct CandidateScore {
+    let isDefault: Int
+    let referenceCount: Int
+    let contentWeight: Int
+    let titleWeight: Int
+    let roleCount: Int
+    let focusCount: Int
+    let resourceCount: Int
+    let joinCount: Int
+    let updatedAt: Date
+    let uuidString: String
+  }
+
+  private static func canonicalDisplayTitle(for rows: [Fulfillment]) -> String {
+    let names = rows
+      .sorted { $0.updatedAt < $1.updatedAt }
+      .map(\.category)
+    return FulfillmentCategoryIdentity.canonicalDisplayName(for: names)
+  }
+
+  private static func mergeScalarCategoryFields(
+    into canonical: Fulfillment,
+    from duplicates: [Fulfillment],
+    canonicalTitle: String
+  ) {
+    canonical.category = canonicalTitle
+    canonical.category_identitiy = preferredMergedText(
+      current: canonical.category_identitiy,
+      candidates: duplicates.map(\.category_identitiy)
+    )
+    canonical.category_vision = preferredMergedText(
+      current: canonical.category_vision,
+      candidates: duplicates.map(\.category_vision)
+    )
+    canonical.category_purpose = preferredMergedText(
+      current: canonical.category_purpose,
+      candidates: duplicates.map(\.category_purpose)
+    )
+    canonical.updatedAt = ([canonical.updatedAt] + duplicates.map(\.updatedAt)).max() ?? canonical.updatedAt
+  }
+
+  private static func preferredMergedText(current: String, candidates: [String]) -> String {
+    let trimmedCurrent = current.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !trimmedCurrent.isEmpty {
+      return current
+    }
+    return candidates
+      .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+      .last(where: { !$0.isEmpty }) ?? current
+  }
+
+  private static func dedupeCategoryRows<Row>(
+    rows: [Row],
+    key: (Row) -> String,
+    merge: (Row, Row) -> Void,
+    delete: (Row) -> Void
+  ) -> [UUID: UUID] where Row: AnyObject, Row: Identifiable, Row.ID == UUID {
+    var remap: [UUID: UUID] = [:]
+    var keptByKey: [String: Row] = [:]
+    for row in rows {
+      let normalizedKey = FulfillmentCategoryIdentity.normalizedKey(key(row))
+      guard !normalizedKey.isEmpty else { continue }
+      if let kept = keptByKey[normalizedKey], kept.id != row.id {
+        merge(kept, row)
+        remap[row.id] = kept.id
+        delete(row)
+      } else {
+        keptByKey[normalizedKey] = row
+      }
+    }
+    return remap
+  }
+
+  private static func dedupePassionJoins(
+    for categoryID: UUID,
+    joins: [PassionFulfillmentJoin],
+    delete: (PassionFulfillmentJoin) -> Void
+  ) {
+    var keptPassionIDs = Set<UUID>()
+    for join in joins where join.category_id == categoryID {
+      if keptPassionIDs.contains(join.passion_id) {
+        delete(join)
+      } else {
+        keptPassionIDs.insert(join.passion_id)
+      }
+    }
+  }
+
+  private static func dedupePlanLabels(
+    for categoryID: UUID,
+    categoryTitle: String,
+    labels: [PlanLabel],
+    delete: (PlanLabel) -> Void
+  ) -> [UUID: UUID] {
+    var remap: [UUID: UUID] = [:]
+    var keptByKey: [String: PlanLabel] = [:]
+    for label in labels where label.categoryId == categoryID {
+      label.category = categoryTitle
+      let normalizedLabel = label.label.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+      guard !normalizedLabel.isEmpty else { continue }
+      let dedupeKey = normalizedLabel
+      if let kept = keptByKey[dedupeKey], kept.labelId != label.labelId {
+        remap[label.labelId] = kept.labelId
+        delete(label)
+      } else {
+        label.label = normalizedLabel
+        keptByKey[dedupeKey] = label
+      }
+    }
+    return remap
+  }
+
+  private static func resequenceRoles(for categoryID: UUID, roles: [FulfillmentRoles]) {
+    let ordered = roles
+      .filter { $0.category_id == categoryID }
+      .sorted { lhs, rhs in
+        if lhs.rank != rhs.rank { return lhs.rank < rhs.rank }
+        return lhs.updatedAt > rhs.updatedAt
+      }
+    for (idx, row) in ordered.enumerated() {
+      row.rank = idx
+    }
+  }
+
+  private static func resequenceFoci(for categoryID: UUID, foci: [FulfillmentFocus]) {
+    let ordered = foci
+      .filter { $0.category_id == categoryID }
+      .sorted { lhs, rhs in
+        if lhs.rank != rhs.rank { return lhs.rank < rhs.rank }
+        return lhs.updatedAt > rhs.updatedAt
+      }
+    for (idx, row) in ordered.enumerated() {
+      row.rank = idx
+    }
+  }
+
+  private static func resequenceResources(for categoryID: UUID, resources: [FulfillmentResources]) {
+    let ordered = resources
+      .filter { $0.category_id == categoryID }
+      .sorted { lhs, rhs in
+        if lhs.rank != rhs.rank { return lhs.rank < rhs.rank }
+        return lhs.updatedAt > rhs.updatedAt
+      }
+    for (idx, row) in ordered.enumerated() {
+      row.rank = idx
+    }
+  }
+
+  private static func dedupeSnapshotsAfterRemap(
+    _ snapshots: [FulfillmentCategoryScoreSnapshot],
+    delete: (FulfillmentCategoryScoreSnapshot) -> Void
+  ) -> Bool {
+    var didChange = false
+    var keptByKey: [String: FulfillmentCategoryScoreSnapshot] = [:]
+    for snapshot in snapshots.sorted(by: {
+      if $0.weekCategoryKey != $1.weekCategoryKey { return $0.weekCategoryKey < $1.weekCategoryKey }
+      if $0.updatedAt != $1.updatedAt { return $0.updatedAt > $1.updatedAt }
+      return $0.id.uuidString < $1.id.uuidString
+    }) {
+      let key = snapshot.weekCategoryKey
+      if let kept = keptByKey[key], kept.id != snapshot.id {
+        let shouldKeepSnapshot =
+          snapshot.updatedAt > kept.updatedAt ||
+          (snapshot.updatedAt == kept.updatedAt && snapshot.score > kept.score)
+        if shouldKeepSnapshot {
+          delete(kept)
+          keptByKey[key] = snapshot
+        } else {
+          delete(snapshot)
+        }
+        didChange = true
+      } else {
+        keptByKey[key] = snapshot
+      }
+    }
+    return didChange
+  }
+
+  private static func archiveDuplicateIfNeeded(
+    _ duplicate: Fulfillment,
+    roles: [FulfillmentRoles],
+    foci: [FulfillmentFocus],
+    resources: [FulfillmentResources],
+    joins: [PassionFulfillmentJoin],
+    in context: ModelContext
+  ) {
+    let rolesForCategory = roles
+      .filter { $0.category_id == duplicate.category_id }
+      .sorted { $0.rank < $1.rank }
+    let fociForCategory = foci
+      .filter { $0.category_id == duplicate.category_id }
+      .sorted { $0.rank < $1.rank }
+    let resourcesForCategory = resources
+      .filter { $0.category_id == duplicate.category_id }
+      .sorted { $0.rank < $1.rank }
+    let joinsForCategory = joins.filter { $0.category_id == duplicate.category_id }
+    let hasAnyValue =
+      !duplicate.category_identitiy.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+      !duplicate.category_vision.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+      !duplicate.category_purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+      !rolesForCategory.isEmpty ||
+      !fociForCategory.isEmpty ||
+      !resourcesForCategory.isEmpty ||
+      !joinsForCategory.isEmpty
+
+    guard hasAnyValue else { return }
+    context.insert(
+      ReplacedFulfillmentCategoryArchive(
+        category_id: duplicate.category_id,
+        category: duplicate.category,
+        category_identitiy: duplicate.category_identitiy,
+        category_vision: duplicate.category_vision,
+        category_purpose: duplicate.category_purpose,
+        rolesCSV: rolesForCategory.map(\.role).joined(separator: "|||"),
+        fociCSV: fociForCategory.map(\.activity).joined(separator: "|||"),
+        resourcesCSV: resourcesForCategory.map(\.resource).joined(separator: "|||"),
+        passionsCSV: joinsForCategory.map(\.passion_id.uuidString).joined(separator: "|||"),
+        replacedAt: .now
+      )
+    )
+  }
+}
+
+enum FulfillmentActiveStore {
+  @MainActor
+  static func upsertCategory(
+    named rawName: String,
+    in context: ModelContext,
+    configure: ((Fulfillment) -> Void)? = nil
+  ) throws -> Fulfillment {
+    let trimmed = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else {
+      throw NSError(domain: "FulfillmentActiveStore", code: 1, userInfo: nil)
+    }
+
+    let fulfillments = try context.fetch(FetchDescriptor<Fulfillment>())
+    let matches = fulfillments.filter {
+      FulfillmentCategoryIdentity.matches($0.category, trimmed)
+    }
+    let record = FulfillmentCategoryIdentity.canonicalRow(from: matches) ?? Fulfillment(
+      category: FulfillmentCategoryIdentity.canonicalDisplayName(for: [trimmed]),
+      category_identitiy: "",
+      category_vision: "",
+      category_purpose: ""
+    )
+    if matches.isEmpty {
+      context.insert(record)
+    }
+    record.category = FulfillmentCategoryIdentity.canonicalDisplayName(for: [record.category, trimmed])
+    record.updatedAt = .now
+    configure?(record)
+    return record
+  }
+}
+
+enum OutcomeContributingLittleWinsDefaults {
+  private static let defaultsKey = "outcome_contributing_little_wins_v1"
+
+  static func remapFocusIDs(_ remap: [UUID: UUID], defaults: UserDefaults = .standard) {
+    guard !remap.isEmpty else { return }
+    let scopedKey = LoomDefaultsScope.scopedKey(defaultsKey, defaults: defaults)
+    guard let data = defaults.data(forKey: scopedKey),
+          let decoded = try? JSONDecoder().decode([String: [String]].self, from: data) else {
+      return
+    }
+
+    var rewritten: [String: [String]] = [:]
+    for (outcomeID, focusIDs) in decoded {
+      var ordered: [String] = []
+      var seen = Set<String>()
+      for raw in focusIDs {
+        guard let id = UUID(uuidString: raw) else { continue }
+        let mapped = remap[id] ?? id
+        let mappedRaw = mapped.uuidString
+        if seen.insert(mappedRaw).inserted {
+          ordered.append(mappedRaw)
+        }
+      }
+      if !ordered.isEmpty {
+        rewritten[outcomeID] = ordered
+      }
+    }
+
+    guard let rewrittenData = try? JSONEncoder().encode(rewritten) else { return }
+    defaults.set(rewrittenData, forKey: scopedKey)
+  }
+}
+
+enum CompletedOutcomeContributingLittleWinsDefaults {
+  private struct Snapshot: Codable {
+    let focusID: UUID
+    let focusTitle: String
+    let completedCountInOutcomeWindow: Int
+  }
+
+  private static let defaultsKey = "completed_outcome_contributing_little_wins_v1"
+
+  static func remapFocusIDs(_ remap: [UUID: UUID], defaults: UserDefaults = .standard) {
+    guard !remap.isEmpty else { return }
+    let scopedKey = LoomDefaultsScope.scopedKey(defaultsKey, defaults: defaults)
+    guard let data = defaults.data(forKey: scopedKey),
+          let decoded = try? JSONDecoder().decode([String: [Snapshot]].self, from: data) else {
+      return
+    }
+
+    var rewritten: [String: [Snapshot]] = [:]
+    for (archiveID, snapshots) in decoded {
+      var keptByID: [UUID: Snapshot] = [:]
+      for snapshot in snapshots {
+        let mappedID = remap[snapshot.focusID] ?? snapshot.focusID
+        if keptByID[mappedID] == nil {
+          keptByID[mappedID] = Snapshot(
+            focusID: mappedID,
+            focusTitle: snapshot.focusTitle,
+            completedCountInOutcomeWindow: snapshot.completedCountInOutcomeWindow
+          )
+        }
+      }
+      if !keptByID.isEmpty {
+        rewritten[archiveID] = Array(keptByID.values)
+      }
+    }
+
+    guard let rewrittenData = try? JSONEncoder().encode(rewritten) else { return }
+    defaults.set(rewrittenData, forKey: scopedKey)
+  }
+}
+
 enum OutcomeStartingValueStore {
   private static let defaultsKey = "outcomeStartingValueEntryIDs.v1"
 
@@ -292,6 +1047,19 @@ enum LittleWinsScheduleStore {
     }
   }
 
+  static func remapFocusIDs(_ remap: [UUID: UUID]) {
+    guard !remap.isEmpty else { return }
+    let rules = allRules()
+    var rewritten: [UUID: LittleWinsScheduleRule] = [:]
+    for (focusID, rule) in rules {
+      let mapped = remap[focusID] ?? focusID
+      rewritten[mapped] = rule.normalized
+    }
+    if rewritten != rules {
+      saveAllRules(rewritten)
+    }
+  }
+
   private static func saveAllRules(_ rules: [UUID: LittleWinsScheduleRule]) {
     let raw = Dictionary(uniqueKeysWithValues: rules.map { ($0.key.uuidString, $0.value.normalized) })
     let scopedKey = LoomDefaultsScope.scopedKey(defaultsKey)
@@ -516,6 +1284,19 @@ enum LittleWinsIntegrationStore {
     save(map)
   }
 
+  static func remapFocusIDs(_ remap: [UUID: UUID]) {
+    guard !remap.isEmpty else { return }
+    let current = allConfigs()
+    var rewritten: [UUID: LittleWinsIntegrationConfig] = [:]
+    for (focusID, config) in current {
+      let mapped = remap[focusID] ?? focusID
+      rewritten[mapped] = config.normalized
+    }
+    if rewritten != current {
+      save(rewritten)
+    }
+  }
+
   private static func save(_ map: [UUID: LittleWinsIntegrationConfig]) {
     let raw = Dictionary(uniqueKeysWithValues: map.map { ($0.key.uuidString, $0.value.normalized) })
     let scopedKey = LoomDefaultsScope.scopedKey(defaultsKey)
@@ -578,6 +1359,20 @@ enum LittleWinsPassionsStore {
     }
     if changed {
       save(map)
+    }
+  }
+
+  static func remapFocusIDs(_ remap: [UUID: UUID]) {
+    guard !remap.isEmpty else { return }
+    let current = allLinks()
+    var rewritten: [UUID: [UUID]] = [:]
+    for (focusID, passionIDs) in current {
+      let mapped = remap[focusID] ?? focusID
+      let existing = Set(rewritten[mapped] ?? [])
+      rewritten[mapped] = Array(existing.union(passionIDs)).sorted { $0.uuidString < $1.uuidString }
+    }
+    if rewritten != current {
+      save(rewritten)
     }
   }
 

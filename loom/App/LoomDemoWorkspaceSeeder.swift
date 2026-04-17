@@ -3,28 +3,21 @@ import SwiftData
 
 enum LoomSpecialAccountWorkspace: String {
     case reviewDemo = "review-demo"
-    case reviewOnboardingDemo = "review-onboarding-demo"
-    case starter = "starter"
 
-    static let reviewDemoAccountEmail = "test@loom.app"
-    static let reviewOnboardingDemoAccountEmail = "demo@loomlife.us"
-    static let starterAccountEmail = "start@loom.app"
+    static let reviewDemoAccountEmail = "demo@loomlife.us"
 
     static func workspace(for email: String) -> LoomSpecialAccountWorkspace? {
+        guard LoomInternalDemoMode.isEnabled else { return nil }
         switch email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
         case reviewDemoAccountEmail:
             return .reviewDemo
-        case reviewOnboardingDemoAccountEmail:
-            return .reviewOnboardingDemo
-        case starterAccountEmail:
-            return .starter
         default:
             return nil
         }
     }
 
     var shouldSeedDemoWorkspace: Bool {
-        self == .reviewDemo || self == .reviewOnboardingDemo
+        self == .reviewDemo
     }
 
     var shouldAutoCompleteGatesAfterSignIn: Bool {
@@ -32,19 +25,19 @@ enum LoomSpecialAccountWorkspace: String {
     }
 
     var shouldPrefillDiagnosticDuringOnboarding: Bool {
-        self == .reviewOnboardingDemo
+        false
     }
 
     var shouldForceFreshSetupAppearanceDuringQuickTour: Bool {
-        self == .reviewOnboardingDemo
+        false
     }
 
     var usesDefaultMonthlySubscription: Bool {
-        self == .reviewDemo || self == .reviewOnboardingDemo
+        false
     }
 
     var preservesWorkspaceStateAcrossLogout: Bool {
-        self == .reviewOnboardingDemo
+        false
     }
 
     var bootstrapDefaultsKey: String {
@@ -56,78 +49,37 @@ enum LoomSpecialAccountWorkspace: String {
     }
 
     var autoCreateEnabledDefaultsKey: String? {
-        switch self {
-        case .reviewOnboardingDemo:
-            return defaultsPrefix + "auto_create_enabled_v1"
-        case .reviewDemo, .starter:
-            return nil
-        }
+        nil
     }
 
     var storeGenerationDefaultsKey: String {
-        switch self {
-        case .reviewDemo:
-            return UserSessionStore.Keys.reviewDemoStoreGeneration
-        case .reviewOnboardingDemo:
-            return UserSessionStore.Keys.reviewOnboardingDemoStoreGeneration
-        case .starter:
-            return UserSessionStore.Keys.starterStoreGeneration
-        }
+        UserSessionStore.Keys.reviewDemoStoreGeneration
     }
 
     var alertTitle: String {
-        switch self {
-        case .reviewDemo:
-            return "Demo Account"
-        case .reviewOnboardingDemo:
-            return "Review Demo Account"
-        case .starter:
-            return "Isolated Workspace"
-        }
+        "Demo Account"
     }
 
     var alertMessage: String {
-        switch self {
-        case .reviewDemo:
-            return "This account is a demo workspace with sample data. Changes will NOT save if logged out."
-        case .reviewOnboardingDemo:
-            return "This account is a review demo workspace with preloaded sample data, but it still follows the normal onboarding flow. Changes will NOT save if logged out."
-        case .starter:
-            return "This account is a temporary empty workspace. Changes reset after sign out."
-        }
+        "This demo account loads preserved sample data. Changes reset when the demo workspace is refreshed."
     }
 
     var storeFilePrefix: String {
-        switch self {
-        case .reviewDemo:
-            return "review-demo"
-        case .reviewOnboardingDemo:
-            return "review-onboarding-demo"
-        case .starter:
-            return "starter-isolated"
-        }
+        "review-demo"
     }
 
     var defaultsPrefix: String {
-        switch self {
-        case .reviewDemo:
-            return "review_demo."
-        case .reviewOnboardingDemo:
-            return "review_onboarding_demo."
-        case .starter:
-            return "starter_isolated."
-        }
+        "review_demo."
     }
 
     func allowsAutoCreate(defaults: UserDefaults = .standard) -> Bool {
-        guard let key = autoCreateEnabledDefaultsKey else { return true }
-        guard defaults.object(forKey: key) != nil else { return true }
-        return defaults.bool(forKey: key)
+        _ = defaults
+        return false
     }
 
     func setAllowsAutoCreate(_ isEnabled: Bool, defaults: UserDefaults = .standard) {
-        guard let key = autoCreateEnabledDefaultsKey else { return }
-        defaults.set(isEnabled, forKey: key)
+        _ = isEnabled
+        _ = defaults
     }
 }
 

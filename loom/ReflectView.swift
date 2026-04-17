@@ -59,8 +59,6 @@ struct ReflectView: View {
     @Query private var allAdHocMarkers: [PlannedChunkActionAdHocMarker]
     @Query(sort: \RollingCaptureItem.createdAt, order: .reverse) private var captureItems: [RollingCaptureItem]
     @Query(sort: \ActivePlanState.id, order: .forward) private var activePlanStates: [ActivePlanState]
-    @AppStorage("capture_google_tasks_access_token") private var googleTasksAccessToken: String = ""
-    @AppStorage("capture_microsoft_todo_access_token") private var microsoftTodoAccessToken: String = ""
 
     @State private var step: Int = 1
     @State private var showCelebration: Bool = true
@@ -2442,10 +2440,6 @@ struct ReflectView: View {
         switch sourceType {
         case "apple_reminder":
             applyAppleReminderMutationIfNeeded(for: item, action: action)
-        case "google_tasks":
-            applyGoogleTaskMutationIfNeeded(for: item, action: action)
-        case "microsoft_todo":
-            applyMicrosoftTodoMutationIfNeeded(for: item, action: action)
         default:
             break
         }
@@ -2481,91 +2475,6 @@ struct ReflectView: View {
             }
         }
         #endif
-    }
-
-    private func applyGoogleTaskMutationIfNeeded(for item: RollingCaptureItem, action: ExternalMutationAction) {
-        guard !googleTasksAccessToken.isEmpty else { return }
-        guard let externalID = item.sourceExternalID else { return }
-        let parts = externalID.split(separator: "|", maxSplits: 1).map(String.init)
-        guard parts.count == 2 else { return }
-        let listID = parts[0]
-        let taskID = parts[1]
-        Task { await performGoogleTaskMutation(accessToken: googleTasksAccessToken, listID: listID, taskID: taskID, action: action) }
-    }
-
-    private func performGoogleTaskMutation(
-        accessToken: String,
-        listID: String,
-        taskID: String,
-        action: ExternalMutationAction
-    ) async {
-        guard
-            let listEncoded = listID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
-            let taskEncoded = taskID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
-            let url = URL(string: "https://tasks.googleapis.com/tasks/v1/lists/\(listEncoded)/tasks/\(taskEncoded)")
-        else { return }
-
-        var request = URLRequest(url: url)
-        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-
-        switch action {
-        case .complete:
-            request.httpMethod = "PATCH"
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            let body: [String: String] = [
-                "status": "completed",
-                "completed": ISO8601DateFormatter().string(from: Date())
-            ]
-            request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-            _ = try? await URLSession.shared.data(for: request)
-        case .delete:
-            request.httpMethod = "DELETE"
-            _ = try? await URLSession.shared.data(for: request)
-        }
-    }
-
-    private func applyMicrosoftTodoMutationIfNeeded(for item: RollingCaptureItem, action: ExternalMutationAction) {
-        guard !microsoftTodoAccessToken.isEmpty else { return }
-        guard let externalID = item.sourceExternalID else { return }
-        let parts = externalID.split(separator: "|", maxSplits: 1).map(String.init)
-        guard parts.count == 2 else { return }
-        let listID = parts[0]
-        let taskID = parts[1]
-        Task {
-            await performMicrosoftTodoMutation(
-                accessToken: microsoftTodoAccessToken,
-                listID: listID,
-                taskID: taskID,
-                action: action
-            )
-        }
-    }
-
-    private func performMicrosoftTodoMutation(
-        accessToken: String,
-        listID: String,
-        taskID: String,
-        action: ExternalMutationAction
-    ) async {
-        guard
-            let listEncoded = listID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
-            let taskEncoded = taskID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
-            let url = URL(string: "https://graph.microsoft.com/v1.0/me/todo/lists/\(listEncoded)/tasks/\(taskEncoded)")
-        else { return }
-        var request = URLRequest(url: url)
-        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-
-        switch action {
-        case .complete:
-            request.httpMethod = "PATCH"
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            let body: [String: String] = ["status": "completed"]
-            request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-            _ = try? await URLSession.shared.data(for: request)
-        case .delete:
-            request.httpMethod = "DELETE"
-            _ = try? await URLSession.shared.data(for: request)
-        }
     }
 
     /// Archive is persisted first, then active-week planning/action rows are cleared

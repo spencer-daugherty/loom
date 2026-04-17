@@ -125,25 +125,14 @@ enum LoomPersistence {
         }
 
         do {
-            // CloudKit-backed persistent store for signed-in iCloud users.
-            let cloudKitConfiguration = ModelConfiguration(cloudKitDatabase: .automatic)
-            return try ModelContainer(for: Schema(modelTypes), configurations: [cloudKitConfiguration])
+            let localConfiguration = ModelConfiguration(cloudKitDatabase: .none)
+            return try ModelContainer(for: Schema(modelTypes), configurations: [localConfiguration])
         } catch {
             AppDebugActivityLog.log(
                 "Persistence",
-                "Primary CloudKit ModelContainer init failed error=\(error.localizedDescription)"
+                "Primary local ModelContainer init failed error=\(error.localizedDescription); falling back to in-memory store"
             )
-            // Fallback lets app boot even if CloudKit capability/container is not configured yet.
-            let localConfiguration = ModelConfiguration(cloudKitDatabase: .none)
-            do {
-                return try ModelContainer(for: Schema(modelTypes), configurations: [localConfiguration])
-            } catch {
-                AppDebugActivityLog.log(
-                    "Persistence",
-                    "Primary local ModelContainer init failed error=\(error.localizedDescription); falling back to in-memory store"
-                )
-                return makeInMemoryContainer()
-            }
+            return makeInMemoryContainer()
         }
     }
 
@@ -273,8 +262,6 @@ struct loomApp: App {
     @AppStorage(UserSessionStore.Keys.hasAccount) private var hasAccount = false
     @AppStorage(UserSessionStore.Keys.reviewDemoModeEnabled) private var reviewDemoModeEnabled = false
     @AppStorage(UserSessionStore.Keys.reviewDemoStoreGeneration) private var reviewDemoStoreGeneration = 0
-    @AppStorage(UserSessionStore.Keys.reviewOnboardingDemoStoreGeneration) private var reviewOnboardingDemoStoreGeneration = 0
-    @AppStorage(UserSessionStore.Keys.starterStoreGeneration) private var starterStoreGeneration = 0
     @AppStorage(UserSessionStore.Keys.isolatedWorkspaceKind) private var isolatedWorkspaceKind = ""
     @AppStorage(loomAIDebugDefaultsKey) private var enableLoomAIDebug = false
     @AppStorage("loom.showLoomAIDebugPage") private var showLoomAIDebugPage = false
@@ -285,59 +272,16 @@ struct loomApp: App {
                 hasAccount: hasAccount,
                 reviewDemoModeEnabled: reviewDemoModeEnabled,
                 reviewDemoStoreGeneration: reviewDemoStoreGeneration,
-                reviewOnboardingDemoStoreGeneration: reviewOnboardingDemoStoreGeneration,
-                starterStoreGeneration: starterStoreGeneration,
                 isolatedWorkspaceKind: isolatedWorkspaceKind
             ) {
-                ZStack(alignment: .bottomLeading) {
-                    Group {
-                        if enableLoomAIDebug && showLoomAIDebugPage {
-                            TemporaryVisionAutoWriteDebugView {
-                                showLoomAIDebugPage = false
-                            }
-                        } else {
-                            RootGateView(presentationStyle: .fullScreen) {
-                                ContentView()
-                                    .autocorrectionDisabled(false)
-                                    .textInputAutocapitalization(.sentences)
-                            }
-                        }
-                    }
-                    .id(enableLoomAIDebug && showLoomAIDebugPage ? "loom-debug-root" : "loom-main-root")
-
-                    if enableLoomAIDebug && !showLoomAIDebugPage {
-                        Button {
-                            showLoomAIDebugPage = true
-                        } label: {
-                            Text("Debug")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 8)
-                                .background(
-                                    Capsule(style: .continuous)
-                                        .fill(Color.blue.gradient)
-                                )
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.leading, 12)
-                        .padding(.bottom, 14)
-                        .zIndex(10)
-                    }
+                RootGateView(presentationStyle: .fullScreen) {
+                    ContentView()
+                        .autocorrectionDisabled(false)
+                        .textInputAutocapitalization(.sentences)
                 }
             }
             .onAppear {
-                if !enableLoomAIDebug {
-                    showLoomAIDebugPage = false
-                }
-            }
-            .onChange(of: enableLoomAIDebug) { _, isEnabled in
-                AppDebugActivityLog.log("App", "LoomAI Debug mode toggled \(isEnabled ? "on" : "off")")
-                if isEnabled {
-                    showLoomAIDebugPage = true
-                } else {
-                    showLoomAIDebugPage = false
-                }
+                showLoomAIDebugPage = false
             }
         }
     }
@@ -384,8 +328,6 @@ private struct LoomModelContainerHost<Content: View>: View {
     let hasAccount: Bool
     let reviewDemoModeEnabled: Bool
     let reviewDemoStoreGeneration: Int
-    let reviewOnboardingDemoStoreGeneration: Int
-    let starterStoreGeneration: Int
     let isolatedWorkspaceKind: String
     let content: Content
 
@@ -393,16 +335,12 @@ private struct LoomModelContainerHost<Content: View>: View {
         hasAccount: Bool,
         reviewDemoModeEnabled: Bool,
         reviewDemoStoreGeneration: Int,
-        reviewOnboardingDemoStoreGeneration: Int,
-        starterStoreGeneration: Int,
         isolatedWorkspaceKind: String,
         @ViewBuilder content: () -> Content
     ) {
         self.hasAccount = hasAccount
         self.reviewDemoModeEnabled = reviewDemoModeEnabled
         self.reviewDemoStoreGeneration = reviewDemoStoreGeneration
-        self.reviewOnboardingDemoStoreGeneration = reviewOnboardingDemoStoreGeneration
-        self.starterStoreGeneration = starterStoreGeneration
         self.isolatedWorkspaceKind = isolatedWorkspaceKind
         self.content = content()
     }
@@ -411,13 +349,17 @@ private struct LoomModelContainerHost<Content: View>: View {
         Group {
             if let workspace = resolvedWorkspace,
                let container = LoomIsolatedContainerStore.container(for: workspace, generation: storeGeneration(for: workspace)) {
-                LoomIsolatedWorkspaceBootstrapView(workspace: workspace) {
-                    content
+                LoomAppBootstrapView {
+                    LoomIsolatedWorkspaceBootstrapView(workspace: workspace) {
+                        content
+                    }
                 }
                 .modelContainer(container)
                 .id("loom-isolated-container-\(workspace.rawValue)-\(storeGeneration(for: workspace))")
             } else if let container = LoomPrimaryContainerStore.container {
-                content
+                LoomAppBootstrapView {
+                    content
+                }
                     .modelContainer(container)
                     .id("loom-primary-container")
             } else {
@@ -434,7 +376,7 @@ private struct LoomModelContainerHost<Content: View>: View {
     }
 
     private var resolvedWorkspace: LoomSpecialAccountWorkspace? {
-        guard reviewDemoModeEnabled else { return nil }
+        guard LoomInternalDemoMode.isEnabled, reviewDemoModeEnabled else { return nil }
         let normalizedKind = isolatedWorkspaceKind.trimmingCharacters(in: .whitespacesAndNewlines)
         if let workspace = LoomSpecialAccountWorkspace(rawValue: normalizedKind) {
             return workspace
@@ -443,20 +385,8 @@ private struct LoomModelContainerHost<Content: View>: View {
     }
 
     private func storeGeneration(for workspace: LoomSpecialAccountWorkspace) -> Int {
-        switch workspace {
-        case .reviewDemo:
-            return reviewDemoStoreGeneration
-        case .reviewOnboardingDemo:
-            if UserDefaults.standard.object(forKey: UserSessionStore.Keys.reviewOnboardingDemoStoreGeneration) != nil {
-                return reviewOnboardingDemoStoreGeneration
-            }
-            return reviewDemoStoreGeneration
-        case .starter:
-            if UserDefaults.standard.object(forKey: UserSessionStore.Keys.starterStoreGeneration) != nil {
-                return starterStoreGeneration
-            }
-            return reviewDemoStoreGeneration
-        }
+        _ = workspace
+        return reviewDemoStoreGeneration
     }
 
     private func handleIncomingURL(_ url: URL) {
@@ -494,6 +424,34 @@ private struct LoomModelContainerHost<Content: View>: View {
             base64 += String(repeating: "=", count: 4 - pad)
         }
         return base64
+    }
+}
+
+private struct LoomAppBootstrapView<Content: View>: View {
+    @Environment(\.modelContext) private var modelContext
+    @State private var didFinishBootstrap = false
+    let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        Group {
+            if didFinishBootstrap {
+                content
+            } else {
+                ProgressView("Preparing Loom data…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color(.systemBackground).ignoresSafeArea())
+            }
+        }
+        .task {
+            guard !didFinishBootstrap else { return }
+            RetiredExternalIntegrationCleanup.runIfNeeded(in: modelContext)
+            FulfillmentDuplicateRepair.runIfNeeded(in: modelContext)
+            didFinishBootstrap = true
+        }
     }
 }
 

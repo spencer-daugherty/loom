@@ -6,25 +6,24 @@ extension Notification.Name {
 
 enum SubscriptionAccessGate {
     static let inactivePurchaseOverrideKey = "dev_inactive_purchase_override"
-    static let starterManualEntitlementAccessKey = "starter_manual_entitlement_access"
-    static let starterPreferredProductIDKey = "starter_preferred_product_id"
     static let inactiveBannerMessage = "Your subscription is inactive. Select an option to continue access."
 
     static func shouldForceInactiveSubscription(
         workspace: LoomSpecialAccountWorkspace? = LoomDefaultsScope.currentWorkspace()
     ) -> Bool {
-        workspace == .starter
+        _ = workspace
+        return false
     }
 
     static func defaultPlan(
         workspace: LoomSpecialAccountWorkspace? = LoomDefaultsScope.currentWorkspace()
     ) -> SubscriptionPlan? {
-        switch workspace {
-        case .reviewDemo, .reviewOnboardingDemo:
-            return .monthly
-        default:
-            return nil
-        }
+        guard LoomInternalDemoMode.isEnabled, workspace == .reviewDemo else { return nil }
+        let rawValue = UserDefaults.standard
+            .string(forKey: LoomInternalDemoMode.grantedPlanDefaultsKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let rawValue, !rawValue.isEmpty else { return nil }
+        return SubscriptionPlan(rawValue: rawValue)
     }
 
     static func hasActiveSubscription(
@@ -34,29 +33,6 @@ enum SubscriptionAccessGate {
     ) -> Bool {
         _ = workspace
         return isSubscribed && !inactivePurchaseOverrideEnabled
-    }
-
-    static func allowsStarterEntitlementAccess(defaults: UserDefaults = .standard) -> Bool {
-        defaults.bool(forKey: starterManualEntitlementAccessKey)
-    }
-
-    static func setStarterEntitlementAccess(_ isEnabled: Bool, defaults: UserDefaults = .standard) {
-        defaults.set(isEnabled, forKey: starterManualEntitlementAccessKey)
-    }
-
-    static func starterPreferredProductID(defaults: UserDefaults = .standard) -> String? {
-        let productID = defaults.string(forKey: starterPreferredProductIDKey)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let productID, !productID.isEmpty else { return nil }
-        return productID
-    }
-
-    static func setStarterPreferredProductID(_ productID: String?, defaults: UserDefaults = .standard) {
-        let trimmedProductID = productID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if trimmedProductID.isEmpty {
-            defaults.removeObject(forKey: starterPreferredProductIDKey)
-        } else {
-            defaults.set(trimmedProductID, forKey: starterPreferredProductIDKey)
-        }
     }
 
     static func presentInactiveSubscriptionPaywall() {

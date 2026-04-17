@@ -392,6 +392,10 @@ struct ContentView: View {
         PlanFlowProgressStore.hasCompletedPlanFlowOnceForCurrentUser()
     }
 
+    private var hasCompletedAnyWeeklyActionPlan: Bool {
+        !reflectionArchives.isEmpty
+    }
+
     private var isDrivingForceEmptyState: Bool {
         shouldShowBlankHomepageAppearance || shouldForceFreshSetupCardsForReviewQuickTour || !hasDrivingForceData
     }
@@ -502,7 +506,7 @@ struct ContentView: View {
             }
             return ("Master To Do List", "4/5", subtitle)
         case .actionBlocks:
-            let stepPrefix = hasCompletedPlanFlowOnce ? "" : "5/5"
+            let stepPrefix = hasCompletedAnyWeeklyActionPlan ? "" : "5/5"
             return ("Start Weekly Action Plan", stepPrefix, nil)
         case .none:
             return nil
@@ -1616,7 +1620,10 @@ struct ContentView: View {
     }
     
     private func recordForCategory(_ categoryTitle: String) -> Fulfillment? {
-        fulfillments.first { $0.category == categoryTitle }
+        let matches = fulfillments.filter {
+            FulfillmentCategoryIdentity.matches($0.category, categoryTitle)
+        }
+        return FulfillmentCategoryIdentity.canonicalRow(from: matches)
     }
 
     private func recordForCategoryID(_ categoryID: UUID) -> Fulfillment? {

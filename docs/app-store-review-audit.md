@@ -23,10 +23,10 @@ The current repo looks like a pre-release build, not a clean submission build. T
   **Evidence in repo:** [Info.plist](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/Info.plist:40) contains `NSPhotoLibraryAddUsageDescription` but no `NSPhotoLibraryUsageDescription`; the app imports and previews user media in flows like [CaptureView.swift](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/CaptureView.swift:1273), [ActionView.swift](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/ActionView.swift:5753), and [PlanView.swift](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/PlanView.swift:9109). Saving camera output add-only is separately used in [LittleWinsShareCameraView.swift](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/LittleWinsShareCameraView.swift:626).
   **Recommended fix:** Add the correct read permission string for any Photos import path, and make the wording specific to the actual user-facing feature.
 
-- **Issue:** Review/demo accounts and credentials are not just provided for review; the app has product logic for them. OOO
-  **Why Apple may care:** Apple accepts demo credentials when necessary, but special review-only behavior, seeded workspaces, and hardcoded passwords make the build look staged and non-production.
-  **Evidence in repo:** [docs/app-review-attachment.rtf](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/docs/app-review-attachment.rtf:6) includes `demo@loomlife.us` and password `ForAllTime3`; [LoomDemoWorkspaceSeeder.swift](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/App/LoomDemoWorkspaceSeeder.swift:14) defines special workspaces including `reviewDemo`, `reviewOnboardingDemo`, and `starter`; [AccountStepView.swift](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/Onboarding/AccountStepView.swift:703) returns “This demo sign-in is not available right now”; [AccountStepView.swift](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/Onboarding/AccountStepView.swift:753) branches on special workspace types.
-  **Recommended fix:** Strip special review/demo logic from the shipping binary. If reviewer access is needed, use a normal production account with no review-only branching.
+- **Issue:** Demo-account seeding still exists in the codebase and must stay aligned with the real review/demo setup. OOO
+  **Why Apple may care:** Apple accepts normal demo credentials when necessary, but hidden review-only behavior or stale demo-account logic can make the app look staged and non-production.
+  **Evidence in repo:** [docs/app-review-attachment.rtf](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/docs/app-review-attachment.rtf:1) says live review credentials belong only in App Store Connect; [LoomDemoWorkspaceSeeder.swift](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/App/LoomDemoWorkspaceSeeder.swift:4) now points the seeded demo path at `demo@loomlife.us`; [InternalDemoProvisioning.swift](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/InternalDemoProvisioning.swift:7) enables the Firebase-controlled demo provisioning path in the shipping app.
+  **Recommended fix:** Keep the demo account credentials in App Store Connect and make sure the demo flow matches the current production setup.
 
 - **Issue:** The build presents itself as alpha software.
   **Why Apple may care:** Visible alpha/beta labeling signals an unfinished app and undermines the “complete, production-ready” standard.
@@ -55,10 +55,10 @@ The current repo looks like a pre-release build, not a clean submission build. T
   **Evidence in repo:** [SubscriptionPlan.swift](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/Paywall/SubscriptionPlan.swift:54) uses `Founding Member (Lifetime)` and `Annual (Early Adopter)`; [SubscriptionPlan.swift](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/Paywall/SubscriptionPlan.swift:139) says `price-lock for life`; [SubscriptionPlan.swift](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/Paywall/SubscriptionPlan.swift:168) and [SubscriptionPlan.swift](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/Paywall/SubscriptionPlan.swift:170) hardcode offer end dates.
   **Recommended fix:** Replace hardcoded urgency and “for life” marketing claims with language sourced from live StoreKit products or remove the claims entirely.
 
-- **Issue:** The app syncs broad personal data through CloudKit without obvious in-app disclosure. OOO
-  **Why Apple may care:** Silent iCloud sync of deeply personal content can create privacy-label and reviewer questions if not clearly disclosed.
-  **Evidence in repo:** [loom.entitlements](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/loom.entitlements:17) enables iCloud/CloudKit; [loomApp.swift](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/loomApp.swift:284) uses `LoomModelContainerHost`; previous inspection confirmed the SwiftData model container is configured with `cloudKitDatabase: .automatic`, which likely sweeps in goals, reflections, insights, and chat history.
-  **Recommended fix:** Make iCloud sync explicit in privacy/legal copy and confirm App Privacy labels reflect this storage/sync behavior.
+- **Issue:** CloudKit-backed sync was previously configured for the main SwiftData store. OOO
+  **Why Apple may care:** If it returns, silent iCloud sync of deeply personal content would create privacy-label and reviewer questions unless it is clearly disclosed.
+  **Evidence in repo:** [loomApp.swift](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/loomApp.swift:122) now initializes the primary SwiftData store with `cloudKitDatabase: .none`; [loom.entitlements](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/loom.entitlements:1) no longer contains iCloud/CloudKit entitlement keys.
+  **Recommended fix:** Keep the main database local-only and keep privacy/support copy free of iCloud sync claims unless a future release intentionally reintroduces CloudKit.
 
 - **Issue:** OAuth task-sync tokens are stored in `AppStorage`. OOO
   **Why Apple may care:** This is more of a security and trust problem than an App Review rule by itself, but it weakens the privacy posture if external account tokens are stored casually.
@@ -86,15 +86,14 @@ The current repo looks like a pre-release build, not a clean submission build. T
 
 - **What appears collected**
   - Account identifiers and auth-linked metadata through Firebase Auth, including email, display name, auth provider, and UID: [AccountStepView.swift](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/Onboarding/AccountStepView.swift:480), [AppFeedbackService.swift](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/AppFeedbackService.swift:48).
-  - In-app planning, reflections, goals, purpose/diagnostic data, chat history, and other personal productivity content stored in SwiftData and likely synced via CloudKit.
+  - In-app planning, reflections, goals, purpose/diagnostic data, chat history, and other personal productivity content stored locally in SwiftData on device.
   - App feedback payloads with rating, details, app version/build, user key, Firebase UID, email, name, and auth provider: [AppFeedbackService.swift](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/AppFeedbackService.swift:66).
   - Analytics and crash/diagnostic data in release builds: [AnalyticsCollectionPolicy.swift](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/Analytics/AnalyticsCollectionPolicy.swift:7), [loomApp.swift](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/loomApp.swift:242).
 
 - **What appears transmitted**
   - Firebase services for auth, analytics, crash reporting, and Firestore feedback.
-  - Remote AI requests to Loom’s worker backend at `loom-ai-minimal.spence0927.workers.dev`: [LoomAIService.swift](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/LoomAIService.swift:5).
-  - The worker forwards prompts/context to OpenAI Responses API: [worker.js](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/worker.js:1).
-  - Google Tasks and Microsoft To Do API traffic when sync is enabled: [CaptureView.swift](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/CaptureView.swift:6241), [CaptureView.swift](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/CaptureView.swift:6300).
+  - Apple Intelligence processing on supported devices.
+  - No active Google Tasks, Microsoft To Do, or Loom-hosted remote AI production paths remain in the core app after the retirement cleanup.
 
 - **What third parties appear involved**
   - Firebase Auth
@@ -102,17 +101,10 @@ The current repo looks like a pre-release build, not a clean submission build. T
   - Firebase Crashlytics
   - Firebase Firestore
   - Google Sign-In
-  - Google Tasks
-  - Microsoft identity / Microsoft To Do
-  - OpenAI via Loom’s remote worker
-  - Apple CloudKit/iCloud
-
 - **What the privacy policy must likely disclose**
-  - Remote AI processing and the fact that user content may be sent to Loom’s backend worker and OpenAI.
   - Firebase analytics/crash reporting in production.
   - Firestore feedback submission with linked account fields.
-  - CloudKit/iCloud syncing of user data.
-  - External task-provider sync and token-based access.
+  - Apple Intelligence use on supported devices and local compatibility behavior on unsupported devices.
   - Health, reminders, camera, and photos access scopes.
 
 - **What App Privacy labels likely need to match**
@@ -123,7 +115,7 @@ The current repo looks like a pre-release build, not a clean submission build. T
   - Potentially purchases/subscription data if linked to the user session.
 
 - **Any mismatches or unknowns**
-  - `docs/index.txt` already discloses remote AI and some Firebase flows, but `cannot verify from repo` whether App Store Connect privacy labels currently match.
+  - `docs/index.txt` now reflects Apple Intelligence, local compatibility, and Firebase flows, but `cannot verify from repo` whether App Store Connect privacy labels currently match.
   - `cannot verify from repo` whether production backend logs, retention, and deletion behavior match the policy.
 
 ## 6. ACCOUNT / AUTH / DELETION AUDIT
@@ -140,7 +132,7 @@ The current repo looks like a pre-release build, not a clean submission build. T
 - **Any review risk here**
   - Medium risk: the local deletion flow looks real and materially better than many apps.
   - Medium risk: wording says account deletion removes personalization history and device data, but `cannot verify from repo` whether all remote data beyond Firebase Auth and local state is deleted. Firestore feedback retention is not obviously deleted by this flow.
-  - Medium risk: special workspace handling for `reviewOnboardingDemo` is baked into deletion logic: [AccountView.swift](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/AccountView.swift:2482). That reinforces the problem that review/demo behavior is part of product logic.
+  - Medium risk: demo reset handling still exists in account-management code for `demo@loomlife.us`: [AccountView.swift](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/AccountView.swift:2501). Make sure App Review notes match the real account behavior.
 
 ## 7. SUBSCRIPTIONS / IAP AUDIT
 
@@ -198,8 +190,8 @@ The current repo looks like a pre-release build, not a clean submission build. T
   - Assessment: real feature, but permission scope appears broader than implementation.
 
 - **iCloud / CloudKit**
-  - Found: container and CloudKit services in [loom.entitlements](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/loom.entitlements:17).
-  - Assessment: justified only if the app clearly discloses iCloud sync. Medium review risk otherwise.
+  - Found: primary persistence now uses `cloudKitDatabase: .none` in [loomApp.swift](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/loomApp.swift:122), and iCloud/CloudKit entitlements are absent from [loom.entitlements](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/loom.entitlements:1).
+  - Assessment: low risk if the release build stays local-only and disclosure copy no longer claims iCloud sync.
 
 - **Reminders**
   - Found: reminder access purpose strings are set in project build settings; real EventKit integration exists in Capture/Plan/Action/Reflect flows.
@@ -219,17 +211,16 @@ The current repo looks like a pre-release build, not a clean submission build. T
 
 - **What is on-device vs remote**
   - Apple Intelligence and local compatibility logic exist in the client for some flows: [LoomAIChatProvider.swift](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/LoomAIChatProvider.swift:1), [AppleIntelligenceSupport.swift](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/AppleIntelligenceSupport.swift:1).
-  - Remote AI definitely still exists through Loom’s worker service: [LoomAIService.swift](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/LoomAIService.swift:5), [worker.js](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/worker.js:1).
+  - Core user-facing AI flows no longer depend on Loom’s worker service, Google Tasks, or Microsoft To Do after the retirement cleanup.
 
 - **What is disclosed vs not disclosed**
-  - Repo docs already disclose remote AI and OpenAI involvement in `docs/index.txt`.
-  - Medium risk remains if in-app wording or App Store metadata implies Apple Intelligence or on-device processing more broadly than is true.
+  - Repo docs should disclose Apple Intelligence support and local compatibility behavior without claiming broader remote AI processing.
+  - Medium risk remains if in-app wording or App Store metadata implies Apple Intelligence is always available on every device.
 
 - **Review risks or misleading claims**
-  - High risk: the temporary debug screen exposes raw AI request/response tooling and endpoints in the shipped build.
   - Medium risk: AI branding in tips, marketing, or UI could overstate capabilities if reviewers test unsupported paths.
   - Medium risk: diagnostic insight generation operates on sensitive life, health, and planning context. The app should avoid implying authoritative or deterministic advice.
-  - Medium risk: `cannot verify from repo` whether the app gives users enough runtime disclosure that some AI features are processed remotely.
+  - Medium risk: `cannot verify from repo` whether the app gives users enough runtime disclosure that Apple Intelligence is optional and device-dependent.
 
 ## 10. MANUAL APP STORE CONNECT CHECKLIST
 
@@ -238,16 +229,14 @@ The current repo looks like a pre-release build, not a clean submission build. T
   - Analytics
   - Crash diagnostics
   - Firestore feedback
-  - CloudKit sync
-  - Remote AI/OpenAI processing
-  - Third-party task sync
+  - Apple Intelligence / local compatibility behavior
 - Confirm all live IAPs exist and match in-app product IDs:
   - `loom.lifetime`
   - `loom.annual.locked`
   - `loom.monthly`
 - Confirm pricing, trial length, and any “original price” comparison shown in the app are legally supportable and match App Store Connect.
 - Confirm release entitlements actually include or exclude FamilyControls as intended.
-- Confirm the submission build removes all debug/developer/demo-only surfaces.
+- Confirm the submission build removes or disables all debug/developer/demo-only surfaces.
 - Confirm screenshots, subtitles, promotional text, and descriptions do not overclaim Apple Intelligence, AI personalization, Health integration, or subscription benefits.
 - Confirm the hosted privacy policy at `https://spencer-daugherty.github.io/loom/` is live, accurate, and stable.
 - Confirm account deletion removes all required remote user data or that the policy accurately explains any retained records.
@@ -269,7 +258,7 @@ The current repo looks like a pre-release build, not a clean submission build. T
   - Remove dead remote-notification capability if the app only uses local notifications.
   - Move third-party OAuth tokens out of `AppStorage`.
   - Replace literal placeholder strings in diagnostic loading UI.
-  - Make iCloud sync and remote AI processing clearer in privacy-facing copy if currently under-explained in-app.
+  - Keep CloudKit/iCloud references removed from privacy-facing copy unless a future release intentionally reintroduces iCloud sync.
 
 - **Can fix after launch**
   - Improve legal terminology from generic `License Agreement` to clearer Apple Standard EULA labeling.
@@ -297,7 +286,6 @@ The current repo looks like a pre-release build, not a clean submission build. T
   - [loom/LoomAIService.swift](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/LoomAIService.swift)
   - [loom/LoomAIChatProvider.swift](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/LoomAIChatProvider.swift)
   - [loom/AppleIntelligenceSupport.swift](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/AppleIntelligenceSupport.swift)
-  - [loom/worker.js](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/worker.js)
   - [loom/FirestorePersonalizationRepository.swift](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/FirestorePersonalizationRepository.swift)
   - [loom/AppFeedbackService.swift](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/AppFeedbackService.swift)
   - [loom/Analytics/AnalyticsCollectionPolicy.swift](/Users/spencer.daugherty/Developer/Loom%20Life%20Manager/loom/Analytics/AnalyticsCollectionPolicy.swift)

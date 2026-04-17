@@ -929,18 +929,7 @@ struct FulfillmentView: View {
         )
     }
     private func categoryKey(_ raw: String) -> String {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !trimmed.isEmpty else { return "" }
-        let andNormalized = trimmed.replacingOccurrences(of: "&", with: " and ")
-        let cleaned = andNormalized.replacingOccurrences(
-            of: "[^a-z0-9]+",
-            with: " ",
-            options: .regularExpression
-        )
-        let collapsed = cleaned
-            .split(whereSeparator: \.isWhitespace)
-            .joined(separator: " ")
-        return collapsed
+        FulfillmentCategoryIdentity.normalizedKey(raw)
     }
 
     private var orderedFulfillments: [Fulfillment] {
@@ -1624,21 +1613,22 @@ struct FulfillmentView: View {
             return
         }
 
-        let restored = Fulfillment(
-            category_id: archive.category_id,
-            updatedAt: .now,
-            category: archive.category,
-            category_identitiy: archive.category_identitiy,
-            category_vision: archive.category_vision,
-            category_purpose: archive.category_purpose
-        )
-        modelContext.insert(restored)
+        guard let restored = try? FulfillmentActiveStore.upsertCategory(
+            named: archive.category,
+            in: modelContext,
+            configure: { record in
+                record.category_identitiy = archive.category_identitiy
+                record.category_vision = archive.category_vision
+                record.category_purpose = archive.category_purpose
+                record.updatedAt = .now
+            }
+        ) else { return }
 
         let roleValues = csvItems(from: archive.rolesCSV)
         for (idx, value) in roleValues.enumerated() {
             modelContext.insert(
                 FulfillmentRoles(
-                    category_id: archive.category_id,
+                    category_id: restored.category_id,
                     role: value,
                     rank: idx
                 )
@@ -1649,7 +1639,7 @@ struct FulfillmentView: View {
         for (idx, value) in focusValues.enumerated() {
             modelContext.insert(
                 FulfillmentFocus(
-                    category_id: archive.category_id,
+                    category_id: restored.category_id,
                     activity: value,
                     rank: idx
                 )
@@ -1660,7 +1650,7 @@ struct FulfillmentView: View {
         for (idx, value) in resourceValues.enumerated() {
             modelContext.insert(
                 FulfillmentResources(
-                    category_id: archive.category_id,
+                    category_id: restored.category_id,
                     resource: value,
                     rank: idx
                 )
@@ -1671,7 +1661,7 @@ struct FulfillmentView: View {
         if !desiredPassionKeys.isEmpty {
             var existingJoinPassionIDs = Set(
                 passionJoins
-                    .filter { $0.category_id == archive.category_id }
+                    .filter { $0.category_id == restored.category_id }
                     .map(\.passion_id)
             )
             for passion in passions {
@@ -1681,7 +1671,7 @@ struct FulfillmentView: View {
                         modelContext.insert(
                             PassionFulfillmentJoin(
                                 passion_id: passion.passion_id,
-                                category_id: archive.category_id
+                                category_id: restored.category_id
                             )
                         )
                         existingJoinPassionIDs.insert(passion.passion_id)

@@ -19,7 +19,7 @@ Shared, imported, and attached content
 Optional permission-based data
 	•	Apple Health data you choose to connect, such as steps, workout minutes, sleep, or selected outcome metrics
 		•	Camera images, imported photo attachments, and Photos library saves when you use Loom camera or attachment features
-	•	Reminder/task data from Apple Reminders, Google Tasks, or Microsoft To Do if you connect those integrations
+	•	Reminder/task data from Apple Reminders if you connect that integration
 Usage, diagnostics, and app state
 	•	App interaction events, product usage, and feature telemetry collected by Firebase Analytics in production builds
 	•	Crash and performance diagnostics collected by Firebase Crashlytics in production builds
@@ -31,14 +31,14 @@ Billing and Apple-managed purchase data
 2. How Loom Collects Information
 	•	Directly from you when you create an account, sign in, complete onboarding, type content, chat with LoomAI, submit feedback, or configure plans and goals
 	•	From your device and app use through local storage, notifications settings, analytics, diagnostics, and saved app state
-		•	From Apple frameworks and system services you choose to use, such as CloudKit, HealthKit, EventKit reminders, camera, Photos, and notifications
-	•	From connected third-party account integrations you choose to enable, such as Google Sign-In, Google Tasks, or Microsoft To Do
+		•	From Apple frameworks and system services you choose to use, such as HealthKit, EventKit reminders, camera, Photos, and notifications
+	•	From connected third-party account integrations you choose to enable, such as Google Sign-In
 	•	From content you share into Loom using the Share into Loom extension
 3. How Loom Uses Information
 	•	To create and manage your account, authenticate sign-in, and keep your session active
 	•	To provide Loom’s planning, goal, fulfillment, capture, reminder, attachment, and reflection features
 	•	To personalize the app, generate inferred profiles or insights, and tailor setup or AI suggestions to your context
-		•	To enable optional integrations you request, such as Health, Reminders, Google Tasks, or Microsoft To Do
+		•	To enable optional integrations you request, such as Health or Reminders
 	•	To process purchases, restore purchases, and determine premium access through Apple’s StoreKit systems
 	•	To improve app quality, reliability, and performance through analytics, diagnostics, and feedback review
 	•	To respond to support requests, bug reports, and feedback you submit
@@ -47,33 +47,23 @@ On your device
 	•	Main app data is stored locally using SwiftData, Application Support files, and UserDefaults
 	•	Imported files and photos are stored in local app storage for attachments
 	•	Shared content from the Share into Loom extension is first written into Loom’s shared app-group container so the app can ingest it
-	•	Google Tasks and Microsoft To Do tokens used by the app are stored locally on your device
-Apple sync storage
-	•	Loom attempts to use CloudKit-backed SwiftData storage when available
-	•	If CloudKit is available, your app content may sync through your private iCloud account for Loom
-	•	If CloudKit is unavailable, Loom falls back to local-only storage
+	•	Loom does not sync its main app database through iCloud or CloudKit
 5. Third Parties and Service Providers
 Loom does not sell your personal information. Loom shares or processes data with the following categories of third parties when needed to operate the app:
-	•	Apple for Sign in with Apple, StoreKit purchases, iCloud/CloudKit sync, notifications, HealthKit, EventKit reminders, camera/photos access, and other Apple frameworks you use
+	•	Apple for Sign in with Apple, StoreKit purchases, notifications, HealthKit, EventKit reminders, camera/photos access, and other Apple frameworks you use
 	•	Google / Firebase for authentication, analytics, crash diagnostics, Firestore-backed personalization sync for authenticated users, and app feedback submissions
-	•	Google if you connect Google Tasks, so the app can read, refresh, and update your Google Tasks data directly with Google’s APIs
-	•	Microsoft if you connect Microsoft To Do, so the app can read, refresh, and update your Microsoft To Do data directly with Microsoft Graph
-	•	OpenAI and Loom’s backend worker infrastructure for remote LoomAI features that are not handled fully on device
 When Loom uses service providers or processors, Loom expects them to protect personal data in a manner consistent with this policy and applicable law.
 6. AI Features
 	•	Some Loom AI features can run on device using Apple Intelligence when available and enabled on a supported device
-	•	Other LoomAI features use Loom’s remote backend and OpenAI, including general chat, purpose profile generation, and auto-write features
-	•	Remote AI requests can include the text you send, plus related personalization and planning context needed to answer the request
-	•	Based on the code reviewed, the app’s diagnostic Root Cause and Next Direction generation now runs locally on device rather than through the remote AI endpoint
-	•	Loom’s backend worker may temporarily cache some AI request or response data and hashed context summaries for performance and reliability
-Because some AI features involve off-device processing, do not enter information you do not want processed by Loom’s backend or OpenAI.
+	•	On devices without Apple Intelligence support, Loom uses built-in local compatibility logic to provide suggestions and guidance on device
+	•	AI features use the text you send plus related on-device personalization and planning context needed to answer the request
+	•	Based on the code reviewed, Loom’s diagnostic, onboarding, chat, and auto-write support now rely on Apple Intelligence or local on-device logic rather than Loom-hosted remote AI processing
 7. Optional Permissions and Integrations
 		•	Health: You can choose whether to connect Apple Health data. The code reviewed reads selected health metrics and does not write Health data.
 		•	Reminders: You can choose whether Loom can read and update Apple Reminders you sync into Capture.
-		•	Google Tasks / Microsoft To Do: You can choose whether Loom connects those accounts and stores refresh/access tokens locally so the app can sync your tasks directly with those providers.
 		•	Camera and Photos: You can choose whether Loom can use the camera, import photo attachments, or save generated images to Photos.
 		•	Notifications: You can choose whether Loom can schedule local reminders and alerts.
-You can revoke most app permissions at any time in iOS Settings. You can also disconnect third-party task integrations from within Loom or through the relevant provider account settings.
+You can revoke most app permissions at any time in iOS Settings.
 8. Link Previews, Shared Content, and Attachments
 	•	If you add or share a web link, Loom may request link preview metadata to render a preview card
 	•	If you share text, links, images, videos, or files into Loom, that content may be written into Loom’s shared app-group storage before you review and save it
@@ -81,10 +71,9 @@ You can revoke most app permissions at any time in iOS Settings. You can also di
 	•	Based on the code reviewed, Loom does not upload those attachment files to Loom’s servers as standalone files
 9. Data Retention
 	•	Loom keeps your local app data until you delete it, delete your account, remove the app, or clear the relevant local/app-synced state
-	•	If you use CloudKit sync, your synced app data may remain in your private iCloud storage until it is removed through the app or your iCloud account
 	•	Firestore personalization records are retained while needed for the signed-in Loom account and are cleared when the app’s account-deletion flow resets that state
 	•	Feedback submissions may be retained as support or product records even if you later delete your account
-	•	Analytics, crash, and remote AI processing data may be retained for operational, security, fraud-prevention, debugging, legal, or provider-policy reasons
+	•	Analytics and crash data may be retained for operational, security, fraud-prevention, debugging, legal, or provider-policy reasons
 10. Your Choices, Access, and Deletion
 	•	You can update some account information inside the app
 	•	You can revoke permissions in iOS Settings and disconnect optional integrations you no longer want to use

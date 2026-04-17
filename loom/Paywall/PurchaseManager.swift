@@ -165,14 +165,6 @@ final class PurchaseManager: ObservableObject {
             return
         }
 
-        if SubscriptionAccessGate.shouldForceInactiveSubscription(),
-           !SubscriptionAccessGate.allowsStarterEntitlementAccess(defaults: defaults) {
-            clearPendingAutoRenewChange()
-            applyEntitlementSnapshot(activeProductIDs: [], expirationDatesByProductID: [:])
-            hasLoadedEntitlements = true
-            return
-        }
-
         var activeProductIDs = Set<String>()
         var expirationDatesByProductID: [String: Date] = [:]
         let now = Date()
@@ -239,10 +231,6 @@ final class PurchaseManager: ObservableObject {
                 switch verification {
                 case .verified(let transaction):
                     await transaction.finish()
-                    if SubscriptionAccessGate.shouldForceInactiveSubscription() {
-                        SubscriptionAccessGate.setStarterEntitlementAccess(true, defaults: defaults)
-                        SubscriptionAccessGate.setStarterPreferredProductID(transaction.productID, defaults: defaults)
-                    }
                     switch action {
                     case .purchaseNew, .purchaseLifetimeAlongsideAutoRenewing:
                         applyOptimisticEntitlementSnapshot(forPurchasedProductID: transaction.productID)
@@ -292,10 +280,6 @@ final class PurchaseManager: ObservableObject {
             return .failed(errorType: "sync_failed")
         }
 
-        if SubscriptionAccessGate.shouldForceInactiveSubscription() {
-            SubscriptionAccessGate.setStarterEntitlementAccess(true, defaults: defaults)
-            SubscriptionAccessGate.setStarterPreferredProductID(nil, defaults: defaults)
-        }
         await refreshEntitlements()
         return isPremium ? .restoredActiveEntitlement : .noActivePurchasesFound
     }
@@ -322,13 +306,7 @@ final class PurchaseManager: ObservableObject {
         ownedProductIDs = activeProductIDs
 
         let resolvedPlan: SubscriptionPlan?
-        if SubscriptionAccessGate.shouldForceInactiveSubscription(),
-           SubscriptionAccessGate.allowsStarterEntitlementAccess(defaults: defaults),
-           let preferredProductID = SubscriptionAccessGate.starterPreferredProductID(defaults: defaults),
-           activeProductIDs.contains(preferredProductID),
-           let preferredPlan = SubscriptionPlan.from(storeKitProductID: preferredProductID) {
-            resolvedPlan = preferredPlan
-        } else if activeProductIDs.contains(SubscriptionPlan.lifetime.storeKitProductID) {
+        if activeProductIDs.contains(SubscriptionPlan.lifetime.storeKitProductID) {
             resolvedPlan = .lifetime
         } else if activeProductIDs.contains(SubscriptionPlan.annual.storeKitProductID) {
             resolvedPlan = .annual
@@ -336,12 +314,6 @@ final class PurchaseManager: ObservableObject {
             resolvedPlan = .monthly
         } else {
             resolvedPlan = nil
-        }
-
-        if SubscriptionAccessGate.shouldForceInactiveSubscription(),
-           let preferredProductID = SubscriptionAccessGate.starterPreferredProductID(defaults: defaults),
-           !activeProductIDs.contains(preferredProductID) {
-            SubscriptionAccessGate.setStarterPreferredProductID(nil, defaults: defaults)
         }
 
         activePlan = resolvedPlan

@@ -2437,81 +2437,68 @@ struct PurposeView: View {
         autoWriteVisionTroubleshootingMessage = nil
         autoWriteVisionSuggestions = []
 
-        do {
-            let contextSnapshot = try LoomAIViewModel().buildContextSnapshot(in: context)
-            let modeInstruction: String
-            let effectivePreviousSuggestions: [String]
-            switch selectedVisionAutoWriteMode {
-            case .newVision:
-                modeInstruction = "newVision"
-                effectivePreviousSuggestions = uniqueVisionSuggestions(
-                    ([visionTrimmed] + previousSuggestions)
-                        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                        .filter { !$0.isEmpty }
-                )
-            case .rewordVision:
-                modeInstruction = "rewordVision"
-                effectivePreviousSuggestions = visionTrimmed.isEmpty ? [] : previousSuggestions
-            }
-            let response = try await LoomAIService().sendPurposeVisionAutoWrite(
-                currentVision: visionTrimmed,
-                previousSuggestions: effectivePreviousSuggestions,
-                mode: modeInstruction,
-                context: contextSnapshot
+        let effectivePreviousSuggestions: [String]
+        switch selectedVisionAutoWriteMode {
+        case .newVision:
+            effectivePreviousSuggestions = uniqueVisionSuggestions(
+                ([visionTrimmed] + previousSuggestions)
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
             )
-            let rawSuggestions = decodeAutoWriteVisionSuggestions(from: response.message)
-            let suggestions: [String]
-            if selectedVisionAutoWriteMode == .newVision {
-                suggestions = filterNewVisionSuggestions(
-                    rawSuggestions,
+        case .rewordVision:
+            effectivePreviousSuggestions = visionTrimmed.isEmpty ? [] : previousSuggestions
+        }
+
+        if AppleIntelligenceSupport.isAvailable {
+            do {
+                let aiSuggestions = try await AppleIntelligencePurposeVisionGenerator.suggestions(
+                    personalization: nil,
                     currentVision: visionTrimmed,
                     previousSuggestions: effectivePreviousSuggestions
                 )
-            } else {
-                suggestions = rawSuggestions
-            }
-            guard !suggestions.isEmpty else {
-                if selectedVisionAutoWriteMode == .newVision {
-                    autoWriteVisionErrorMessage = "No new vision suggestions yet."
-                    let duplicateDetails = loomAIDuplicateSuggestionTroubleshootingDetails(
-                        feature: "purpose_view_autowrite_vision",
-                        reason: "All generated suggestions were duplicates or too similar to the current vision.",
-                        responsePreview: response.message
+                let resolved = selectedVisionAutoWriteMode == .newVision
+                    ? filterNewVisionSuggestions(
+                        aiSuggestions,
+                        currentVision: visionTrimmed,
+                        previousSuggestions: effectivePreviousSuggestions
                     )
-                    autoWriteVisionTroubleshootingMessage = duplicateDetails
-                    loomAIReportTroubleshootingIfEnabled(details: duplicateDetails)
-                } else {
-                    autoWriteVisionErrorMessage = "No suggestions yet."
-                    autoWriteVisionTroubleshootingMessage = loomAITroubleshootingLocalDetails(
-                        feature: "purpose_view_autowrite_vision",
-                        reason: "No suggestions were returned in the response.",
-                        responsePreview: response.message
-                    )
+                    : aiSuggestions
+                let nextSuggestions = Array(resolved.prefix(2))
+                if !nextSuggestions.isEmpty {
+                    autoWriteVisionSuggestions = nextSuggestions
+                    autoWriteVisionErrorMessage = nil
+                    autoWriteVisionTroubleshootingMessage = nil
+                    return
                 }
-                return
+            } catch {
+                // Fall back to the local suggestion table below.
             }
-            let nextSuggestions = Array(suggestions.prefix(2))
-            guard !nextSuggestions.isEmpty else {
-                autoWriteVisionErrorMessage = "No new suggestions yet."
-                let duplicateDetails = loomAIDuplicateSuggestionTroubleshootingDetails(
-                    feature: "purpose_view_autowrite_vision",
-                    reason: "No usable suggestions were returned after parsing.",
-                    responsePreview: response.message
-                )
-                autoWriteVisionTroubleshootingMessage = duplicateDetails
-                loomAIReportTroubleshootingIfEnabled(details: duplicateDetails)
-                return
-            }
-            autoWriteVisionSuggestions = nextSuggestions
-            autoWriteVisionErrorMessage = nil
-            autoWriteVisionTroubleshootingMessage = nil
-        } catch {
-            autoWriteVisionErrorMessage = "Couldn’t generate Vision suggestions. Check your connection."
-            autoWriteVisionTroubleshootingMessage = loomAITroubleshootingDetails(
-                feature: "purpose_view_autowrite_vision",
-                error: error
-            )
         }
+
+        let fallbackSuggestions = PurposeVisionAutoWriteSuggestionTable.pickSuggestions(
+            personalizationSnapshot: nil,
+            currentVision: visionTrimmed,
+            previousSuggestions: effectivePreviousSuggestions,
+            count: 2
+        )
+        let resolvedFallback = selectedVisionAutoWriteMode == .newVision
+            ? filterNewVisionSuggestions(
+                fallbackSuggestions,
+                currentVision: visionTrimmed,
+                previousSuggestions: effectivePreviousSuggestions
+            )
+            : fallbackSuggestions
+        let nextSuggestions = Array(resolvedFallback.prefix(2))
+        guard !nextSuggestions.isEmpty else {
+            autoWriteVisionErrorMessage = selectedVisionAutoWriteMode == .newVision
+                ? "No new vision suggestions yet."
+                : "No suggestions yet."
+            autoWriteVisionTroubleshootingMessage = nil
+            return
+        }
+        autoWriteVisionSuggestions = nextSuggestions
+        autoWriteVisionErrorMessage = nil
+        autoWriteVisionTroubleshootingMessage = nil
     }
 
     private func uniqueVisionSuggestions(_ suggestions: [String]) -> [String] {

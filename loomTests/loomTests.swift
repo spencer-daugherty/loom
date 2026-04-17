@@ -124,6 +124,248 @@ struct loomTests {
         #expect(analysis?.detail == "missing_outcomes")
     }
 
+    @Test func fulfillmentCategoryIdentityNormalizesRelationshipNames() {
+        #expect(FulfillmentCategoryIdentity.normalizedKey("Love & Relationships") == "love and relationships")
+        #expect(FulfillmentCategoryIdentity.normalizedKey(" love and   relationships ") == "love and relationships")
+        #expect(FulfillmentCategoryIdentity.matches("Love & Relationships", "love and relationships"))
+    }
+
+    @MainActor
+    @Test func duplicateFulfillmentRepairMergesLegacyCategoryRowsAndRemapsReferences() throws {
+        clearFulfillmentDuplicateRepairDefaults()
+        defer { clearFulfillmentDuplicateRepairDefaults() }
+
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(
+            for: Fulfillment.self,
+            FulfillmentRoles.self,
+            FulfillmentFocus.self,
+            FulfillmentResources.self,
+            PassionFulfillmentJoin.self,
+            PlanLabel.self,
+            PlanChunkSelection.self,
+            PlannedChunk.self,
+            PlannedChunkStepFourState.self,
+            Outcomes.self,
+            OutcomesArchive.self,
+            LittleWinsDailyCompletion.self,
+            FulfillmentCategoryScoreSnapshot.self,
+            ReplacedFulfillmentCategoryArchive.self,
+            configurations: config
+        )
+        let context = ModelContext(container)
+
+        let primaryCategoryID = UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!
+        let duplicateCategoryID = UUID(uuidString: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")!
+        let primaryFocusID = UUID(uuidString: "cccccccc-cccc-cccc-cccc-cccccccccccc")!
+        let duplicateFocusID = UUID(uuidString: "dddddddd-dddd-dddd-dddd-dddddddddddd")!
+        let primaryRoleID = UUID(uuidString: "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")!
+        let duplicateRoleID = UUID(uuidString: "ffffffff-ffff-ffff-ffff-ffffffffffff")!
+
+        context.insert(
+            Fulfillment(
+                category_id: primaryCategoryID,
+                updatedAt: .now.addingTimeInterval(-60),
+                category: "Love & Relationships",
+                category_identitiy: "",
+                category_vision: "Build a steady home life.",
+                category_purpose: ""
+            )
+        )
+        context.insert(
+            Fulfillment(
+                category_id: duplicateCategoryID,
+                updatedAt: .now,
+                category: " love and relationships ",
+                category_identitiy: "Present partner",
+                category_vision: "",
+                category_purpose: "Invest in the people closest to me."
+            )
+        )
+
+        let primaryRole = FulfillmentRoles(id: primaryRoleID, category_id: primaryCategoryID, updatedAt: .now, role: "Partner", rank: 0)
+        let duplicateRole = FulfillmentRoles(id: duplicateRoleID, category_id: duplicateCategoryID, updatedAt: .now, role: "Partner", rank: 1)
+        context.insert(primaryRole)
+        context.insert(duplicateRole)
+
+        let primaryFocus = FulfillmentFocus(id: primaryFocusID, category_id: primaryCategoryID, updatedAt: .now, activity: "Weekly check-in", rank: 0)
+        let duplicateFocus = FulfillmentFocus(id: duplicateFocusID, category_id: duplicateCategoryID, updatedAt: .now, activity: "Weekly check-in", rank: 1)
+        context.insert(primaryFocus)
+        context.insert(duplicateFocus)
+
+        let primaryLabel = PlanLabel(
+            labelId: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
+            label: "relationships",
+            categoryId: primaryCategoryID,
+            category: "Love & Relationships",
+            source: "cat-\(primaryCategoryID.uuidString)"
+        )
+        let duplicateLabel = PlanLabel(
+            labelId: UUID(uuidString: "22222222-2222-2222-2222-222222222222")!,
+            label: "relationships",
+            categoryId: duplicateCategoryID,
+            category: " love and relationships ",
+            source: "cat-\(duplicateCategoryID.uuidString)"
+        )
+        context.insert(primaryLabel)
+        context.insert(duplicateLabel)
+
+        let selection = PlanChunkSelection(
+            weekStart: .now,
+            chunkIndex: 0,
+            labelId: duplicateLabel.labelId,
+            label: duplicateLabel.label,
+            categoryId: duplicateCategoryID,
+            category: " love and relationships "
+        )
+        let chunk = PlannedChunk(
+            weekStart: .now,
+            chunkIndex: 0,
+            labelId: duplicateLabel.labelId,
+            label: duplicateLabel.label,
+            categoryId: duplicateCategoryID,
+            category: " love and relationships "
+        )
+        let stepFour = PlannedChunkStepFourState(
+            weekStart: .now,
+            plannedChunkId: chunk.id,
+            connectedRoleId: duplicateRole.id
+        )
+        context.insert(selection)
+        context.insert(chunk)
+        context.insert(stepFour)
+
+        context.insert(
+            LittleWinsDailyCompletion(
+                focusId: duplicateFocusID,
+                day: .now,
+                categoryIdSnapshot: duplicateCategoryID,
+                categoryTitleSnapshot: " love and relationships ",
+                focusTitleSnapshot: duplicateFocus.activity,
+                categoryFocusCountSnapshot: 1
+            )
+        )
+
+        let weekStart = Calendar.current.startOfDay(for: .now)
+        context.insert(
+            FulfillmentCategoryScoreSnapshot(
+                weekStartDate: weekStart,
+                categoryID: primaryCategoryID,
+                categoryTitleSnapshot: "Love & Relationships",
+                score: 3.2,
+                smoothedScore: 3.2,
+                targetScore: 3.5,
+                evidence: 0.5,
+                momentum: 0.1,
+                structure: 0.4,
+                outcomes: 0.4,
+                actionBlocks: 0.4,
+                carryoverPenalty: 0.1,
+                littleWins: 0.4,
+                engagement: 0.4,
+                strategicBalance: 0.4,
+                consistency: 0.4,
+                updatedAt: .now.addingTimeInterval(-120)
+            )
+        )
+        context.insert(
+            FulfillmentCategoryScoreSnapshot(
+                weekStartDate: weekStart,
+                categoryID: duplicateCategoryID,
+                categoryTitleSnapshot: " love and relationships ",
+                score: 4.4,
+                smoothedScore: 4.4,
+                targetScore: 4.5,
+                evidence: 0.8,
+                momentum: 0.4,
+                structure: 0.7,
+                outcomes: 0.7,
+                actionBlocks: 0.7,
+                carryoverPenalty: 0.05,
+                littleWins: 0.7,
+                engagement: 0.7,
+                strategicBalance: 0.7,
+                consistency: 0.7,
+                updatedAt: .now
+            )
+        )
+
+        LittleWinsScheduleStore.setRule(
+            LittleWinsScheduleRule(canCompleteAnyDay: false, activeWeekdayMask: 0b0000010),
+            for: duplicateFocusID
+        )
+        LittleWinsIntegrationStore.setConfig(
+            LittleWinsIntegrationConfig(
+                isEnabled: true,
+                source: .appleHealth,
+                metric: .steps,
+                targetValue: 6000,
+                progressValue: 0,
+                isConnected: true,
+                updatedAtUnix: Date().timeIntervalSince1970
+            ),
+            for: duplicateFocusID
+        )
+        LittleWinsPassionsStore.setPassionIDs([UUID(uuidString: "33333333-3333-3333-3333-333333333333")!], for: duplicateFocusID)
+
+        try context.save()
+
+        FulfillmentDuplicateRepair.runIfNeeded(in: context, force: true)
+
+        let repairedFulfillments = try context.fetch(FetchDescriptor<Fulfillment>())
+        #expect(repairedFulfillments.count == 1)
+        let repaired = try #require(repairedFulfillments.first)
+        #expect(repaired.category == "Love & Relationships")
+        #expect(repaired.category_identitiy == "Present partner")
+        #expect(repaired.category_vision == "Build a steady home life.")
+        #expect(repaired.category_purpose == "Invest in the people closest to me.")
+
+        let repairedRoles = try context.fetch(FetchDescriptor<FulfillmentRoles>())
+        #expect(repairedRoles.count == 1)
+        #expect(repairedRoles[0].category_id == repaired.category_id)
+
+        let repairedFoci = try context.fetch(FetchDescriptor<FulfillmentFocus>())
+        #expect(repairedFoci.count == 1)
+        #expect(repairedFoci[0].category_id == repaired.category_id)
+
+        let repairedSelections = try context.fetch(FetchDescriptor<PlanChunkSelection>())
+        #expect(repairedSelections.count == 1)
+        #expect(repairedSelections[0].categoryId == repaired.category_id)
+        #expect(repairedSelections[0].category == "Love & Relationships")
+
+        let repairedChunks = try context.fetch(FetchDescriptor<PlannedChunk>())
+        #expect(repairedChunks.count == 1)
+        #expect(repairedChunks[0].categoryId == repaired.category_id)
+        #expect(repairedChunks[0].category == "Love & Relationships")
+
+        let repairedLabels = try context.fetch(FetchDescriptor<PlanLabel>())
+        #expect(repairedLabels.count == 1)
+        #expect(repairedSelections[0].labelId == repairedLabels[0].labelId)
+        #expect(repairedChunks[0].labelId == repairedLabels[0].labelId)
+
+        let repairedStepFour = try context.fetch(FetchDescriptor<PlannedChunkStepFourState>())
+        #expect(repairedStepFour.count == 1)
+        #expect(repairedStepFour[0].connectedRoleId == repairedRoles[0].id)
+
+        let repairedCompletions = try context.fetch(FetchDescriptor<LittleWinsDailyCompletion>())
+        #expect(repairedCompletions.count == 1)
+        #expect(repairedCompletions[0].focusId == repairedFoci[0].id)
+        #expect(repairedCompletions[0].categoryIdSnapshot == repaired.category_id)
+        #expect(repairedCompletions[0].categoryTitleSnapshot == "Love & Relationships")
+
+        #expect(LittleWinsScheduleStore.rule(for: repairedFoci[0].id).activeWeekdayMask == 0b0000010)
+        #expect(LittleWinsIntegrationStore.config(for: repairedFoci[0].id)?.targetValue == 6000)
+        #expect(LittleWinsPassionsStore.passionIDs(for: repairedFoci[0].id).count == 1)
+        #expect(LittleWinsScheduleStore.allRules()[duplicateFocusID] == nil)
+        #expect(LittleWinsIntegrationStore.config(for: duplicateFocusID) == nil)
+        #expect(LittleWinsPassionsStore.passionIDs(for: duplicateFocusID).isEmpty)
+
+        let repairedSnapshots = try context.fetch(FetchDescriptor<FulfillmentCategoryScoreSnapshot>())
+        #expect(repairedSnapshots.count == 1)
+        #expect(repairedSnapshots[0].categoryID == repaired.category_id)
+        #expect(repairedSnapshots[0].score == 4.4)
+    }
+
     @Test func diagnosticsPromptUsesStructuredFieldsAndContext() {
         let snapshot = PersonalizationSnapshot(
             stressSource: "Too many competing priorities",
@@ -254,4 +496,19 @@ struct loomTests {
         )
     }
 
+}
+
+private func clearFulfillmentDuplicateRepairDefaults(defaults: UserDefaults = .standard) {
+    let keys = [
+        FulfillmentCategoryIdentity.repairKey,
+        "littleWinsScheduleRules.v1",
+        "littleWinsIntegrationConfigs.v2",
+        "littleWinsIntegrationConfigs.v1",
+        "littleWinsPassionLinks.v1",
+        "outcome_contributing_little_wins_v1",
+        "completed_outcome_contributing_little_wins_v1",
+    ]
+    for key in keys {
+        defaults.removeObject(forKey: LoomDefaultsScope.scopedKey(key, defaults: defaults))
+    }
 }

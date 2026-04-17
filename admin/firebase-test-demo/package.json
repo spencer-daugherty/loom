@@ -1,0 +1,13 @@
+{
+  "name": "loom-firebase-test-demo-tools",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "firebase-admin": "^13.0.0"
+  },
+  "scripts": {
+    "create:test-demo-user": "node ./scripts/create-test-demo-user.mjs",
+    "set:test-demo-provisioning": "node ./scripts/set-test-demo-provisioning.mjs",
+    "grant:test-demo-monthly": "node ./scripts/grant-test-demo-monthly.mjs"
+  }
+}

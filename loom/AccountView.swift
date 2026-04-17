@@ -680,11 +680,11 @@ struct AccountView: View {
         return "Loom"
     }
 
-    private func resetReviewOnboardingDemoWorkspace() {
-        LoomSpecialAccountWorkspace.reviewOnboardingDemo.setAllowsAutoCreate(true)
-        session.resetIsolatedWorkspaceImmediately(.reviewOnboardingDemo)
+    private func resetInternalTestDemoWorkspace() {
+        session.resetIsolatedWorkspaceImmediately(.reviewDemo)
+        TestDemoProvisioningService.clearLocalProvisioningState()
 
-        guard LoomDefaultsScope.currentWorkspace() == .reviewOnboardingDemo else { return }
+        guard LoomDefaultsScope.currentWorkspace() == .reviewDemo else { return }
 
         showDeveloperPage = false
 
@@ -1213,9 +1213,9 @@ struct AccountView: View {
                 .alert(isPresented: $showResetReviewOnboardingDemoConfirmation) {
                     Alert(
                         title: Text("Reset demo@loomlife.us?"),
-                        message: Text("All current data and changes for demo@loomlife.us will be lost immediately. If that account is currently signed in, it will be signed out and the next session will start from the beginning of onboarding."),
+                        message: Text("All current data and changes for demo@loomlife.us will be lost immediately. If that account is currently signed in, it will be signed out and the next session will reload the preserved demo workspace."),
                         primaryButton: .destructive(Text("Reset Demo Account")) {
-                            resetReviewOnboardingDemoWorkspace()
+                            resetInternalTestDemoWorkspace()
                         },
                         secondaryButton: .cancel()
                     )
@@ -2498,9 +2498,8 @@ struct AccountDetailsView: View {
         }
 #endif
 
-        if deletedWorkspace == .reviewOnboardingDemo {
-            deletedWorkspace?.setAllowsAutoCreate(false)
-            session.resetIsolatedWorkspaceForNextSignIn(.reviewOnboardingDemo)
+        if deletedWorkspace == .reviewDemo {
+            session.resetIsolatedWorkspaceForNextSignIn(.reviewDemo)
         }
         await personalizationStore.resetState(for: personalizationUserKey)
         AccountDataDeletion.deleteAllData(in: context)
@@ -4350,14 +4349,7 @@ struct ManageFulfillmentCategoriesView: View {
             return
         }
 
-        context.insert(
-            Fulfillment(
-                category: trimmed,
-                category_identitiy: "",
-                category_vision: "",
-                category_purpose: ""
-            )
-        )
+        _ = try? FulfillmentActiveStore.upsertCategory(named: trimmed, in: context)
         var map = categoryColorKeys
         if map[trimmed] == nil {
             let defaults = FulfillmentCategoryTheme.defaultColorKeys()
@@ -5115,16 +5107,10 @@ private struct FulfillmentCategoryLabelsView: View {
                 return
             }
 
-            let newCategoryID = UUID()
-            context.insert(
-                Fulfillment(
-                    category_id: newCategoryID,
-                    category: currentCategory,
-                    category_identitiy: "",
-                    category_vision: "",
-                    category_purpose: ""
-                )
-            )
+            guard let fulfillment = try? FulfillmentActiveStore.upsertCategory(named: currentCategory, in: context) else {
+                return
+            }
+            let newCategoryID = fulfillment.category_id
 
             let sourceTag = "cat-\(newCategoryID.uuidString)"
             for value in normalized {

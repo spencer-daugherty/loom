@@ -1485,7 +1485,8 @@ struct FulfillmentStartView: View {
     private var isLifeOSInsightsMode: Bool { entryMode == .lifeOSInsights }
 
     private var orderedFulfillments: [Fulfillment] {
-        let baseRows = fulfillmentSnapshot.isEmpty ? fulfillments : fulfillmentSnapshot
+        let sourceRows = fulfillmentSnapshot.isEmpty ? fulfillments : fulfillmentSnapshot
+        let baseRows = FulfillmentCategoryIdentity.canonicalRows(from: sourceRows)
         if !selectedCategoryNames.isEmpty {
             let all = baseRows
             let mapped = selectedCategoryNames.compactMap { selectedName in
@@ -1803,17 +1804,7 @@ struct FulfillmentStartView: View {
     }
 
     private func categoryKey(_ raw: String) -> String {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !trimmed.isEmpty else { return "" }
-        let andNormalized = trimmed.replacingOccurrences(of: "&", with: " and ")
-        let cleaned = andNormalized.replacingOccurrences(
-            of: "[^a-z0-9]+",
-            with: " ",
-            options: .regularExpression
-        )
-        return cleaned
-            .split(whereSeparator: \.isWhitespace)
-            .joined(separator: " ")
+        FulfillmentCategoryIdentity.normalizedKey(raw)
     }
 
     @ViewBuilder
@@ -5881,10 +5872,10 @@ struct FulfillmentStartView: View {
         }
 
         do {
-            let contextSnapshot = try LoomAIViewModel().buildContextSnapshot(in: modelContext)
             let payloadJSON = fulfillmentInsightsPayloadJSONString()
             let decoded: (cards: [FulfillmentInsightCard], nudge: String?)
             if AppleIntelligenceSupport.isAvailable {
+                let contextSnapshot = try LoomAIViewModel().buildContextSnapshot(in: modelContext)
                 let appContextJSON = AppleIntelligenceInsightPromptBuilder.contextJSON(
                     surfaceID: "fulfillment_onboarding_insights",
                     context: contextSnapshot
@@ -5912,32 +5903,11 @@ struct FulfillmentStartView: View {
                     nudge: bundle.nudge?.trimmingCharacters(in: .whitespacesAndNewlines)
                 )
             } else {
-                let instruction = """
-                Generate Fulfillment onboarding insights for Loom.
-                Fulfillment onboarding payload JSON:
-                \(payloadJSON)
-
-                Requirements:
-                - Return JSON only with exactly 2 cards.
-                - Card 1 title: Fulfillment areas
-                - Card 2 title: Next direction
-                - Do not list selected category names and do not say "You selected".
-                - Do not rename or re-label selected fulfillment areas.
-                - Ground cards in diagnostics + purpose + fulfillment setup evidence only.
-                - Keep each card to 2-3 sentences with calm, practical language.
-                - If diagnostics or purpose are missing, say that briefly and provide a useful fallback without inventing claims.
-                - Next direction must end with a final sentence that starts with "Loom will help you".
-                """
-
-                let response = try await LoomAIService().sendChat(
-                    messages: [.init(role: "user", content: instruction)],
-                    context: contextSnapshot,
-                    intent: "onboarding_insights_fulfillment",
-                    screen: "fulfillment_insights",
-                    requestID: UUID().uuidString,
-                    requestHash: requestKey
+                _ = payloadJSON
+                decoded = (
+                    cards: defaultFulfillmentInsightsCards(),
+                    nudge: nil
                 )
-                decoded = decodeFulfillmentInsights(from: response.message)
             }
             guard !decoded.cards.isEmpty else {
                 guard requestKey == fulfillmentInsightsCacheKey else { return }
@@ -7108,16 +7078,7 @@ struct FulfillmentStartView: View {
                 categoryKey($0.category) == categoryKey(category)
             }
             guard !exists else { continue }
-            modelContext.insert(
-                Fulfillment(
-                    category_id: UUID(),
-                    updatedAt: Date(),
-                    category: category,
-                    category_identitiy: "",
-                    category_vision: "",
-                    category_purpose: ""
-                )
-            )
+            _ = try? FulfillmentActiveStore.upsertCategory(named: category, in: modelContext)
         }
     }
 
@@ -7155,7 +7116,13 @@ struct FulfillmentStartView: View {
 
     private func syncSelectedCategoriesIntoFulfillment() {
         let sourceRows = fulfillmentSnapshot.isEmpty ? fulfillments : fulfillmentSnapshot
-        let sourceByKey = Dictionary(uniqueKeysWithValues: sourceRows.map { (categoryKey($0.category), $0) })
+        let sourceByKey = Dictionary(
+            uniqueKeysWithValues: FulfillmentCategoryIdentity
+                .groupedRows(from: sourceRows, name: { $0.category })
+                .compactMap { key, rows in
+                    FulfillmentCategoryIdentity.canonicalRow(from: rows).map { (key, $0) }
+                }
+        )
         let stagedRows: [Fulfillment] = selectedCategoryNames.map { category in
             let key = categoryKey(category)
             if let existing = sourceByKey[key] {

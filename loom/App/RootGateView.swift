@@ -9,8 +9,8 @@ struct RootGateView<MainContent: View>: View {
     private let presentationStyle: RootGatePresentationStyle
     private let mainContent: MainContent
 
-    @StateObject private var session = UserSessionStore()
-    @StateObject private var purchaseManager = PurchaseManager()
+    @StateObject private var session: UserSessionStore
+    @StateObject private var purchaseManager: PurchaseManager
 
     @AppStorage(UserSessionStore.Keys.hasSeenOnboarding) private var hasSeenOnboarding = false
     @AppStorage(UserSessionStore.Keys.hasAccount) private var hasAccount = false
@@ -31,9 +31,12 @@ struct RootGateView<MainContent: View>: View {
     @State private var hasAppliedOnboardingResetForLaunch = false
     @State private var hasLoggedCoreOpenedThisSession = false
     @StateObject private var personalizationStore = PersonalizationStore()
-    @State private var gatePath: [GateRoute] = []
+    @State private var gatePath: [GateRoute]
     @State private var isSyncingGatePath = false
     @State private var diagnosticPrefillDraft: PersonalizationDraft?
+    @State private var isGateRoutingReady: Bool
+    @State private var gateRoutingTask: Task<Void, Never>?
+    @Namespace private var splashNamespace
 
     private enum GateRoute: Hashable {
         case account
@@ -46,8 +49,14 @@ struct RootGateView<MainContent: View>: View {
         presentationStyle: RootGatePresentationStyle = .fullScreen,
         @ViewBuilder content: () -> MainContent
     ) {
+        let initialSession = UserSessionStore()
         self.presentationStyle = presentationStyle
         self.mainContent = content()
+        _session = StateObject(wrappedValue: initialSession)
+        _purchaseManager = StateObject(wrappedValue: PurchaseManager())
+        _isGatePresented = State(initialValue: initialSession.requiresGate)
+        _gatePath = State(initialValue: Self.desiredGatePath(for: initialSession))
+        _isGateRoutingReady = State(initialValue: false)
     }
 
     var body: some View {
@@ -61,9 +70,7 @@ struct RootGateView<MainContent: View>: View {
                 initializeInstallDateIfNeeded()
                 syncSessionFromStorage()
                 purchaseManager.configure(session: session)
-                syncGatePresentationState()
-                syncGatePathFromSession(animated: false)
-                trackCoreEntryIfNeeded()
+                scheduleGateResolution(animated: false, immediate: true)
                 Task {
                     await personalizationStore.reloadForCurrentUser()
                 }
@@ -78,46 +85,32 @@ struct RootGateView<MainContent: View>: View {
             }
             .onChange(of: hasSeenOnboarding) { _, _ in
                 syncSessionFromStorage()
-                syncGatePresentationState()
-                syncGatePathFromSession()
-                trackCoreEntryIfNeeded()
+                scheduleGateResolution()
             }
             .onChange(of: hasAccount) { _, _ in
                 syncSessionFromStorage()
-                syncGatePresentationState()
-                syncGatePathFromSession()
-                trackCoreEntryIfNeeded()
+                scheduleGateResolution()
                 Task { await personalizationStore.reloadForCurrentUser() }
             }
             .onChange(of: hasCompletedDiagnostic) { _, _ in
                 syncSessionFromStorage()
-                syncGatePresentationState()
-                syncGatePathFromSession()
-                trackCoreEntryIfNeeded()
+                scheduleGateResolution()
             }
             .onChange(of: hasSeenDiagnosticInsights) { _, _ in
                 syncSessionFromStorage()
-                syncGatePresentationState()
-                syncGatePathFromSession()
-                trackCoreEntryIfNeeded()
+                scheduleGateResolution()
             }
             .onChange(of: isSubscribed) { _, _ in
                 syncSessionFromStorage()
-                syncGatePresentationState()
-                syncGatePathFromSession()
-                trackCoreEntryIfNeeded()
+                scheduleGateResolution()
             }
             .onChange(of: session.hasSeenOnboarding) { _, value in
                 hasSeenOnboarding = value
-                syncGatePresentationState()
-                syncGatePathFromSession()
-                trackCoreEntryIfNeeded()
+                scheduleGateResolution()
             }
             .onChange(of: session.hasAccount) { _, value in
                 hasAccount = value
-                syncGatePresentationState()
-                syncGatePathFromSession()
-                trackCoreEntryIfNeeded()
+                scheduleGateResolution()
                 Task {
                     await purchaseManager.refreshEntitlements(session: session)
                 }
@@ -125,21 +118,15 @@ struct RootGateView<MainContent: View>: View {
             }
             .onChange(of: session.hasCompletedDiagnostic) { _, value in
                 hasCompletedDiagnostic = value
-                syncGatePresentationState()
-                syncGatePathFromSession()
-                trackCoreEntryIfNeeded()
+                scheduleGateResolution()
             }
             .onChange(of: session.hasSeenDiagnosticInsights) { _, value in
                 hasSeenDiagnosticInsights = value
-                syncGatePresentationState()
-                syncGatePathFromSession()
-                trackCoreEntryIfNeeded()
+                scheduleGateResolution()
             }
             .onChange(of: session.isSubscribed) { _, value in
                 isSubscribed = value
-                syncGatePresentationState()
-                syncGatePathFromSession()
-                trackCoreEntryIfNeeded()
+                scheduleGateResolution()
             }
             .modifier(
                 GatePresentationModifier(
@@ -153,28 +140,37 @@ struct RootGateView<MainContent: View>: View {
                 LoomAITroubleshootingBannerHost()
             }
             .overlay {
-                if !purchaseManager.hasLoadedEntitlements {
-                    ZStack {
-                        Color(.systemBackground)
-                            .ignoresSafeArea()
-                        ProgressView()
-                    }
+                if shouldShowRoutingSplash {
+                    LoadingSplashView(
+                        metrics: [],
+                        namespace: splashNamespace,
+                        minimumDisplayDuration: 0.8
+                    )
                 }
+            }
+            .allowsHitTesting(!shouldShowRoutingSplash)
+            .onDisappear {
+                gateRoutingTask?.cancel()
+                gateRoutingTask = nil
             }
     }
 
     private var gatePresentationBinding: Binding<Bool> {
         Binding(
-            get: { isGatePresented },
+            get: { isGateRoutingReady && isGatePresented },
             set: { newValue in
                 isGatePresented = newValue
-                if !newValue && session.requiresGate {
+                if !newValue && isGateRoutingReady && session.requiresGate {
                     DispatchQueue.main.async {
                         isGatePresented = true
                     }
                 }
             }
         )
+    }
+
+    private var shouldShowRoutingSplash: Bool {
+        !isGateRoutingReady || !purchaseManager.hasLoadedEntitlements
     }
 
     @ViewBuilder
@@ -324,6 +320,22 @@ struct RootGateView<MainContent: View>: View {
         isSyncingGatePath = false
     }
 
+    private func scheduleGateResolution(animated: Bool = true, immediate: Bool = false) {
+        gateRoutingTask?.cancel()
+        isGateRoutingReady = false
+        gateRoutingTask = Task { @MainActor in
+            if !immediate {
+                try? await Task.sleep(nanoseconds: 120_000_000)
+            }
+            guard !Task.isCancelled else { return }
+            syncGatePresentationState()
+            syncGatePathFromSession(animated: animated)
+            trackCoreEntryIfNeeded()
+            isGateRoutingReady = true
+            gateRoutingTask = nil
+        }
+    }
+
     private func handleGateRoutePop(_ removedRoutes: ArraySlice<GateRoute>) {
         guard !removedRoutes.isEmpty else { return }
         if removedRoutes.contains(.paywall) || removedRoutes.contains(.insights) || removedRoutes.contains(.diagnostic) || removedRoutes.contains(.account) {
@@ -399,6 +411,20 @@ struct RootGateView<MainContent: View>: View {
         let calendar = Calendar(identifier: .gregorian)
         let value = calendar.dateComponents([.day], from: startDate, to: endDate).day ?? 0
         return max(0, value)
+    }
+
+    private static func desiredGatePath(for session: UserSessionStore) -> [GateRoute] {
+        guard session.hasSeenOnboarding else { return [] }
+        if !session.hasAccount {
+            return [.account]
+        }
+        if !session.hasCompletedDiagnostic {
+            return [.diagnostic]
+        }
+        if !session.hasSeenDiagnosticInsights {
+            return [.insights]
+        }
+        return []
     }
 }
 
