@@ -13,12 +13,6 @@ struct DiagnosticInsightsView: View {
     let onEditAnswers: () -> Void
 
     @StateObject private var viewModel = DiagnosticsInsightsViewModel()
-    @State private var showErrorAlert = false
-    @State private var lastFailedDiagnosticsHash: String?
-    @State private var showInlineRetryButton = false
-    @State private var hasTimedOutWaiting = false
-    @State private var timeoutTask: Task<Void, Never>?
-    @State private var timeoutAlertHash: String?
 
     private var currentSnapshot: PersonalizationSnapshot? {
         personalizationStore.current
@@ -33,17 +27,15 @@ struct DiagnosticInsightsView: View {
         return "\(userKey)|\(hash)|v\(DiagnosticsInsightsHasher.schemaVersion)"
     }
 
-    private var currentDiagnosticsHash: String? {
-        guard let snapshot = currentSnapshot else { return nil }
-        return DiagnosticsInsightsHasher.hash(for: snapshot)
-    }
-
-    private var hasLoadedInsights: Bool {
-        !viewModel.insightCards.isEmpty && viewModel.insightsErrorMessage == nil
+    private var presentationState: DiagnosticsInsightsPresentationState {
+        DiagnosticsInsightsPresentationState.resolve(
+            cards: viewModel.insightCards,
+            errorMessage: viewModel.insightsErrorMessage
+        )
     }
 
     private var isWaitingForInsights: Bool {
-        !hasLoadedInsights && !hasTimedOutWaiting
+        presentationState == .loading
     }
 
     var body: some View {
@@ -63,10 +55,10 @@ struct DiagnosticInsightsView: View {
                     .foregroundStyle(.secondary)
 
                 Group {
-                    if viewModel.isShowingSkeleton || viewModel.insightCards.isEmpty {
+                    if presentationState == .loading {
                         DiagnosticInsightsSkeletonStack()
                             .transition(.opacity)
-                    } else {
+                    } else if presentationState == .content {
                         DiagnosticInsightsCardsStack(
                             cards: viewModel.insightCards,
                             lifeAreas: currentSnapshot?.lifeAreasSelected ?? [],
@@ -74,28 +66,40 @@ struct DiagnosticInsightsView: View {
                             showsAnimatedOutline: false
                         )
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    } else {
+                        InsightsCard(title: "Insights", showsAnimatedOutline: false) {
+                            Text(viewModel.insightsErrorMessage ?? DiagnosticsInsightsCopy.generationErrorMessage)
+                                .font(.body)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .transition(.opacity)
                     }
                 }
                 .animation(.easeInOut(duration: 0.24), value: viewModel.isShowingSkeleton)
                 .animation(.easeInOut(duration: 0.24), value: viewModel.insightCards.count)
 
-                if showInlineRetryButton {
+                if case .error = presentationState {
                     if loomAITroubleshootingEnabled {
-                        Button("Copy troubleshooting") {
-                            let details = (viewModel.troubleshootingMessage ?? "")
-                                .trimmingCharacters(in: .whitespacesAndNewlines)
-                            UIPasteboard.general.string = details.isEmpty
-                                ? "[diagnostics_insights] troubleshooting details unavailable."
-                                : details
+                        HStack(spacing: 10) {
+                            Button("Retry") {
+                                Task { await refreshInsights(forceRefresh: true) }
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(.secondary)
+
+                            Button("Copy troubleshooting") {
+                                let details = (viewModel.troubleshootingMessage ?? "")
+                                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                                UIPasteboard.general.string = details.isEmpty
+                                    ? "[diagnostics_insights] troubleshooting details unavailable."
+                                    : details
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(.secondary)
                         }
-                        .buttonStyle(.bordered)
-                        .tint(.secondary)
-                        .controlSize(.large)
-                        .frame(maxWidth: .infinity, alignment: .center)
                     } else {
                         Button("Retry") {
-                            showInlineRetryButton = false
-                            restartTimeoutWindow()
                             Task { await refreshInsights(forceRefresh: true) }
                         }
                         .buttonStyle(.bordered)
@@ -138,38 +142,17 @@ struct DiagnosticInsightsView: View {
         }
         .background(Color(.systemBackground).ignoresSafeArea())
         .onAppear {
-            restartTimeoutWindow()
             Task {
                 await refreshInsights()
             }
         }
         .onChange(of: diagnosticsSignature) { _, _ in
-            restartTimeoutWindow()
             Task {
                 await refreshInsights()
             }
         }
-        .onChange(of: currentDiagnosticsHash) { _, newValue in
-            if newValue != lastFailedDiagnosticsHash {
-                lastFailedDiagnosticsHash = nil
-                showInlineRetryButton = false
-            }
-            if timeoutAlertHash != newValue {
-                timeoutAlertHash = nil
-            }
-        }
-        .onChange(of: hasLoadedInsights) { _, loaded in
-            if loaded {
-                hasTimedOutWaiting = false
-                timeoutTask?.cancel()
-                timeoutTask = nil
-            } else if !hasTimedOutWaiting {
-                restartTimeoutWindow()
-            }
-        }
         .onChange(of: viewModel.insightsErrorMessage) { _, newValue in
             if newValue != nil {
-                lastFailedDiagnosticsHash = currentDiagnosticsHash
                 if loomAITroubleshootingEnabled,
                    let details = viewModel.troubleshootingMessage,
                    !details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -178,74 +161,32 @@ struct DiagnosticInsightsView: View {
                     #endif
                     loomAIReportTroubleshootingIfEnabled(details: details)
                 }
-            } else if !viewModel.insightCards.isEmpty {
-                lastFailedDiagnosticsHash = nil
-                showInlineRetryButton = false
             }
-        }
-        .onDisappear {
-            timeoutTask?.cancel()
-            timeoutTask = nil
-        }
-        .alert("Check your connection", isPresented: $showErrorAlert) {
-            if loomAITroubleshootingEnabled,
-               let details = viewModel.troubleshootingMessage,
-               !details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Button("Copy troubleshooting") {
-                    UIPasteboard.general.string = details
-                }
-            }
-            Button("OK", role: .cancel) {
-                showInlineRetryButton = true
-                onContinue()
-            }
-        } message: {
-            Text("Generate insights later in Account > Personalization.")
         }
     }
 
     private func refreshInsights(forceRefresh: Bool = false) async {
-        guard currentSnapshot != nil else {
-            viewModel.prepareForPendingPersonalizationLoad()
-            return
-        }
-        if !forceRefresh, showInlineRetryButton {
-            return
-        }
-        if !forceRefresh,
-           let failedHash = lastFailedDiagnosticsHash,
-           failedHash == currentDiagnosticsHash {
+        guard let snapshot = currentSnapshot else {
+            if personalizationStore.isLoading {
+                viewModel.prepareForPendingPersonalizationLoad()
+            } else {
+                viewModel.presentGenerationError(
+                    DiagnosticsInsightsCopy.generationErrorMessage,
+                    troubleshooting: "Missing personalization snapshot for diagnostics insights."
+                )
+            }
             return
         }
         await viewModel.refresh(
-            snapshot: currentSnapshot,
+            snapshot: snapshot,
             in: modelContext,
             forceRefresh: forceRefresh
         )
-    }
-
-    private func restartTimeoutWindow() {
-        hasTimedOutWaiting = false
-        timeoutTask?.cancel()
-        timeoutTask = Task {
-            try? await Task.sleep(nanoseconds: 60_000_000_000)
-            guard !Task.isCancelled else { return }
-            await MainActor.run {
-                guard !hasLoadedInsights else { return }
-                hasTimedOutWaiting = true
-                let currentHash = currentDiagnosticsHash
-                if timeoutAlertHash != currentHash {
-                    timeoutAlertHash = currentHash
-                    showErrorAlert = true
-                }
-            }
-        }
     }
 }
 
 @MainActor
 final class DiagnosticsInsightsViewModel: ObservableObject {
-    private static let diagnosticsInsightsConnectionError = "Couldn’t personalize insights yet. Check your connection."
     private static var inMemoryCardsBySnapshotKey: [String: [DiagnosticInsightCard]] = [:]
 
     @Published fileprivate private(set) var insightCards: [DiagnosticInsightCard] = []
@@ -281,6 +222,18 @@ final class DiagnosticsInsightsViewModel: ObservableObject {
         isShowingSkeleton = showSkeleton
     }
 
+    func presentGenerationError(_ message: String, troubleshooting: String? = nil) {
+        cancelInFlight()
+        insightCards = []
+        insightsErrorMessage = message
+        troubleshootingMessage = troubleshooting
+        isGeneratingInsights = false
+        isShowingSkeleton = false
+        loadedSnapshotKey = nil
+        failedSnapshotKey = nil
+        currentDiagnosticsHash = nil
+    }
+
     func refresh(
         snapshot: PersonalizationSnapshot?,
         userKey: String? = nil,
@@ -293,14 +246,10 @@ final class DiagnosticsInsightsViewModel: ObservableObject {
     ) async {
         guard let snapshot else {
             AppDebugActivityLog.log("DiagnosticsInsights", "refresh skipped: missing personalization snapshot")
-            cancelInFlight()
-            insightCards = []
-            insightsErrorMessage = Self.diagnosticsInsightsConnectionError
-            troubleshootingMessage = nil
-            isGeneratingInsights = false
-            isShowingSkeleton = false
-            loadedSnapshotKey = nil
-            currentDiagnosticsHash = nil
+            presentGenerationError(
+                DiagnosticsInsightsCopy.generationErrorMessage,
+                troubleshooting: "Missing personalization snapshot for diagnostics insights."
+            )
             return
         }
 
@@ -373,63 +322,21 @@ final class DiagnosticsInsightsViewModel: ObservableObject {
             insightCards = []
         }
         currentDiagnosticsHash = diagnosticsHash
-        AppDebugActivityLog.log("DiagnosticsInsights", "refresh requesting remote insights")
+        AppDebugActivityLog.log("DiagnosticsInsights", "refresh generating local insights")
 
         let requestID = UUID().uuidString
 
         let task = Task { () -> DiagnosticsInsightsRemoteResult in
-            do {
-                let response = try await LoomAIService().fetchDiagnosticInsights(
-                    diagnostic: DiagnosticAnswers(snapshot: snapshot),
-                    client: DiagnosticInsightsClient(
-                        appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
-                        platform: "ios",
-                        screen: "diagnostic_insights"
-                    )
-                )
-                let decoded = PersonalizationInsightsComposer.decodeRemotePayload(response)
-                let fulfillmentBody = Self.fulfillmentAreasBody(from: snapshot.lifeAreasSelected)
-                let rootCard = decoded.cards.first { $0.kind == .rootCause } ?? .init(kind: .rootCause, body: "")
-                let nextCard = decoded.cards.first { $0.kind == .nextDirection } ?? .init(kind: .nextDirection, body: "")
-                return DiagnosticsInsightsRemoteResult(
-                    cards: decoded.usedFallback
-                    ? []
-                    : [
-                        rootCard,
-                        .init(kind: .fulfillmentAreas, body: fulfillmentBody),
-                        nextCard
-                    ],
-                    errorMessage: decoded.usedFallback ? Self.diagnosticsInsightsConnectionError : nil,
-                    troubleshootingMessage: decoded.usedFallback
-                    ? loomAITroubleshootingLocalDetails(
-                        feature: "diagnostics_insights",
-                        reason: "Response payload could not be decoded into insight cards.",
-                        responsePreview: "\(response.rootCause)\n\n\(response.nextDirection)",
-                        requestID: requestID,
-                        requestHash: diagnosticsHash
-                    )
-                    : nil,
-                    usedFallback: decoded.usedFallback,
-                    evidenceCount: 0,
-                    responseCharacters: response.rootCause.count + response.nextDirection.count,
-                    requestID: requestID
-                )
-            } catch {
-                return DiagnosticsInsightsRemoteResult(
-                    cards: [],
-                    errorMessage: Self.diagnosticsInsightsConnectionError,
-                    troubleshootingMessage: loomAITroubleshootingDetails(
-                        feature: "diagnostics_insights",
-                        error: error,
-                        requestID: requestID,
-                        requestHash: diagnosticsHash
-                    ),
-                    usedFallback: false,
-                    evidenceCount: 0,
-                    responseCharacters: 0,
-                    requestID: requestID
-                )
-            }
+            let composed = LocalDiagnosticInsightsComposer.compose(snapshot: snapshot)
+            return DiagnosticsInsightsRemoteResult(
+                cards: composed.cards,
+                errorMessage: nil,
+                troubleshootingMessage: nil,
+                usedFallback: false,
+                evidenceCount: 0,
+                responseCharacters: composed.rootCause.count + composed.fulfillmentAreas.count + composed.nextDirection.count,
+                requestID: requestID
+            )
         }
         currentTask = task
 
@@ -492,10 +399,6 @@ final class DiagnosticsInsightsViewModel: ObservableObject {
         currentTask = nil
     }
 
-    private func errorStateCards() -> [DiagnosticInsightCard] {
-        []
-    }
-
     private func fetchStoredSnapshot(
         snapshotKey: String,
         in modelContext: ModelContext
@@ -505,17 +408,15 @@ final class DiagnosticsInsightsViewModel: ObservableObject {
             predicate: #Predicate { $0.snapshotKey == key }
         )
         return (try? modelContext.fetch(descriptor))?
+            .filter { $0.version == DiagnosticsInsightsHasher.schemaVersion }
             .sorted(by: { $0.generatedAt > $1.generatedAt })
             .first
     }
 
     private func applyPersisted(_ snapshot: DiagnosticsInsightsSnapshot) {
-        let fulfillment = snapshot.fulfillmentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? Self.fulfillmentAreasBody(from: [])
-            : snapshot.fulfillmentText
         let cards = [
             DiagnosticInsightCard(kind: .rootCause, body: snapshot.rootCauseText),
-            DiagnosticInsightCard(kind: .fulfillmentAreas, body: fulfillment),
+            DiagnosticInsightCard(kind: .fulfillmentAreas, body: snapshot.fulfillmentText),
             DiagnosticInsightCard(kind: .nextDirection, body: snapshot.nextDirectionText)
         ]
         insightCards = cards
@@ -569,10 +470,6 @@ final class DiagnosticsInsightsViewModel: ObservableObject {
         )
     }
 
-    private static func fulfillmentAreasBody(from areas: [String]) -> String {
-        _ = areas
-        return "Every task, goal, and little win will land in one of these areas, so your life stays organized."
-    }
 }
 
 private struct DiagnosticsInsightsRemoteResult: Sendable {
@@ -585,37 +482,10 @@ private struct DiagnosticsInsightsRemoteResult: Sendable {
     var requestID: String?
 }
 
-private struct DiagnosticsInsightsDecodedPayload: Sendable {
-    var cards: [DiagnosticInsightCard]
-    var usedFallback: Bool
-}
-
-private struct DiagnosticInsightCard: Identifiable, Hashable, Sendable {
-    enum Kind: String, Hashable {
-        case rootCause
-        case fulfillmentAreas
-        case nextDirection
-
-        var title: String {
-            switch self {
-            case .rootCause:
-                return "Root cause"
-            case .fulfillmentAreas:
-                return "Fulfillment areas"
-            case .nextDirection:
-                return "Next direction"
-            }
-        }
-    }
-
-    var kind: Kind
-    var body: String
-    var id: String { kind.rawValue }
-}
-
 struct PersonalizationInsightsOverride: Equatable, Sendable {
     var diagnosticsHash: String
     var rootCause: String
+    var fulfillmentAreas: String
     var nextDirection: String
 }
 
@@ -707,10 +577,7 @@ struct PersonalizationInsightsCards: View {
         if let insightsOverride, insightsOverride.diagnosticsHash == currentDiagnosticsHash {
             return [
                 DiagnosticInsightCard(kind: .rootCause, body: insightsOverride.rootCause),
-                DiagnosticInsightCard(
-                    kind: .fulfillmentAreas,
-                    body: "Every task, goal, and little win will land in one of these areas, so your life stays organized."
-                ),
+                DiagnosticInsightCard(kind: .fulfillmentAreas, body: insightsOverride.fulfillmentAreas),
                 DiagnosticInsightCard(kind: .nextDirection, body: insightsOverride.nextDirection)
             ]
         }
@@ -733,7 +600,7 @@ struct PersonalizationInsightsCards: View {
                 )
             } else {
                 InsightsCard(title: "Insights") {
-                    Text(viewModel.insightsErrorMessage ?? "Couldn’t personalize insights yet. Check your connection.")
+                    Text(viewModel.insightsErrorMessage ?? DiagnosticsInsightsCopy.generationErrorMessage)
                         .font(.body)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -807,43 +674,6 @@ struct PersonalizationInsightsCards: View {
 
         // Load persisted/current only for the active diagnostics signature.
         await refresh(forceRefresh: false)
-    }
-}
-
-private enum PersonalizationInsightsComposer {
-    private static let retryFallbackMessage = "Processing error. Please try again later."
-
-    static func decodeRemotePayload(_ insights: DiagnosticInsights) -> DiagnosticsInsightsDecodedPayload {
-        let root = normalizedBody(insights.rootCause)
-        let next = normalizedBody(insights.nextDirection)
-
-        guard isValidInsightBody(root), isValidInsightBody(next) else {
-            return .init(cards: [], usedFallback: true)
-        }
-
-        return .init(
-            cards: [
-                .init(kind: .rootCause, body: root),
-                .init(kind: .nextDirection, body: next)
-            ],
-            usedFallback: false
-        )
-    }
-
-    private static func normalizedBody(_ text: String) -> String {
-        text
-            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private static func isValidInsightBody(_ text: String) -> Bool {
-        if text == retryFallbackMessage { return true }
-        guard !text.isEmpty else { return false }
-        let sentences = text
-            .split(whereSeparator: { ".!?".contains($0) })
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        return sentences.count >= 2 && sentences.count <= 3
     }
 }
 

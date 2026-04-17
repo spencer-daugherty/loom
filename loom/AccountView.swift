@@ -578,14 +578,17 @@ struct AccountView: View {
     @AppStorage("has_seen_content_quickstart_v1") private var hasSeenContentQuickstart = false
     @AppStorage("force_show_content_quickstart_once") private var forceShowContentQuickstartOnce = false
     @AppStorage("developer_launch_paywall_once") private var developerLaunchPaywallOnce = false
+    @AppStorage("account_name") private var accountName = ""
     @AppStorage(loomAITroubleshootingDefaultsKey) private var enableLoomAITroubleshooting = true
     @AppStorage(loomAIDebugDefaultsKey) private var enableLoomAIDebug = false
     @AppStorage(loomAIDisableAppleIntelligenceDefaultsKey) private var disableAppleIntelligence = false
+    @AppStorage(loomAICustomChatDefaultsKey) private var enableLoomAICustomChat = false
     @AppStorage("loomAI.dev.disableDailyLimiter") private var disableLoomAIDailyLimiter = false
     @AppStorage("dev_manual_warning_cards_enabled") private var devManualWarningCardsEnabled = false
     @AppStorage("dev_outcome_warning_target_passed") private var devOutcomeWarningTargetPassed = false
     @AppStorage("dev_outcome_warning_goal_achieved") private var devOutcomeWarningGoalAchieved = false
     @AppStorage("dev_action_blocks_warning_old_blocks") private var devActionBlocksWarningOldBlocks = false
+    @AppStorage("dev_planview_result_autowrite_enabled") private var devPlanViewResultAutoWriteEnabled = false
     @AppStorage(SubscriptionAccessGate.inactivePurchaseOverrideKey) private var inactivePurchaseOverrideEnabled = false
     @AppStorage(UserSessionStore.Keys.hasSeenOnboarding) private var hasSeenOnboarding = false
     @AppStorage(UserSessionStore.Keys.hasAccount) private var hasAccount = false
@@ -605,6 +608,7 @@ struct AccountView: View {
     @State private var showDeveloperPaywall = false
     @State private var showResetReviewOnboardingDemoConfirmation = false
     @State private var loomAICostSnapshot = LoomAICostLedger.dailySnapshot()
+    @State private var weekStartOption: AppWeekStartOption = AppWeekStartStore.current()
 
     private func deleteWarningTitle(for scope: DeleteScope) -> String {
         switch scope {
@@ -659,7 +663,30 @@ struct AccountView: View {
 
     private func resetReviewOnboardingDemoWorkspace() {
         LoomSpecialAccountWorkspace.reviewOnboardingDemo.setAllowsAutoCreate(true)
-        session.resetIsolatedWorkspaceForNextSignIn(.reviewOnboardingDemo)
+        session.resetIsolatedWorkspaceImmediately(.reviewOnboardingDemo)
+
+        guard LoomDefaultsScope.currentWorkspace() == .reviewOnboardingDemo else { return }
+
+        showDeveloperPage = false
+
+#if canImport(FirebaseAuth)
+        try? Auth.auth().signOut()
+#endif
+#if canImport(GoogleSignIn)
+        GIDSignIn.sharedInstance.signOut()
+#endif
+
+        hasSeenOnboarding = false
+        hasAccount = false
+        hasCompletedDiagnostic = false
+        hasSeenDiagnosticInsights = false
+        isSubscribed = false
+        blankHomepageMode = false
+        setupHomepageMode = false
+        hasSeenContentQuickstart = false
+        forceShowContentQuickstartOnce = false
+        session.clearAccountSession()
+        session.setHasSeenOnboarding(false)
     }
 
     private func costProgress(spent: Double, limit: Double) -> Double {
@@ -681,6 +708,13 @@ struct AccountView: View {
         return "Excludes \(count) \(requestWord) without exact usage metadata."
     }
 
+    private func saveSelectedWeekStartOption(_ option: AppWeekStartOption) {
+        guard weekStartOption != option else { return }
+        weekStartOption = option
+        AppWeekStartStore.setCurrent(option)
+        ActivePlanSessionStore.setWeekStart(nil)
+    }
+
     var body: some View {
         List {
             Section {
@@ -691,6 +725,32 @@ struct AccountView: View {
                         Text("Account")
                     }
                 }
+
+                Menu {
+                    ForEach([AppWeekStartOption.saturday, .sunday, .monday]) { option in
+                        Button {
+                            saveSelectedWeekStartOption(option)
+                        } label: {
+                            HStack {
+                                Text(option.title)
+                                if weekStartOption == option {
+                                    Spacer()
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    HStack {
+                        Text("Week start")
+                        Spacer(minLength: 8)
+                        Text(weekStartOption.title)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                }
+                .buttonStyle(.plain)
 
                 NavigationLink {
                     NotificationsPlaceholderView()
@@ -797,7 +857,7 @@ struct AccountView: View {
             Section {
                 HStack {
                     Spacer()
-                    Text("Version: 0.1.0-alpha.7 | Made in USA")
+                    Text("Version: 0.1.0-alpha.7")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -823,7 +883,7 @@ struct AccountView: View {
 
                 HStack(spacing: 16) {
                     Spacer()
-                    Button("Terms of Use") {
+                    Button("License Agreement") {
                         presentedLegalDocument = .terms
                     }
                     .buttonStyle(.plain)
@@ -839,26 +899,29 @@ struct AccountView: View {
                 .foregroundStyle(.blue)
                 .listRowSeparator(.hidden)
 
-                HStack {
-                    Spacer()
-                    Button {
-                        developerPasswordInput = ""
-                        showDeveloperPasswordError = false
-                        showDeveloperPasswordSheet = true
-                    } label: {
-                        Text("Developer")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                if accountName.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare("Spencer") == .orderedSame {
+                    HStack {
+                        Spacer()
+                        Button {
+                            developerPasswordInput = ""
+                            showDeveloperPasswordError = false
+                            showDeveloperPasswordSheet = true
+                        } label: {
+                            Text("Developer")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
                     }
-                    Spacer()
+                    .listRowSeparator(.hidden)
                 }
-                .listRowSeparator(.hidden)
             }
         }
         .listStyle(.plain)
         .navigationTitle("Account Manager")
         .onAppear {
             RecentlyDeletedStore.purgeExpired(in: context)
+            weekStartOption = AppWeekStartStore.current()
         }
         .onChange(of: devManualWarningCardsEnabled) { _, isEnabled in
             guard !isEnabled else { return }
@@ -991,6 +1054,7 @@ struct AccountView: View {
                         Toggle("Enable LoomAI Insights Refresh", isOn: $enableLoomAIInsightsRefresh)
                         Toggle("LoomAI Troubleshooting", isOn: $enableLoomAITroubleshooting)
                         Toggle("LoomAI Debug", isOn: $enableLoomAIDebug)
+                        Toggle("LoomAI Custom Chat", isOn: $enableLoomAICustomChat)
                         Toggle("Disable Apple Intelligence", isOn: $disableAppleIntelligence)
                         Toggle("Disable LoomAI Daily Limiter", isOn: $disableLoomAIDailyLimiter)
                         Toggle("Enable Projects", isOn: $enableProjectsFeature)
@@ -998,6 +1062,7 @@ struct AccountView: View {
                         Toggle("Blank Homepage", isOn: $blankHomepageMode)
                         Toggle("Setup Homepage", isOn: $setupHomepageMode)
                         Toggle("Warning Cards", isOn: $devManualWarningCardsEnabled)
+                        Toggle("AutoWrite PlanView Result", isOn: $devPlanViewResultAutoWriteEnabled)
                     }
 
                     if devManualWarningCardsEnabled {
@@ -1126,13 +1191,15 @@ struct AccountView: View {
                 .onAppear {
                     refreshLoomAICostSnapshot()
                 }
-                .alert("Reset demo@loomlife.us?", isPresented: $showResetReviewOnboardingDemoConfirmation) {
-                    Button("Reset Demo Account", role: .destructive) {
-                        resetReviewOnboardingDemoWorkspace()
-                    }
-                    Button("Cancel", role: .cancel) {}
-                } message: {
-                    Text("All current data and changes for demo@loomlife.us will be lost. If that account is currently signed in, the reset will apply after it signs out and the next sign in will treat it like a new account.")
+                .alert(isPresented: $showResetReviewOnboardingDemoConfirmation) {
+                    Alert(
+                        title: Text("Reset demo@loomlife.us?"),
+                        message: Text("All current data and changes for demo@loomlife.us will be lost immediately. If that account is currently signed in, it will be signed out and the next session will start from the beginning of onboarding."),
+                        primaryButton: .destructive(Text("Reset Demo Account")) {
+                            resetReviewOnboardingDemoWorkspace()
+                        },
+                        secondaryButton: .cancel()
+                    )
                 }
             }
         }
@@ -1873,7 +1940,7 @@ struct AccountDetailsView: View {
     @State private var isDeletingAccount = false
     @State private var isRestoringPurchases = false
     @State private var restorePurchasesMessage: String? = nil
-    @State private var weekStartOption: AppWeekStartOption = AppWeekStartStore.current()
+    @State private var restoreFailureAlertMessage: String? = nil
     @FocusState private var focusedAccountField: AccountField?
 
     var body: some View {
@@ -1903,6 +1970,7 @@ struct AccountDetailsView: View {
 
                 Button {
                     restorePurchasesMessage = nil
+                    restoreFailureAlertMessage = nil
                     Task {
                         await openAppleSubscriptionManagement()
                     }
@@ -1910,7 +1978,9 @@ struct AccountDetailsView: View {
                     subscriptionSettingsRow
                 }
                 .buttonStyle(.plain)
+            }
 
+            Section {
                 Button {
                     Task {
                         await restorePurchases()
@@ -1943,27 +2013,6 @@ struct AccountDetailsView: View {
                             .font(.footnote.weight(.semibold))
                             .foregroundStyle(.secondary)
                     }
-                }
-                .buttonStyle(.plain)
-            }
-
-            Section("Calendar Configuration") {
-                Menu {
-                    ForEach([AppWeekStartOption.saturday, .sunday, .monday]) { option in
-                        Button {
-                            saveSelectedWeekStartOption(option)
-                        } label: {
-                            HStack {
-                                Text(option.title)
-                                if weekStartOption == option {
-                                    Spacer()
-                                    Image(systemName: "checkmark")
-                                }
-                            }
-                        }
-                    }
-                } label: {
-                    settingsRow(title: "Week start", value: weekStartOption.title, showsChevron: false)
                 }
                 .buttonStyle(.plain)
             }
@@ -2002,7 +2051,23 @@ struct AccountDetailsView: View {
         .navigationTitle("Account")
         .onAppear {
             hydrateAccountFieldsFromAuthUserIfAvailable()
-            weekStartOption = AppWeekStartStore.current()
+        }
+        .alert(
+            "The purchase did not complete",
+            isPresented: Binding(
+                get: { restoreFailureAlertMessage != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        restoreFailureAlertMessage = nil
+                    }
+                }
+            )
+        ) {
+            Button("Cancel", role: .cancel) {
+                restoreFailureAlertMessage = nil
+            }
+        } message: {
+            Text(restoreFailureAlertMessage ?? "")
         }
         .confirmationDialog("Sign out of Loom?", isPresented: $showSignOutConfirmation, titleVisibility: .visible) {
             Button("Sign Out", role: .destructive) {
@@ -2133,13 +2198,6 @@ struct AccountDetailsView: View {
         }
     }
 
-    private func saveSelectedWeekStartOption(_ option: AppWeekStartOption) {
-        guard weekStartOption != option else { return }
-        weekStartOption = option
-        AppWeekStartStore.setCurrent(option)
-        ActivePlanSessionStore.setWeekStart(nil)
-    }
-
     private var appDisplayName: String {
         (Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
         ?? (Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String)
@@ -2147,6 +2205,9 @@ struct AccountDetailsView: View {
     }
 
     private var currentSubscriptionSummary: String {
+        if let activePlan = purchaseManager.activePlan {
+            return activePlan.plainTitle
+        }
         if SubscriptionAccessGate.shouldForceInactiveSubscription() && !isSubscribed {
             return "Not Purchased"
         }
@@ -2160,7 +2221,7 @@ struct AccountDetailsView: View {
         if subscriptionPlanRaw == SubscriptionPlan.monthly.rawValue {
             return "Monthly"
         }
-        return "Annual (Locked)"
+        return "Annual"
     }
 
     private var accountProviderLabel: String {
@@ -2347,6 +2408,7 @@ struct AccountDetailsView: View {
         guard !isRestoringPurchases else { return }
         isRestoringPurchases = true
         restorePurchasesMessage = nil
+        restoreFailureAlertMessage = nil
         accountError = nil
         defer { isRestoringPurchases = false }
 
@@ -2355,9 +2417,9 @@ struct AccountDetailsView: View {
         case .restoredActiveEntitlement:
             restorePurchasesMessage = "Purchases restored."
         case .noActivePurchasesFound:
-            restorePurchasesMessage = "No active purchases were found for this Apple ID."
+            restoreFailureAlertMessage = "Unfortunately, there was nothing to restore."
         case .failed:
-            restorePurchasesMessage = "Restore failed. Please try again."
+            restoreFailureAlertMessage = "Restore failed. Please try again."
         }
     }
 
@@ -2759,7 +2821,7 @@ private struct AccountSubscriptionView: View {
             return .lifetime
         case "Monthly":
             return .monthly
-        case "Annual (Locked)":
+        case "Annual", "Annual (Locked)":
             return .annual
         default:
             return nil
@@ -2770,17 +2832,13 @@ private struct AccountSubscriptionView: View {
         resolvedPlan?.plainTitle ?? subscriptionSummary
     }
 
+    private var resolvedPlanPresentation: PurchaseManager.PlanPresentation? {
+        guard let resolvedPlan else { return nil }
+        return purchaseManager.presentation(for: resolvedPlan)
+    }
+
     private var priceText: String {
-        switch resolvedPlan {
-        case .lifetime:
-            return "$129 one-time"
-        case .monthly:
-            return "$15 / month"
-        case .annual:
-            return "$79 / year"
-        case nil:
-            return "No active purchase"
-        }
+        resolvedPlanPresentation?.priceText ?? "No active purchase"
     }
 
     private var renewalLineText: String? {
@@ -2796,6 +2854,15 @@ private struct AccountSubscriptionView: View {
         }
     }
 
+    private var pendingRenewalLineText: String? {
+        guard let pendingPlan = purchaseManager.pendingAutoRenewPlan else { return nil }
+        guard pendingPlan != resolvedPlan else { return nil }
+        if let effectiveDate = purchaseManager.pendingAutoRenewEffectiveDate {
+            return "\(pendingPlan.plainTitle) starts \(effectiveDate.formatted(.dateTime.month(.wide).day()))"
+        }
+        return "\(pendingPlan.plainTitle) starts at your next renewal"
+    }
+
     private var canCancelAutoRenewingSubscription: Bool {
         resolvedPlan == .annual || resolvedPlan == .monthly
     }
@@ -2803,6 +2870,15 @@ private struct AccountSubscriptionView: View {
     private var cancelHelperText: String? {
         guard canCancelAutoRenewingSubscription, let date = purchaseManager.activePlanPeriodEndDate else { return nil }
         return "If you cancel now, you can still access your subscription until \(date.formatted(.dateTime.month(.wide).day()))."
+    }
+
+    private var pendingSwitchHelperText: String? {
+        guard let pendingPlan = purchaseManager.pendingAutoRenewPlan else { return nil }
+        guard pendingPlan != resolvedPlan else { return nil }
+        guard let effectiveDate = purchaseManager.pendingAutoRenewEffectiveDate else {
+            return "\(pendingPlan.plainTitle) starts after your current plan ends."
+        }
+        return "Your current plan stays active until \(effectiveDate.formatted(.dateTime.month(.wide).day())). \(pendingPlan.plainTitle) starts after that renewal."
     }
 
     var body: some View {
@@ -2834,6 +2910,14 @@ private struct AccountSubscriptionView: View {
 
                     if let cancelHelperText {
                         Text(cancelHelperText)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 8)
+                    }
+
+                    if let pendingSwitchHelperText {
+                        Text(pendingSwitchHelperText)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -2937,6 +3021,9 @@ private struct AccountSubscriptionView: View {
                 if let renewalLineText {
                     subscriptionDetailRow(icon: "calendar", text: renewalLineText)
                 }
+                if let pendingRenewalLineText {
+                    subscriptionDetailRow(icon: "arrow.triangle.2.circlepath", text: pendingRenewalLineText)
+                }
             }
         }
         .padding(16)
@@ -2994,7 +3081,7 @@ private struct SubscriptionAboutSheet: View {
                             onShowLegalDocument(.terms)
                         }
                     } label: {
-                        Label("Terms of Use", systemImage: "doc.text")
+                        Label("License Agreement", systemImage: "doc.text")
                     }
                 }
             }

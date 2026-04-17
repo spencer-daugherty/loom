@@ -46,6 +46,35 @@ private struct PlanViewMicrosoftTokenResponse: Decodable {
     }
 }
 
+enum PlanFlowProgressStore {
+    private static let legacyCompletedKey = "has_completed_plan_flow_once"
+    private static let completedKeyPrefix = "loom.plan.completed_once.v1."
+
+    static func hasCompletedPlanFlowOnceForCurrentUser(defaults: UserDefaults = .standard) -> Bool {
+        let userKey = PersonalizationUserIdentity.currentUserKey(defaults: defaults)
+        let key = completedKey(for: userKey)
+        if defaults.object(forKey: key) != nil {
+            return defaults.bool(forKey: key)
+        }
+        guard userKey == "device:default" else { return false }
+        return defaults.bool(forKey: legacyCompletedKey)
+    }
+
+    static func markCompletedForCurrentUser(defaults: UserDefaults = .standard) {
+        let key = completedKey(for: PersonalizationUserIdentity.currentUserKey(defaults: defaults))
+        defaults.set(true, forKey: key)
+
+        // Preserve the legacy install-wide flag for existing flows that may still read it.
+        if !defaults.bool(forKey: legacyCompletedKey) {
+            defaults.set(true, forKey: legacyCompletedKey)
+        }
+    }
+
+    private static func completedKey(for userKey: String) -> String {
+        completedKeyPrefix + PersonalizationUserIdentity.storageSafeKey(for: userKey)
+    }
+}
+
 private enum PlanViewExternalMutationAction {
     case complete
     case delete
@@ -4451,6 +4480,7 @@ struct PlanStepThreeLabelView: View {
 
 // MARK: - Step 4 (Result)
 struct PlanStepFourResultView: View {
+    @AppStorage("dev_planview_result_autowrite_enabled") private var devPlanViewResultAutoWriteEnabled = false
     let onBack: (() -> Void)?
     let onNext: (() -> Void)?
 
@@ -4765,7 +4795,9 @@ struct PlanStepFourResultView: View {
             GeometryReader { proxy in
                 if !plannedChunksForWeek.isEmpty && AppleIntelligenceSupport.isAvailable {
                     HStack(spacing: 8) {
-                        resultAutoWriteControls
+                        if devPlanViewResultAutoWriteEnabled {
+                            resultAutoWriteControls
+                        }
                         if isKeyboardVisible {
                             keyboardDismissButton
                         }
@@ -4966,8 +4998,10 @@ struct PlanStepFourResultView: View {
                         HStack(alignment: .center, spacing: 10) {
                             Image("LoomAI")
                                 .resizable()
+                                .renderingMode(.template)
                                 .scaledToFit()
                                 .frame(width: 18, height: 18)
+                                .foregroundStyle(.white)
                                 .opacity(isApplied ? 0.92 : 1)
 
                             Text(suggestion)
@@ -6568,7 +6602,6 @@ struct PlanStepFiveView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var colorScheme
-    @AppStorage("has_completed_plan_flow_once") private var hasCompletedPlanFlowOnce = false
 
     @State private var isShowingInstructions: Bool = false
 
@@ -7085,7 +7118,9 @@ struct PlanStepFiveView: View {
         let fill: Color = isOtherChunk
             ? Color(red: 0.92, green: 0.92, blue: 0.94)
             : FulfillmentCategoryColors.lightColor(for: chunk.category)
-        let accent: Color = isOtherChunk ? .black : FulfillmentCategoryTheme.color(for: chunk.category)
+        let accent: Color = isOtherChunk
+            ? (colorScheme == .dark ? .white : .black)
+            : FulfillmentCategoryTheme.color(for: chunk.category)
 
         let step4 = stepFourStatesForWeekByChunkID[chunk.id]
         let resultText = step4?.resultText ?? ""
@@ -8259,7 +8294,7 @@ struct PlanStepFiveView: View {
         state.activatedAt = .now
         state.weekStart = currentWeekStart
         ActivePlanSessionStore.setWeekStart(currentWeekStart)
-        hasCompletedPlanFlowOnce = true
+        PlanFlowProgressStore.markCompletedForCurrentUser()
         try? modelContext.save()
         NotificationCenter.default.post(name: Notification.Name("plan_flow_completed"), object: nil)
 

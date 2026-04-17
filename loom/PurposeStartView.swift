@@ -64,10 +64,8 @@ struct PurposeStartView: View {
     @State private var shouldHighlightStepValidation = false
     @State private var invalidPassionKeys = Set<String>()
     @State private var addingPassionBuckets: Set<String> = []
-    @State private var showPurposeInsightsTimeoutAlert = false
-    @State private var hasTimedOutPurposeInsights = false
-    @State private var purposeInsightsTimeoutTask: Task<Void, Never>?
-    @State private var purposeInsightsTroubleshootingMessage: String? = nil
+    @State private var shouldShowPurposeInsightsSkip = false
+    @State private var purposeInsightsSkipTask: Task<Void, Never>?
     @State private var loadedPurposeInsightsCycleKey: String?
 
     @FocusState private var focusedField: Field?
@@ -114,6 +112,8 @@ struct PurposeStartView: View {
             self.signals = signals
         }
     }
+
+    private let purposeInsightsSkipDelay: Duration = .seconds(20)
 
     private struct PurposeAutoWriteMemory: Codable {
         var visionAccepted: [String: Int] = [:]
@@ -399,9 +399,9 @@ struct PurposeStartView: View {
             if newStep == .insights {
                 restartPurposeInsightsTimeoutWindow()
             } else {
-                hasTimedOutPurposeInsights = false
-                purposeInsightsTimeoutTask?.cancel()
-                purposeInsightsTimeoutTask = nil
+                shouldShowPurposeInsightsSkip = false
+                purposeInsightsSkipTask?.cancel()
+                purposeInsightsSkipTask = nil
             }
             handleAutoStartForStep(newStep)
         }
@@ -449,21 +449,21 @@ struct PurposeStartView: View {
         .onDisappear {
             autoWriteIconAnimationTask?.cancel()
             autoWriteIconAnimationTask = nil
-            purposeInsightsTimeoutTask?.cancel()
-            purposeInsightsTimeoutTask = nil
+            purposeInsightsSkipTask?.cancel()
+            purposeInsightsSkipTask = nil
         }
         .onChange(of: purposeInsightCards) { _, newValue in
             if !newValue.isEmpty {
-                hasTimedOutPurposeInsights = false
-                purposeInsightsTimeoutTask?.cancel()
-                purposeInsightsTimeoutTask = nil
+                shouldShowPurposeInsightsSkip = false
+                purposeInsightsSkipTask?.cancel()
+                purposeInsightsSkipTask = nil
                 animatePurposeInsightOutline = false
                 Task { @MainActor in
                     try? await Task.sleep(for: .milliseconds(220))
                     guard !purposeInsightCards.isEmpty else { return }
                     animatePurposeInsightOutline = true
                 }
-            } else if step == .insights && !hasTimedOutPurposeInsights {
+            } else if step == .insights {
                 restartPurposeInsightsTimeoutWindow()
                 animatePurposeInsightOutline = false
             }
@@ -543,18 +543,6 @@ struct PurposeStartView: View {
                 .padding(.trailing, 16)
                 .padding(.bottom, autoWriteBottomPadding(in: proxy))
             }
-        }
-        .alert("Check your connection", isPresented: $showPurposeInsightsTimeoutAlert) {
-            if loomAITroubleshootingEnabled,
-               let details = purposeInsightsTroubleshootingMessage,
-               !details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Button("Copy troubleshooting") {
-                    UIPasteboard.general.string = details
-                }
-            }
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text("Generate insights later in Account > Personalization.")
         }
     }
 
@@ -686,7 +674,7 @@ struct PurposeStartView: View {
     }
 
     private var footer: some View {
-        HStack(spacing: 10) {
+        VStack(spacing: 10) {
             if step == .intro {
                 Button {
                     step = .vision
@@ -719,7 +707,7 @@ struct PurposeStartView: View {
                     Button {
                         dismiss()
                     } label: {
-                        Text("Back")
+                        Text("Done")
                             .frame(maxWidth: .infinity)
                             .contentShape(Rectangle())
                     }
@@ -727,14 +715,33 @@ struct PurposeStartView: View {
                     .controlSize(.large)
                     .frame(maxWidth: .infinity)
                 } else {
+                    if shouldShowPurposeInsightsSkipUI {
+                        Text("This is taking longer than usual")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .center)
+
+                        Button {
+                            finalizeAndContinue()
+                        } label: {
+                            Text("Skip for Now")
+                                .frame(maxWidth: .infinity)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.blue)
+                        .controlSize(.large)
+                        .frame(maxWidth: .infinity)
+                    }
+
                     Button {
                         finalizeAndContinue()
                     } label: {
                         ZStack {
                             Text("Continue")
-                                .opacity(isWaitingForPurposeInsights ? 0.0 : 1.0)
+                                .opacity(shouldShowPurposeInsightsSpinner ? 0.0 : 1.0)
                                 .frame(maxWidth: .infinity)
-                            if isWaitingForPurposeInsights {
+                            if shouldShowPurposeInsightsSpinner {
                                 ProgressView()
                                     .progressViewStyle(.circular)
                             }
@@ -807,10 +814,15 @@ struct PurposeStartView: View {
     }
 
     private var isWaitingForPurposeInsights: Bool {
-        AppleIntelligenceSupport.isAvailable
-            && step == .insights
-            && purposeInsightCards.isEmpty
-            && !hasTimedOutPurposeInsights
+        step == .insights && purposeInsightCards.isEmpty
+    }
+
+    private var shouldShowPurposeInsightsSpinner: Bool {
+        step == .insights && purposeInsightCards.isEmpty && isGeneratingPurposeInsights
+    }
+
+    private var shouldShowPurposeInsightsSkipUI: Bool {
+        step == .insights && !startAtInsights && purposeInsightCards.isEmpty && shouldShowPurposeInsightsSkip
     }
 
     private var progressCurrentStep: Int {
@@ -892,7 +904,7 @@ struct PurposeStartView: View {
 
             multiLineEditor(
                 text: $visionText,
-                placeholder: "Write your ultimate vision...",
+                placeholder: "Write your purpose vision...",
                 showError: shouldHighlightStepValidation && isVisionInvalid
             )
             .focused($focusedField, equals: .vision)
@@ -1065,14 +1077,9 @@ struct PurposeStartView: View {
 
                     let values = draftPassions[bucket.key] ?? []
                     ForEach(Array(values.enumerated()), id: \.offset) { index, value in
-                        let selectionCount = passionSelectionCount(for: value, in: bucket.key)
                         HStack(spacing: 10) {
                             Text(value)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                            Text("\(selectionCount)")
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .monospacedDigit()
                             Button {
                                 deletePassions(at: IndexSet(integer: index), in: bucket.key)
                             } label: {
@@ -1277,61 +1284,55 @@ struct PurposeStartView: View {
     }
 
     private var insightsStep: some View {
-        Group {
-            if AppleIntelligenceSupport.isAvailable {
-                VStack(alignment: .leading, spacing: 12) {
-                    PurposeInsightsThinkingHeader(
-                        title: "LoomAI",
-                        progress: 1.0
-                    )
+        VStack(alignment: .leading, spacing: 12) {
+            PurposeInsightsThinkingHeader(
+                title: "LoomAI",
+                progress: 1.0
+            )
 
-                    if !(isGeneratingPurposeInsights && purposeInsightCards.isEmpty) {
-                        Text("This will personalize your Loom experience.")
-                            .font(.title3.weight(.medium))
-                            .foregroundStyle(.secondary)
+            if !purposeInsightCards.isEmpty {
+                Text("This will personalize your Loom experience.")
+                    .font(.title3.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+
+            Text(purposeInsightHeadingText)
+                .font(.system(size: 38, weight: .bold))
+                .fixedSize(horizontal: false, vertical: true)
+
+            Group {
+                if purposeInsightCards.isEmpty {
+                    ForEach(0..<1, id: \.self) { _ in
+                        purposeInsightsLoadingCard
                     }
-
-                    Text(purposeInsightHeadingText)
-                        .font(.system(size: 38, weight: .bold))
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    Group {
-                        if isGeneratingPurposeInsights && purposeInsightCards.isEmpty {
-                            ForEach(0..<1, id: \.self) { _ in
-                                purposeInsightsLoadingCard
-                            }
-                            .transition(.opacity)
-                        } else {
-                            ForEach(purposeInsightCards) { card in
-                                purposeInsightsCard(card, animateOutline: animatePurposeInsightOutline)
-                            }
-                            .transition(.opacity.combined(with: .move(edge: .bottom)))
-                        }
+                    .transition(.opacity)
+                } else {
+                    ForEach(purposeInsightCards) { card in
+                        purposeInsightsCard(card, animateOutline: animatePurposeInsightOutline)
                     }
-                    .animation(.easeInOut(duration: 0.24), value: isGeneratingPurposeInsights)
-                    .animation(.easeInOut(duration: 0.24), value: purposeInsightCards.count)
-
-                    Text("This may change overtime and with different data. View anytime in Account > Personalization")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
-                .padding(14)
-                .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
-                .onAppear {
-                    if autoWriteOutlineAngle == 0 {
-                        withAnimation(.linear(duration: 8).repeatForever(autoreverses: false)) {
-                            autoWriteOutlineAngle = 360
-                        }
-                    }
-                    if insightsOutlinePhase == 0 {
-                        withAnimation(.linear(duration: 2.1).repeatForever(autoreverses: false)) {
-                            insightsOutlinePhase = 1
-                        }
-                    }
+            }
+            .animation(.easeInOut(duration: 0.24), value: isGeneratingPurposeInsights)
+            .animation(.easeInOut(duration: 0.24), value: purposeInsightCards.count)
+
+            Text("This may change overtime and with different data. View anytime in Account > Personalization")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+        .onAppear {
+            if autoWriteOutlineAngle == 0 {
+                withAnimation(.linear(duration: 8).repeatForever(autoreverses: false)) {
+                    autoWriteOutlineAngle = 360
                 }
-            } else {
-                EmptyView()
+            }
+            if insightsOutlinePhase == 0 {
+                withAnimation(.linear(duration: 2.1).repeatForever(autoreverses: false)) {
+                    insightsOutlinePhase = 1
+                }
             }
         }
     }
@@ -1721,23 +1722,6 @@ struct PurposeStartView: View {
         }
     }
 
-    private func passionSelectionCount(for passionText: String, in emotionKey: String) -> Int {
-        let matchingPassionIDs = Set(
-            passions
-                .filter {
-                    $0.emotion == emotionKey &&
-                    $0.passion.caseInsensitiveCompare(passionText) == .orderedSame
-                }
-                .map(\.passion_id)
-        )
-        guard !matchingPassionIDs.isEmpty else { return 0 }
-        return Set(
-            passionJoins
-                .filter { matchingPassionIDs.contains($0.passion_id) }
-                .map(\.category_id)
-        ).count
-    }
-
     private func advanceFromCurrentStep() {
         switch step {
         case .vision:
@@ -2099,54 +2083,46 @@ struct PurposeStartView: View {
             autoWriteVisionSuggestions = []
         }
 
-        do {
-            let contextSnapshot = try LoomAIViewModel().buildContextSnapshot(in: context)
-            let effectivePreviousSuggestions = visionTrimmed.isEmpty ? [] : previousSuggestions
-            let response = try await LoomAIService().sendPurposeVisionAutoWrite(
-                currentVision: visionTrimmed,
-                previousSuggestions: effectivePreviousSuggestions,
-                mode: "newVision",
-                context: contextSnapshot,
-                requestHash: requestKey
-            )
-            let suggestions = decodeAutoWriteVisionSuggestions(from: response.message)
-            guard !suggestions.isEmpty else {
-                autoWriteVisionErrorMessage = "No suggestions yet."
-                autoWriteVisionTroubleshootingMessage = loomAITroubleshootingLocalDetails(
-                    feature: "purpose_start_autowrite_vision",
-                    reason: "No suggestions were returned in the response.",
-                    responsePreview: response.message,
-                    requestHash: requestKey
+        let effectivePreviousSuggestions = visionTrimmed.isEmpty ? [] : previousSuggestions
+
+        if AppleIntelligenceSupport.isAvailable {
+            do {
+                let suggestions = try await AppleIntelligencePurposeVisionGenerator.suggestions(
+                    personalization: personalizationSnapshot,
+                    currentVision: visionTrimmed,
+                    previousSuggestions: effectivePreviousSuggestions
                 )
-                markFailed()
-                return
-            }
-            let nextSuggestions = Array(suggestions.prefix(2))
-            guard !nextSuggestions.isEmpty else {
-                autoWriteVisionErrorMessage = "No new suggestions yet."
-                let duplicateDetails = loomAIDuplicateSuggestionTroubleshootingDetails(
-                    feature: "purpose_start_autowrite_vision",
-                    reason: "No usable suggestions were returned after parsing.",
-                    responsePreview: response.message,
-                    requestHash: requestKey
+                let nextSuggestions = resolvedVisionSuggestions(
+                    suggestions,
+                    currentVision: visionTrimmed,
+                    previousSuggestions: effectivePreviousSuggestions
                 )
-                autoWriteVisionTroubleshootingMessage = duplicateDetails
-                loomAIReportTroubleshootingIfEnabled(details: duplicateDetails)
-                markFailed()
-                return
+                if !nextSuggestions.isEmpty {
+                    autoWriteVisionSuggestions = nextSuggestions
+                    autoWriteVisionErrorMessage = nil
+                    autoWriteVisionTroubleshootingMessage = nil
+                    return
+                }
+            } catch {
+                // Fall back to the local suggestion table below.
             }
-            autoWriteVisionSuggestions = nextSuggestions
-            autoWriteVisionErrorMessage = nil
-            autoWriteVisionTroubleshootingMessage = nil
-        } catch {
-            autoWriteVisionErrorMessage = "Couldn’t generate Vision suggestions. Check your connection."
-            autoWriteVisionTroubleshootingMessage = loomAITroubleshootingDetails(
-                feature: "purpose_start_autowrite_vision",
-                error: error,
-                requestHash: requestKey
-            )
-            markFailed()
         }
+
+        let fallbackSuggestions = PurposeVisionAutoWriteSuggestionTable.pickSuggestions(
+            personalizationSnapshot: personalizationSnapshot,
+            currentVision: visionTrimmed,
+            previousSuggestions: effectivePreviousSuggestions,
+            count: 2
+        )
+        guard !fallbackSuggestions.isEmpty else {
+            autoWriteVisionErrorMessage = "Couldn’t generate Vision suggestions right now."
+            autoWriteVisionTroubleshootingMessage = nil
+            markFailed()
+            return
+        }
+        autoWriteVisionSuggestions = fallbackSuggestions
+        autoWriteVisionErrorMessage = nil
+        autoWriteVisionTroubleshootingMessage = nil
     }
 
     private func requestAutoWritePassionSuggestions(forceRefresh: Bool = false) async {
@@ -2215,15 +2191,12 @@ struct PurposeStartView: View {
         guard let personalizationSnapshot else {
             purposeInsightCards = []
             purposeInsightProfileName = ""
-            purposeInsightsTroubleshootingMessage = nil
             loadedPurposeInsightsCycleKey = nil
-            hasTimedOutPurposeInsights = false
+            shouldShowPurposeInsightsSkip = false
             return
         }
 
         let diagnostics = DiagnosticAnswers(snapshot: personalizationSnapshot)
-        let currentVision = currentDrivingForce?.ultimateVision.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let passions = currentPassionPhrasesForProfileInsights()
         let userKey = PersonalizationUserIdentity.currentUserKey()
         let monthKey = PurposeProfileInsightsHasher.measuredMonthKey()
         let cycleKey = "\(userKey)|\(personalizationSnapshot.id.uuidString)|\(personalizationSnapshot.createdAt.timeIntervalSince1970)"
@@ -2243,12 +2216,30 @@ struct PurposeStartView: View {
             isGeneratingPurposeInsights = false
         }
         guard !Task.isCancelled else { return }
+        let inputsHash = PurposeProfileInsightsHasher.hash(diagnostic: diagnostics)
+
+        if !forceRefresh,
+           let cachedSnapshot = purposeProfileSnapshot(
+            for: userKey,
+            monthKey: monthKey,
+            inputsHash: inputsHash
+           ) {
+            AppDebugActivityLog.log(
+                "PurposeProfile",
+                "Using cached questionnaire match profile=\(cachedSnapshot.profile) inputsHash=\(String(inputsHash.prefix(8)))"
+            )
+            applyPurposeInsightSnapshot(cachedSnapshot)
+            loadedPurposeInsightsCycleKey = cycleKey
+            shouldShowPurposeInsightsSkip = false
+            return
+        }
+
         let matchResult = personalizationSnapshot.personalityMatch
         let resolvedRecord = matchResult.winnerRecord
-        let inputsHash = PurposeProfileInsightsHasher.hash(
-            diagnostic: diagnostics,
-            vision: currentVision,
-            passions: passions
+        let topAlternatives = matchResult.alternativeProfileNames.prefix(2).joined(separator: ", ")
+        AppDebugActivityLog.log(
+            "PurposeProfile",
+            "Computed questionnaire match profile=\(resolvedRecord.profile) confidence=\(Int((matchResult.confidence * 100).rounded())) low=\(matchResult.lowConfidence) alternatives=\(topAlternatives) inputsHash=\(String(inputsHash.prefix(8)))"
         )
 
         persistPurposeProfileSnapshot(
@@ -2257,16 +2248,20 @@ struct PurposeStartView: View {
             monthKey: monthKey,
             inputsHash: inputsHash
         )
-        purposeInsightsTroubleshootingMessage = nil
         applyPurposeInsightRecord(resolvedRecord, match: matchResult)
         loadedPurposeInsightsCycleKey = cycleKey
-        hasTimedOutPurposeInsights = false
+        shouldShowPurposeInsightsSkip = false
     }
 
     private func restartPurposeInsightsTimeoutWindow() {
-        hasTimedOutPurposeInsights = false
-        purposeInsightsTimeoutTask?.cancel()
-        showPurposeInsightsTimeoutAlert = false
+        shouldShowPurposeInsightsSkip = false
+        purposeInsightsSkipTask?.cancel()
+        guard step == .insights, !startAtInsights, purposeInsightCards.isEmpty else { return }
+        purposeInsightsSkipTask = Task { @MainActor in
+            try? await Task.sleep(for: purposeInsightsSkipDelay)
+            guard !Task.isCancelled, step == .insights, !startAtInsights, purposeInsightCards.isEmpty else { return }
+            shouldShowPurposeInsightsSkip = true
+        }
     }
 
     private func handleAutoStartForStep(_ newStep: Step) {
@@ -2276,6 +2271,7 @@ struct PurposeStartView: View {
         case .purpose, .passions:
             Task { await requestAutoWritePassionSuggestions() }
         case .insights:
+            restartPurposeInsightsTimeoutWindow()
             Task { await generatePurposeInsights() }
         default:
             break
@@ -2335,7 +2331,7 @@ struct PurposeStartView: View {
         for record: PurposeProfileRecord,
         match: OnboardingPersonalityMatchResult? = nil
     ) -> [PurposeInsightCard] {
-        var cards: [PurposeInsightCard] = [
+        let cards: [PurposeInsightCard] = [
             PurposeInsightCard(title: "Strength", body: record.strength),
             PurposeInsightCard(title: "Weakness", body: record.weakness),
             PurposeInsightCard(
@@ -2346,33 +2342,7 @@ struct PurposeStartView: View {
                 )
             )
         ]
-
-        if let match, !match.alternativeProfileNames.isEmpty {
-            let label = match.lowConfidence ? "Also close" : "Nearby fits"
-            cards.append(
-                PurposeInsightCard(
-                    title: label,
-                    body: match.alternativeProfileNames.prefix(2).joined(separator: " • ")
-                )
-            )
-        }
         return cards
-    }
-
-    private func currentPassionPhrasesForProfileInsights() -> [String] {
-        let byBucket = bucketOrder.flatMap { bucket -> [String] in
-            var values = draftPassions[bucket.key] ?? []
-            let pending = (entryText[bucket.key] ?? "")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            if !pending.isEmpty {
-                values.append(pending)
-            }
-            return values
-        }
-        let normalized = byBucket
-            .map { $0.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        return Array(Set(normalized)).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
     private func latestDiagnosticsInsightsSnapshot(for personalization: PersonalizationSnapshot?) -> DiagnosticsInsightsSnapshot? {
@@ -2380,24 +2350,30 @@ struct PurposeStartView: View {
         if let personalization {
             let diagnosticsHash = DiagnosticsInsightsHasher.hash(for: personalization)
             if let exact = diagnosticsInsightsSnapshots.first(where: {
-                $0.userKey == userKey && $0.diagnosticsHash == diagnosticsHash
+                $0.userKey == userKey &&
+                $0.diagnosticsHash == diagnosticsHash &&
+                $0.version == DiagnosticsInsightsHasher.schemaVersion
             }) {
                 return exact
             }
         }
-        if let latestForUser = diagnosticsInsightsSnapshots.first(where: { $0.userKey == userKey }) {
+        if let latestForUser = diagnosticsInsightsSnapshots.first(where: {
+            $0.userKey == userKey &&
+            $0.version == DiagnosticsInsightsHasher.schemaVersion
+        }) {
             return latestForUser
         }
-        return diagnosticsInsightsSnapshots.first
+        return diagnosticsInsightsSnapshots.first(where: { $0.version == DiagnosticsInsightsHasher.schemaVersion })
     }
 
-    private func latestPurposeProfileSnapshot(for userKey: String) -> PurposeProfileInsightsSnapshot? {
-        purposeProfileInsightsSnapshots.first(where: { $0.userKey == userKey })
-    }
-
-    private func purposeProfileSnapshot(for userKey: String, monthKey: String) -> PurposeProfileInsightsSnapshot? {
-        purposeProfileInsightsSnapshots.first {
-            $0.userKey == userKey && $0.monthKey == monthKey
+    private func purposeProfileSnapshot(for userKey: String, monthKey: String, inputsHash: String) -> PurposeProfileInsightsSnapshot? {
+        let snapshotKey = PurposeProfileInsightsHasher.snapshotKey(
+            userKey: userKey,
+            monthKey: monthKey,
+            inputsHash: inputsHash
+        )
+        return purposeProfileInsightsSnapshots.first {
+            $0.snapshotKey == snapshotKey
         }
     }
 
@@ -2423,9 +2399,7 @@ struct PurposeStartView: View {
             monthKey: monthKey,
             inputsHash: inputsHash
         )
-        if purposeProfileInsightsSnapshots.contains(where: { $0.userKey == userKey && $0.monthKey == monthKey }) {
-            return
-        } else if let existing = purposeProfileInsightsSnapshots.first(where: { $0.snapshotKey == snapshotKey }) {
+        if let existing = purposeProfileInsightsSnapshots.first(where: { $0.snapshotKey == snapshotKey }) {
             existing.generatedAt = .now
             existing.profile = record.profile
             existing.strength = record.strength
@@ -2660,6 +2634,27 @@ struct PurposeStartView: View {
             .map { $0.replacingOccurrences(of: #"^[-•]\s*"#, with: "", options: .regularExpression) }
             .filter { !$0.isEmpty }
             .prefix(3))
+    }
+
+    private func resolvedVisionSuggestions(
+        _ suggestions: [String],
+        currentVision: String,
+        previousSuggestions: [String]
+    ) -> [String] {
+        let excluded = Set(([currentVision] + previousSuggestions).map(normalizedVisionSuggestion).filter { !$0.isEmpty })
+        var seen = Set<String>()
+        return Array(
+            suggestions
+                .map { $0.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .filter { suggestion in
+                    let normalized = normalizedVisionSuggestion(suggestion)
+                    guard !normalized.isEmpty else { return false }
+                    guard !excluded.contains(normalized) else { return false }
+                    return seen.insert(normalized).inserted
+                }
+                .prefix(2)
+        )
     }
 
     private func truncateSuggestion(_ text: String, maxLength: Int) -> String {

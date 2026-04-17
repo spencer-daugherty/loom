@@ -1188,14 +1188,14 @@ let fulfillmentStartHealthEnergyLittleWinFlags: [(activity: String, appleHealth:
     ("15 minute walk", true),
     ("30 minute workout", true),
     ("Morning stretch routine", false),
-    ("Drink full glass of water", true),
+    ("Drink full glass of water", false),
     ("Eat a healthy breakfast", false),
     ("5 minute mobility work", false),
-    ("10 minute yoga session", true),
-    ("Short outdoor walk", true),
-    ("Stand for 1 minute each hour", true),
-    ("Take stairs instead of elevator", true),
-    ("Log your meals", true),
+    ("10 minute yoga session", false),
+    ("Short outdoor walk", false),
+    ("Stand for 1 minute each hour", false),
+    ("Take stairs instead of elevator", false),
+    ("Log your meals", false),
     ("Eat a serving of vegetables", false),
     ("Eat a serving of fruit", false),
     ("15 minute cardio", true),
@@ -1203,11 +1203,11 @@ let fulfillmentStartHealthEnergyLittleWinFlags: [(activity: String, appleHealth:
     ("Strength training session", true),
     ("Light stretching before bed", false),
     ("5 minutes deep breathing", false),
-    ("10 minutes meditation", true),
+    ("10 minutes meditation", false),
     ("Practice good posture", false),
     ("Take a hydration break", false),
-    ("Drink 8 glasses of water", true),
-    ("Walk after a meal", true),
+    ("Drink 8 glasses of water", false),
+    ("Walk after a meal", false),
     ("Avoid sugary snack", false),
     ("Healthy lunch choice", false),
     ("Cook a healthy meal", false),
@@ -1217,12 +1217,12 @@ let fulfillmentStartHealthEnergyLittleWinFlags: [(activity: String, appleHealth:
     ("Wind down before bed", false),
     ("Evening walk", true),
     ("Short bodyweight workout", true),
-    ("Take movement break", true),
+    ("Take movement break", false),
     ("Desk stretch break", false),
     ("Drink herbal tea instead of soda", false),
-    ("Log body weight", true),
-    ("Check resting heart rate", true),
-    ("Track sleep quality", true),
+    ("Log body weight", false),
+    ("Check resting heart rate", false),
+    ("Track sleep quality", false),
     ("Cold shower or rinse", false),
     ("Foam roll muscles", false),
     ("Short bike ride", true),
@@ -1231,8 +1231,8 @@ let fulfillmentStartHealthEnergyLittleWinFlags: [(activity: String, appleHealth:
     ("Practice balance exercise", false),
     ("Reduce screen time before bed", false),
     ("Deep stretch session", false),
-    ("Walk while on phone call", true),
-    ("Park farther away and walk", true),
+    ("Walk while on phone call", false),
+    ("Park farther away and walk", false),
     ("Reflect on energy levels", false)
 ]
 
@@ -1246,7 +1246,7 @@ fileprivate let fulfillmentStartHealthEnergyAppleHealthLittleWins: Set<String> =
 
 struct FulfillmentStartView: View {
     private static let draftStorageKey = "fulfillment_start_onboarding_draft_v1"
-    private static let fulfillmentInsightsPromptVersion = "onboarding_fulfillment_insights_v3"
+    private static let fulfillmentInsightsPromptVersion = "onboarding_fulfillment_insights_v4"
     enum EntryMode {
         case onboarding
         case addSingleArea
@@ -1856,7 +1856,7 @@ struct FulfillmentStartView: View {
 
     @ViewBuilder
     private var bottomInsetContent: some View {
-        if step != .intro && !isLifeOSInsightsMode {
+        if step != .intro && (!isLifeOSInsightsMode || step == .insights) {
             VStack(spacing: 6) {
                 if step == .createCategories, shouldShowRefreshButton {
                     Button("refresh") {
@@ -2423,16 +2423,29 @@ struct FulfillmentStartView: View {
                 .frame(maxWidth: .infinity)
                 .disabled(!summaryCanComplete)
             } else if step == .insights {
-                Button {
-                    finalizeAndContinue()
-                } label: {
-                    Text("Continue")
-                        .frame(maxWidth: .infinity)
-                        .contentShape(Rectangle())
+                if isLifeOSInsightsMode {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Text("Done")
+                            .frame(maxWidth: .infinity)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .frame(maxWidth: .infinity)
+                } else {
+                    Button {
+                        finalizeAndContinue()
+                    } label: {
+                        Text("Continue")
+                            .frame(maxWidth: .infinity)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .frame(maxWidth: .infinity)
             } else {
                 Button {
                     if shouldForceColorPickerBeforeProceed {
@@ -3483,6 +3496,7 @@ struct FulfillmentStartView: View {
 
     private var insightsStep: some View {
         GeometryReader { proxy in
+            let contentWidth = max(proxy.size.width - 4, 0)
             VStack(alignment: .leading, spacing: lifeOSInsightsVerticalSpacing) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("PURPOSE")
@@ -3533,7 +3547,7 @@ struct FulfillmentStartView: View {
                 lifeOSBottomSystemsGroup(containerHeight: max(250, proxy.size.height * 0.34))
                     .padding(.bottom, proxy.safeAreaInsets.bottom)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .frame(maxWidth: contentWidth, maxHeight: .infinity, alignment: .topLeading)
             .padding(.horizontal, 2)
             .overlayPreferenceValue(LifeOSInsightsBoundsPreferenceKey.self) { anchors in
                 GeometryReader { overlayProxy in
@@ -3552,6 +3566,8 @@ struct FulfillmentStartView: View {
                     }
                 }
             }
+            .compositingGroup()
+            .clipped()
         }
     }
 
@@ -5867,40 +5883,69 @@ struct FulfillmentStartView: View {
         do {
             let contextSnapshot = try LoomAIViewModel().buildContextSnapshot(in: modelContext)
             let payloadJSON = fulfillmentInsightsPayloadJSONString()
-            let instruction = """
-            Generate Fulfillment onboarding insights for Loom.
-            Fulfillment onboarding payload JSON:
-            \(payloadJSON)
+            let decoded: (cards: [FulfillmentInsightCard], nudge: String?)
+            if AppleIntelligenceSupport.isAvailable {
+                let appContextJSON = AppleIntelligenceInsightPromptBuilder.contextJSON(
+                    surfaceID: "fulfillment_onboarding_insights",
+                    context: contextSnapshot
+                )
+                let bundle = try await AppleIntelligencePurposeInsightsGenerator.fulfillmentOnboardingInsights(
+                    prompt: fulfillmentOnboardingInsightsPrompt(
+                        payloadJSON: payloadJSON,
+                        appContextJSON: appContextJSON
+                    )
+                )
+                let areasBody = validatedFulfillmentAreasBody(
+                    candidate: bundle.fulfillmentAreas,
+                    fallback: ""
+                )
+                let nextBody = validatedNextDirectionBody(
+                    candidate: bundle.nextDirection,
+                    fallback: ""
+                )
+                let cards = [
+                    FulfillmentInsightCard(title: "Fulfillment areas", body: areasBody),
+                    FulfillmentInsightCard(title: "Next direction", body: nextBody)
+                ]
+                decoded = (
+                    cards: cards.allSatisfy { !$0.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ? cards : [],
+                    nudge: bundle.nudge?.trimmingCharacters(in: .whitespacesAndNewlines)
+                )
+            } else {
+                let instruction = """
+                Generate Fulfillment onboarding insights for Loom.
+                Fulfillment onboarding payload JSON:
+                \(payloadJSON)
 
-            Requirements:
-            - Return JSON only with exactly 2 cards.
-            - Card 1 title: Fulfillment areas
-            - Card 2 title: Next direction
-            - Do not list selected category names and do not say "You selected".
-            - Do not rename or re-label selected fulfillment areas.
-            - Ground cards in diagnostics + purpose + fulfillment setup evidence only.
-            - Keep each card to 2-3 sentences with calm, practical language.
-            - If diagnostics or purpose are missing, say that briefly and provide a useful fallback without inventing claims.
-            - Next direction must end with a final sentence that starts with "Loom will help you".
-            """
+                Requirements:
+                - Return JSON only with exactly 2 cards.
+                - Card 1 title: Fulfillment areas
+                - Card 2 title: Next direction
+                - Do not list selected category names and do not say "You selected".
+                - Do not rename or re-label selected fulfillment areas.
+                - Ground cards in diagnostics + purpose + fulfillment setup evidence only.
+                - Keep each card to 2-3 sentences with calm, practical language.
+                - If diagnostics or purpose are missing, say that briefly and provide a useful fallback without inventing claims.
+                - Next direction must end with a final sentence that starts with "Loom will help you".
+                """
 
-            let response = try await LoomAIService().sendChat(
-                messages: [.init(role: "user", content: instruction)],
-                context: contextSnapshot,
-                intent: "onboarding_insights_fulfillment",
-                screen: "fulfillment_insights",
-                requestID: UUID().uuidString,
-                requestHash: requestKey
-            )
-            let decoded = decodeFulfillmentInsights(from: response.message)
+                let response = try await LoomAIService().sendChat(
+                    messages: [.init(role: "user", content: instruction)],
+                    context: contextSnapshot,
+                    intent: "onboarding_insights_fulfillment",
+                    screen: "fulfillment_insights",
+                    requestID: UUID().uuidString,
+                    requestHash: requestKey
+                )
+                decoded = decodeFulfillmentInsights(from: response.message)
+            }
             guard !decoded.cards.isEmpty else {
                 guard requestKey == fulfillmentInsightsCacheKey else { return }
-                fulfillmentInsightCards = defaultFulfillmentInsightsCards()
+                fulfillmentInsightCards = AppleIntelligenceSupport.isAvailable ? [] : defaultFulfillmentInsightsCards()
                 fulfillmentInsightsErrorMessage = "Couldn’t generate insights yet."
                 fulfillmentInsightsTroubleshootingMessage = loomAITroubleshootingLocalDetails(
                     feature: "fulfillment_start_insights",
-                    reason: "No insight cards could be parsed from the response.",
-                    responsePreview: response.message,
+                    reason: "No supported-device fulfillment onboarding insight cards could be validated.",
                     requestHash: requestKey
                 )
                 return
@@ -5922,7 +5967,7 @@ struct FulfillmentStartView: View {
             )
         } catch {
             guard requestKey == fulfillmentInsightsCacheKey else { return }
-            fulfillmentInsightCards = defaultFulfillmentInsightsCards()
+            fulfillmentInsightCards = AppleIntelligenceSupport.isAvailable ? [] : defaultFulfillmentInsightsCards()
             fulfillmentInsightsErrorMessage = "Couldn’t generate insights yet."
             fulfillmentInsightsTroubleshootingMessage = loomAITroubleshootingDetails(
                 feature: "fulfillment_start_insights",
@@ -5978,6 +6023,35 @@ struct FulfillmentStartView: View {
             return "{}"
         }
         return jsonString
+    }
+
+    private func fulfillmentOnboardingInsightsPrompt(
+        payloadJSON: String,
+        appContextJSON: String
+    ) -> String {
+        """
+        Generate Fulfillment onboarding insights for Loom.
+
+        Requirements:
+        - Use APP_CONTEXT plus the fulfillment onboarding payload below.
+        - Return structured output with exactly these fields: `fulfillmentAreas`, `nextDirection`, `nudge`.
+        - `fulfillmentAreas` should be 2 to 3 practical sentences that explain why these areas create the user's life map in Loom.
+        - `nextDirection` should be 2 to 3 practical sentences about what setup needs to become clearer or more durable next.
+        - `nudge` should be optional, and if present it must be one short sentence.
+        - Do not list the selected category names and do not say "You selected".
+        - Do not rename or re-label selected fulfillment areas.
+        - Ground the response in diagnostics, Purpose, Fulfillment setup, and APP_CONTEXT only.
+        - If diagnostics, Purpose, or setup are sparse, say that briefly and keep the guidance broad instead of making a strong diagnosis.
+        - The final sentence of `nextDirection` must start with "Loom will help you".
+        - Use APP_CONTEXT to understand how Fulfillment Areas connect to Purpose, Outcomes, Action Blocks, Little Wins, resources, and reflection inside the app.
+        - Return only structured output.
+
+        APP_CONTEXT JSON:
+        \(appContextJSON)
+
+        Fulfillment onboarding payload JSON:
+        \(payloadJSON)
+        """
     }
 
     private func decodeFulfillmentInsights(from raw: String) -> (cards: [FulfillmentInsightCard], nudge: String?) {
@@ -6113,6 +6187,7 @@ struct FulfillmentStartView: View {
     private func ensureNextDirectionEnding(_ raw: String) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
+            guard !AppleIntelligenceSupport.isAvailable else { return "" }
             return "We’ll narrow your planning to fewer priorities so progress feels steady and sustainable. Loom will help you keep decisions simple and follow-through consistent."
         }
 

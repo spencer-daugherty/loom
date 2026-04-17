@@ -41,7 +41,7 @@ final class PurposeProfileInsightsSnapshot {
 }
 
 enum PurposeProfileInsightsHasher {
-    static let schemaVersion = 5
+    static let schemaVersion = 7
 
     static func monthKey(from date: Date = .now) -> String {
         let formatter = DateFormatter()
@@ -65,13 +65,7 @@ enum PurposeProfileInsightsHasher {
         calendar.component(.day, from: date) == 1
     }
 
-    static func hash(
-        diagnostic: DiagnosticAnswers,
-        vision: String,
-        passions: [String]
-    ) -> String {
-        _ = vision
-        _ = passions
+    static func hash(diagnostic: DiagnosticAnswers) -> String {
         struct Input: Codable {
             var stress: String
             var breaksFirst: String

@@ -49,7 +49,10 @@ struct ReflectView: View {
     @Query private var allChunkSelections: [PlanChunkSelection]
     @Query(sort: \Outcomes.rank, order: .forward) private var outcomes: [Outcomes]
     @Query(sort: \Fulfillment.updatedAt, order: .forward) private var fulfillments: [Fulfillment]
+    @Query(sort: \DrivingForce.updatedAt, order: .reverse) private var drivingForces: [DrivingForce]
     @Query(sort: \Passion.date, order: .forward) private var passions: [Passion]
+    @Query(sort: \DiagnosticsInsightsSnapshot.generatedAt, order: .reverse) private var diagnosticsInsightsSnapshots: [DiagnosticsInsightsSnapshot]
+    @Query(sort: \PurposeProfileInsightsSnapshot.generatedAt, order: .reverse) private var purposeProfileInsightsSnapshots: [PurposeProfileInsightsSnapshot]
     @Query(sort: \OutcomesMeasure.measuredAt, order: .reverse) private var outcomeMeasures: [OutcomesMeasure]
     @Query(sort: \OutcomesMeasureEntry.measuredAt, order: .forward) private var outcomeMeasureEntries: [OutcomesMeasureEntry]
     @Query private var allMindsetRows: [WeeklyMindsetEntry.Fields]
@@ -622,9 +625,17 @@ struct ReflectView: View {
         passions.filter { selectedReflectionPassionIDs.contains($0.passion_id) }
     }
 
+    private func reflectionCategoryColor(for category: String) -> Color {
+        let trimmed = category.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.caseInsensitiveCompare(PlanOtherLabel.title) == .orderedSame {
+            return Color(.systemGray)
+        }
+        return FulfillmentCategoryTheme.color(for: trimmed)
+    }
+
     private var celebrationSplashMetrics: [(String, Color, Double)] {
         let actionBlockCategories = Array(Set(weekChunks.map(\.category))).sorted()
-        let colors = actionBlockCategories.map { FulfillmentCategoryTheme.color(for: $0) }
+        let colors = actionBlockCategories.map { reflectionCategoryColor(for: $0) }
         let palette = colors.isEmpty ? [Color.blue, .indigo, .green, .purple, .red, .orange] : colors
         return palette.enumerated().map { idx, color in
             ("Area \(idx + 1)", color, 20)
@@ -670,7 +681,7 @@ struct ReflectView: View {
                 InsightsSnapshot.FulfillmentAreaRow(
                     title: $0.0,
                     doneCount: $0.1,
-                    color: FulfillmentCategoryTheme.color(for: $0.0),
+                    color: reflectionCategoryColor(for: $0.0),
                     actionBlockProjectedDelta: projectedDeltas[$0.0]
                 )
             },
@@ -679,7 +690,7 @@ struct ReflectView: View {
                     id: $0.outcome_id,
                     title: $0.outcome,
                     category: $0.category,
-                    color: FulfillmentCategoryTheme.color(for: $0.category)
+                    color: reflectionCategoryColor(for: $0.category)
                 )
             },
             carriedActionTexts: carried.map(\.text)
@@ -698,13 +709,113 @@ struct ReflectView: View {
         return readableInsightsLoading || !(readableInsightsText?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
     }
 
+    private var readableInsightPersonalizationContext: PersonalizationContextValue? {
+        PersonalizationStore.cachedContextForCurrentUser()
+    }
+
+    private var latestReadableInsightDiagnosticsSnapshot: DiagnosticsInsightsSnapshot? {
+        let userKey = PersonalizationUserIdentity.currentUserKey()
+        return diagnosticsInsightsSnapshots.first(where: { $0.userKey == userKey })
+    }
+
+    private var latestReadableInsightPurposeProfileSnapshot: PurposeProfileInsightsSnapshot? {
+        let userKey = PersonalizationUserIdentity.currentUserKey()
+        return purposeProfileInsightsSnapshots.first(where: { $0.userKey == userKey })
+    }
+
+    private var reflectReadableInsightContextSeed: AppleIntelligenceReadableInsightContextSeed {
+        let weekBlocks = weekChunks
+            .sorted { $0.chunkIndex < $1.chunkIndex }
+            .prefix(4)
+            .map { chunk in
+                let chunkActions = weekActions
+                    .filter { $0.plannedChunkId == chunk.id }
+                    .sorted { $0.sortOrder < $1.sortOrder }
+                let completed = chunkActions.filter { status(for: $0.id) == .done || status(for: $0.id) == .notNeeded }
+                return LoomAIContextSnapshot.ActionBlockSummary(
+                    category: chunk.category,
+                    title: chunk.label,
+                    completionRatio: chunkActions.isEmpty ? 0 : Double(completed.count) / Double(chunkActions.count),
+                    actions: Array(chunkActions.prefix(4).map(\.text))
+                )
+            }
+
+        let fulfillmentCategories = fulfillments
+            .sorted { $0.updatedAt > $1.updatedAt }
+            .prefix(4)
+            .map {
+                LoomAIContextSnapshot.FulfillmentCategorySummary(
+                    id: $0.category_id.uuidString,
+                    name: $0.category,
+                    colorKey: FulfillmentCategoryTheme.colorKey(for: $0.category),
+                    mission: $0.category_purpose,
+                    identity: [],
+                    littleWins: [],
+                    resources: [],
+                    connectedPassions: [],
+                    weeklyScore: nil
+                )
+            }
+
+        let activeOutcomes = outcomes
+            .filter { $0.end >= .now }
+            .sorted { $0.end < $1.end }
+            .prefix(4)
+            .map {
+                LoomAIContextSnapshot.OutcomeSummary(
+                    id: $0.outcome_id.uuidString,
+                    title: $0.outcome,
+                    category: $0.category,
+                    endDate: $0.end,
+                    measurable: false,
+                    progressSummary: "Active outcome"
+                )
+            }
+
+        return AppleIntelligenceReadableInsightContextSeed(
+            diagnostic: AppleIntelligenceReadableInsightContextSupport.diagnosticSummary(
+                personalizationContext: readableInsightPersonalizationContext,
+                diagnosticsSnapshot: latestReadableInsightDiagnosticsSnapshot
+            ),
+            drivingForce: drivingForces.first.map {
+                .init(
+                    vision: $0.ultimateVision,
+                    purpose: $0.ultimatePurpose,
+                    passions: Array(passions.prefix(8)).map { .init(emotion: $0.emotion, title: $0.passion) }
+                )
+            },
+            purposeProfile: AppleIntelligenceReadableInsightContextSupport.purposeProfileSummary(
+                personalizationContext: readableInsightPersonalizationContext,
+                purposeProfileSnapshot: latestReadableInsightPurposeProfileSnapshot
+            ),
+            fulfillmentSetup: AppleIntelligenceReadableInsightContextSupport.fulfillmentSetupSummary(
+                personalizationContext: readableInsightPersonalizationContext
+            ),
+            fulfillmentCategories: fulfillmentCategories,
+            activeOutcomes: activeOutcomes,
+            currentWeekActionBlocks: weekBlocks,
+            recentActivity: .init(
+                quickCompletesLast7Days: 0,
+                littleWinsCompletionsLast7Days: 0,
+                carryoversLast7Days: carriedActions.count
+            ),
+            appGuide: Array(LoomAIViewModel.appGuideTopics().prefix(5)),
+            dataInventory: [],
+            notes: ["surface=reflect_readable_insight", "reflect-readable-insight-lightweight-context"]
+        )
+    }
+
     private var readableInsightsRequestSignature: String {
         [
             weekStart.ISO8601Format(),
             String(weekActions.count),
             String(doneCount),
             String(carriedActions.count),
-            String(notNeededCount)
+            String(notNeededCount),
+            AppleIntelligenceInsightPromptBuilder.contextSignature(
+                surfaceID: "reflect_readable_insight",
+                seed: reflectReadableInsightContextSeed
+            )
         ].joined(separator: "|")
     }
 
@@ -719,21 +830,35 @@ struct ReflectView: View {
         guard readableInsightsRequestKey != signature else { return }
         readableInsightsRequestKey = signature
         readableInsightsLoading = true
-        readableInsightsText = nil
 
         do {
+            await Task.yield()
             let prompt = reflectReadableInsightsPrompt()
-            let text = try await AppleIntelligencePurposeInsightsGenerator.readableInsight(prompt: prompt)
+            let text = try await AppleIntelligencePurposeInsightsGenerator.reflectSummary(prompt: prompt)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !Task.isCancelled, readableInsightsRequestKey == signature else { return }
             readableInsightsText = text.isEmpty ? nil : limitedReadableInsightsText(text, maxCharacters: 200)
         } catch {
-            readableInsightsText = nil
+            guard !Task.isCancelled, readableInsightsRequestKey == signature else { return }
+            if readableInsightsText?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true {
+                readableInsightsText = nil
+            }
         }
 
+        guard readableInsightsRequestKey == signature else { return }
         readableInsightsLoading = false
     }
 
     private func reflectReadableInsightsPrompt() -> String {
+        let contextBuildStartedAt = Date()
+        let appContextJSON = AppleIntelligenceInsightPromptBuilder.contextJSON(
+            surfaceID: "reflect_readable_insight",
+            seed: reflectReadableInsightContextSeed
+        )
+        AppDebugActivityLog.log(
+            "ReflectInsights",
+            "readable insight context built surface=reflect key=\(readableInsightsRequestSignature) durationMs=\(Int(Date().timeIntervalSince(contextBuildStartedAt) * 1000))"
+        )
         let rows = weekActions.map { action -> String in
             let status = status(for: action.id).rawValue
             let define = defineByActionID[action.id]
@@ -773,13 +898,19 @@ struct ReflectView: View {
         Create a readable insights summary for a completed Loom Action Blocks session.
 
         Requirements:
-        - Base the insight only on the session details below.
-        - Return exactly ONE high-signal insight sentence (not a recap/summary of visible stats).
+        - Use the session details below as the primary evidence and APP_CONTEXT as supporting Loom context.
+        - Return structured output with one `summary` field only.
+        - `summary` must be exactly one high-signal insight sentence, not a recap of visible stats.
         - Prioritize patterns, implications, or mismatches over repeating totals/counts already shown in the UI.
         - Use practical, plain-language wording (no filler).
         - Mention fulfillment areas or outcomes only when relevant to the actual insight.
         - Keep the message under 200 characters and end as a complete sentence.
-        - Do not return actions/CTAs. Return only the readable insights text in the message.
+        - Do not return actions/CTAs.
+        - Use APP_CONTEXT to understand how Purpose, Fulfillment, Outcomes, Action Blocks, and reflection work together in Loom.
+        - If the session evidence is sparse, keep the observation broad and uncertainty-aware.
+
+        APP_CONTEXT JSON:
+        \(appContextJSON)
 
         Session summary:
         weekStart: \(weekStart.ISO8601Format())
@@ -854,7 +985,7 @@ struct ReflectView: View {
                 saveArchiveAndExit()
             }
         } message: {
-            Text("No passions are connected to this reflection. Do you want to save anyway?")
+            Text("No passions are connected to this action plan. Do you want to save anyway?")
         }
         .overlay(alignment: .bottom) {
             if showSaveHint {
@@ -2014,10 +2145,17 @@ struct ReflectView: View {
     private var otherLabeledChunksForContribution: [PlannedChunk] {
         let selections = Dictionary(grouping: allChunkSelections, by: \.chunkIndex)
             .compactMapValues { rows in rows.max(by: { $0.updatedAt < $1.updatedAt }) }
+        let doneActionChunkIDs = Set(
+            weekActions
+                .filter { status(for: $0.id) == .done }
+                .map(\.plannedChunkId)
+        )
         return weekChunks.filter { chunk in
             guard let selection = selections[chunk.chunkIndex] else { return false }
-            return selection.labelId == PlanOtherLabel.id ||
+            let isOtherSelection = selection.labelId == PlanOtherLabel.id ||
                 selection.label?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == PlanOtherLabel.title.lowercased()
+            guard isOtherSelection else { return false }
+            return doneActionChunkIDs.contains(chunk.id)
         }
         .sorted { $0.chunkIndex < $1.chunkIndex }
     }
@@ -2481,33 +2619,17 @@ private struct ReflectReadableInsightsCallout: View {
     let isLoading: Bool
     let fulfillmentHighlights: [(name: String, color: Color)]
     let outcomeHighlights: [(name: String, color: Color)]
-    @State private var outlineAngle: Double = 0
-
-    private var outlineGradient: AngularGradient {
-        AngularGradient(
-            colors: [
-                Color(red: 0.22, green: 0.47, blue: 1.0),
-                Color(red: 0.15, green: 0.83, blue: 0.95),
-                Color(red: 0.62, green: 0.40, blue: 0.95),
-                Color(red: 0.80, green: 0.38, blue: 0.78),
-                Color(red: 0.98, green: 0.36, blue: 0.58),
-                Color(red: 0.75, green: 0.42, blue: 0.74),
-                Color(red: 0.22, green: 0.47, blue: 1.0)
-            ],
-            center: .center,
-            angle: .degrees(outlineAngle)
-        )
-    }
 
     var body: some View {
+        let trimmedMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
         HStack(alignment: .center, spacing: 10) {
             Image("LoomAI")
                 .resizable()
                 .scaledToFit()
                 .frame(width: 28, height: 28)
 
-            if isLoading {
-                ReflectLoomTypingDotsIndicator()
+            if isLoading && trimmedMessage.isEmpty {
+                LoomAIReadableInsightTypingDotsIndicator()
                     .frame(height: 20)
             } else {
                 Text(styledMessage)
@@ -2518,15 +2640,8 @@ private struct ReflectReadableInsightsCallout: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(outlineGradient.opacity(0.95), lineWidth: 2)
+            LoomAIReadableInsightAnimatedOutlineBorder(cornerRadius: 12)
         )
-        .onAppear {
-            guard outlineAngle == 0 else { return }
-            withAnimation(.linear(duration: 7).repeatForever(autoreverses: false)) {
-                outlineAngle = 360
-            }
-        }
     }
 
     private var styledMessage: AttributedString {
@@ -2561,35 +2676,8 @@ private struct ReflectReadableInsightsCallout: View {
 }
 
 private struct ReflectLoomTypingDotsIndicator: View {
-    @State private var activeIndex: Int = 0
-
-    private let colors: [Color] = [
-        Color(red: 0.22, green: 0.47, blue: 1.0),
-        Color(red: 0.15, green: 0.83, blue: 0.95),
-        Color(red: 0.62, green: 0.40, blue: 0.95)
-    ]
-
     var body: some View {
-        HStack(spacing: 5) {
-            ForEach(Array(colors.enumerated()), id: \.offset) { idx, color in
-                Circle()
-                    .fill(color.opacity(activeIndex == idx ? 1 : 0.35))
-                    .frame(width: 6, height: 6)
-                    .scaleEffect(activeIndex == idx ? 1.15 : 0.9)
-                    .animation(.easeInOut(duration: 0.2), value: activeIndex)
-            }
-        }
-        .onAppear {
-            guard activeIndex == 0 else { return }
-            animate()
-        }
-    }
-
-    private func animate() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
-            activeIndex = (activeIndex + 1) % colors.count
-            animate()
-        }
+        LoomAIReadableInsightTypingDotsIndicator()
     }
 }
 

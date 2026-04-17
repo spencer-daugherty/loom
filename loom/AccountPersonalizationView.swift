@@ -3,12 +3,13 @@ import SwiftData
 
 struct AccountPersonalizationView: View {
     private static let diagnosticsFallbackMessage = "Processing error. Please try again later."
-    private typealias RefreshedDiagnosticsInsights = (diagnosticsHash: String, rootCause: String, nextDirection: String)
+    private typealias RefreshedDiagnosticsInsights = (diagnosticsHash: String, rootCause: String, fulfillmentAreas: String, nextDirection: String)
     private static let diagnosticsDisplayCachePrefix = "loom.personalization.diagnostics-display.v1"
 
     private struct CachedDiagnosticsDisplay: Codable {
         var diagnosticsHash: String
         var rootCause: String
+        var fulfillmentAreas: String
         var nextDirection: String
     }
 
@@ -31,8 +32,6 @@ struct AccountPersonalizationView: View {
 
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var personalizationStore: PersonalizationStore
-    @Query(sort: \DrivingForce.updatedAt, order: .reverse) private var drivingForces: [DrivingForce]
-    @Query(sort: \Passion.date, order: .forward) private var passions: [Passion]
     @Query(sort: \Fulfillment.updatedAt, order: .forward) private var fulfillmentCategories: [Fulfillment]
     @Query(sort: \DiagnosticsInsightsSnapshot.generatedAt, order: .reverse) private var diagnosticsInsightsSnapshots: [DiagnosticsInsightsSnapshot]
     @Query(sort: \PurposeProfileInsightsSnapshot.generatedAt, order: .reverse) private var purposeProfileInsightsSnapshots: [PurposeProfileInsightsSnapshot]
@@ -42,6 +41,7 @@ struct AccountPersonalizationView: View {
     @State private var isRefreshingDiagnosticsInsights = false
     @State private var displayedDiagnosticsHash: String?
     @State private var displayedRootCause = ""
+    @State private var displayedFulfillmentAreas = ""
     @State private var displayedNextDirection = ""
     @State private var postSaveRefreshTask: Task<Void, Never>?
     @State private var pendingDiagnosticsHydrationKey: String?
@@ -255,10 +255,10 @@ struct AccountPersonalizationView: View {
             )
             personalizationInsightCard(
                 title: "Fulfillment areas",
-                body: "Every task, goal, and little win will land in one of these areas, so your life stays organized.",
+                body: resolved.fulfillmentAreas,
                 chips: officialFulfillmentAreaTitles,
                 colorKeys: officialFulfillmentAreaColorKeys,
-                showsLoading: false
+                showsLoading: isRefreshingDiagnosticsInsights
             )
             personalizationInsightCard(
                 title: "Next direction",
@@ -417,6 +417,7 @@ struct AccountPersonalizationView: View {
         guard let current = personalizationStore.current else {
             displayedDiagnosticsHash = nil
             displayedRootCause = ""
+            displayedFulfillmentAreas = ""
             displayedNextDirection = ""
             pendingDiagnosticsHydrationKey = nil
             return
@@ -427,14 +428,20 @@ struct AccountPersonalizationView: View {
         let hydrationKey = "\(current.id.uuidString)|\(diagnosticsHash)"
         let storedRoot = current.diagnosticRootCause?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let storedNext = current.diagnosticNextDirection?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let storedFulfillment = latestDiagnosticsInsightsSnapshot(
+            userKey: personalizationStore.userKey,
+            diagnosticsHash: diagnosticsHash
+        )?.fulfillmentText.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !storedRoot.isEmpty, !storedNext.isEmpty {
             displayedDiagnosticsHash = diagnosticsHash
             displayedRootCause = storedRoot
+            displayedFulfillmentAreas = storedFulfillment
             displayedNextDirection = storedNext
             pendingDiagnosticsHydrationKey = nil
             cacheDisplayedDiagnostics(
                 diagnosticsHash: diagnosticsHash,
                 rootCause: storedRoot,
+                fulfillmentAreas: storedFulfillment,
                 nextDirection: storedNext
             )
             return
@@ -449,10 +456,12 @@ struct AccountPersonalizationView: View {
         ) ?? fetchStoredDiagnosticsInsightsSnapshot(snapshotKey: snapshotKey) {
             displayedDiagnosticsHash = diagnosticsHash
             displayedRootCause = persisted.rootCauseText
+            displayedFulfillmentAreas = persisted.fulfillmentText
             displayedNextDirection = persisted.nextDirectionText
             cacheDisplayedDiagnostics(
                 diagnosticsHash: diagnosticsHash,
                 rootCause: persisted.rootCauseText,
+                fulfillmentAreas: persisted.fulfillmentText,
                 nextDirection: persisted.nextDirectionText
             )
             if pendingDiagnosticsHydrationKey != hydrationKey {
@@ -473,12 +482,64 @@ struct AccountPersonalizationView: View {
         } else if let cached = cachedDisplayedDiagnostics(diagnosticsHash: diagnosticsHash) {
             displayedDiagnosticsHash = diagnosticsHash
             displayedRootCause = cached.rootCause
+            displayedFulfillmentAreas = cached.fulfillmentAreas
             displayedNextDirection = cached.nextDirection
         } else {
-            // Do not inject the fallback during load races on page re-entry.
-            // Keep whatever is currently rendered until a persisted snapshot arrives.
-            if displayedDiagnosticsHash == nil {
+            displayedDiagnosticsHash = diagnosticsHash
+            generateAndPersistDiagnosticInsightsIfNeeded(
+                for: current,
+                diagnosticsHash: diagnosticsHash,
+                hydrationKey: hydrationKey
+            )
+        }
+    }
+
+    private func generateAndPersistDiagnosticInsightsIfNeeded(
+        for snapshot: PersonalizationSnapshot,
+        diagnosticsHash: String,
+        hydrationKey: String
+    ) {
+        guard pendingDiagnosticsHydrationKey != hydrationKey else { return }
+        pendingDiagnosticsHydrationKey = hydrationKey
+        let snapshotKey = DiagnosticsInsightsHasher.snapshotKey(
+            userKey: personalizationStore.userKey,
+            diagnosticsHash: diagnosticsHash
+        )
+        let composed = LocalDiagnosticInsightsComposer.compose(snapshot: snapshot)
+
+        Task {
+            upsertDiagnosticsInsightsSnapshot(
+                snapshotKey: snapshotKey,
+                userKey: personalizationStore.userKey,
+                diagnosticsHash: diagnosticsHash,
+                rootCause: composed.rootCause,
+                fulfillmentText: composed.fulfillmentAreas,
+                nextDirection: composed.nextDirection,
+                purposeRefreshCycleKey: latestDiagnosticsInsightsSnapshot(
+                    userKey: personalizationStore.userKey,
+                    diagnosticsHash: diagnosticsHash
+                )?.purposeRefreshCycleKey
+            )
+
+            await personalizationStore.persistDiagnosticInsights(
+                snapshotID: snapshot.id,
+                rootCause: composed.rootCause,
+                nextDirection: composed.nextDirection
+            )
+
+            await MainActor.run {
+                guard pendingDiagnosticsHydrationKey == hydrationKey else { return }
                 displayedDiagnosticsHash = diagnosticsHash
+                displayedRootCause = composed.rootCause
+                displayedFulfillmentAreas = composed.fulfillmentAreas
+                displayedNextDirection = composed.nextDirection
+                pendingDiagnosticsHydrationKey = nil
+                cacheDisplayedDiagnostics(
+                    diagnosticsHash: diagnosticsHash,
+                    rootCause: composed.rootCause,
+                    fulfillmentAreas: composed.fulfillmentAreas,
+                    nextDirection: composed.nextDirection
+                )
             }
         }
     }
@@ -486,6 +547,7 @@ struct AccountPersonalizationView: View {
     private func saveDiagnosticDraft(_ draft: PersonalizationDraft, mode: EditorMode) async {
         isSaving = true
         let previousRootCause = displayedRootCause
+        let previousFulfillmentAreas = displayedFulfillmentAreas
         let previousNextDirection = displayedNextDirection
 
         do {
@@ -507,6 +569,7 @@ struct AccountPersonalizationView: View {
                 await performPostSaveInsightsRefresh(
                     savedSnapshot: savedSnapshot,
                     previousRootCause: previousRootCause,
+                    previousFulfillmentAreas: previousFulfillmentAreas,
                     previousNextDirection: previousNextDirection
                 )
             }
@@ -522,6 +585,7 @@ struct AccountPersonalizationView: View {
     private func performPostSaveInsightsRefresh(
         savedSnapshot: PersonalizationSnapshot,
         previousRootCause: String,
+        previousFulfillmentAreas: String,
         previousNextDirection: String
     ) async {
         let refreshStartedAt = Date()
@@ -542,17 +606,24 @@ struct AccountPersonalizationView: View {
             )
             displayedDiagnosticsHash = refreshedInsights.diagnosticsHash
             displayedRootCause = refreshedInsights.rootCause
+            displayedFulfillmentAreas = refreshedInsights.fulfillmentAreas
             displayedNextDirection = refreshedInsights.nextDirection
             pendingDiagnosticsHydrationKey = nil
             cacheDisplayedDiagnostics(
                 diagnosticsHash: refreshedInsights.diagnosticsHash,
                 rootCause: refreshedInsights.rootCause,
+                fulfillmentAreas: refreshedInsights.fulfillmentAreas,
                 nextDirection: refreshedInsights.nextDirection
             )
         } else {
             displayedDiagnosticsHash = DiagnosticsInsightsHasher.hash(for: savedSnapshot)
-            displayedRootCause = previousRootCause.isEmpty ? Self.diagnosticsFallbackMessage : previousRootCause
-            displayedNextDirection = previousNextDirection.isEmpty ? Self.diagnosticsFallbackMessage : previousNextDirection
+            displayedRootCause = previousRootCause.isEmpty
+                ? Self.diagnosticsFallbackMessage
+                : previousRootCause
+            displayedFulfillmentAreas = previousFulfillmentAreas
+            displayedNextDirection = previousNextDirection.isEmpty
+                ? Self.diagnosticsFallbackMessage
+                : previousNextDirection
         }
         isRefreshingDiagnosticsInsights = false
         AppDebugActivityLog.log("Personalization", "Post-save insights refresh completed")
@@ -577,70 +648,39 @@ struct AccountPersonalizationView: View {
         )
 
         var rootCause = fallbackDiagnosticsSnapshot?.rootCauseText.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        var fulfillmentAreas = fallbackDiagnosticsSnapshot?.fulfillmentText.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         var nextDirection = fallbackDiagnosticsSnapshot?.nextDirectionText.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        var receivedFreshValidInsights = false
-        let fulfillmentText = fallbackDiagnosticsSnapshot?.fulfillmentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-            ? fallbackDiagnosticsSnapshot!.fulfillmentText
-            : "Every task, goal, and little win will land in one of these areas, so your life stays organized."
-
-        do {
-            let response = try await LoomAIService().fetchDiagnosticInsights(
-                diagnostic: diagnostics,
-                client: DiagnosticInsightsClient(
-                    appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
-                    platform: "ios",
-                    screen: "account_personalization"
-                )
-            )
-            let normalizedRoot = normalizeInsightsBody(response.rootCause)
-            let normalizedNext = normalizeInsightsBody(response.nextDirection)
-            if isRenderableDiagnosticInsightBody(normalizedRoot),
-               isRenderableDiagnosticInsightBody(normalizedNext),
-               normalizedRoot != Self.diagnosticsFallbackMessage,
-               normalizedNext != Self.diagnosticsFallbackMessage {
-                rootCause = normalizedRoot
-                nextDirection = normalizedNext
-                receivedFreshValidInsights = true
-                AppDebugActivityLog.log(
-                    "Personalization",
-                    "Diagnostic insights refreshed from API root/next chars=\(rootCause.count)/\(nextDirection.count)"
-                )
-                upsertDiagnosticsInsightsSnapshot(
-                    snapshotKey: diagnosticsSnapshotKey,
-                    userKey: userKey,
-                    diagnosticsHash: diagnosticsHash,
-                    rootCause: rootCause,
-                    fulfillmentText: fulfillmentText,
-                    nextDirection: nextDirection,
-                    purposeRefreshCycleKey: fallbackDiagnosticsSnapshot?.purposeRefreshCycleKey
-                )
-            } else {
-                AppDebugActivityLog.log(
-                    "Personalization",
-                    "Diagnostic insights response rejected; preserving prior root/next"
-                )
-            }
-        } catch {
-            // Keep fallback diagnostics values.
-            AppDebugActivityLog.log("Personalization", "Diagnostic insights refresh failed: \(error.localizedDescription)")
-        }
-
-        let resolvedRecord = snapshot.personalityMatch.winnerRecord
-
-        let monthKey = PurposeProfileInsightsHasher.measuredMonthKey()
-        let inputsHash = PurposeProfileInsightsHasher.hash(
-            diagnostic: diagnostics,
-            vision: currentVisionForProfileInsights(),
-            passions: currentPassionsForProfileInsights()
+        let composed = LocalDiagnosticInsightsComposer.compose(snapshot: snapshot)
+        rootCause = composed.rootCause
+        fulfillmentAreas = composed.fulfillmentAreas
+        nextDirection = composed.nextDirection
+        AppDebugActivityLog.log(
+            "Personalization",
+            "Diagnostic insights refreshed locally root/next chars=\(rootCause.count)/\(nextDirection.count)"
         )
+        upsertDiagnosticsInsightsSnapshot(
+            snapshotKey: diagnosticsSnapshotKey,
+            userKey: userKey,
+            diagnosticsHash: diagnosticsHash,
+            rootCause: rootCause,
+            fulfillmentText: fulfillmentAreas,
+            nextDirection: nextDirection,
+            purposeRefreshCycleKey: fallbackDiagnosticsSnapshot?.purposeRefreshCycleKey
+        )
+
+        let matchResult = snapshot.personalityMatch
+        let resolvedRecord = matchResult.winnerRecord
+        let monthKey = PurposeProfileInsightsHasher.measuredMonthKey()
+        let inputsHash = PurposeProfileInsightsHasher.hash(diagnostic: diagnostics)
         let purposeSnapshotKey = PurposeProfileInsightsHasher.snapshotKey(
             userKey: userKey,
             monthKey: monthKey,
             inputsHash: inputsHash
         )
+        let topAlternatives = matchResult.alternativeProfileNames.prefix(2).joined(separator: ", ")
         AppDebugActivityLog.log(
             "Personalization",
-            "Purpose profile refresh request month=\(monthKey) inputsHash=\(String(inputsHash.prefix(8))) profile=\(resolvedRecord.profile)"
+            "Purpose profile refresh request month=\(monthKey) inputsHash=\(String(inputsHash.prefix(8))) profile=\(resolvedRecord.profile) confidence=\(Int((matchResult.confidence * 100).rounded())) low=\(matchResult.lowConfidence) alternatives=\(topAlternatives)"
         )
         upsertPurposeProfileSnapshot(
             snapshotKey: purposeSnapshotKey,
@@ -650,13 +690,13 @@ struct AccountPersonalizationView: View {
             record: resolvedRecord
         )
 
-        if receivedFreshValidInsights || fallbackDiagnosticsSnapshot != nil {
+        if fallbackDiagnosticsSnapshot != nil || !rootCause.isEmpty || !nextDirection.isEmpty {
             upsertDiagnosticsInsightsSnapshot(
                 snapshotKey: diagnosticsSnapshotKey,
                 userKey: userKey,
                 diagnosticsHash: diagnosticsHash,
                 rootCause: rootCause,
-                fulfillmentText: fulfillmentText,
+                fulfillmentText: fulfillmentAreas,
                 nextDirection: nextDirection,
                 purposeRefreshCycleKey: purposeSnapshotKey
             )
@@ -666,23 +706,7 @@ struct AccountPersonalizationView: View {
             "refreshInsightsForUpdatedDiagnostic completed profileKey=\(purposeSnapshotKey)"
         )
 
-        guard receivedFreshValidInsights else { return nil }
-        return (diagnosticsHash, rootCause, nextDirection)
-    }
-
-    private func normalizeInsightsBody(_ text: String) -> String {
-        text
-            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private func isRenderableDiagnosticInsightBody(_ text: String) -> Bool {
-        guard !text.isEmpty else { return false }
-        let sentences = text
-            .split(whereSeparator: { ".!?".contains($0) })
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        return sentences.count >= 2 && sentences.count <= 3
+        return (diagnosticsHash, rootCause, fulfillmentAreas, nextDirection)
     }
 
     private func latestDiagnosticsInsightsSnapshot(
@@ -690,7 +714,9 @@ struct AccountPersonalizationView: View {
         diagnosticsHash: String
     ) -> DiagnosticsInsightsSnapshot? {
         diagnosticsInsightsSnapshots.first(where: {
-            $0.userKey == userKey && $0.diagnosticsHash == diagnosticsHash
+            $0.userKey == userKey &&
+            $0.diagnosticsHash == diagnosticsHash &&
+            $0.version == DiagnosticsInsightsHasher.schemaVersion
         })
     }
 
@@ -700,6 +726,7 @@ struct AccountPersonalizationView: View {
             predicate: #Predicate { $0.snapshotKey == key }
         )
         return (try? modelContext.fetch(descriptor))?
+            .filter { $0.version == DiagnosticsInsightsHasher.schemaVersion }
             .sorted(by: { $0.generatedAt > $1.generatedAt })
             .first
     }
@@ -707,11 +734,13 @@ struct AccountPersonalizationView: View {
     private func cacheDisplayedDiagnostics(
         diagnosticsHash: String,
         rootCause: String,
+        fulfillmentAreas: String,
         nextDirection: String
     ) {
         let payload = CachedDiagnosticsDisplay(
             diagnosticsHash: diagnosticsHash,
             rootCause: rootCause,
+            fulfillmentAreas: fulfillmentAreas,
             nextDirection: nextDirection
         )
         let encoder = JSONEncoder()
@@ -730,19 +759,23 @@ struct AccountPersonalizationView: View {
         "\(Self.diagnosticsDisplayCachePrefix).\(PersonalizationUserIdentity.storageSafeKey(for: personalizationStore.userKey)).\(diagnosticsHash)"
     }
 
-    private func resolvedDiagnosticsDisplay(for snapshot: PersonalizationSnapshot) -> (rootCause: String, nextDirection: String) {
+    private func resolvedDiagnosticsDisplay(for snapshot: PersonalizationSnapshot) -> (rootCause: String, fulfillmentAreas: String, nextDirection: String) {
         let diagnosticsHash = DiagnosticsInsightsHasher.hash(for: snapshot)
         let storedRoot = snapshot.diagnosticRootCause?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let storedNext = snapshot.diagnosticNextDirection?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
         if !storedRoot.isEmpty, !storedNext.isEmpty {
-            return (storedRoot, storedNext)
+            let storedFulfillment = latestDiagnosticsInsightsSnapshot(
+                userKey: personalizationStore.userKey,
+                diagnosticsHash: diagnosticsHash
+            )?.fulfillmentText ?? displayedFulfillmentAreas
+            return (storedRoot, storedFulfillment, storedNext)
         }
 
         if displayedDiagnosticsHash == diagnosticsHash,
            (!displayedRootCause.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
             !displayedNextDirection.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
-            return (displayedRootCause, displayedNextDirection)
+            return (displayedRootCause, displayedFulfillmentAreas, displayedNextDirection)
         }
 
         let snapshotKey = DiagnosticsInsightsHasher.snapshotKey(
@@ -753,30 +786,14 @@ struct AccountPersonalizationView: View {
             userKey: personalizationStore.userKey,
             diagnosticsHash: diagnosticsHash
         ) ?? fetchStoredDiagnosticsInsightsSnapshot(snapshotKey: snapshotKey) {
-            return (persisted.rootCauseText, persisted.nextDirectionText)
+            return (persisted.rootCauseText, persisted.fulfillmentText, persisted.nextDirectionText)
         }
 
         if let cached = cachedDisplayedDiagnostics(diagnosticsHash: diagnosticsHash) {
-            return (cached.rootCause, cached.nextDirection)
+            return (cached.rootCause, cached.fulfillmentAreas, cached.nextDirection)
         }
 
-        return (displayedRootCause, displayedNextDirection)
-    }
-
-    private func currentVisionForProfileInsights() -> String {
-        (drivingForces.first?.ultimateVision ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private func currentPassionsForProfileInsights() -> [String] {
-        let normalized = passions
-            .map { $0.passion }
-            .map {
-                $0.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-            }
-            .filter { !$0.isEmpty }
-        return Array(Set(normalized)).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+        return (displayedRootCause, displayedFulfillmentAreas, displayedNextDirection)
     }
 
     private func upsertDiagnosticsInsightsSnapshot(
@@ -822,9 +839,7 @@ struct AccountPersonalizationView: View {
         inputsHash: String,
         record: PurposeProfileRecord
     ) {
-        if purposeProfileInsightsSnapshots.contains(where: { $0.userKey == userKey && $0.monthKey == monthKey }) {
-            return
-        } else if let existing = purposeProfileInsightsSnapshots.first(where: { $0.snapshotKey == snapshotKey }) {
+        if let existing = purposeProfileInsightsSnapshots.first(where: { $0.snapshotKey == snapshotKey }) {
             existing.generatedAt = .now
             existing.userKey = userKey
             existing.monthKey = monthKey
@@ -854,6 +869,7 @@ struct AccountPersonalizationView: View {
     }
 
     private var latestPurposeProfileDisplay: PurposeProfileDisplay? {
+        let userKey = personalizationStore.userKey
         if let match = personalizationStore.current?.personalityMatch {
             let record = match.winnerRecord
             return PurposeProfileDisplay(
@@ -868,8 +884,10 @@ struct AccountPersonalizationView: View {
             )
         }
 
-        let userKey = personalizationStore.userKey
-        guard let snapshot = purposeProfileInsightsSnapshots.first(where: { $0.userKey == userKey }) else { return nil }
+        guard let snapshot = purposeProfileInsightsSnapshots.first(where: {
+            $0.userKey == userKey &&
+            $0.snapshotKey.contains("|\(PurposeProfileInsightsHasher.schemaVersion)|")
+        }) else { return nil }
         return PurposeProfileDisplay(
             profile: snapshot.profile,
             strength: snapshot.strength,
@@ -894,12 +912,6 @@ struct AccountPersonalizationView: View {
             Text(profile.profile)
                 .font(.title3.weight(.semibold))
                 .fixedSize(horizontal: false, vertical: true)
-
-            if let confidence = profile.confidence {
-                Text(profile.lowConfidence ? "Low-confidence match" : "Confidence \(Int((confidence * 100).rounded()))%")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(profile.lowConfidence ? .orange : .secondary)
-            }
 
             detailRow(title: "Strength", value: profile.strength)
             detailRow(title: "Weakness", value: profile.weakness)
@@ -928,10 +940,6 @@ struct AccountPersonalizationView: View {
                         .font(.subheadline)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-            }
-
-            if !profile.alternatives.isEmpty {
-                detailRow(title: "Also close", value: profile.alternatives.prefix(2).joined(separator: " • "))
             }
         }
         .padding(14)

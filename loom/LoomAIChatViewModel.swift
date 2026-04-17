@@ -364,6 +364,7 @@ final class LoomAIViewModel: ObservableObject {
     @Published var latestSuggestedActions: [LoomAISuggestedAction] = []
     @Published var suggestedPromptChips: [String] = []
     @Published var followUpPromptChips: [String] = []
+    @Published var pendingDeepSearchTrace: [LoomAIDeepSearchTraceStep] = []
     @Published var debugFailureDetail: DebugFailureDetail?
     @Published var remainingDailyResponses: Int = 10
     @Published var dailyEstimatedSpendUSD: Double = 0
@@ -439,7 +440,8 @@ final class LoomAIViewModel: ObservableObject {
         in context: ModelContext,
         threadKey: String,
         displayedUserMessage: String? = nil,
-        transportMessageOverride: String? = nil
+        transportMessageOverride: String? = nil,
+        artificialResponseDelayNanoseconds: UInt64 = 0
     ) async {
         let trimmedDisplay = (displayedUserMessage ?? draft).trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedTransport = (transportMessageOverride ?? draft).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -467,7 +469,10 @@ final class LoomAIViewModel: ObservableObject {
         }
 
         isSending = true
-        defer { isSending = false }
+        defer {
+            pendingDeepSearchTrace = []
+            isSending = false
+        }
         errorMessage = nil
         debugFailureDetail = nil
         lastSendAt = now
@@ -490,8 +495,21 @@ final class LoomAIViewModel: ObservableObject {
             }
             postChatMessagesDidChange(threadKey: thread.threadKey)
 
+            if artificialResponseDelayNanoseconds > 0 {
+                try? await Task.sleep(nanoseconds: artificialResponseDelayNanoseconds)
+            }
+
             let history = try fetchThreadMessages(in: context, threadKey: threadKey)
             let contextSnapshot = compactedSnapshotIfEnabled(try buildContextSnapshot(in: context))
+            let route = LoomAIChatProvider.resolveRoute(
+                latestUserMessage: trimmedTransport,
+                context: contextSnapshot
+            )
+            pendingDeepSearchTrace = LoomAIChatProvider.deepSearchTraceSteps(
+                context: contextSnapshot,
+                route: route,
+                latestUserMessage: trimmedTransport
+            )
 
             var outgoing = history.suffix(10).map {
                 LoomAIService.TransportMessage(role: $0.roleRaw, content: $0.content)
@@ -536,6 +554,7 @@ final class LoomAIViewModel: ObservableObject {
                 actionsJSON: LoomAIChatMessageActionsCodec.encode(response.actions),
                 debugJSON: LoomAIDebugCodec.encode(response.debug),
                 groundingJSON: LoomAIChatMessageGroundingCodec.encode(response.grounding),
+                messageAnnotationsJSON: LoomAIChatMessageAnnotationsCodec.encode(response.messageAnnotations),
                 suggestionCardsJSON: LoomAIChatMessageSuggestionCardsCodec.encode(response.suggestionCards),
                 nextActionJSON: LoomAIChatMessageNextActionCodec.encode(response.nextAction)
             )
@@ -747,6 +766,18 @@ final class LoomAIViewModel: ObservableObject {
                 errorMessage = "That identity already exists in \(category.category)."
                 return false
             }
+            if categoryRoles.count >= 3 {
+                guard let roleRow = Self.oldestIdentityRowToRotate(from: categoryRoles, excludingIdentity: identity) else {
+                    errorMessage = "Couldn’t find the identity to replace in \(category.category)."
+                    return false
+                }
+                roleRow.role = identity
+                roleRow.updatedAt = .now
+                category.updatedAt = .now
+                try? context.save()
+                errorMessage = nil
+                return true
+            }
             let nextRank = ((categoryRoles.map(\.rank).max()) ?? -1) + 1
             context.insert(FulfillmentRoles(category_id: category.category_id, updatedAt: .now, role: identity, rank: nextRank))
             category.updatedAt = .now
@@ -914,6 +945,18 @@ final class LoomAIViewModel: ObservableObject {
             }) {
                 errorMessage = "That Little Win already exists in \(targetCategory.category)."
                 return false
+            }
+            if existingFocusRows.count >= 3 {
+                guard let rowToReplace = Self.oldestLittleWinRowToRotate(from: existingFocusRows, excludingActivity: activity) else {
+                    errorMessage = "Couldn’t find the existing Little Win to replace in \(targetCategory.category)."
+                    return false
+                }
+                rowToReplace.activity = activity
+                rowToReplace.updatedAt = .now
+                targetCategory.updatedAt = .now
+                try? context.save()
+                errorMessage = nil
+                return true
             }
             let nextRank = ((existingFocusRows.map(\.rank).max()) ?? -1) + 1
 
@@ -1909,7 +1952,7 @@ final class LoomAIViewModel: ObservableObject {
             sectionTimestamps: gatedSectionTimestamps,
             purposeProfile: purposeProfileSummary,
             dataInventory: inventory,
-            appGuide: buildAppGuideTopics(),
+            appGuide: Self.appGuideTopics(),
             notes: [
                 "Context is compact and list-limited for token efficiency.",
                 "Use action suggestions only when they are concrete and safe.",
@@ -2336,7 +2379,7 @@ final class LoomAIViewModel: ObservableObject {
         ]
     }
 
-    private func buildAppGuideTopics() -> [LoomAIContextSnapshot.GuideTopic] {
+    nonisolated static func appGuideTopics() -> [LoomAIContextSnapshot.GuideTopic] {
         [
             .init(
                 id: "loom_ecosystem",
