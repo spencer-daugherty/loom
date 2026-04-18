@@ -416,9 +416,8 @@ final class PurchaseManager: ObservableObject {
     }
 
     private func originalComparisonPriceText(for plan: SubscriptionPlan) -> String? {
-        guard plan == .annual, let monthlyProduct = product(for: .monthly) else { return nil }
-        let yearlyEquivalent = monthlyProduct.price * Decimal(12)
-        return yearlyEquivalent.formatted(monthlyProduct.priceFormatStyle)
+        _ = plan
+        return nil
     }
 
     private func introductoryOffer(for plan: SubscriptionPlan, product: Product?) -> Product.SubscriptionOffer? {
@@ -438,10 +437,8 @@ final class PurchaseManager: ObservableObject {
     }
 
     private func trialDetailText(for plan: SubscriptionPlan) -> String? {
-        switch plan {
-        case .annual, .monthly, .lifetime:
-            return plan.trialDetailText
-        }
+        _ = plan
+        return nil
     }
 
     private func summaryText(for plan: SubscriptionPlan, product: Product?) -> String? {
@@ -449,7 +446,15 @@ final class PurchaseManager: ObservableObject {
         case .lifetime:
             let livePrice = product?.displayPrice ?? plan.priceText.replacingOccurrences(of: " one-time", with: "")
             return "\(livePrice) one-time purchase. No subscription renewal."
-        case .annual, .monthly:
+        case .annual:
+            if let product {
+                return "\(product.displayPrice) billed yearly. Auto-renewable."
+            }
+            return plan.summaryText
+        case .monthly:
+            if let product {
+                return "\(product.displayPrice) billed monthly. Auto-renewable."
+            }
             return plan.summaryText
         }
     }
@@ -459,11 +464,10 @@ final class PurchaseManager: ObservableObject {
         case .lifetime:
             return plan.disclosureDetailText
         case .annual:
-            let pricingLockText = "This offer ends June 30, 2026."
             if let introOfferLabel {
-                return "Annual (Early Adopter) includes a \(introOfferLabel). \(pricingLockText). Payment will be charged to your Apple ID at the end of the trial period unless canceled at least 24 hours before the trial ends. Subscription renews automatically unless canceled at least 24 hours before the end of the current period. Your account will be charged for renewal within 24 hours prior to the end of the current period. You can manage or cancel your subscription anytime in your Apple ID account settings."
+                return "Annual includes a \(introOfferLabel). Payment will be charged to your Apple ID at the end of the introductory period unless canceled at least 24 hours before it ends. Subscription renews automatically unless canceled at least 24 hours before the end of the current period. Your account will be charged for renewal within 24 hours prior to the end of the current period. You can manage or cancel your subscription anytime in Apple Account Settings."
             }
-            return "Annual (Early Adopter) is billed to your Apple ID after purchase confirmation. \(pricingLockText). Subscription renews automatically unless canceled at least 24 hours before the end of the current period. Your account will be charged for renewal within 24 hours prior to the end of the current period. You can manage or cancel your subscription anytime in your Apple ID account settings."
+            return plan.disclosureDetailText
         case .monthly:
             return plan.disclosureDetailText
         }
@@ -483,7 +487,7 @@ final class PurchaseManager: ObservableObject {
 
     private func freeTrialLabel(for offer: Product.SubscriptionOffer) -> String? {
         guard offer.paymentMode == .freeTrial else { return nil }
-        return "\(hyphenated(period: offer.period)) free trial"
+        return "\(hyphenated(period: offer.period)) free intro offer"
     }
 
     private func hyphenated(period: Product.SubscriptionPeriod) -> String {

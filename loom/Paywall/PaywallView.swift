@@ -149,7 +149,7 @@ struct PaywallView: View {
             .presentationDragIndicator(.visible)
         }
         .alert(
-            "Purchase Founding Member (Lifetime)?",
+            "Purchase \(selectedPlanPresentation.detailSheetTitle)?",
             isPresented: Binding(
                 get: { pendingLifetimeConfirmationPlan != nil },
                 set: { isPresented in
