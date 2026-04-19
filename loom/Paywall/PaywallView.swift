@@ -99,6 +99,20 @@ struct PaywallView: View {
         purchaseManager.presentation(for: selectedPlan)
     }
 
+    private func isPlanSelectable(_ plan: SubscriptionPlan) -> Bool {
+        plan.isSelectable()
+    }
+
+    private func preferredManageSelection() -> SubscriptionPlan {
+        if let pendingPlan = purchaseManager.pendingAutoRenewPlan {
+            return pendingPlan
+        }
+        if let activePlan = purchaseManager.activePlan {
+            return activePlan
+        }
+        return .lifetime
+    }
+
     var body: some View {
         standardPaywallBody
         .background(Color(.systemBackground).ignoresSafeArea())
@@ -196,6 +210,8 @@ struct PaywallView: View {
                     selectedPlan = pendingPlan
                 } else if let newPlan {
                     selectedPlan = newPlan
+                } else {
+                    selectedPlan = .lifetime
                 }
             }
             initializeSelectedPlanIfNeeded()
@@ -206,6 +222,8 @@ struct PaywallView: View {
                 selectedPlan = newPlan
             } else if let activePlan = purchaseManager.activePlan {
                 selectedPlan = activePlan
+            } else {
+                selectedPlan = .lifetime
             }
         }
         .onChange(of: queuedPurchaseAfterLifetimeConfirmation) { _, queuedPurchase in
@@ -524,9 +542,12 @@ struct PaywallView: View {
         let isCurrentPlan = purchaseManager.activePlan == plan
         let isIncludedWithLifetime = purchaseManager.activePlan == .lifetime && plan != .lifetime
         let isPendingPlan = purchaseManager.pendingAutoRenewPlan == plan
+        let isSelectable = isPlanSelectable(plan)
+        let countdownText = plan.availabilityCountdownText()
         let presentation = purchaseManager.presentation(for: plan)
 
         return Button {
+            guard isSelectable else { return }
             selectedPlan = plan
         } label: {
             HStack {
@@ -608,6 +629,7 @@ struct PaywallView: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .opacity(isSelectable ? 1 : 0.42)
             .background(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(Color(.secondarySystemBackground))
@@ -616,8 +638,22 @@ struct PaywallView: View {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .stroke(selected ? Color.accentColor : Color.clear, lineWidth: 2)
             )
+            .overlay {
+                if let countdownText {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Color(.systemBackground).opacity(0.84))
+                        .overlay {
+                            Text(countdownText)
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 16)
+                        }
+                }
+            }
         }
         .buttonStyle(.plain)
+        .disabled(!isSelectable)
     }
 
     private var manageCloseButton: some View {
@@ -728,18 +764,18 @@ struct PaywallView: View {
     private func initializeSelectedPlanIfNeeded() {
         guard !hasInitializedPlanSelection else { return }
         if usesManageHeader {
-            if let pendingPlan = purchaseManager.pendingAutoRenewPlan {
-                selectedPlan = pendingPlan
-            } else if let activePlan = purchaseManager.activePlan {
-                selectedPlan = activePlan
-            } else {
-                selectedPlan = .monthly
-            }
+            selectedPlan = preferredManageSelection()
+        } else {
+            selectedPlan = .lifetime
         }
         hasInitializedPlanSelection = true
     }
 
     private func handlePrimaryCTA() {
+        guard isPlanSelectable(selectedPlan) else {
+            selectedPlan = .lifetime
+            return
+        }
         let previousSelection = purchaseManager.activePlan
         switch selectedPlanAction {
         case .purchaseLifetimeAlongsideAutoRenewing:
@@ -762,6 +798,10 @@ struct PaywallView: View {
         dismissOnSuccess: Bool = false,
         fallbackSelection: SubscriptionPlan? = nil
     ) async {
+        guard isPlanSelectable(plan) else {
+            selectedPlan = .lifetime
+            return
+        }
         purchaseStatusMessage = nil
         purchaseFailureAlertMessage = nil
         restoreStatusMessage = nil

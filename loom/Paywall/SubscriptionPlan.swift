@@ -7,6 +7,47 @@ enum SubscriptionPlan: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    var availabilityDate: Date? {
+        let calendar = Calendar(identifier: .gregorian)
+
+        switch self {
+        case .lifetime:
+            return nil
+        case .annual:
+            return calendar.date(from: DateComponents(year: 2026, month: 6, day: 1))
+        case .monthly:
+            return calendar.date(from: DateComponents(year: 2026, month: 7, day: 1))
+        }
+    }
+
+    var availabilityDateLabel: String? {
+        switch self {
+        case .lifetime:
+            return nil
+        case .annual:
+            return "June 1, 2026"
+        case .monthly:
+            return "July 1, 2026"
+        }
+    }
+
+    func isSelectable(on currentDate: Date = Date(), calendar: Calendar = .current) -> Bool {
+        guard let availabilityDate else { return true }
+        return calendar.startOfDay(for: currentDate) >= calendar.startOfDay(for: availabilityDate)
+    }
+
+    func availabilityCountdownText(on currentDate: Date = Date(), calendar: Calendar = .current) -> String? {
+        guard let availabilityDate, let availabilityDateLabel else { return nil }
+
+        let currentDay = calendar.startOfDay(for: currentDate)
+        let availableDay = calendar.startOfDay(for: availabilityDate)
+        guard currentDay < availableDay else { return nil }
+
+        let remainingDays = max(1, calendar.dateComponents([.day], from: currentDay, to: availableDay).day ?? 0)
+        let dayText = remainingDays == 1 ? "1 day" : "\(remainingDays) days"
+        return "Available on \(availabilityDateLabel) (\(dayText))"
+    }
+
     var storeKitProductID: String {
         switch self {
         case .lifetime:
