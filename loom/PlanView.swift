@@ -4264,6 +4264,10 @@ struct PlanStepFourResultView: View {
     private let resultAutoWriteMaxWords = 8
     private let otherChunkFixedFill = Color(red: 0.92, green: 0.92, blue: 0.94)
 
+    private var shouldShowResultAutoWriteControls: Bool {
+        LoomDeveloperBuild.enabled(devPlanViewResultAutoWriteEnabled)
+    }
+
     private var secondaryButtonTextColor: Color {
         colorScheme == .dark ? Color(.secondaryLabel) : .black
     }
@@ -4533,7 +4537,7 @@ struct PlanStepFourResultView: View {
             GeometryReader { proxy in
                 if !plannedChunksForWeek.isEmpty && AppleIntelligenceSupport.isAvailable {
                     HStack(spacing: 8) {
-                        if devPlanViewResultAutoWriteEnabled {
+                        if shouldShowResultAutoWriteControls {
                             resultAutoWriteControls
                         }
                         if isKeyboardVisible {

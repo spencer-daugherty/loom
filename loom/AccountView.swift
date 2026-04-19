@@ -571,19 +571,12 @@ struct AccountView: View {
     @EnvironmentObject private var session: UserSessionStore
     @Query private var fulfillments: [Fulfillment]
     @AppStorage(loomAIInsightsRefreshToggleDefaultsKey) private var enableLoomAIInsightsRefresh = false
-    @AppStorage("enable_projects_feature") private var enableProjectsFeature = false
+    @AppStorage("enable_projects_feature") private var enableProjectsFeatureStorage = false
     @AppStorage("onboarding_reset_on_next_launch") private var onboardingResetOnNextLaunch = false
-    @AppStorage("blank_homepage_mode") private var blankHomepageMode = false
-    @AppStorage("setup_homepage_mode") private var setupHomepageMode = false
+    @AppStorage("blank_homepage_mode") private var blankHomepageModeStorage = false
+    @AppStorage("setup_homepage_mode") private var setupHomepageModeStorage = false
     @AppStorage("has_seen_content_quickstart_v1") private var hasSeenContentQuickstart = false
     @AppStorage("force_show_content_quickstart_once") private var forceShowContentQuickstartOnce = false
-    @AppStorage("developer_launch_paywall_once") private var developerLaunchPaywallOnce = false
-    @AppStorage("account_name") private var accountName = ""
-    @AppStorage(loomAITroubleshootingDefaultsKey) private var enableLoomAITroubleshooting = true
-    @AppStorage(loomAIDebugDefaultsKey) private var enableLoomAIDebug = false
-    @AppStorage(loomAIDisableAppleIntelligenceDefaultsKey) private var disableAppleIntelligence = false
-    @AppStorage(loomAICustomChatDefaultsKey) private var enableLoomAICustomChat = false
-    @AppStorage("loomAI.dev.disableDailyLimiter") private var disableLoomAIDailyLimiter = false
     @AppStorage("dev_manual_warning_cards_enabled") private var devManualWarningCardsEnabled = false
     @AppStorage("dev_outcome_warning_target_passed") private var devOutcomeWarningTargetPassed = false
     @AppStorage("dev_outcome_warning_goal_achieved") private var devOutcomeWarningGoalAchieved = false
@@ -597,17 +590,10 @@ struct AccountView: View {
     @AppStorage(UserSessionStore.Keys.isSubscribed) private var isSubscribed = false
     @State private var presentedDeleteScope: DeleteScope? = nil
     @State private var deleteAllConfirmationCode = ""
-    @State private var showDeveloperPasswordSheet = false
-    @State private var developerPasswordInput = ""
-    @State private var showDeveloperPasswordError = false
     @State private var showFeedbackSheet = false
     @State private var feedbackRating = 0
     @State private var feedbackDetails = ""
     @State private var presentedLegalDocument: LegalDocument?
-    @State private var showDeveloperPage = false
-    @State private var showDeveloperPaywall = false
-    @State private var showResetReviewOnboardingDemoConfirmation = false
-    @State private var loomAICostSnapshot = LoomAICostLedger.dailySnapshot()
     @State private var weekStartOption: AppWeekStartOption = AppWeekStartStore.current()
 
     private func deleteWarningTitle(for scope: DeleteScope) -> String {
@@ -647,84 +633,28 @@ struct AccountView: View {
         blankHomepageMode || fulfillments.isEmpty
     }
 
-    private var legacyLoomAIChatDailyLimitDefaultsKey: String {
-        "loomAI.chatDailyMessageLimit.v1"
+    private var enableProjectsFeature: Bool {
+        LoomDeveloperBuild.enabled(enableProjectsFeatureStorage)
     }
 
-    private func refreshLoomAICostSnapshot() {
-        loomAICostSnapshot = LoomAICostLedger.dailySnapshot()
+    private var blankHomepageMode: Bool {
+        get { LoomDeveloperBuild.enabled(blankHomepageModeStorage) }
+        nonmutating set { blankHomepageModeStorage = newValue }
     }
 
-    private func resetLoomAIDailyLimit() {
-        LoomAICostLedger.resetToday()
-        UserDefaults.standard.removeObject(forKey: legacyLoomAIChatDailyLimitDefaultsKey)
-        refreshLoomAICostSnapshot()
+    private var setupHomepageMode: Bool {
+        get { LoomDeveloperBuild.enabled(setupHomepageModeStorage) }
+        nonmutating set { setupHomepageModeStorage = newValue }
     }
 
     private var appVersionLabel: String {
         let bundle = Bundle.main
         let version = (bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let build = (bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-
-        if !version.isEmpty && !build.isEmpty {
-            return "Version \(version) (\(build))"
-        }
         if !version.isEmpty {
-            return "Version \(version)"
-        }
-        if !build.isEmpty {
-            return "Build \(build)"
+            return "Loom version \(version)"
         }
         return "Loom"
-    }
-
-    private func resetInternalTestDemoWorkspace() {
-        session.resetIsolatedWorkspaceImmediately(.reviewDemo)
-        TestDemoProvisioningService.clearLocalProvisioningState()
-
-        guard LoomDefaultsScope.currentWorkspace() == .reviewDemo else { return }
-
-        showDeveloperPage = false
-
-#if canImport(FirebaseAuth)
-        try? Auth.auth().signOut()
-#endif
-#if canImport(GoogleSignIn)
-        GIDSignIn.sharedInstance.signOut()
-#endif
-
-        hasSeenOnboarding = false
-        hasAccount = false
-        hasCompletedDiagnostic = false
-        hasSeenDiagnosticInsights = false
-        isSubscribed = false
-        blankHomepageMode = false
-        setupHomepageMode = false
-        hasSeenContentQuickstart = false
-        forceShowContentQuickstartOnce = false
-        session.clearAccountSession()
-        session.setHasSeenOnboarding(false)
-    }
-
-    private func costProgress(spent: Double, limit: Double) -> Double {
-        guard limit > 0 else { return 0 }
-        return min(max(spent / limit, 0), 1)
-    }
-
-    private func formatUSDCost(_ value: Double) -> String {
-        let sanitized = max(0, value)
-        if sanitized < 0.01 {
-            return String(format: "$%.4f", sanitized)
-        }
-        return String(format: "$%.2f", sanitized)
-    }
-
-    private func unpricedCostFootnote(_ count: Int) -> String? {
-        guard count > 0 else { return nil }
-        let requestWord = count == 1 ? "request" : "requests"
-        return "Excludes \(count) \(requestWord) without exact usage metadata."
     }
 
     private func saveSelectedWeekStartOption(_ option: AppWeekStartOption) {
@@ -918,22 +848,6 @@ struct AccountView: View {
                 .foregroundStyle(.blue)
                 .listRowSeparator(.hidden)
 
-                if accountName.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare("Spencer") == .orderedSame {
-                    HStack {
-                        Spacer()
-                        Button {
-                            developerPasswordInput = ""
-                            showDeveloperPasswordError = false
-                            showDeveloperPasswordSheet = true
-                        } label: {
-                            Text("Developer")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                    }
-                    .listRowSeparator(.hidden)
-                }
             }
         }
         .listStyle(.plain)
@@ -1013,227 +927,6 @@ struct AccountView: View {
         }
         .sheet(item: $presentedLegalDocument) { document in
             LegalLinksView(document: document)
-        }
-        .sheet(isPresented: $showDeveloperPasswordSheet) {
-            DeveloperAccessSheet(
-                pin: $developerPasswordInput,
-                showError: $showDeveloperPasswordError
-            ) {
-                if developerPasswordInput == "0927" {
-                    showDeveloperPasswordError = false
-                    showDeveloperPasswordSheet = false
-                    showDeveloperPage = true
-                } else {
-                    showDeveloperPasswordError = true
-                }
-            }
-            .presentationDetents([.height(220)])
-            .presentationDragIndicator(.visible)
-        }
-        .sheet(isPresented: $showDeveloperPage) {
-            NavigationStack {
-                List {
-                    Section {
-                        Button(role: .destructive) {
-                            showResetReviewOnboardingDemoConfirmation = true
-                        } label: {
-                            Text("Reset demo@loomlife.us")
-                                .foregroundStyle(.red)
-                        }
-
-                        NavigationLink {
-                            ManageRawDataView()
-                        } label: {
-                            Text("Manage Raw Data")
-                        }
-
-                        NavigationLink {
-                            AccountLaunchReflectionView()
-                        } label: {
-                            Text("Launch Reflection")
-                        }
-
-                        Button {
-                            developerLaunchPaywallOnce = false
-                            showDeveloperPage = false
-                            showDeveloperPaywall = true
-                        } label: {
-                            HStack {
-                                Text("Launch Paywall")
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .font(.footnote.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-
-                    Section("Feature Flags") {
-                        Toggle("Inactive purchase", isOn: $inactivePurchaseOverrideEnabled)
-                        Toggle("Enable LoomAI Insights Refresh", isOn: $enableLoomAIInsightsRefresh)
-                        Toggle("LoomAI Troubleshooting", isOn: $enableLoomAITroubleshooting)
-                        Toggle("LoomAI Debug", isOn: $enableLoomAIDebug)
-                        Toggle("LoomAI Custom Chat", isOn: $enableLoomAICustomChat)
-                        Toggle("Disable Apple Intelligence", isOn: $disableAppleIntelligence)
-                        Toggle("Disable LoomAI Daily Limiter", isOn: $disableLoomAIDailyLimiter)
-                        Toggle("Enable Projects", isOn: $enableProjectsFeature)
-                        Toggle("Onboarding", isOn: $onboardingResetOnNextLaunch)
-                        Toggle("Blank Homepage", isOn: $blankHomepageMode)
-                        Toggle("Setup Homepage", isOn: $setupHomepageMode)
-                        Toggle("Warning Cards", isOn: $devManualWarningCardsEnabled)
-                        Toggle("AutoWrite PlanView Result", isOn: $devPlanViewResultAutoWriteEnabled)
-                    }
-
-                    if devManualWarningCardsEnabled {
-                        Section("Outcomes") {
-                            Toggle("Outcome date passed", isOn: $devOutcomeWarningTargetPassed)
-                            Toggle("Outcome achieved", isOn: $devOutcomeWarningGoalAchieved)
-                        }
-                        Section("Action Plan") {
-                            Toggle("Action Plans are old", isOn: $devActionBlocksWarningOldBlocks)
-                        }
-                    }
-
-                    Section("LoomAI Cost") {
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                Text("Total Daily Cost")
-                                    .font(.headline)
-                                Spacer()
-                                Text(formatUSDCost(loomAICostSnapshot.totalDailySpentUSD))
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-
-                            HStack {
-                                Text("Total Monthly Cost")
-                                    .font(.headline)
-                                Spacer()
-                                Text(formatUSDCost(loomAICostSnapshot.totalMonthlySpentUSD))
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-
-                            if loomAICostSnapshot.totalUnpricedDailyCount > 0 || loomAICostSnapshot.totalUnpricedMonthlyCount > 0 {
-                                Text("Exact totals exclude \(loomAICostSnapshot.totalUnpricedDailyCount) daily and \(loomAICostSnapshot.totalUnpricedMonthlyCount) monthly requests without exact usage metadata.")
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .padding(.vertical, 4)
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                Text("LoomAI Chat")
-                                    .font(.headline)
-                                Spacer()
-                                Text("\(formatUSDCost(loomAICostSnapshot.chatSpentUSD)) / \(formatUSDCost(loomAICostSnapshot.chatLimitUSD))")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-                            ProgressView(value: costProgress(spent: loomAICostSnapshot.chatSpentUSD, limit: loomAICostSnapshot.chatLimitUSD))
-                                .tint(.accentColor)
-                            Text(unpricedCostFootnote(loomAICostSnapshot.chatUnpricedDailyCount) ?? "Exact cost total for today.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(.vertical, 4)
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                Text("AutoWrite + AutoGroup")
-                                    .font(.headline)
-                                Spacer()
-                                Text("\(formatUSDCost(loomAICostSnapshot.autoWriteSpentUSD)) / \(formatUSDCost(loomAICostSnapshot.autoWriteLimitUSD))")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-                            ProgressView(value: costProgress(spent: loomAICostSnapshot.autoWriteSpentUSD, limit: loomAICostSnapshot.autoWriteLimitUSD))
-                                .tint(.accentColor)
-                            Text(unpricedCostFootnote(loomAICostSnapshot.autoWriteUnpricedDailyCount) ?? "Includes AutoWrite and AutoGroup requests.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(.vertical, 4)
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                Text("Insights")
-                                    .font(.headline)
-                                Spacer()
-                                Text("\(formatUSDCost(loomAICostSnapshot.insightsSpentUSD)) / \(formatUSDCost(loomAICostSnapshot.insightsLimitUSD))")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-                            ProgressView(value: costProgress(spent: loomAICostSnapshot.insightsSpentUSD, limit: loomAICostSnapshot.insightsLimitUSD))
-                                .tint(.accentColor)
-                            Text(unpricedCostFootnote(loomAICostSnapshot.insightsUnpricedDailyCount) ?? "Includes How Loom Sees You and diagnostic insights requests.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(.vertical, 4)
-                    }
-
-                    Section("Danger Zone") {
-                        Button {
-                            deleteAllConfirmationCode = ""
-                            presentedDeleteScope = .littleWinsOnly
-                        } label: {
-                            Text("Delete Little Wins Data")
-                                .foregroundStyle(.red)
-                        }
-                        Button {
-                            deleteAllConfirmationCode = ""
-                            presentedDeleteScope = .fulfillmentOnly
-                        } label: {
-                            Text("Delete Fulfillment Data")
-                                .foregroundStyle(.red)
-                        }
-                        Button {
-                            deleteAllConfirmationCode = ""
-                            presentedDeleteScope = .allData
-                        } label: {
-                            Text("Delete All Data")
-                                .foregroundStyle(.red)
-                        }
-                    }
-                }
-                .listStyle(.plain)
-                .navigationTitle("Developer")
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button("Done") {
-                            showDeveloperPage = false
-                        }
-                    }
-                }
-                .onAppear {
-                    refreshLoomAICostSnapshot()
-                }
-                .alert(isPresented: $showResetReviewOnboardingDemoConfirmation) {
-                    Alert(
-                        title: Text("Reset demo@loomlife.us?"),
-                        message: Text("All current data and changes for demo@loomlife.us will be lost immediately. If that account is currently signed in, it will be signed out and the next session will reload the preserved demo workspace."),
-                        primaryButton: .destructive(Text("Reset Demo Account")) {
-                            resetInternalTestDemoWorkspace()
-                        },
-                        secondaryButton: .cancel()
-                    )
-                }
-            }
-        }
-        .fullScreenCover(isPresented: $showDeveloperPaywall) {
-            NavigationStack {
-                PaywallView()
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .navigationBarTrailing) {
-                            Button("Done") {
-                                showDeveloperPaywall = false
-                            }
-                        }
-                    }
-            }
         }
         .onChange(of: blankHomepageMode) { _, isOn in
             if isOn {
@@ -2235,7 +1928,7 @@ struct AccountDetailsView: View {
             inactivePurchaseOverrideEnabled: inactivePurchaseOverrideEnabled
         ) else { return "Inactive" }
         if subscriptionPlanRaw == SubscriptionPlan.lifetime.rawValue {
-            return "Founding Member (Lifetime)"
+            return "Lifetime"
         }
         if subscriptionPlanRaw == SubscriptionPlan.monthly.rawValue {
             return "Monthly"
@@ -2835,11 +2528,11 @@ private struct AccountSubscriptionView: View {
             return activePlan
         }
         switch subscriptionSummary {
-        case "Founding Member (Lifetime)":
+        case "Lifetime", "Founding Member (Lifetime)":
             return .lifetime
         case "Monthly":
             return .monthly
-        case "Annual", "Annual (Locked)":
+        case "Annual", "Annual (Locked)", "Annual (Early Adopter)":
             return .annual
         default:
             return nil
@@ -3984,29 +3677,40 @@ struct ManageRawDataView: View {
     }
 
     var body: some View {
-        rawDataList
-        .listStyle(.plain)
-        .toolbar {
-            rawDataToolbarContent
-        }
-        .navigationTitle("Manage Raw Data")
-        .alert("Permanently delete selected items?", isPresented: $showingDeleteAlert) {
-            Button("Cancel", role: .cancel) { }
-            Button("Delete", role: .destructive) {
-                performBulkDelete()
-            }
-        } message: {
-            Text("This will remove the chosen records forever.")
-        }
-        .sheet(isPresented: $showingFilterSheet) {
-            FilterView(
-                availableFilters: visibleFilters,
-                selectedFilters: $selectedFilters
-            )
-        }
-        .onChange(of: showDeveloperData) { _, isOn in
-            if !isOn {
-                selectedFilters.subtract(developerFilterIDs)
+        Group {
+            if LoomDeveloperBuild.isInternalBuild {
+                rawDataList
+                .listStyle(.plain)
+                .toolbar {
+                    rawDataToolbarContent
+                }
+                .navigationTitle("Manage Raw Data")
+                .alert("Permanently delete selected items?", isPresented: $showingDeleteAlert) {
+                    Button("Cancel", role: .cancel) { }
+                    Button("Delete", role: .destructive) {
+                        performBulkDelete()
+                    }
+                } message: {
+                    Text("This will remove the chosen records forever.")
+                }
+                .sheet(isPresented: $showingFilterSheet) {
+                    FilterView(
+                        availableFilters: visibleFilters,
+                        selectedFilters: $selectedFilters
+                    )
+                }
+                .onChange(of: showDeveloperData) { _, isOn in
+                    if !isOn {
+                        selectedFilters.subtract(developerFilterIDs)
+                    }
+                }
+            } else {
+                ContentUnavailableView(
+                    "Unavailable",
+                    systemImage: "lock.shield",
+                    description: Text("Raw data management is only available in internal builds.")
+                )
+                .navigationTitle("Manage Raw Data")
             }
         }
     }
@@ -5743,114 +5447,6 @@ private struct NotificationsPlaceholderView: View {
         let refreshedStatus = await LoomNotificationScheduler.authorizationStatus()
         await MainActor.run { authorizationStatus = refreshedStatus }
         return isAuthorizationGranted(refreshedStatus)
-    }
-}
-
-private struct DeveloperAccessSheet: View {
-    @Binding var pin: String
-    @Binding var showError: Bool
-    let onSubmit: () -> Void
-
-    @FocusState private var isPinFieldFocused: Bool
-    @State private var isAutoSubmitting = false
-    @State private var focusTask: Task<Void, Never>?
-
-    var body: some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 14) {
-                Text("Developer Access")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity, alignment: .center)
-
-                ZStack {
-                    TextField("", text: $pin)
-                        .keyboardType(.numberPad)
-                        .textContentType(.oneTimeCode)
-                        .focused($isPinFieldFocused)
-                        .opacity(0.01)
-                        .frame(height: 1)
-                        .accessibilityHidden(true)
-
-                    HStack(spacing: 10) {
-                        ForEach(0..<4, id: \.self) { index in
-                            let isFilled = index < pin.count
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(Color(.secondarySystemBackground))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                        .stroke(
-                                            isFilled ? Color.accentColor.opacity(0.45) : Color.black.opacity(0.08),
-                                            lineWidth: 1
-                                        )
-                                )
-                                .overlay {
-                                    Text(pinDigit(at: index))
-                                        .font(.system(size: 24, weight: .semibold, design: .rounded))
-                                        .foregroundStyle(.primary)
-                                }
-                                .frame(maxWidth: .infinity, minHeight: 58)
-                        }
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        isPinFieldFocused = true
-                    }
-                }
-
-                if showError {
-                    Text("Incorrect password.")
-                        .font(.footnote)
-                        .foregroundStyle(.red)
-                }
-
-                Spacer(minLength: 0)
-            }
-            .padding()
-            .onAppear {
-                pin = String(pin.filter(\.isNumber).prefix(4))
-                focusTask?.cancel()
-                focusTask = Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 300_000_000)
-                    isPinFieldFocused = true
-                }
-            }
-            .onDisappear {
-                focusTask?.cancel()
-                focusTask = nil
-            }
-            .onChange(of: pin) { _, newValue in
-                let normalized = String(newValue.filter(\.isNumber).prefix(4))
-                if normalized != newValue {
-                    pin = normalized
-                    return
-                }
-
-                if showError {
-                    showError = false
-                }
-
-                guard normalized.count == 4 else {
-                    isAutoSubmitting = false
-                    return
-                }
-                guard !isAutoSubmitting else { return }
-
-                isAutoSubmitting = true
-                DispatchQueue.main.async {
-                    onSubmit()
-                    isAutoSubmitting = false
-                    if pin.count < 4 {
-                        isPinFieldFocused = true
-                    }
-                }
-            }
-        }
-    }
-
-    private func pinDigit(at index: Int) -> String {
-        guard index < pin.count else { return "" }
-        let stringIndex = pin.index(pin.startIndex, offsetBy: index)
-        return String(pin[stringIndex])
     }
 }
 

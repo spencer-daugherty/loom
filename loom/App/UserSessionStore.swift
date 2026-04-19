@@ -100,6 +100,7 @@ final class UserSessionStore: ObservableObject {
     func setHasSeenOnboarding(_ value: Bool) {
         hasSeenOnboarding = value
         defaults.set(value, forKey: Keys.hasSeenOnboarding)
+        refreshAnalyticsCollectionState()
     }
 
     func setHasAccount(_ value: Bool) {
@@ -109,6 +110,7 @@ final class UserSessionStore: ObservableObject {
             setHasCompletedDiagnostic(false)
             setHasSeenDiagnosticInsights(false)
         }
+        refreshAnalyticsCollectionState()
     }
 
     func setHasCompletedDiagnostic(_ value: Bool) {
@@ -118,17 +120,20 @@ final class UserSessionStore: ObservableObject {
         if !resolvedValue {
             setHasSeenDiagnosticInsights(false)
         }
+        refreshAnalyticsCollectionState()
     }
 
     func setHasSeenDiagnosticInsights(_ value: Bool) {
         let resolvedValue = (hasAccount && hasCompletedDiagnostic) ? value : false
         hasSeenDiagnosticInsights = resolvedValue
         defaults.set(resolvedValue, forKey: Keys.hasSeenDiagnosticInsights)
+        refreshAnalyticsCollectionState()
     }
 
     func setIsSubscribed(_ value: Bool) {
         isSubscribed = value
         defaults.set(value, forKey: Keys.isSubscribed)
+        refreshAnalyticsCollectionState()
     }
 
     func setReviewDemoModeEnabled(_ value: Bool) {
@@ -146,6 +151,7 @@ final class UserSessionStore: ObservableObject {
         } else {
             defaults.removeObject(forKey: Keys.isolatedWorkspaceKind)
         }
+        refreshAnalyticsCollectionState()
     }
 
     func isolatedWorkspaceStoreGeneration(for workspace: LoomSpecialAccountWorkspace) -> Int {
@@ -215,7 +221,7 @@ final class UserSessionStore: ObservableObject {
         defaults.removeObject(forKey: Keys.authProvider)
         defaults.removeObject(forKey: Keys.accountName)
         defaults.removeObject(forKey: Keys.accountEmail)
-        TestDemoProvisioningService.clearLocalProvisioningState(defaults: defaults)
+        refreshAnalyticsCollectionState()
     }
 
     private func clearPersistedWorkspaceState(for workspace: LoomSpecialAccountWorkspace) {
@@ -365,6 +371,7 @@ final class UserSessionStore: ObservableObject {
         defaults.set(hasAccount, forKey: Keys.hasAccount)
         defaults.set(resolvedHasCompletedDiagnostic, forKey: Keys.hasCompletedDiagnostic)
         defaults.set(resolvedHasSeenDiagnosticInsights, forKey: Keys.hasSeenDiagnosticInsights)
+        refreshAnalyticsCollectionState()
     }
 
     func reloadFromDefaults() {
@@ -373,6 +380,11 @@ final class UserSessionStore: ObservableObject {
         hasCompletedDiagnostic = defaults.bool(forKey: Keys.hasCompletedDiagnostic)
         hasSeenDiagnosticInsights = defaults.bool(forKey: Keys.hasSeenDiagnosticInsights)
         isSubscribed = defaults.bool(forKey: Keys.isSubscribed)
+        refreshAnalyticsCollectionState()
+    }
+
+    private func refreshAnalyticsCollectionState() {
+        AnalyticsCollectionPolicy.refreshCollectionState()
     }
 
 }

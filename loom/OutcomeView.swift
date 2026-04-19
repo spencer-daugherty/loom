@@ -267,6 +267,18 @@ struct OutcomeView: View {
         )
     }
 
+    private var developerWarningCardsEnabled: Bool {
+        LoomDeveloperBuild.enabled(devManualWarningCardsEnabled)
+    }
+
+    private var developerOutcomeTargetPassedEnabled: Bool {
+        LoomDeveloperBuild.enabled(devOutcomeWarningTargetPassed)
+    }
+
+    private var developerOutcomeGoalAchievedEnabled: Bool {
+        LoomDeveloperBuild.enabled(devOutcomeWarningGoalAchieved)
+    }
+
     @Query(sort: \OutcomesMeasureEntry.measuredAt, order: .forward) private var allMeasureEntries: [OutcomesMeasureEntry]
     @Query(sort: \OutcomesMeasure.measure_updated, order: .reverse) private var allMeasureSnapshots: [OutcomesMeasure]
     @Query(sort: \OutcomeAnalyticsEvent.occurredAt, order: .forward) private var allOutcomeEvents: [OutcomeAnalyticsEvent]
@@ -547,9 +559,9 @@ struct OutcomeView: View {
     }
 
     private var manualOutcomeWarningSelection: ManualOutcomeWarningSelection? {
-        guard devManualWarningCardsEnabled else { return nil }
-        if devOutcomeWarningTargetPassed { return .targetPassed }
-        if devOutcomeWarningGoalAchieved { return .goalAchieved }
+        guard developerWarningCardsEnabled else { return nil }
+        if developerOutcomeTargetPassedEnabled { return .targetPassed }
+        if developerOutcomeGoalAchievedEnabled { return .goalAchieved }
         return nil
     }
 

@@ -196,7 +196,6 @@ struct PaywallView: View {
             if !didLogPaywallViewed {
                 didLogPaywallViewed = true
                 AnalyticsLogger.log(.paywallViewed())
-                AnalyticsLogger.log(.paywallPlanSelected(plan: selectedPlan.rawValue))
             }
             guard !reduceMotion else { return }
             previewCycleTask?.cancel()
@@ -216,9 +215,6 @@ struct PaywallView: View {
             if !purchaseManager.isPremium {
                 AnalyticsLogger.log(.paywallAbandoned(reason: "dismissed"))
             }
-        }
-        .onChange(of: selectedPlan) { _, newPlan in
-            AnalyticsLogger.log(.paywallPlanSelected(plan: newPlan.rawValue))
         }
         .onChange(of: purchaseManager.activePlan) { _, newPlan in
             if usesManageHeader {

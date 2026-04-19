@@ -40,7 +40,7 @@ struct ObjectivesView: View {
     let autoOpenAddOutcome: Bool
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.modelContext) private var modelContext
-    @AppStorage("enable_projects_feature") private var enableProjectsFeature = false
+    @AppStorage("enable_projects_feature") private var enableProjectsFeatureStorage = false
     @Query(sort: \Outcomes.rank, order: .forward) private var outcomes: [Outcomes]
     @Query(sort: \OutcomesMeasure.measuredAt, order: .reverse) private var outcomeMeasures: [OutcomesMeasure]
     @Query(sort: \OutcomesMeasureEntry.measuredAt, order: .forward) private var outcomeMeasureEntries: [OutcomesMeasureEntry]
@@ -53,6 +53,11 @@ struct ObjectivesView: View {
     @State private var showUpcoming = false
     @State private var showCompletedOutcomesPlaceholder = false
     @State private var hasAutoOpenedAddOutcome = false
+
+    private var enableProjectsFeature: Bool {
+        LoomDeveloperBuild.enabled(enableProjectsFeatureStorage)
+    }
+
     private var sortSheetHeight: CGFloat {
         let rows = CGFloat(activeOutcomesForSort.count)
         return min(max(260, rows * 56 + 140), 620)

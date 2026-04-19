@@ -66,7 +66,60 @@
 		1D8E61E92DC0526500167931 /* Exceptions for "loom" folder in "loom" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				AccountPersonalizationView.swift.tmp,
+				AccountView.swift.tmp,
+				ActionCarryProfileStore.swift.tmp,
+				ActionView.swift.tmp,
+				AppDebugActivityLog.swift.tmp,
+				CanvasRouteLineComponents.swift.tmp,
+				CaptureView.swift.tmp,
+				CompletedActionBlocksView.swift.tmp,
+				ContentView.swift.tmp,
+				DiagnosticFlowView.swift.tmp,
+				DiagnosticInsightsModels.swift.tmp,
+				DiagnosticInsightsView.swift.tmp,
+				DiagnosticsInsightsSnapshot.swift.tmp,
+				FirestorePersonalizationRepository.swift.tmp,
+				FulfillmentCategoryTheme.swift.tmp,
+				FulfillmentScoringService.swift.tmp,
+				FulfillmentStartView.swift.tmp,
+				FulfillmentView.swift.tmp,
 				Info.plist,
+				Item.swift.tmp,
+				LittleWinsShareCameraSession.swift.tmp,
+				LittleWinsShareCameraView.swift.tmp,
+				LittleWinsShareOverlayTemplates.swift.tmp,
+				LoadingSplashView.swift.tmp,
+				LoomAIChatModels.swift.tmp,
+				LoomAIChatView.swift.tmp,
+				LoomAIChatViewModel.swift.tmp,
+				LoomAIService.swift.tmp,
+				LoomAITroubleshooting.swift.tmp,
+				loomApp.swift.tmp,
+				LoomNotifications.swift.tmp,
+				Models.swift.tmp,
+				ObjectivesAddView.swift.tmp,
+				ObjectivesAddViewChart.swift.tmp,
+				ObjectivesStartView.swift.tmp,
+				ObjectivesView.swift.tmp,
+				OutcomeView.swift.tmp,
+				PassionAutoWriteSuggestionTable.swift.tmp,
+				PassionScoringService.swift.tmp,
+				PersonalizationSnapshot.swift.tmp,
+				PersonalizationStore.swift.tmp,
+				PlanLabelModels.swift.tmp,
+				PlanView.swift.tmp,
+				PurposeProfileInsightsSnapshot.swift.tmp,
+				PurposeProfilesCatalog.swift.tmp,
+				PurposeStartView.swift.tmp,
+				PurposeView.swift.tmp,
+				RecentlyDeletedStore.swift.tmp,
+				ReflectView.swift.tmp,
+				ShareIntoLoomBridge.swift.tmp,
+				TipDetailView.swift.tmp,
+				TipModels.swift.tmp,
+				TipPhonePreview.swift.tmp,
+				TipsHubView.swift.tmp,
 			);
 			target = 1D8E61C52DC0526000167931 /* loom */;
 		};
@@ -431,7 +484,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = loom/loom.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 9;
 				DEVELOPMENT_TEAM = 3D885624HS;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -439,6 +492,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = Loom;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Loom reads Apple Health data you choose to connect to automatically track Little Wins progress. Loom does not write data to Apple Health.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Loom does not write health data by default. If a HealthKit write permission prompt appears, it is only to satisfy HealthKit integration requirements and Loom will not save health samples to Apple Health without a future feature that clearly explains that action.";
 				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "Loom needs full access to your reminders to sync active tasks into Capture.";
 				INFOPLIST_KEY_NSRemindersUsageDescription = "Loom needs access to your reminders to sync active tasks into Capture.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -451,7 +505,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = "$(LOOM_BASE_BUNDLE_IDENTIFIER)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -467,7 +521,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = loom/loom.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 9;
 				DEVELOPMENT_TEAM = 3D885624HS;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -475,6 +529,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = Loom;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Loom reads Apple Health data you choose to connect to automatically track Little Wins progress. Loom does not write data to Apple Health.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Loom does not write health data by default. If a HealthKit write permission prompt appears, it is only to satisfy HealthKit integration requirements and Loom will not save health samples to Apple Health without a future feature that clearly explains that action.";
 				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "Loom needs full access to your reminders to sync active tasks into Capture.";
 				INFOPLIST_KEY_NSRemindersUsageDescription = "Loom needs access to your reminders to sync active tasks into Capture.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -487,7 +542,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = "$(LOOM_BASE_BUNDLE_IDENTIFIER)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -707,7 +762,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = ShareIntoLoomExtension/ShareIntoLoomExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 8;
 				DEVELOPMENT_TEAM = 3D885624HS;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ShareIntoLoomExtension/Info.plist;
@@ -717,7 +772,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = "$(LOOM_BASE_BUNDLE_IDENTIFIER).ShareIntoLoomExtension";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -733,7 +788,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = ShareIntoLoomExtension/ShareIntoLoomExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 8;
 				DEVELOPMENT_TEAM = 3D885624HS;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ShareIntoLoomExtension/Info.plist;
@@ -743,7 +798,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = "$(LOOM_BASE_BUNDLE_IDENTIFIER).ShareIntoLoomExtension";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;

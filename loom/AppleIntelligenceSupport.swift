@@ -6,7 +6,7 @@ import FoundationModels
 
 enum AppleIntelligenceSupport {
     static var isForceDisabled: Bool {
-        UserDefaults.standard.bool(forKey: loomAIDisableAppleIntelligenceDefaultsKey)
+        LoomDeveloperBuild.storedFlag(forKey: loomAIDisableAppleIntelligenceDefaultsKey)
     }
 
     static var isAvailable: Bool {

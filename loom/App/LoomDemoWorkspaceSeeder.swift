@@ -7,7 +7,6 @@ enum LoomSpecialAccountWorkspace: String {
     static let reviewDemoAccountEmail = "demo@loomlife.us"
 
     static func workspace(for email: String) -> LoomSpecialAccountWorkspace? {
-        guard LoomInternalDemoMode.isEnabled else { return nil }
         switch email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
         case reviewDemoAccountEmail:
             return .reviewDemo
@@ -32,10 +31,6 @@ enum LoomSpecialAccountWorkspace: String {
         false
     }
 
-    var usesDefaultMonthlySubscription: Bool {
-        false
-    }
-
     var preservesWorkspaceStateAcrossLogout: Bool {
         false
     }
@@ -54,14 +49,6 @@ enum LoomSpecialAccountWorkspace: String {
 
     var storeGenerationDefaultsKey: String {
         UserSessionStore.Keys.reviewDemoStoreGeneration
-    }
-
-    var alertTitle: String {
-        "Demo Account"
-    }
-
-    var alertMessage: String {
-        "This demo account loads preserved sample data. Changes reset when the demo workspace is refreshed."
     }
 
     var storeFilePrefix: String {

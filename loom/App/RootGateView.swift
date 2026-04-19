@@ -17,9 +17,9 @@ struct RootGateView<MainContent: View>: View {
     @AppStorage(UserSessionStore.Keys.hasCompletedDiagnostic) private var hasCompletedDiagnostic = false
     @AppStorage(UserSessionStore.Keys.hasSeenDiagnosticInsights) private var hasSeenDiagnosticInsights = false
     @AppStorage(UserSessionStore.Keys.isSubscribed) private var isSubscribed = false
-    @AppStorage("onboarding_reset_on_next_launch") private var onboardingResetOnNextLaunch = false
-    @AppStorage("blank_homepage_mode") private var blankHomepageMode = false
-    @AppStorage("setup_homepage_mode") private var setupHomepageMode = false
+    @AppStorage("onboarding_reset_on_next_launch") private var onboardingResetOnNextLaunchStorage = false
+    @AppStorage("blank_homepage_mode") private var blankHomepageModeStorage = false
+    @AppStorage("setup_homepage_mode") private var setupHomepageModeStorage = false
     @AppStorage("return_to_onboarding_last_page_once") private var returnToOnboardingLastPageOnce = false
     @AppStorage("analytics_install_date") private var analyticsInstallDate = ""
     @AppStorage("analytics_last_active_date") private var analyticsLastActiveDate = ""
@@ -37,6 +37,21 @@ struct RootGateView<MainContent: View>: View {
     @State private var isGateRoutingReady: Bool
     @State private var gateRoutingTask: Task<Void, Never>?
     @Namespace private var splashNamespace
+
+    private var onboardingResetOnNextLaunch: Bool {
+        get { LoomDeveloperBuild.enabled(onboardingResetOnNextLaunchStorage) }
+        nonmutating set { onboardingResetOnNextLaunchStorage = newValue }
+    }
+
+    private var blankHomepageMode: Bool {
+        get { LoomDeveloperBuild.enabled(blankHomepageModeStorage) }
+        nonmutating set { blankHomepageModeStorage = newValue }
+    }
+
+    private var setupHomepageMode: Bool {
+        get { LoomDeveloperBuild.enabled(setupHomepageModeStorage) }
+        nonmutating set { setupHomepageModeStorage = newValue }
+    }
 
     private enum GateRoute: Hashable {
         case account
@@ -183,8 +198,7 @@ struct RootGateView<MainContent: View>: View {
                         AccountStepView()
                     case .diagnostic:
                         DiagnosticFlowView(mode: .onboarding, initialDraft: resolvedDiagnosticPrefillDraft) { draft, _ in
-                            let saved = try? await personalizationStore.saveSnapshot(from: draft, source: .onboarding)
-                            guard saved != nil else { return }
+                            _ = try await personalizationStore.saveSnapshot(from: draft, source: .onboarding)
                             diagnosticPrefillDraft = nil
                             session.markDiagnosticCompleted()
                             session.setHasSeenDiagnosticInsights(false)
@@ -345,6 +359,7 @@ struct RootGateView<MainContent: View>: View {
     }
 
     private func initializeInstallDateIfNeeded() {
+        guard AnalyticsCollectionPolicy.shouldCollectAnalytics else { return }
         if analyticsInstallDate.isEmpty {
             analyticsInstallDate = Self.analyticsDayString(from: Date())
         }
@@ -352,6 +367,7 @@ struct RootGateView<MainContent: View>: View {
 
     private func trackCoreEntryIfNeeded() {
         guard !session.requiresGate else { return }
+        guard AnalyticsCollectionPolicy.shouldCollectAnalytics else { return }
         if !hasLoggedCoreOpenedThisSession {
             hasLoggedCoreOpenedThisSession = true
             if !analyticsDidLogFirstActivation {
@@ -359,16 +375,12 @@ struct RootGateView<MainContent: View>: View {
                 AnalyticsLogger.log(.firstActivation())
             }
             AnalyticsLogger.log(.coreOpened())
-            AnalyticsLogger.featureUsed("main_app_opened", source: "root_gate", step: "content", variant: nil)
-            // TODO: Add feature_used events for weekly_reset_started / weekly_reset_completed.
-            // TODO: Add feature_used events for action_block_created.
-            // TODO: Add feature_used events for radar_viewed.
-            // TODO: Add feature_used events for driving_force_saved.
         }
         logDailyActiveIfNeeded()
     }
 
     private func logDailyActiveIfNeeded() {
+        guard AnalyticsCollectionPolicy.shouldCollectAnalytics else { return }
         let today = Self.analyticsDayString(from: Date())
         if analyticsLastActiveDate == today {
             return

@@ -1,8 +1,12 @@
 import Foundation
 import Darwin
+#if canImport(FirebaseAnalytics)
+import FirebaseAnalytics
+#endif
 
 enum AnalyticsCollectionPolicy {
     static let releaseOverrideDefaultsKey = "loom.analytics.collection.enabled"
+    private static let sandboxReceiptName = "sandboxReceipt"
 
     static var shouldCollectAnalytics: Bool {
         if isRunningForPreviews { return false }
@@ -10,11 +14,19 @@ enum AnalyticsCollectionPolicy {
 #if DEBUG
         return false
 #else
+        if isDemoWorkspaceActive { return false }
+        if isTestFlightOrSandboxInstall { return false }
         let defaults = UserDefaults.standard
         if defaults.object(forKey: releaseOverrideDefaultsKey) != nil {
             return defaults.bool(forKey: releaseOverrideDefaultsKey)
         }
         return true
+#endif
+    }
+
+    static func refreshCollectionState() {
+#if canImport(FirebaseAnalytics)
+        Analytics.setAnalyticsCollectionEnabled(shouldCollectAnalytics)
 #endif
     }
 
@@ -33,5 +45,14 @@ enum AnalyticsCollectionPolicy {
             return false
         }
         return (info.kp_proc.p_flag & P_TRACED) != 0
+    }
+
+    private static var isDemoWorkspaceActive: Bool {
+        LoomDefaultsScope.currentWorkspace() != nil
+    }
+
+    private static var isTestFlightOrSandboxInstall: Bool {
+        guard let receiptURL = Bundle.main.appStoreReceiptURL else { return false }
+        return receiptURL.lastPathComponent == sandboxReceiptName
     }
 }

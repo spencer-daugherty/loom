@@ -78,13 +78,12 @@ struct ContentView: View {
     @AppStorage(UserSessionStore.Keys.hasSeenDiagnosticInsights) private var hasSeenDiagnosticInsights = false
     @AppStorage(UserSessionStore.Keys.isSubscribed) private var isSubscribed = false
     @AppStorage(SubscriptionAccessGate.inactivePurchaseOverrideKey) private var inactivePurchaseOverrideEnabled = false
-    @AppStorage("enable_projects_feature") private var enableProjectsFeature = false
-    @AppStorage("blank_homepage_mode") private var blankHomepageMode = false
-    @AppStorage("setup_homepage_mode") private var setupHomepageMode = false
+    @AppStorage("enable_projects_feature") private var enableProjectsFeatureStorage = false
+    @AppStorage("blank_homepage_mode") private var blankHomepageModeStorage = false
+    @AppStorage("setup_homepage_mode") private var setupHomepageModeStorage = false
     @AppStorage("capture_setup_completed_once_v1") private var hasCompletedCaptureSetupOnce = false
     @AppStorage("has_seen_content_quickstart_v1") private var hasSeenContentQuickstart = false
     @AppStorage("force_show_content_quickstart_once") private var forceShowContentQuickstartOnce = false
-    @AppStorage("developer_demo_mode_enabled") private var developerDemoModeEnabled = false
     @AppStorage(UserSessionStore.Keys.reviewDemoModeEnabled) private var reviewDemoModeEnabled = false
     @AppStorage("onboarding_capture_notifications_prompted_v1") private var hasPromptedCaptureNotifications = false
     @AppStorage("content_home_objectives_setup_skipped_v1") private var hasSkippedObjectivesSetupStep = false
@@ -133,6 +132,20 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     private let drivingBounceTimer = Timer.publish(every: 2.0, on: .main, in: .common).autoconnect()
     private let littleWinsAppleHealthRefreshTimer = Timer.publish(every: 900, on: .main, in: .common).autoconnect()
+
+    private var enableProjectsFeature: Bool {
+        LoomDeveloperBuild.enabled(enableProjectsFeatureStorage)
+    }
+
+    private var blankHomepageMode: Bool {
+        get { LoomDeveloperBuild.enabled(blankHomepageModeStorage) }
+        nonmutating set { blankHomepageModeStorage = newValue }
+    }
+
+    private var setupHomepageMode: Bool {
+        get { LoomDeveloperBuild.enabled(setupHomepageModeStorage) }
+        nonmutating set { setupHomepageModeStorage = newValue }
+    }
 
     // Model-derived state
     @Query(sort: \ActivePlanState.id, order: .forward)
@@ -294,10 +307,6 @@ struct ContentView: View {
 
     private var shouldShowBlankHomepageAppearance: Bool {
         blankHomepageMode || setupHomepageMode
-    }
-
-    private var isDeveloperDemoMode: Bool {
-        developerDemoModeEnabled
     }
 
     private var quickstartPageTransitionAnimation: Animation {
@@ -1056,9 +1065,6 @@ struct ContentView: View {
     private var contentViewLifecyclePrimaryObservers: some View {
         contentViewPresentationLayer
             .onAppear {
-                if isDeveloperDemoMode {
-                    ensureDeveloperDemoDataIfNeeded()
-                }
             }
             .onChange(of: isActivePlan) { _, newValue in
                 if newValue == true, !reviewDemoModeEnabled {
@@ -1071,13 +1077,6 @@ struct ContentView: View {
             .onChange(of: isActiveActionFlow) { _, newValue in
                 if newValue {
                     setupHomepageMode = false
-                }
-            }
-            .onChange(of: isDeveloperDemoMode) { _, isOn in
-                if isOn {
-                    showLoomAIChatMenu = false
-                    homePageIndex = HomeSwipePage.home.rawValue
-                    ensureDeveloperDemoDataIfNeeded()
                 }
             }
     }
@@ -6047,11 +6046,6 @@ struct ContentView: View {
 
     private func presentInactiveSubscriptionPaywall() {
         isPresentingInactiveSubscriptionPaywall = true
-    }
-
-    private func ensureDeveloperDemoDataIfNeeded() {
-        guard developerDemoModeEnabled else { return }
-        LoomDemoWorkspaceSeeder.seedDemoWorkspace(in: modelContext)
     }
 
     private func openOnboardingCallCardDestination(_ destination: OnboardingCallCardDestination) {

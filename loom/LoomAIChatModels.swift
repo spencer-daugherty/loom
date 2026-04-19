@@ -370,9 +370,44 @@ enum LoomAIDebugCodec {
         return String(data: data, encoding: .utf8)
     }
 
+    static func encodeForPersistence(_ debug: LoomAIDebug?) -> String? {
+        guard let persisted = persistencePayload(from: debug) else { return nil }
+        return encode(persisted)
+    }
+
     static func decode(_ json: String?) -> LoomAIDebug? {
         guard let json, let data = json.data(using: .utf8) else { return nil }
         return try? JSONDecoder().decode(LoomAIDebug.self, from: data)
+    }
+
+    private static func persistencePayload(from debug: LoomAIDebug?) -> LoomAIDebug? {
+        guard let debug else { return nil }
+        guard !LoomDeveloperBuild.isInternalBuild else { return debug }
+
+        let sanitized = LoomAIDebug(
+            model: debug.model,
+            suggestionSource: debug.suggestionSource,
+            usedContext: nil,
+            claimedUsedContext: nil,
+            confidence: nil,
+            evidence: nil,
+            contextBytes: nil,
+            contextHash: nil,
+            contextKeys: nil,
+            structuredAttemptStatus: nil,
+            structuredAttemptError: nil,
+            structuredRawPayloadJSON: nil,
+            textFallbackStatus: nil,
+            textFallbackError: nil,
+            textFallbackRawText: nil,
+            finalFailureReason: nil
+        )
+
+        if (sanitized.model?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+            && (sanitized.suggestionSource?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) {
+            return nil
+        }
+        return sanitized
     }
 }
 

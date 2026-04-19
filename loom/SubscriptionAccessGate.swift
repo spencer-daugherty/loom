@@ -18,12 +18,8 @@ enum SubscriptionAccessGate {
     static func defaultPlan(
         workspace: LoomSpecialAccountWorkspace? = LoomDefaultsScope.currentWorkspace()
     ) -> SubscriptionPlan? {
-        guard LoomInternalDemoMode.isEnabled, workspace == .reviewDemo else { return nil }
-        let rawValue = UserDefaults.standard
-            .string(forKey: LoomInternalDemoMode.grantedPlanDefaultsKey)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let rawValue, !rawValue.isEmpty else { return nil }
-        return SubscriptionPlan(rawValue: rawValue)
+        _ = workspace
+        return nil
     }
 
     static func hasActiveSubscription(
@@ -32,7 +28,7 @@ enum SubscriptionAccessGate {
         workspace: LoomSpecialAccountWorkspace? = LoomDefaultsScope.currentWorkspace()
     ) -> Bool {
         _ = workspace
-        return isSubscribed && !inactivePurchaseOverrideEnabled
+        return isSubscribed && !LoomDeveloperBuild.enabled(inactivePurchaseOverrideEnabled)
     }
 
     static func presentInactiveSubscriptionPaywall() {

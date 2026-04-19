@@ -552,7 +552,7 @@ struct CaptureView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openURL) private var openURL
-    @AppStorage("setup_homepage_mode") private var setupHomepageMode = false
+    @AppStorage("setup_homepage_mode") private var setupHomepageModeStorage = false
     @AppStorage("capture_setup_completed_once_v1") private var hasCompletedCaptureSetupOnce = false
     private let forceSetupWelcome: Bool
     private let pendingSharePayloadID: String?
@@ -695,6 +695,11 @@ struct CaptureView: View {
     @ObservedObject private var editingAttachmentPreviewStore = LoomLinkPreviewStore.shared
     @ObservedObject private var sharedDraftAttachmentPreviewStore = LoomLinkPreviewStore.shared
     @AppStorage(loomAITroubleshootingDefaultsKey) private var loomAITroubleshootingEnabled = true
+
+    private var setupHomepageMode: Bool {
+        get { LoomDeveloperBuild.enabled(setupHomepageModeStorage) }
+        nonmutating set { setupHomepageModeStorage = newValue }
+    }
 
     init(
         forceSetupWelcome: Bool = false,
@@ -3709,7 +3714,7 @@ struct CaptureView: View {
                                 Text(sharedAutoWriteErrorMessage)
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
-                                if loomAITroubleshootingEnabled,
+                                if LoomDeveloperBuild.enabled(loomAITroubleshootingEnabled),
                                    let troubleshooting = sharedAutoWriteTroubleshootingMessage,
                                    !troubleshooting.isEmpty {
                                     LoomAITroubleshootingSection(details: troubleshooting)

@@ -65,7 +65,7 @@ struct DiagnosticFlowView: View {
 
     let mode: Mode
     let initialDraft: PersonalizationDraft?
-    let onComplete: @MainActor (_ draft: PersonalizationDraft, _ elapsedSeconds: Int) async -> Void
+    let onComplete: @MainActor (_ draft: PersonalizationDraft, _ elapsedSeconds: Int) async throws -> Void
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -80,11 +80,13 @@ struct DiagnosticFlowView: View {
     @State private var stepTask: Task<Void, Never>?
     @State private var revisitedSingleSelectSteps: Set<Step> = []
     @State private var lifeAreaColorKeys: [String: String] = [:]
+    @State private var completionErrorMessage: String?
+    @Namespace private var loadingSplashNamespace
 
     init(
         mode: Mode = .onboarding,
         initialDraft: PersonalizationDraft? = nil,
-        onComplete: @escaping @MainActor (_ draft: PersonalizationDraft, _ elapsedSeconds: Int) async -> Void = { _, _ in }
+        onComplete: @escaping @MainActor (_ draft: PersonalizationDraft, _ elapsedSeconds: Int) async throws -> Void = { _, _ in }
     ) {
         self.mode = mode
         self.initialDraft = initialDraft
@@ -95,73 +97,91 @@ struct DiagnosticFlowView: View {
     }
 
     var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 18) {
-                if let questionIndex = questionIndex(for: step) {
-                    DiagnosticThinkingHeader(
-                        title: "\(questionIndex) of \(totalQuestionCount)",
-                        progress: Double(questionIndex) / Double(max(1, totalQuestionCount))
-                    )
-                }
+        Group {
+            if step == .building {
+                LoadingSplashView(
+                    metrics: [],
+                    namespace: loadingSplashNamespace,
+                    minimumDisplayDuration: 0.8
+                )
+            } else {
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 18) {
+                        if let questionIndex = questionIndex(for: step) {
+                            DiagnosticThinkingHeader(
+                                title: "\(questionIndex) of \(totalQuestionCount)",
+                                progress: Double(questionIndex) / Double(max(1, totalQuestionCount))
+                            )
+                        }
 
-                switch step {
-                case .stressSource:
-                    singleSelectStep(
-                        step: .stressSource,
-                        prompt: "What’s causing the most stress right now?",
-                        helper: "Pick one.",
-                        options: Self.stressOptions,
-                        selected: draft.stressSource
-                    ) { value in
-                        draft.stressSource = value
-                        moveToNextStep(from: .stressSource, after: 240_000_000)
+                        if let completionErrorMessage {
+                            cautionCard(completionErrorMessage)
+                        }
+
+                        switch step {
+                        case .stressSource:
+                            singleSelectStep(
+                                step: .stressSource,
+                                prompt: "What’s causing the most stress right now?",
+                                helper: "Pick one.",
+                                options: Self.stressOptions,
+                                selected: draft.stressSource
+                            ) { value in
+                                completionErrorMessage = nil
+                                draft.stressSource = value
+                                moveToNextStep(from: .stressSource, after: 240_000_000)
+                            }
+                        case .breakPoint:
+                            singleSelectStep(
+                                step: .breakPoint,
+                                prompt: "When you try to make progress, what usually breaks first?",
+                                helper: "Pick one.",
+                                options: Self.breakPointOptions,
+                                selected: draft.breakPoint
+                            ) { value in
+                                completionErrorMessage = nil
+                                draft.breakPoint = value
+                                moveToNextStep(from: .breakPoint, after: 240_000_000)
+                            }
+                        case .lifeAreas:
+                            lifeAreasStep
+                        case .planningReality:
+                            singleSelectStep(
+                                step: .planningReality,
+                                prompt: "Most days, you…",
+                                helper: "Pick what’s most true.",
+                                options: Self.planningRealityOptions,
+                                selected: draft.planningReality
+                            ) { value in
+                                completionErrorMessage = nil
+                                draft.planningReality = value
+                                moveToNextStep(from: .planningReality, after: 240_000_000)
+                            }
+                        case .desiredChange:
+                            singleSelectStep(
+                                step: .desiredChange,
+                                prompt: "If Loom works, what changes first?",
+                                helper: "Pick one.",
+                                options: Self.desiredChangeOptions,
+                                selected: draft.desiredChange
+                            ) { value in
+                                completionErrorMessage = nil
+                                draft.desiredChange = value
+                                beginBuildAndFinish()
+                            }
+                        case .building:
+                            EmptyView()
+                        }
                     }
-                case .breakPoint:
-                    singleSelectStep(
-                        step: .breakPoint,
-                        prompt: "When you try to make progress, what usually breaks first?",
-                        helper: "Pick one.",
-                        options: Self.breakPointOptions,
-                        selected: draft.breakPoint
-                    ) { value in
-                        draft.breakPoint = value
-                        moveToNextStep(from: .breakPoint, after: 240_000_000)
-                    }
-                case .lifeAreas:
-                    lifeAreasStep
-                case .planningReality:
-                    singleSelectStep(
-                        step: .planningReality,
-                        prompt: "Most days, you…",
-                        helper: "Pick what’s most true.",
-                        options: Self.planningRealityOptions,
-                        selected: draft.planningReality
-                    ) { value in
-                        draft.planningReality = value
-                        moveToNextStep(from: .planningReality, after: 240_000_000)
-                    }
-                case .desiredChange:
-                    singleSelectStep(
-                        step: .desiredChange,
-                        prompt: "If Loom works, what changes first?",
-                        helper: "Pick one.",
-                        options: Self.desiredChangeOptions,
-                        selected: draft.desiredChange
-                    ) { value in
-                        draft.desiredChange = value
-                        beginBuildAndFinish()
-                    }
-                case .building:
-                    EmptyView()
+                    .padding(.horizontal, 20)
+                    .padding(.top, 20)
+                    .padding(.bottom, 28)
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 20)
-            .padding(.bottom, 28)
         }
         .background(Color(.systemBackground).ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
-        .navigationBarBackButtonHidden(true)
+        .navigationBarBackButtonHidden(step == .building)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button {
@@ -173,6 +193,8 @@ struct DiagnosticFlowView: View {
                         Text("Back")
                     }
                 }
+                .disabled(step == .building)
+                .opacity(step == .building ? 0 : 1)
             }
         }
         .onAppear {
@@ -432,6 +454,7 @@ struct DiagnosticFlowView: View {
 
     private func continueFromLifeAreas() {
         guard canContinueFromLifeAreas else { return }
+        completionErrorMessage = nil
         triggerSelectionHaptic()
         withAnimation(.easeInOut(duration: reduceMotion ? 0.01 : 0.22)) {
             step = .planningReality
@@ -494,29 +517,31 @@ struct DiagnosticFlowView: View {
             guard draft.isComplete else { return }
 
             draft.lifeAreaColorKeys = selectedLifeAreaColorAssignments()
+            completionErrorMessage = nil
+            withAnimation(.easeInOut(duration: reduceMotion ? 0.01 : 0.20)) {
+                step = .building
+            }
+            await Task.yield()
 
-            hasCompletedFlow = true
-            let elapsed = elapsedSeconds
-            AnalyticsLogger.log(
-                .diagnosticCompleted(
-                    source: mode.analyticsSource,
-                    step: totalQuestionCount,
-                    elapsedSeconds: elapsed
-                )
-            )
-            if mode == .accountEdit {
+            do {
+                let elapsed = elapsedSeconds
+                try await onComplete(draft, elapsed)
+                hasCompletedFlow = true
                 AnalyticsLogger.log(
-                    .diagnosticUpdated(
+                    .diagnosticCompleted(
                         source: mode.analyticsSource,
                         step: totalQuestionCount,
                         elapsedSeconds: elapsed
                     )
                 )
-            }
-            await onComplete(draft, elapsed)
-
-            if mode == .accountEdit {
-                dismiss()
+                if mode == .accountEdit {
+                    dismiss()
+                }
+            } catch {
+                completionErrorMessage = "We couldn’t finish your diagnostic right now. Please try again."
+                withAnimation(.easeInOut(duration: reduceMotion ? 0.01 : 0.20)) {
+                    step = .desiredChange
+                }
             }
         }
     }

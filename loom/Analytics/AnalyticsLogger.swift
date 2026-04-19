@@ -27,15 +27,6 @@ enum AnalyticsLogger {
 #endif
     }
 
-    static func featureUsed(
-        _ featureName: String,
-        source: String,
-        step: String? = nil,
-        variant: String? = nil
-    ) {
-        log(.featureUsed(featureName: featureName, source: source, step: step, variant: variant))
-    }
-
-    // TODO: Add additional typed events only after funnel hypotheses are defined.
-    // TODO: Keep event payloads free of PII and free-text content.
+    // Keep external analytics limited to AnalyticsEvent so release telemetry stays reviewable,
+    // typed, and free of PII or user-authored free text.
 }

@@ -159,24 +159,28 @@ final class LoomLinkPreviewStore: ObservableObject {
     }
 
     @Published private var previews: [String: PreviewData] = [:]
-    private var loadedURLs: Set<String> = []
-    private let persistenceKey = "loom.linkPreviewStore.cache"
+    private var loadedPreviewKeys: Set<String> = []
+    private let persistenceKey = "loom.linkPreviewStore.cache.v2"
+    private let legacyPersistenceKey = "loom.linkPreviewStore.cache"
 
     private init() {
+        clearLegacyPersistedCache()
         restorePersistedCache()
     }
 
     func preview(for urlString: String?) -> PreviewData? {
         guard let normalized = normalizedURLString(urlString) else { return nil }
-        return previews[normalized]
+        return previews[previewKey(for: normalized)]
     }
 
     func load(urlStrings: [String]) {
         let normalized = urlStrings
             .compactMap(normalizedURLString(_:))
 
-        for urlString in normalized where !loadedURLs.contains(urlString) {
-            loadedURLs.insert(urlString)
+        for urlString in normalized {
+            let previewKey = previewKey(for: urlString)
+            guard !loadedPreviewKeys.contains(previewKey) else { continue }
+            loadedPreviewKeys.insert(previewKey)
             Task {
                 await loadPreview(for: urlString)
             }
@@ -208,16 +212,18 @@ final class LoomLinkPreviewStore: ObservableObject {
             image: image,
             tint: tint
         )
-        previews[urlString] = previewData
-        persist(previewData, for: urlString)
+        let previewKey = previewKey(for: urlString)
+        previews[previewKey] = previewData
+        persist(previewData, for: previewKey)
         #else
         let previewData = PreviewData(
             title: title,
             subtitle: subtitle,
             tint: Color.blue
         )
-        previews[urlString] = previewData
-        persist(previewData, for: urlString)
+        let previewKey = previewKey(for: urlString)
+        previews[previewKey] = previewData
+        persist(previewData, for: previewKey)
         #endif
     }
 
@@ -227,6 +233,10 @@ final class LoomLinkPreviewStore: ObservableObject {
               let url = URL(string: value),
               loomSupportsWebLinkPreview(url) else { return nil }
         return value
+    }
+
+    private func previewKey(for urlString: String) -> String {
+        cacheKey(for: urlString)
     }
 
     private func restorePersistedCache() {
@@ -264,13 +274,17 @@ final class LoomLinkPreviewStore: ObservableObject {
             #endif
         }
         previews = restored
-        loadedURLs = Set(restored.keys)
+        loadedPreviewKeys = Set(restored.keys)
     }
 
-    private func persist(_ previewData: PreviewData, for urlString: String) {
+    private func clearLegacyPersistedCache() {
+        UserDefaults.standard.removeObject(forKey: legacyPersistenceKey)
+    }
+
+    private func persist(_ previewData: PreviewData, for previewKey: String) {
         var persisted = loadPersistedEntries()
         #if canImport(UIKit)
-        let imageCacheKey = persistImage(previewData.image, for: urlString)
+        let imageCacheKey = persistImage(previewData.image, for: previewKey)
         let color = UIColor(previewData.tint)
         #else
         let imageCacheKey: String? = nil
@@ -281,7 +295,7 @@ final class LoomLinkPreviewStore: ObservableObject {
         var blue: CGFloat = 0
         var alpha: CGFloat = 1
         color.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
-        persisted[urlString] = PersistedPreviewData(
+        persisted[previewKey] = PersistedPreviewData(
             title: previewData.title,
             subtitle: previewData.subtitle,
             red: red,
@@ -303,18 +317,17 @@ final class LoomLinkPreviewStore: ObservableObject {
     }
 
     #if canImport(UIKit)
-    private func persistImage(_ image: UIImage?, for urlString: String) -> String? {
+    private func persistImage(_ image: UIImage?, for previewKey: String) -> String? {
         guard let image,
               let data = image.pngData() else { return nil }
-        let cacheKey = cacheKey(for: urlString)
-        let url = imageCacheURL(for: cacheKey)
+        let url = imageCacheURL(for: previewKey)
         do {
             try FileManager.default.createDirectory(
                 at: url.deletingLastPathComponent(),
                 withIntermediateDirectories: true
             )
             try data.write(to: url, options: .atomic)
-            return cacheKey
+            return previewKey
         } catch {
             return nil
         }

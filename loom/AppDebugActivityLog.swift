@@ -23,10 +23,12 @@ final class AppDebugActivityLog: ObservableObject {
     private init() {}
 
     func clear() {
+        guard LoomDeveloperBuild.isInternalBuild else { return }
         entries.removeAll()
     }
 
     func exportText(limit: Int = 800) -> String {
+        guard LoomDeveloperBuild.isInternalBuild else { return "<unavailable in release builds>" }
         let recent = entries.suffix(max(1, limit))
         guard !recent.isEmpty else { return "<no activity yet>" }
         return recent
@@ -38,6 +40,7 @@ final class AppDebugActivityLog: ObservableObject {
     }
 
     private func append(subsystem: String, message: String) {
+        guard LoomDeveloperBuild.isInternalBuild else { return }
         let trimmedMessage = message
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -58,6 +61,7 @@ final class AppDebugActivityLog: ObservableObject {
     }
 
     nonisolated static func log(_ subsystem: String, _ message: String) {
+        guard LoomDeveloperBuild.isInternalBuild else { return }
         Task { @MainActor in
             AppDebugActivityLog.shared.append(subsystem: subsystem, message: message)
         }

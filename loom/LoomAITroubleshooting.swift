@@ -1,82 +1,8 @@
 import SwiftUI
-import UIKit
 
 let loomAITroubleshootingDefaultsKey = "loom.enableLoomAITroubleshooting"
-let loomAIDebugDefaultsKey = "loom.enableLoomAIDebug"
 let loomAIDisableAppleIntelligenceDefaultsKey = "loom.disableAppleIntelligence"
 let loomAICustomChatDefaultsKey = "loom.enableLoomAICustomChat"
-let loomAISlowResponseThresholdMS: Double = 5_000
-
-func registerLoomAITroubleshootingDefaultIfNeeded() {
-    let defaults = UserDefaults.standard
-    // Troubleshooting popups are disabled app-wide.
-    defaults.set(false, forKey: loomAITroubleshootingDefaultsKey)
-    if defaults.object(forKey: loomAIDebugDefaultsKey) == nil {
-        defaults.set(false, forKey: loomAIDebugDefaultsKey)
-    }
-    if defaults.object(forKey: loomAIDisableAppleIntelligenceDefaultsKey) == nil {
-        defaults.set(false, forKey: loomAIDisableAppleIntelligenceDefaultsKey)
-    }
-    if defaults.object(forKey: loomAICustomChatDefaultsKey) == nil {
-        defaults.set(false, forKey: loomAICustomChatDefaultsKey)
-    }
-}
-
-func loomAISlowResponseTroubleshootingDetailsIfNeeded(
-    feature: String,
-    elapsedMS: Double,
-    responsePreview: String? = nil,
-    intent: String? = nil,
-    screen: String? = nil,
-    requestID: String? = nil,
-    requestHash: String? = nil
-) -> String? {
-    guard elapsedMS > loomAISlowResponseThresholdMS else { return nil }
-    let elapsedSeconds = elapsedMS / 1000
-    let intentValue = (intent ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-    let screenValue = (screen ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-    let reason = String(
-        format: "Slow LoomAI response: %.2fs (> %.2fs). intent=%@ screen=%@",
-        elapsedSeconds,
-        loomAISlowResponseThresholdMS / 1000,
-        intentValue.isEmpty ? "<none>" : intentValue,
-        screenValue.isEmpty ? "<none>" : screenValue
-    )
-    return loomAITroubleshootingLocalDetails(
-        feature: feature,
-        reason: reason,
-        responsePreview: responsePreview,
-        requestID: requestID,
-        requestHash: requestHash
-    )
-}
-
-func loomAIDuplicateSuggestionTroubleshootingDetails(
-    feature: String,
-    reason: String,
-    responsePreview: String? = nil,
-    requestID: String? = nil,
-    requestHash: String? = nil
-) -> String {
-    let normalizedReason = reason.trimmingCharacters(in: .whitespacesAndNewlines)
-    return loomAITroubleshootingLocalDetails(
-        feature: feature,
-        reason: "Duplicate suggestion detected. \(normalizedReason)",
-        responsePreview: responsePreview,
-        requestID: requestID,
-        requestHash: requestHash
-    )
-}
-
-func loomAIReportTroubleshootingIfEnabled(details: String) {
-    _ = details
-    return
-}
-
-func loomAICopyTroubleshootingToClipboard(_ details: String) {
-    _ = details
-    return
-}
 
 @MainActor
 final class LoomAITroubleshootingCenter: ObservableObject {
@@ -109,6 +35,55 @@ struct LoomAITroubleshootingBannerHost: View {
     var body: some View {
         EmptyView()
     }
+}
+
+func loomAISlowResponseTroubleshootingDetailsIfNeeded(
+    feature: String,
+    elapsedMS: Double,
+    responsePreview: String? = nil,
+    intent: String? = nil,
+    screen: String? = nil,
+    requestID: String? = nil,
+    requestHash: String? = nil
+) -> String? {
+    guard elapsedMS > 5_000 else { return nil }
+    let reason = String(
+        format: "Slow LoomAI response: %.2fs. intent=%@ screen=%@",
+        elapsedMS / 1000,
+        (intent ?? "").isEmpty ? "<none>" : (intent ?? ""),
+        (screen ?? "").isEmpty ? "<none>" : (screen ?? "")
+    )
+    return loomAITroubleshootingLocalDetails(
+        feature: feature,
+        reason: reason,
+        responsePreview: responsePreview,
+        requestID: requestID,
+        requestHash: requestHash
+    )
+}
+
+func loomAIDuplicateSuggestionTroubleshootingDetails(
+    feature: String,
+    reason: String,
+    responsePreview: String? = nil,
+    requestID: String? = nil,
+    requestHash: String? = nil
+) -> String {
+    loomAITroubleshootingLocalDetails(
+        feature: feature,
+        reason: "Duplicate suggestion detected. \(reason.trimmingCharacters(in: .whitespacesAndNewlines))",
+        responsePreview: responsePreview,
+        requestID: requestID,
+        requestHash: requestHash
+    )
+}
+
+func loomAIReportTroubleshootingIfEnabled(details: String) {
+    _ = details
+}
+
+func loomAICopyTroubleshootingToClipboard(_ details: String) {
+    _ = details
 }
 
 func loomAITroubleshootingDetails(

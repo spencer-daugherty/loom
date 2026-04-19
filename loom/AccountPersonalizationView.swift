@@ -176,7 +176,7 @@ struct AccountPersonalizationView: View {
                     mode: .accountEdit,
                     initialDraft: mode == .edit ? personalizationStore.current.map(PersonalizationDraft.init(snapshot:)) : nil
                 ) { draft, _ in
-                    await saveDiagnosticDraft(draft, mode: mode)
+                    try await saveDiagnosticDraft(draft, mode: mode)
                 }
                 .navigationTitle("Quick Diagnostic")
                 .toolbar {
@@ -544,14 +544,14 @@ struct AccountPersonalizationView: View {
         }
     }
 
-    private func saveDiagnosticDraft(_ draft: PersonalizationDraft, mode: EditorMode) async {
+    private func saveDiagnosticDraft(_ draft: PersonalizationDraft, mode: EditorMode) async throws {
         isSaving = true
         let previousRootCause = displayedRootCause
         let previousFulfillmentAreas = displayedFulfillmentAreas
         let previousNextDirection = displayedNextDirection
 
+        let source: PersonalizationSaveSource = mode == .reset ? .accountReset : .accountEdit
         do {
-            let source: PersonalizationSaveSource = mode == .reset ? .accountReset : .accountEdit
             let savedSnapshot = try await personalizationStore.saveSnapshot(from: draft, source: source)
             AppDebugActivityLog.log(
                 "Personalization",
@@ -574,11 +574,10 @@ struct AccountPersonalizationView: View {
                 )
             }
         } catch {
-            // Keep previous values if save fails.
             isSaving = false
-            editorMode = nil
             isRefreshingDiagnosticsInsights = false
             AppDebugActivityLog.log("Personalization", "Edit diagnostic save failed: \(error.localizedDescription)")
+            throw error
         }
     }
 

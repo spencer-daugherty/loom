@@ -4667,7 +4667,7 @@ struct FulfillmentStartView: View {
         buttonTitle: String,
         action: @escaping () -> Void
     ) -> some View {
-        let hasTroubleshooting = loomAITroubleshootingEnabled && !(troubleshooting ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasTroubleshooting = LoomDeveloperBuild.enabled(loomAITroubleshootingEnabled) && !(troubleshooting ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         return VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 8) {
                 Text(message)

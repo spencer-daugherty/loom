@@ -58,13 +58,11 @@ final class LoomAIChatProvider {
     private let appleTitleHandler: AppleTitleHandler?
 
     init(
-        service: LoomAIService = LoomAIService(),
         availabilityResolver: @escaping () -> Bool = { AppleIntelligenceSupport.isAvailable },
         appleChatHandler: AppleChatHandler? = nil,
         appleTextChatHandler: AppleTextChatHandler? = nil,
         appleTitleHandler: AppleTitleHandler? = nil
     ) {
-        _ = service
         self.availabilityResolver = availabilityResolver
         self.appleChatHandler = appleChatHandler
         self.appleTextChatHandler = appleTextChatHandler

@@ -226,7 +226,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         }
 #endif
 #if canImport(FirebaseAnalytics)
-        Analytics.setAnalyticsCollectionEnabled(AnalyticsCollectionPolicy.shouldCollectAnalytics)
+        AnalyticsCollectionPolicy.refreshCollectionState()
 #endif
 #if canImport(FirebaseCrashlytics)
         #if DEBUG
@@ -237,7 +237,6 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         #endif
 #endif
         UNUserNotificationCenter.current().delegate = self
-        registerLoomAITroubleshootingDefaultIfNeeded()
         return true
     }
 
@@ -259,12 +258,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 @main
 struct loomApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage(UserSessionStore.Keys.hasAccount) private var hasAccount = false
     @AppStorage(UserSessionStore.Keys.reviewDemoModeEnabled) private var reviewDemoModeEnabled = false
     @AppStorage(UserSessionStore.Keys.reviewDemoStoreGeneration) private var reviewDemoStoreGeneration = 0
     @AppStorage(UserSessionStore.Keys.isolatedWorkspaceKind) private var isolatedWorkspaceKind = ""
-    @AppStorage(loomAIDebugDefaultsKey) private var enableLoomAIDebug = false
-    @AppStorage("loom.showLoomAIDebugPage") private var showLoomAIDebugPage = false
 
     var body: some Scene {
         WindowGroup {
@@ -281,7 +279,20 @@ struct loomApp: App {
                 }
             }
             .onAppear {
-                showLoomAIDebugPage = false
+                AnalyticsCollectionPolicy.refreshCollectionState()
+            }
+            .onChange(of: reviewDemoModeEnabled) { _, _ in
+                AnalyticsCollectionPolicy.refreshCollectionState()
+            }
+            .onChange(of: isolatedWorkspaceKind) { _, _ in
+                AnalyticsCollectionPolicy.refreshCollectionState()
+            }
+            .onChange(of: hasAccount) { _, _ in
+                AnalyticsCollectionPolicy.refreshCollectionState()
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                guard newPhase == .active else { return }
+                AnalyticsCollectionPolicy.refreshCollectionState()
             }
         }
     }
@@ -376,7 +387,7 @@ private struct LoomModelContainerHost<Content: View>: View {
     }
 
     private var resolvedWorkspace: LoomSpecialAccountWorkspace? {
-        guard LoomInternalDemoMode.isEnabled, reviewDemoModeEnabled else { return nil }
+        guard reviewDemoModeEnabled else { return nil }
         let normalizedKind = isolatedWorkspaceKind.trimmingCharacters(in: .whitespacesAndNewlines)
         if let workspace = LoomSpecialAccountWorkspace(rawValue: normalizedKind) {
             return workspace
@@ -430,6 +441,7 @@ private struct LoomModelContainerHost<Content: View>: View {
 private struct LoomAppBootstrapView<Content: View>: View {
     @Environment(\.modelContext) private var modelContext
     @State private var didFinishBootstrap = false
+    @Namespace private var splashNamespace
     let content: Content
 
     init(@ViewBuilder content: () -> Content) {
@@ -441,9 +453,11 @@ private struct LoomAppBootstrapView<Content: View>: View {
             if didFinishBootstrap {
                 content
             } else {
-                ProgressView("Preparing Loom data…")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color(.systemBackground).ignoresSafeArea())
+                LoadingSplashView(
+                    metrics: [],
+                    namespace: splashNamespace,
+                    minimumDisplayDuration: 0.8
+                )
             }
         }
         .task {
@@ -476,6 +490,8 @@ private struct LoomPersistenceFailureView: View {
 
 private struct LoomIsolatedWorkspaceBootstrapView<Content: View>: View {
     @Environment(\.modelContext) private var modelContext
+    @State private var didFinishWorkspaceBootstrap = false
+    @Namespace private var splashNamespace
     let workspace: LoomSpecialAccountWorkspace
     let content: Content
 
@@ -488,10 +504,23 @@ private struct LoomIsolatedWorkspaceBootstrapView<Content: View>: View {
     }
 
     var body: some View {
-        content
-            .task {
-                guard workspace.shouldSeedDemoWorkspace else { return }
+        Group {
+            if didFinishWorkspaceBootstrap {
+                content
+            } else {
+                LoadingSplashView(
+                    metrics: [],
+                    namespace: splashNamespace,
+                    minimumDisplayDuration: 0.8
+                )
+            }
+        }
+        .task {
+            guard !didFinishWorkspaceBootstrap else { return }
+            if workspace.shouldSeedDemoWorkspace {
                 LoomDemoWorkspaceSeeder.seedDemoWorkspace(in: modelContext)
             }
+            didFinishWorkspaceBootstrap = true
+        }
     }
 }

@@ -2,7 +2,6 @@ import Foundation
 
 enum AnalyticsEvent {
     case onboardingStarted(source: String = "onboarding")
-    case onboardingSlideViewed(index: Int, source: String = "onboarding")
     case onboardingCompleted(totalSlides: Int, durationSeconds: Int, source: String = "onboarding")
     case onboardingAbandoned(lastSlideIndex: Int, source: String = "onboarding")
     case signupStarted(source: String = "account")
@@ -11,10 +10,8 @@ enum AnalyticsEvent {
     case diagnosticStarted(source: String = "diagnostic", step: Int, elapsedSeconds: Int)
     case diagnosticCompleted(source: String = "diagnostic", step: Int, elapsedSeconds: Int)
     case diagnosticAbandoned(source: String = "diagnostic", step: Int, elapsedSeconds: Int)
-    case diagnosticUpdated(source: String = "diagnostic", step: Int, elapsedSeconds: Int)
     case paywallViewed(source: String = "paywall")
     case paywallAbandoned(reason: String, source: String = "paywall")
-    case paywallPlanSelected(plan: String, source: String = "paywall")
     case purchaseStarted(plan: String, source: String = "paywall")
     case purchaseCompleted(plan: String, source: String = "paywall")
     case purchaseFailed(plan: String, errorType: String, source: String = "paywall")
@@ -23,12 +20,10 @@ enum AnalyticsEvent {
     case dailyActive(source: String = "root_gate", sessionDay: Int)
     case retentionDay1(source: String = "root_gate")
     case retentionDay7(source: String = "root_gate")
-    case featureUsed(featureName: String, source: String, step: String?, variant: String?)
 
     var name: String {
         switch self {
         case .onboardingStarted: return "onboarding_started"
-        case .onboardingSlideViewed: return "onboarding_slide_viewed"
         case .onboardingCompleted: return "onboarding_completed"
         case .onboardingAbandoned: return "onboarding_abandoned"
         case .signupStarted: return "signup_started"
@@ -37,10 +32,8 @@ enum AnalyticsEvent {
         case .diagnosticStarted: return "diagnostic_started"
         case .diagnosticCompleted: return "diagnostic_completed"
         case .diagnosticAbandoned: return "diagnostic_abandoned"
-        case .diagnosticUpdated: return "diagnostic_updated"
         case .paywallViewed: return "paywall_viewed"
         case .paywallAbandoned: return "paywall_abandoned"
-        case .paywallPlanSelected: return "paywall_plan_selected"
         case .purchaseStarted: return "purchase_started"
         case .purchaseCompleted: return "purchase_completed"
         case .purchaseFailed: return "purchase_failed"
@@ -49,7 +42,6 @@ enum AnalyticsEvent {
         case .dailyActive: return "daily_active"
         case .retentionDay1: return "retention_day_1"
         case .retentionDay7: return "retention_day_7"
-        case .featureUsed: return "feature_used"
         }
     }
 
@@ -57,8 +49,6 @@ enum AnalyticsEvent {
         switch self {
         case .onboardingStarted(let source):
             return ["source": source]
-        case .onboardingSlideViewed(let index, let source):
-            return ["source": source, "step": index]
         case .onboardingCompleted(let totalSlides, let durationSeconds, let source):
             return ["source": source, "total_slides": totalSlides, "duration_seconds": durationSeconds]
         case .onboardingAbandoned(let lastSlideIndex, let source):
@@ -75,14 +65,10 @@ enum AnalyticsEvent {
             return ["source": source, "step": step, "time_spent_seconds": elapsedSeconds]
         case .diagnosticAbandoned(let source, let step, let elapsedSeconds):
             return ["source": source, "step": step, "time_spent_seconds": elapsedSeconds]
-        case .diagnosticUpdated(let source, let step, let elapsedSeconds):
-            return ["source": source, "step": step, "time_spent_seconds": elapsedSeconds]
         case .paywallViewed(let source):
             return ["source": source]
         case .paywallAbandoned(let reason, let source):
             return ["source": source, "reason": reason]
-        case .paywallPlanSelected(let plan, let source):
-            return ["source": source, "plan": plan]
         case .purchaseStarted(let plan, let source):
             return ["source": source, "plan": plan]
         case .purchaseCompleted(let plan, let source):
@@ -99,11 +85,6 @@ enum AnalyticsEvent {
             return ["source": source, "session_day": 1]
         case .retentionDay7(let source):
             return ["source": source, "session_day": 7]
-        case .featureUsed(let featureName, let source, let step, let variant):
-            var params: [String: Any] = ["source": source, "feature_name": featureName]
-            if let step, !step.isEmpty { params["step"] = step }
-            if let variant, !variant.isEmpty { params["variant"] = variant }
-            return params
         }
     }
 }

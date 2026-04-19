@@ -42,7 +42,7 @@ struct AccountStepView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.modelContext) private var modelContext
     @Environment(\.openURL) private var openURL
-    @AppStorage("developer_launch_paywall_once") private var developerLaunchPaywallOnce = false
+    @AppStorage("developer_launch_paywall_once") private var developerLaunchPaywallOnceStorage = false
     @AppStorage("has_seen_content_quickstart_v1") private var hasSeenContentQuickstart = false
     @AppStorage("force_show_content_quickstart_once") private var forceShowContentQuickstartOnce = false
     @FocusState private var focusedField: ReviewAuthField?
@@ -64,21 +64,16 @@ struct AccountStepView: View {
     @State private var reviewEmail = ""
     @State private var reviewPassword = ""
     @State private var isReviewPasswordVisible = false
-    @State private var isShowingReviewSignInNote = false
-
-    private struct PendingReviewSignInSuccess {
-        let userID: String
-        let email: String
-        let fullName: String?
-        let workspace: LoomSpecialAccountWorkspace
-        let provisioningProfile: TestDemoProvisioningProfile?
-    }
-
-    @State private var pendingReviewSignInSuccess: PendingReviewSignInSuccess?
+    @State private var isCompletingDemoSignIn = false
 
     private enum ReviewAuthField: Hashable {
         case email
         case password
+    }
+
+    private var developerLaunchPaywallOnce: Bool {
+        get { LoomDeveloperBuild.enabled(developerLaunchPaywallOnceStorage) }
+        nonmutating set { developerLaunchPaywallOnceStorage = newValue }
     }
 
     private var canSubmitReviewSignIn: Bool {
@@ -388,22 +383,6 @@ struct AccountStepView: View {
         .sheet(item: $presentedLegalDocument) { document in
             LegalLinksView(document: document)
         }
-        .alert(
-            pendingReviewSignInSuccess?.provisioningProfile?.alertTitle
-                ?? pendingReviewSignInSuccess?.workspace.alertTitle
-                ?? "Demo Account",
-            isPresented: $isShowingReviewSignInNote
-        ) {
-            Button("Continue") {
-                completePendingReviewSignInSuccess()
-            }
-        } message: {
-            Text(
-                pendingReviewSignInSuccess?.provisioningProfile?.alertMessage
-                    ?? pendingReviewSignInSuccess?.workspace.alertMessage
-                    ?? ""
-            )
-        }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
@@ -565,7 +544,7 @@ struct AccountStepView: View {
 
     private func startReviewSignIn() {
 #if canImport(FirebaseAuth)
-        guard !isGoogleSignInInProgress, !isReviewSignInInProgress else { return }
+        guard !isGoogleSignInInProgress, !isReviewSignInInProgress, !isCompletingDemoSignIn else { return }
 
         let trimmedEmail = reviewEmail.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedEmail.isEmpty else {
@@ -592,33 +571,13 @@ struct AccountStepView: View {
                 let authResult = try await signInWithEmailAccount(email: trimmedEmail, password: reviewPassword)
                 let user = authResult.user
                 let resolvedEmail = user.email ?? trimmedEmail
-                let provisioningProfile = await TestDemoProvisioningService.fetchCurrentProfile(for: user.uid)
-                let workspace = provisioningProfile?.activatesDemoWorkspace == true
-                    ? LoomSpecialAccountWorkspace.reviewDemo
-                    : nil
-
-                if let workspace {
-                    pendingReviewSignInSuccess = PendingReviewSignInSuccess(
-                        userID: user.uid,
-                        email: resolvedEmail,
-                        fullName: user.displayName,
-                        workspace: workspace,
-                        provisioningProfile: provisioningProfile
-                    )
-                    isShowingReviewSignInNote = true
-                } else {
-                    session.setIsolatedWorkspace(nil)
-                    TestDemoProvisioningService.clearLocalProvisioningState()
-                    session.completeSignInWithEmail(
-                        userID: user.uid,
-                        email: resolvedEmail,
-                        fullName: user.displayName
-                    )
-                }
-                if workspace == nil {
-                    didCompleteSignup = true
-                    AnalyticsLogger.log(.signupCompleted(method: "email"))
-                }
+                await completeEmailSignIn(
+                    userID: user.uid,
+                    email: resolvedEmail,
+                    fullName: user.displayName
+                )
+                didCompleteSignup = true
+                AnalyticsLogger.log(.signupCompleted(method: "email"))
             } catch {
                 AppDebugActivityLog.log(
                     "AccountStepView",
@@ -632,58 +591,42 @@ struct AccountStepView: View {
 #endif
     }
 
-    private func completePendingReviewSignInSuccess() {
-        guard let pending = pendingReviewSignInSuccess else { return }
-        isShowingReviewSignInNote = false
-        Task { @MainActor in
-            let workspace = pending.workspace
-            let defaults = UserDefaults.standard
-            let hasCompletedWorkspaceBootstrap = defaults.bool(forKey: workspace.bootstrapDefaultsKey)
-            let appliedResetToken = defaults.integer(forKey: LoomInternalDemoMode.appliedResetTokenDefaultsKey)
-            let requestedResetToken = pending.provisioningProfile?.resetToken ?? 0
-            let shouldResetWorkspaceForThisSignIn =
-                !hasCompletedWorkspaceBootstrap || appliedResetToken != requestedResetToken
-            pendingReviewSignInSuccess = nil
+    @MainActor
+    private func completeEmailSignIn(
+        userID: String,
+        email: String,
+        fullName: String?
+    ) async {
+        let defaults = UserDefaults.standard
+        let workspace = LoomSpecialAccountWorkspace.workspace(for: email)
 
-            if shouldResetWorkspaceForThisSignIn {
-                LoomDefaultsScope.clearScopedValues(for: workspace)
-                resetIsolatedWorkspaceOnboardingProgress(defaults: defaults)
-            }
+        if let workspace, !defaults.bool(forKey: workspace.bootstrapDefaultsKey) {
+            isCompletingDemoSignIn = true
+            defer { isCompletingDemoSignIn = false }
+            LoomDefaultsScope.clearScopedValues(for: workspace)
+            resetIsolatedWorkspaceOnboardingProgress(defaults: defaults)
             session.setIsolatedWorkspace(workspace)
-            session.completeSignInWithEmail(
-                userID: pending.userID,
-                email: pending.email,
-                fullName: pending.fullName
-            )
-            if let grantedPlan = pending.provisioningProfile?.grantedPlan {
-                session.setIsSubscribed(true)
-                defaults.set(grantedPlan.rawValue, forKey: "loom.subscription_plan")
-                defaults.set(grantedPlan.rawValue, forKey: LoomInternalDemoMode.grantedPlanDefaultsKey)
-            } else {
-                session.setIsSubscribed(false)
-                defaults.removeObject(forKey: "loom.subscription_plan")
-                defaults.removeObject(forKey: LoomInternalDemoMode.grantedPlanDefaultsKey)
-            }
-            if shouldResetWorkspaceForThisSignIn {
-                await personalizationStore.resetCurrentUserState()
-            }
+            await personalizationStore.resetCurrentUserState()
             if workspace.shouldSeedDemoWorkspace {
-                if shouldResetWorkspaceForThisSignIn {
-                    hasSeenContentQuickstart = false
-                    forceShowContentQuickstartOnce = true
-                }
-                if pending.provisioningProfile?.autoCompleteGates ?? workspace.shouldAutoCompleteGatesAfterSignIn {
-                    session.setHasSeenOnboarding(true)
-                    session.setHasCompletedDiagnostic(true)
-                    session.setHasSeenDiagnosticInsights(true)
-                    await LoomDemoWorkspaceSeeder.seedDemoPersonalization(using: personalizationStore)
-                }
+                await LoomDemoWorkspaceSeeder.seedDemoPersonalization(using: personalizationStore)
             }
+            session.completeSignInWithEmail(
+                userID: userID,
+                email: email,
+                fullName: fullName
+            )
+            hasSeenContentQuickstart = false
+            forceShowContentQuickstartOnce = true
             defaults.set(true, forKey: workspace.bootstrapDefaultsKey)
-            defaults.set(requestedResetToken, forKey: LoomInternalDemoMode.appliedResetTokenDefaultsKey)
-            didCompleteSignup = true
-            AnalyticsLogger.log(.signupCompleted(method: "email"))
+            return
         }
+
+        session.setIsolatedWorkspace(workspace)
+        session.completeSignInWithEmail(
+            userID: userID,
+            email: email,
+            fullName: fullName
+        )
     }
 
     private func resetIsolatedWorkspaceOnboardingProgress(defaults: UserDefaults = .standard) {
@@ -693,14 +636,6 @@ struct AccountStepView: View {
         defaults.set(false, forKey: "onboarding_capture_notifications_prompted_v1")
         defaults.set(false, forKey: "content_home_objectives_setup_skipped_v1")
         defaults.set(false, forKey: "return_to_onboarding_last_page_once")
-    }
-
-    private func cancelPendingReviewSignInSuccess() {
-        pendingReviewSignInSuccess = nil
-        isShowingReviewSignInNote = false
-#if canImport(FirebaseAuth)
-        try? Auth.auth().signOut()
-#endif
     }
 
     private func reviewSignInErrorMessage(for error: Error, email: String) -> String {

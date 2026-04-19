@@ -74,7 +74,7 @@ struct LoomAIChatView: View {
     }
 
     private var supportsCustomChat: Bool {
-        viewModel.activeChatProviderKind == .appleIntelligence && enableLoomAICustomChat
+        viewModel.activeChatProviderKind == .appleIntelligence && LoomDeveloperBuild.enabled(enableLoomAICustomChat)
     }
 
     private var shouldShowCompatibilityNote: Bool {
@@ -270,7 +270,7 @@ struct LoomAIChatView: View {
                             .foregroundStyle(Color.black.opacity(0.75))
                         Spacer(minLength: 0)
                     }
-                    if loomAITroubleshootingEnabled {
+                    if LoomDeveloperBuild.enabled(loomAITroubleshootingEnabled) {
                         let troubleshooting = {
                             if let detail = viewModel.debugFailureDetail {
                                 return loomAITroubleshootingDetails(

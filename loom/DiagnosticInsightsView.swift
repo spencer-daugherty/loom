@@ -80,7 +80,7 @@ struct DiagnosticInsightsView: View {
                 .animation(.easeInOut(duration: 0.24), value: viewModel.insightCards.count)
 
                 if case .error = presentationState {
-                    if loomAITroubleshootingEnabled {
+                    if LoomDeveloperBuild.enabled(loomAITroubleshootingEnabled) {
                         HStack(spacing: 10) {
                             Button("Retry") {
                                 Task { await refreshInsights(forceRefresh: true) }
@@ -153,7 +153,7 @@ struct DiagnosticInsightsView: View {
         }
         .onChange(of: viewModel.insightsErrorMessage) { _, newValue in
             if newValue != nil {
-                if loomAITroubleshootingEnabled,
+                if LoomDeveloperBuild.enabled(loomAITroubleshootingEnabled),
                    let details = viewModel.troubleshootingMessage,
                    !details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     #if DEBUG
@@ -615,7 +615,7 @@ struct PersonalizationInsightsCards: View {
                     .buttonStyle(.bordered)
                     .tint(.secondary)
 
-                    if loomAITroubleshootingEnabled,
+                    if LoomDeveloperBuild.enabled(loomAITroubleshootingEnabled),
                        let details = viewModel.troubleshootingMessage,
                        !details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Button("Copy troubleshooting") {

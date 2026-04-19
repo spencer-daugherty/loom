@@ -60,11 +60,7 @@ struct OnboardingFlowView: View {
                 didLogOnboardingStarted = true
                 onboardingStartDate = Date()
                 AnalyticsLogger.log(.onboardingStarted())
-                AnalyticsLogger.log(.onboardingSlideViewed(index: currentIndex))
             }
-        }
-        .onChange(of: currentIndex) { _, newValue in
-            AnalyticsLogger.log(.onboardingSlideViewed(index: newValue))
         }
         .onDisappear {
             if didLogOnboardingStarted && !didLogOnboardingCompleted && !session.hasSeenOnboarding {

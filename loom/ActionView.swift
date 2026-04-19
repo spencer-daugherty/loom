@@ -173,6 +173,14 @@ struct ActionView: View {
     @State private var isSearchPresented: Bool = false
     @State private var actionSearchText: String = ""
 
+    private var developerWarningCardsEnabled: Bool {
+        LoomDeveloperBuild.enabled(devManualWarningCardsEnabled)
+    }
+
+    private var developerOldActionBlocksWarningEnabled: Bool {
+        LoomDeveloperBuild.enabled(devActionBlocksWarningOldBlocks)
+    }
+
     @State private var isShowingInstructions: Bool = false
     @State private var openFilter: FilterMenu? = nil
     @State private var selectedPlaceIDs: Set<UUID> = []
@@ -1780,7 +1788,7 @@ struct ActionView: View {
 
     private var shouldShowActionBlocksOldCautionCard: Bool {
         let autoShow = (blocksAgeDays ?? 0) >= 8
-        let manualShow = devManualWarningCardsEnabled && devActionBlocksWarningOldBlocks
+        let manualShow = developerWarningCardsEnabled && developerOldActionBlocksWarningEnabled
         return manualShow || autoShow
     }
 
@@ -1833,7 +1841,7 @@ struct ActionView: View {
 
     @ViewBuilder
     private var cautionRow: some View {
-        let cautionAgeDays = blocksAgeDays ?? (devManualWarningCardsEnabled && devActionBlocksWarningOldBlocks ? 8 : 0)
+        let cautionAgeDays = blocksAgeDays ?? (developerWarningCardsEnabled && developerOldActionBlocksWarningEnabled ? 8 : 0)
         let cautionForeground = Color.black.opacity(0.7)
         let accentBlue = Color.blue
         let lightBlueSurface = Color(red: 0.89, green: 0.95, blue: 1.0)

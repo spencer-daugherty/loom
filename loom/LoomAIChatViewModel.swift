@@ -397,17 +397,15 @@ final class LoomAIViewModel: ObservableObject {
     }
     private var cachedContextSnapshotEntry: CachedContextSnapshotEntry?
 
-    init(
-        service: LoomAIService = LoomAIService(),
-        chatProvider: LoomAIChatProvider? = nil
-    ) {
-        self.chatProvider = chatProvider ?? LoomAIChatProvider(service: service)
-        self.activeChatProviderKind = (chatProvider ?? LoomAIChatProvider(service: service)).currentKind
+    init(chatProvider: LoomAIChatProvider? = nil) {
+        let resolvedProvider = chatProvider ?? LoomAIChatProvider()
+        self.chatProvider = resolvedProvider
+        self.activeChatProviderKind = resolvedProvider.currentKind
         refreshRemainingDailyResponses()
     }
 
     private var isDailyLimiterDisabled: Bool {
-        UserDefaults.standard.bool(forKey: DailyChatLimitConfig.disableLimiterDefaultsKey)
+        LoomDeveloperBuild.storedFlag(forKey: DailyChatLimitConfig.disableLimiterDefaultsKey)
     }
 
     var isDailyLimitReached: Bool {
@@ -547,19 +545,19 @@ final class LoomAIViewModel: ObservableObject {
             }
             let replyText = response.message.trimmingCharacters(in: .whitespacesAndNewlines)
             let finalReply = replyText.isEmpty ? LoomAIChatProvider.tryLaterMessage : replyText
-            let assistantPreviewMessage = LoomAIChatMessage(
-                threadID: thread.id,
-                threadKey: thread.threadKey,
-                roleRaw: LoomAIChatRole.assistant.rawValue,
-                content: finalReply,
-                chipsJSON: LoomAIChatMessageChipsCodec.encode(response.chips),
-                actionsJSON: LoomAIChatMessageActionsCodec.encode(response.actions),
-                debugJSON: LoomAIDebugCodec.encode(response.debug),
-                groundingJSON: LoomAIChatMessageGroundingCodec.encode(response.grounding),
-                messageAnnotationsJSON: LoomAIChatMessageAnnotationsCodec.encode(response.messageAnnotations),
-                suggestionCardsJSON: LoomAIChatMessageSuggestionCardsCodec.encode(response.suggestionCards),
-                nextActionJSON: LoomAIChatMessageNextActionCodec.encode(response.nextAction)
-            )
+                let assistantPreviewMessage = LoomAIChatMessage(
+                    threadID: thread.id,
+                    threadKey: thread.threadKey,
+                    roleRaw: LoomAIChatRole.assistant.rawValue,
+                    content: finalReply,
+                    chipsJSON: LoomAIChatMessageChipsCodec.encode(response.chips),
+                    actionsJSON: LoomAIChatMessageActionsCodec.encode(response.actions),
+                    debugJSON: LoomAIDebugCodec.encodeForPersistence(response.debug),
+                    groundingJSON: LoomAIChatMessageGroundingCodec.encode(response.grounding),
+                    messageAnnotationsJSON: LoomAIChatMessageAnnotationsCodec.encode(response.messageAnnotations),
+                    suggestionCardsJSON: LoomAIChatMessageSuggestionCardsCodec.encode(response.suggestionCards),
+                    nextActionJSON: LoomAIChatMessageNextActionCodec.encode(response.nextAction)
+                )
             await MainActor.run {
                 let assistant = assistantPreviewMessage
                 context.insert(assistant)
@@ -2507,40 +2505,21 @@ final class LoomAIViewModel: ObservableObject {
     }
 
     func refreshRemainingDailyResponses(now: Date = Date()) {
-        let ledger = dailySpendLedger(for: now)
-        dailyEstimatedSpendUSD = max(0, ledger.spentUSD)
-        let remainingBudget = max(0, DailyChatLimitConfig.maxDailyEstimatedCostUSD - dailyEstimatedSpendUSD)
-        remainingDailyResponses = max(
-            0,
-            Int((remainingBudget / DailyChatLimitConfig.fallbackEstimatedCostPerReplyUSD).rounded(.down))
-        )
+        _ = now
+        dailyEstimatedSpendUSD = 0
+        remainingDailyResponses = Int.max
     }
 
     @discardableResult
     private func incrementDailySpendLedger(with response: LoomAIService.LoomAIResponse, now: Date = Date()) -> Bool {
-        var ledger = dailySpendLedger(for: now)
-        guard isDailyLimiterDisabled || ledger.spentUSD < DailyChatLimitConfig.maxDailyEstimatedCostUSD else {
-            refreshRemainingDailyResponses(now: now)
-            return false
-        }
-        ledger.sentCount += 1
-        ledger.spentUSD += estimatedCostUSD(for: response)
-        saveDailySpendLedger(ledger)
-        refreshRemainingDailyResponses(now: now)
+        _ = response
+        _ = now
         return true
     }
 
     private func estimatedCostUSD(for response: LoomAIService.LoomAIResponse) -> Double {
-        guard let usage = response.usage else {
-            return DailyChatLimitConfig.fallbackEstimatedCostPerReplyUSD
-        }
-        return LoomAIUsageCostCalculator.estimatedCostUSD(
-            model: usage.model,
-            inputTokens: usage.inputTokens,
-            cachedInputTokens: usage.cachedInputTokens,
-            outputTokens: usage.outputTokens,
-            fallbackUSD: DailyChatLimitConfig.fallbackEstimatedCostPerReplyUSD
-        )
+        _ = response
+        return 0
     }
 
     private static let dayKeyFormatter: DateFormatter = {

@@ -757,7 +757,7 @@ struct PurposeView: View {
         troubleshooting: String?,
         action: @escaping () -> Void
     ) -> some View {
-        let hasTroubleshooting = loomAITroubleshootingEnabled && !(troubleshooting ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasTroubleshooting = LoomDeveloperBuild.enabled(loomAITroubleshootingEnabled) && !(troubleshooting ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         return VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 8) {
                 Text(message)
@@ -783,7 +783,7 @@ struct PurposeView: View {
     }
 
     private var bottomCopyTroubleshootingDetails: String? {
-        guard loomAITroubleshootingEnabled else { return nil }
+        guard LoomDeveloperBuild.enabled(loomAITroubleshootingEnabled) else { return nil }
         return [
             autoWriteVisionTroubleshootingMessage,
             autoWritePassionsTroubleshootingMessage
@@ -793,7 +793,7 @@ struct PurposeView: View {
     }
 
     private var shouldShowBottomTroubleshootingPending: Bool {
-        guard loomAITroubleshootingEnabled else { return false }
+        guard LoomDeveloperBuild.enabled(loomAITroubleshootingEnabled) else { return false }
         guard bottomCopyTroubleshootingDetails == nil else { return false }
         let hasError = [
             autoWriteVisionErrorMessage,
