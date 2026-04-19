@@ -38,6 +38,11 @@ struct DiagnosticInsightsView: View {
         presentationState == .loading
     }
 
+    private var shouldShowIntroSubtitle: Bool {
+        let cardKinds = Set(viewModel.insightCards.map(\.kind))
+        return !cardKinds.contains(.rootCause) || !cardKinds.contains(.nextDirection)
+    }
+
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 16) {
@@ -50,9 +55,12 @@ struct DiagnosticInsightsView: View {
                     .font(.system(size: 38, weight: .bold))
                     .fixedSize(horizontal: false, vertical: true)
 
-                Text("This will shape your Loom experience and will only take a minute.")
-                    .font(.title3.weight(.medium))
-                    .foregroundStyle(.secondary)
+                if shouldShowIntroSubtitle {
+                    Text("This will shape your Loom experience and will only take a minute.")
+                        .font(.title3.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
                 Group {
                     if presentationState == .loading {
@@ -141,6 +149,7 @@ struct DiagnosticInsightsView: View {
             .padding(.bottom, 28)
         }
         .background(Color(.systemBackground).ignoresSafeArea())
+        .navigationBarBackButtonHidden(true)
         .onAppear {
             Task {
                 await refreshInsights()

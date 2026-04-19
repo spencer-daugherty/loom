@@ -4,6 +4,11 @@ extension Notification.Name {
     static let loomPresentInactiveSubscriptionPaywall = Notification.Name("loomPresentInactiveSubscriptionPaywall")
 }
 
+enum InactiveSubscriptionPaywallSource: String {
+    case lockedFeature
+    case setupFlow
+}
+
 enum SubscriptionAccessGate {
     static let inactivePurchaseOverrideKey = "dev_inactive_purchase_override"
     static let inactiveBannerMessage = "Your subscription is inactive. Select an option to continue access."
@@ -31,7 +36,7 @@ enum SubscriptionAccessGate {
         return isSubscribed && !LoomDeveloperBuild.enabled(inactivePurchaseOverrideEnabled)
     }
 
-    static func presentInactiveSubscriptionPaywall() {
-        NotificationCenter.default.post(name: .loomPresentInactiveSubscriptionPaywall, object: nil)
+    static func presentInactiveSubscriptionPaywall(source: InactiveSubscriptionPaywallSource = .lockedFeature) {
+        NotificationCenter.default.post(name: .loomPresentInactiveSubscriptionPaywall, object: source.rawValue)
     }
 }

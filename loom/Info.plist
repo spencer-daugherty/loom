@@ -25,12 +25,6 @@
 			</array>
 		</dict>
 	</array>
-	<key>NSCameraUsageDescription</key>
-	<string>Loom uses the camera so you can capture and share your Little Wins progress.</string>
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Loom accesses your photo library when you attach pictures to actions and plans.</string>
-	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>Loom saves your Little Wins share snapshots to Photos when you choose Save.</string>
 	<key>UILaunchScreen</key>
 	<false/>
 </dict>

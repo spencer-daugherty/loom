@@ -26,7 +26,6 @@ struct PaywallView: View {
     @AppStorage("account_email") private var accountEmail = ""
     @State private var selectedPlan: SubscriptionPlan = .lifetime
     @State private var presentedLegalDocument: LegalDocument?
-    @State private var isShowingTrialDetails = false
     @State private var previewIndex: Int = 0
     @State private var previewCycleTask: Task<Void, Never>?
     @State private var didLogPaywallViewed = false
@@ -35,6 +34,7 @@ struct PaywallView: View {
     @State private var activeLoadingAction: PaywallLoadingAction?
     @State private var restoreStatusMessage: String?
     @State private var restoreFailureAlertMessage: String?
+    @State private var purchaseFailureAlertMessage: String?
     @State private var purchaseStatusMessage: String?
     @State private var hasInitializedPlanSelection = false
     @State private var pendingLifetimeConfirmationPlan: SubscriptionPlan?
@@ -105,49 +105,6 @@ struct PaywallView: View {
         .sheet(item: $presentedLegalDocument) { document in
             LegalLinksView(document: document)
         }
-        .sheet(isPresented: $isShowingTrialDetails) {
-            NavigationStack {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 14) {
-                        if let manageText = selectedPlanPresentation.manageOrCancelText {
-                            Text(manageText)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        if let detailText = selectedPlanPresentation.disclosureDetailText {
-                            Text(detailText)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        if !selectedPlanActionDisclosureParagraphs.isEmpty {
-                            VStack(alignment: .leading, spacing: 14) {
-                                ForEach(Array(selectedPlanActionDisclosureParagraphs.enumerated()), id: \.offset) { _, paragraph in
-                                    Text(paragraph)
-                                        .font(.footnote)
-                                        .foregroundStyle(.secondary)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                }
-                            }
-                            .padding(.top, 6)
-                        }
-                    }
-                    .padding(20)
-                }
-                .navigationTitle(selectedPlanPresentation.detailSheetTitle)
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Done") {
-                            isShowingTrialDetails = false
-                        }
-                    }
-                }
-            }
-            .presentationDetents([.medium])
-            .presentationDragIndicator(.visible)
-        }
         .alert(
             "Purchase \(selectedPlanPresentation.detailSheetTitle)?",
             isPresented: Binding(
@@ -185,6 +142,23 @@ struct PaywallView: View {
                 }
             }
         )
+        .alert(
+            "The purchase did not complete",
+            isPresented: Binding(
+                get: { purchaseFailureAlertMessage != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        purchaseFailureAlertMessage = nil
+                    }
+                }
+            )
+        ) {
+            Button("OK", role: .cancel) {
+                purchaseFailureAlertMessage = nil
+            }
+        } message: {
+            Text(purchaseFailureAlertMessage ?? "")
+        }
         .onAppear {
             purchaseManager.configure(session: session)
             if purchaseManager.products.isEmpty {
@@ -250,38 +224,45 @@ struct PaywallView: View {
 
     private var standardPaywallBody: some View {
         GeometryReader { geo in
+            let viewportHeight = geo.size.height
+            let topInset = geo.safeAreaInsets.top
+            let bottomInset = geo.safeAreaInsets.bottom
             let availableHeight = geo.size.height - geo.safeAreaInsets.top - geo.safeAreaInsets.bottom
             let verticalSpacing = paywallVerticalSpacing(for: availableHeight)
             let bottomClearance: CGFloat = 20
-            VStack(alignment: .leading, spacing: verticalSpacing) {
-                if usesManageHeader {
-                    manageCloseButton
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: verticalSpacing) {
+                    if usesManageHeader {
+                        manageCloseButton
+                    }
+
+                    if let bannerMessage, !bannerMessage.isEmpty {
+                        paywallBanner(message: bannerMessage)
+                    }
+
+                    paywallHeader
+                        .readHeight { headerHeight = $0 }
+
+                    if shouldShowPreviewBox {
+                        let previewScale = previewBoxScale(
+                            for: availableHeight,
+                            headerHeight: headerHeight,
+                            lowerContentHeight: lowerContentHeight,
+                            verticalSpacing: verticalSpacing,
+                            bottomClearance: bottomClearance
+                        ) * effectivePaywallPreviewBaseScale
+                        onboardingAnimationPreviewBox(scale: previewScale)
+                    }
+
+                    paywallLowerContent(for: availableHeight, bottomClearance: bottomClearance)
+                        .readHeight { lowerContentHeight = $0 }
                 }
-
-                if let bannerMessage, !bannerMessage.isEmpty {
-                    paywallBanner(message: bannerMessage)
-                }
-
-                paywallHeader
-                    .readHeight { headerHeight = $0 }
-
-                if shouldShowPreviewBox {
-                    let previewScale = previewBoxScale(
-                        for: availableHeight,
-                        headerHeight: headerHeight,
-                        lowerContentHeight: lowerContentHeight,
-                        verticalSpacing: verticalSpacing,
-                        bottomClearance: bottomClearance
-                    ) * effectivePaywallPreviewBaseScale
-                    onboardingAnimationPreviewBox(scale: previewScale)
-                }
-
-                paywallLowerContent(for: availableHeight, bottomClearance: bottomClearance)
-                    .readHeight { lowerContentHeight = $0 }
+                .padding(.top, topInset + 20)
+                .padding(.horizontal, 20)
+                .padding(.bottom, bottomInset)
+                .frame(maxWidth: .infinity, minHeight: viewportHeight, alignment: .topLeading)
             }
-            .padding(.top, 20)
-            .padding(.horizontal, 20)
-            .frame(width: geo.size.width, height: availableHeight, alignment: .topLeading)
+            .frame(width: geo.size.width, height: viewportHeight, alignment: .topLeading)
         }
     }
 
@@ -300,6 +281,7 @@ struct PaywallView: View {
                 Text("Join the movement to end stress and live fulfilled.")
                     .font(.body)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -423,24 +405,10 @@ struct PaywallView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            if let summaryText = selectedPlanPresentation.summaryText {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(summaryText)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                    if selectedPlanPresentation.disclosureDetailText != nil || !selectedPlanActionDisclosureParagraphs.isEmpty {
-                        Button("Show more") {
-                            isShowingTrialDetails = true
-                        }
-                        .font(.footnote.weight(.semibold))
-                        .buttonStyle(.plain)
-                        .fixedSize()
-                    }
-                }
+            if selectedPlanPresentation.summaryText != nil
+                || selectedPlanPresentation.disclosureDetailText != nil
+                || !selectedPlanActionDisclosureParagraphs.isEmpty {
+                inlineDisclosureSection
             }
 
             VStack(spacing: 4) {
@@ -680,7 +648,7 @@ struct PaywallView: View {
         case .scheduledAutoRenewChange:
             return "Change Scheduled"
         case .switchAutoRenewable(_, let to):
-            return "Switch to \(to.plainTitle)"
+            return "Switch to \(to.title)"
         case .purchaseLifetimeAlongsideAutoRenewing:
             return "Purchase Lifetime Access"
         case .includedWithLifetime:
@@ -698,18 +666,18 @@ struct PaywallView: View {
                pendingPlan != selectedPlan,
                let effectiveDate = purchaseManager.pendingAutoRenewEffectiveDate {
                 return [
-                    "Your current \(selectedPlan.plainTitle.lowercased()) plan remains active until \(formattedMonthDay(effectiveDate)). \(pendingPlan.plainTitle) starts after that."
+                    "Your current \(selectedPlan.plainTitle.lowercased()) plan remains active until \(formattedMonthDay(effectiveDate)). \(pendingPlan.title) starts after that."
                 ]
             }
             return ["This Apple ID already has this auto-renewing plan."]
         case .scheduledAutoRenewChange(let from, let to, let effectiveDate):
             if let effectiveDate {
                 return [
-                    "\(to.plainTitle) starts \(formattedMonthDay(effectiveDate)) after your current \(from.plainTitle.lowercased()) plan ends."
+                    "\(to.title) starts \(formattedMonthDay(effectiveDate)) after your current \(from.plainTitle.lowercased()) plan ends."
                 ]
             }
             return [
-                "\(to.plainTitle) is scheduled for your next renewal after your current \(from.plainTitle.lowercased()) plan ends."
+                "\(to.title) is scheduled for your next renewal after your current \(from.plainTitle.lowercased()) plan ends."
             ]
         case .switchAutoRenewable:
             return [
@@ -721,6 +689,39 @@ struct PaywallView: View {
             ]
         case .includedWithLifetime:
             return []
+        }
+    }
+
+    @ViewBuilder
+    private var inlineDisclosureSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let summaryText = selectedPlanPresentation.summaryText {
+                Text(summaryText)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            if let detailText = selectedPlanPresentation.disclosureDetailText {
+                Text(detailText)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            if !selectedPlanActionDisclosureParagraphs.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(Array(selectedPlanActionDisclosureParagraphs.enumerated()), id: \.offset) { _, paragraph in
+                        Text(paragraph)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
         }
     }
 
@@ -762,6 +763,7 @@ struct PaywallView: View {
         fallbackSelection: SubscriptionPlan? = nil
     ) async {
         purchaseStatusMessage = nil
+        purchaseFailureAlertMessage = nil
         restoreStatusMessage = nil
         activeLoadingAction = .purchase
         defer { activeLoadingAction = nil }
@@ -785,7 +787,7 @@ struct PaywallView: View {
             }
         case .failed(let errorType):
             AnalyticsLogger.log(.purchaseFailed(plan: plan.rawValue, errorType: errorType))
-            purchaseStatusMessage = purchaseFailureMessage(for: errorType)
+            purchaseFailureAlertMessage = purchaseFailureMessage(for: errorType)
             if let previousSelection {
                 selectedPlan = previousSelection
             }
@@ -800,7 +802,7 @@ struct PaywallView: View {
             return "This Apple ID already has the selected plan."
         case "already_pending_plan_change":
             if let pendingPlan = purchaseManager.pendingAutoRenewPlan {
-                return "\(pendingPlan.plainTitle) is already scheduled for your next renewal."
+                return "\(pendingPlan.title) is already scheduled for your next renewal."
             }
             return "This plan change is already scheduled."
         case "included_with_lifetime":

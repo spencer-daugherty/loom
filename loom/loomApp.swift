@@ -263,6 +263,8 @@ struct loomApp: App {
     @AppStorage(UserSessionStore.Keys.reviewDemoModeEnabled) private var reviewDemoModeEnabled = false
     @AppStorage(UserSessionStore.Keys.reviewDemoStoreGeneration) private var reviewDemoStoreGeneration = 0
     @AppStorage(UserSessionStore.Keys.isolatedWorkspaceKind) private var isolatedWorkspaceKind = ""
+    @StateObject private var workspaceTransitionCoordinator = LoomWorkspaceTransitionCoordinator()
+    @Namespace private var workspaceTransitionSplashNamespace
 
     var body: some Scene {
         WindowGroup {
@@ -278,6 +280,19 @@ struct loomApp: App {
                         .textInputAutocapitalization(.sentences)
                 }
             }
+            .environmentObject(workspaceTransitionCoordinator)
+            .overlay {
+                if workspaceTransitionCoordinator.isTransitioning {
+                    LoadingSplashView(
+                        metrics: [],
+                        namespace: workspaceTransitionSplashNamespace,
+                        minimumDisplayDuration: 0.8
+                    )
+                    .ignoresSafeArea()
+                    .transition(.opacity)
+                }
+            }
+            .allowsHitTesting(!workspaceTransitionCoordinator.isTransitioning)
             .onAppear {
                 AnalyticsCollectionPolicy.refreshCollectionState()
             }
@@ -335,12 +350,67 @@ struct loomApp: App {
     }
 }
 
+@MainActor
+final class LoomWorkspaceTransitionCoordinator: ObservableObject {
+    @Published private(set) var isTransitioning = false
+
+    private var pendingReadyContinuation: CheckedContinuation<Void, Never>?
+    private var didReachReadyState = false
+    private var pendingTargetWorkspace: LoomSpecialAccountWorkspace?
+    private var usesTransientPrimaryWorkspace = false
+
+    func beginTransition(to workspace: LoomSpecialAccountWorkspace?) async {
+        didReachReadyState = false
+        pendingTargetWorkspace = workspace
+        usesTransientPrimaryWorkspace = workspace == nil
+        isTransitioning = true
+
+        await withCheckedContinuation { continuation in
+            pendingReadyContinuation = continuation
+            if didReachReadyState {
+                pendingReadyContinuation = nil
+                continuation.resume()
+            }
+        }
+    }
+
+    func markReady(for workspace: LoomSpecialAccountWorkspace?) {
+        guard isTransitioning else { return }
+        guard pendingTargetWorkspace == workspace else { return }
+        didReachReadyState = true
+        pendingReadyContinuation?.resume()
+        pendingReadyContinuation = nil
+    }
+
+    func finishTransition() {
+        pendingReadyContinuation?.resume()
+        pendingReadyContinuation = nil
+        didReachReadyState = false
+        pendingTargetWorkspace = nil
+        usesTransientPrimaryWorkspace = false
+        isTransitioning = false
+    }
+
+    func cancelTransition() {
+        finishTransition()
+    }
+
+    func resolvedWorkspace(persistedWorkspace: LoomSpecialAccountWorkspace?) -> LoomSpecialAccountWorkspace? {
+        guard isTransitioning else { return persistedWorkspace }
+        if usesTransientPrimaryWorkspace {
+            return nil
+        }
+        return pendingTargetWorkspace ?? persistedWorkspace
+    }
+}
+
 private struct LoomModelContainerHost<Content: View>: View {
     let hasAccount: Bool
     let reviewDemoModeEnabled: Bool
     let reviewDemoStoreGeneration: Int
     let isolatedWorkspaceKind: String
     let content: Content
+    @EnvironmentObject private var workspaceTransitionCoordinator: LoomWorkspaceTransitionCoordinator
 
     init(
         hasAccount: Bool,
@@ -360,7 +430,7 @@ private struct LoomModelContainerHost<Content: View>: View {
         Group {
             if let workspace = resolvedWorkspace,
                let container = LoomIsolatedContainerStore.container(for: workspace, generation: storeGeneration(for: workspace)) {
-                LoomAppBootstrapView {
+                LoomAppBootstrapView(reportsTransitionReady: false) {
                     LoomIsolatedWorkspaceBootstrapView(workspace: workspace) {
                         content
                     }
@@ -387,6 +457,10 @@ private struct LoomModelContainerHost<Content: View>: View {
     }
 
     private var resolvedWorkspace: LoomSpecialAccountWorkspace? {
+        workspaceTransitionCoordinator.resolvedWorkspace(persistedWorkspace: persistedWorkspace)
+    }
+
+    private var persistedWorkspace: LoomSpecialAccountWorkspace? {
         guard reviewDemoModeEnabled else { return nil }
         let normalizedKind = isolatedWorkspaceKind.trimmingCharacters(in: .whitespacesAndNewlines)
         if let workspace = LoomSpecialAccountWorkspace(rawValue: normalizedKind) {
@@ -440,11 +514,17 @@ private struct LoomModelContainerHost<Content: View>: View {
 
 private struct LoomAppBootstrapView<Content: View>: View {
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var workspaceTransitionCoordinator: LoomWorkspaceTransitionCoordinator
     @State private var didFinishBootstrap = false
     @Namespace private var splashNamespace
+    let reportsTransitionReady: Bool
     let content: Content
 
-    init(@ViewBuilder content: () -> Content) {
+    init(
+        reportsTransitionReady: Bool = true,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.reportsTransitionReady = reportsTransitionReady
         self.content = content()
     }
 
@@ -465,6 +545,9 @@ private struct LoomAppBootstrapView<Content: View>: View {
             RetiredExternalIntegrationCleanup.runIfNeeded(in: modelContext)
             FulfillmentDuplicateRepair.runIfNeeded(in: modelContext)
             didFinishBootstrap = true
+            if reportsTransitionReady {
+                workspaceTransitionCoordinator.markReady(for: nil)
+            }
         }
     }
 }
@@ -490,6 +573,7 @@ private struct LoomPersistenceFailureView: View {
 
 private struct LoomIsolatedWorkspaceBootstrapView<Content: View>: View {
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var workspaceTransitionCoordinator: LoomWorkspaceTransitionCoordinator
     @State private var didFinishWorkspaceBootstrap = false
     @Namespace private var splashNamespace
     let workspace: LoomSpecialAccountWorkspace
@@ -521,6 +605,7 @@ private struct LoomIsolatedWorkspaceBootstrapView<Content: View>: View {
                 LoomDemoWorkspaceSeeder.seedDemoWorkspace(in: modelContext)
             }
             didFinishWorkspaceBootstrap = true
+            workspaceTransitionCoordinator.markReady(for: workspace)
         }
     }
 }

@@ -46,8 +46,95 @@ enum PlanFlowProgressStore {
         }
     }
 
+    static func resetForCurrentUser(defaults: UserDefaults = .standard) {
+        let userKey = PersonalizationUserIdentity.currentUserKey(defaults: defaults)
+        defaults.set(false, forKey: completedKey(for: userKey))
+        if userKey == "device:default" {
+            defaults.set(false, forKey: legacyCompletedKey)
+        }
+    }
+
     private static func completedKey(for userKey: String) -> String {
         completedKeyPrefix + PersonalizationUserIdentity.storageSafeKey(for: userKey)
+    }
+}
+
+enum HomeSetupProgressStore {
+    private static let legacyCaptureCompletedKey = "capture_setup_completed_once_v1"
+    private static let legacyObjectivesSkippedKey = "content_home_objectives_setup_skipped_v1"
+    private static let captureCompletedKeyPrefix = "loom.home.capture.completed_once.v1."
+    private static let objectivesSkippedKeyPrefix = "loom.home.objectives.skipped.v1."
+
+    static func hasCompletedCaptureSetupForCurrentUser(defaults: UserDefaults = .standard) -> Bool {
+        boolValueForCurrentUser(
+            currentKeyPrefix: captureCompletedKeyPrefix,
+            legacyKey: legacyCaptureCompletedKey,
+            defaults: defaults
+        )
+    }
+
+    static func setCaptureSetupCompletedForCurrentUser(_ value: Bool, defaults: UserDefaults = .standard) {
+        setBoolValueForCurrentUser(
+            value,
+            currentKeyPrefix: captureCompletedKeyPrefix,
+            legacyKey: legacyCaptureCompletedKey,
+            defaults: defaults
+        )
+    }
+
+    static func hasSkippedObjectivesSetupForCurrentUser(defaults: UserDefaults = .standard) -> Bool {
+        boolValueForCurrentUser(
+            currentKeyPrefix: objectivesSkippedKeyPrefix,
+            legacyKey: legacyObjectivesSkippedKey,
+            defaults: defaults
+        )
+    }
+
+    static func setObjectivesSetupSkippedForCurrentUser(_ value: Bool, defaults: UserDefaults = .standard) {
+        setBoolValueForCurrentUser(
+            value,
+            currentKeyPrefix: objectivesSkippedKeyPrefix,
+            legacyKey: legacyObjectivesSkippedKey,
+            defaults: defaults
+        )
+    }
+
+    static func resetForCurrentUser(defaults: UserDefaults = .standard) {
+        setCaptureSetupCompletedForCurrentUser(false, defaults: defaults)
+        setObjectivesSetupSkippedForCurrentUser(false, defaults: defaults)
+    }
+
+    static func resetLegacyProgress(defaults: UserDefaults = .standard) {
+        defaults.set(false, forKey: legacyCaptureCompletedKey)
+        defaults.set(false, forKey: legacyObjectivesSkippedKey)
+    }
+
+    private static func boolValueForCurrentUser(
+        currentKeyPrefix: String,
+        legacyKey: String,
+        defaults: UserDefaults
+    ) -> Bool {
+        let userKey = PersonalizationUserIdentity.currentUserKey(defaults: defaults)
+        let scopedKey = currentKeyPrefix + PersonalizationUserIdentity.storageSafeKey(for: userKey)
+        if defaults.object(forKey: scopedKey) != nil {
+            return defaults.bool(forKey: scopedKey)
+        }
+        guard userKey == "device:default" else { return false }
+        return defaults.bool(forKey: legacyKey)
+    }
+
+    private static func setBoolValueForCurrentUser(
+        _ value: Bool,
+        currentKeyPrefix: String,
+        legacyKey: String,
+        defaults: UserDefaults
+    ) {
+        let userKey = PersonalizationUserIdentity.currentUserKey(defaults: defaults)
+        let scopedKey = currentKeyPrefix + PersonalizationUserIdentity.storageSafeKey(for: userKey)
+        defaults.set(value, forKey: scopedKey)
+        if userKey == "device:default" {
+            defaults.set(value, forKey: legacyKey)
+        }
     }
 }
 

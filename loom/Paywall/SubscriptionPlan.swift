@@ -25,9 +25,9 @@ enum SubscriptionPlan: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .lifetime:
-            return "Lifetime"
+            return "Founding Member (Lifetime)"
         case .annual:
-            return "Annual"
+            return "Annual (Early Adopter)"
         case .monthly:
             return "Monthly"
         }
@@ -116,9 +116,9 @@ enum SubscriptionPlan: String, CaseIterable, Identifiable {
     var detailSheetTitle: String {
         switch self {
         case .lifetime:
-            return "Lifetime"
+            return title
         case .annual:
-            return "Annual"
+            return title
         case .monthly:
             return "Monthly"
         }

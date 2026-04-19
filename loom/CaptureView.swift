@@ -553,7 +553,6 @@ struct CaptureView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openURL) private var openURL
     @AppStorage("setup_homepage_mode") private var setupHomepageModeStorage = false
-    @AppStorage("capture_setup_completed_once_v1") private var hasCompletedCaptureSetupOnce = false
     private let forceSetupWelcome: Bool
     private let pendingSharePayloadID: String?
     private let onSharePayloadHandled: ((String) -> Void)?
@@ -599,6 +598,8 @@ struct CaptureView: View {
     @State private var captureIntroShowsQuickCompleteDemoRow: Bool = true
     @State private var captureIntroShowsSettingsDemoRow: Bool = true
     @State private var captureSetupDidContinue: Bool = false
+    @State private var hasCompletedCaptureSetupOnce = HomeSetupProgressStore.hasCompletedCaptureSetupForCurrentUser()
+    @State private var homeSetupProgressUserKey = PersonalizationUserIdentity.currentUserKey()
     @State private var isSearchMode: Bool = false
     @State private var showFullTextEditorSheet: Bool = false
     @State private var editingItemID: UUID?
@@ -945,7 +946,16 @@ struct CaptureView: View {
     private func markCaptureSetupCompletedIfNeeded() {
         guard !hasCompletedCaptureSetupOnce else { return }
         guard allItems.count >= captureSetupRequiredToDoCount else { return }
+        HomeSetupProgressStore.setCaptureSetupCompletedForCurrentUser(true)
         hasCompletedCaptureSetupOnce = true
+        homeSetupProgressUserKey = PersonalizationUserIdentity.currentUserKey()
+    }
+
+    private func reloadHomeSetupProgressState(force: Bool = false) {
+        let currentUserKey = PersonalizationUserIdentity.currentUserKey()
+        guard force || currentUserKey != homeSetupProgressUserKey else { return }
+        homeSetupProgressUserKey = currentUserKey
+        hasCompletedCaptureSetupOnce = HomeSetupProgressStore.hasCompletedCaptureSetupForCurrentUser()
     }
     private var ghostClockIconName: String {
         #if canImport(UIKit)
@@ -1059,6 +1069,7 @@ struct CaptureView: View {
                 }
                 .toolbar(isCaptureSetupWelcomePage ? .hidden : .visible, for: .navigationBar)
                     .onAppear {
+                        reloadHomeSetupProgressState(force: true)
                         handleIncomingSharePayloadIfNeeded()
                         markCaptureSetupCompletedIfNeeded()
                         runAutoUnhideIfNeeded()

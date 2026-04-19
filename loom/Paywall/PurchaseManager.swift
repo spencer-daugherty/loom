@@ -416,8 +416,10 @@ final class PurchaseManager: ObservableObject {
     }
 
     private func originalComparisonPriceText(for plan: SubscriptionPlan) -> String? {
-        _ = plan
-        return nil
+        guard plan == .annual else { return nil }
+        guard let monthlyProduct = product(for: .monthly) else { return "$180" }
+        let annualComparisonPrice = monthlyProduct.price * 12
+        return annualComparisonPrice.formatted(monthlyProduct.priceFormatStyle)
     }
 
     private func introductoryOffer(for plan: SubscriptionPlan, product: Product?) -> Product.SubscriptionOffer? {

@@ -5,6 +5,9 @@ import StoreKit
 #if canImport(AuthenticationServices)
 import AuthenticationServices
 #endif
+#if canImport(CryptoKit)
+import CryptoKit
+#endif
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -80,6 +83,8 @@ private enum AccountDataDeletion {
         deleteAllRows(PlannedChunkActionSensitivityPlace.self, in: context)
         FulfillmentCategoryTheme.clearFulfillmentPreferences()
         UserDefaults.standard.removeObject(forKey: "fulfillment_start_onboarding_draft_v1")
+        HomeSetupProgressStore.resetForCurrentUser()
+        PlanFlowProgressStore.resetForCurrentUser()
         try? context.save()
     }
 
@@ -652,7 +657,7 @@ struct AccountView: View {
         let version = (bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !version.isEmpty {
-            return "Loom version \(version)"
+            return "Version \(version)"
         }
         return "Loom"
     }
@@ -1633,6 +1638,7 @@ struct AccountDetailsView: View {
     @EnvironmentObject private var session: UserSessionStore
     @EnvironmentObject private var personalizationStore: PersonalizationStore
     @EnvironmentObject private var purchaseManager: PurchaseManager
+    @EnvironmentObject private var workspaceTransitionCoordinator: LoomWorkspaceTransitionCoordinator
     @AppStorage("account_name") private var accountName = ""
     @AppStorage("account_email") private var accountEmail = ""
     @AppStorage(UserSessionStore.Keys.appleUserID) private var appleUserID = ""
@@ -1653,6 +1659,7 @@ struct AccountDetailsView: View {
     @State private var isRestoringPurchases = false
     @State private var restorePurchasesMessage: String? = nil
     @State private var restoreFailureAlertMessage: String? = nil
+    @State private var isSigningOut = false
     @FocusState private var focusedAccountField: AccountField?
 
     var body: some View {
@@ -1680,16 +1687,22 @@ struct AccountDetailsView: View {
                     showsChevron: false
                 )
 
-                Button {
-                    restorePurchasesMessage = nil
-                    restoreFailureAlertMessage = nil
-                    Task {
-                        await openAppleSubscriptionManagement()
+                Group {
+                    if isSubscriptionManagementAvailable {
+                        Button {
+                            restorePurchasesMessage = nil
+                            restoreFailureAlertMessage = nil
+                            Task {
+                                await openAppleSubscriptionManagement()
+                            }
+                        } label: {
+                            subscriptionSettingsRow
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        subscriptionSettingsRow
                     }
-                } label: {
-                    subscriptionSettingsRow
                 }
-                .buttonStyle(.plain)
             }
 
             Section {
@@ -1714,19 +1727,21 @@ struct AccountDetailsView: View {
                 }
             }
 
-            Section {
-                Button {
-                    showSeeAllPlans = true
-                } label: {
-                    HStack {
-                        Text("See All Plans")
-                        Spacer(minLength: 8)
-                        Image(systemName: "chevron.right")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(.secondary)
+            if canShowPlanPickerFromAccount {
+                Section {
+                    Button {
+                        showSeeAllPlans = true
+                    } label: {
+                        HStack {
+                            Text("See All Plans")
+                            Spacer(minLength: 8)
+                            Image(systemName: "chevron.right")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
                     }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
 
             if let accountError, !accountError.isEmpty {
@@ -1763,6 +1778,10 @@ struct AccountDetailsView: View {
         .navigationTitle("Account")
         .onAppear {
             hydrateAccountFieldsFromAuthUserIfAvailable()
+            purchaseManager.configure(session: session)
+            Task {
+                await purchaseManager.refreshEntitlements(session: session)
+            }
         }
         .alert(
             "The purchase did not complete",
@@ -1917,8 +1936,8 @@ struct AccountDetailsView: View {
     }
 
     private var currentSubscriptionSummary: String {
-        if let activePlan = purchaseManager.activePlan {
-            return activePlan.plainTitle
+        if let resolvedSubscriptionPlan {
+            return resolvedSubscriptionPlan.title
         }
         if SubscriptionAccessGate.shouldForceInactiveSubscription() && !isSubscribed {
             return "Not Purchased"
@@ -1928,12 +1947,28 @@ struct AccountDetailsView: View {
             inactivePurchaseOverrideEnabled: inactivePurchaseOverrideEnabled
         ) else { return "Inactive" }
         if subscriptionPlanRaw == SubscriptionPlan.lifetime.rawValue {
-            return "Lifetime"
+            return SubscriptionPlan.lifetime.title
         }
         if subscriptionPlanRaw == SubscriptionPlan.monthly.rawValue {
-            return "Monthly"
+            return SubscriptionPlan.monthly.title
         }
-        return "Annual"
+        return SubscriptionPlan.annual.title
+    }
+
+    private var resolvedSubscriptionPlan: SubscriptionPlan? {
+        if let activePlan = purchaseManager.activePlan {
+            return activePlan
+        }
+        guard !purchaseManager.hasLoadedEntitlements else { return nil }
+        return SubscriptionPlan(rawValue: subscriptionPlanRaw)
+    }
+
+    private var isSubscriptionManagementAvailable: Bool {
+        resolvedSubscriptionPlan == .annual || resolvedSubscriptionPlan == .monthly
+    }
+
+    private var canShowPlanPickerFromAccount: Bool {
+        resolvedSubscriptionPlan != .lifetime
     }
 
     private var accountProviderLabel: String {
@@ -2068,9 +2103,11 @@ struct AccountDetailsView: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
-            Image(systemName: "chevron.right")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.secondary)
+            if isSubscriptionManagementAvailable {
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -2097,12 +2134,21 @@ struct AccountDetailsView: View {
 
     @MainActor
     private func signOut() async {
+        guard !isSigningOut else { return }
+        isSigningOut = true
+        defer { isSigningOut = false }
         let isolatedWorkspace = LoomDefaultsScope.currentWorkspace()
         let personalizationUserKey = isolatedWorkspace != nil ? PersonalizationUserIdentity.currentUserKey() : nil
+        if isolatedWorkspace != nil {
+            await workspaceTransitionCoordinator.beginTransition(to: nil)
+        }
 #if canImport(FirebaseAuth)
         do {
             try Auth.auth().signOut()
         } catch {
+            if isolatedWorkspace != nil {
+                workspaceTransitionCoordinator.cancelTransition()
+            }
             accountError = "Unable to sign out right now. Please try again."
             return
         }
@@ -2112,6 +2158,9 @@ struct AccountDetailsView: View {
             Task {
                 await personalizationStore.resetState(for: personalizationUserKey)
             }
+        }
+        if isolatedWorkspace != nil {
+            workspaceTransitionCoordinator.finishTransition()
         }
     }
 
@@ -2137,6 +2186,7 @@ struct AccountDetailsView: View {
 
     @MainActor
     private func openAppleSubscriptionManagement() async {
+        guard isSubscriptionManagementAvailable else { return }
 #if canImport(UIKit)
         accountError = nil
 
@@ -2319,7 +2369,8 @@ struct AccountDetailsView: View {
     @MainActor
     private func reauthenticateAndRevokeApple(for user: User) async throws {
 #if canImport(AuthenticationServices) && canImport(UIKit)
-        let appleCredential = try await requestAppleCredentialForDeletion()
+        let authorizationResult = try await requestAppleCredentialForDeletion()
+        let appleCredential = authorizationResult.credential
         guard let tokenData = appleCredential.identityToken,
               let idTokenString = String(data: tokenData, encoding: .utf8) else {
             throw AccountDeletionFlowError.appleIdentityTokenUnavailable
@@ -2332,7 +2383,7 @@ struct AccountDetailsView: View {
 
         let credential = OAuthProvider.appleCredential(
             withIDToken: idTokenString,
-            rawNonce: nil,
+            rawNonce: authorizationResult.rawNonce,
             fullName: appleCredential.fullName
         )
         _ = try await user.reauthenticate(with: credential)
@@ -2345,13 +2396,15 @@ struct AccountDetailsView: View {
 
 #if canImport(AuthenticationServices) && canImport(UIKit)
     @MainActor
-    private func requestAppleCredentialForDeletion() async throws -> ASAuthorizationAppleIDCredential {
+    private func requestAppleCredentialForDeletion() async throws -> AppleAccountDeletionAuthorizationResult {
         guard let presentingController = topViewController(),
               let anchor = presentingController.view.window else {
             throw AccountDeletionFlowError.applePresentationUnavailable
         }
+        let rawNonce = accountDeletionRandomNonceString()
         let coordinator = AppleAccountDeletionAuthorizationCoordinator(anchor: anchor)
-        return try await coordinator.authorize()
+        let credential = try await coordinator.authorize(rawNonce: rawNonce)
+        return AppleAccountDeletionAuthorizationResult(credential: credential, rawNonce: rawNonce)
     }
 #endif
 
@@ -2470,6 +2523,11 @@ private enum AccountDeletionFlowError: LocalizedError {
 }
 
 #if canImport(AuthenticationServices) && canImport(UIKit)
+private struct AppleAccountDeletionAuthorizationResult {
+    let credential: ASAuthorizationAppleIDCredential
+    let rawNonce: String
+}
+
 private final class AppleAccountDeletionAuthorizationCoordinator: NSObject, ASAuthorizationControllerDelegate, ASAuthorizationControllerPresentationContextProviding {
     private let anchor: ASPresentationAnchor
     private var continuation: CheckedContinuation<ASAuthorizationAppleIDCredential, Error>?
@@ -2479,11 +2537,12 @@ private final class AppleAccountDeletionAuthorizationCoordinator: NSObject, ASAu
     }
 
     @MainActor
-    func authorize() async throws -> ASAuthorizationAppleIDCredential {
+    func authorize(rawNonce: String) async throws -> ASAuthorizationAppleIDCredential {
         try await withCheckedThrowingContinuation { continuation in
             self.continuation = continuation
             let provider = ASAuthorizationAppleIDProvider()
             let request = provider.createRequest()
+            request.nonce = accountDeletionSHA256(rawNonce)
             let controller = ASAuthorizationController(authorizationRequests: [request])
             controller.delegate = self
             controller.presentationContextProvider = self
@@ -2512,6 +2571,42 @@ private final class AppleAccountDeletionAuthorizationCoordinator: NSObject, ASAu
 }
 #endif
 
+#if canImport(CryptoKit)
+private func accountDeletionSHA256(_ input: String) -> String {
+    let inputData = Data(input.utf8)
+    let hashed = SHA256.hash(data: inputData)
+    return hashed.map { String(format: "%02x", $0) }.joined()
+}
+#else
+private func accountDeletionSHA256(_ input: String) -> String { input }
+#endif
+
+private func accountDeletionRandomNonceString(length: Int = 32) -> String {
+    precondition(length > 0)
+    let charset = Array("0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._")
+    var result = ""
+    var remainingLength = length
+
+    while remainingLength > 0 {
+        var randoms: [UInt8] = (0..<16).map { _ in 0 }
+        let errorCode = SecRandomCopyBytes(kSecRandomDefault, randoms.count, &randoms)
+        if errorCode != errSecSuccess {
+            return UUID().uuidString.replacingOccurrences(of: "-", with: "")
+        }
+        randoms.forEach { random in
+            if remainingLength == 0 {
+                return
+            }
+            if Int(random) < charset.count {
+                result.append(charset[Int(random)])
+                remainingLength -= 1
+            }
+        }
+    }
+
+    return result
+}
+
 private struct AccountSubscriptionView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
@@ -2527,20 +2622,31 @@ private struct AccountSubscriptionView: View {
         if let activePlan = purchaseManager.activePlan {
             return activePlan
         }
-        switch subscriptionSummary {
-        case "Lifetime", "Founding Member (Lifetime)":
-            return .lifetime
-        case "Monthly":
-            return .monthly
-        case "Annual", "Annual (Locked)", "Annual (Early Adopter)":
-            return .annual
-        default:
-            return nil
+        if !purchaseManager.hasLoadedEntitlements {
+            switch subscriptionSummary {
+            case "Lifetime", "Founding Member (Lifetime)":
+                return .lifetime
+            case "Monthly":
+                return .monthly
+            case "Annual", "Annual (Locked)", "Annual (Early Adopter)":
+                return .annual
+            default:
+                return nil
+            }
         }
+        return nil
+    }
+
+    private var canShowPlanPicker: Bool {
+        resolvedPlan != .lifetime
+    }
+
+    private var canOpenAppleSubscriptionManagement: Bool {
+        resolvedPlan == .annual || resolvedPlan == .monthly
     }
 
     private var activePlanLabel: String {
-        resolvedPlan?.plainTitle ?? subscriptionSummary
+        resolvedPlan?.title ?? subscriptionSummary
     }
 
     private var resolvedPlanPresentation: PurchaseManager.PlanPresentation? {
@@ -2569,9 +2675,9 @@ private struct AccountSubscriptionView: View {
         guard let pendingPlan = purchaseManager.pendingAutoRenewPlan else { return nil }
         guard pendingPlan != resolvedPlan else { return nil }
         if let effectiveDate = purchaseManager.pendingAutoRenewEffectiveDate {
-            return "\(pendingPlan.plainTitle) starts \(effectiveDate.formatted(.dateTime.month(.wide).day()))"
+            return "\(pendingPlan.title) starts \(effectiveDate.formatted(.dateTime.month(.wide).day()))"
         }
-        return "\(pendingPlan.plainTitle) starts at your next renewal"
+        return "\(pendingPlan.title) starts at your next renewal"
     }
 
     private var canCancelAutoRenewingSubscription: Bool {
@@ -2587,9 +2693,9 @@ private struct AccountSubscriptionView: View {
         guard let pendingPlan = purchaseManager.pendingAutoRenewPlan else { return nil }
         guard pendingPlan != resolvedPlan else { return nil }
         guard let effectiveDate = purchaseManager.pendingAutoRenewEffectiveDate else {
-            return "\(pendingPlan.plainTitle) starts after your current plan ends."
+            return "\(pendingPlan.title) starts after your current plan ends."
         }
-        return "Your current plan stays active until \(effectiveDate.formatted(.dateTime.month(.wide).day())). \(pendingPlan.plainTitle) starts after that renewal."
+        return "Your current plan stays active until \(effectiveDate.formatted(.dateTime.month(.wide).day())). \(pendingPlan.title) starts after that renewal."
     }
 
     var body: some View {
@@ -2711,18 +2817,20 @@ private struct AccountSubscriptionView: View {
 
                 Spacer(minLength: 0)
 
-                Button {
-                    showPlansPaywall = true
-                } label: {
-                    HStack(spacing: 3) {
-                        Text("See All Plans")
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
+                if canShowPlanPicker {
+                    Button {
+                        showPlansPaywall = true
+                    } label: {
+                        HStack(spacing: 3) {
+                            Text("See All Plans")
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                        }
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(.blue)
                     }
-                    .font(.body.weight(.medium))
-                    .foregroundStyle(.blue)
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
 
             Divider()
@@ -2757,6 +2865,7 @@ private struct AccountSubscriptionView: View {
     }
 
     private func openManageSubscriptions() {
+        guard canOpenAppleSubscriptionManagement else { return }
         guard let url = URL(string: "https://apps.apple.com/account/subscriptions") else { return }
         openURL(url)
     }

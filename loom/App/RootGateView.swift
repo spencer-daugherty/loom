@@ -35,6 +35,7 @@ struct RootGateView<MainContent: View>: View {
     @State private var isSyncingGatePath = false
     @State private var diagnosticPrefillDraft: PersonalizationDraft?
     @State private var isGateRoutingReady: Bool
+    @State private var hasCompletedInitialGateResolution = false
     @State private var gateRoutingTask: Task<Void, Never>?
     @Namespace private var splashNamespace
 
@@ -172,10 +173,10 @@ struct RootGateView<MainContent: View>: View {
 
     private var gatePresentationBinding: Binding<Bool> {
         Binding(
-            get: { isGateRoutingReady && isGatePresented },
+            get: { isGatePresented },
             set: { newValue in
                 isGatePresented = newValue
-                if !newValue && isGateRoutingReady && session.requiresGate {
+                if !newValue && session.requiresGate {
                     DispatchQueue.main.async {
                         isGatePresented = true
                     }
@@ -185,7 +186,7 @@ struct RootGateView<MainContent: View>: View {
     }
 
     private var shouldShowRoutingSplash: Bool {
-        !isGateRoutingReady || !purchaseManager.hasLoadedEntitlements
+        (!hasCompletedInitialGateResolution && !isGateRoutingReady) || !purchaseManager.hasLoadedEntitlements
     }
 
     @ViewBuilder
@@ -336,9 +337,12 @@ struct RootGateView<MainContent: View>: View {
 
     private func scheduleGateResolution(animated: Bool = true, immediate: Bool = false) {
         gateRoutingTask?.cancel()
-        isGateRoutingReady = false
+        let isInitialResolution = !hasCompletedInitialGateResolution
+        if isInitialResolution {
+            isGateRoutingReady = false
+        }
         gateRoutingTask = Task { @MainActor in
-            if !immediate {
+            if !immediate && isInitialResolution {
                 try? await Task.sleep(nanoseconds: 120_000_000)
             }
             guard !Task.isCancelled else { return }
@@ -346,6 +350,7 @@ struct RootGateView<MainContent: View>: View {
             syncGatePathFromSession(animated: animated)
             trackCoreEntryIfNeeded()
             isGateRoutingReady = true
+            hasCompletedInitialGateResolution = true
             gateRoutingTask = nil
         }
     }

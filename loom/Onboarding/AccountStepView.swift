@@ -39,6 +39,8 @@ private struct AccountStepDarkModeInvertImage: ViewModifier {
 struct AccountStepView: View {
     @EnvironmentObject private var session: UserSessionStore
     @EnvironmentObject private var personalizationStore: PersonalizationStore
+    @EnvironmentObject private var purchaseManager: PurchaseManager
+    @EnvironmentObject private var workspaceTransitionCoordinator: LoomWorkspaceTransitionCoordinator
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.modelContext) private var modelContext
     @Environment(\.openURL) private var openURL
@@ -305,7 +307,7 @@ struct AccountStepView: View {
                             } label: {
                                 HStack(spacing: 10) {
                                     Spacer(minLength: 0)
-                                    if isReviewSignInInProgress {
+                                    if isReviewSignInInProgress || isCompletingDemoSignIn {
                                         ProgressView()
                                             .controlSize(.small)
                                     }
@@ -323,7 +325,7 @@ struct AccountStepView: View {
                             }
                             .buttonStyle(.plain)
                             .accessibilityIdentifier("account_signInForAppReview")
-                            .disabled(isGoogleSignInInProgress || isReviewSignInInProgress || isAuthTapCoolingDown)
+                            .disabled(isGoogleSignInInProgress || isReviewSignInInProgress || isCompletingDemoSignIn || isAuthTapCoolingDown)
                         }
                     }
                 }
@@ -605,37 +607,50 @@ struct AccountStepView: View {
             defer { isCompletingDemoSignIn = false }
             LoomDefaultsScope.clearScopedValues(for: workspace)
             resetIsolatedWorkspaceOnboardingProgress(defaults: defaults)
-            session.setIsolatedWorkspace(workspace)
+            await workspaceTransitionCoordinator.beginTransition(to: workspace)
             await personalizationStore.resetCurrentUserState()
             if workspace.shouldSeedDemoWorkspace {
                 await LoomDemoWorkspaceSeeder.seedDemoPersonalization(using: personalizationStore)
             }
+            session.setIsolatedWorkspace(workspace)
             session.completeSignInWithEmail(
                 userID: userID,
                 email: email,
                 fullName: fullName
             )
+            await purchaseManager.refreshEntitlements(session: session)
             hasSeenContentQuickstart = false
             forceShowContentQuickstartOnce = true
             defaults.set(true, forKey: workspace.bootstrapDefaultsKey)
+            workspaceTransitionCoordinator.finishTransition()
             return
         }
 
-        session.setIsolatedWorkspace(workspace)
+        if let workspace {
+            isCompletingDemoSignIn = true
+            await workspaceTransitionCoordinator.beginTransition(to: workspace)
+            session.setIsolatedWorkspace(workspace)
+        } else {
+            session.setIsolatedWorkspace(nil)
+        }
         session.completeSignInWithEmail(
             userID: userID,
             email: email,
             fullName: fullName
         )
+        await purchaseManager.refreshEntitlements(session: session)
+        if workspace != nil {
+            workspaceTransitionCoordinator.finishTransition()
+            isCompletingDemoSignIn = false
+        }
     }
 
     private func resetIsolatedWorkspaceOnboardingProgress(defaults: UserDefaults = .standard) {
         defaults.set(false, forKey: "blank_homepage_mode")
         defaults.set(false, forKey: "setup_homepage_mode")
-        defaults.set(false, forKey: "capture_setup_completed_once_v1")
         defaults.set(false, forKey: "onboarding_capture_notifications_prompted_v1")
-        defaults.set(false, forKey: "content_home_objectives_setup_skipped_v1")
         defaults.set(false, forKey: "return_to_onboarding_last_page_once")
+        HomeSetupProgressStore.resetLegacyProgress(defaults: defaults)
     }
 
     private func reviewSignInErrorMessage(for error: Error, email: String) -> String {

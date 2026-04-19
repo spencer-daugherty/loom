@@ -81,13 +81,14 @@ struct ContentView: View {
     @AppStorage("enable_projects_feature") private var enableProjectsFeatureStorage = false
     @AppStorage("blank_homepage_mode") private var blankHomepageModeStorage = false
     @AppStorage("setup_homepage_mode") private var setupHomepageModeStorage = false
-    @AppStorage("capture_setup_completed_once_v1") private var hasCompletedCaptureSetupOnce = false
     @AppStorage("has_seen_content_quickstart_v1") private var hasSeenContentQuickstart = false
     @AppStorage("force_show_content_quickstart_once") private var forceShowContentQuickstartOnce = false
     @AppStorage(UserSessionStore.Keys.reviewDemoModeEnabled) private var reviewDemoModeEnabled = false
     @AppStorage("onboarding_capture_notifications_prompted_v1") private var hasPromptedCaptureNotifications = false
-    @AppStorage("content_home_objectives_setup_skipped_v1") private var hasSkippedObjectivesSetupStep = false
     @State private var isPresentingCaptureView = false
+    @State private var hasCompletedCaptureSetupOnce = HomeSetupProgressStore.hasCompletedCaptureSetupForCurrentUser()
+    @State private var hasSkippedObjectivesSetupStep = HomeSetupProgressStore.hasSkippedObjectivesSetupForCurrentUser()
+    @State private var homeSetupProgressUserKey = PersonalizationUserIdentity.currentUserKey()
     @State private var pendingSharePayloadID: String? = nil
     @State private var pressedEmotion: String? = nil
     @State private var pressedOutcome: Outcomes? = nil
@@ -171,6 +172,7 @@ struct ContentView: View {
     @State private var hasDeferredActionPlanCalloutThisSession = false
     @State private var isPresentingPurposeSetupPaywall = false
     @State private var isPresentingInactiveSubscriptionPaywall = false
+    @State private var inactiveSubscriptionPaywallSource: InactiveSubscriptionPaywallSource = .lockedFeature
     @State private var pendingPurposeOpenAfterPaywall = false
     @State private var onboardingCallCardDestination: OnboardingCallCardDestination? = nil
 
@@ -405,6 +407,10 @@ struct ContentView: View {
         !reflectionArchives.isEmpty
     }
 
+    private var shouldSkipActionPlanIntro: Bool {
+        hasCompletedAnyWeeklyActionPlan || hasCompletedPlanFlowOnce
+    }
+
     private var isDrivingForceEmptyState: Bool {
         shouldShowBlankHomepageAppearance || shouldForceFreshSetupCardsForReviewQuickTour || !hasDrivingForceData
     }
@@ -475,7 +481,9 @@ struct ContentView: View {
     private func markCaptureSetupCompletedIfNeeded() {
         guard !hasCompletedCaptureSetupOnce else { return }
         guard notificationCaptureItems.count >= 6 else { return }
+        HomeSetupProgressStore.setCaptureSetupCompletedForCurrentUser(true)
         hasCompletedCaptureSetupOnce = true
+        homeSetupProgressUserKey = PersonalizationUserIdentity.currentUserKey()
     }
 
     private var shouldShowAnyOnboardingBounce: Bool {
@@ -515,7 +523,7 @@ struct ContentView: View {
             }
             return ("Master To Do List", "4/5", subtitle)
         case .actionBlocks:
-            let stepPrefix = hasCompletedAnyWeeklyActionPlan ? "" : "5/5"
+            let stepPrefix = shouldSkipActionPlanIntro ? "" : "5/5"
             return ("Start Weekly Action Plan", stepPrefix, nil)
         case .none:
             return nil
@@ -605,7 +613,13 @@ struct ContentView: View {
                     case .objectives:
                         ObjectivesView(autoOpenAddOutcome: false)
                     case .planStart:
-                        PlanStartView()
+                        Group {
+                            if shouldSkipActionPlanIntro {
+                                PlanView()
+                            } else {
+                                PlanStartView()
+                            }
+                        }
                     case .plan:
                         PlanView()
                     }
@@ -1018,7 +1032,7 @@ struct ContentView: View {
             .fullScreenCover(isPresented: $isPresentingInactiveSubscriptionPaywall) {
                 NavigationStack {
                     PaywallView(
-                        bannerMessage: shouldPresentStarterPaywallAsNewUser
+                        bannerMessage: inactiveSubscriptionPaywallSource == .setupFlow || shouldPresentStarterPaywallAsNewUser
                             ? nil
                             : SubscriptionAccessGate.inactiveBannerMessage
                     )
@@ -1126,8 +1140,10 @@ struct ContentView: View {
 
     private var contentViewLifecycleNotificationObservers: some View {
         contentViewLifecycleSecondaryObservers
-            .onReceive(NotificationCenter.default.publisher(for: .loomPresentInactiveSubscriptionPaywall)) { _ in
-                presentInactiveSubscriptionPaywall()
+            .onReceive(NotificationCenter.default.publisher(for: .loomPresentInactiveSubscriptionPaywall)) { notification in
+                let rawValue = (notification.object as? String) ?? InactiveSubscriptionPaywallSource.lockedFeature.rawValue
+                let source = InactiveSubscriptionPaywallSource(rawValue: rawValue) ?? .lockedFeature
+                presentInactiveSubscriptionPaywall(source: source)
             }
             .onChange(of: contentQuickstartStepIndex) { _, newValue in
                 guard shouldShowContentQuickstart else { return }
@@ -1188,6 +1204,7 @@ struct ContentView: View {
     }
 
     private func handleHasAccountChanged(_ hasAccount: Bool) {
+        reloadHomeSetupProgressState(force: true)
         if !hasAccount {
             showSplash = false
             splashMinimumElapsed = true
@@ -1196,6 +1213,7 @@ struct ContentView: View {
     }
 
     private func handleContentViewAppear() {
+        reloadHomeSetupProgressState(force: true)
         if hasAccount {
             beginStartupPreparationIfNeeded()
         } else {
@@ -3192,7 +3210,7 @@ struct ContentView: View {
 
                                 Button {
                                     guard hasActiveSubscriptionAccess else {
-                                        presentInactiveSubscriptionPaywall()
+                                        presentInactiveSubscriptionPaywall(source: .lockedFeature)
                                         return
                                     }
                                     isPresentingLittleWinsManagerSheet = true
@@ -4175,7 +4193,7 @@ struct ContentView: View {
             guard !littleWinsDeckIsDragging else { return }
             guard Date() >= littleWinsSuppressRowTapUntil else { return }
             guard hasActiveSubscriptionAccess else {
-                presentInactiveSubscriptionPaywall()
+                presentInactiveSubscriptionPaywall(source: .lockedFeature)
                 return
             }
             if isIntegrated {
@@ -4238,7 +4256,7 @@ struct ContentView: View {
                 Button(action: {
                     guard canOpenCaptureFooterTarget else { return }
                     guard hasActiveSubscriptionAccess else {
-                        presentInactiveSubscriptionPaywall()
+                        presentInactiveSubscriptionPaywall(source: .setupFlow)
                         return
                     }
                     isPresentingCaptureView = true
@@ -4285,7 +4303,7 @@ struct ContentView: View {
                         Button(action: {
                             guard canOpenActionBlocksFooterTarget else { return }
                             guard hasActiveSubscriptionAccess else {
-                                presentInactiveSubscriptionPaywall()
+                                presentInactiveSubscriptionPaywall(source: .setupFlow)
                                 return
                             }
                             playSheetDestination = .action
@@ -4296,7 +4314,13 @@ struct ContentView: View {
                     } else if setupHomepageMode {
                         if hasActiveSubscriptionAccess {
                             NavigationLink {
-                                PlanStartView()
+                                Group {
+                                    if shouldSkipActionPlanIntro {
+                                        PlanView()
+                                    } else {
+                                        PlanStartView()
+                                    }
+                                }
                             } label: {
                                 actionBlocksPlayButtonVisual
                             }
@@ -4304,7 +4328,7 @@ struct ContentView: View {
                         } else {
                             Button(action: {
                                 guard canOpenActionBlocksFooterTarget else { return }
-                                presentInactiveSubscriptionPaywall()
+                                presentInactiveSubscriptionPaywall(source: .setupFlow)
                             }) {
                                 actionBlocksPlayButtonVisual
                             }
@@ -4314,7 +4338,7 @@ struct ContentView: View {
                         Button(action: {
                             guard canOpenActionBlocksFooterTarget else { return }
                             guard hasActiveSubscriptionAccess else {
-                                presentInactiveSubscriptionPaywall()
+                                presentInactiveSubscriptionPaywall(source: .setupFlow)
                                 return
                             }
                             triggerPlayBlockedFeedback()
@@ -4325,7 +4349,7 @@ struct ContentView: View {
                     } else {
                         if hasActiveSubscriptionAccess {
                             NavigationLink {
-                                if hasCompletedPlanFlowOnce {
+                                if shouldSkipActionPlanIntro {
                                     PlanView()
                                 } else {
                                     PlanStartView()
@@ -4337,7 +4361,7 @@ struct ContentView: View {
                         } else {
                             Button(action: {
                                 guard canOpenActionBlocksFooterTarget else { return }
-                                presentInactiveSubscriptionPaywall()
+                                presentInactiveSubscriptionPaywall(source: .setupFlow)
                             }) {
                                 actionBlocksPlayButtonVisual
                             }
@@ -5532,7 +5556,7 @@ struct ContentView: View {
                 Color.clear
                     .contentShape(Rectangle())
                     .onTapGesture {
-                        presentInactiveSubscriptionPaywall()
+                        presentInactiveSubscriptionPaywall(source: .setupFlow)
                     }
             } else if shouldRequirePaywallBeforePurposeSetup {
                 Color.clear
@@ -5691,7 +5715,7 @@ struct ContentView: View {
                 Color.clear
                     .contentShape(Rectangle())
                     .onTapGesture {
-                        presentInactiveSubscriptionPaywall()
+                        presentInactiveSubscriptionPaywall(source: .setupFlow)
                     }
             } else if isDrivingForceEmptyState && !setupHomepageMode {
                 Color.clear
@@ -5961,7 +5985,7 @@ struct ContentView: View {
                 Color.clear
                     .contentShape(Rectangle())
                     .onTapGesture {
-                        presentInactiveSubscriptionPaywall()
+                        presentInactiveSubscriptionPaywall(source: .setupFlow)
                     }
             } else if !canOpenPlanOrActionFlow {
                 Color.clear
@@ -5988,11 +6012,15 @@ struct ContentView: View {
     }
 
     private func skipObjectivesSetupStep() {
+        HomeSetupProgressStore.setObjectivesSetupSkippedForCurrentUser(true)
         hasSkippedObjectivesSetupStep = true
+        homeSetupProgressUserKey = PersonalizationUserIdentity.currentUserKey()
     }
 
     private func returnToObjectivesSetupStep() {
+        HomeSetupProgressStore.setObjectivesSetupSkippedForCurrentUser(false)
         hasSkippedObjectivesSetupStep = false
+        homeSetupProgressUserKey = PersonalizationUserIdentity.currentUserKey()
     }
 
     private func skipActionPlanSetupStep() {
@@ -6002,7 +6030,7 @@ struct ContentView: View {
 
     private func openOnboardingCallCardTarget(_ target: HomeStartupFocusTarget) {
         guard hasActiveSubscriptionAccess else {
-            presentInactiveSubscriptionPaywall()
+            presentInactiveSubscriptionPaywall(source: .setupFlow)
             return
         }
         switch target {
@@ -6039,12 +6067,23 @@ struct ContentView: View {
             } else if !canOpenPlanOrActionFlow {
                 triggerPlayBlockedFeedback()
             } else {
-                openOnboardingCallCardDestination(hasCompletedPlanFlowOnce ? .plan : .planStart)
+                openOnboardingCallCardDestination(shouldSkipActionPlanIntro ? .plan : .planStart)
             }
         }
     }
 
-    private func presentInactiveSubscriptionPaywall() {
+    private func reloadHomeSetupProgressState(force: Bool = false) {
+        let currentUserKey = PersonalizationUserIdentity.currentUserKey()
+        guard force || currentUserKey != homeSetupProgressUserKey else { return }
+        homeSetupProgressUserKey = currentUserKey
+        hasCompletedCaptureSetupOnce = HomeSetupProgressStore.hasCompletedCaptureSetupForCurrentUser()
+        hasSkippedObjectivesSetupStep = HomeSetupProgressStore.hasSkippedObjectivesSetupForCurrentUser()
+    }
+
+    private func presentInactiveSubscriptionPaywall(
+        source: InactiveSubscriptionPaywallSource = .lockedFeature
+    ) {
+        inactiveSubscriptionPaywallSource = source
         isPresentingInactiveSubscriptionPaywall = true
     }
 
