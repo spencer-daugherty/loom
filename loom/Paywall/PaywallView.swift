@@ -99,6 +99,19 @@ struct PaywallView: View {
         purchaseManager.presentation(for: selectedPlan)
     }
 
+    private var isSelectedPlanPurchaseReady: Bool {
+        purchaseManager.isProductReadyForPurchase(for: selectedPlan)
+    }
+
+    private var shouldDisablePrimaryCTA: Bool {
+        purchaseManager.isProcessing || !selectedPlanAction.allowsPurchase || !isSelectedPlanPurchaseReady
+    }
+
+    private var paywallCatalogMessage: String? {
+        guard selectedPlan == .lifetime else { return nil }
+        return purchaseManager.launchPurchaseCatalogMessage
+    }
+
     private func isPlanSelectable(_ plan: SubscriptionPlan) -> Bool {
         plan.isSelectable()
     }
@@ -357,8 +370,28 @@ struct PaywallView: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-            .disabled(purchaseManager.isProcessing || !selectedPlanAction.allowsPurchase)
+            .disabled(shouldDisablePrimaryCTA)
             .accessibilityIdentifier("paywall_primaryCTA")
+
+            if let paywallCatalogMessage {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(paywallCatalogMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if purchaseManager.launchPurchaseCatalogState == .temporarilyUnavailable {
+                        Button("Retry App Store Connection") {
+                            Task {
+                                await purchaseManager.loadProducts()
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.blue)
+                    }
+                }
+            }
 
             Button {
                 Task {
@@ -776,6 +809,9 @@ struct PaywallView: View {
             selectedPlan = .lifetime
             return
         }
+        guard isSelectedPlanPurchaseReady else {
+            return
+        }
         let previousSelection = purchaseManager.activePlan
         switch selectedPlanAction {
         case .purchaseLifetimeAlongsideAutoRenewing:
@@ -848,20 +884,11 @@ struct PaywallView: View {
         case "included_with_lifetime":
             return "No additional purchase is needed."
         case "product_missing":
-            if let error = purchaseManager.productCatalogErrorDescription, !error.isEmpty {
-                return "The App Store purchase sheet could not be prepared. \(error)"
-            }
-            if purchaseManager.missingProductIDs.contains(selectedPlan.storeKitProductID) {
-                return "This purchase option is not currently available from App Store Connect for this build or Apple ID."
-            }
-            return "The App Store purchase sheet could not be prepared. Please try again."
+            return "The App Store purchase sheet isn't ready right now. Please try again in a moment."
         case "unverified":
             return "Apple could not verify this purchase."
         case "purchase_error":
-            if let error = purchaseManager.productCatalogErrorDescription, !error.isEmpty {
-                return "The purchase sheet did not complete. \(error)"
-            }
-            return "The purchase sheet did not complete. Make sure this device is signed in to the App Store and try again."
+            return "The purchase could not be completed right now. Please try again."
         case "unknown_result":
             return "The App Store returned an unknown purchase result."
         default:

@@ -1589,7 +1589,7 @@ struct FulfillmentStartView: View {
 
     private var isScrollableStep: Bool {
         switch step {
-        case .createCategories, .visionSweep, .purposeSweep, .roles, .littleWins, .passions, .summary:
+        case .intro, .createCategories, .visionSweep, .purposeSweep, .roles, .littleWins, .passions, .summary:
             return true
         default:
             return false
@@ -2103,7 +2103,8 @@ struct FulfillmentStartView: View {
         }
         .padding(.horizontal)
         .padding(.bottom, (step == .intro ? introFooterReserve : (step == .summary ? 100 : 0)) + keyboardScrollableBottomPadding)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: 720, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     private var keyboardDismissButton: some View {

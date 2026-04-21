@@ -279,63 +279,63 @@ struct PlanStartView: View {
                 Color(.systemGroupedBackground)
                     .ignoresSafeArea()
 
-                VStack(alignment: .leading, spacing: 14) {
-                    VStack(spacing: 1) {
-                        ZStack {
-                            PlanIntroRouteLinesView()
-                                .padding(.horizontal, -24)
-                                .allowsHitTesting(false)
-                            Image("ActionGraphic")
-                                .resizable()
-                                .scaledToFit()
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 420)
-                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        VStack(spacing: 1) {
+                            ZStack {
+                                PlanIntroRouteLinesView()
+                                    .padding(.horizontal, -24)
+                                    .allowsHitTesting(false)
+                                Image("ActionGraphic")
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 420)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            }
+                            .frame(height: 420)
+                            .padding(.bottom, 2)
+
+                            HStack(spacing: 6) {
+                                Image(systemName: "clock.fill")
+                                    .font(.caption)
+                                Text("~5 minutes")
+                                    .font(.caption.weight(.bold))
+                            }
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color(.systemGray5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .frame(maxWidth: .infinity, alignment: .center)
                         }
-                        .frame(height: 420)
-                        .padding(.bottom, 2)
 
-                        HStack(spacing: 6) {
-                            Image(systemName: "clock.fill")
-                                .font(.caption)
-                            Text("~5 minutes")
-                                .font(.caption.weight(.bold))
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("This is where you turn ideas into results.")
+                                .font(introSubtextFont)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(nil)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text("This process helps you focus on the results that matter most, not busywork.")
+                                .font(introSubtextFont)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(nil)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text("You’ll effortlessly connect your daily actions to meaningful Outcomes, Fulfillment Areas, and your Purpose.")
+                                .font(introSubtextFont)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(nil)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color(.systemGray5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        .frame(maxWidth: .infinity, alignment: .center)
-
+                        .padding(14)
+                        .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
                     }
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("This is where you turn ideas into results.")
-                            .font(introSubtextFont)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(nil)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text("This process helps you focus on the results that matter most, not busywork.")
-                            .font(introSubtextFont)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(nil)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text("You’ll effortlessly connect your daily actions to meaningful Outcomes, Fulfillment Areas, and your Purpose.")
-                            .font(introSubtextFont)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(nil)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .padding(14)
-                    .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
-
-                    Spacer(minLength: 0)
+                    .padding(.horizontal)
+                    .padding(.bottom, max(112, geo.safeAreaInsets.bottom + 88))
+                    .frame(maxWidth: 720, alignment: .topLeading)
+                    .frame(maxWidth: .infinity, alignment: .top)
                 }
-                .padding(.horizontal)
-                .padding(.bottom, 100)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
-            .overlay(alignment: .bottom) {
+            .safeAreaInset(edge: .bottom) {
                 Button {
                     navigateToPlan = true
                 } label: {
@@ -347,7 +347,7 @@ struct PlanStartView: View {
                 .controlSize(.large)
                 .padding(.horizontal)
                 .padding(.top, 8)
-                .padding(.bottom, max(40, geo.safeAreaInsets.bottom + 32))
+                .padding(.bottom, max(14, geo.safeAreaInsets.bottom + 8))
                 .background(Color(.systemGroupedBackground))
             }
         }

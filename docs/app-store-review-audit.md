@@ -19,14 +19,17 @@ Intended App Review path:
 1. App Review notes must match `docs/app-review-attachment.rtf` exactly.
 2. Live review credentials must appear only in App Review Information.
 3. Optional permissions must remain skippable for the initial review path.
-4. Delete Account must remain available in Account.
-5. Subscription management must continue opening Apple’s native management flow.
-6. The shipping build must not expose internal debug, raw-data, or developer-only controls.
+4. Apple Health must be visibly identified in the UI as an optional, read-only integration.
+5. The first setup intro pages must remain scrollable with pinned bottom actions on review devices.
+6. Delete Account must remain available in Account.
+7. Subscription management must continue opening Apple’s native management flow.
+8. The shipping build must not expose internal debug, raw-data, or developer-only controls.
 
 ## Resolved In This State
 
 - The hosted privacy policy and support page use final public-facing language.
 - The App Review attachment documents the exact demo-account path and optional-permission posture.
+- The launch monetization posture remains one live lifetime purchase plus two disabled upcoming plans.
 - Link preview handling is documented as Apple-system preview fetches plus local caching only.
 - The release story remains Apple Intelligence on supported devices plus local fallback logic on unsupported devices.
 - Release builds are expected to avoid retaining internal in-memory debug logs and rich AI debug persistence.

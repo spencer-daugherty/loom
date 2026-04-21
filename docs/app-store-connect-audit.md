@@ -1,8 +1,8 @@
 # Loom App Store Connect Audit
 
-Date reviewed: 2026-04-18  
+Date reviewed: 2026-04-21  
 Project reviewed: Loom iOS app and Share into Loom extension  
-App version / build: 0.1 (8)  
+App version / build: 1.0 (12)  
 Main bundle ID: `srd.loom`  
 Extension bundle ID: `srd.loom.ShareIntoLoomExtension`
 
@@ -17,6 +17,7 @@ Current submission posture:
 - Hosted Support URL: `https://spencer-daugherty.github.io/loom/support.html`
 - Standard license agreement: Apple's Standard EULA
 - Tracking: `No`
+- Launch purchase posture: `Founding Member (Lifetime)` is the only selectable launch purchase; annual and monthly remain visible in-app as upcoming plans with countdown overlays and are not for sale yet
 - Release builds: no release-visible developer toggles, no release raw-data inspector access, no release in-memory debug log retention, and no release persistence of rich AI debug payloads
 
 Evidence boundary:
@@ -108,6 +109,8 @@ Evidence files:
 - Reviewer enters the credentials from App Review Information
 - Reviewer sees a brief seeded-workspace splash
 - Reviewer lands in the seeded demo workspace
+- Apple Health is visibly identified in onboarding and Account as an optional read-only integration
+- First setup intro pages remain scrollable with pinned bottom actions on review devices
 - Optional permissions are not required for initial review
 - Delete Account remains available
 - Subscription management remains Apple-native
@@ -130,8 +133,11 @@ Expected behavior:
 - The review account signs in through the standard email/password flow.
 - After sign-in, Loom may briefly show the standard splash while a locally seeded isolated demo workspace finishes preparing.
 - The `demo@loomlife.us` review account opens with stable seeded data and bypasses first-run setup so the full app can be reviewed immediately.
+- `Founding Member (Lifetime)` is the only selectable launch purchase. Annual and Monthly are intentionally visible as upcoming plans and remain disabled until their launch dates.
 - No hidden review toggles, remote demo provisioning, backend demo-plan overrides, or release-visible developer tools are included in the shipping build.
 - Optional permissions such as Health, Reminders, Camera, Photos, and Notifications are not required for initial review.
+- Apple Health is identified in onboarding and in Account as an optional, read-only integration used for selected progress signals.
+- The first setup intro pages for Purpose, Fulfillment, Outcomes, and Action Plan are scrollable with pinned bottom actions.
 - Delete Account is available in Account.
 - Subscription management uses Apple’s native subscription management flow.
 - The Share into Loom extension can be tested separately from the iOS Share Sheet with shared text, links, images, videos, or files.

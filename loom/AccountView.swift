@@ -1652,6 +1652,7 @@ struct AccountDetailsView: View {
     @State private var showSignOutConfirmation = false
     @State private var showDeleteAccountSheet = false
     @State private var showSeeAllPlans = false
+    @State private var showAppleHealthInfoSheet = false
     @State private var deleteAccountConfirmationWord = ""
     @State private var deleteAccountPassword = ""
     @State private var deleteAccountError: String? = nil
@@ -1727,6 +1728,25 @@ struct AccountDetailsView: View {
                 }
             }
 
+            Section("Integrations") {
+                Button {
+                    showAppleHealthInfoSheet = true
+                } label: {
+                    HStack {
+                        Label("Apple Health", systemImage: "heart.fill")
+                            .foregroundStyle(.primary)
+                        Spacer(minLength: 8)
+                        Text("Optional, read-only")
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+
             if canShowPlanPickerFromAccount {
                 Section {
                     Button {
@@ -1776,6 +1796,9 @@ struct AccountDetailsView: View {
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Account")
+        .sheet(isPresented: $showAppleHealthInfoSheet) {
+            AppleHealthAboutSheet()
+        }
         .onAppear {
             hydrateAccountFieldsFromAuthUserIfAvailable()
             purchaseManager.configure(session: session)
@@ -2907,6 +2930,37 @@ private struct SubscriptionAboutSheet: View {
                 }
             }
             .navigationTitle("About Subscriptions")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct AppleHealthAboutSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Apple Health") {
+                    Label("Optional integration", systemImage: "checkmark.circle")
+                    Label("Read-only access for selected metrics", systemImage: "eye")
+                    Label("Supports progress for Goals and Little Wins", systemImage: "scope")
+                }
+
+                Section("How Loom uses it") {
+                    Text("Loom can optionally read selected Apple Health metrics such as steps, workout minutes, or sleep to support progress tracking.")
+                    Text("Loom does not write data to Apple Health.")
+                    Text("Apple Health permission is only requested when you choose to connect the feature.")
+                }
+            }
+            .navigationTitle("Apple Health")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {

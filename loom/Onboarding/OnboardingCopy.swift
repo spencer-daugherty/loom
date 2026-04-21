@@ -35,7 +35,7 @@ enum OnboardingCopy {
         .init(
             id: 5,
             headline: "Create daily momentum.",
-            body: "Little Wins make instant gratification and delayed acheivement work together.",
+            body: "Little Wins make instant gratification and delayed acheivement work together. You can also optionally connect Apple Health signals like steps, workouts, or sleep to support real progress.",
             visualKind: .radar
         ),
         .init(

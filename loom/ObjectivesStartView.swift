@@ -23,40 +23,40 @@ struct ObjectivesStartView: View {
     }
 
     var body: some View {
-        ZStack {
-            Color(.systemGroupedBackground)
-                .ignoresSafeArea()
+        GeometryReader { geo in
+            ZStack {
+                Color(.systemGroupedBackground)
+                    .ignoresSafeArea()
 
-            VStack(alignment: .leading, spacing: 14) {
-                header
-                introCard
-                if !isCompactIntroLayout {
-                    Spacer(minLength: 0)
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        header
+                        introCard
+                    }
+                    .padding(.horizontal)
+                    .padding(.bottom, bottomButtonReserve + max(22, geo.safeAreaInsets.bottom))
+                    .frame(maxWidth: 720, alignment: .topLeading)
+                    .frame(maxWidth: .infinity, alignment: .top)
                 }
             }
-            .padding(.horizontal)
-            .padding(.bottom, bottomButtonReserve)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        }
-        .overlay(alignment: .bottom) {
-            VStack(spacing: 6) {
-                Button {
-                    navigateToObjectives = true
-                } label: {
-                    Text("Create Outcome")
-                        .frame(maxWidth: .infinity)
-                        .contentShape(Rectangle())
+            .safeAreaInset(edge: .bottom) {
+                VStack(spacing: 6) {
+                    Button {
+                        navigateToObjectives = true
+                    } label: {
+                        Text("Create Outcome")
+                            .frame(maxWidth: .infinity)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .frame(maxWidth: .infinity)
+                .padding(.horizontal)
+                .padding(.top, 8)
+                .padding(.bottom, max(footerInnerBottomPadding, geo.safeAreaInsets.bottom + 8))
+                .background(Color(.systemGroupedBackground))
             }
-            .padding(.horizontal)
-            .padding(.top, 8)
-            .padding(.bottom, footerInnerBottomPadding)
-            .background(Color(.systemGroupedBackground))
-            .offset(y: screenHeight <= 740 ? -14 : -10)
-            .zIndex(20)
         }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)

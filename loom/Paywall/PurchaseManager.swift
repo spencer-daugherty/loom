@@ -3,6 +3,12 @@ import StoreKit
 
 @MainActor
 final class PurchaseManager: ObservableObject {
+    enum ProductCatalogState: Equatable {
+        case loading
+        case ready
+        case temporarilyUnavailable
+    }
+
     struct PlanPresentation: Equatable {
         let title: String
         let priceText: String
@@ -62,6 +68,7 @@ final class PurchaseManager: ObservableObject {
     @Published private(set) var isLoadingProducts = false
     @Published private(set) var missingProductIDs: Set<String> = []
     @Published private(set) var productCatalogErrorDescription: String?
+    @Published private(set) var launchPurchaseCatalogState: ProductCatalogState = .loading
 
     private let defaults: UserDefaults
     private var productsByID: [String: Product] = [:]
@@ -83,6 +90,22 @@ final class PurchaseManager: ObservableObject {
 
     func product(for plan: SubscriptionPlan) -> Product? {
         productsByID[plan.storeKitProductID]
+    }
+
+    func isProductReadyForPurchase(for plan: SubscriptionPlan) -> Bool {
+        guard plan.isSelectable() else { return false }
+        return product(for: plan) != nil
+    }
+
+    var launchPurchaseCatalogMessage: String? {
+        switch launchPurchaseCatalogState {
+        case .loading:
+            return "Checking App Store purchase availability..."
+        case .ready:
+            return nil
+        case .temporarilyUnavailable:
+            return "Purchases are temporarily unavailable on this device right now. Try again in a moment."
+        }
     }
 
     func presentation(for plan: SubscriptionPlan) -> PlanPresentation {
@@ -130,12 +153,20 @@ final class PurchaseManager: ObservableObject {
     func loadProducts() async {
         guard !isLoadingProducts else { return }
         isLoadingProducts = true
+        if products.isEmpty {
+            launchPurchaseCatalogState = .loading
+        }
         defer { isLoadingProducts = false }
 
         do {
             let fetchedProducts = try await Product.products(for: SubscriptionPlan.allCases.map(\.storeKitProductID))
             let mappedProducts = Dictionary(uniqueKeysWithValues: fetchedProducts.map { ($0.id, $0) })
-            let missingProductIDs = Set(SubscriptionPlan.allCases.map(\.storeKitProductID)).subtracting(mappedProducts.keys)
+            let requiredProductIDs = Set(
+                SubscriptionPlan.allCases
+                    .filter { $0.isSelectable() }
+                    .map(\.storeKitProductID)
+            )
+            let missingProductIDs = requiredProductIDs.subtracting(mappedProducts.keys)
             if !missingProductIDs.isEmpty {
                 log("Missing products from App Store Connect: \(missingProductIDs.sorted().joined(separator: ", "))")
             }
@@ -144,12 +175,18 @@ final class PurchaseManager: ObservableObject {
             productCatalogErrorDescription = nil
             productsByID = mappedProducts
             products = SubscriptionPlan.allCases.compactMap { mappedProducts[$0.storeKitProductID] }
+            launchPurchaseCatalogState = missingProductIDs.isEmpty ? .ready : .temporarilyUnavailable
         } catch {
             log("Failed to load products: \(error.localizedDescription)")
-            missingProductIDs = Set(SubscriptionPlan.allCases.map(\.storeKitProductID))
+            missingProductIDs = Set(
+                SubscriptionPlan.allCases
+                    .filter { $0.isSelectable() }
+                    .map(\.storeKitProductID)
+            )
             productCatalogErrorDescription = error.localizedDescription
             productsByID = [:]
             products = []
+            launchPurchaseCatalogState = .temporarilyUnavailable
         }
     }
 

@@ -318,7 +318,7 @@ struct PurposeStartView: View {
     }
 
     private var isScrollableStep: Bool {
-        step == .vision || step == .passions || step == .summary || step == .insights
+        step == .intro || step == .vision || step == .passions || step == .summary || step == .insights
     }
 
     private var editorSurfaceColor: Color {
@@ -330,7 +330,10 @@ struct PurposeStartView: View {
     }
 
     private var contentBottomPadding: CGFloat {
-        (step == .summary || step == .insights) ? 100 : 0
+        if step == .intro || step == .summary || step == .insights {
+            return 100
+        }
+        return 0
     }
     private var screenHeight: CGFloat { UIScreen.main.bounds.height }
     private var screenWidth: CGFloat { UIScreen.main.bounds.width }
@@ -633,7 +636,8 @@ struct PurposeStartView: View {
         }
         .padding(.horizontal)
         .padding(.bottom, contentBottomPadding + keyboardScrollableBottomPadding)
-        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .frame(maxWidth: 720, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .top)
     }
 
     private var header: some View {
