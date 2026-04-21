@@ -83,25 +83,27 @@ struct AccountStepView: View {
     }
 
     var body: some View {
-        VStack(spacing: 22) {
-            Spacer(minLength: 0)
+        GeometryReader { geometry in
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 0) {
+                    Spacer(minLength: 0)
 
-            VStack(spacing: 10) {
-                Text("End Stress. Live Fulfilled.")
-                    .font(.system(size: 39, weight: .bold))
-                    .multilineTextAlignment(.center)
+                    VStack(spacing: 10) {
+                        Text("End Stress. Live Fulfilled.")
+                            .font(.system(size: 39, weight: .bold))
+                            .multilineTextAlignment(.center)
 
-                Text("Join the movement.")
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-            .frame(maxWidth: .infinity, alignment: .center)
+                        Text("Join the movement.")
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
 
-            Spacer(minLength: 0)
+                    Spacer(minLength: 0)
 
-            VStack(spacing: 12) {
-                if !showReviewSignIn {
+                    VStack(spacing: 16) {
+                        if !showReviewSignIn {
                     #if canImport(AuthenticationServices)
                     SignInWithAppleButton(.continue) { request in
                         guard beginAuthTapCooldownIfNeeded() else { return }
@@ -328,59 +330,64 @@ struct AccountStepView: View {
                             .disabled(isGoogleSignInInProgress || isReviewSignInInProgress || isCompletingDemoSignIn || isAuthTapCoolingDown)
                         }
                     }
-                }
-            }
-            .padding(.top, 6)
-
-            if let appleSignInError, !appleSignInError.isEmpty {
-                Text(appleSignInError)
-                    .font(.footnote)
-                    .foregroundStyle(.red)
-                    .multilineTextAlignment(.center)
-            }
-            if let googleSignInError, !googleSignInError.isEmpty {
-                Text(googleSignInError)
-                    .font(.footnote)
-                    .foregroundStyle(.red)
-                    .multilineTextAlignment(.center)
-            }
-            if let reviewSignInError, !reviewSignInError.isEmpty {
-                Text(reviewSignInError)
-                    .font(.footnote)
-                    .foregroundStyle(.red)
-                    .multilineTextAlignment(.center)
-            }
-
-            VStack(spacing: 2) {
-                Text("By continuing you agree to Loom's")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-
-                HStack(spacing: 4) {
-                    Button("Standard License Agreement") {
-                        presentedLegalDocument = .terms
+                        }
                     }
-                    .buttonStyle(.plain)
-                    .font(.footnote)
-                    .foregroundStyle(Color.accentColor)
+                    .padding(.top, 6)
 
-                    Text("and")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-
-                    Button("Privacy Policy") {
-                        presentedLegalDocument = .privacy
+                    if let appleSignInError, !appleSignInError.isEmpty {
+                        Text(appleSignInError)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                            .multilineTextAlignment(.center)
                     }
-                    .buttonStyle(.plain)
-                    .font(.footnote)
-                    .foregroundStyle(Color.accentColor)
+                    if let googleSignInError, !googleSignInError.isEmpty {
+                        Text(googleSignInError)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                            .multilineTextAlignment(.center)
+                    }
+                    if let reviewSignInError, !reviewSignInError.isEmpty {
+                        Text(reviewSignInError)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                            .multilineTextAlignment(.center)
+                    }
+
+                    VStack(spacing: 2) {
+                        Text("By continuing you agree to Loom's")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+
+                        HStack(spacing: 4) {
+                            Button("Standard License Agreement") {
+                                presentedLegalDocument = .terms
+                            }
+                            .buttonStyle(.plain)
+                            .font(.footnote)
+                            .foregroundStyle(Color.accentColor)
+
+                            Text("and")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+
+                            Button("Privacy Policy") {
+                                presentedLegalDocument = .privacy
+                            }
+                            .buttonStyle(.plain)
+                            .font(.footnote)
+                            .foregroundStyle(Color.accentColor)
+                        }
+                    }
+                    .padding(.top, 14)
                 }
+                .frame(minHeight: geometry.size.height - 40, alignment: .top)
+                .fixedSize(horizontal: false, vertical: false)
+                .padding(.vertical, 20)
+                .reviewPathColumn(maxWidth: 560, horizontalPadding: 20, alignment: .top)
             }
-            .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(20)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .scrollDismissesKeyboard(.interactively)
         .background(Color(.systemBackground).ignoresSafeArea())
         .sheet(item: $presentedLegalDocument) { document in
             LegalLinksView(document: document)

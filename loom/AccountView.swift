@@ -968,6 +968,7 @@ struct AccountView: View {
                 devOutcomeWarningTargetPassed = false
             }
         }
+        .loomAdaptiveConstrainedFrame(maxWidth: 820, alignment: .top)
     }
 
     private func permanentlyDeleteAllData() {
@@ -1066,6 +1067,7 @@ private struct AppFeedbackSheet: View {
                 .disabled(rating == 0 || isSubmitting)
             }
             .padding(20)
+            .loomAdaptiveConstrainedFrame(maxWidth: 760, alignment: .top)
             .navigationTitle("Give App Feedback")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -2960,6 +2962,7 @@ private struct AppleHealthAboutSheet: View {
                     Text("Apple Health permission is only requested when you choose to connect the feature.")
                 }
             }
+            .loomAdaptiveConstrainedFrame(maxWidth: 760, alignment: .top)
             .navigationTitle("Apple Health")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

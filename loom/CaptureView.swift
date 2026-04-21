@@ -1021,6 +1021,10 @@ struct CaptureView: View {
                         .background(Color.clear)
                     }
                 }
+                .loomAdaptiveConstrainedFrame(
+                    maxWidth: isCaptureSetupWelcomePage ? 760 : 860,
+                    alignment: .top
+                )
                 .navigationTitle(isCaptureSetupWelcomePage ? "" : "Capture")
                 .navigationBarTitleDisplayMode(.inline)
                 .navigationBarHidden(isCaptureSetupWelcomePage)
@@ -1138,6 +1142,7 @@ struct CaptureView: View {
                 }
             }
         }
+        .navigationViewStyle(.stack)
     }
 
     var body: some View {

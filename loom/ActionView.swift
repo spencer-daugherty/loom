@@ -914,6 +914,7 @@ struct ActionView: View {
             content
                 .padding(.horizontal)
                 .safeAreaPadding(.top)
+                .loomAdaptiveConstrainedFrame(maxWidth: 860, alignment: .topLeading)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .overlay(alignment: .top) {
                     completeHintOverlay

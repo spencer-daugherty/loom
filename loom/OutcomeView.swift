@@ -1036,6 +1036,7 @@ struct OutcomeView: View {
     var body: some View {
         NavigationStack {
             formWithModifiers
+                .loomAdaptiveConstrainedFrame(maxWidth: 820, alignment: .top)
         }
         .sheet(isPresented: $isShowingAddMeasureSheet) {
             AddOutcomeMeasureSheet(

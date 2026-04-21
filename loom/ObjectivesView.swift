@@ -282,6 +282,7 @@ struct ObjectivesView: View {
                     }
                 }
                 .padding(.bottom, 20)
+                .loomAdaptiveConstrainedFrame(maxWidth: 820, alignment: .top)
             }
         }
         .navigationTitle("Goals")

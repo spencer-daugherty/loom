@@ -34,8 +34,8 @@ struct OnboardingSlideView: View {
             }
             .padding(.horizontal, 6)
         }
-        .padding(.horizontal, 20)
         .padding(.top, 16)
+        .reviewPathColumn(maxWidth: 640, horizontalPadding: 20, alignment: .top)
     }
 
     @ViewBuilder

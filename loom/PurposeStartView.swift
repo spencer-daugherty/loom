@@ -337,7 +337,8 @@ struct PurposeStartView: View {
     }
     private var screenHeight: CGFloat { UIScreen.main.bounds.height }
     private var screenWidth: CGFloat { UIScreen.main.bounds.width }
-    private var isCompactIntroLayout: Bool { screenHeight <= 740 || screenWidth <= 390 }
+    private var isCompactIntroLayout: Bool { !LoomAdaptiveDevice.isPad && (screenHeight <= 740 || screenWidth <= 390) }
+    private var introHeroHeight: CGFloat { LoomAdaptiveDevice.isPad ? 360 : 420 }
     private var introSubtextFont: Font { isCompactIntroLayout ? .system(size: 14) : .body }
     private let autoWritePillHeight: CGFloat = 45
     private var isVisionKeyboardVisible: Bool { step == .vision && keyboardHeight > 0 }
@@ -376,7 +377,7 @@ struct PurposeStartView: View {
         }
         .safeAreaInset(edge: .bottom) {
             footer
-                .padding(.horizontal)
+                .loomAdaptiveColumn(maxWidth: 760, horizontalPadding: 20, alignment: .top)
                 .padding(.top, 8)
                 .padding(.bottom, 10)
                 .background(Color(.systemGroupedBackground))
@@ -636,7 +637,7 @@ struct PurposeStartView: View {
         }
         .padding(.horizontal)
         .padding(.bottom, contentBottomPadding + keyboardScrollableBottomPadding)
-        .frame(maxWidth: 720, alignment: .topLeading)
+        .frame(maxWidth: 760, alignment: .topLeading)
         .frame(maxWidth: .infinity, alignment: .top)
     }
 
@@ -651,10 +652,10 @@ struct PurposeStartView: View {
                         .resizable()
                         .scaledToFit()
                         .frame(maxWidth: .infinity)
-                        .frame(height: 420)
+                        .frame(height: introHeroHeight)
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
-                .frame(height: 420)
+                .frame(height: introHeroHeight)
                 .padding(.bottom, 2)
             }
             if step != .intro && !(startAtInsights && step == .insights) {

@@ -208,6 +208,19 @@ extension View {
             self
         }
     }
+
+    func reviewPathColumn(
+        maxWidth: CGFloat = 720,
+        horizontalPadding: CGFloat = 20,
+        alignment: Alignment = .topLeading
+    ) -> some View {
+        loomAdaptiveColumn(
+            maxWidth: maxWidth,
+            horizontalPadding: horizontalPadding,
+            alignment: alignment,
+            appliesOnPhone: true
+        )
+    }
 }
 
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {

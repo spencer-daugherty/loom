@@ -43,6 +43,7 @@ struct LegalLinksView: View {
                         privacyContent
                     }
                 }
+                .loomAdaptiveConstrainedFrame(maxWidth: 760, alignment: .topLeading)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(20)
             }

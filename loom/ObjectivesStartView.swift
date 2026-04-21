@@ -5,9 +5,10 @@ struct ObjectivesStartView: View {
 
     private var screenHeight: CGFloat { UIScreen.main.bounds.height }
     private var screenWidth: CGFloat { UIScreen.main.bounds.width }
-    private var isCompactIntroLayout: Bool { screenHeight <= 740 || screenWidth <= 390 }
+    private var isCompactIntroLayout: Bool { !LoomAdaptiveDevice.isPad && (screenHeight <= 740 || screenWidth <= 390) }
     private var introSubtextFont: Font { isCompactIntroLayout ? .system(size: 14) : .body }
     private var introHeroHeight: CGFloat {
+        if LoomAdaptiveDevice.isPad { return 360 }
         switch screenHeight {
         case ...680: return 210
         case ...740: return 240
@@ -35,7 +36,7 @@ struct ObjectivesStartView: View {
                     }
                     .padding(.horizontal)
                     .padding(.bottom, bottomButtonReserve + max(22, geo.safeAreaInsets.bottom))
-                    .frame(maxWidth: 720, alignment: .topLeading)
+                    .frame(maxWidth: 760, alignment: .topLeading)
                     .frame(maxWidth: .infinity, alignment: .top)
                 }
             }
@@ -52,7 +53,7 @@ struct ObjectivesStartView: View {
                     .controlSize(.large)
                     .frame(maxWidth: .infinity)
                 }
-                .padding(.horizontal)
+                .loomAdaptiveColumn(maxWidth: 760, horizontalPadding: 20, alignment: .top)
                 .padding(.top, 8)
                 .padding(.bottom, max(footerInnerBottomPadding, geo.safeAreaInsets.bottom + 8))
                 .background(Color(.systemGroupedBackground))

@@ -24,6 +24,7 @@ struct OnboardingFlowView: View {
     var body: some View {
         VStack(spacing: 0) {
             topBar
+                .reviewPathColumn(maxWidth: 720, horizontalPadding: 20, alignment: .top)
 
             TabView(selection: $currentIndex) {
                 ForEach(Array(pages.enumerated()), id: \.offset) { index, page in
@@ -46,9 +47,9 @@ struct OnboardingFlowView: View {
                 .controlSize(.large)
                 .accessibilityIdentifier(isLastPage ? (session.hasAccount ? "onboarding_continue" : "onboarding_createAccount") : "onboarding_next")
             }
-            .padding(.horizontal, 20)
             .padding(.top, 20)
             .padding(.bottom, 26)
+            .reviewPathColumn(maxWidth: 720, horizontalPadding: 20, alignment: .top)
         }
         .background(Color(.systemBackground).ignoresSafeArea())
         .onAppear {
@@ -99,7 +100,6 @@ struct OnboardingFlowView: View {
                 .accessibilityIdentifier("onboarding_skip")
             }
         }
-        .padding(.horizontal, 20)
         .padding(.top, 14)
     }
 

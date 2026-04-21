@@ -1010,6 +1010,7 @@ struct FulfillmentView: View {
 
     private var fulfillmentScreenCore: some View {
         fulfillmentBaseContent
+            .loomAdaptiveConstrainedFrame(maxWidth: 860, alignment: .top)
             .navigationTitle("Fulfillment")
             .toolbar { fulfillmentToolbarContent }
     }
@@ -3181,6 +3182,7 @@ struct LittleWinsManagerSheetView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .loomAdaptiveConstrainedFrame(maxWidth: 760, alignment: .top)
             .navigationTitle("Manage Little Wins")
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarBackButtonHidden(isDeleteMode)
@@ -3413,6 +3415,7 @@ private struct RolesManagerSheetView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .loomAdaptiveConstrainedFrame(maxWidth: 760, alignment: .top)
             .navigationTitle("Manage Identity")
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarBackButtonHidden(isDeleteMode)
@@ -3727,6 +3730,7 @@ private struct RoleEditorSheetView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .loomAdaptiveConstrainedFrame(maxWidth: 760, alignment: .top)
             .navigationTitle(isEditing ? "Edit Identity" : "Add Identity")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -4235,6 +4239,7 @@ private struct ResourcesManagerSheetView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .loomAdaptiveConstrainedFrame(maxWidth: 760, alignment: .top)
             .navigationTitle("Manage Resources")
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarBackButtonHidden(isDeleteMode)
@@ -4341,6 +4346,7 @@ private struct ResourceEditorSheetView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .loomAdaptiveConstrainedFrame(maxWidth: 760, alignment: .top)
             .navigationTitle(isEditing ? "Edit Resource" : "Add Resource")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -4763,6 +4769,7 @@ struct LittleWinEditorSheetView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .loomAdaptiveConstrainedFrame(maxWidth: 760, alignment: .top)
             .navigationTitle(isEditing ? "Edit Little Win" : "Add Little Win")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

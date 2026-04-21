@@ -112,6 +112,10 @@ struct PaywallView: View {
         return purchaseManager.launchPurchaseCatalogMessage
     }
 
+    private var availabilityOverlayTextColor: Color {
+        colorScheme == .dark ? .white : .black
+    }
+
     private func isPlanSelectable(_ plan: SubscriptionPlan) -> Bool {
         plan.isSelectable()
     }
@@ -289,9 +293,10 @@ struct PaywallView: View {
                         .readHeight { lowerContentHeight = $0 }
                 }
                 .padding(.top, topInset + 20)
-                .padding(.horizontal, 20)
                 .padding(.bottom, bottomInset)
-                .frame(maxWidth: .infinity, minHeight: viewportHeight, alignment: .topLeading)
+                .frame(maxWidth: 720, alignment: .topLeading)
+                .frame(maxWidth: .infinity, minHeight: viewportHeight, alignment: .top)
+                .padding(.horizontal, 20)
             }
             .frame(width: geo.size.width, height: viewportHeight, alignment: .topLeading)
         }
@@ -678,7 +683,7 @@ struct PaywallView: View {
                         .overlay {
                             Text(countdownText)
                                 .font(.footnote.weight(.semibold))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(availabilityOverlayTextColor)
                                 .multilineTextAlignment(.center)
                                 .padding(.horizontal, 16)
                         }

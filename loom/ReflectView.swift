@@ -954,6 +954,7 @@ struct ReflectView: View {
                 celebrationView
             }
         }
+        .loomAdaptiveConstrainedFrame(maxWidth: 860, alignment: .top)
         .navigationTitle(showCelebration ? "" : stepTitle)
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)

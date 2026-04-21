@@ -173,9 +173,9 @@ struct DiagnosticFlowView: View {
                             EmptyView()
                         }
                     }
-                    .padding(.horizontal, 20)
                     .padding(.top, 20)
                     .padding(.bottom, 28)
+                    .reviewPathColumn(maxWidth: 720, horizontalPadding: 20, alignment: .topLeading)
                 }
             }
         }

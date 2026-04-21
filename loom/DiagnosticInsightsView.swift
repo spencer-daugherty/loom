@@ -147,6 +147,7 @@ struct DiagnosticInsightsView: View {
             .padding(.horizontal, 20)
             .padding(.top, 20)
             .padding(.bottom, 28)
+            .loomAdaptiveConstrainedFrame(maxWidth: 760, alignment: .topLeading)
         }
         .background(Color(.systemBackground).ignoresSafeArea())
         .navigationBarBackButtonHidden(true)

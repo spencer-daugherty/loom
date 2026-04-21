@@ -270,8 +270,9 @@ struct PlanStartView: View {
 
     private var screenHeight: CGFloat { UIScreen.main.bounds.height }
     private var screenWidth: CGFloat { UIScreen.main.bounds.width }
-    private var isCompactIntroLayout: Bool { screenHeight <= 740 || screenWidth <= 390 }
+    private var isCompactIntroLayout: Bool { !LoomAdaptiveDevice.isPad && (screenHeight <= 740 || screenWidth <= 390) }
     private var introSubtextFont: Font { isCompactIntroLayout ? .system(size: 14) : .body }
+    private var introHeroHeight: CGFloat { LoomAdaptiveDevice.isPad ? 360 : 420 }
 
     var body: some View {
         GeometryReader { geo in
@@ -290,10 +291,10 @@ struct PlanStartView: View {
                                     .resizable()
                                     .scaledToFit()
                                     .frame(maxWidth: .infinity)
-                                    .frame(height: 420)
+                                    .frame(height: introHeroHeight)
                                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                             }
-                            .frame(height: 420)
+                            .frame(height: introHeroHeight)
                             .padding(.bottom, 2)
 
                             HStack(spacing: 6) {
@@ -331,7 +332,7 @@ struct PlanStartView: View {
                     }
                     .padding(.horizontal)
                     .padding(.bottom, max(112, geo.safeAreaInsets.bottom + 88))
-                    .frame(maxWidth: 720, alignment: .topLeading)
+                    .frame(maxWidth: 760, alignment: .topLeading)
                     .frame(maxWidth: .infinity, alignment: .top)
                 }
             }
@@ -345,7 +346,7 @@ struct PlanStartView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
-                .padding(.horizontal)
+                .loomAdaptiveColumn(maxWidth: 760, horizontalPadding: 20, alignment: .top)
                 .padding(.top, 8)
                 .padding(.bottom, max(14, geo.safeAreaInsets.bottom + 8))
                 .background(Color(.systemGroupedBackground))
@@ -664,6 +665,7 @@ private struct PlanFlowHostView: View {
                 PlanStepFiveView(onBack: { step = 6 })
             }
         }
+        .loomAdaptiveConstrainedFrame(maxWidth: 860, alignment: .topLeading)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }

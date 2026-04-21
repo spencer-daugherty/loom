@@ -1055,6 +1055,7 @@ struct PurposeView: View {
         }
         .listStyle(.insetGrouped)
         .listRowSpacing(4)
+        .loomAdaptiveConstrainedFrame(maxWidth: 820, alignment: .top)
         .toolbar { topToolbar }
         .navigationTitle("Purpose")
         .background(backgroundTapDismiss)

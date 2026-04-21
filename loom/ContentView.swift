@@ -736,6 +736,7 @@ struct ContentView: View {
                     .environment(\.contentCardDensity, cardDensity)
                 }
             }
+            .loomAdaptiveConstrainedFrame(maxWidth: 860, alignment: .top)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             contentViewPopupOverlay
@@ -6789,6 +6790,7 @@ struct ContentLittleWinsManagerSheetView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .loomAdaptiveConstrainedFrame(maxWidth: 760, alignment: .top)
             .animation(nil, value: selectedCategoryID)
             .navigationTitle("Manage Little Wins")
             .navigationBarTitleDisplayMode(.inline)

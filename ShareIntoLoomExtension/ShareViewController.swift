@@ -330,6 +330,11 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
     }()
     private let scrollView = UIScrollView()
     private let scrollContent = UIView()
+    private lazy var editorStackPreferredWidthConstraint: NSLayoutConstraint = {
+        let constraint = editorStack.widthAnchor.constraint(equalTo: scrollContent.widthAnchor, constant: -32)
+        constraint.priority = .defaultHigh
+        return constraint
+    }()
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -368,6 +373,7 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
             buttonStack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             buttonStack.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 12),
             buttonStack.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -12),
+            buttonStack.widthAnchor.constraint(lessThanOrEqualToConstant: 720),
 
             loadingStack.topAnchor.constraint(equalTo: buttonStack.bottomAnchor, constant: 10),
             loadingStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
@@ -385,9 +391,12 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
             scrollContent.widthAnchor.constraint(equalTo: scrollView.frameLayoutGuide.widthAnchor),
 
             editorStack.topAnchor.constraint(equalTo: scrollContent.topAnchor, constant: 14),
-            editorStack.leadingAnchor.constraint(equalTo: scrollContent.leadingAnchor, constant: 16),
-            editorStack.trailingAnchor.constraint(equalTo: scrollContent.trailingAnchor, constant: -16),
+            editorStack.centerXAnchor.constraint(equalTo: scrollContent.centerXAnchor),
+            editorStack.leadingAnchor.constraint(greaterThanOrEqualTo: scrollContent.leadingAnchor, constant: 16),
+            editorStack.trailingAnchor.constraint(lessThanOrEqualTo: scrollContent.trailingAnchor, constant: -16),
             editorStack.bottomAnchor.constraint(equalTo: scrollContent.bottomAnchor, constant: -16),
+            editorStack.widthAnchor.constraint(lessThanOrEqualToConstant: 720),
+            editorStackPreferredWidthConstraint,
 
             keyboardDismissButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
             keyboardDismissBottomConstraint!,
@@ -411,6 +420,10 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         Task { [weak self] in
             await self?.processShare()
         }
+    }
+
+    override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
+        .portrait
     }
 
     private func processShare() async {

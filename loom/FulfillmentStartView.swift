@@ -1775,7 +1775,7 @@ struct FulfillmentStartView: View {
 
     private var screenHeight: CGFloat { UIScreen.main.bounds.height }
     private var screenWidth: CGFloat { UIScreen.main.bounds.width }
-    private var isCompactIntroLayout: Bool { screenHeight <= 740 || screenWidth <= 390 }
+    private var isCompactIntroLayout: Bool { !LoomAdaptiveDevice.isPad && (screenHeight <= 740 || screenWidth <= 390) }
     private var introSubtextFont: Font { isCompactIntroLayout ? .system(size: 14) : .body }
     private let footerPinnedHeight: CGFloat = 68
     private let keyboardFloatingGap: CGFloat = 15
@@ -1792,6 +1792,7 @@ struct FulfillmentStartView: View {
         return keyboardOverlapInView + keyboardFloatingGap
     }
     private var introHeroHeight: CGFloat {
+        if LoomAdaptiveDevice.isPad { return 360 }
         switch screenHeight {
         case ...680: return 210
         case ...740: return 240
@@ -1861,7 +1862,7 @@ struct FulfillmentStartView: View {
 
                 footer
             }
-            .padding(.horizontal)
+            .loomAdaptiveColumn(maxWidth: 760, horizontalPadding: 20, alignment: .top)
             .padding(.top, 8)
             .padding(.bottom, 10)
             .background(Color(.systemGroupedBackground))
@@ -1872,7 +1873,7 @@ struct FulfillmentStartView: View {
     private var introFooterOverlay: some View {
         if step == .intro {
             footer
-                .padding(.horizontal)
+                .loomAdaptiveColumn(maxWidth: 760, horizontalPadding: 20, alignment: .top)
                 .padding(.top, 8)
                 .padding(.bottom, 10)
                 .background(Color(.systemGroupedBackground))
@@ -2103,7 +2104,7 @@ struct FulfillmentStartView: View {
         }
         .padding(.horizontal)
         .padding(.bottom, (step == .intro ? introFooterReserve : (step == .summary ? 100 : 0)) + keyboardScrollableBottomPadding)
-        .frame(maxWidth: 720, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: 760, maxHeight: .infinity, alignment: .topLeading)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
