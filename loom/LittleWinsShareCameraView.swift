@@ -14,7 +14,7 @@ struct LittleWinsShareCameraView: View {
 
     @AppStorage("analytics_install_date") private var analyticsInstallDate = ""
     @AppStorage(UserSessionStore.Keys.isSubscribed) private var isSubscribed = false
-    @AppStorage("loom.subscription_plan") private var subscriptionPlanRaw = SubscriptionPlan.annual.rawValue
+    @AppStorage("loom.subscription_plan") private var subscriptionPlanRaw = ""
     @AppStorage(UserSessionStore.Keys.accountName) private var accountName = ""
 
     @Query(sort: \Fulfillment.updatedAt, order: .forward)

@@ -129,7 +129,7 @@ Review steps:
 Expected behavior:
 - The review account signs in through the standard email/password flow.
 - After sign-in, Loom may briefly show the standard splash while a locally seeded isolated demo workspace finishes preparing.
-- The review account opens with stable seeded data and bypasses first-run setup so the full app can be reviewed immediately.
+- The `demo@loomlife.us` review account opens with stable seeded data and bypasses first-run setup so the full app can be reviewed immediately.
 - No hidden review toggles, remote demo provisioning, backend demo-plan overrides, or release-visible developer tools are included in the shipping build.
 - Optional permissions such as Health, Reminders, Camera, Photos, and Notifications are not required for initial review.
 - Delete Account is available in Account.

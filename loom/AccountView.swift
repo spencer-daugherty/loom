@@ -1647,7 +1647,7 @@ struct AccountDetailsView: View {
     @AppStorage(UserSessionStore.Keys.hasAccount) private var hasAccount = false
     @AppStorage(UserSessionStore.Keys.isSubscribed) private var isSubscribed = false
     @AppStorage(SubscriptionAccessGate.inactivePurchaseOverrideKey) private var inactivePurchaseOverrideEnabled = false
-    @AppStorage("loom.subscription_plan") private var subscriptionPlanRaw = SubscriptionPlan.annual.rawValue
+    @AppStorage("loom.subscription_plan") private var subscriptionPlanRaw = ""
     @State private var accountError: String? = nil
     @State private var showSignOutConfirmation = false
     @State private var showDeleteAccountSheet = false
@@ -1946,13 +1946,10 @@ struct AccountDetailsView: View {
             isSubscribed: isSubscribed,
             inactivePurchaseOverrideEnabled: inactivePurchaseOverrideEnabled
         ) else { return "Inactive" }
-        if subscriptionPlanRaw == SubscriptionPlan.lifetime.rawValue {
-            return SubscriptionPlan.lifetime.title
+        if let storedSubscriptionPlan {
+            return storedSubscriptionPlan.title
         }
-        if subscriptionPlanRaw == SubscriptionPlan.monthly.rawValue {
-            return SubscriptionPlan.monthly.title
-        }
-        return SubscriptionPlan.annual.title
+        return "Active"
     }
 
     private var resolvedSubscriptionPlan: SubscriptionPlan? {
@@ -1960,7 +1957,11 @@ struct AccountDetailsView: View {
             return activePlan
         }
         guard !purchaseManager.hasLoadedEntitlements else { return nil }
-        return SubscriptionPlan(rawValue: subscriptionPlanRaw)
+        return storedSubscriptionPlan
+    }
+
+    private var storedSubscriptionPlan: SubscriptionPlan? {
+        SubscriptionPlan(rawValue: subscriptionPlanRaw.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     private var isSubscriptionManagementAvailable: Bool {
