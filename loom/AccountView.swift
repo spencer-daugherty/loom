@@ -25,6 +25,51 @@ fileprivate let loomAIInsightsRefreshToggleDefaultsKey = "loom.enableLoomAIInsig
 private let firebaseGoogleProviderID = "google.com"
 private let firebaseEmailProviderID = "password"
 
+enum AccountDeletionProviderResolver {
+    enum Provider: Equatable {
+        case apple
+        case google
+        case email
+        case unknown
+    }
+
+    static func resolve(
+        providerIDs: some Sequence<String>,
+        storedProvider: String,
+        googleUserID: String,
+        appleUserID: String
+    ) -> Provider {
+        let providers = Set(providerIDs)
+        if providers.contains("apple.com") {
+            return .apple
+        }
+        if providers.contains(firebaseGoogleProviderID) {
+            return .google
+        }
+        if providers.contains(firebaseEmailProviderID) {
+            return .email
+        }
+
+        let normalizedProvider = storedProvider.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch normalizedProvider {
+        case "apple":
+            return .apple
+        case "google":
+            return .google
+        case "email":
+            return .email
+        default:
+            if !googleUserID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return .google
+            }
+            if !appleUserID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return .apple
+            }
+            return .unknown
+        }
+    }
+}
+
 private enum AccountDataDeletion {
     static func deleteAllData(in context: ModelContext) {
         deleteAllRows(DrivingForce.self, in: context)
@@ -1628,13 +1673,6 @@ struct AccountDetailsView: View {
         case name
     }
 
-    private enum AccountDeletionProvider {
-        case apple
-        case google
-        case email
-        case unknown
-    }
-
     @Environment(\.modelContext) private var context
     @Environment(\.openURL) private var openURL
     @EnvironmentObject private var session: UserSessionStore
@@ -1994,7 +2032,7 @@ struct AccountDetailsView: View {
     }
 
     private var canShowPlanPickerFromAccount: Bool {
-        resolvedSubscriptionPlan != .lifetime
+        SubscriptionPlan.launchVisiblePlans.count > 1 && resolvedSubscriptionPlan != .lifetime
     }
 
     private var accountProviderLabel: String {
@@ -2017,33 +2055,16 @@ struct AccountDetailsView: View {
         return "Email"
     }
 
-    private var deletionProvider: AccountDeletionProvider {
-#if canImport(FirebaseAuth)
-        if let user = Auth.auth().currentUser {
-            let providers = Set(user.providerData.map(\.providerID))
-            if providers.contains(AuthProviderID.apple.rawValue) {
-                return .apple
-            }
-            if providers.contains(firebaseGoogleProviderID) {
-                return .google
-            }
-            if providers.contains(firebaseEmailProviderID) {
-                return .email
-            }
+    private var deletionProvider: AccountDeletionProviderResolver.Provider {
+        if let authenticatedProvider = authenticatedDeletionProvider {
+            return authenticatedProvider
         }
-#endif
-
-        let normalizedProvider = authProvider.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        switch normalizedProvider {
-        case "apple":
-            return .apple
-        case "google":
-            return .google
-        case "email":
-            return .email
-        default:
-            return .unknown
-        }
+        return AccountDeletionProviderResolver.resolve(
+            providerIDs: [String](),
+            storedProvider: authProvider,
+            googleUserID: googleUserID,
+            appleUserID: appleUserID
+        )
     }
 
     private var deleteAccountInstructionText: String {
@@ -2055,7 +2076,7 @@ struct AccountDetailsView: View {
         case .email:
             return "This permanently deletes your Loom account and removes your personalization history and app data from this device. App Store subscriptions are managed by Apple and are not canceled automatically. If needed, cancel the subscription separately in Apple Account Settings before deleting your account. To continue, type \"DELETE\" below and enter your password."
         case .unknown:
-            return "This permanently deletes your Loom account and removes your personalization history and app data from this device. App Store subscriptions are managed by Apple and are not canceled automatically. If needed, cancel the subscription separately in Apple Account Settings before deleting your account. To continue, type \"DELETE\" below."
+            return "This permanently deletes your Loom account and removes your personalization history and app data from this device. App Store subscriptions are managed by Apple and are not canceled automatically. If needed, cancel the subscription separately in Apple Account Settings before deleting your account. Sign in again if Loom asks for verification before deletion finishes."
         }
     }
 
@@ -2067,8 +2088,28 @@ struct AccountDetailsView: View {
         if deletionProvider == .email {
             return !deleteAccountPassword.isEmpty
         }
-        return true
+        return deletionProvider != .unknown
     }
+
+    private var authenticatedDeletionProvider: AccountDeletionProviderResolver.Provider? {
+#if canImport(FirebaseAuth)
+        guard let user = Auth.auth().currentUser else { return nil }
+        return deletionProvider(for: user)
+#else
+        return nil
+#endif
+    }
+
+#if canImport(FirebaseAuth)
+    private func deletionProvider(for user: User) -> AccountDeletionProviderResolver.Provider {
+        AccountDeletionProviderResolver.resolve(
+            providerIDs: user.providerData.map(\.providerID),
+            storedProvider: authProvider,
+            googleUserID: googleUserID,
+            appleUserID: appleUserID
+        )
+    }
+#endif
 
     @ViewBuilder
     private func settingsRow(title: String, value: String, showsChevron: Bool = true) -> some View {
@@ -2250,20 +2291,17 @@ struct AccountDetailsView: View {
         isDeletingAccount = true
         accountError = nil
         deleteAccountError = nil
+        defer { isDeletingAccount = false }
 
         let personalizationUserKey = PersonalizationUserIdentity.currentUserKey()
         let deletedWorkspace = resolvedWorkspaceForDeletingAccount()
 
 #if canImport(FirebaseAuth)
-        if let user = Auth.auth().currentUser {
-            do {
-                try await prepareAuthenticatedUserForDeletion(user)
-                try await user.delete()
-            } catch {
-                deleteAccountError = deleteAccountErrorMessage(for: error)
-                isDeletingAccount = false
-                return
-            }
+        do {
+            try await deleteAuthenticatedAccountIfNeeded()
+        } catch {
+            deleteAccountError = deleteAccountErrorMessage(for: error)
+            return
         }
 #endif
 
@@ -2275,7 +2313,6 @@ struct AccountDetailsView: View {
         deleteAccountPassword = ""
         showDeleteAccountSheet = false
         clearLocalAccountSession()
-        isDeletingAccount = false
     }
 
     @MainActor
@@ -2314,17 +2351,44 @@ struct AccountDetailsView: View {
         }
 #if canImport(FirebaseAuth)
         let nsError = error as NSError
+#if canImport(AuthenticationServices)
+        if nsError.domain == ASAuthorizationError.errorDomain,
+           let authorizationCode = ASAuthorizationError.Code(rawValue: nsError.code) {
+            switch authorizationCode {
+            case .canceled:
+                return "Account deletion was canceled before verification finished."
+            case .failed:
+                return "Account verification did not complete. Please try again."
+            default:
+                return "Unable to verify this account for deletion right now."
+            }
+        }
+#endif
+#if canImport(GoogleSignIn)
+        if let googleErrorCode = GIDSignInError.Code(rawValue: nsError.code) {
+            switch googleErrorCode {
+            case .canceled:
+                return "Google verification was canceled before deletion finished."
+            default:
+                return "Google verification did not complete. Please try again."
+            }
+        }
+#endif
         guard let authCode = AuthErrorCode(rawValue: nsError.code) else {
             return "Unable to delete this account right now. Please try again."
         }
 
         switch authCode {
         case .requiresRecentLogin:
-            return "Please verify this account again and then retry deletion."
+            return "Please verify this account again to finish deletion."
         case .wrongPassword, .invalidCredential:
             return "The password or sign-in confirmation did not match this account."
         case .networkError:
             return "Deleting your account needs a network connection."
+        case .userNotFound:
+            return "This account is no longer signed in on this device. Sign in again, then retry deletion."
+        case .userDisabled:
+            return "This account is currently unavailable and cannot be deleted right now."
         default:
             return "Unable to delete this account right now. Please try again."
         }
@@ -2335,8 +2399,37 @@ struct AccountDetailsView: View {
 
 #if canImport(FirebaseAuth)
     @MainActor
-    private func prepareAuthenticatedUserForDeletion(_ user: User) async throws {
-        switch deletionProvider {
+    private func deleteAuthenticatedAccountIfNeeded() async throws {
+        guard let user = Auth.auth().currentUser else {
+            throw AccountDeletionFlowError.missingAuthenticatedUser
+        }
+
+        let provider = deletionProvider(for: user)
+        guard provider != .unknown else {
+            throw AccountDeletionFlowError.reauthenticationMethodUnavailable
+        }
+
+        try await prepareAuthenticatedUserForDeletion(user, provider: provider)
+        do {
+            try await user.delete()
+        } catch {
+            let nsError = error as NSError
+            if let authCode = AuthErrorCode(rawValue: nsError.code),
+               authCode == .requiresRecentLogin {
+                try await prepareAuthenticatedUserForDeletion(user, provider: provider)
+                try await user.delete()
+                return
+            }
+            throw error
+        }
+    }
+
+    @MainActor
+    private func prepareAuthenticatedUserForDeletion(
+        _ user: User,
+        provider: AccountDeletionProviderResolver.Provider
+    ) async throws {
+        switch provider {
         case .apple:
             try await reauthenticateAndRevokeApple(for: user)
         case .google:
@@ -2344,7 +2437,7 @@ struct AccountDetailsView: View {
         case .email:
             try await reauthenticateEmail(for: user)
         case .unknown:
-            break
+            throw AccountDeletionFlowError.reauthenticationMethodUnavailable
         }
     }
 
@@ -2377,7 +2470,16 @@ struct AccountDetailsView: View {
         }
 
         GIDSignIn.sharedInstance.configuration = GIDConfiguration(clientID: clientID)
-        let result = try await GIDSignIn.sharedInstance.signIn(withPresenting: presentingController)
+        let result: GIDSignInResult
+        do {
+            result = try await GIDSignIn.sharedInstance.signIn(withPresenting: presentingController)
+        } catch {
+            let nsError = error as NSError
+            if GIDSignInError.Code(rawValue: nsError.code) == .canceled {
+                throw AccountDeletionFlowError.googleVerificationCancelled
+            }
+            throw error
+        }
         guard let idToken = result.user.idToken?.tokenString else {
             throw AccountDeletionFlowError.googleCredentialUnavailable
         }
@@ -2519,9 +2621,12 @@ struct AccountDetailsView: View {
 private enum AccountDeletionFlowError: LocalizedError {
     case passwordRequired
     case emailUnavailable
+    case missingAuthenticatedUser
+    case reauthenticationMethodUnavailable
     case googleConfigurationUnavailable
     case googlePresentationUnavailable
     case googleCredentialUnavailable
+    case googleVerificationCancelled
     case applePresentationUnavailable
     case appleIdentityTokenUnavailable
     case appleAuthorizationCodeUnavailable
@@ -2532,12 +2637,18 @@ private enum AccountDeletionFlowError: LocalizedError {
             return "Enter your password to delete this account."
         case .emailUnavailable:
             return "This email account cannot be re-verified right now."
+        case .missingAuthenticatedUser:
+            return "This account is not currently signed in on this device. Sign in again, then retry deletion."
+        case .reauthenticationMethodUnavailable:
+            return "Loom couldn't determine how to verify this account for deletion. Sign out, sign back in, and try again."
         case .googleConfigurationUnavailable:
             return "Google sign in is not available right now."
         case .googlePresentationUnavailable:
             return "Unable to present Google sign in for account verification."
         case .googleCredentialUnavailable:
             return "Google verification did not return the credentials needed to delete this account."
+        case .googleVerificationCancelled:
+            return "Google verification was canceled before deletion finished."
         case .applePresentationUnavailable:
             return "Unable to present Sign in with Apple for account verification."
         case .appleIdentityTokenUnavailable:
@@ -2664,7 +2775,7 @@ private struct AccountSubscriptionView: View {
     }
 
     private var canShowPlanPicker: Bool {
-        resolvedPlan != .lifetime
+        SubscriptionPlan.launchVisiblePlans.count > 1 && resolvedPlan != .lifetime
     }
 
     private var canOpenAppleSubscriptionManagement: Bool {

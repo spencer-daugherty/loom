@@ -79,6 +79,10 @@ struct PaywallView: View {
         purchaseManager.planAction(for: selectedPlan)
     }
 
+    private var visiblePlans: [SubscriptionPlan] {
+        SubscriptionPlan.launchVisiblePlans
+    }
+
     private var shouldShowPreviewBox: Bool {
         mode == .standard
     }
@@ -117,7 +121,8 @@ struct PaywallView: View {
     }
 
     private func isPlanSelectable(_ plan: SubscriptionPlan) -> Bool {
-        plan.isSelectable()
+        guard visiblePlans.contains(plan) else { return false }
+        return plan.isSelectable()
     }
 
     private func preferredManageSelection() -> SubscriptionPlan {
@@ -127,7 +132,7 @@ struct PaywallView: View {
         if let activePlan = purchaseManager.activePlan {
             return activePlan
         }
-        return .lifetime
+        return visiblePlans.first ?? .lifetime
     }
 
     var body: some View {
@@ -228,7 +233,7 @@ struct PaywallView: View {
                 } else if let newPlan {
                     selectedPlan = newPlan
                 } else {
-                    selectedPlan = .lifetime
+                    selectedPlan = visiblePlans.first ?? .lifetime
                 }
             }
             initializeSelectedPlanIfNeeded()
@@ -240,7 +245,7 @@ struct PaywallView: View {
             } else if let activePlan = purchaseManager.activePlan {
                 selectedPlan = activePlan
             } else {
-                selectedPlan = .lifetime
+                selectedPlan = visiblePlans.first ?? .lifetime
             }
         }
         .onChange(of: queuedPurchaseAfterLifetimeConfirmation) { _, queuedPurchase in
@@ -351,12 +356,10 @@ struct PaywallView: View {
 
         VStack(alignment: .leading, spacing: paywallVerticalSpacing(for: screenHeight)) {
             VStack(spacing: planSpacing) {
-                planCard(for: .lifetime)
-                    .accessibilityIdentifier("paywall_plan_lifetime")
-                planCard(for: .annual)
-                    .accessibilityIdentifier("paywall_plan_annual")
-                planCard(for: .monthly)
-                    .accessibilityIdentifier("paywall_plan_monthly")
+                ForEach(visiblePlans) { plan in
+                    planCard(for: plan)
+                        .accessibilityIdentifier("paywall_plan_\(plan.rawValue)")
+                }
             }
             .padding(.top, planTopPadding)
 
@@ -804,14 +807,14 @@ struct PaywallView: View {
         if usesManageHeader {
             selectedPlan = preferredManageSelection()
         } else {
-            selectedPlan = .lifetime
+            selectedPlan = visiblePlans.first ?? .lifetime
         }
         hasInitializedPlanSelection = true
     }
 
     private func handlePrimaryCTA() {
         guard isPlanSelectable(selectedPlan) else {
-            selectedPlan = .lifetime
+            selectedPlan = visiblePlans.first ?? .lifetime
             return
         }
         guard isSelectedPlanPurchaseReady else {
@@ -840,7 +843,7 @@ struct PaywallView: View {
         fallbackSelection: SubscriptionPlan? = nil
     ) async {
         guard isPlanSelectable(plan) else {
-            selectedPlan = .lifetime
+            selectedPlan = visiblePlans.first ?? .lifetime
             return
         }
         purchaseStatusMessage = nil

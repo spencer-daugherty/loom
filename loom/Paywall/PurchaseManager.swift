@@ -93,6 +93,7 @@ final class PurchaseManager: ObservableObject {
     }
 
     func isProductReadyForPurchase(for plan: SubscriptionPlan) -> Bool {
+        guard SubscriptionPlan.launchVisiblePlans.contains(plan) else { return false }
         guard plan.isSelectable() else { return false }
         return product(for: plan) != nil
     }
@@ -159,10 +160,11 @@ final class PurchaseManager: ObservableObject {
         defer { isLoadingProducts = false }
 
         do {
-            let fetchedProducts = try await Product.products(for: SubscriptionPlan.allCases.map(\.storeKitProductID))
+            let visiblePlans = SubscriptionPlan.launchVisiblePlans
+            let fetchedProducts = try await Product.products(for: visiblePlans.map(\.storeKitProductID))
             let mappedProducts = Dictionary(uniqueKeysWithValues: fetchedProducts.map { ($0.id, $0) })
             let requiredProductIDs = Set(
-                SubscriptionPlan.allCases
+                visiblePlans
                     .filter { $0.isSelectable() }
                     .map(\.storeKitProductID)
             )
@@ -174,12 +176,12 @@ final class PurchaseManager: ObservableObject {
             self.missingProductIDs = missingProductIDs
             productCatalogErrorDescription = nil
             productsByID = mappedProducts
-            products = SubscriptionPlan.allCases.compactMap { mappedProducts[$0.storeKitProductID] }
+            products = visiblePlans.compactMap { mappedProducts[$0.storeKitProductID] }
             launchPurchaseCatalogState = missingProductIDs.isEmpty ? .ready : .temporarilyUnavailable
         } catch {
             log("Failed to load products: \(error.localizedDescription)")
             missingProductIDs = Set(
-                SubscriptionPlan.allCases
+                SubscriptionPlan.launchVisiblePlans
                     .filter { $0.isSelectable() }
                     .map(\.storeKitProductID)
             )

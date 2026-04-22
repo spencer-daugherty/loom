@@ -15,6 +15,33 @@ struct loomTests {
         // Write your test here and use APIs like `#expect(...)` to check expected conditions.
     }
 
+    @Test func launchCatalogIsLifetimeOnlyForSubmittedBuild() {
+        #expect(SubscriptionPlan.launchVisiblePlans == [.lifetime])
+        #expect(SubscriptionPlan.launchVisibleProductIDs == ["loom.lifetime"])
+    }
+
+    @Test func accountDeletionProviderPrefersAuthenticatedProviderIDs() {
+        let provider = AccountDeletionProviderResolver.resolve(
+            providerIDs: ["password", "google.com"],
+            storedProvider: "email",
+            googleUserID: "",
+            appleUserID: ""
+        )
+
+        #expect(provider == .google)
+    }
+
+    @Test func accountDeletionProviderFallsBackToStoredStateWhenAuthProvidersAreUnavailable() {
+        let provider = AccountDeletionProviderResolver.resolve(
+            providerIDs: [],
+            storedProvider: "",
+            googleUserID: "",
+            appleUserID: "apple-user"
+        )
+
+        #expect(provider == .apple)
+    }
+
     @Test func insightPromptContextIncludesSurfaceAndGuideContext() {
         let snapshot = sampleContextSnapshot()
 

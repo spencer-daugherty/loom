@@ -17,7 +17,7 @@ Current submission posture:
 - Hosted Support URL: `https://spencer-daugherty.github.io/loom/support.html`
 - Standard license agreement: Apple's Standard EULA
 - Tracking: `No`
-- Launch purchase posture: `Founding Member (Lifetime)` is the only selectable launch purchase; annual and monthly remain visible in-app as upcoming plans with countdown overlays and are not for sale yet
+- Launch purchase posture: `Founding Member (Lifetime)` is the only purchase offered in the submitted build
 - Release builds: no release-visible developer toggles, no release raw-data inspector access, no release in-memory debug log retention, and no release persistence of rich AI debug payloads
 
 Evidence boundary:
@@ -133,7 +133,7 @@ Expected behavior:
 - The review account signs in through the standard email/password flow.
 - After sign-in, Loom may briefly show the standard splash while a locally seeded isolated demo workspace finishes preparing.
 - The `demo@loomlife.us` review account opens with stable seeded data and bypasses first-run setup so the full app can be reviewed immediately.
-- `Founding Member (Lifetime)` is the only selectable launch purchase. Annual and Monthly are intentionally visible as upcoming plans and remain disabled until their launch dates.
+- `Founding Member (Lifetime)` is the only purchase offered in this submitted build.
 - No hidden review toggles, remote demo provisioning, backend demo-plan overrides, or release-visible developer tools are included in the shipping build.
 - Optional permissions such as Health, Reminders, Camera, Photos, and Notifications are not required for initial review.
 - Apple Health is identified in onboarding and in Account as an optional, read-only integration used for selected progress signals.
@@ -145,6 +145,31 @@ Expected behavior:
 Privacy / technical notes:
 - Link preview cards use Apple system preview services and local caching only.
 - The shipping build does not expose internal debug or developer-only controls.
+```
+
+### Paste-ready App Description
+
+Use this description for the lifetime-only launch build:
+
+```text
+Your life is not a to-do list.
+
+Loom is a life management system that helps you turn chaos into clarity by connecting your purpose, fulfillment areas, goals, action plans, and daily wins in one clear system.
+
+Loom requires the Founding Member (Lifetime) in-app purchase to use the app at launch. No subscription plan is included in this submitted version.
+
+Use Loom to:
+
+- Define the kind of life you want to live
+- Organize life into key areas like career, health, relationships, wealth, and more
+- Turn goals into focused action plans
+- Keep important details attached to your actions with due dates, musts, places, assignments, and attachments
+- Build momentum through Little Wins, small repeatable actions that create progress over time
+- Get personalized guidance, suggestions, and next steps from LoomAI
+- See what part of life needs your attention so you can rebalance with intention
+- Optionally connect Apple Health to support progress tracking with selected read-only health signals
+
+Loom is built for people who want more than a task manager.
 ```
 
 ## Release-Build Compliance Checklist

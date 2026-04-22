@@ -29,7 +29,7 @@ Intended App Review path:
 
 - The hosted privacy policy and support page use final public-facing language.
 - The App Review attachment documents the exact demo-account path and optional-permission posture.
-- The launch monetization posture remains one live lifetime purchase plus two disabled upcoming plans.
+- The launch monetization posture remains one live lifetime purchase in the submitted build.
 - Link preview handling is documented as Apple-system preview fetches plus local caching only.
 - The release story remains Apple Intelligence on supported devices plus local fallback logic on unsupported devices.
 - Release builds are expected to avoid retaining internal in-memory debug logs and rich AI debug persistence.

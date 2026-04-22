@@ -7,6 +7,12 @@ enum SubscriptionPlan: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    static let launchVisiblePlans: [SubscriptionPlan] = [.lifetime]
+
+    static var launchVisibleProductIDs: [String] {
+        launchVisiblePlans.map(\.storeKitProductID)
+    }
+
     var availabilityDate: Date? {
         let calendar = Calendar(identifier: .gregorian)
 
