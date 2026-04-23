@@ -17,7 +17,7 @@ struct loomTests {
 
     @Test func launchCatalogIsLifetimeOnlyForSubmittedBuild() {
         #expect(SubscriptionPlan.launchVisiblePlans == [.lifetime])
-        #expect(SubscriptionPlan.launchVisibleProductIDs == ["loom.lifetime"])
+        #expect(SubscriptionPlan.launchVisibleProductIDs == ["lifetime"])
     }
 
     @Test func accountDeletionProviderPrefersAuthenticatedProviderIDs() {

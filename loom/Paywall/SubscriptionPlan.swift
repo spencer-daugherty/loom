@@ -57,7 +57,7 @@ enum SubscriptionPlan: String, CaseIterable, Identifiable {
     var storeKitProductID: String {
         switch self {
         case .lifetime:
-            return "loom.lifetime"
+            return "lifetime"
         case .annual:
             return "loom.annual.locked"
         case .monthly:
