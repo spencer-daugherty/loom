@@ -3,6 +3,13 @@ import StoreKit
 
 @MainActor
 final class PurchaseManager: ObservableObject {
+    enum SubscriptionAccessState: Equatable {
+        case unknown
+        case active(plan: SubscriptionPlan, periodEndDate: Date?)
+        case expiredSubscription(plan: SubscriptionPlan, expirationDate: Date?)
+        case inactive
+    }
+
     enum ProductCatalogState: Equatable {
         case loading
         case ready
@@ -65,6 +72,7 @@ final class PurchaseManager: ObservableObject {
     @Published private(set) var pendingAutoRenewEffectiveDate: Date?
     @Published private(set) var isProcessing = false
     @Published private(set) var hasLoadedEntitlements = false
+    @Published private(set) var subscriptionAccessState: SubscriptionAccessState = .unknown
     @Published private(set) var isLoadingProducts = false
     @Published private(set) var missingProductIDs: Set<String> = []
     @Published private(set) var productCatalogErrorDescription: String?
@@ -74,6 +82,11 @@ final class PurchaseManager: ObservableObject {
     private var productsByID: [String: Product] = [:]
     private var transactionUpdatesTask: Task<Void, Never>?
     private weak var session: UserSessionStore?
+
+    private enum DefaultsKey {
+        static let lastAutoRenewSubscriptionPlan = "loom.last_auto_renew_subscription_plan"
+        static let lastAutoRenewSubscriptionExpirationDate = "loom.last_auto_renew_subscription_expiration_date"
+    }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -211,24 +224,42 @@ final class PurchaseManager: ObservableObject {
         for await entitlement in Transaction.currentEntitlements {
             switch entitlement {
             case .verified(let transaction):
-                guard transaction.revocationDate == nil else { continue }
-                if let expirationDate = transaction.expirationDate, expirationDate <= now {
-                    continue
-                }
-                guard SubscriptionPlan.from(storeKitProductID: transaction.productID) != nil else { continue }
-                activeProductIDs.insert(transaction.productID)
-                if let expirationDate = transaction.expirationDate {
-                    let currentDate = expirationDatesByProductID[transaction.productID]
-                    if currentDate == nil || expirationDate > currentDate! {
-                        expirationDatesByProductID[transaction.productID] = expirationDate
-                    }
-                }
+                includeActiveEntitlement(
+                    from: transaction,
+                    now: now,
+                    activeProductIDs: &activeProductIDs,
+                    expirationDatesByProductID: &expirationDatesByProductID
+                )
             case .unverified(let transaction, let error):
                 log("Ignoring unverified entitlement \(transaction.productID): \(error.localizedDescription)")
             }
         }
 
-        applyEntitlementSnapshot(activeProductIDs: activeProductIDs, expirationDatesByProductID: expirationDatesByProductID)
+        for await unfinished in Transaction.unfinished {
+            switch unfinished {
+            case .verified(let transaction):
+                let didIncludeEntitlement = includeActiveEntitlement(
+                    from: transaction,
+                    now: now,
+                    activeProductIDs: &activeProductIDs,
+                    expirationDatesByProductID: &expirationDatesByProductID
+                )
+                if didIncludeEntitlement {
+                    await transaction.finish()
+                }
+            case .unverified(let transaction, let error):
+                log("Ignoring unverified unfinished transaction \(transaction.productID): \(error.localizedDescription)")
+            }
+        }
+
+        let expiredSubscription = activeProductIDs.isEmpty
+            ? await latestExpiredSubscriptionSnapshot(now: now)
+            : nil
+        applyEntitlementSnapshot(
+            activeProductIDs: activeProductIDs,
+            expirationDatesByProductID: expirationDatesByProductID,
+            expiredSubscription: expiredSubscription
+        )
         await refreshAutoRenewStatusIfNeeded()
         hasLoadedEntitlements = true
     }
@@ -340,23 +371,32 @@ final class PurchaseManager: ObservableObject {
 
     private func applyEntitlementSnapshot(
         activeProductIDs: Set<String>,
-        expirationDatesByProductID: [String: Date] = [:]
+        expirationDatesByProductID: [String: Date] = [:],
+        expiredSubscription: (plan: SubscriptionPlan, expirationDate: Date?)? = nil
     ) {
         ownedProductIDs = activeProductIDs
 
-        let resolvedPlan: SubscriptionPlan?
-        if activeProductIDs.contains(SubscriptionPlan.lifetime.storeKitProductID) {
-            resolvedPlan = .lifetime
-        } else if activeProductIDs.contains(SubscriptionPlan.annual.storeKitProductID) {
-            resolvedPlan = .annual
-        } else if activeProductIDs.contains(SubscriptionPlan.monthly.storeKitProductID) {
-            resolvedPlan = .monthly
-        } else {
-            resolvedPlan = nil
-        }
+        let resolvedPlan = [
+            SubscriptionPlan.lifetime,
+            .annual,
+            .monthly,
+        ].first { !$0.recognizedStoreKitProductIDs.isDisjoint(with: activeProductIDs) }
 
         activePlan = resolvedPlan
-        activePlanPeriodEndDate = resolvedPlan.flatMap { expirationDatesByProductID[$0.storeKitProductID] }
+        activePlanPeriodEndDate = resolvedPlan.flatMap { plan in
+            expirationDatesByProductID.first { plan.recognizedStoreKitProductIDs.contains($0.key) }?.value
+        }
+        if let resolvedPlan {
+            subscriptionAccessState = .active(plan: resolvedPlan, periodEndDate: activePlanPeriodEndDate)
+            persistAutoRenewSubscriptionHistoryIfNeeded(plan: resolvedPlan, expirationDate: activePlanPeriodEndDate)
+        } else if let expiredSubscription {
+            subscriptionAccessState = .expiredSubscription(
+                plan: expiredSubscription.plan,
+                expirationDate: expiredSubscription.expirationDate
+            )
+        } else {
+            subscriptionAccessState = .inactive
+        }
         activePlanWillAutoRenew = resolvedPlan == .lifetime ? false : nil
         if resolvedPlan == nil || resolvedPlan == .lifetime {
             clearPendingAutoRenewChange()
@@ -371,6 +411,88 @@ final class PurchaseManager: ObservableObject {
         }
         defaults.set(isPremium, forKey: UserSessionStore.Keys.isSubscribed)
         session?.setIsSubscribed(isPremium)
+    }
+
+    private func latestExpiredSubscriptionSnapshot(now: Date) async -> (plan: SubscriptionPlan, expirationDate: Date?)? {
+        var latestExpiredPlan: SubscriptionPlan?
+        var latestExpirationDate: Date?
+
+        for await transactionResult in Transaction.all {
+            guard case .verified(let transaction) = transactionResult else { continue }
+            guard transaction.revocationDate == nil else { continue }
+            guard let plan = SubscriptionPlan.from(storeKitProductID: transaction.productID),
+                  plan.isAutoRenewingSubscription else { continue }
+            guard let expirationDate = transaction.expirationDate, expirationDate <= now else { continue }
+            if latestExpirationDate == nil || expirationDate > latestExpirationDate! {
+                latestExpiredPlan = plan
+                latestExpirationDate = expirationDate
+            }
+        }
+
+        if let latestExpiredPlan {
+            persistAutoRenewSubscriptionHistoryIfNeeded(plan: latestExpiredPlan, expirationDate: latestExpirationDate)
+            return (latestExpiredPlan, latestExpirationDate)
+        }
+
+        return persistedExpiredSubscriptionSnapshot(now: now)
+    }
+
+    private func persistedExpiredSubscriptionSnapshot(now: Date) -> (plan: SubscriptionPlan, expirationDate: Date?)? {
+        guard let rawPlan = defaults.string(forKey: DefaultsKey.lastAutoRenewSubscriptionPlan),
+              let plan = SubscriptionPlan(rawValue: rawPlan),
+              plan.isAutoRenewingSubscription else {
+            return nil
+        }
+
+        let expirationTimeInterval = defaults.double(forKey: DefaultsKey.lastAutoRenewSubscriptionExpirationDate)
+        guard expirationTimeInterval > 0 else {
+            return nil
+        }
+        let expirationDate = Date(timeIntervalSince1970: expirationTimeInterval)
+        guard expirationDate <= now else {
+            return nil
+        }
+        return (plan, expirationDate)
+    }
+
+    private func persistAutoRenewSubscriptionHistoryIfNeeded(plan: SubscriptionPlan, expirationDate: Date?) {
+        guard plan.isAutoRenewingSubscription else {
+            if plan == .lifetime {
+                clearAutoRenewSubscriptionHistory()
+            }
+            return
+        }
+        guard let expirationDate else { return }
+        defaults.set(plan.rawValue, forKey: DefaultsKey.lastAutoRenewSubscriptionPlan)
+        defaults.set(expirationDate.timeIntervalSince1970, forKey: DefaultsKey.lastAutoRenewSubscriptionExpirationDate)
+    }
+
+    private func clearAutoRenewSubscriptionHistory() {
+        defaults.removeObject(forKey: DefaultsKey.lastAutoRenewSubscriptionPlan)
+        defaults.removeObject(forKey: DefaultsKey.lastAutoRenewSubscriptionExpirationDate)
+    }
+
+    @discardableResult
+    private func includeActiveEntitlement(
+        from transaction: Transaction,
+        now: Date,
+        activeProductIDs: inout Set<String>,
+        expirationDatesByProductID: inout [String: Date]
+    ) -> Bool {
+        guard transaction.revocationDate == nil else { return false }
+        if let expirationDate = transaction.expirationDate, expirationDate <= now {
+            return false
+        }
+        guard SubscriptionPlan.from(storeKitProductID: transaction.productID) != nil else { return false }
+
+        activeProductIDs.insert(transaction.productID)
+        if let expirationDate = transaction.expirationDate {
+            let currentDate = expirationDatesByProductID[transaction.productID]
+            if currentDate == nil || expirationDate > currentDate! {
+                expirationDatesByProductID[transaction.productID] = expirationDate
+            }
+        }
+        return true
     }
 
     private func applyOptimisticEntitlementSnapshot(forPurchasedProductID productID: String) {

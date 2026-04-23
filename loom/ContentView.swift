@@ -18,6 +18,7 @@ private enum ContentQuickstartTarget: String, Hashable {
 
 #Preview {
     ContentView()
+        .environmentObject(PurchaseManager())
         .loomPreviewContainer()
 }
 
@@ -72,6 +73,7 @@ private struct DarkModeInvertImage: ViewModifier {
 }
 
 struct ContentView: View {
+    @EnvironmentObject private var purchaseManager: PurchaseManager
     @AppStorage(UserSessionStore.Keys.hasSeenOnboarding) private var hasSeenOnboarding = false
     @AppStorage(UserSessionStore.Keys.hasAccount) private var hasAccount = false
     @AppStorage(UserSessionStore.Keys.hasCompletedDiagnostic) private var hasCompletedDiagnostic = false
@@ -171,8 +173,7 @@ struct ContentView: View {
     @State private var quickstartIsPageTransitionInFlight = false
     @State private var hasDeferredActionPlanCalloutThisSession = false
     @State private var isPresentingPurposeSetupPaywall = false
-    @State private var isPresentingInactiveSubscriptionPaywall = false
-    @State private var inactiveSubscriptionPaywallSource: InactiveSubscriptionPaywallSource = .lockedFeature
+    @State private var inactiveSubscriptionPaywallPresentation: InactiveSubscriptionPaywallPresentation? = nil
     @State private var pendingPurposeOpenAfterPaywall = false
     @State private var onboardingCallCardDestination: OnboardingCallCardDestination? = nil
 
@@ -185,6 +186,12 @@ struct ContentView: View {
     private enum PlayDestination: String, Identifiable, Hashable {
         case action
         var id: String { rawValue }
+    }
+
+    private struct InactiveSubscriptionPaywallPresentation: Identifiable, Equatable {
+        let id = UUID()
+        let source: InactiveSubscriptionPaywallSource
+        let bannerMessage: String?
     }
 
     private enum OnboardingCallCardDestination: String, Identifiable, Hashable {
@@ -1030,13 +1037,9 @@ struct ContentView: View {
                     PaywallView()
                 }
             }
-            .fullScreenCover(isPresented: $isPresentingInactiveSubscriptionPaywall) {
+            .fullScreenCover(item: $inactiveSubscriptionPaywallPresentation) { presentation in
                 NavigationStack {
-                    PaywallView(
-                        bannerMessage: inactiveSubscriptionPaywallSource == .setupFlow || shouldPresentStarterPaywallAsNewUser
-                            ? nil
-                            : SubscriptionAccessGate.inactiveBannerMessage
-                    )
+                    PaywallView(bannerMessage: presentation.bannerMessage)
                 }
             }
             .fullScreenCover(isPresented: $isPresentingLittleWinsShareCamera) {
@@ -1103,15 +1106,11 @@ struct ContentView: View {
                 if isPresentingPurposeSetupPaywall {
                     isPresentingPurposeSetupPaywall = false
                 }
-                if isPresentingInactiveSubscriptionPaywall {
-                    isPresentingInactiveSubscriptionPaywall = false
-                }
+                inactiveSubscriptionPaywallPresentation = nil
             }
             .onChange(of: inactivePurchaseOverrideEnabled) { _, isEnabled in
                 guard !isEnabled, hasActiveSubscriptionAccess else { return }
-                if isPresentingInactiveSubscriptionPaywall {
-                    isPresentingInactiveSubscriptionPaywall = false
-                }
+                inactiveSubscriptionPaywallPresentation = nil
             }
             .onChange(of: isPresentingPurposeSetupPaywall) { _, isPresented in
                 guard !isPresented else { return }
@@ -6084,8 +6083,14 @@ struct ContentView: View {
     private func presentInactiveSubscriptionPaywall(
         source: InactiveSubscriptionPaywallSource = .lockedFeature
     ) {
-        inactiveSubscriptionPaywallSource = source
-        isPresentingInactiveSubscriptionPaywall = true
+        inactiveSubscriptionPaywallPresentation = InactiveSubscriptionPaywallPresentation(
+            source: source,
+            bannerMessage: SubscriptionAccessGate.inactivePaywallBannerMessage(
+                accessState: purchaseManager.subscriptionAccessState,
+                source: source,
+                shouldPresentStarterPaywallAsNewUser: shouldPresentStarterPaywallAsNewUser
+            )
+        )
     }
 
     private func openOnboardingCallCardDestination(_ destination: OnboardingCallCardDestination) {
@@ -6959,6 +6964,7 @@ struct ContentView_Previews: PreviewProvider {
             ContentView()
                 .previewDevice("iPhone 14 Pro Max")
         }
+        .environmentObject(PurchaseManager())
     }
 }
 

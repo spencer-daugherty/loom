@@ -36,6 +36,20 @@ enum SubscriptionAccessGate {
         return isSubscribed && !LoomDeveloperBuild.enabled(inactivePurchaseOverrideEnabled)
     }
 
+    static func inactivePaywallBannerMessage(
+        accessState: PurchaseManager.SubscriptionAccessState,
+        source: InactiveSubscriptionPaywallSource,
+        shouldPresentStarterPaywallAsNewUser: Bool
+    ) -> String? {
+        guard source != .setupFlow, !shouldPresentStarterPaywallAsNewUser else {
+            return nil
+        }
+        guard case .expiredSubscription = accessState else {
+            return nil
+        }
+        return inactiveBannerMessage
+    }
+
     static func presentInactiveSubscriptionPaywall(source: InactiveSubscriptionPaywallSource = .lockedFeature) {
         NotificationCenter.default.post(name: .loomPresentInactiveSubscriptionPaywall, object: source.rawValue)
     }

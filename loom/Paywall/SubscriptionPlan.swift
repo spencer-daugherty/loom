@@ -7,7 +7,7 @@ enum SubscriptionPlan: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    static let launchVisiblePlans: [SubscriptionPlan] = [.lifetime]
+    static let launchVisiblePlans: [SubscriptionPlan] = [.lifetime, .annual, .monthly]
 
     static var launchVisibleProductIDs: [String] {
         launchVisiblePlans.map(\.storeKitProductID)
@@ -37,13 +37,18 @@ enum SubscriptionPlan: String, CaseIterable, Identifiable {
         }
     }
 
+    var lifetimeOfferEndDate: Date? {
+        let calendar = Calendar(identifier: .gregorian)
+        return calendar.date(from: DateComponents(year: 2026, month: 5, day: 31))
+    }
+
     func isSelectable(on currentDate: Date = Date(), calendar: Calendar = .current) -> Bool {
         guard let availabilityDate else { return true }
         return calendar.startOfDay(for: currentDate) >= calendar.startOfDay(for: availabilityDate)
     }
 
     func availabilityCountdownText(on currentDate: Date = Date(), calendar: Calendar = .current) -> String? {
-        guard let availabilityDate, let availabilityDateLabel else { return nil }
+        guard let availabilityDate else { return nil }
 
         let currentDay = calendar.startOfDay(for: currentDate)
         let availableDay = calendar.startOfDay(for: availabilityDate)
@@ -51,7 +56,22 @@ enum SubscriptionPlan: String, CaseIterable, Identifiable {
 
         let remainingDays = max(1, calendar.dateComponents([.day], from: currentDay, to: availableDay).day ?? 0)
         let dayText = remainingDays == 1 ? "1 day" : "\(remainingDays) days"
-        return "Available on \(availabilityDateLabel) (\(dayText))"
+        return "Available in \(dayText)"
+    }
+
+    func lifetimeOfferCountdownText(on currentDate: Date = Date(), calendar: Calendar = .current) -> String? {
+        guard self == .lifetime, let lifetimeOfferEndDate else { return nil }
+
+        let currentDay = calendar.startOfDay(for: currentDate)
+        let endDay = calendar.startOfDay(for: lifetimeOfferEndDate)
+        if currentDay == endDay {
+            return "Ends today"
+        }
+        guard currentDay < endDay else { return nil }
+
+        let remainingDays = max(1, calendar.dateComponents([.day], from: currentDay, to: endDay).day ?? 0)
+        let dayText = remainingDays == 1 ? "1 day" : "\(remainingDays) days"
+        return "Ends in \(dayText)"
     }
 
     var storeKitProductID: String {
@@ -59,14 +79,32 @@ enum SubscriptionPlan: String, CaseIterable, Identifiable {
         case .lifetime:
             return "lifetime"
         case .annual:
-            return "loom.annual.locked"
+            return "annual"
         case .monthly:
-            return "loom.monthly"
+            return "monthly"
+        }
+    }
+
+    var recognizedStoreKitProductIDs: Set<String> {
+        switch self {
+        case .lifetime:
+            return ["lifetime", "lifetime2"]
+        case .annual, .monthly:
+            return [storeKitProductID]
+        }
+    }
+
+    var isAutoRenewingSubscription: Bool {
+        switch self {
+        case .annual, .monthly:
+            return true
+        case .lifetime:
+            return false
         }
     }
 
     static func from(storeKitProductID: String) -> SubscriptionPlan? {
-        allCases.first { $0.storeKitProductID == storeKitProductID }
+        allCases.first { $0.recognizedStoreKitProductIDs.contains(storeKitProductID) }
     }
 
     var title: String {
@@ -118,7 +156,12 @@ enum SubscriptionPlan: String, CaseIterable, Identifiable {
     }
 
     var originalPriceText: String? {
-        nil
+        switch self {
+        case .annual:
+            return "$180"
+        case .lifetime, .monthly:
+            return nil
+        }
     }
 
     var trialText: String? {
