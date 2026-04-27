@@ -9,6 +9,7 @@ struct RootGateView<MainContent: View>: View {
     private let presentationStyle: RootGatePresentationStyle
     private let mainContent: MainContent
 
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var session: UserSessionStore
     @StateObject private var purchaseManager: PurchaseManager
 
@@ -81,23 +82,56 @@ struct RootGateView<MainContent: View>: View {
             .environmentObject(personalizationStore)
             .environmentObject(purchaseManager)
             .onAppear {
+#if DEBUG
+                print("[LoomLaunch] RootGate onAppear")
+#endif
                 consumePendingOnboardingResetIfNeeded()
                 migrateDiagnosticCompletionIfNeeded()
                 initializeInstallDateIfNeeded()
+                trackDailyActiveForCurrentStage()
                 syncSessionFromStorage()
                 purchaseManager.configure(session: session)
+#if DEBUG
+                purchaseManager.finishLaunchEntitlementLoadIfNeeded(session: session)
+                print("[LoomLaunch] RootGate applied cached entitlement state")
+#endif
                 scheduleGateResolution(animated: false, immediate: true)
-                Task {
-                    await personalizationStore.reloadForCurrentUser()
-                }
             }
             .task {
                 purchaseManager.configure(session: session)
-                await purchaseManager.loadProducts()
-                await purchaseManager.refreshEntitlements(session: session)
+#if DEBUG
+                print("[LoomLaunch] RootGate post-render background startup")
+                FirebaseBootstrap.configureIfNeeded(reason: "root gate post-render")
+                AnalyticsCollectionPolicy.refreshCollectionState()
+                purchaseManager.startObservingTransactionUpdatesIfNeeded()
+                Task {
+                    await purchaseManager.loadProducts()
+                }
+                Task {
+                    await purchaseManager.refreshEntitlements(
+                        session: session,
+                        includeHistoricalExpiredSnapshot: false
+                    )
+                }
                 #if canImport(AuthenticationServices)
                 await session.refreshAppleCredentialStateIfNeeded()
                 #endif
+#else
+                Task {
+                    await purchaseManager.loadProducts()
+                }
+                Task {
+                    await purchaseManager.refreshEntitlements(
+                        session: session,
+                        includeHistoricalExpiredSnapshot: false
+                    )
+                }
+                try? await Task.sleep(nanoseconds: 2_500_000_000)
+                purchaseManager.finishLaunchEntitlementLoadIfNeeded(session: session)
+                #if canImport(AuthenticationServices)
+                await session.refreshAppleCredentialStateIfNeeded()
+                #endif
+#endif
             }
             .onChange(of: hasSeenOnboarding) { _, _ in
                 syncSessionFromStorage()
@@ -169,6 +203,10 @@ struct RootGateView<MainContent: View>: View {
                 gateRoutingTask?.cancel()
                 gateRoutingTask = nil
             }
+            .onChange(of: scenePhase) { _, newPhase in
+                guard newPhase == .active else { return }
+                trackDailyActiveForCurrentStage()
+            }
     }
 
     private var gatePresentationBinding: Binding<Bool> {
@@ -186,7 +224,11 @@ struct RootGateView<MainContent: View>: View {
     }
 
     private var shouldShowRoutingSplash: Bool {
+#if DEBUG
+        false
+#else
         (!hasCompletedInitialGateResolution && !isGateRoutingReady) || !purchaseManager.hasLoadedEntitlements
+#endif
     }
 
     @ViewBuilder
@@ -364,10 +406,7 @@ struct RootGateView<MainContent: View>: View {
     }
 
     private func initializeInstallDateIfNeeded() {
-        guard AnalyticsCollectionPolicy.shouldCollectAnalytics else { return }
-        if analyticsInstallDate.isEmpty {
-            analyticsInstallDate = Self.analyticsDayString(from: Date())
-        }
+        LaunchFunnelAnalyticsTracker.initializeInstallDateIfNeeded()
     }
 
     private func trackCoreEntryIfNeeded() {
@@ -385,25 +424,28 @@ struct RootGateView<MainContent: View>: View {
     }
 
     private func logDailyActiveIfNeeded() {
-        guard AnalyticsCollectionPolicy.shouldCollectAnalytics else { return }
-        let today = Self.analyticsDayString(from: Date())
-        if analyticsLastActiveDate == today {
-            return
-        }
-        initializeInstallDateIfNeeded()
-        let daysSinceInstall = Self.daysBetween(analyticsInstallDate, today)
-        AnalyticsLogger.log(.dailyActive(sessionDay: daysSinceInstall))
+        trackDailyActiveForCurrentStage()
+    }
 
-        if daysSinceInstall == 1 && !analyticsDidLogRetentionDay1 {
-            analyticsDidLogRetentionDay1 = true
-            AnalyticsLogger.log(.retentionDay1())
-        }
-        if daysSinceInstall == 7 && !analyticsDidLogRetentionDay7 {
-            analyticsDidLogRetentionDay7 = true
-            AnalyticsLogger.log(.retentionDay7())
-        }
+    private func trackDailyActiveForCurrentStage() {
+        LaunchFunnelAnalyticsTracker.recordDailyActive(currentStage: currentAnalyticsStage)
+    }
 
-        analyticsLastActiveDate = today
+    private var currentAnalyticsStage: String {
+        switch session.currentGateStep {
+        case .onboarding:
+            return "onboarding"
+        case .account:
+            return "account"
+        case .diagnostic:
+            return "diagnostic"
+        case .insights:
+            return "insights"
+        case .paywall:
+            return "paywall"
+        case .done:
+            return "core"
+        }
     }
 
     private static func analyticsDayString(from date: Date) -> String {

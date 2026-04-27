@@ -81,6 +81,7 @@ final class PurchaseManager: ObservableObject {
     private let defaults: UserDefaults
     private var productsByID: [String: Product] = [:]
     private var transactionUpdatesTask: Task<Void, Never>?
+    private var isObservingTransactionUpdates = false
     private weak var session: UserSessionStore?
 
     private enum DefaultsKey {
@@ -90,7 +91,11 @@ final class PurchaseManager: ObservableObject {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        transactionUpdatesTask = observeTransactionUpdates()
+#if DEBUG
+        log("Deferred StoreKit transaction observation for Debug launch.")
+#else
+        startObservingTransactionUpdatesIfNeeded()
+#endif
     }
 
     deinit {
@@ -99,6 +104,13 @@ final class PurchaseManager: ObservableObject {
 
     func configure(session: UserSessionStore) {
         self.session = session
+    }
+
+    func startObservingTransactionUpdatesIfNeeded() {
+        guard !isObservingTransactionUpdates else { return }
+        isObservingTransactionUpdates = true
+        transactionUpdatesTask = observeTransactionUpdates()
+        log("Started StoreKit transaction observation.")
     }
 
     func product(for plan: SubscriptionPlan) -> Product? {
@@ -205,7 +217,10 @@ final class PurchaseManager: ObservableObject {
         }
     }
 
-    func refreshEntitlements(session: UserSessionStore? = nil) async {
+    func refreshEntitlements(
+        session: UserSessionStore? = nil,
+        includeHistoricalExpiredSnapshot: Bool = true
+    ) async {
         if let session {
             configure(session: session)
         }
@@ -252,9 +267,14 @@ final class PurchaseManager: ObservableObject {
             }
         }
 
-        let expiredSubscription = activeProductIDs.isEmpty
-            ? await latestExpiredSubscriptionSnapshot(now: now)
-            : nil
+        let expiredSubscription: (plan: SubscriptionPlan, expirationDate: Date?)?
+        if activeProductIDs.isEmpty {
+            expiredSubscription = includeHistoricalExpiredSnapshot
+                ? await latestExpiredSubscriptionSnapshot(now: now)
+                : persistedExpiredSubscriptionSnapshot(now: now)
+        } else {
+            expiredSubscription = nil
+        }
         applyEntitlementSnapshot(
             activeProductIDs: activeProductIDs,
             expirationDatesByProductID: expirationDatesByProductID,
@@ -262,6 +282,42 @@ final class PurchaseManager: ObservableObject {
         )
         await refreshAutoRenewStatusIfNeeded()
         hasLoadedEntitlements = true
+    }
+
+    func finishLaunchEntitlementLoadIfNeeded(session: UserSessionStore? = nil) {
+        if let session {
+            configure(session: session)
+        }
+        guard !hasLoadedEntitlements else { return }
+
+        if defaults.bool(forKey: UserSessionStore.Keys.isSubscribed) {
+            let cachedPlan = defaults.string(forKey: "loom.subscription_plan")
+                .flatMap(SubscriptionPlan.init(rawValue:))
+                ?? .annual
+            activePlan = cachedPlan
+            activePlanPeriodEndDate = nil
+            activePlanWillAutoRenew = cachedPlan == .lifetime ? false : nil
+            subscriptionAccessState = .active(plan: cachedPlan, periodEndDate: nil)
+            isPremium = true
+        } else if let expiredSubscription = persistedExpiredSubscriptionSnapshot(now: Date()) {
+            activePlan = nil
+            activePlanPeriodEndDate = nil
+            activePlanWillAutoRenew = nil
+            subscriptionAccessState = .expiredSubscription(
+                plan: expiredSubscription.plan,
+                expirationDate: expiredSubscription.expirationDate
+            )
+            isPremium = false
+        } else {
+            activePlan = nil
+            activePlanPeriodEndDate = nil
+            activePlanWillAutoRenew = nil
+            subscriptionAccessState = .inactive
+            isPremium = false
+        }
+
+        hasLoadedEntitlements = true
+        log("Launch entitlement check timed out; using cached subscription state until StoreKit refresh completes.")
     }
 
     func purchase(plan: SubscriptionPlan, session: UserSessionStore? = nil) async -> PurchaseOutcome {

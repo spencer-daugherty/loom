@@ -275,6 +275,12 @@ final class PersonalizationStore: ObservableObject {
 
     private static func makeDefaultRepository() -> any PersonalizationRepository {
         #if canImport(FirebaseFirestore)
+        #if DEBUG
+        guard FirebaseBootstrap.isConfigured else {
+            print("[LoomLaunch] PersonalizationStore using local repository before Firebase configure")
+            return LocalPersonalizationRepository()
+        }
+        #endif
         return FirestorePersonalizationRepository()
         #else
         return LocalPersonalizationRepository()
@@ -309,9 +315,11 @@ enum PersonalizationStoreError: Error {
 enum PersonalizationUserIdentity {
     static func currentUserKey(defaults: UserDefaults = .standard) -> String {
         #if canImport(FirebaseAuth)
-        if let uid = Auth.auth().currentUser?.uid.trimmingCharacters(in: .whitespacesAndNewlines),
-           !uid.isEmpty {
-            return "firebase:\(uid)"
+        if FirebaseBootstrap.isConfigured {
+            if let uid = Auth.auth().currentUser?.uid.trimmingCharacters(in: .whitespacesAndNewlines),
+               !uid.isEmpty {
+                return "firebase:\(uid)"
+            }
         }
         #endif
 

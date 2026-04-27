@@ -523,6 +523,7 @@ struct LoadingSplashView: View {
     let metrics: [(String, Color, Double)]
     let namespace: Namespace.ID
     let minimumDisplayDuration: TimeInterval
+    let radarIntroDelay: TimeInterval
     let onMinimumElapsed: (() -> Void)?
     private var isPresented: Binding<Bool>?
     @State private var splashRadarSelectedIndex: Int = 0
@@ -537,12 +538,14 @@ struct LoadingSplashView: View {
         metrics: [(String, Color, Double)],
         namespace: Namespace.ID,
         minimumDisplayDuration: TimeInterval = 5,
+        radarIntroDelay: TimeInterval = 1.0,
         onMinimumElapsed: (() -> Void)? = nil,
         isPresented: Binding<Bool>? = nil
     ) {
         self.metrics = metrics
         self.namespace = namespace
         self.minimumDisplayDuration = minimumDisplayDuration
+        self.radarIntroDelay = radarIntroDelay
         self.onMinimumElapsed = onMinimumElapsed
         self.isPresented = isPresented
     }
@@ -640,7 +643,6 @@ struct LoadingSplashView: View {
                     let animatedMetrics = isTransitioningOut ? effectiveMetrics : pulsedMetrics(at: t * 0.45)
                     let rotationDegrees = isTransitioningOut ? 0.0 : (t * Double(337.5))
                     let startupElapsed = context.date.timeIntervalSince(splashStartDate)
-                    let radarIntroDelay: Double = 1.0
                     let radarGrowDuration: Double = 0.26
                     let radarPopDuration: Double = 0.24
 

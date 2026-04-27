@@ -26,7 +26,11 @@ enum AnalyticsCollectionPolicy {
 
     static func refreshCollectionState() {
 #if canImport(FirebaseAnalytics)
+        #if DEBUG
+        Analytics.setAnalyticsCollectionEnabled(false)
+        #else
         Analytics.setAnalyticsCollectionEnabled(shouldCollectAnalytics)
+        #endif
 #endif
     }
 

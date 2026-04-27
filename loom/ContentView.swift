@@ -635,7 +635,11 @@ struct ContentView: View {
     }
 
     private var contentViewNavigationStackBody: some View {
+#if DEBUG
+        let shouldRenderSplash = false
+#else
         let shouldRenderSplash = showSplash && hasAccount
+#endif
         return ZStack {
             Color(.systemGroupedBackground)
                 .ignoresSafeArea()
@@ -1158,7 +1162,12 @@ struct ContentView: View {
             .onChange(of: hasAccount) { _, newValue in
                 handleHasAccountChanged(newValue)
             }
-            .onAppear(perform: handleContentViewAppear)
+        .onAppear {
+#if DEBUG
+            print("[LoomLaunch] ContentView onAppear")
+#endif
+            handleContentViewAppear()
+        }
             .onDisappear {
                 notificationPermissionRequestTask?.cancel()
                 notificationPermissionRequestTask = nil
@@ -1350,11 +1359,19 @@ struct ContentView: View {
         guard !splashPreparationStarted else { return }
         splashPreparationStarted = true
 
+#if DEBUG
+        splashPreparationFinished = true
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            await runStartupPreparation()
+        }
+#else
         Task { @MainActor in
             await runStartupPreparation()
             splashPreparationFinished = true
             dismissSplashIfReady()
         }
+#endif
     }
 
     @MainActor
