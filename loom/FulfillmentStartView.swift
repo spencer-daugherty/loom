@@ -1862,7 +1862,7 @@ struct FulfillmentStartView: View {
 
                 footer
             }
-            .loomAdaptiveColumn(maxWidth: 760, horizontalPadding: 20, alignment: .top)
+            .loomAdaptiveColumn(maxWidth: 760, horizontalPadding: 20, alignment: .top, appliesOnPhone: true)
             .padding(.top, 8)
             .padding(.bottom, 10)
             .background(Color(.systemGroupedBackground))
@@ -1873,7 +1873,7 @@ struct FulfillmentStartView: View {
     private var introFooterOverlay: some View {
         if step == .intro {
             footer
-                .loomAdaptiveColumn(maxWidth: 760, horizontalPadding: 20, alignment: .top)
+                .loomAdaptiveColumn(maxWidth: 760, horizontalPadding: 20, alignment: .top, appliesOnPhone: true)
                 .padding(.top, 8)
                 .padding(.bottom, 10)
                 .background(Color(.systemGroupedBackground))

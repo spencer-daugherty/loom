@@ -47,16 +47,34 @@ enum SubscriptionPlan: String, CaseIterable, Identifiable {
         return calendar.startOfDay(for: currentDate) >= calendar.startOfDay(for: availabilityDate)
     }
 
-    func availabilityCountdownText(on currentDate: Date = Date(), calendar: Calendar = .current) -> String? {
+    func availabilityRemainingDays(on currentDate: Date = Date(), calendar: Calendar = .current) -> Int? {
         guard let availabilityDate else { return nil }
 
         let currentDay = calendar.startOfDay(for: currentDate)
         let availableDay = calendar.startOfDay(for: availabilityDate)
         guard currentDay < availableDay else { return nil }
 
-        let remainingDays = max(1, calendar.dateComponents([.day], from: currentDay, to: availableDay).day ?? 0)
+        return max(1, calendar.dateComponents([.day], from: currentDay, to: availableDay).day ?? 0)
+    }
+
+    func availabilityCountdownText(on currentDate: Date = Date(), calendar: Calendar = .current) -> String? {
+        guard let remainingDays = availabilityRemainingDays(on: currentDate, calendar: calendar) else {
+            return nil
+        }
         let dayText = remainingDays == 1 ? "1 day" : "\(remainingDays) days"
         return "Available in \(dayText)"
+    }
+
+    func availabilityReminderFireDate(
+        on currentDate: Date = Date(),
+        calendar: Calendar = .current,
+        hour: Int = 9,
+        minute: Int = 0
+    ) -> Date? {
+        guard !isSelectable(on: currentDate, calendar: calendar) else { return nil }
+        guard let availabilityDate else { return nil }
+        let availableDay = calendar.startOfDay(for: availabilityDate)
+        return calendar.date(bySettingHour: hour, minute: minute, second: 0, of: availableDay)
     }
 
     func lifetimeOfferCountdownText(on currentDate: Date = Date(), calendar: Calendar = .current) -> String? {
@@ -112,7 +130,7 @@ enum SubscriptionPlan: String, CaseIterable, Identifiable {
         case .lifetime:
             return "Founding Member (Lifetime)"
         case .annual:
-            return "Annual (Early Adopter)"
+            return "Annual"
         case .monthly:
             return "Monthly"
         }
@@ -165,7 +183,12 @@ enum SubscriptionPlan: String, CaseIterable, Identifiable {
     }
 
     var trialText: String? {
-        nil
+        switch self {
+        case .annual:
+            return "10-day free trial"
+        case .lifetime, .monthly:
+            return nil
+        }
     }
 
     var trialDetailText: String? {

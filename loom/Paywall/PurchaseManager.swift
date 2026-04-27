@@ -1,5 +1,8 @@
 import Foundation
 import StoreKit
+#if canImport(FirebaseAnalytics)
+import FirebaseAnalytics
+#endif
 
 @MainActor
 final class PurchaseManager: ObservableObject {
@@ -91,11 +94,7 @@ final class PurchaseManager: ObservableObject {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-#if DEBUG
-        log("Deferred StoreKit transaction observation for Debug launch.")
-#else
         startObservingTransactionUpdatesIfNeeded()
-#endif
     }
 
     deinit {
@@ -326,6 +325,7 @@ final class PurchaseManager: ObservableObject {
         }
 
         guard !isProcessing else { return .failed(errorType: "busy") }
+        guard plan.isSelectable() else { return .failed(errorType: "not_available") }
         let action = planAction(for: plan)
         if !action.allowsPurchase {
             switch action {
@@ -356,6 +356,7 @@ final class PurchaseManager: ObservableObject {
             case .success(let verification):
                 switch verification {
                 case .verified(let transaction):
+                    logVerifiedStoreKitTransaction(transaction)
                     await transaction.finish()
                     switch action {
                     case .purchaseNew, .purchaseLifetimeAlongsideAutoRenewing:
@@ -416,6 +417,7 @@ final class PurchaseManager: ObservableObject {
                 guard let self else { return }
                 switch update {
                 case .verified(let transaction):
+                    self.logVerifiedStoreKitTransaction(transaction)
                     await transaction.finish()
                     await self.refreshEntitlements()
                 case .unverified(let transaction, let error):
@@ -423,6 +425,13 @@ final class PurchaseManager: ObservableObject {
                 }
             }
         }
+    }
+
+    private func logVerifiedStoreKitTransaction(_ transaction: Transaction) {
+#if canImport(FirebaseAnalytics)
+        guard AnalyticsCollectionPolicy.shouldCollectAnalytics else { return }
+        Analytics.logTransaction(transaction)
+#endif
     }
 
     private func applyEntitlementSnapshot(
@@ -619,6 +628,20 @@ final class PurchaseManager: ObservableObject {
         pendingAutoRenewEffectiveDate = nil
     }
 
+    func grantDebugAccess(plan: SubscriptionPlan, session: UserSessionStore? = nil) {
+#if DEBUG
+        if let session {
+            configure(session: session)
+        }
+
+        applyEntitlementSnapshot(activeProductIDs: [plan.storeKitProductID])
+        hasLoadedEntitlements = true
+#else
+        _ = plan
+        _ = session
+#endif
+    }
+
     private func displayPriceText(for plan: SubscriptionPlan, product: Product?) -> String {
         guard let product else { return plan.priceText }
 
@@ -633,10 +656,7 @@ final class PurchaseManager: ObservableObject {
     }
 
     private func originalComparisonPriceText(for plan: SubscriptionPlan) -> String? {
-        guard plan == .annual else { return nil }
-        guard let monthlyProduct = product(for: .monthly) else { return "$180" }
-        let annualComparisonPrice = monthlyProduct.price * 12
-        return annualComparisonPrice.formatted(monthlyProduct.priceFormatStyle)
+        plan.originalPriceText
     }
 
     private func introductoryOffer(for plan: SubscriptionPlan, product: Product?) -> Product.SubscriptionOffer? {
@@ -647,7 +667,7 @@ final class PurchaseManager: ObservableObject {
     private func trialText(for plan: SubscriptionPlan, introOfferLabel: String?) -> String? {
         switch plan {
         case .annual:
-            return introOfferLabel
+            return introOfferLabel ?? plan.trialText
         case .monthly:
             return plan.trialText
         case .lifetime:
@@ -706,7 +726,7 @@ final class PurchaseManager: ObservableObject {
 
     private func freeTrialLabel(for offer: Product.SubscriptionOffer) -> String? {
         guard offer.paymentMode == .freeTrial else { return nil }
-        return "\(hyphenated(period: offer.period)) free intro offer"
+        return "\(hyphenated(period: offer.period)) free trial"
     }
 
     private func hyphenated(period: Product.SubscriptionPeriod) -> String {

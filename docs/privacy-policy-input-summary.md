@@ -7,9 +7,9 @@ Project reviewed: Loom iOS app
 - Loom is a personal planning, fulfillment, goal, reflection, and AI-assisted productivity app.
 - The app stores user-created content across purpose, passions, fulfillment areas, goals, little wins, reflections, plans, capture inbox items, chat threads, and onboarding diagnostic/personalization flows.
 - The app offers optional premium access through StoreKit 2 products:
-  - `loom.lifetime` non-consumable
-  - `loom.annual.locked` auto-renewable subscription
-  - `loom.monthly` auto-renewable subscription
+  - `lifetime` non-consumable
+  - `annual` auto-renewable subscription
+  - `monthly` auto-renewable subscription
 
 ## Third-Party Services and Apple Frameworks in Use
 - Firebase Auth
@@ -81,13 +81,17 @@ Project reviewed: Loom iOS app
   - auth provider if available
 
 ## Analytics and Diagnostics
-- Firebase Analytics is limited to a small set of funnel and retention events:
+- Firebase Analytics is limited to production-only funnel, retention, setup, paywall, and purchase telemetry:
   - onboarding started / completed / abandoned
   - signup started / completed / abandoned
   - diagnostic started / completed / abandoned
-  - paywall viewed / abandoned
-  - purchase started / completed / failed
-  - first activation, core opened, daily active, retention day 1, retention day 7
+  - quick tour started / step viewed / completed
+  - post-paywall setup started / step viewed / step completed / exited / completed
+  - paywall viewed / abandoned / pricing option selected
+  - purchase started / completed / failed and restore started / completed
+  - first activation, core opened, daily active, retention day 1, retention day 3, retention day 7
+- StoreKit purchase revenue may be reported to Firebase Analytics through Firebase's StoreKit transaction integration when analytics collection is enabled in eligible production installs.
+- Analytics events must not include user-authored Purpose, Fulfillment, Goal, diagnostic, LoomAI chat, reminder, feedback, or free-text planning content.
 - Firebase Analytics collection is disabled in debug builds, previews, debugger-attached sessions, review/demo workspace sessions, and TestFlight or sandbox-receipt installs.
 - Firebase Crashlytics is enabled in non-debug builds and disabled in debug builds.
 - App debug activity logging may exist locally, but the production privacy story should focus on Firebase Analytics and Crashlytics.

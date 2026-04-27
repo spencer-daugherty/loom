@@ -1,6 +1,7 @@
 import SwiftUI
 
 let loomAITroubleshootingDefaultsKey = "loom.enableLoomAITroubleshooting"
+let loomAIDebugDefaultsKey = "loom.enableLoomAIDebug"
 let loomAIDisableAppleIntelligenceDefaultsKey = "loom.disableAppleIntelligence"
 let loomAICustomChatDefaultsKey = "loom.enableLoomAICustomChat"
 

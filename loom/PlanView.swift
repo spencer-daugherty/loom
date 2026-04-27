@@ -346,7 +346,7 @@ struct PlanStartView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
-                .loomAdaptiveColumn(maxWidth: 760, horizontalPadding: 20, alignment: .top)
+                .loomAdaptiveColumn(maxWidth: 760, horizontalPadding: 20, alignment: .top, appliesOnPhone: true)
                 .padding(.top, 8)
                 .padding(.bottom, max(14, geo.safeAreaInsets.bottom + 8))
                 .background(Color(.systemGroupedBackground))
@@ -8126,6 +8126,8 @@ struct PlanStepFiveView: View {
         state.weekStart = currentWeekStart
         ActivePlanSessionStore.setWeekStart(currentWeekStart)
         PlanFlowProgressStore.markCompletedForCurrentUser()
+        LaunchFunnelAnalyticsTracker.recordSetupStepCompleted(.actionPlan)
+        LaunchFunnelAnalyticsTracker.recordSetupCompleted()
         try? modelContext.save()
         NotificationCenter.default.post(name: Notification.Name("plan_flow_completed"), object: nil)
 

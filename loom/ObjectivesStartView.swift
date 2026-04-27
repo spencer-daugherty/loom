@@ -53,7 +53,7 @@ struct ObjectivesStartView: View {
                     .controlSize(.large)
                     .frame(maxWidth: .infinity)
                 }
-                .loomAdaptiveColumn(maxWidth: 760, horizontalPadding: 20, alignment: .top)
+                .loomAdaptiveColumn(maxWidth: 760, horizontalPadding: 20, alignment: .top, appliesOnPhone: true)
                 .padding(.top, 8)
                 .padding(.bottom, max(footerInnerBottomPadding, geo.safeAreaInsets.bottom + 8))
                 .background(Color(.systemGroupedBackground))

@@ -110,9 +110,122 @@ enum LoomNotificationSettingsStore {
     }
 }
 
+struct LoomPaywallAvailabilityReminderRequestResult: Equatable {
+    enum Outcome: String, Equatable {
+        case scheduled = "scheduled"
+        case alreadyScheduled = "already_scheduled"
+        case promptDeclined = "prompt_declined"
+        case permissionDenied = "permission_denied"
+        case noLongerUnavailable = "no_longer_unavailable"
+        case scheduleFailed = "schedule_failed"
+    }
+
+    let outcome: Outcome
+    let authorizationStatus: UNAuthorizationStatus
+}
+
+enum LoomPaywallAvailabilityReminderStore {
+    private static let defaultsKey = "loom.notification.paywall_availability_reminders.v1"
+
+    static func load(now: Date = .now, calendar: Calendar = .current) -> [String: Date] {
+        let stored = rawStoredReminders()
+        let validated = validatedReminders(from: stored, now: now, calendar: calendar)
+        if validated != stored {
+            persist(validated)
+        }
+        return validated
+    }
+
+    static func setReminder(
+        for plan: SubscriptionPlan,
+        fireDate: Date,
+        now: Date = .now,
+        calendar: Calendar = .current
+    ) {
+        var reminders = load(now: now, calendar: calendar)
+        reminders[plan.rawValue] = fireDate
+        persist(validatedReminders(from: reminders, now: now, calendar: calendar))
+    }
+
+    static func removeReminder(
+        for plan: SubscriptionPlan,
+        now: Date = .now,
+        calendar: Calendar = .current
+    ) {
+        var reminders = load(now: now, calendar: calendar)
+        reminders.removeValue(forKey: plan.rawValue)
+        persist(reminders)
+    }
+
+    static func clearAll() {
+        UserDefaults.standard.removeObject(forKey: defaultsKey)
+    }
+
+    static func persist(_ reminders: [String: Date]) {
+        if reminders.isEmpty {
+            UserDefaults.standard.removeObject(forKey: defaultsKey)
+            return
+        }
+
+        if let data = try? JSONEncoder().encode(reminders) {
+            UserDefaults.standard.set(data, forKey: defaultsKey)
+        }
+    }
+
+    static func validatedReminders(
+        from stored: [String: Date],
+        now: Date = .now,
+        calendar: Calendar = .current
+    ) -> [String: Date] {
+        stored.reduce(into: [String: Date]()) { partialResult, entry in
+            let (rawPlan, _) = entry
+            guard let plan = SubscriptionPlan(rawValue: rawPlan) else { return }
+            guard let fireDate = plan.availabilityReminderFireDate(on: now, calendar: calendar) else {
+                return
+            }
+            guard fireDate > now else { return }
+            partialResult[plan.rawValue] = fireDate
+        }
+    }
+
+    private static func rawStoredReminders() -> [String: Date] {
+        guard
+            let data = UserDefaults.standard.data(forKey: defaultsKey),
+            let decoded = try? JSONDecoder().decode([String: Date].self, from: data)
+        else {
+            return [:]
+        }
+        return decoded
+    }
+}
+
+extension UNAuthorizationStatus {
+    var loomHasGrantedAccess: Bool {
+        self == .authorized || self == .provisional || self == .ephemeral
+    }
+
+    var loomAnalyticsValue: String {
+        switch self {
+        case .notDetermined:
+            return "not_determined"
+        case .denied:
+            return "denied"
+        case .authorized:
+            return "authorized"
+        case .provisional:
+            return "provisional"
+        case .ephemeral:
+            return "ephemeral"
+        @unknown default:
+            return "unknown"
+        }
+    }
+}
+
 @MainActor
 enum LoomNotificationScheduler {
     private static let idPrefix = "loom.notification."
+    private static let paywallAvailabilityIDPrefix = "\(idPrefix)paywallAvailability."
     private static let defaultHour = 9
     private static let defaultMinute = 0
 
@@ -133,8 +246,11 @@ enum LoomNotificationScheduler {
 
     static func reschedule(using context: ModelContext, now: Date = .now) async {
         let center = UNUserNotificationCenter.current()
+        _ = await syncPaywallAvailabilityReminders(center: center, now: now)
         let pending = await pendingRequests(center: center)
-        let loomIDs = pending.map(\.identifier).filter { $0.hasPrefix(idPrefix) }
+        let loomIDs = pending.map(\.identifier).filter {
+            $0.hasPrefix(idPrefix) && !$0.hasPrefix(paywallAvailabilityIDPrefix)
+        }
         if !loomIDs.isEmpty {
             center.removePendingNotificationRequests(withIdentifiers: loomIDs)
         }
@@ -387,8 +503,89 @@ enum LoomNotificationScheduler {
 
         // Keep a reasonable upper bound for reliability on device.
         for request in requests.prefix(60) {
-            await addRequest(center: center, request: request)
+            _ = await addRequest(center: center, request: request)
         }
+    }
+
+    static func activePaywallAvailabilityReminderPlans(now: Date = .now) async -> Set<SubscriptionPlan> {
+        let center = UNUserNotificationCenter.current()
+        return await syncPaywallAvailabilityReminders(center: center, now: now)
+    }
+
+    static func requestPaywallAvailabilityReminder(
+        for plan: SubscriptionPlan,
+        now: Date = .now
+    ) async -> LoomPaywallAvailabilityReminderRequestResult {
+        let center = UNUserNotificationCenter.current()
+        let currentStatus = await notificationSettings(center: center).authorizationStatus
+        let grantedStatus: UNAuthorizationStatus
+
+        if currentStatus.loomHasGrantedAccess {
+            grantedStatus = currentStatus
+        } else if currentStatus == .notDetermined {
+            _ = await requestAuthorization()
+            let refreshedStatus = await notificationSettings(center: center).authorizationStatus
+            guard refreshedStatus.loomHasGrantedAccess else {
+                _ = await syncPaywallAvailabilityReminders(center: center, now: now)
+                return LoomPaywallAvailabilityReminderRequestResult(
+                    outcome: .promptDeclined,
+                    authorizationStatus: refreshedStatus
+                )
+            }
+            grantedStatus = refreshedStatus
+        } else {
+            _ = await syncPaywallAvailabilityReminders(center: center, now: now)
+            return LoomPaywallAvailabilityReminderRequestResult(
+                outcome: .permissionDenied,
+                authorizationStatus: currentStatus
+            )
+        }
+
+        guard let fireDate = plan.availabilityReminderFireDate(
+            on: now,
+            calendar: .current,
+            hour: defaultHour,
+            minute: defaultMinute
+        ) else {
+            center.removePendingNotificationRequests(withIdentifiers: [paywallAvailabilityIdentifier(for: plan)])
+            LoomPaywallAvailabilityReminderStore.removeReminder(for: plan, now: now)
+            return LoomPaywallAvailabilityReminderRequestResult(
+                outcome: .noLongerUnavailable,
+                authorizationStatus: grantedStatus
+            )
+        }
+
+        let existingPlans = await syncPaywallAvailabilityReminders(center: center, now: now)
+        if existingPlans.contains(plan) {
+            return LoomPaywallAvailabilityReminderRequestResult(
+                outcome: .alreadyScheduled,
+                authorizationStatus: grantedStatus
+            )
+        }
+
+        let request = makeOneShotCalendarRequest(
+            id: paywallAvailabilityIdentifier(for: plan),
+            title: "\(plan.plainTitle) Is Available",
+            body: "The \(plan.plainTitle) plan is now available in Loom.",
+            fireDate: fireDate,
+            calendar: .current
+        )
+        let didAdd = await addRequest(center: center, request: request)
+        guard didAdd else {
+            LoomPaywallAvailabilityReminderStore.removeReminder(for: plan, now: now)
+            _ = await syncPaywallAvailabilityReminders(center: center, now: now)
+            return LoomPaywallAvailabilityReminderRequestResult(
+                outcome: .scheduleFailed,
+                authorizationStatus: grantedStatus
+            )
+        }
+
+        LoomPaywallAvailabilityReminderStore.setReminder(for: plan, fireDate: fireDate, now: now)
+        let refreshedPlans = await syncPaywallAvailabilityReminders(center: center, now: now)
+        return LoomPaywallAvailabilityReminderRequestResult(
+            outcome: refreshedPlans.contains(plan) ? .scheduled : .scheduleFailed,
+            authorizationStatus: grantedStatus
+        )
     }
 
     private static func resolvedDueDay(
@@ -461,14 +658,15 @@ enum LoomNotificationScheduler {
         calendar: Calendar
     ) {
         guard fireDate > now else { return }
-        let content = UNMutableNotificationContent()
-        content.title = title
-        content.body = body
-        content.sound = .default
-
-        let components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: fireDate)
-        let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
-        requests.append(UNNotificationRequest(identifier: id, content: content, trigger: trigger))
+        requests.append(
+            makeOneShotCalendarRequest(
+                id: id,
+                title: title,
+                body: body,
+                fireDate: fireDate,
+                calendar: calendar
+            )
+        )
     }
 
     private static func makeRepeatingCalendarRequest(
@@ -485,9 +683,72 @@ enum LoomNotificationScheduler {
         return UNNotificationRequest(identifier: id, content: content, trigger: trigger)
     }
 
+    private static func makeOneShotCalendarRequest(
+        id: String,
+        title: String,
+        body: String,
+        fireDate: Date,
+        calendar: Calendar
+    ) -> UNNotificationRequest {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+
+        let components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: fireDate)
+        let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+        return UNNotificationRequest(identifier: id, content: content, trigger: trigger)
+    }
+
     private static func dateOn(day: Date, hour: Int, minute: Int, calendar: Calendar) -> Date? {
         let start = calendar.startOfDay(for: day)
         return calendar.date(bySettingHour: hour, minute: minute, second: 0, of: start)
+    }
+
+    private static func paywallAvailabilityIdentifier(for plan: SubscriptionPlan) -> String {
+        "\(paywallAvailabilityIDPrefix)\(plan.rawValue)"
+    }
+
+    private static func syncPaywallAvailabilityReminders(
+        center: UNUserNotificationCenter,
+        now: Date
+    ) async -> Set<SubscriptionPlan> {
+        let pending = await pendingRequests(center: center)
+        let pendingIDs = Set(
+            pending
+                .map(\.identifier)
+                .filter { $0.hasPrefix(paywallAvailabilityIDPrefix) }
+        )
+        let authStatus = await notificationSettings(center: center).authorizationStatus
+        guard authStatus.loomHasGrantedAccess else {
+            if !pendingIDs.isEmpty {
+                center.removePendingNotificationRequests(withIdentifiers: Array(pendingIDs))
+            }
+            LoomPaywallAvailabilityReminderStore.clearAll()
+            return []
+        }
+
+        let storedReminders = LoomPaywallAvailabilityReminderStore.load(now: now)
+        var activeReminders: [String: Date] = [:]
+        var expectedIDs: Set<String> = []
+
+        for (rawPlan, fireDate) in storedReminders {
+            guard let plan = SubscriptionPlan(rawValue: rawPlan) else { continue }
+            let identifier = paywallAvailabilityIdentifier(for: plan)
+            guard pendingIDs.contains(identifier) else { continue }
+            expectedIDs.insert(identifier)
+            activeReminders[rawPlan] = fireDate
+        }
+
+        let staleIDs = pendingIDs.subtracting(expectedIDs)
+        if !staleIDs.isEmpty {
+            center.removePendingNotificationRequests(withIdentifiers: Array(staleIDs))
+        }
+        if activeReminders != storedReminders {
+            LoomPaywallAvailabilityReminderStore.persist(activeReminders)
+        }
+
+        return Set(activeReminders.keys.compactMap(SubscriptionPlan.init(rawValue:)))
     }
 
     private static func dayKey(_ date: Date) -> String {
@@ -514,10 +775,10 @@ enum LoomNotificationScheduler {
         }
     }
 
-    private static func addRequest(center: UNUserNotificationCenter, request: UNNotificationRequest) async {
+    private static func addRequest(center: UNUserNotificationCenter, request: UNNotificationRequest) async -> Bool {
         await withCheckedContinuation { continuation in
-            center.add(request) { _ in
-                continuation.resume()
+            center.add(request) { error in
+                continuation.resume(returning: error == nil)
             }
         }
     }

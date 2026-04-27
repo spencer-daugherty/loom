@@ -1,5 +1,6 @@
 import SwiftUI
 import StoreKit
+import UserNotifications
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -23,11 +24,14 @@ struct PaywallView: View {
     @EnvironmentObject private var purchaseManager: PurchaseManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage("account_email") private var accountEmail = ""
     @State private var selectedPlan: SubscriptionPlan = .lifetime
     @State private var presentedLegalDocument: LegalDocument?
+    @State private var currentDate = Date()
     @State private var previewIndex: Int = 0
     @State private var previewCycleTask: Task<Void, Never>?
+    @State private var availabilityRefreshTask: Task<Void, Never>?
     @State private var didLogPaywallViewed = false
     @State private var headerHeight: CGFloat = 0
     @State private var lowerContentHeight: CGFloat = 0
@@ -36,6 +40,9 @@ struct PaywallView: View {
     @State private var restoreFailureAlertMessage: String?
     @State private var purchaseFailureAlertMessage: String?
     @State private var purchaseStatusMessage: String?
+    @State private var paywallReminderStatusMessage: String?
+    @State private var pendingAvailabilityReminderPlan: SubscriptionPlan?
+    @State private var armedAvailabilityReminderPlans: Set<SubscriptionPlan> = []
     @State private var hasInitializedPlanSelection = false
     @State private var pendingLifetimeConfirmationPlan: SubscriptionPlan?
     @State private var queuedPurchaseAfterLifetimeConfirmation: QueuedPurchaseAfterConfirmation?
@@ -75,6 +82,15 @@ struct PaywallView: View {
         }
     }
 
+    private var analyticsMode: String {
+        switch mode {
+        case .standard:
+            return "standard"
+        case .managePaywall:
+            return "manage"
+        }
+    }
+
     private var selectedPlanAction: PurchaseManager.PlanAction {
         purchaseManager.planAction(for: selectedPlan)
     }
@@ -108,11 +124,14 @@ struct PaywallView: View {
     }
 
     private var shouldDisablePrimaryCTA: Bool {
-        purchaseManager.isProcessing || !selectedPlanAction.allowsPurchase || !isSelectedPlanPurchaseReady
+        if LoomDeveloperBuild.isInternalBuild {
+            return purchaseManager.isProcessing || !isPlanSelectable(selectedPlan)
+        }
+        return purchaseManager.isProcessing || !selectedPlanAction.allowsPurchase || !isSelectedPlanPurchaseReady
     }
 
     private var paywallCatalogMessage: String? {
-        guard selectedPlan == .lifetime else { return nil }
+        guard isPlanSelectable(selectedPlan) else { return nil }
         return purchaseManager.launchPurchaseCatalogMessage
     }
 
@@ -120,9 +139,15 @@ struct PaywallView: View {
         colorScheme == .dark ? .white : .black
     }
 
+    private var needsProductRefreshForSelectablePlans: Bool {
+        SubscriptionPlan.launchVisiblePlans.contains { plan in
+            plan.isSelectable(on: currentDate) && purchaseManager.product(for: plan) == nil
+        }
+    }
+
     private func isPlanSelectable(_ plan: SubscriptionPlan) -> Bool {
         guard visiblePlans.contains(plan) else { return false }
-        return plan.isSelectable()
+        return plan.isSelectable(on: currentDate)
     }
 
     private func preferredManageSelection() -> SubscriptionPlan {
@@ -203,9 +228,30 @@ struct PaywallView: View {
                 }
             }
             initializeSelectedPlanIfNeeded()
+            currentDate = Date()
+            Task {
+                await refreshPaywallAvailabilityReminders(now: currentDate)
+            }
+            if needsProductRefreshForSelectablePlans {
+                Task {
+                    await purchaseManager.loadProducts()
+                }
+            }
+            availabilityRefreshTask?.cancel()
+            availabilityRefreshTask = Task { @MainActor in
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 60_000_000_000)
+                    guard !Task.isCancelled else { break }
+                    currentDate = Date()
+                    await refreshPaywallAvailabilityReminders(now: currentDate)
+                    if needsProductRefreshForSelectablePlans {
+                        await purchaseManager.loadProducts()
+                    }
+                }
+            }
             if !didLogPaywallViewed {
                 didLogPaywallViewed = true
-                AnalyticsLogger.log(.paywallViewed())
+                AnalyticsLogger.log(.paywallViewed(mode: analyticsMode))
             }
             guard !reduceMotion else { return }
             previewCycleTask?.cancel()
@@ -222,6 +268,8 @@ struct PaywallView: View {
         .onDisappear {
             previewCycleTask?.cancel()
             previewCycleTask = nil
+            availabilityRefreshTask?.cancel()
+            availabilityRefreshTask = nil
             if !purchaseManager.isPremium {
                 AnalyticsLogger.log(.paywallAbandoned(reason: "dismissed"))
             }
@@ -258,6 +306,13 @@ struct PaywallView: View {
                     dismissOnSuccess: queuedPurchase.dismissOnSuccess,
                     fallbackSelection: queuedPurchase.fallbackSelection
                 )
+            }
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active else { return }
+            Task {
+                currentDate = Date()
+                await refreshPaywallAvailabilityReminders(now: currentDate)
             }
         }
     }
@@ -363,8 +418,20 @@ struct PaywallView: View {
             }
             .padding(.top, planTopPadding)
 
+            if let paywallReminderStatusMessage, !paywallReminderStatusMessage.isEmpty {
+                Text(paywallReminderStatusMessage)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Button {
-                AnalyticsLogger.log(.purchaseStarted(plan: selectedPlan.rawValue))
+                AnalyticsLogger.log(
+                    .purchaseStarted(
+                        plan: selectedPlan.rawValue,
+                        productID: selectedPlan.storeKitProductID
+                    )
+                )
                 handlePrimaryCTA()
             } label: {
                 ZStack {
@@ -403,16 +470,25 @@ struct PaywallView: View {
 
             Button {
                 Task {
+                    AnalyticsLogger.log(.restoreStarted())
                     restoreStatusMessage = nil
                     restoreFailureAlertMessage = nil
                     activeLoadingAction = .restore
                     let outcome = await purchaseManager.restorePurchases(session: session)
                     switch outcome {
                     case .restoredActiveEntitlement:
+                        AnalyticsLogger.log(
+                            .restoreCompleted(
+                                restoreOutcome: "restored_active_entitlement",
+                                plan: purchaseManager.activePlan?.rawValue
+                            )
+                        )
                         restoreStatusMessage = "Purchases restored."
                     case .noActivePurchasesFound:
+                        AnalyticsLogger.log(.restoreCompleted(restoreOutcome: "no_active_purchases_found"))
                         restoreFailureAlertMessage = "Unfortunately, there was nothing to restore."
-                    case .failed:
+                    case .failed(let errorType):
+                        AnalyticsLogger.log(.restoreCompleted(restoreOutcome: errorType))
                         restoreFailureAlertMessage = "Restore failed. Please try again."
                     }
                     activeLoadingAction = nil
@@ -584,117 +660,87 @@ struct PaywallView: View {
         let isIncludedWithLifetime = purchaseManager.activePlan == .lifetime && plan != .lifetime
         let isPendingPlan = purchaseManager.pendingAutoRenewPlan == plan
         let isSelectable = isPlanSelectable(plan)
-        let countdownText = plan.availabilityCountdownText()
+        let availabilityCountdownText = plan.availabilityCountdownText(on: currentDate)
+        let lifetimeCountdownText = plan.lifetimeOfferCountdownText(on: currentDate)
         let presentation = purchaseManager.presentation(for: plan)
 
-        return Button {
-            guard isSelectable else { return }
-            selectedPlan = plan
-        } label: {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 8) {
-                        Text(presentation.title)
-                            .font(.headline)
-                            .foregroundStyle(.primary)
-                        if usesManageHeader && isCurrentPlan {
-                            Text("Current")
-                                .font(.caption2.weight(.semibold))
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(
-                                    Capsule(style: .continuous)
-                                        .fill(Color.accentColor.opacity(0.14))
-                                )
-                                .foregroundStyle(Color.accentColor)
-                        } else if usesManageHeader && isPendingPlan {
-                            Text("Pending")
-                                .font(.caption2.weight(.semibold))
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(
-                                    Capsule(style: .continuous)
-                                        .fill(Color.orange.opacity(0.14))
-                                )
-                                .foregroundStyle(Color.orange)
-                        } else if usesManageHeader && isIncludedWithLifetime {
-                            Text("Included")
-                                .font(.caption2.weight(.semibold))
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(
-                                    Capsule(style: .continuous)
-                                        .fill(Color.green.opacity(0.12))
-                                )
-                                .foregroundStyle(Color.green)
-                        }
-                    }
-                    HStack(spacing: 6) {
-                        if let originalPriceText = presentation.originalPriceText {
-                            Text(originalPriceText)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .strikethrough()
-                        }
-                        Text(presentation.priceText)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.primary)
-                    }
-                    if let tierText = presentation.tierText {
-                        Text(tierText)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    if let tierDetailText = presentation.tierDetailText {
-                        Text(tierDetailText)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    if let trialText = presentation.trialText {
-                        Text(trialText)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    if let trialDetailText = presentation.trialDetailText {
-                        Text(trialDetailText)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+        let cardContent = PaywallPlanCardContent(
+            presentation: presentation,
+            selected: selected,
+            isSelectable: isSelectable,
+            showsCurrentBadge: usesManageHeader && isCurrentPlan,
+            showsPendingBadge: usesManageHeader && isPendingPlan,
+            showsIncludedBadge: usesManageHeader && isIncludedWithLifetime,
+            lifetimeCountdownText: lifetimeCountdownText
+        )
 
-                Spacer(minLength: 0)
-
-                Image(systemName: selected ? "largecircle.fill.circle" : "circle")
-                    .foregroundStyle(selected ? Color.accentColor : Color.secondary)
-                    .font(.title3)
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .opacity(isSelectable ? 1 : 0.42)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color(.secondarySystemBackground))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(selected ? Color.accentColor : Color.clear, lineWidth: 2)
-            )
-            .overlay {
-                if let countdownText {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(Color(.systemBackground).opacity(0.84))
-                        .overlay {
-                            Text(countdownText)
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(availabilityOverlayTextColor)
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal, 16)
-                        }
+        return ZStack {
+            if isSelectable {
+                Button {
+                    selectedPlan = plan
+                    AnalyticsLogger.log(
+                        .paywallPlanSelected(
+                            mode: analyticsMode,
+                            plan: plan.rawValue,
+                            productID: plan.storeKitProductID
+                        )
+                    )
+                } label: {
+                    cardContent
                 }
+                .buttonStyle(.plain)
+            } else {
+                cardContent
             }
         }
-        .buttonStyle(.plain)
-        .disabled(!isSelectable)
+        .overlay {
+            if !isSelectable, let availabilityCountdownText {
+                unavailablePlanOverlay(
+                    for: plan,
+                    availabilityCountdownText: availabilityCountdownText
+                )
+            }
+        }
+    }
+
+    private func unavailablePlanOverlay(
+        for plan: SubscriptionPlan,
+        availabilityCountdownText: String
+    ) -> some View {
+        RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .fill(Color(.systemBackground).opacity(0.84))
+            .overlay {
+                HStack(alignment: .center, spacing: 12) {
+                    Text(availabilityCountdownText)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(availabilityOverlayTextColor)
+                        .multilineTextAlignment(.leading)
+
+                    Spacer(minLength: 0)
+
+                    if pendingAvailabilityReminderPlan == plan {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else if armedAvailabilityReminderPlans.contains(plan) {
+                        Button("You'll be reminded") { }
+                            .buttonStyle(.plain)
+                            .disabled(true)
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Button("Notify me") {
+                            Task {
+                                await handlePaywallAvailabilityReminderTap(for: plan)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.blue)
+                        .accessibilityIdentifier("paywall_notify_\(plan.rawValue)")
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
     }
 
     private var manageCloseButton: some View {
@@ -817,6 +863,14 @@ struct PaywallView: View {
             selectedPlan = visiblePlans.first ?? .lifetime
             return
         }
+        if LoomDeveloperBuild.isInternalBuild {
+            purchaseManager.grantDebugAccess(plan: selectedPlan, session: session)
+            purchaseStatusMessage = "Debug access granted."
+            purchaseFailureAlertMessage = nil
+            restoreStatusMessage = nil
+            dismiss()
+            return
+        }
         guard isSelectedPlanPurchaseReady else {
             return
         }
@@ -856,13 +910,13 @@ struct PaywallView: View {
         let outcome = await purchaseManager.purchase(plan: plan, session: session)
         switch outcome {
         case .success:
-            AnalyticsLogger.log(.purchaseCompleted(plan: plan.rawValue))
+            AnalyticsLogger.log(.purchaseCompleted(plan: plan.rawValue, productID: plan.storeKitProductID))
             purchaseStatusMessage = nil
             if dismissOnSuccess {
                 dismiss()
             }
         case .pending:
-            AnalyticsLogger.log(.purchaseFailed(plan: plan.rawValue, errorType: "pending"))
+            AnalyticsLogger.log(.purchaseFailed(plan: plan.rawValue, productID: plan.storeKitProductID, errorType: "pending"))
             purchaseStatusMessage = "Purchase is pending approval."
         case .userCancelled:
             purchaseStatusMessage = nil
@@ -870,7 +924,7 @@ struct PaywallView: View {
                 selectedPlan = previousSelection
             }
         case .failed(let errorType):
-            AnalyticsLogger.log(.purchaseFailed(plan: plan.rawValue, errorType: errorType))
+            AnalyticsLogger.log(.purchaseFailed(plan: plan.rawValue, productID: plan.storeKitProductID, errorType: errorType))
             purchaseFailureAlertMessage = purchaseFailureMessage(for: errorType)
             if let previousSelection {
                 selectedPlan = previousSelection
@@ -891,6 +945,8 @@ struct PaywallView: View {
             return "This plan change is already scheduled."
         case "included_with_lifetime":
             return "No additional purchase is needed."
+        case "not_available":
+            return "This plan is not available yet."
         case "product_missing":
             return "The App Store purchase sheet isn't ready right now. Please try again in a moment."
         case "unverified":
@@ -901,6 +957,60 @@ struct PaywallView: View {
             return "The App Store returned an unknown purchase result."
         default:
             return "The purchase could not be completed. Please try again."
+        }
+    }
+
+    @MainActor
+    private func refreshPaywallAvailabilityReminders(now: Date) async {
+        let activePlans = await LoomNotificationScheduler.activePaywallAvailabilityReminderPlans(now: now)
+        armedAvailabilityReminderPlans = activePlans
+        if paywallReminderStatusMessage != nil, !activePlans.isEmpty {
+            paywallReminderStatusMessage = nil
+        }
+    }
+
+    @MainActor
+    private func handlePaywallAvailabilityReminderTap(for plan: SubscriptionPlan) async {
+        let now = Date()
+        currentDate = now
+        paywallReminderStatusMessage = nil
+        pendingAvailabilityReminderPlan = plan
+        defer { pendingAvailabilityReminderPlan = nil }
+
+        let initialAuthorizationStatus = await LoomNotificationScheduler.authorizationStatus()
+        AnalyticsLogger.log(
+            .paywallNotifyMeTapped(
+                mode: analyticsMode,
+                plan: plan.rawValue,
+                productID: plan.storeKitProductID,
+                daysUntilAvailable: plan.availabilityRemainingDays(on: now) ?? 0,
+                authorizationStatus: initialAuthorizationStatus.loomAnalyticsValue
+            )
+        )
+
+        let result = await LoomNotificationScheduler.requestPaywallAvailabilityReminder(for: plan, now: now)
+        AnalyticsLogger.log(
+            .paywallNotifyMeResult(
+                mode: analyticsMode,
+                plan: plan.rawValue,
+                productID: plan.storeKitProductID,
+                daysUntilAvailable: plan.availabilityRemainingDays(on: now) ?? 0,
+                authorizationStatus: result.authorizationStatus.loomAnalyticsValue,
+                result: result.outcome.rawValue
+            )
+        )
+
+        await refreshPaywallAvailabilityReminders(now: now)
+
+        switch result.outcome {
+        case .scheduled, .alreadyScheduled:
+            paywallReminderStatusMessage = nil
+        case .permissionDenied, .promptDeclined:
+            paywallReminderStatusMessage = "Enable notifications in Settings to get reminded."
+        case .noLongerUnavailable:
+            paywallReminderStatusMessage = nil
+        case .scheduleFailed:
+            paywallReminderStatusMessage = "The reminder could not be scheduled right now. Please try again."
         }
     }
 
@@ -918,6 +1028,15 @@ struct PaywallView: View {
         if let activeWindowScene {
             do {
                 try await AppStore.presentOfferCodeRedeemSheet(in: activeWindowScene)
+                await purchaseManager.refreshEntitlements(session: session)
+                if purchaseManager.isPremium {
+                    purchaseStatusMessage = "Code redeemed. Lifetime access is active."
+                    if shouldDismissAfterSuccessfulPurchase {
+                        dismiss()
+                    }
+                } else {
+                    purchaseStatusMessage = "If Apple accepted the code, access may take a moment to update. You can also tap Restore Purchases."
+                }
                 return
             } catch {
                 AppDebugActivityLog.log(
@@ -928,6 +1047,103 @@ struct PaywallView: View {
         }
 #endif
         purchaseStatusMessage = "The redeem sheet could not be opened right now. Please try again."
+    }
+}
+
+private struct PaywallPlanCardContent: View {
+    let presentation: PurchaseManager.PlanPresentation
+    let selected: Bool
+    let isSelectable: Bool
+    let showsCurrentBadge: Bool
+    let showsPendingBadge: Bool
+    let showsIncludedBadge: Bool
+    let lifetimeCountdownText: String?
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 3) {
+                titleRow
+                priceRow
+                optionalDetailText(lifetimeCountdownText, weight: .semibold)
+                optionalDetailText(presentation.tierText)
+                optionalDetailText(presentation.tierDetailText)
+                optionalDetailText(presentation.trialText)
+                optionalDetailText(presentation.trialDetailText)
+            }
+
+            Spacer(minLength: 0)
+
+            Image(systemName: selected ? "largecircle.fill.circle" : "circle")
+                .foregroundStyle(selected ? Color.accentColor : Color.secondary)
+                .font(.title3)
+                .opacity(isSelectable ? 1 : 0)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .opacity(isSelectable ? 1 : 0.42)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(selected ? Color.accentColor : Color.clear, lineWidth: 2)
+        )
+    }
+
+    private var titleRow: some View {
+        HStack(spacing: 8) {
+            Text(presentation.title)
+                .font(.headline)
+                .foregroundStyle(.primary)
+
+            if showsCurrentBadge {
+                badge("Current", color: .accentColor, opacity: 0.14)
+            } else if showsPendingBadge {
+                badge("Pending", color: .orange, opacity: 0.14)
+            } else if showsIncludedBadge {
+                badge("Included", color: .green, opacity: 0.12)
+            }
+        }
+    }
+
+    private var priceRow: some View {
+        HStack(spacing: 6) {
+            if let originalPriceText = presentation.originalPriceText {
+                Text(originalPriceText)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .strikethrough()
+            }
+
+            Text(presentation.priceText)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+        }
+    }
+
+    private func badge(_ text: String, color: Color, opacity: Double) -> some View {
+        Text(text)
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(color.opacity(opacity))
+            )
+            .foregroundStyle(color)
+    }
+
+    @ViewBuilder
+    private func optionalDetailText(
+        _ text: String?,
+        weight: Font.Weight? = nil
+    ) -> some View {
+        if let text {
+            Text(text)
+                .font(weight.map { .caption.weight($0) } ?? .caption)
+                .foregroundStyle(.secondary)
+        }
     }
 }
 

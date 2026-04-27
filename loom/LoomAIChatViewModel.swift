@@ -2505,21 +2505,40 @@ final class LoomAIViewModel: ObservableObject {
     }
 
     func refreshRemainingDailyResponses(now: Date = Date()) {
-        _ = now
-        dailyEstimatedSpendUSD = 0
-        remainingDailyResponses = Int.max
+        let ledger = dailySpendLedger(for: now)
+        dailyEstimatedSpendUSD = max(0, ledger.spentUSD)
+        let remainingBudget = max(0, DailyChatLimitConfig.maxDailyEstimatedCostUSD - dailyEstimatedSpendUSD)
+        remainingDailyResponses = max(
+            0,
+            Int((remainingBudget / DailyChatLimitConfig.fallbackEstimatedCostPerReplyUSD).rounded(.down))
+        )
     }
 
     @discardableResult
     private func incrementDailySpendLedger(with response: LoomAIService.LoomAIResponse, now: Date = Date()) -> Bool {
-        _ = response
-        _ = now
+        var ledger = dailySpendLedger(for: now)
+        guard isDailyLimiterDisabled || ledger.spentUSD < DailyChatLimitConfig.maxDailyEstimatedCostUSD else {
+            refreshRemainingDailyResponses(now: now)
+            return false
+        }
+        ledger.sentCount += 1
+        ledger.spentUSD += estimatedCostUSD(for: response)
+        saveDailySpendLedger(ledger)
+        refreshRemainingDailyResponses(now: now)
         return true
     }
 
     private func estimatedCostUSD(for response: LoomAIService.LoomAIResponse) -> Double {
-        _ = response
-        return 0
+        guard let usage = response.usage else {
+            return DailyChatLimitConfig.fallbackEstimatedCostPerReplyUSD
+        }
+        return LoomAIUsageCostCalculator.estimatedCostUSD(
+            model: usage.model,
+            inputTokens: usage.inputTokens,
+            cachedInputTokens: usage.cachedInputTokens,
+            outputTokens: usage.outputTokens,
+            fallbackUSD: DailyChatLimitConfig.fallbackEstimatedCostPerReplyUSD
+        )
     }
 
     private static let dayKeyFormatter: DateFormatter = {
@@ -2766,5 +2785,103 @@ final class LoomAIViewModel: ObservableObject {
                 return $0.updatedAt < $1.updatedAt
             }
             .first
+    }
+}
+
+struct LoomAIUsageCostCalculator {
+    struct Pricing {
+        let inputPerM: Double
+        let cachedInputPerM: Double?
+        let outputPerM: Double
+    }
+
+    private static let longContextThreshold = 272_000
+
+    static func exactCostUSD(
+        model: String?,
+        inputTokens: Int,
+        cachedInputTokens: Int,
+        outputTokens: Int
+    ) -> Double? {
+        let normalizedInputTokens = max(0, inputTokens)
+        let normalizedCachedInputTokens = max(0, min(cachedInputTokens, normalizedInputTokens))
+        let nonCachedInputTokens = max(0, normalizedInputTokens - normalizedCachedInputTokens)
+        let normalizedOutputTokens = max(0, outputTokens)
+
+        guard let pricing = pricingForModel(model, inputTokens: normalizedInputTokens) else {
+            return nil
+        }
+        guard normalizedCachedInputTokens == 0 || pricing.cachedInputPerM != nil else {
+            return nil
+        }
+
+        let inputCost = (Double(nonCachedInputTokens) / 1_000_000.0) * pricing.inputPerM
+        let cachedInputCost = (Double(normalizedCachedInputTokens) / 1_000_000.0) * (pricing.cachedInputPerM ?? 0)
+        let outputCost = (Double(normalizedOutputTokens) / 1_000_000.0) * pricing.outputPerM
+        let total = inputCost + cachedInputCost + outputCost
+        guard total.isFinite, total >= 0 else { return nil }
+        return total
+    }
+
+    static func estimatedCostUSD(
+        model: String?,
+        inputTokens: Int,
+        cachedInputTokens: Int,
+        outputTokens: Int,
+        fallbackUSD: Double
+    ) -> Double {
+        guard let exact = exactCostUSD(
+            model: model,
+            inputTokens: inputTokens,
+            cachedInputTokens: cachedInputTokens,
+            outputTokens: outputTokens
+        ) else {
+            return fallbackUSD
+        }
+        return exact > 0 ? exact : fallbackUSD
+    }
+
+    static func pricingForModel(_ model: String?, inputTokens: Int) -> Pricing? {
+        let normalizedModel = (model ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard !normalizedModel.isEmpty else { return nil }
+        let usesLongContextPricing = max(0, inputTokens) > longContextThreshold
+
+        if normalizedModel.contains("gpt-5.4-pro") {
+            if usesLongContextPricing {
+                return Pricing(inputPerM: 60.00, cachedInputPerM: nil, outputPerM: 270.00)
+            }
+            return Pricing(inputPerM: 30.00, cachedInputPerM: nil, outputPerM: 180.00)
+        }
+        if normalizedModel.contains("gpt-5.4") {
+            if usesLongContextPricing {
+                return Pricing(inputPerM: 5.00, cachedInputPerM: 0.50, outputPerM: 22.50)
+            }
+            return Pricing(inputPerM: 2.50, cachedInputPerM: 0.25, outputPerM: 15.00)
+        }
+        if normalizedModel.contains("gpt-5.2-pro") {
+            return Pricing(inputPerM: 21.00, cachedInputPerM: nil, outputPerM: 168.00)
+        }
+        if normalizedModel.contains("gpt-5-pro") {
+            return Pricing(inputPerM: 15.00, cachedInputPerM: nil, outputPerM: 120.00)
+        }
+        if normalizedModel.contains("gpt-5.2") {
+            return Pricing(inputPerM: 1.75, cachedInputPerM: 0.175, outputPerM: 14.00)
+        }
+        if normalizedModel.contains("gpt-5.1") {
+            return Pricing(inputPerM: 1.25, cachedInputPerM: 0.125, outputPerM: 10.00)
+        }
+        if normalizedModel.contains("gpt-5-mini") {
+            return Pricing(inputPerM: 0.25, cachedInputPerM: 0.025, outputPerM: 2.00)
+        }
+        if normalizedModel.contains("gpt-5-nano") {
+            return Pricing(inputPerM: 0.05, cachedInputPerM: 0.005, outputPerM: 0.40)
+        }
+        if normalizedModel == "gpt-5" || normalizedModel.contains("gpt-5-") || normalizedModel.hasPrefix("gpt-5@") {
+            return Pricing(inputPerM: 1.25, cachedInputPerM: 0.125, outputPerM: 10.00)
+        }
+
+        return nil
     }
 }

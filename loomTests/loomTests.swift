@@ -10,14 +10,255 @@ import Foundation
 @testable import loom
 
 struct loomTests {
+    private static let gregorian = Calendar(identifier: .gregorian)
+
+    private static func date(_ year: Int, _ month: Int, _ day: Int) -> Date {
+        gregorian.date(from: DateComponents(year: year, month: month, day: day))!
+    }
 
     @Test func example() async throws {
         // Write your test here and use APIs like `#expect(...)` to check expected conditions.
     }
 
-    @Test func launchCatalogIsLifetimeOnlyForSubmittedBuild() {
-        #expect(SubscriptionPlan.launchVisiblePlans == [.lifetime])
-        #expect(SubscriptionPlan.launchVisibleProductIDs == ["lifetime"])
+    @Test func analyticsSetupCompletedEventUsesSafeLaunchFunnelParameters() {
+        let event = AnalyticsEvent.setupStepCompleted(
+            stepName: LaunchSetupStage.fulfillment.rawValue,
+            stepIndex: LaunchSetupStage.fulfillment.stepIndex,
+            completionOutcome: "completed",
+            elapsedSeconds: 123,
+            stepDurationSeconds: 45
+        )
+
+        #expect(event.name == "setup_step_completed")
+        #expect(event.parameters["step_name"] as? String == "fulfillment")
+        #expect(event.parameters["step_index"] as? Int == 2)
+        #expect(event.parameters["completion_outcome"] as? String == "completed")
+        #expect(event.parameters["elapsed_seconds"] as? Int == 123)
+        #expect(event.parameters["step_duration_seconds"] as? Int == 45)
+        #expect(event.parameters["email"] == nil)
+        #expect(event.parameters["uid"] == nil)
+        #expect(event.parameters["goal"] == nil)
+    }
+
+    @Test func analyticsPurchaseEventsIncludeProductIDWithoutRevenueValue() {
+        let event = AnalyticsEvent.purchaseCompleted(
+            plan: SubscriptionPlan.lifetime.rawValue,
+            productID: SubscriptionPlan.lifetime.storeKitProductID
+        )
+
+        #expect(event.name == "purchase_completed")
+        #expect(event.parameters["plan"] as? String == "lifetime")
+        #expect(event.parameters["product_id"] as? String == "lifetime")
+        #expect(event.parameters["value"] == nil)
+        #expect(event.parameters["currency"] == nil)
+    }
+
+    @Test func analyticsPaywallNotifyMeEventsStayTypedAndPIIFree() {
+        let tappedEvent = AnalyticsEvent.paywallNotifyMeTapped(
+            mode: "standard",
+            plan: SubscriptionPlan.annual.rawValue,
+            productID: SubscriptionPlan.annual.storeKitProductID,
+            daysUntilAvailable: 12,
+            authorizationStatus: "not_determined"
+        )
+        let resultEvent = AnalyticsEvent.paywallNotifyMeResult(
+            mode: "manage",
+            plan: SubscriptionPlan.monthly.rawValue,
+            productID: SubscriptionPlan.monthly.storeKitProductID,
+            daysUntilAvailable: 37,
+            authorizationStatus: "authorized",
+            result: "scheduled"
+        )
+
+        #expect(tappedEvent.name == "paywall_notify_me_tapped")
+        #expect(tappedEvent.parameters["mode"] as? String == "standard")
+        #expect(tappedEvent.parameters["plan"] as? String == "annual")
+        #expect(tappedEvent.parameters["product_id"] as? String == "annual")
+        #expect(tappedEvent.parameters["days_until_available"] as? Int == 12)
+        #expect(tappedEvent.parameters["authorization_status"] as? String == "not_determined")
+        #expect(tappedEvent.parameters["email"] == nil)
+        #expect(tappedEvent.parameters["uid"] == nil)
+
+        #expect(resultEvent.name == "paywall_notify_me_result")
+        #expect(resultEvent.parameters["mode"] as? String == "manage")
+        #expect(resultEvent.parameters["plan"] as? String == "monthly")
+        #expect(resultEvent.parameters["product_id"] as? String == "monthly")
+        #expect(resultEvent.parameters["days_until_available"] as? Int == 37)
+        #expect(resultEvent.parameters["authorization_status"] as? String == "authorized")
+        #expect(resultEvent.parameters["result"] as? String == "scheduled")
+        #expect(resultEvent.parameters["value"] == nil)
+        #expect(resultEvent.parameters["currency"] == nil)
+    }
+
+    @Test func launchSetupStageIndexesMatchLaunchFunnelOrder() {
+        #expect(LaunchSetupStage.purpose.stepIndex == 1)
+        #expect(LaunchSetupStage.fulfillment.stepIndex == 2)
+        #expect(LaunchSetupStage.goal.stepIndex == 3)
+        #expect(LaunchSetupStage.capture.stepIndex == 4)
+        #expect(LaunchSetupStage.actionPlan.stepIndex == 5)
+    }
+
+    @Test func launchCatalogIncludesTimedSubscriptionPlans() {
+        #expect(SubscriptionPlan.launchVisiblePlans == [.lifetime, .annual, .monthly])
+        #expect(SubscriptionPlan.launchVisibleProductIDs == ["lifetime", "annual", "monthly"])
+    }
+
+    @Test func planLookupRecognizesCurrentProductIDsForTransactions() {
+        #expect(SubscriptionPlan.from(storeKitProductID: "lifetime") == .lifetime)
+        #expect(SubscriptionPlan.from(storeKitProductID: "lifetime2") == .lifetime)
+        #expect(SubscriptionPlan.from(storeKitProductID: "annual") == .annual)
+        #expect(SubscriptionPlan.from(storeKitProductID: "monthly") == .monthly)
+    }
+
+    @Test func lifetimeOfferCountdownEndsAfterMayThirtyFirst() {
+        #expect(
+            SubscriptionPlan.lifetime.lifetimeOfferCountdownText(
+                on: Self.date(2026, 5, 30),
+                calendar: Self.gregorian
+            ) == "Ends in 1 day"
+        )
+        #expect(
+            SubscriptionPlan.lifetime.lifetimeOfferCountdownText(
+                on: Self.date(2026, 5, 31),
+                calendar: Self.gregorian
+            ) == "Ends today"
+        )
+        #expect(
+            SubscriptionPlan.lifetime.lifetimeOfferCountdownText(
+                on: Self.date(2026, 6, 1),
+                calendar: Self.gregorian
+            ) == nil
+        )
+    }
+
+    @Test func timedSubscriptionPlansBecomeSelectableOnLaunchDates() {
+        #expect(!SubscriptionPlan.annual.isSelectable(on: Self.date(2026, 5, 31), calendar: Self.gregorian))
+        #expect(SubscriptionPlan.annual.isSelectable(on: Self.date(2026, 6, 1), calendar: Self.gregorian))
+        #expect(!SubscriptionPlan.monthly.isSelectable(on: Self.date(2026, 6, 30), calendar: Self.gregorian))
+        #expect(SubscriptionPlan.monthly.isSelectable(on: Self.date(2026, 7, 1), calendar: Self.gregorian))
+    }
+
+    @Test func timedSubscriptionAvailabilityCountdownsHideOnLaunchDates() {
+        #expect(
+            SubscriptionPlan.annual.availabilityCountdownText(
+                on: Self.date(2026, 5, 31),
+                calendar: Self.gregorian
+            ) == "Available in 1 day"
+        )
+        #expect(
+            SubscriptionPlan.annual.availabilityCountdownText(
+                on: Self.date(2026, 6, 1),
+                calendar: Self.gregorian
+            ) == nil
+        )
+        #expect(
+            SubscriptionPlan.monthly.availabilityCountdownText(
+                on: Self.date(2026, 6, 30),
+                calendar: Self.gregorian
+            ) == "Available in 1 day"
+        )
+        #expect(
+            SubscriptionPlan.monthly.availabilityCountdownText(
+                on: Self.date(2026, 7, 1),
+                calendar: Self.gregorian
+            ) == nil
+        )
+    }
+
+    @Test func unavailablePlansExposeReminderFireDatesBeforeLaunch() {
+        let annualReminder = SubscriptionPlan.annual.availabilityReminderFireDate(
+            on: Self.date(2026, 5, 31),
+            calendar: Self.gregorian
+        )
+        let monthlyReminder = SubscriptionPlan.monthly.availabilityReminderFireDate(
+            on: Self.date(2026, 6, 20),
+            calendar: Self.gregorian
+        )
+
+        #expect(annualReminder == Self.gregorian.date(from: DateComponents(year: 2026, month: 6, day: 1, hour: 9, minute: 0)))
+        #expect(monthlyReminder == Self.gregorian.date(from: DateComponents(year: 2026, month: 7, day: 1, hour: 9, minute: 0)))
+    }
+
+    @Test func availablePlansDoNotExposeReminderFireDates() {
+        #expect(
+            SubscriptionPlan.annual.availabilityReminderFireDate(
+                on: Self.date(2026, 6, 1),
+                calendar: Self.gregorian
+            ) == nil
+        )
+        #expect(
+            SubscriptionPlan.lifetime.availabilityReminderFireDate(
+                on: Self.date(2026, 5, 1),
+                calendar: Self.gregorian
+            ) == nil
+        )
+    }
+
+    @Test func stalePaywallReminderEntriesArePrunedOnLaunchDay() {
+        let stale = LoomPaywallAvailabilityReminderStore.validatedReminders(
+            from: [
+                SubscriptionPlan.annual.rawValue: Self.date(2026, 6, 1),
+                SubscriptionPlan.monthly.rawValue: Self.date(2026, 7, 1),
+                "invalid-plan": Self.date(2026, 7, 1),
+            ],
+            now: Self.date(2026, 6, 1),
+            calendar: Self.gregorian
+        )
+
+        #expect(stale[SubscriptionPlan.annual.rawValue] == nil)
+        #expect(
+            stale[SubscriptionPlan.monthly.rawValue] ==
+            Self.gregorian.date(from: DateComponents(year: 2026, month: 7, day: 1, hour: 9, minute: 0))
+        )
+        #expect(stale["invalid-plan"] == nil)
+    }
+
+    @Test func inactivePaywallBannerOnlyShowsForExpiredSubscription() {
+        #expect(
+            SubscriptionAccessGate.inactivePaywallBannerMessage(
+                accessState: .expiredSubscription(plan: .annual, expirationDate: nil),
+                source: .lockedFeature,
+                shouldPresentStarterPaywallAsNewUser: false
+            ) == SubscriptionAccessGate.inactiveBannerMessage
+        )
+        #expect(
+            SubscriptionAccessGate.inactivePaywallBannerMessage(
+                accessState: .inactive,
+                source: .lockedFeature,
+                shouldPresentStarterPaywallAsNewUser: false
+            ) == nil
+        )
+        #expect(
+            SubscriptionAccessGate.inactivePaywallBannerMessage(
+                accessState: .unknown,
+                source: .lockedFeature,
+                shouldPresentStarterPaywallAsNewUser: false
+            ) == nil
+        )
+        #expect(
+            SubscriptionAccessGate.inactivePaywallBannerMessage(
+                accessState: .active(plan: .lifetime, periodEndDate: nil),
+                source: .lockedFeature,
+                shouldPresentStarterPaywallAsNewUser: false
+            ) == nil
+        )
+    }
+
+    @Test func inactivePaywallBannerIsSuppressedForSetupAndStarterPaywalls() {
+        #expect(
+            SubscriptionAccessGate.inactivePaywallBannerMessage(
+                accessState: .expiredSubscription(plan: .monthly, expirationDate: nil),
+                source: .setupFlow,
+                shouldPresentStarterPaywallAsNewUser: false
+            ) == nil
+        )
+        #expect(
+            SubscriptionAccessGate.inactivePaywallBannerMessage(
+                accessState: .expiredSubscription(plan: .monthly, expirationDate: nil),
+                source: .lockedFeature,
+                shouldPresentStarterPaywallAsNewUser: true
+            ) == nil
+        )
     }
 
     @Test func accountDeletionProviderPrefersAuthenticatedProviderIDs() {

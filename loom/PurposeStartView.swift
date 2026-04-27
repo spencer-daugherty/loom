@@ -377,7 +377,7 @@ struct PurposeStartView: View {
         }
         .safeAreaInset(edge: .bottom) {
             footer
-                .loomAdaptiveColumn(maxWidth: 760, horizontalPadding: 20, alignment: .top)
+                .loomAdaptiveColumn(maxWidth: 760, horizontalPadding: 20, alignment: .top, appliesOnPhone: true)
                 .padding(.top, 8)
                 .padding(.bottom, 10)
                 .background(Color(.systemGroupedBackground))

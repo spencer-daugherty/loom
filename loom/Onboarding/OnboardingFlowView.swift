@@ -65,7 +65,8 @@ struct OnboardingFlowView: View {
         }
         .onDisappear {
             if didLogOnboardingStarted && !didLogOnboardingCompleted && !session.hasSeenOnboarding {
-                AnalyticsLogger.log(.onboardingAbandoned(lastSlideIndex: currentIndex))
+                let duration = max(0, Int(Date().timeIntervalSince(onboardingStartDate ?? Date())))
+                AnalyticsLogger.log(.onboardingAbandoned(lastSlideIndex: currentIndex, durationSeconds: duration))
             }
         }
     }

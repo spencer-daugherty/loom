@@ -635,11 +635,7 @@ struct ContentView: View {
     }
 
     private var contentViewNavigationStackBody: some View {
-#if DEBUG
-        let shouldRenderSplash = false
-#else
         let shouldRenderSplash = showSplash && hasAccount
-#endif
         return ZStack {
             Color(.systemGroupedBackground)
                 .ignoresSafeArea()
@@ -848,6 +844,7 @@ struct ContentView: View {
                         Spacer(minLength: 0)
                         Button(isLast ? "Done" : "Next") {
                             if isLast {
+                                LaunchFunnelAnalyticsTracker.recordQuickTourCompleted(totalSteps: contentQuickstartSteps.count)
                                 hasSeenContentQuickstart = true
                                 forceShowContentQuickstartOnce = false
                                 withAnimation(quickstartPageTransitionAnimation) {
@@ -1126,6 +1123,8 @@ struct ContentView: View {
                 }
             }
             .onChange(of: activeHomeFocusTarget) { previousTarget, newTarget in
+                recordCompletedSetupStepIfNeeded(previousTarget: previousTarget, newTarget: newTarget)
+                recordActiveSetupStageIfNeeded(newTarget)
                 guard previousTarget == .capture, newTarget != .capture else { return }
                 pendingCaptureCompletionNotificationPrompt = true
                 requestNotificationsAfterCaptureCompletionIfNeeded()
@@ -1136,6 +1135,11 @@ struct ContentView: View {
             }
             .onChange(of: shouldShowContentQuickstart) { _, show in
                 if show {
+                    LaunchFunnelAnalyticsTracker.recordQuickTourStarted()
+                    LaunchFunnelAnalyticsTracker.recordQuickTourStepViewed(
+                        stepName: contentQuickstartSteps[0].target.rawValue,
+                        stepIndex: 1
+                    )
                     contentQuickstartStepIndex = 0
                     homePageIndex = quickstartPage(for: 0)
                 }
@@ -1151,6 +1155,11 @@ struct ContentView: View {
             }
             .onChange(of: contentQuickstartStepIndex) { _, newValue in
                 guard shouldShowContentQuickstart else { return }
+                let bounded = min(max(0, newValue), max(0, contentQuickstartSteps.count - 1))
+                LaunchFunnelAnalyticsTracker.recordQuickTourStepViewed(
+                    stepName: contentQuickstartSteps[bounded].target.rawValue,
+                    stepIndex: bounded + 1
+                )
                 guard !quickstartIsPageTransitionInFlight else { return }
                 let targetPage = quickstartPage(for: newValue)
                 if homePageIndex != targetPage {
@@ -1162,13 +1171,9 @@ struct ContentView: View {
             .onChange(of: hasAccount) { _, newValue in
                 handleHasAccountChanged(newValue)
             }
-        .onAppear {
-#if DEBUG
-            print("[LoomLaunch] ContentView onAppear")
-#endif
-            handleContentViewAppear()
-        }
+            .onAppear(perform: handleContentViewAppear)
             .onDisappear {
+                LaunchFunnelAnalyticsTracker.recordSetupExitIfNeeded()
                 notificationPermissionRequestTask?.cancel()
                 notificationPermissionRequestTask = nil
             }
@@ -1206,6 +1211,10 @@ struct ContentView: View {
                 dismissVacationModeBanner = false
                 refreshFulfillmentCategoryScoresForCurrentWeek()
             }
+            .onChange(of: scenePhase) { _, newPhase in
+                guard newPhase == .inactive || newPhase == .background else { return }
+                LaunchFunnelAnalyticsTracker.recordSetupExitIfNeeded()
+            }
     }
 
     private var contentViewLifecycleLayer: some View {
@@ -1241,8 +1250,15 @@ struct ContentView: View {
             hasSeenContentQuickstart = true
         }
         if shouldShowContentQuickstart {
+            LaunchFunnelAnalyticsTracker.recordQuickTourStarted()
+            let bounded = min(max(0, contentQuickstartStepIndex), max(0, contentQuickstartSteps.count - 1))
+            LaunchFunnelAnalyticsTracker.recordQuickTourStepViewed(
+                stepName: contentQuickstartSteps[bounded].target.rawValue,
+                stepIndex: bounded + 1
+            )
             homePageIndex = quickstartPage(for: contentQuickstartStepIndex)
         }
+        recordActiveSetupStageIfNeeded(activeHomeFocusTarget)
         if shouldShowAnyOnboardingBounce {
             bounceDrivingCardOnce()
         }
@@ -1359,19 +1375,11 @@ struct ContentView: View {
         guard !splashPreparationStarted else { return }
         splashPreparationStarted = true
 
-#if DEBUG
-        splashPreparationFinished = true
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
-            await runStartupPreparation()
-        }
-#else
         Task { @MainActor in
             await runStartupPreparation()
             splashPreparationFinished = true
             dismissSplashIfReady()
         }
-#endif
     }
 
     @MainActor
@@ -5604,12 +5612,10 @@ struct ContentView: View {
             : Color(.secondarySystemBackground)
 
         return AnyView(NavigationLink {
-            Group {
-                if isFulfillmentEmptyState {
-                    FulfillmentStartView()
-                } else {
-                    FulfillmentView()
-                }
+            if isFulfillmentEmptyState {
+                FulfillmentStartView()
+            } else {
+                FulfillmentView()
             }
         } label: {
             SectionCard(
@@ -6029,6 +6035,7 @@ struct ContentView: View {
     }
 
     private func skipObjectivesSetupStep() {
+        LaunchFunnelAnalyticsTracker.recordSetupStepCompleted(.goal, outcome: "skipped")
         HomeSetupProgressStore.setObjectivesSetupSkippedForCurrentUser(true)
         hasSkippedObjectivesSetupStep = true
         homeSetupProgressUserKey = PersonalizationUserIdentity.currentUserKey()
@@ -6041,8 +6048,41 @@ struct ContentView: View {
     }
 
     private func skipActionPlanSetupStep() {
+        LaunchFunnelAnalyticsTracker.recordSetupStepCompleted(.actionPlan, outcome: "deferred")
         hasDeferredActionPlanCalloutThisSession = true
         setupHomepageMode = false
+    }
+
+    private func recordActiveSetupStageIfNeeded(_ target: HomeStartupFocusTarget?) {
+        guard hasActiveSubscriptionAccess else { return }
+        guard let target, let stage = launchSetupStage(for: target) else { return }
+        LaunchFunnelAnalyticsTracker.recordSetupStageViewed(stage)
+    }
+
+    private func recordCompletedSetupStepIfNeeded(
+        previousTarget: HomeStartupFocusTarget?,
+        newTarget: HomeStartupFocusTarget?
+    ) {
+        guard hasActiveSubscriptionAccess else { return }
+        guard let previousTarget, previousTarget != newTarget else { return }
+        guard let stage = launchSetupStage(for: previousTarget) else { return }
+        let outcome = (stage == .goal && hasSkippedObjectivesSetupStep) ? "skipped" : "completed"
+        LaunchFunnelAnalyticsTracker.recordSetupStepCompleted(stage, outcome: outcome)
+    }
+
+    private func launchSetupStage(for target: HomeStartupFocusTarget) -> LaunchSetupStage? {
+        switch target {
+        case .purpose:
+            return .purpose
+        case .fulfillment:
+            return .fulfillment
+        case .objectives:
+            return .goal
+        case .capture:
+            return .capture
+        case .actionBlocks:
+            return .actionPlan
+        }
     }
 
     private func openOnboardingCallCardTarget(_ target: HomeStartupFocusTarget) {

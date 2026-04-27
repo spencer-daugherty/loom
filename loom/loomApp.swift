@@ -246,35 +246,20 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
-#if DEBUG
-        print("[LoomLaunch] App didFinishLaunching")
-#endif
         AppDebugActivityLog.log("App", "didFinishLaunching")
         if LoomRuntime.isPreviewSafeModeEnabled {
             return true
         }
 
 #if canImport(FirebaseCore)
-        #if DEBUG
-        print("[LoomLaunch] App skipped synchronous Firebase configure for Debug launch")
-        #else
         FirebaseBootstrap.configureIfNeeded(reason: "app delegate")
-        #endif
 #endif
 #if canImport(FirebaseAnalytics)
-        #if DEBUG
-        if FirebaseBootstrap.isConfigured {
-            AnalyticsCollectionPolicy.refreshCollectionState()
-        }
-        #else
         AnalyticsCollectionPolicy.refreshCollectionState()
-        #endif
 #endif
 #if canImport(FirebaseCrashlytics)
         #if DEBUG
-        if FirebaseBootstrap.isConfigured {
-            Crashlytics.crashlytics().setCrashlyticsCollectionEnabled(false)
-        }
+        Crashlytics.crashlytics().setCrashlyticsCollectionEnabled(false)
         #else
         Crashlytics.crashlytics().setCrashlyticsCollectionEnabled(true)
         #endif
@@ -306,11 +291,6 @@ struct loomApp: App {
     @AppStorage(UserSessionStore.Keys.reviewDemoModeEnabled) private var reviewDemoModeEnabled = false
     @AppStorage(UserSessionStore.Keys.reviewDemoStoreGeneration) private var reviewDemoStoreGeneration = 0
     @AppStorage(UserSessionStore.Keys.isolatedWorkspaceKind) private var isolatedWorkspaceKind = ""
-#if DEBUG
-    @AppStorage(loomAIDebugDefaultsKey) private var enableLoomAIDebug = false
-    @State private var showLoomAIDebugPage = false
-    private let loomAIDebugDefaultOffNormalizationKey = "loom.enableLoomAIDebug.defaultOffNormalized.v1"
-#endif
     @StateObject private var workspaceTransitionCoordinator = LoomWorkspaceTransitionCoordinator()
     @Namespace private var workspaceTransitionSplashNamespace
 
@@ -322,50 +302,11 @@ struct loomApp: App {
                 reviewDemoStoreGeneration: reviewDemoStoreGeneration,
                 isolatedWorkspaceKind: isolatedWorkspaceKind
             ) {
-                #if DEBUG
-                ZStack(alignment: .bottomLeading) {
-                    Group {
-                        if enableLoomAIDebug && showLoomAIDebugPage {
-                            TemporaryVisionAutoWriteDebugView {
-                                showLoomAIDebugPage = false
-                            }
-                        } else {
-                            RootGateView(presentationStyle: .fullScreen) {
-                                ContentView()
-                                    .autocorrectionDisabled(false)
-                                    .textInputAutocapitalization(.sentences)
-                            }
-                        }
-                    }
-                    .id(enableLoomAIDebug && showLoomAIDebugPage ? "loom-debug-root" : "loom-main-root")
-
-                    if enableLoomAIDebug && !showLoomAIDebugPage {
-                        Button {
-                            showLoomAIDebugPage = true
-                        } label: {
-                            Text("Debug")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 8)
-                                .background(
-                                    Capsule(style: .continuous)
-                                        .fill(Color.blue.gradient)
-                                )
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.leading, 12)
-                        .padding(.bottom, 14)
-                        .zIndex(10)
-                    }
-                }
-                #else
                 RootGateView(presentationStyle: .fullScreen) {
                     ContentView()
                         .autocorrectionDisabled(false)
                         .textInputAutocapitalization(.sentences)
                 }
-                #endif
             }
             .environmentObject(workspaceTransitionCoordinator)
             .overlay {
@@ -382,10 +323,6 @@ struct loomApp: App {
             .allowsHitTesting(!workspaceTransitionCoordinator.isTransitioning)
             .onAppear {
                 AnalyticsCollectionPolicy.refreshCollectionState()
-#if DEBUG
-                normalizeLoomAIDebugDefaultIfNeeded()
-                showLoomAIDebugPage = false
-#endif
             }
             .onChange(of: reviewDemoModeEnabled) { _, _ in
                 AnalyticsCollectionPolicy.refreshCollectionState()
@@ -400,28 +337,8 @@ struct loomApp: App {
                 guard newPhase == .active else { return }
                 AnalyticsCollectionPolicy.refreshCollectionState()
             }
-#if DEBUG
-            .onChange(of: enableLoomAIDebug) { _, isEnabled in
-                AppDebugActivityLog.log("App", "LoomAI Debug mode toggled \(isEnabled ? "on" : "off")")
-                if !isEnabled {
-                    showLoomAIDebugPage = false
-                }
-            }
-#endif
         }
     }
-
-#if DEBUG
-    private func normalizeLoomAIDebugDefaultIfNeeded() {
-        let defaults = UserDefaults.standard
-        guard !defaults.bool(forKey: loomAIDebugDefaultOffNormalizationKey) else { return }
-        if defaults.bool(forKey: loomAIDebugDefaultsKey) {
-            enableLoomAIDebug = false
-            defaults.set(false, forKey: loomAIDebugDefaultsKey)
-        }
-        defaults.set(true, forKey: loomAIDebugDefaultOffNormalizationKey)
-    }
-#endif
 
     private func handleShareIntoLoomURLIfNeeded(_ url: URL) {
         guard url.scheme?.lowercased() == "loom" else { return }
@@ -522,12 +439,6 @@ private struct LoomModelContainerHost<Content: View>: View {
     let isolatedWorkspaceKind: String
     let content: Content
     @EnvironmentObject private var workspaceTransitionCoordinator: LoomWorkspaceTransitionCoordinator
-#if DEBUG
-    @State private var loadedContainerKey: String?
-    @State private var loadedContainer: ModelContainer?
-    @State private var didFailToLoadContainer = false
-    @Namespace private var loadingSplashNamespace
-#endif
 
     init(
         hasAccount: Bool,
@@ -545,11 +456,7 @@ private struct LoomModelContainerHost<Content: View>: View {
 
     var body: some View {
         Group {
-#if DEBUG
-            debugContainerBody
-#else
             releaseContainerBody
-#endif
         }
         .onOpenURL { url in
             guard !LoomRuntime.isPreviewSafeModeEnabled else { return }
@@ -559,45 +466,6 @@ private struct LoomModelContainerHost<Content: View>: View {
 #endif
         }
     }
-
-#if DEBUG
-    @ViewBuilder
-    private var debugContainerBody: some View {
-        if let loadedContainer, loadedContainerKey == desiredContainerKey {
-            if let workspace = desiredWorkspace {
-                LoomAppBootstrapView(reportsTransitionReady: false) {
-                    LoomIsolatedWorkspaceBootstrapView(workspace: workspace) {
-                        content
-                    }
-                }
-                .modelContainer(loadedContainer)
-                .id(loadedContainerKey)
-            } else {
-                LoomAppBootstrapView {
-                    content
-                }
-                .modelContainer(loadedContainer)
-                .id(loadedContainerKey)
-            }
-        } else if didFailToLoadContainer {
-            LoomPersistenceFailureView()
-        } else {
-            LoadingSplashView(
-                metrics: [],
-                namespace: loadingSplashNamespace,
-                minimumDisplayDuration: 0.8,
-                radarIntroDelay: 0.15
-            )
-            .onAppear {
-                print("[LoomLaunch] Debug loading splash appeared")
-                AppDebugActivityLog.log("Launch", "Debug loading splash appeared")
-            }
-            .task(id: desiredContainerKey) {
-                await loadContainerIfNeeded()
-            }
-        }
-    }
-#endif
 
     @ViewBuilder
     private var releaseContainerBody: some View {
@@ -621,19 +489,6 @@ private struct LoomModelContainerHost<Content: View>: View {
         }
     }
 
-#if DEBUG
-    private var desiredContainerKey: String {
-        if let workspace = desiredWorkspace {
-            return "loom-isolated-container-\(workspace.rawValue)-\(storeGeneration(for: workspace))"
-        }
-        return "loom-primary-container"
-    }
-
-    private var desiredWorkspace: LoomSpecialAccountWorkspace? {
-        resolvedWorkspace
-    }
-#endif
-
     private var resolvedWorkspace: LoomSpecialAccountWorkspace? {
         workspaceTransitionCoordinator.resolvedWorkspace(persistedWorkspace: persistedWorkspace)
     }
@@ -651,37 +506,6 @@ private struct LoomModelContainerHost<Content: View>: View {
         _ = workspace
         return reviewDemoStoreGeneration
     }
-
-#if DEBUG
-    @MainActor
-    private func loadContainerIfNeeded() async {
-        let key = desiredContainerKey
-        guard loadedContainerKey != key || loadedContainer == nil else { return }
-
-        loadedContainer = nil
-        loadedContainerKey = nil
-        didFailToLoadContainer = false
-
-        // Let the Debug loading animation become visibly active before any persistence work starts.
-        await Task.yield()
-        try? await Task.sleep(nanoseconds: 1_500_000_000)
-
-        let workspace = desiredWorkspace
-        let generation = workspace.map { storeGeneration(for: $0) }
-        let container = await LoomDebugContainerLoader.loadContainer(
-            workspace: workspace,
-            generation: generation
-        )
-
-        guard desiredContainerKey == key else { return }
-        if let container {
-            loadedContainer = container
-            loadedContainerKey = key
-        } else {
-            didFailToLoadContainer = true
-        }
-    }
-#endif
 
     private func handleIncomingURL(_ url: URL) {
         guard url.scheme?.lowercased() == "loom" else { return }
@@ -721,25 +545,6 @@ private struct LoomModelContainerHost<Content: View>: View {
     }
 }
 
-#if DEBUG
-private enum LoomDebugContainerLoader {
-    static func loadContainer(
-        workspace: LoomSpecialAccountWorkspace?,
-        generation: Int?
-    ) async -> ModelContainer? {
-        _ = workspace
-        _ = generation
-        debugLog("using in-memory Debug container; persistent store open is skipped during launch")
-        return LoomPersistence.makeInMemoryContainer()
-    }
-
-    private static func debugLog(_ message: String) {
-        print("[LoomLaunch] DebugContainerLoader \(message)")
-        AppDebugActivityLog.log("DebugContainerLoader", message)
-    }
-}
-#endif
-
 private struct LoomAppBootstrapView<Content: View>: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var workspaceTransitionCoordinator: LoomWorkspaceTransitionCoordinator
@@ -757,21 +562,6 @@ private struct LoomAppBootstrapView<Content: View>: View {
     }
 
     var body: some View {
-#if DEBUG
-        content
-            .task {
-                guard !didFinishBootstrap else { return }
-                didFinishBootstrap = true
-                if reportsTransitionReady {
-                    workspaceTransitionCoordinator.markReady(for: nil)
-                }
-
-                // Debug launch already showed the animated splash; keep the first app frame visible.
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-                RetiredExternalIntegrationCleanup.runIfNeeded(in: modelContext)
-                FulfillmentDuplicateRepair.runIfNeeded(in: modelContext)
-            }
-#else
         Group {
             if didFinishBootstrap {
                 content
@@ -792,7 +582,6 @@ private struct LoomAppBootstrapView<Content: View>: View {
                 workspaceTransitionCoordinator.markReady(for: nil)
             }
         }
-#endif
     }
 }
 

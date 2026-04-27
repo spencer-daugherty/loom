@@ -205,6 +205,7 @@ struct DiagnosticFlowView: View {
                     .diagnosticStarted(
                         source: mode.analyticsSource,
                         step: questionIndex(for: step) ?? 0,
+                        stepName: analyticsStepName(for: step),
                         elapsedSeconds: 0
                     )
                 )
@@ -223,6 +224,7 @@ struct DiagnosticFlowView: View {
                 .diagnosticAbandoned(
                     source: mode.analyticsSource,
                     step: questionIndex(for: step) ?? 0,
+                    stepName: analyticsStepName(for: step),
                     elapsedSeconds: elapsedSeconds
                 )
             )
@@ -531,6 +533,7 @@ struct DiagnosticFlowView: View {
                     .diagnosticCompleted(
                         source: mode.analyticsSource,
                         step: totalQuestionCount,
+                        stepName: analyticsStepName(for: .desiredChange),
                         elapsedSeconds: elapsed
                     )
                 )
@@ -762,6 +765,17 @@ struct DiagnosticFlowView: View {
     private func questionIndex(for step: Step) -> Int? {
         guard let index = visibleQuestionSteps.firstIndex(of: step) else { return nil }
         return index + 1
+    }
+
+    private func analyticsStepName(for step: Step) -> String {
+        switch step {
+        case .stressSource: return "stress_source"
+        case .breakPoint: return "break_point"
+        case .lifeAreas: return "life_areas"
+        case .planningReality: return "planning_reality"
+        case .desiredChange: return "desired_change"
+        case .building: return "building"
+        }
     }
 
     @ViewBuilder

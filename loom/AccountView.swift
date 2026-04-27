@@ -621,10 +621,17 @@ struct AccountView: View {
     @EnvironmentObject private var session: UserSessionStore
     @Query private var fulfillments: [Fulfillment]
     @AppStorage(loomAIInsightsRefreshToggleDefaultsKey) private var enableLoomAIInsightsRefresh = false
+    @AppStorage(loomAITroubleshootingDefaultsKey) private var enableLoomAITroubleshooting = true
+    @AppStorage(loomAIDebugDefaultsKey) private var enableLoomAIDebug = false
+    @AppStorage(loomAIDisableAppleIntelligenceDefaultsKey) private var disableAppleIntelligence = false
+    @AppStorage(loomAICustomChatDefaultsKey) private var enableLoomAICustomChat = false
+    @AppStorage("loomAI.dev.disableDailyLimiter") private var disableLoomAIDailyLimiter = false
     @AppStorage("enable_projects_feature") private var enableProjectsFeatureStorage = false
     @AppStorage("onboarding_reset_on_next_launch") private var onboardingResetOnNextLaunch = false
     @AppStorage("blank_homepage_mode") private var blankHomepageModeStorage = false
     @AppStorage("setup_homepage_mode") private var setupHomepageModeStorage = false
+    @AppStorage("developer_launch_paywall_once") private var developerLaunchPaywallOnce = false
+    @AppStorage("account_name") private var accountName = ""
     @AppStorage("has_seen_content_quickstart_v1") private var hasSeenContentQuickstart = false
     @AppStorage("force_show_content_quickstart_once") private var forceShowContentQuickstartOnce = false
     @AppStorage("dev_manual_warning_cards_enabled") private var devManualWarningCardsEnabled = false
@@ -645,6 +652,13 @@ struct AccountView: View {
     @State private var feedbackDetails = ""
     @State private var presentedLegalDocument: LegalDocument?
     @State private var weekStartOption: AppWeekStartOption = AppWeekStartStore.current()
+    @State private var showDeveloperPasswordSheet = false
+    @State private var developerPasswordInput = ""
+    @State private var showDeveloperPasswordError = false
+    @State private var showDeveloperPage = false
+    @State private var showDeveloperPaywall = false
+    @State private var showResetReviewOnboardingDemoConfirmation = false
+    @State private var loomAICostSnapshot = LoomAICostLedger.dailySnapshot()
 
     private func deleteWarningTitle(for scope: DeleteScope) -> String {
         switch scope {
@@ -681,6 +695,48 @@ struct AccountView: View {
 
     private var isFulfillmentEmptyState: Bool {
         blankHomepageMode || fulfillments.isEmpty
+    }
+
+    private var legacyLoomAIChatDailyLimitDefaultsKey: String {
+        "loomAI.chatDailyMessageLimit.v1"
+    }
+
+    private func refreshLoomAICostSnapshot() {
+        loomAICostSnapshot = LoomAICostLedger.dailySnapshot()
+    }
+
+    private func resetLoomAIDailyLimit() {
+        LoomAICostLedger.resetToday()
+        UserDefaults.standard.removeObject(forKey: legacyLoomAIChatDailyLimitDefaultsKey)
+        refreshLoomAICostSnapshot()
+    }
+
+    private func resetReviewOnboardingDemoWorkspace() {
+        LoomSpecialAccountWorkspace.reviewDemo.setAllowsAutoCreate(true)
+        session.resetIsolatedWorkspaceImmediately(.reviewDemo)
+
+        guard LoomDefaultsScope.currentWorkspace() == .reviewDemo else { return }
+
+        showDeveloperPage = false
+
+#if canImport(FirebaseAuth)
+        try? Auth.auth().signOut()
+#endif
+#if canImport(GoogleSignIn)
+        GIDSignIn.sharedInstance.signOut()
+#endif
+
+        hasSeenOnboarding = false
+        hasAccount = false
+        hasCompletedDiagnostic = false
+        hasSeenDiagnosticInsights = false
+        isSubscribed = false
+        blankHomepageMode = false
+        setupHomepageMode = false
+        hasSeenContentQuickstart = false
+        forceShowContentQuickstartOnce = false
+        session.clearAccountSession()
+        session.setHasSeenOnboarding(false)
     }
 
     private var enableProjectsFeature: Bool {
@@ -829,6 +885,7 @@ struct AccountView: View {
                         Text("Recently Deleted")
                     }
                 }
+
                 Button {
                     dismiss()
                     DispatchQueue.main.async {
@@ -897,6 +954,25 @@ struct AccountView: View {
                 }
                 .foregroundStyle(.blue)
                 .listRowSeparator(.hidden)
+
+                if LoomDeveloperBuild.isInternalBuild,
+                   accountName.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare("Spencer") == .orderedSame {
+                    HStack {
+                        Spacer()
+                        Button {
+                            developerPasswordInput = ""
+                            showDeveloperPasswordError = false
+                            showDeveloperPasswordSheet = true
+                        } label: {
+                            Text("Developer")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        Spacer()
+                    }
+                    .listRowSeparator(.hidden)
+                }
 
             }
         }
@@ -978,6 +1054,75 @@ struct AccountView: View {
         .sheet(item: $presentedLegalDocument) { document in
             LegalLinksView(document: document)
         }
+        .sheet(isPresented: $showDeveloperPasswordSheet) {
+            DeveloperAccessSheet(
+                pin: $developerPasswordInput,
+                showError: $showDeveloperPasswordError
+            ) {
+                if developerPasswordInput == "0927" {
+                    showDeveloperPasswordError = false
+                    showDeveloperPasswordSheet = false
+                    showDeveloperPage = true
+                } else {
+                    showDeveloperPasswordError = true
+                }
+            }
+            .presentationDetents([.height(220)])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showDeveloperPage) {
+            AccountDeveloperSheet(
+                showDeveloperPage: $showDeveloperPage,
+                showDeveloperPaywall: $showDeveloperPaywall,
+                developerLaunchPaywallOnce: $developerLaunchPaywallOnce,
+                inactivePurchaseOverrideEnabled: $inactivePurchaseOverrideEnabled,
+                enableLoomAIInsightsRefresh: $enableLoomAIInsightsRefresh,
+                enableLoomAITroubleshooting: $enableLoomAITroubleshooting,
+                enableLoomAIDebug: $enableLoomAIDebug,
+                enableLoomAICustomChat: $enableLoomAICustomChat,
+                disableAppleIntelligence: $disableAppleIntelligence,
+                disableLoomAIDailyLimiter: $disableLoomAIDailyLimiter,
+                enableProjectsFeatureStorage: $enableProjectsFeatureStorage,
+                onboardingResetOnNextLaunch: $onboardingResetOnNextLaunch,
+                blankHomepageModeStorage: $blankHomepageModeStorage,
+                setupHomepageModeStorage: $setupHomepageModeStorage,
+                devManualWarningCardsEnabled: $devManualWarningCardsEnabled,
+                devPlanViewResultAutoWriteEnabled: $devPlanViewResultAutoWriteEnabled,
+                devOutcomeWarningTargetPassed: $devOutcomeWarningTargetPassed,
+                devOutcomeWarningGoalAchieved: $devOutcomeWarningGoalAchieved,
+                devActionBlocksWarningOldBlocks: $devActionBlocksWarningOldBlocks,
+                showResetReviewOnboardingDemoConfirmation: $showResetReviewOnboardingDemoConfirmation,
+                loomAICostSnapshot: loomAICostSnapshot,
+                refreshLoomAICostSnapshot: refreshLoomAICostSnapshot,
+                resetLoomAIDailyLimit: resetLoomAIDailyLimit,
+                resetReviewOnboardingDemoWorkspace: resetReviewOnboardingDemoWorkspace,
+                deleteLittleWinsData: {
+                    deleteAllConfirmationCode = ""
+                    presentedDeleteScope = .littleWinsOnly
+                },
+                deleteFulfillmentData: {
+                    deleteAllConfirmationCode = ""
+                    presentedDeleteScope = .fulfillmentOnly
+                },
+                deleteAllData: {
+                    deleteAllConfirmationCode = ""
+                    presentedDeleteScope = .allData
+                }
+            )
+        }
+        .fullScreenCover(isPresented: $showDeveloperPaywall) {
+            NavigationStack {
+                PaywallView()
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button("Done") {
+                                showDeveloperPaywall = false
+                            }
+                        }
+                    }
+            }
+        }
         .onChange(of: blankHomepageMode) { _, isOn in
             if isOn {
                 if setupHomepageMode {
@@ -1026,6 +1171,236 @@ struct AccountView: View {
 
     private func permanentlyDeleteLittleWinsData() {
         AccountDataDeletion.deleteLittleWinsData(in: context)
+    }
+}
+
+private struct AccountDeveloperSheet: View {
+    @Binding var showDeveloperPage: Bool
+    @Binding var showDeveloperPaywall: Bool
+    @Binding var developerLaunchPaywallOnce: Bool
+    @Binding var inactivePurchaseOverrideEnabled: Bool
+    @Binding var enableLoomAIInsightsRefresh: Bool
+    @Binding var enableLoomAITroubleshooting: Bool
+    @Binding var enableLoomAIDebug: Bool
+    @Binding var enableLoomAICustomChat: Bool
+    @Binding var disableAppleIntelligence: Bool
+    @Binding var disableLoomAIDailyLimiter: Bool
+    @Binding var enableProjectsFeatureStorage: Bool
+    @Binding var onboardingResetOnNextLaunch: Bool
+    @Binding var blankHomepageModeStorage: Bool
+    @Binding var setupHomepageModeStorage: Bool
+    @Binding var devManualWarningCardsEnabled: Bool
+    @Binding var devPlanViewResultAutoWriteEnabled: Bool
+    @Binding var devOutcomeWarningTargetPassed: Bool
+    @Binding var devOutcomeWarningGoalAchieved: Bool
+    @Binding var devActionBlocksWarningOldBlocks: Bool
+    @Binding var showResetReviewOnboardingDemoConfirmation: Bool
+
+    let loomAICostSnapshot: LoomAIDailyCostSnapshot
+    let refreshLoomAICostSnapshot: () -> Void
+    let resetLoomAIDailyLimit: () -> Void
+    let resetReviewOnboardingDemoWorkspace: () -> Void
+    let deleteLittleWinsData: () -> Void
+    let deleteFulfillmentData: () -> Void
+    let deleteAllData: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            List {
+                developerActionsSection
+                featureFlagsSection
+                warningCardsSection
+                loomAICostSection
+                dangerZoneSection
+            }
+            .listStyle(.plain)
+            .navigationTitle("Developer")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        showDeveloperPage = false
+                    }
+                }
+            }
+            .onAppear(perform: refreshLoomAICostSnapshot)
+            .alert(isPresented: $showResetReviewOnboardingDemoConfirmation) {
+                Alert(
+                    title: Text("Reset demo@loomlife.us?"),
+                    message: Text("All current data and changes for demo@loomlife.us will be lost immediately. If that account is currently signed in, it will be signed out and the next session will start from the beginning of onboarding."),
+                    primaryButton: .destructive(Text("Reset Demo Account")) {
+                        resetReviewOnboardingDemoWorkspace()
+                    },
+                    secondaryButton: .cancel()
+                )
+            }
+        }
+    }
+
+    private var developerActionsSection: some View {
+        Section {
+            Button(role: .destructive) {
+                showResetReviewOnboardingDemoConfirmation = true
+            } label: {
+                Text("Reset demo@loomlife.us")
+                    .foregroundStyle(.red)
+            }
+
+            NavigationLink {
+                ManageRawDataView()
+            } label: {
+                Text("Manage Raw Data")
+            }
+
+            NavigationLink {
+                AccountLaunchReflectionView()
+            } label: {
+                Text("Launch Reflection")
+            }
+
+            Button {
+                developerLaunchPaywallOnce = false
+                showDeveloperPage = false
+                showDeveloperPaywall = true
+            } label: {
+                HStack {
+                    Text("Launch Paywall")
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var featureFlagsSection: some View {
+        Section("Feature Flags") {
+            Toggle("Inactive purchase", isOn: $inactivePurchaseOverrideEnabled)
+            Toggle("Enable LoomAI Insights Refresh", isOn: $enableLoomAIInsightsRefresh)
+            Toggle("LoomAI Troubleshooting", isOn: $enableLoomAITroubleshooting)
+            Toggle("LoomAI Debug", isOn: $enableLoomAIDebug)
+            Toggle("LoomAI Custom Chat", isOn: $enableLoomAICustomChat)
+            Toggle("Disable Apple Intelligence", isOn: $disableAppleIntelligence)
+            Toggle("Disable LoomAI Daily Limiter", isOn: $disableLoomAIDailyLimiter)
+            Toggle("Enable Projects", isOn: $enableProjectsFeatureStorage)
+            Toggle("Onboarding", isOn: $onboardingResetOnNextLaunch)
+            Toggle("Blank Homepage", isOn: $blankHomepageModeStorage)
+            Toggle("Setup Homepage", isOn: $setupHomepageModeStorage)
+            Toggle("Warning Cards", isOn: $devManualWarningCardsEnabled)
+            Toggle("AutoWrite PlanView Result", isOn: $devPlanViewResultAutoWriteEnabled)
+        }
+    }
+
+    @ViewBuilder
+    private var warningCardsSection: some View {
+        if devManualWarningCardsEnabled {
+            Section("Outcomes") {
+                Toggle("Outcome date passed", isOn: $devOutcomeWarningTargetPassed)
+                Toggle("Outcome achieved", isOn: $devOutcomeWarningGoalAchieved)
+            }
+            Section("Action Plan") {
+                Toggle("Action Plans are old", isOn: $devActionBlocksWarningOldBlocks)
+            }
+        }
+    }
+
+    private var loomAICostSection: some View {
+        Section("LoomAI Cost") {
+            loomAITotalCostRows
+            loomAICostBucketRows(
+                title: "LoomAI Chat",
+                spent: loomAICostSnapshot.chatSpentUSD,
+                limit: loomAICostSnapshot.chatLimitUSD,
+                footnote: unpricedCostFootnote(loomAICostSnapshot.chatUnpricedDailyCount) ?? "Exact cost total for today."
+            )
+            loomAICostBucketRows(
+                title: "AutoWrite + AutoGroup",
+                spent: loomAICostSnapshot.autoWriteSpentUSD,
+                limit: loomAICostSnapshot.autoWriteLimitUSD,
+                footnote: unpricedCostFootnote(loomAICostSnapshot.autoWriteUnpricedDailyCount) ?? "Includes AutoWrite and AutoGroup requests."
+            )
+            loomAICostBucketRows(
+                title: "Insights",
+                spent: loomAICostSnapshot.insightsSpentUSD,
+                limit: loomAICostSnapshot.insightsLimitUSD,
+                footnote: unpricedCostFootnote(loomAICostSnapshot.insightsUnpricedDailyCount) ?? "Includes How Loom Sees You and diagnostic insights requests."
+            )
+
+            Button("Reset LoomAI Daily Limit", action: resetLoomAIDailyLimit)
+        }
+    }
+
+    private var loomAITotalCostRows: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            costSummaryRow(title: "Total Daily Cost", value: formatUSDCost(loomAICostSnapshot.totalDailySpentUSD))
+            costSummaryRow(title: "Total Monthly Cost", value: formatUSDCost(loomAICostSnapshot.totalMonthlySpentUSD))
+
+            if loomAICostSnapshot.totalUnpricedDailyCount > 0 || loomAICostSnapshot.totalUnpricedMonthlyCount > 0 {
+                Text("Exact totals exclude \(loomAICostSnapshot.totalUnpricedDailyCount) daily and \(loomAICostSnapshot.totalUnpricedMonthlyCount) monthly requests without exact usage metadata.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func costSummaryRow(title: String, value: String) -> some View {
+        HStack {
+            Text(title)
+                .font(.headline)
+            Spacer()
+            Text(value)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func loomAICostBucketRows(title: String, spent: Double, limit: Double, footnote: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            costSummaryRow(title: title, value: "\(formatUSDCost(spent)) / \(formatUSDCost(limit))")
+            ProgressView(value: costProgress(spent: spent, limit: limit))
+                .tint(.accentColor)
+            Text(footnote)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var dangerZoneSection: some View {
+        Section("Danger Zone") {
+            Button(action: deleteLittleWinsData) {
+                Text("Delete Little Wins Data")
+                    .foregroundStyle(.red)
+            }
+            Button(action: deleteFulfillmentData) {
+                Text("Delete Fulfillment Data")
+                    .foregroundStyle(.red)
+            }
+            Button(action: deleteAllData) {
+                Text("Delete All Data")
+                    .foregroundStyle(.red)
+            }
+        }
+    }
+
+    private func costProgress(spent: Double, limit: Double) -> Double {
+        guard limit > 0 else { return 0 }
+        return min(max(spent / limit, 0), 1)
+    }
+
+    private func formatUSDCost(_ value: Double) -> String {
+        let sanitized = max(0, value)
+        if sanitized < 0.01 {
+            return String(format: "$%.4f", sanitized)
+        }
+        return String(format: "$%.2f", sanitized)
+    }
+
+    private func unpricedCostFootnote(_ count: Int) -> String? {
+        guard count > 0 else { return nil }
+        let requestWord = count == 1 ? "request" : "requests"
+        return "Excludes \(count) \(requestWord) without exact usage metadata."
     }
 }
 
@@ -2465,14 +2840,42 @@ struct AccountDetailsView: View {
         guard let clientID = FirebaseApp.app()?.options.clientID, !clientID.isEmpty else {
             throw AccountDeletionFlowError.googleConfigurationUnavailable
         }
+
+        GIDSignIn.sharedInstance.configuration = GIDConfiguration(clientID: clientID)
+        let googleUser = try await resolvedGoogleUserForDeletion()
+        try validateGoogleDeletionUser(googleUser, matches: user)
+        guard let idToken = googleUser.idToken?.tokenString else {
+            throw AccountDeletionFlowError.googleCredentialUnavailable
+        }
+
+        let credential = GoogleAuthProvider.credential(
+            withIDToken: idToken,
+            accessToken: googleUser.accessToken.tokenString
+        )
+        _ = try await user.reauthenticate(with: credential)
+#else
+        throw AccountDeletionFlowError.googleConfigurationUnavailable
+#endif
+    }
+
+#if canImport(GoogleSignIn) && canImport(FirebaseCore) && canImport(UIKit)
+    @MainActor
+    private func resolvedGoogleUserForDeletion() async throws -> GIDGoogleUser {
+        if let currentUser = GIDSignIn.sharedInstance.currentUser {
+            return try await refreshedGoogleUser(currentUser)
+        }
+
+        if let restoredUser = try await restoredPreviousGoogleUserIfAvailable() {
+            return restoredUser
+        }
+
         guard let presentingController = topViewController() else {
             throw AccountDeletionFlowError.googlePresentationUnavailable
         }
 
-        GIDSignIn.sharedInstance.configuration = GIDConfiguration(clientID: clientID)
-        let result: GIDSignInResult
         do {
-            result = try await GIDSignIn.sharedInstance.signIn(withPresenting: presentingController)
+            let result = try await GIDSignIn.sharedInstance.signIn(withPresenting: presentingController)
+            return result.user
         } catch {
             let nsError = error as NSError
             if GIDSignInError.Code(rawValue: nsError.code) == .canceled {
@@ -2480,19 +2883,57 @@ struct AccountDetailsView: View {
             }
             throw error
         }
-        guard let idToken = result.user.idToken?.tokenString else {
-            throw AccountDeletionFlowError.googleCredentialUnavailable
-        }
-
-        let credential = GoogleAuthProvider.credential(
-            withIDToken: idToken,
-            accessToken: result.user.accessToken.tokenString
-        )
-        _ = try await user.reauthenticate(with: credential)
-#else
-        throw AccountDeletionFlowError.googleConfigurationUnavailable
-#endif
     }
+
+    private func refreshedGoogleUser(_ user: GIDGoogleUser) async throws -> GIDGoogleUser {
+        try await withCheckedThrowingContinuation { continuation in
+            user.refreshTokensIfNeeded { refreshedUser, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                guard let refreshedUser else {
+                    continuation.resume(throwing: AccountDeletionFlowError.googleCredentialUnavailable)
+                    return
+                }
+                continuation.resume(returning: refreshedUser)
+            }
+        }
+    }
+
+    private func restoredPreviousGoogleUserIfAvailable() async throws -> GIDGoogleUser? {
+        do {
+            let restoredUser: GIDGoogleUser? = try await withCheckedThrowingContinuation { continuation in
+                GIDSignIn.sharedInstance.restorePreviousSignIn { user, error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                        return
+                    }
+                    continuation.resume(returning: user)
+                }
+            }
+            guard let restoredUser else {
+                return nil
+            }
+            return try await refreshedGoogleUser(restoredUser)
+        } catch {
+            let nsError = error as NSError
+            if GIDSignInError.Code(rawValue: nsError.code) == .hasNoAuthInKeychain {
+                return nil
+            }
+            throw error
+        }
+    }
+
+    private func validateGoogleDeletionUser(_ googleUser: GIDGoogleUser, matches user: User) throws {
+        let authEmail = user.email?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        let googleEmail = googleUser.profile?.email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        guard !authEmail.isEmpty, !googleEmail.isEmpty else { return }
+        guard authEmail == googleEmail else {
+            throw AccountDeletionFlowError.googleWrongAccountSelected
+        }
+    }
+#endif
 
     @MainActor
     private func reauthenticateAndRevokeApple(for user: User) async throws {
@@ -2627,6 +3068,7 @@ private enum AccountDeletionFlowError: LocalizedError {
     case googlePresentationUnavailable
     case googleCredentialUnavailable
     case googleVerificationCancelled
+    case googleWrongAccountSelected
     case applePresentationUnavailable
     case appleIdentityTokenUnavailable
     case appleAuthorizationCodeUnavailable
@@ -2649,6 +3091,8 @@ private enum AccountDeletionFlowError: LocalizedError {
             return "Google verification did not return the credentials needed to delete this account."
         case .googleVerificationCancelled:
             return "Google verification was canceled before deletion finished."
+        case .googleWrongAccountSelected:
+            return "Use the same Google account that is currently signed in to Loom before deleting this account."
         case .applePresentationUnavailable:
             return "Unable to present Sign in with Apple for account verification."
         case .appleIdentityTokenUnavailable:
@@ -5736,5 +6180,113 @@ private struct AccountLaunchReflectionView: View {
             dismiss()
         }
         .navigationBarBackButtonHidden(true)
+    }
+}
+
+private struct DeveloperAccessSheet: View {
+    @Binding var pin: String
+    @Binding var showError: Bool
+    let onSubmit: () -> Void
+
+    @FocusState private var isPinFieldFocused: Bool
+    @State private var isAutoSubmitting = false
+    @State private var focusTask: Task<Void, Never>?
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Developer Access")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity, alignment: .center)
+
+                ZStack {
+                    TextField("", text: $pin)
+                        .keyboardType(.numberPad)
+                        .textContentType(.oneTimeCode)
+                        .focused($isPinFieldFocused)
+                        .opacity(0.01)
+                        .frame(height: 1)
+                        .accessibilityHidden(true)
+
+                    HStack(spacing: 10) {
+                        ForEach(0..<4, id: \.self) { index in
+                            let isFilled = index < pin.count
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(Color(.secondarySystemBackground))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .stroke(
+                                            isFilled ? Color.accentColor.opacity(0.45) : Color.black.opacity(0.08),
+                                            lineWidth: 1
+                                        )
+                                )
+                                .overlay {
+                                    Text(pinDigit(at: index))
+                                        .font(.system(size: 24, weight: .semibold, design: .rounded))
+                                        .foregroundStyle(.primary)
+                                }
+                                .frame(maxWidth: .infinity, minHeight: 58)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        isPinFieldFocused = true
+                    }
+                }
+
+                if showError {
+                    Text("Incorrect password.")
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding()
+            .onAppear {
+                pin = String(pin.filter(\.isNumber).prefix(4))
+                focusTask?.cancel()
+                focusTask = Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    isPinFieldFocused = true
+                }
+            }
+            .onDisappear {
+                focusTask?.cancel()
+                focusTask = nil
+            }
+            .onChange(of: pin) { _, newValue in
+                let normalized = String(newValue.filter(\.isNumber).prefix(4))
+                if normalized != newValue {
+                    pin = normalized
+                    return
+                }
+
+                if showError {
+                    showError = false
+                }
+
+                guard normalized.count == 4 else {
+                    isAutoSubmitting = false
+                    return
+                }
+                guard !isAutoSubmitting else { return }
+
+                isAutoSubmitting = true
+                DispatchQueue.main.async {
+                    onSubmit()
+                    isAutoSubmitting = false
+                    if pin.count < 4 {
+                        isPinFieldFocused = true
+                    }
+                }
+            }
+        }
+    }
+
+    private func pinDigit(at index: Int) -> String {
+        guard index < pin.count else { return "" }
+        let stringIndex = pin.index(pin.startIndex, offsetBy: index)
+        return String(pin[stringIndex])
     }
 }

@@ -82,41 +82,16 @@ struct RootGateView<MainContent: View>: View {
             .environmentObject(personalizationStore)
             .environmentObject(purchaseManager)
             .onAppear {
-#if DEBUG
-                print("[LoomLaunch] RootGate onAppear")
-#endif
                 consumePendingOnboardingResetIfNeeded()
                 migrateDiagnosticCompletionIfNeeded()
                 initializeInstallDateIfNeeded()
                 trackDailyActiveForCurrentStage()
                 syncSessionFromStorage()
                 purchaseManager.configure(session: session)
-#if DEBUG
-                purchaseManager.finishLaunchEntitlementLoadIfNeeded(session: session)
-                print("[LoomLaunch] RootGate applied cached entitlement state")
-#endif
                 scheduleGateResolution(animated: false, immediate: true)
             }
             .task {
                 purchaseManager.configure(session: session)
-#if DEBUG
-                print("[LoomLaunch] RootGate post-render background startup")
-                FirebaseBootstrap.configureIfNeeded(reason: "root gate post-render")
-                AnalyticsCollectionPolicy.refreshCollectionState()
-                purchaseManager.startObservingTransactionUpdatesIfNeeded()
-                Task {
-                    await purchaseManager.loadProducts()
-                }
-                Task {
-                    await purchaseManager.refreshEntitlements(
-                        session: session,
-                        includeHistoricalExpiredSnapshot: false
-                    )
-                }
-                #if canImport(AuthenticationServices)
-                await session.refreshAppleCredentialStateIfNeeded()
-                #endif
-#else
                 Task {
                     await purchaseManager.loadProducts()
                 }
@@ -131,7 +106,6 @@ struct RootGateView<MainContent: View>: View {
                 #if canImport(AuthenticationServices)
                 await session.refreshAppleCredentialStateIfNeeded()
                 #endif
-#endif
             }
             .onChange(of: hasSeenOnboarding) { _, _ in
                 syncSessionFromStorage()
@@ -224,11 +198,7 @@ struct RootGateView<MainContent: View>: View {
     }
 
     private var shouldShowRoutingSplash: Bool {
-#if DEBUG
-        false
-#else
         (!hasCompletedInitialGateResolution && !isGateRoutingReady) || !purchaseManager.hasLoadedEntitlements
-#endif
     }
 
     @ViewBuilder
