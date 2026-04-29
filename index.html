@@ -3,10 +3,115 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Loom Life Manager</title>
-  <meta name="description" content="Loom is a life management app that connects purpose, fulfillment areas, goals, action plans, little wins, reflections, capture, and LoomAI into one calm system.">
+  <title>Loom: Life Manager | Goal, Habit & Task Planner for iPhone</title>
+  <meta name="description" content="Loom is a life management app for iPhone that connects purpose, goals, tasks, habits, capture, and reflections in one AI-assisted planner. Download on the App Store.">
+  <meta name="robots" content="index, follow, max-image-preview:large">
+  <link rel="canonical" href="https://loomlife.us/">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Loom: Life Manager">
+  <meta property="og:title" content="Loom: Life Manager | Goal, Habit & Task Planner for iPhone">
+  <meta property="og:description" content="A purpose-driven life management app for iPhone that connects goals, tasks, habits, capture, and reflections in one calm planning system.">
+  <meta property="og:url" content="https://loomlife.us/">
+  <meta property="og:image" content="https://loomlife.us/assets/landing/loom-hero-phone.png">
+  <meta property="og:image:alt" content="Loom Life Manager app shown on iPhone">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Loom: Life Manager | Goal, Habit & Task Planner for iPhone">
+  <meta name="twitter:description" content="Connect purpose, goals, tasks, habits, capture, and reflections in one AI-assisted life management app.">
+  <meta name="twitter:image" content="https://loomlife.us/assets/landing/loom-hero-phone.png">
   <link rel="icon" href="assets/landing/loom-icon.jpeg" type="image/jpeg">
   <link rel="apple-touch-icon" href="assets/landing/loom-icon.jpeg">
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "WebSite",
+          "@id": "https://loomlife.us/#website",
+          "url": "https://loomlife.us/",
+          "name": "Loom: Life Manager",
+          "description": "A life management app for iPhone that connects purpose, goals, tasks, habits, capture, and reflections.",
+          "inLanguage": "en-US",
+          "publisher": { "@id": "https://loomlife.us/#organization" }
+        },
+        {
+          "@type": "Organization",
+          "@id": "https://loomlife.us/#organization",
+          "name": "Loom Life Manager",
+          "url": "https://loomlife.us/",
+          "email": "spencer@loomlife.us",
+          "logo": {
+            "@type": "ImageObject",
+            "url": "https://loomlife.us/assets/landing/loom-icon.jpeg"
+          }
+        },
+        {
+          "@type": "MobileApplication",
+          "@id": "https://loomlife.us/#app",
+          "name": "Loom: Life Manager",
+          "operatingSystem": "iOS",
+          "applicationCategory": "ProductivityApplication",
+          "url": "https://loomlife.us/",
+          "downloadUrl": "https://apps.apple.com/us/app/loom-life-manager/id6759817760",
+          "image": "https://loomlife.us/assets/landing/loom-icon.jpeg",
+          "description": "Loom is a purpose-driven life planner, goal tracker, habit tracker, task manager, capture list, reflection journal, and AI-assisted planning system for iPhone.",
+          "offers": {
+            "@type": "Offer",
+            "name": "Founding Member (Lifetime) Deal",
+            "price": "129",
+            "priceCurrency": "USD",
+            "availability": "https://schema.org/InStock",
+            "url": "https://apps.apple.com/us/app/loom-life-manager/id6759817760"
+          }
+        },
+        {
+          "@type": "FAQPage",
+          "@id": "https://loomlife.us/#faq",
+          "mainEntity": [
+            {
+              "@type": "Question",
+              "name": "What is Loom?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Loom is a life management app that connects your purpose, life areas, goals, tasks, habits, capture list, and reflections into one system so daily action stays connected to what matters."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "Who is Loom for?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Loom is for people who want more control of their time and more progress toward their goals, especially people interested in personal growth, goal setting, life planning, daily habits, purpose-driven productivity, and AI-assisted planning."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "How is Loom different from a to-do list or habit tracker?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Most productivity apps track tasks or habits in isolation. Loom connects the full chain: purpose, fulfillment areas, goals, action plans, little wins, capture, and reflection."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "What does the Founding Member Lifetime reward include?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "The Founding Member Lifetime deal includes full access to current and upcoming Loom features for life through a one-time in-app purchase."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "Is Loom available for Android or on the web?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Loom is currently focused on iPhone. Android and web versions are on the roadmap for late 2026, depending on iOS adoption."
+              }
+            }
+          ]
+        }
+      ]
+    }
+  </script>
   <style>
     :root {
       --bg: #f5f3ef;
@@ -216,10 +321,20 @@
     }
 
     h1 {
-      max-width: 11ch;
+      max-width: 12.5ch;
       margin-bottom: 20px;
       font-size: clamp(3.4rem, 8.5vw, 7.4rem);
       font-weight: 850;
+    }
+
+    .hero-kicker {
+      max-width: 34ch;
+      margin: 0 0 12px;
+      color: var(--muted);
+      font-size: 1.02rem;
+      font-weight: 820;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
     }
 
     h2 {
@@ -1409,8 +1524,12 @@
           url("assets/landing/loom-hero-phone.png") right -154px top 10px / 320px auto no-repeat;
       }
 
+      .hero-kicker {
+        font-size: 0.82rem;
+      }
+
       h1 {
-        max-width: 10.5ch;
+        max-width: 11.5ch;
         margin-bottom: 16px;
         font-size: clamp(2.8rem, 14.5vw, 4.2rem);
       }
@@ -1683,7 +1802,8 @@
     <header class="hero">
       <div class="shell">
         <div class="hero-content">
-          <h1>Your life is not a to-do list.</h1>
+          <p class="hero-kicker">Your life is not a to-do list.</p>
+          <h1>Life manager for goals, habits, tasks, and purpose.</h1>
           <div class="hero-actions">
             <a href="https://apps.apple.com/us/app/loom-life-manager/id6759817760" aria-label="Download Loom Life Manager on the App Store">
               <img
@@ -1694,6 +1814,9 @@
           </div>
           <p class="lead">
             Turn life's chaos into clarity with one system that connects your purpose, fulfillment areas, goals, action plans (tasks), little wins (habits), capture list, and reflections.
+          </p>
+          <p class="lead seo-lead">
+            Built for iPhone users comparing productivity apps, goal trackers, habit trackers, task managers, daily planners, journals, and AI planning tools.
           </p>
           <div class="hero-actions hero-actions-compact">
             <div class="hero-button-row">
@@ -1713,7 +1836,7 @@
       <div class="shell">
         <div class="section-head">
           <div>
-            <h2>One system for your life.</h2>
+            <h2>One life management system for your goals, habits, and tasks.</h2>
             <p>
               Loom starts with what drives you, organizes the life areas that need attention, then connects each area to goals, daily Little Wins, and focused Action Plans.
             </p>
@@ -1900,7 +2023,7 @@
       <div class="shell">
         <div class="section-head">
           <div>
-            <h2>Built around the way life actually works.</h2>
+            <h2>A goal tracker, habit tracker, task planner, and reflection system in one.</h2>
             <p>
               Loom is not another place to dump tasks. It is a practical system you can return to every day.
             </p>
