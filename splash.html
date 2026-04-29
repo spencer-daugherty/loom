@@ -1,0 +1,2165 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Loom Life Manager</title>
+  <meta name="description" content="Loom is a life management app that connects purpose, fulfillment areas, goals, action plans, little wins, reflections, capture, and LoomAI into one calm system.">
+  <link rel="icon" href="assets/landing/loom-icon.jpeg" type="image/jpeg">
+  <link rel="apple-touch-icon" href="assets/landing/loom-icon.jpeg">
+  <style>
+    :root {
+      --bg: #f5f3ef;
+      --paper: #fbfaf7;
+      --surface: rgba(255, 255, 255, 0.86);
+      --surface-strong: #ffffff;
+      --ink: #111111;
+      --muted: #5d6470;
+      --soft: #eef0f4;
+      --line: rgba(17, 17, 17, 0.09);
+      --shadow: 0 22px 70px rgba(17, 17, 17, 0.08);
+      --blue: #007aff;
+      --indigo: #5a5cff;
+      --green: #2ea76d;
+      --purple: #8754ff;
+      --red: #df4a66;
+      --orange: #ff8a3d;
+      --max: 1160px;
+      --radius-xl: 32px;
+      --radius-lg: 24px;
+      --radius-md: 16px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      background:
+        linear-gradient(90deg, rgba(47, 107, 255, 0.08) 0 1px, transparent 1px 90px),
+        linear-gradient(180deg, var(--paper) 0%, var(--bg) 52%, #eeece7 100%);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+
+    a {
+      color: inherit;
+    }
+
+    img {
+      display: block;
+      max-width: 100%;
+    }
+
+    .shell {
+      width: min(calc(100% - 28px), var(--max));
+      margin: 0 auto;
+    }
+
+    .nav {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      background: rgba(251, 250, 247, 0.84);
+      border-bottom: 1px solid var(--line);
+      backdrop-filter: blur(18px);
+    }
+
+    .nav-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      min-height: 68px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+      font-size: 2rem;
+      font-weight: 800;
+      letter-spacing: 0;
+    }
+
+    .brand img {
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+    }
+
+    .nav-right {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      color: var(--muted);
+      font-size: 0.94rem;
+      font-weight: 650;
+    }
+
+    .nav-links a {
+      text-decoration: none;
+    }
+
+    .nav-links a:hover {
+      color: var(--ink);
+    }
+
+    .nav-contact {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 0.94rem;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .nav-contact:hover {
+      color: var(--ink);
+    }
+
+    .nav-cta {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 40px;
+      padding: 0 15px;
+      border-radius: 999px;
+      color: #ffffff;
+      background: var(--blue);
+      text-decoration: none;
+      font-size: 0.92rem;
+      font-weight: 780;
+      white-space: nowrap;
+      box-shadow: 0 10px 24px rgba(0, 122, 255, 0.24);
+      transition: transform 140ms ease, box-shadow 140ms ease;
+    }
+
+    .nav-cta:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 14px 30px rgba(0, 122, 255, 0.28);
+    }
+
+    .hero {
+      position: relative;
+      isolation: isolate;
+      min-height: min(840px, 88svh);
+      display: grid;
+      align-items: center;
+      overflow: hidden;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .hero::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: -2;
+      background:
+        linear-gradient(90deg, rgba(251, 250, 247, 0.98) 0%, rgba(251, 250, 247, 0.92) 42%, rgba(251, 250, 247, 0.34) 100%),
+        linear-gradient(180deg, rgba(251, 250, 247, 0.2) 0%, rgba(245, 243, 239, 0.9) 100%),
+        url("assets/landing/loom-hero-phone.png") right 0 top 44% / min(58vw, 680px) auto no-repeat;
+    }
+
+    .hero-content {
+      width: min(100%, 680px);
+      padding: 64px 0;
+    }
+
+    .mini-badge,
+    .placeholder-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      border-radius: 999px;
+      background: rgba(17, 17, 17, 0.05);
+      color: var(--muted);
+      font-size: 0.78rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin-top: 0;
+    }
+
+    h1,
+    h2,
+    h3 {
+      letter-spacing: 0;
+      line-height: 1.03;
+    }
+
+    h1 {
+      max-width: 11ch;
+      margin-bottom: 20px;
+      font-size: clamp(3.4rem, 8.5vw, 7.4rem);
+      font-weight: 850;
+    }
+
+    h2 {
+      margin-bottom: 12px;
+      font-size: clamp(2rem, 4.4vw, 3.25rem);
+      font-weight: 820;
+    }
+
+    h3 {
+      margin-bottom: 10px;
+      font-size: 1.25rem;
+      font-weight: 780;
+    }
+
+    .lead {
+      max-width: 62ch;
+      color: var(--muted);
+      font-size: clamp(1.08rem, 2vw, 1.3rem);
+    }
+
+    .button-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 12px;
+      margin-top: 26px;
+    }
+
+    .hero-actions {
+      display: grid;
+      justify-items: start;
+      gap: 12px;
+      margin-top: 26px;
+    }
+
+    .hero-button-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .hero-actions-compact {
+      margin-top: 20px;
+    }
+
+    .app-store-badge {
+      width: 180px;
+      height: auto;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 52px;
+      padding: 0 20px;
+      border: 1px solid transparent;
+      border-radius: 999px;
+      color: #ffffff;
+      background: var(--blue);
+      text-decoration: none;
+      font-weight: 780;
+      box-shadow: 0 14px 36px rgba(0, 122, 255, 0.24);
+      transition: transform 140ms ease, box-shadow 140ms ease, background 140ms ease;
+    }
+
+    .button:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 18px 44px rgba(0, 122, 255, 0.28);
+    }
+
+    .button.secondary {
+      color: var(--ink);
+      background: rgba(255, 255, 255, 0.76);
+      border-color: var(--line);
+      box-shadow: none;
+    }
+
+    .rating-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 12px;
+      margin-top: 28px;
+      color: var(--muted);
+      font-weight: 680;
+    }
+
+    .rating-score {
+      color: var(--ink);
+      font-weight: 850;
+    }
+
+    .stars {
+      color: var(--orange);
+      letter-spacing: 0.08em;
+    }
+
+    section {
+      padding: 78px 0;
+    }
+
+    .section-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: end;
+      gap: 28px;
+      margin-bottom: 26px;
+    }
+
+    .section-head p {
+      max-width: 66ch;
+      margin-bottom: 0;
+      color: var(--muted);
+    }
+
+    .grid {
+      display: grid;
+      gap: 16px;
+    }
+
+    .grid.two {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .grid.three {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .grid.four {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .card,
+    .plan-card,
+    .shot-card,
+    details,
+    .placeholder-card {
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      background: var(--surface);
+      box-shadow: 0 14px 44px rgba(17, 17, 17, 0.055);
+      backdrop-filter: blur(16px);
+    }
+
+    .card,
+    .plan-card,
+    .placeholder-card {
+      padding: 22px;
+    }
+
+    .card p,
+    .plan-card p,
+    .placeholder-card p,
+    .fine-print,
+    .feature-list,
+    .faq-copy {
+      color: var(--muted);
+    }
+
+    .feature-list {
+      margin: 12px 0 0;
+      padding-left: 18px;
+    }
+
+    .feature-list li + li {
+      margin-top: 8px;
+    }
+
+    .accent-top {
+      position: relative;
+      overflow: hidden;
+    }
+
+    .accent-top::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      right: 0;
+      height: 4px;
+      background: linear-gradient(90deg, var(--blue), var(--green), var(--orange), var(--red), var(--purple));
+    }
+
+    .ecosystem-card {
+      position: relative;
+      --ecosystem-surface: #ffffff;
+      margin-top: 22px;
+      padding: clamp(22px, 4vw, 34px);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      background: var(--ecosystem-surface);
+      box-shadow: 0 18px 44px rgba(17, 17, 17, 0.06);
+    }
+
+    .ecosystem-map {
+      position: relative;
+      min-height: 680px;
+      width: min(100%, 860px);
+      margin: 0 auto;
+      isolation: isolate;
+    }
+
+    .ecosystem-lines {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 0;
+      pointer-events: none;
+    }
+
+    .ecosystem-lines path {
+      fill: none;
+      stroke-width: 2;
+      stroke-linecap: round;
+      opacity: 0.58;
+    }
+
+    .ecosystem-layer {
+      position: relative;
+      z-index: 2;
+      display: grid;
+      gap: 12px;
+      justify-items: center;
+      text-align: center;
+    }
+
+    .ecosystem-layer > h3,
+    .ecosystem-eyebrow {
+      position: relative;
+      z-index: 3;
+      padding-inline: 8px;
+      background: var(--ecosystem-surface, var(--paper));
+      box-decoration-break: clone;
+      -webkit-box-decoration-break: clone;
+    }
+
+    .ecosystem-eyebrow {
+      margin-bottom: 0;
+      color: var(--muted);
+      font-size: 0.78rem;
+      font-weight: 850;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .ecosystem-layer p {
+      max-width: 46ch;
+      margin-bottom: 0;
+      color: var(--muted);
+    }
+
+    .purpose-layer {
+      padding-top: 8px;
+    }
+
+    .passion-row {
+      position: relative;
+      z-index: 3;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 16px;
+      margin-top: 4px;
+      padding: 0 8px;
+      background: var(--ecosystem-surface, var(--paper));
+    }
+
+    .passion-circle {
+      position: relative;
+      display: grid;
+      place-items: center;
+      width: 50px;
+      height: 50px;
+      border-radius: 999px;
+      color: var(--ink);
+      background: var(--ecosystem-surface, var(--paper));
+      font-size: 0.68rem;
+      font-weight: 800;
+    }
+
+    .passion-circle::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      background: conic-gradient(
+        from 0deg,
+        transparent 0deg 2deg,
+        var(--ink) 2deg 88deg,
+        transparent 88deg 92deg,
+        var(--ink) 92deg 178deg,
+        transparent 178deg 182deg,
+        rgba(60, 60, 67, 0.28) 182deg 268deg,
+        transparent 268deg 272deg,
+        rgba(60, 60, 67, 0.28) 272deg 358deg,
+        transparent 358deg 360deg
+      );
+      -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+      mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+    }
+
+    .passion-circle span {
+      position: relative;
+      z-index: 1;
+    }
+
+    .passion-circle svg {
+      display: block;
+      width: 13px;
+      height: 13px;
+      margin: 0 auto 1px;
+      fill: currentColor;
+    }
+
+    .fulfillment-layer {
+      margin-top: 94px;
+    }
+
+    .fulfillment-cluster {
+      position: relative;
+      display: grid;
+      grid-template-columns: minmax(150px, 220px) minmax(186px, 1fr);
+      gap: 18px;
+      align-items: start;
+      justify-content: center;
+      width: min(100%, 620px);
+      min-height: 206px;
+      margin-top: 10px;
+      isolation: isolate;
+    }
+
+    .fulfillment-cluster-lines {
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
+    .fulfillment-cluster-lines path {
+      fill: none;
+      stroke-width: 1.8;
+      stroke-linecap: round;
+      opacity: 0.58;
+    }
+
+    .area-stack {
+      position: relative;
+      z-index: 2;
+      display: grid;
+      gap: 8px;
+      background: var(--ecosystem-surface, var(--paper));
+    }
+
+    .area-chip {
+      display: flex;
+      align-items: center;
+      height: 30px;
+      padding: 7px 10px;
+      border-radius: 9px;
+      border: 1px solid currentColor;
+      background: color-mix(in srgb, currentColor 18%, var(--ecosystem-surface, #fbfaf7));
+      font-size: 0.78rem;
+      font-weight: 700;
+      line-height: 1;
+      text-align: left;
+    }
+
+    .area-chip.blue { color: var(--blue); }
+    .area-chip.orange { color: #ff9500; }
+    .area-chip.red { color: #ff3b30; }
+    .area-chip.green { color: #34c759; }
+
+    .area-custom {
+      color: var(--muted);
+      font-size: 0.84rem;
+      font-weight: 750;
+      text-align: left;
+    }
+
+    .radar {
+      position: relative;
+      z-index: 2;
+      display: grid;
+      place-items: center;
+      width: min(100%, 206px);
+      aspect-ratio: 1;
+      margin-inline: auto;
+      border-radius: 999px;
+      background: var(--ecosystem-surface, var(--paper));
+    }
+
+    .radar-fill {
+      position: absolute;
+      inset: 20%;
+      clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+      background: conic-gradient(
+        from -90deg,
+        rgba(0, 122, 255, 0.5) 0%,
+        rgba(0, 122, 255, 0.5) 7.5%,
+        rgba(255, 149, 0, 0.5) 17.5%,
+        rgba(255, 149, 0, 0.5) 32.5%,
+        rgba(255, 59, 48, 0.5) 42.5%,
+        rgba(255, 59, 48, 0.5) 57.5%,
+        rgba(52, 199, 89, 0.5) 67.5%,
+        rgba(52, 199, 89, 0.5) 82.5%,
+        rgba(0, 122, 255, 0.5) 92.5%,
+        rgba(0, 122, 255, 0.5) 100%
+      );
+      filter: blur(0.4px);
+    }
+
+    .radar svg {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      height: 100%;
+      filter: drop-shadow(0 16px 26px rgba(17, 17, 17, 0.08));
+    }
+
+    .systems-layer {
+      margin-top: 112px;
+    }
+
+    .system-nodes {
+      position: relative;
+      z-index: 2;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: clamp(16px, 4vw, 36px);
+      width: min(100%, 760px);
+      margin-top: 8px;
+    }
+
+    .system-node {
+      position: relative;
+      z-index: 2;
+      display: grid;
+      justify-items: center;
+      gap: 8px;
+      min-height: 92px;
+      padding: 18px 14px;
+      background: var(--ecosystem-surface, var(--paper));
+    }
+
+    .system-node svg {
+      width: 26px;
+      height: 26px;
+      stroke: var(--ink);
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      fill: none;
+    }
+
+    .system-node .play-icon {
+      fill: var(--ink);
+      stroke: none;
+    }
+
+    .system-node h3 {
+      margin-bottom: 0;
+      font-size: 1.02rem;
+    }
+
+    .system-node p {
+      font-size: 0.9rem;
+    }
+
+    .ecosystem-little-wins {
+      position: relative;
+      width: 86px;
+      height: 48px;
+    }
+
+    .ecosystem-little-card {
+      position: absolute;
+      top: 0;
+      width: 30px;
+      height: 42px;
+      border-radius: 6px;
+      box-shadow: 0 8px 16px rgba(17, 17, 17, 0.12);
+    }
+
+    .ecosystem-little-card:nth-child(1) { left: 0; background: var(--green); }
+    .ecosystem-little-card:nth-child(2) { left: 14px; background: var(--red); }
+    .ecosystem-little-card:nth-child(3) { left: 28px; background: var(--orange); }
+    .ecosystem-little-card:nth-child(4) { left: 42px; background: var(--blue); }
+
+    .ecosystem-little-card::after {
+      content: "";
+      position: absolute;
+      inset: 8px;
+      border: 1.3px solid rgba(255, 255, 255, 0.86);
+      clip-path: polygon(50% 0, 93% 31%, 76% 88%, 24% 88%, 7% 31%);
+    }
+
+    .plans {
+      align-items: stretch;
+    }
+
+    .plan-card.featured {
+      display: flex;
+      flex-direction: column;
+      color: #ffffff;
+      background: #111111;
+      border-color: rgba(255, 255, 255, 0.1);
+      box-shadow: 0 26px 72px rgba(17, 17, 17, 0.2);
+    }
+
+    .plan-card[hidden] {
+      display: none;
+    }
+
+    .plan-card.unavailable {
+      filter: grayscale(1);
+      opacity: 0.54;
+    }
+
+    .plan-card.unavailable .button,
+    .plan-card.unavailable a {
+      pointer-events: none;
+    }
+
+    .plan-header {
+      display: grid;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .plan-header h3 {
+      margin-bottom: 0;
+    }
+
+    .plan-card.featured p,
+    .plan-card.featured .fine-print,
+    .plan-card.featured .countdown-label {
+      color: rgba(255, 255, 255, 0.72);
+    }
+
+    .plan-card.featured .price,
+    .plan-card.featured .countdown-value {
+      color: #ffffff;
+    }
+
+    .plan-disclaimer {
+      margin-top: auto;
+      padding-top: 18px;
+      color: rgba(255, 255, 255, 0.58);
+      font-size: 0.78rem;
+      font-style: italic;
+      line-height: 1.45;
+    }
+
+    .price {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin: 12px 0 6px;
+      color: var(--ink);
+      font-size: clamp(2rem, 5vw, 3.2rem);
+      font-weight: 850;
+      line-height: 1;
+    }
+
+    .price-before {
+      margin: 10px 0 -4px;
+      color: var(--muted);
+      font-size: 2.85rem;
+      font-weight: 800;
+      text-decoration: line-through;
+    }
+
+    .price span {
+      font-size: inherit;
+      font-weight: 800;
+      line-height: 1.2;
+    }
+
+    .countdown-box {
+      display: grid;
+      gap: 4px;
+      min-width: 132px;
+      padding: 14px;
+      border-radius: var(--radius-md);
+      background: rgba(255, 255, 255, 0.13);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+    }
+
+    .plan-card:not(.featured) .countdown-box {
+      background: rgba(17, 17, 17, 0.04);
+      border-color: var(--line);
+    }
+
+    .countdown-label {
+      color: var(--muted);
+      font-size: 0.82rem;
+      font-weight: 780;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .countdown-value {
+      color: var(--ink);
+      font-size: 1.05rem;
+      font-weight: 850;
+      line-height: 1.2;
+    }
+
+    .screenshots {
+      display: grid;
+      grid-template-columns: minmax(280px, 430px) minmax(0, 1fr);
+      gap: clamp(28px, 6vw, 72px);
+      align-items: center;
+    }
+
+    .phone-stage {
+      display: grid;
+      justify-items: center;
+      gap: 18px;
+    }
+
+    .phone-shell {
+      position: relative;
+      width: min(100%, 380px);
+      aspect-ratio: 1287 / 2778;
+      isolation: isolate;
+    }
+
+    .phone-screen {
+      position: absolute;
+      inset: 9.8% 9.35% 9.0%;
+      z-index: 1;
+      overflow: hidden;
+      border-radius: 8.2% / 3.8%;
+      background-color: #f0f1f6;
+      background-image: var(--active-screenshot, url("assets/landing/loom-home.png"));
+      background-position: top center;
+      background-size: cover;
+      background-repeat: no-repeat;
+      transform: translateZ(0);
+    }
+
+    .phone-frame {
+      position: absolute;
+      inset: 0;
+      z-index: 10000;
+      width: 100%;
+      height: 100%;
+      display: block;
+      object-fit: contain;
+      pointer-events: none;
+      transform: translateZ(0);
+    }
+
+    .phone-island {
+      position: absolute;
+      left: 50%;
+      top: 8.7%;
+      z-index: 10010;
+      width: 24%;
+      height: 2.75%;
+      transform: translateX(-50%);
+      border-radius: 999px;
+      background: #050505;
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+      pointer-events: none;
+    }
+
+    .phone-camera {
+      position: absolute;
+      left: 59.2%;
+      top: 9.8%;
+      z-index: 10011;
+      width: 4.3%;
+      aspect-ratio: 1;
+      border-radius: 999px;
+      background:
+        radial-gradient(circle at 58% 42%, rgba(88, 107, 255, 0.9) 0 9%, transparent 10%),
+        radial-gradient(circle at 43% 56%, rgba(38, 71, 180, 0.8) 0 18%, transparent 19%),
+        #050507;
+      box-shadow: 0 0 0 3px rgba(12, 6, 18, 0.78);
+      pointer-events: none;
+    }
+
+    .carousel-controls {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+    }
+
+    .carousel-arrow {
+      display: inline-grid;
+      place-items: center;
+      width: 42px;
+      height: 42px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--ink);
+      background: rgba(255, 255, 255, 0.78);
+      font-size: 1.35rem;
+      line-height: 1;
+      cursor: pointer;
+      box-shadow: 0 10px 24px rgba(17, 17, 17, 0.08);
+      transition: transform 140ms ease, box-shadow 140ms ease;
+    }
+
+    .carousel-arrow:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 14px 30px rgba(17, 17, 17, 0.12);
+    }
+
+    .carousel-dots {
+      display: inline-flex;
+      gap: 7px;
+      align-items: center;
+    }
+
+    .carousel-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: rgba(24, 25, 22, 0.24);
+      transition: width 180ms ease, background 180ms ease;
+    }
+
+    .carousel-dot.is-active {
+      width: 21px;
+      background: var(--blue);
+    }
+
+    .screenshot-copy {
+      display: grid;
+      gap: 14px;
+    }
+
+    .screenshot-copy-card {
+      display: none;
+      padding: 0;
+    }
+
+    .screenshot-copy-card.is-active {
+      display: block;
+    }
+
+    .screenshot-copy-card h3 {
+      margin-bottom: 12px;
+      font-size: clamp(1.8rem, 3.4vw, 3rem);
+    }
+
+    .screenshot-copy-card p {
+      max-width: 48ch;
+      margin-bottom: 0;
+      color: var(--muted);
+      font-size: 1.08rem;
+    }
+
+    .step {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      align-items: center;
+      gap: 10px;
+      min-height: 100%;
+    }
+
+    .step h3 {
+      margin-bottom: 0;
+    }
+
+    .step p {
+      grid-column: 1 / -1;
+    }
+
+    .step-icon {
+      display: inline-grid;
+      place-items: center;
+      width: 38px;
+      height: 38px;
+      border-radius: 999px;
+      color: var(--ink);
+      background: rgba(255, 255, 255, 0.72);
+      border: 1px solid var(--line);
+      box-shadow: 0 10px 22px rgba(24, 25, 22, 0.08);
+    }
+
+    .step-icon svg {
+      width: 21px;
+      height: 21px;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      fill: none;
+    }
+
+    .step-icon svg.fill-symbol {
+      fill: currentColor;
+      stroke: none;
+    }
+
+    .step-icon img {
+      width: 22px;
+      height: 22px;
+      object-fit: contain;
+    }
+
+    .little-wins-stack {
+      position: relative;
+      width: 78px;
+      height: 44px;
+      margin-bottom: 2px;
+    }
+
+    .little-win-mini {
+      position: absolute;
+      top: 0;
+      width: 31px;
+      height: 44px;
+      border-radius: 5px;
+      box-shadow: 0 8px 18px rgba(24, 25, 22, 0.14);
+    }
+
+    .little-win-mini:nth-child(1) {
+      left: 0;
+      z-index: 1;
+      background: var(--purple);
+    }
+
+    .little-win-mini:nth-child(2) {
+      left: 16px;
+      z-index: 2;
+      background: var(--green);
+    }
+
+    .little-win-mini:nth-child(3) {
+      left: 32px;
+      z-index: 3;
+      background: var(--blue);
+    }
+
+    .little-win-mini::after {
+      content: "";
+      position: absolute;
+      inset: 9px;
+      border: 1.4px solid rgba(255, 255, 255, 0.88);
+      clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+    }
+
+    .mini-badge {
+      padding: 7px 10px;
+      letter-spacing: 0.04em;
+    }
+
+    .placeholder-card {
+      min-height: 260px;
+      display: grid;
+      align-content: center;
+      gap: 12px;
+      border-style: dashed;
+      background:
+        linear-gradient(135deg, rgba(47, 107, 255, 0.07), rgba(46, 167, 109, 0.06)),
+        rgba(255, 255, 255, 0.72);
+    }
+
+    .placeholder-label {
+      width: fit-content;
+      padding: 8px 11px;
+      color: var(--ink);
+      background: #ffffff;
+      border: 1px solid var(--line);
+    }
+
+    .integration-card {
+      min-height: 260px;
+      display: grid;
+      gap: 18px;
+      align-content: start;
+      padding: 22px;
+    }
+
+    .integration-art {
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      min-height: 138px;
+      border-radius: var(--radius-md);
+      background: rgba(17, 17, 17, 0.04);
+      overflow: hidden;
+    }
+
+    .integration-art.health-badge {
+      min-height: auto;
+      background: transparent;
+      padding: 0;
+      border-radius: 0;
+      overflow: visible;
+    }
+
+    .integration-art.health-badge img {
+      width: min(100%, 212px);
+      height: auto;
+      border-radius: 0;
+    }
+
+    .integration-art.apple-intelligence {
+      min-height: auto;
+      height: auto;
+      background: transparent;
+      border-radius: 0;
+      overflow: visible;
+    }
+
+    .integration-art.apple-intelligence img {
+      width: auto;
+      height: 59px;
+      max-width: 100%;
+      border-radius: 0;
+    }
+
+    .integration-card p {
+      margin-bottom: 0;
+      color: var(--muted);
+    }
+
+    .loomai-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      width: fit-content;
+      padding: 7px 11px 7px 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #ffffff;
+      color: var(--ink);
+      font-size: 0.78rem;
+      font-weight: 800;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .loomai-label img {
+      width: 22px;
+      height: 22px;
+      object-fit: contain;
+    }
+
+    .research-grid {
+      display: grid;
+      grid-template-columns: 0.82fr 1.18fr;
+      gap: 18px;
+    }
+
+    .research-card {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .research-sources {
+      display: grid;
+      gap: 8px;
+      margin: 16px 0 0;
+      padding-left: 18px;
+      color: var(--muted);
+    }
+
+    .research-sources li {
+      padding-left: 2px;
+    }
+
+    .research-sources cite {
+      color: var(--ink);
+      font-style: italic;
+      font-weight: 700;
+    }
+
+    .research-sources strong {
+      color: var(--ink);
+    }
+
+    .research-disclaimer {
+      margin-top: auto;
+      padding-top: 18px;
+      color: var(--muted);
+      font-size: 0.8rem;
+      font-style: italic;
+      line-height: 1.45;
+    }
+
+    details {
+      overflow: hidden;
+    }
+
+    details + details {
+      margin-top: 12px;
+    }
+
+    summary {
+      cursor: pointer;
+      padding: 20px 22px;
+      font-size: 1.06rem;
+      font-weight: 780;
+      list-style: none;
+    }
+
+    summary::-webkit-details-marker {
+      display: none;
+    }
+
+    summary::after {
+      content: "+";
+      float: right;
+      color: var(--muted);
+      font-weight: 850;
+    }
+
+    details[open] summary::after {
+      content: "-";
+    }
+
+    .faq-copy {
+      padding: 0 22px 22px;
+    }
+
+    .footer {
+      padding: 42px 0 58px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+    }
+
+    .footer-grid {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 24px;
+      align-items: start;
+    }
+
+    .footer-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      justify-content: flex-end;
+      font-weight: 720;
+    }
+
+    .footer-links a {
+      color: var(--ink);
+      text-decoration: none;
+    }
+
+    .legal-note {
+      margin-top: 16px;
+      font-size: 0.82rem;
+    }
+
+    @media (max-width: 920px) {
+      .hero {
+        min-height: auto;
+      }
+
+      .hero::before {
+        background:
+          linear-gradient(180deg, rgba(251, 250, 247, 0.94), rgba(251, 250, 247, 0.98)),
+          url("assets/landing/loom-hero-phone.png") right 0 top 50% / 62vw auto no-repeat;
+      }
+
+      .hero-content {
+        padding: 56px 0 48px;
+      }
+
+      .grid.three,
+      .grid.four,
+      .screenshots,
+      .research-grid,
+      .footer-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .grid.two,
+      .small-shot-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .section-head {
+        display: block;
+      }
+
+      .footer-links {
+        justify-content: flex-start;
+      }
+
+      .ecosystem-map {
+        min-height: 760px;
+      }
+
+      .fulfillment-cluster {
+        grid-template-columns: 1fr;
+        max-width: 360px;
+      }
+
+      .fulfillment-cluster-lines {
+        display: none;
+      }
+
+      .system-nodes {
+        grid-template-columns: 1fr;
+        max-width: 360px;
+      }
+
+      .systems-layer {
+        margin-top: 78px;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .nav-inner {
+        min-height: 60px;
+      }
+
+      .nav-links {
+        display: none;
+      }
+
+      .nav-right {
+        gap: 10px;
+      }
+
+      .brand span {
+        max-width: 142px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .nav-cta {
+        min-height: 36px;
+        padding: 0 12px;
+        font-size: 0.82rem;
+      }
+
+      .hero-content {
+        padding: 44px 0 38px;
+      }
+
+      .hero::before {
+        background:
+          linear-gradient(180deg, rgba(251, 250, 247, 0.94), rgba(251, 250, 247, 0.99)),
+          url("assets/landing/loom-hero-phone.png") right -108px top 38px / 340px auto no-repeat;
+      }
+
+      h1 {
+        font-size: clamp(3rem, 16vw, 4.8rem);
+      }
+
+      section {
+        padding: 54px 0;
+      }
+
+      .grid.two,
+      .small-shot-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .button-row {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
+      .hero-actions {
+        justify-items: stretch;
+      }
+
+      .hero-button-row {
+        display: grid;
+        gap: 12px;
+      }
+
+      .app-store-badge {
+        width: 170px;
+      }
+
+      .button {
+        width: 100%;
+      }
+
+      .plan-header {
+        display: grid;
+      }
+
+      .countdown-box {
+        width: 100%;
+      }
+
+      .ecosystem-card {
+        padding: 18px;
+      }
+
+      .ecosystem-map {
+        min-height: 900px;
+      }
+
+      .passion-row {
+        gap: 10px;
+      }
+
+      .passion-circle {
+        width: 50px;
+        height: 50px;
+      }
+
+      .fulfillment-layer {
+        margin-top: 72px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <nav class="nav">
+    <div class="shell nav-inner">
+      <a class="brand" href="#top" aria-label="Loom home">
+        <img src="assets/landing/loom-icon.jpeg" alt="Loom app icon">
+        <span>Loom: Life Manager</span>
+      </a>
+      <div class="nav-right">
+        <div class="nav-links" aria-label="Page navigation">
+          <a href="#system">System</a>
+          <a href="#features">Features</a>
+          <a href="#pricing">Pricing</a>
+          <a href="#faq">FAQ</a>
+        </div>
+        <a class="nav-contact" href="#contact">Contact</a>
+        <a class="nav-cta" href="https://apps.apple.com/us/app/loom-life-manager/id6759817760">Download on the App Store</a>
+      </div>
+    </div>
+  </nav>
+
+  <main id="top">
+    <header class="hero">
+      <div class="shell">
+        <div class="hero-content">
+          <h1>Your life is not a to-do list.</h1>
+          <div class="hero-actions">
+            <a href="https://apps.apple.com/us/app/loom-life-manager/id6759817760" aria-label="Download Loom Life Manager on the App Store">
+              <img
+                class="app-store-badge"
+                alt="Download on the App Store"
+                src="https://tools.applemediaservices.com/api/badges/download-on-the-app-store/black/en-us?size=250x83">
+            </a>
+          </div>
+          <p class="lead">
+            Turn life's chaos into clarity with one system that connects your purpose, fulfillment areas, goals, action plans (tasks), little wins (habits), capture list, and reflections.
+          </p>
+          <div class="hero-actions hero-actions-compact">
+            <div class="hero-button-row">
+              <a class="button" href="#pricing">Founding Member (Lifetime) Deal</a>
+              <a class="button secondary" href="#system">See how it works</a>
+            </div>
+          </div>
+          <div class="rating-row" aria-label="App Store rating">
+            <span class="stars" aria-hidden="true">*****</span>
+            <span><span class="rating-score">5.0 / 5.0</span> App Store rating as of Apr 29, 2026</span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <section id="system">
+      <div class="shell">
+        <div class="section-head">
+          <div>
+            <h2>One system for your life.</h2>
+            <p>
+              Loom starts with what drives you, organizes the life areas that need attention, then connects each area to goals, daily Little Wins, and focused Action Plans.
+            </p>
+          </div>
+        </div>
+
+        <div class="ecosystem-card">
+            <div class="ecosystem-map" aria-label="Static Loom Ecosystem map">
+              <svg class="ecosystem-lines" viewBox="0 0 1000 680" preserveAspectRatio="none" aria-hidden="true">
+              <path d="M380 112 Q510 248 625 386" stroke="rgba(150, 150, 150, 0.72)"></path>
+              <path d="M460 112 Q548 244 625 386" stroke="rgba(180, 180, 180, 0.74)"></path>
+              <path d="M540 112 Q590 240 625 386" stroke="rgba(150, 150, 150, 0.72)"></path>
+              <path d="M620 112 Q638 240 625 386" stroke="rgba(180, 180, 180, 0.74)"></path>
+              <path d="M625 424 Q420 518 205 608" stroke="rgba(0, 122, 255, 0.58)"></path>
+              <path d="M625 424 Q560 516 500 608" stroke="rgba(52, 199, 89, 0.58)"></path>
+              <path d="M625 424 Q716 518 795 608" stroke="rgba(255, 149, 0, 0.58)"></path>
+            </svg>
+
+            <div class="ecosystem-layer purpose-layer">
+              <p class="ecosystem-eyebrow">Purpose</p>
+              <h3>Your passions reveal who you are and what drives you.</h3>
+              <div class="passion-row" aria-label="Purpose passion signals">
+                <div class="passion-circle">
+                  <span>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-4.5-9.4-9.1C.8 8.3 3.1 4.5 7 4.5c2 0 3.6 1.1 5 3 1.4-1.9 3-3 5-3 3.9 0 6.2 3.8 4.4 7.4C19 16.5 12 21 12 21Z"></path></svg>
+                    love
+                  </span>
+                </div>
+                <div class="passion-circle">
+                  <span>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V8a5 5 0 0 1 10 0v2h1a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h1Zm2 0h6V8a3 3 0 0 0-6 0v2Z"></path></svg>
+                    vows
+                  </span>
+                </div>
+                <div class="passion-circle">
+                  <span>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 10-13h-7l0-7Z"></path></svg>
+                    thrill
+                  </span>
+                </div>
+                <div class="passion-circle">
+                  <span>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 4.5 5v6.3c0 4.7 3.1 8.9 7.5 10.7 4.4-1.8 7.5-6 7.5-10.7V5L12 2Z"></path></svg>
+                    hate
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div class="ecosystem-layer fulfillment-layer">
+              <p class="ecosystem-eyebrow">Fulfillment</p>
+              <h3>These areas make up your life.</h3>
+              <div class="fulfillment-cluster">
+                <svg class="fulfillment-cluster-lines" viewBox="0 0 620 206" preserveAspectRatio="none" aria-hidden="true">
+                  <path d="M210 7.5 Q315 38 411 103" stroke="rgba(0, 122, 255, 0.58)"></path>
+                  <path d="M210 15 Q315 44 411 103" stroke="rgba(0, 122, 255, 0.58)"></path>
+                  <path d="M210 22.5 Q315 50 411 103" stroke="rgba(0, 122, 255, 0.58)"></path>
+                  <path d="M210 45.5 Q316 68 411 103" stroke="rgba(255, 149, 0, 0.58)"></path>
+                  <path d="M210 53 Q316 74 411 103" stroke="rgba(255, 149, 0, 0.58)"></path>
+                  <path d="M210 60.5 Q316 80 411 103" stroke="rgba(255, 149, 0, 0.58)"></path>
+                  <path d="M210 83.5 Q316 94 411 103" stroke="rgba(255, 59, 48, 0.58)"></path>
+                  <path d="M210 91 Q316 100 411 103" stroke="rgba(255, 59, 48, 0.58)"></path>
+                  <path d="M210 98.5 Q316 106 411 103" stroke="rgba(255, 59, 48, 0.58)"></path>
+                  <path d="M210 121.5 Q315 132 411 103" stroke="rgba(52, 199, 89, 0.58)"></path>
+                  <path d="M210 129 Q315 138 411 103" stroke="rgba(52, 199, 89, 0.58)"></path>
+                  <path d="M210 136.5 Q315 144 411 103" stroke="rgba(52, 199, 89, 0.58)"></path>
+                </svg>
+                <div class="area-stack" aria-label="Fulfillment areas">
+                  <span class="area-chip blue">Career &amp; Business</span>
+                  <span class="area-chip orange">Health &amp; Energy</span>
+                  <span class="area-chip red">Love &amp; Relationships</span>
+                  <span class="area-chip green">Wealth &amp; Finance</span>
+                  <span class="area-custom">+ Custom Area</span>
+                </div>
+                <div class="radar" aria-label="Fulfillment radar">
+                  <div class="radar-fill" aria-hidden="true"></div>
+                  <svg viewBox="0 0 220 220" aria-hidden="true">
+                    <defs>
+                      <filter id="radar-dot-glow" x="-80%" y="-80%" width="260%" height="260%">
+                        <feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="#ffffff" flood-opacity="0.95"></feDropShadow>
+                      </filter>
+                    </defs>
+                    <polygon points="110,0 220,110 110,220 0,110" fill="none" stroke="rgba(60, 60, 67, 0.29)" stroke-width="4"></polygon>
+                    <circle cx="110" cy="44" r="7" fill="#007aff" stroke="#ffffff" stroke-width="2" filter="url(#radar-dot-glow)"></circle>
+                    <circle cx="176" cy="110" r="7" fill="#ff9500" stroke="#ffffff" stroke-width="2" filter="url(#radar-dot-glow)"></circle>
+                    <circle cx="110" cy="176" r="7" fill="#ff3b30" stroke="#ffffff" stroke-width="2" filter="url(#radar-dot-glow)"></circle>
+                    <circle cx="44" cy="110" r="7" fill="#34c759" stroke="#ffffff" stroke-width="2" filter="url(#radar-dot-glow)"></circle>
+                  </svg>
+                </div>
+              </div>
+            </div>
+
+            <div class="ecosystem-layer systems-layer">
+              <div class="system-nodes">
+                <article class="system-node">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <circle cx="12" cy="12" r="6.5"></circle>
+                    <path d="M12 3v3"></path>
+                    <path d="M12 18v3"></path>
+                    <path d="M3 12h3"></path>
+                    <path d="M18 12h3"></path>
+                  </svg>
+                  <h3>Goals</h3>
+                </article>
+                <article class="system-node">
+                  <div class="ecosystem-little-wins" aria-hidden="true">
+                    <span class="ecosystem-little-card"></span>
+                    <span class="ecosystem-little-card"></span>
+                    <span class="ecosystem-little-card"></span>
+                    <span class="ecosystem-little-card"></span>
+                  </div>
+                  <h3>Little Wins</h3>
+                </article>
+                <article class="system-node">
+                  <svg class="play-icon" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M8 5.5c0-.9 1-1.4 1.8-.9l8.2 5.3c.7.5.7 1.5 0 2l-8.2 5.3c-.8.5-1.8 0-1.8-.9V5.5Z"></path>
+                  </svg>
+                  <h3>Action Plans</h3>
+                </article>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <section id="screenshots">
+      <div class="shell">
+        <div class="section-head">
+          <div>
+            <h2>A calm command center.</h2>
+            <p>
+              Loom gives purpose, life areas, goals, tasks, and daily habits a shared structure instead of leaving them scattered across separate apps.
+            </p>
+          </div>
+        </div>
+
+        <div class="screenshots">
+          <div class="phone-stage" data-carousel>
+            <div class="phone-shell" aria-label="Loom app screenshots in an iPhone 17 Pro frame">
+              <div
+                class="phone-screen"
+                data-carousel-screen
+                role="img"
+                aria-label="Loom home screen showing Purpose, Fulfillment, Goals, and Capture"></div>
+              <img class="phone-frame" src="assets/landing/iphone-17-pro-frame-front.png" alt="" aria-hidden="true">
+            </div>
+            <div class="carousel-controls" aria-label="Screenshot carousel controls">
+              <button class="carousel-arrow" type="button" data-carousel-prev aria-label="Previous screenshot">&larr;</button>
+              <div class="carousel-dots" aria-hidden="true">
+                <span class="carousel-dot is-active" data-carousel-dot></span>
+                <span class="carousel-dot" data-carousel-dot></span>
+                <span class="carousel-dot" data-carousel-dot></span>
+                <span class="carousel-dot" data-carousel-dot></span>
+              </div>
+              <button class="carousel-arrow" type="button" data-carousel-next aria-label="Next screenshot">&rarr;</button>
+            </div>
+          </div>
+
+          <div class="screenshot-copy">
+            <article class="screenshot-copy-card is-active" data-carousel-copy>
+              <h3>See the bigger picture</h3>
+              <p>Purpose, Fulfillment, Goals, and Capture stay visible so daily work stays connected to what matters.</p>
+            </article>
+            <article class="screenshot-copy-card" data-carousel-copy>
+              <h3>Direction into goals</h3>
+              <p>Set targets with timelines, measurable progress, and a clear connection back to the life areas they support.</p>
+            </article>
+            <article class="screenshot-copy-card" data-carousel-copy>
+              <h3>Little Wins compound</h3>
+              <p>Build daily momentum with small repeatable actions that make progress feel possible most days.</p>
+            </article>
+            <article class="screenshot-copy-card" data-carousel-copy>
+              <h3>LoomAI guidance</h3>
+              <p>Ask for help clarifying goals, plans, priorities, rewrites, and next steps without leaving your system.</p>
+            </article>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="features">
+      <div class="shell">
+        <div class="section-head">
+          <div>
+            <h2>Built around the way life actually works.</h2>
+            <p>
+              Loom is not another place to dump tasks. It is a practical system you can return to every day.
+            </p>
+          </div>
+        </div>
+
+        <div class="grid four">
+          <article class="card step">
+            <span class="step-icon" aria-label="SF Symbol: infinity">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M7.4 8.4c-2.4 0-4.4 1.6-4.4 3.6s2 3.6 4.4 3.6c1.6 0 2.9-.9 4.6-3.6 1.7-2.7 3-3.6 4.6-3.6 2.4 0 4.4 1.6 4.4 3.6s-2 3.6-4.4 3.6c-1.6 0-2.9-.9-4.6-3.6-1.7-2.7-3-3.6-4.6-3.6Z"></path>
+              </svg>
+            </span>
+            <h3>Purpose</h3>
+            <p>Define your life vision and passions: what you love, vow, thrill toward, and refuse to tolerate.</p>
+          </article>
+          <article class="card step">
+            <span class="step-icon" aria-label="SF Symbol: trophy">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M8 4h8v4.4c0 2.6-1.8 4.8-4 4.8s-4-2.2-4-4.8V4Z"></path>
+                <path d="M8 6H4.5v2.1c0 1.9 1.4 3.4 3.5 3.7"></path>
+                <path d="M16 6h3.5v2.1c0 1.9-1.4 3.4-3.5 3.7"></path>
+                <path d="M12 13.2v3.3"></path>
+                <path d="M8.8 20h6.4"></path>
+                <path d="M10 16.5h4"></path>
+              </svg>
+            </span>
+            <h3>Fulfillment Areas</h3>
+            <p>Organize 3-7 core life areas like career, health, wealth, relationships, faith, learning, service, home, and custom areas.</p>
+          </article>
+          <article class="card step">
+            <span class="step-icon" aria-label="SF Symbol: scope">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="6.5"></circle>
+                <path d="M12 3v3"></path>
+                <path d="M12 18v3"></path>
+                <path d="M3 12h3"></path>
+                <path d="M18 12h3"></path>
+                <circle cx="12" cy="12" r="1.2"></circle>
+              </svg>
+            </span>
+            <h3>Goals</h3>
+            <p>Turn direction into real targets with timelines, progress, and context tied back to the life areas they support.</p>
+          </article>
+          <article class="card step">
+            <span class="step-icon" aria-label="SF Symbol: play.fill">
+              <svg class="fill-symbol" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M8 5.5c0-.9 1-1.4 1.8-.9l8.2 5.3c.7.5.7 1.5 0 2l-8.2 5.3c-.8.5-1.8 0-1.8-.9V5.5Z"></path>
+              </svg>
+            </span>
+            <h3>Action Plans</h3>
+            <p>Move from goals and captured tasks into focused execution with due dates, people, places, attachments, duration, musts, and status.</p>
+          </article>
+          <article class="card step">
+            <div class="little-wins-stack" aria-label="Stacked Little Wins cards">
+              <span class="little-win-mini"></span>
+              <span class="little-win-mini"></span>
+              <span class="little-win-mini"></span>
+            </div>
+            <h3>Little Wins</h3>
+            <p>Create small daily acts like walking, sleeping enough, writing, gratitude, prayer, or reaching out to a friend.</p>
+          </article>
+          <article class="card step">
+            <span class="step-icon" aria-label="SF Symbol: arrow.triangle.2.circlepath">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M18.1 8.4A6.9 6.9 0 0 0 6 7.9"></path>
+                <path d="M18.6 4.8v3.8h-3.8"></path>
+                <path d="M5.9 15.6A6.9 6.9 0 0 0 18 16.1"></path>
+                <path d="M5.4 19.2v-3.8h3.8"></path>
+              </svg>
+            </span>
+            <h3>Reflections</h3>
+            <p>Review what worked, what fell behind, what needs to change, and whether actions still match what matters.</p>
+          </article>
+          <article class="card step">
+            <span class="step-icon" aria-label="LoomAI">
+              <img src="assets/landing/loomai-logo.png" alt="">
+            </span>
+            <h3>LoomAI</h3>
+            <p>Get guidance for planning, rewrites, priorities, Little Wins, stuck areas, and purpose or fulfillment insights.</p>
+          </article>
+          <article class="card step">
+            <span class="step-icon" aria-label="SF Symbol: plus.viewfinder">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M5 9V6.8C5 5.8 5.8 5 6.8 5H9"></path>
+                <path d="M15 5h2.2c1 0 1.8.8 1.8 1.8V9"></path>
+                <path d="M19 15v2.2c0 1-.8 1.8-1.8 1.8H15"></path>
+                <path d="M9 19H6.8c-1 0-1.8-.8-1.8-1.8V15"></path>
+                <path d="M12 8.2v7.6"></path>
+                <path d="M8.2 12h7.6"></path>
+              </svg>
+            </span>
+            <h3>Capture</h3>
+            <p>Keep tasks, information, commitments, links, attachments, and anything you need to remember in one navigable place.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="integrations">
+      <div class="shell">
+        <div class="section-head">
+          <div>
+            <h2>Health signals and AI support, when they help.</h2>
+            <p>
+              Loom keeps the system grounded. Integrations support your actions instead of replacing your judgment.
+            </p>
+          </div>
+        </div>
+
+        <div class="grid two">
+          <article class="card integration-card">
+            <h3>Works with Apple Health</h3>
+            <div class="integration-art health-badge">
+              <img
+                src="https://developer.apple.com/licensing-trademarks/works-with-apple-health/images/badge-standard_2x.png"
+                alt="Works with Apple Health">
+            </div>
+            <p>
+              Using Loom with the Apple Health app on iPhone empowers you to better manage your health. Loom can read selected metrics you permit, such as steps, workouts, and sleep, to support health-backed Little Wins.
+            </p>
+          </article>
+
+          <article class="card integration-card">
+            <h3>Apple Intelligence</h3>
+            <div class="integration-art apple-intelligence">
+              <img
+                src="assets/landing/apple-intelligence.png"
+                alt="Apple Intelligence">
+            </div>
+            <p>
+              Apple Intelligence is built into iPhone, iPad, Mac, and Apple Vision Pro with privacy at its core. On supported devices, LoomAI can use Apple Intelligence to help with planning, priorities, rewrites, and next steps.
+            </p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="research">
+      <div class="shell">
+        <div class="section-head">
+          <div>
+            <h2>Research-inspired, practically designed.</h2>
+            <p>
+              Loom is an independent product built around a simple belief: daily action should stay connected to what matters.
+            </p>
+          </div>
+        </div>
+
+        <div class="research-grid">
+          <article class="card accent-top">
+            <h3>Why Loom exists</h3>
+            <p>
+              I built Loom because I wanted the best way to connect long-term direction with daily action. Not another app pretending to solve everything, but a calm command center for life.
+            </p>
+            <p><strong>End Stress. Live Fulfilled.</strong></p>
+          </article>
+
+          <article class="card research-card">
+            <h3>Research and inspiration</h3>
+            <p>
+              Loom draws from broad productivity and personal-development ideas, then turns them into one practical app structure.
+            </p>
+            <ul class="research-sources" aria-label="Research inspiration list">
+              <li>
+                Tony Robbins - <strong><em>Time of Your Life</em></strong>
+                <ul>
+                  <li>Rapid Planning Method (RPM).</li>
+                </ul>
+              </li>
+              <li>David Allen - <cite>Getting Things Done: The Art of Stress-Free Productivity</cite>.</li>
+              <li>Stephen R. Covey - <cite>The 7 Habits of Highly Effective People</cite>.</li>
+              <li>Habit formation research.</li>
+              <li>Goal-setting theory and research.</li>
+              <li>Journaling and reflection practices.</li>
+              <li>AI-assisted planning workflows.</li>
+            </ul>
+            <p class="research-disclaimer">
+              Loom is not affiliated with, sponsored by, or endorsed by Tony Robbins, David Allen, Stephen Covey, or their organizations.
+            </p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="pricing">
+      <div class="shell">
+        <div class="section-head">
+          <div>
+            <h2>Same premium access, flexible options.</h2>
+            <p>
+              Choose lifetime access during the launch window, or subscribe annually or monthly as those options become available.
+            </p>
+          </div>
+        </div>
+
+        <div class="grid three plans">
+          <article class="plan-card featured" id="plan-lifetime" data-plan-card data-remove-after="2026-05-31T23:59:59-04:00">
+            <div class="plan-header">
+              <div class="countdown-box">
+                <span class="countdown-label">Limited offer</span>
+                <span class="countdown-value" id="countdown-lifetime">Loading...</span>
+              </div>
+              <h3>Founding Member (Lifetime)</h3>
+            </div>
+            <div class="price">$129 <span>one-time</span></div>
+            <p>One-time purchase. No subscription renewal. Full access to current and upcoming Loom features for life.</p>
+            <div class="button-row">
+              <a class="button" href="https://apps.apple.com/us/app/loom-life-manager/id6759817760">Get lifetime access</a>
+            </div>
+            <p class="plan-disclaimer">Billed by Apple after purchase confirmation through the App Store.</p>
+          </article>
+
+          <article class="plan-card unavailable" id="plan-annual" data-plan-card data-unlock-at="2026-06-01T00:00:00-04:00">
+            <div class="plan-header">
+              <div class="countdown-box">
+                <span class="countdown-label">Launches Soon</span>
+                <span class="countdown-value" id="countdown-annual">Loading...</span>
+              </div>
+              <h3>Annual</h3>
+            </div>
+            <div class="price-before">$180</div>
+            <div class="price">$79 / year</div>
+            <p>Auto-renewable yearly subscription with a 10-day free trial. Planned launch: June 1, 2026.</p>
+          </article>
+
+          <article class="plan-card unavailable" id="plan-monthly" data-plan-card data-unlock-at="2026-07-01T00:00:00-04:00">
+            <div class="plan-header">
+              <div class="countdown-box">
+                <span class="countdown-label">Launches Soon</span>
+                <span class="countdown-value" id="countdown-monthly">Loading...</span>
+              </div>
+              <h3>Monthly</h3>
+            </div>
+            <div class="price">$15 / month</div>
+            <p>Auto-renewable monthly subscription for flexible access. Planned launch: July 1, 2026.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="roadmap">
+      <div class="shell">
+        <div class="section-head">
+          <div>
+            <h2>Built for launch, designed to grow.</h2>
+            <p>
+              Loom 1.0 has the core life-management system in place, and early support helps fund the deeper intelligence layer.
+            </p>
+          </div>
+        </div>
+
+        <div class="grid three">
+          <article class="card">
+            <h3>Available now</h3>
+            <p>Core Loom functionality is live on iPhone: purpose, fulfillment areas, goals, action plans, little wins, reflection, capture, and LoomAI support.</p>
+          </article>
+          <article class="card">
+            <h3>Subscription launch</h3>
+            <p>Subscription pricing starts with Annual on June 1, 2026 and Monthly on July 1, 2026. Founding Member Lifetime access remains the launch-window deal.</p>
+          </article>
+          <article class="card">
+            <h3>Roadmap</h3>
+            <p>Future R&amp;D targets include deeper intelligence, agentic task completion, and Android or web support later in 2026 if iOS adoption supports the expansion.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="faq">
+      <div class="shell">
+        <div class="section-head">
+          <div>
+            <h2>FAQ</h2>
+          </div>
+        </div>
+
+        <details>
+          <summary>What is Loom?</summary>
+          <div class="faq-copy">
+            Loom is a life management app that connects your purpose, life areas, goals, and daily actions into one system so you can end stress and live fulfilled.
+          </div>
+        </details>
+
+        <details>
+          <summary>Who is Loom for?</summary>
+          <div class="faq-copy">
+            Loom is for people who never feel in control of time or want more progress toward their goals. It is especially useful for people who care about personal growth, goal setting, life planning, daily habits, purpose-driven productivity, and AI empowerment.
+          </div>
+        </details>
+
+        <details>
+          <summary>How is Loom different from a to-do list or habit tracker?</summary>
+          <div class="faq-copy">
+            Most productivity apps help you track tasks or require lots of input without a human-oriented system, so many create more noise. Loom connects the full chain: Purpose &gt; Fulfillment Areas &gt; Goals &gt; Action Plans (tasks) &gt; Little Wins (habits) &gt; Reflection in an effortless system.
+          </div>
+        </details>
+
+        <details>
+          <summary>What does the Founding Member (Lifetime) reward include? When will backers get access?</summary>
+          <div class="faq-copy">
+            Full access to all Loom features, current and upcoming, for life. Backers get access immediately via a one-time in-app redemption code.
+          </div>
+        </details>
+
+        <details>
+          <summary>Is Loom available for Android or on the web?</summary>
+          <div class="faq-copy">
+            Loom currently does not have Android or web applications in development, though they are on the roadmap for late 2026, barring poor iOS adoption.
+          </div>
+        </details>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer" id="contact">
+    <div class="shell footer-grid">
+      <div>
+        <strong>Loom Life Manager</strong>
+        <p class="fine-print">
+          Contact: <a href="mailto:spencer@loomlife.us">spencer@loomlife.us</a>
+        </p>
+        <p class="fine-print">&copy; 2026 Spencer Daugherty. All rights reserved.</p>
+        <p class="legal-note">
+          Apple, Apple Health, Apple Intelligence, App Store, and iPhone are trademarks of Apple Inc., registered in the U.S. and other countries. Loom is an independent product and is not affiliated with Apple except through Apple platform services used by the app.
+        </p>
+      </div>
+      <div class="footer-links" aria-label="Legal and support links">
+        <a href="index.html">Privacy Policy</a>
+        <a href="support.html">Support</a>
+        <a href="https://www.apple.com/legal/internet-services/itunes/dev/stdeula/">Apple EULA</a>
+        <a href="https://apps.apple.com/us/app/loom-life-manager/id6759817760">App Store</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    const countdownTargets = [
+      {
+        id: "countdown-lifetime",
+        cardId: "plan-lifetime",
+        target: "2026-05-31T23:59:59-04:00",
+        beforePrefix: "Ends in",
+        afterText: "Offer ended",
+        removeAfterEnd: true
+      },
+      {
+        id: "countdown-annual",
+        cardId: "plan-annual",
+        target: "2026-06-01T00:00:00-04:00",
+        beforePrefix: "Available in",
+        afterText: "Available now",
+        unlockAtTarget: true
+      },
+      {
+        id: "countdown-monthly",
+        cardId: "plan-monthly",
+        target: "2026-07-01T00:00:00-04:00",
+        beforePrefix: "Available in",
+        afterText: "Available now",
+        unlockAtTarget: true
+      }
+    ];
+
+    function plural(value, unit) {
+      return value + " " + unit + (value === 1 ? "" : "s");
+    }
+
+    function formatRemaining(ms) {
+      const totalMinutes = Math.max(0, Math.floor(ms / 60000));
+      const days = Math.floor(totalMinutes / 1440);
+      const hours = Math.floor((totalMinutes % 1440) / 60);
+      const minutes = totalMinutes % 60;
+
+      if (days >= 2) {
+        return plural(days, "day");
+      }
+
+      if (days === 1) {
+        return "1 day " + plural(hours, "hour");
+      }
+
+      if (hours >= 1) {
+        return plural(hours, "hour") + " " + plural(minutes, "minute");
+      }
+
+      return plural(Math.max(1, minutes), "minute");
+    }
+
+    function updateCountdowns() {
+      const now = new Date();
+
+      countdownTargets.forEach((item) => {
+        const el = document.getElementById(item.id);
+        const card = item.cardId ? document.getElementById(item.cardId) : null;
+        const target = new Date(item.target);
+        const diff = target.getTime() - now.getTime();
+        const hasEnded = diff <= 0;
+
+        if (item.removeAfterEnd && card) {
+          card.hidden = hasEnded;
+        }
+
+        if (item.unlockAtTarget && card) {
+          card.classList.toggle("unavailable", !hasEnded);
+        }
+
+        if (!el) return;
+        el.textContent = hasEnded ? item.afterText : item.beforePrefix + " " + formatRemaining(diff);
+
+        const label = el.parentElement?.querySelector(".countdown-label");
+        if (label && item.unlockAtTarget && hasEnded) {
+          label.textContent = "Available now";
+        }
+      });
+    }
+
+    updateCountdowns();
+    window.setInterval(updateCountdowns, 60000);
+
+    const carousel = document.querySelector("[data-carousel]");
+    if (carousel) {
+      const screen = document.querySelector("[data-carousel-screen]");
+      const slides = [
+        {
+          src: "assets/landing/loom-home.png",
+          alt: "Loom home screen showing Purpose, Fulfillment, Goals, and Capture"
+        },
+        {
+          src: "assets/landing/loom-goals.png",
+          alt: "Loom goals screen with progress and due dates"
+        },
+        {
+          src: "assets/landing/loom-little-wins.png",
+          alt: "Loom Little Wins screen with stacked daily habit cards"
+        },
+        {
+          src: "assets/landing/loom-ai.png",
+          alt: "LoomAI screen with guidance prompt"
+        }
+      ];
+      const copyBlocks = Array.from(document.querySelectorAll("[data-carousel-copy]"));
+      const dots = Array.from(document.querySelectorAll("[data-carousel-dot]"));
+      const previous = document.querySelector("[data-carousel-prev]");
+      const next = document.querySelector("[data-carousel-next]");
+      let activeIndex = 0;
+      let carouselTimer;
+
+      function showSlide(index) {
+        activeIndex = (index + slides.length) % slides.length;
+
+        if (screen) {
+          screen.style.setProperty("--active-screenshot", `url("${slides[activeIndex].src}")`);
+          screen.setAttribute("aria-label", slides[activeIndex].alt);
+        }
+
+        copyBlocks.forEach((copy, copyIndex) => {
+          copy.classList.toggle("is-active", copyIndex === activeIndex);
+        });
+
+        dots.forEach((dot, dotIndex) => {
+          dot.classList.toggle("is-active", dotIndex === activeIndex);
+        });
+      }
+
+      function restartCarouselTimer() {
+        window.clearInterval(carouselTimer);
+        carouselTimer = window.setInterval(() => showSlide(activeIndex + 1), 4800);
+      }
+
+      previous?.addEventListener("click", () => {
+        showSlide(activeIndex - 1);
+        restartCarouselTimer();
+      });
+
+      next?.addEventListener("click", () => {
+        showSlide(activeIndex + 1);
+        restartCarouselTimer();
+      });
+
+      restartCarouselTimer();
+    }
+  </script>
+</body>
+</html>
