@@ -36,6 +36,7 @@
 
     html {
       scroll-behavior: smooth;
+      scroll-padding-top: 76px;
     }
 
     body {
@@ -49,6 +50,7 @@
       line-height: 1.55;
       -webkit-font-smoothing: antialiased;
       text-rendering: optimizeLegibility;
+      overflow-x: hidden;
     }
 
     a {
@@ -153,6 +155,10 @@
     .nav-cta:hover {
       transform: translateY(-1px);
       box-shadow: 0 14px 30px rgba(0, 122, 255, 0.28);
+    }
+
+    .nav-cta-short {
+      display: none;
     }
 
     .hero {
@@ -1292,7 +1298,10 @@
       }
 
       .grid.three,
-      .grid.four,
+      .grid.four {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
       .screenshots,
       .research-grid,
       .footer-grid {
@@ -1336,8 +1345,13 @@
     }
 
     @media (max-width: 640px) {
+      .shell {
+        width: min(calc(100% - 22px), var(--max));
+      }
+
       .nav-inner {
-        min-height: 60px;
+        min-height: 58px;
+        gap: 8px;
       }
 
       .nav-links {
@@ -1345,14 +1359,30 @@
       }
 
       .nav-right {
-        gap: 10px;
+        gap: 8px;
+      }
+
+      .brand {
+        min-width: 0;
+        gap: 8px;
+        font-size: 1.05rem;
+      }
+
+      .brand img {
+        width: 30px;
+        height: 30px;
+        border-radius: 7px;
       }
 
       .brand span {
-        max-width: 142px;
+        max-width: min(42vw, 158px);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+      }
+
+      .nav-contact {
+        display: none;
       }
 
       .nav-cta {
@@ -1361,25 +1391,45 @@
         font-size: 0.82rem;
       }
 
+      .nav-cta-full {
+        display: none;
+      }
+
+      .nav-cta-short {
+        display: inline;
+      }
+
       .hero-content {
-        padding: 44px 0 38px;
+        padding: 38px 0 34px;
       }
 
       .hero::before {
         background:
-          linear-gradient(180deg, rgba(251, 250, 247, 0.94), rgba(251, 250, 247, 0.99)),
-          url("assets/landing/loom-hero-phone.png") right -108px top 38px / 340px auto no-repeat;
+          linear-gradient(180deg, rgba(251, 250, 247, 0.98), rgba(251, 250, 247, 0.995)),
+          url("assets/landing/loom-hero-phone.png") right -154px top 10px / 320px auto no-repeat;
       }
 
       h1 {
-        font-size: clamp(3rem, 16vw, 4.8rem);
+        max-width: 10.5ch;
+        margin-bottom: 16px;
+        font-size: clamp(2.8rem, 14.5vw, 4.2rem);
+      }
+
+      h2 {
+        font-size: clamp(1.85rem, 9vw, 2.45rem);
+      }
+
+      .lead {
+        font-size: 1.02rem;
       }
 
       section {
-        padding: 54px 0;
+        padding: 48px 0;
       }
 
       .grid.two,
+      .grid.three,
+      .grid.four,
       .small-shot-grid {
         grid-template-columns: 1fr;
       }
@@ -1402,8 +1452,34 @@
         width: 170px;
       }
 
+      .rating-row {
+        gap: 8px;
+        margin-top: 22px;
+        font-size: 0.92rem;
+        line-height: 1.35;
+      }
+
+      .stars {
+        font-size: 1.55em;
+        letter-spacing: 0.04em;
+      }
+
       .button {
         width: 100%;
+      }
+
+      .card,
+      .plan-card,
+      .shot-card,
+      details,
+      .placeholder-card {
+        border-radius: 20px;
+      }
+
+      .card,
+      .plan-card,
+      .placeholder-card {
+        padding: 18px;
       }
 
       .plan-header {
@@ -1416,23 +1492,166 @@
 
       .ecosystem-card {
         padding: 18px;
+        overflow: hidden;
       }
 
       .ecosystem-map {
-        min-height: 900px;
+        min-height: auto;
+        padding: 4px 0 6px;
+      }
+
+      .ecosystem-map::before {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: 126px;
+        bottom: 124px;
+        z-index: 0;
+        width: 2px;
+        border-radius: 999px;
+        background: linear-gradient(180deg, rgba(0, 122, 255, 0.28), rgba(52, 199, 89, 0.32), rgba(255, 149, 0, 0.3));
+        transform: translateX(-50%);
+      }
+
+      .ecosystem-lines {
+        display: none;
+      }
+
+      .ecosystem-layer > h3 {
+        max-width: 25ch;
+        font-size: 1.12rem;
+      }
+
+      .ecosystem-layer p {
+        font-size: 0.94rem;
       }
 
       .passion-row {
-        gap: 10px;
+        gap: 8px;
+        padding: 0 4px;
       }
 
       .passion-circle {
-        width: 50px;
-        height: 50px;
+        width: 46px;
+        height: 46px;
+        font-size: 0.62rem;
       }
 
       .fulfillment-layer {
-        margin-top: 72px;
+        margin-top: 52px;
+      }
+
+      .fulfillment-cluster {
+        max-width: 300px;
+        min-height: 0;
+        gap: 14px;
+      }
+
+      .area-chip {
+        height: auto;
+        min-height: 30px;
+        font-size: 0.76rem;
+      }
+
+      .radar {
+        width: min(100%, 178px);
+      }
+
+      .systems-layer {
+        margin-top: 52px;
+      }
+
+      .system-nodes {
+        max-width: 300px;
+        gap: 12px;
+      }
+
+      .system-node {
+        min-height: 80px;
+        padding: 14px 10px;
+      }
+
+      .screenshots {
+        gap: 22px;
+      }
+
+      .phone-shell {
+        width: min(78vw, 292px);
+      }
+
+      .carousel-arrow {
+        width: 38px;
+        height: 38px;
+      }
+
+      .screenshot-copy-card h3 {
+        font-size: 1.65rem;
+      }
+
+      .screenshot-copy-card p {
+        font-size: 0.98rem;
+      }
+
+      .integration-card {
+        min-height: 0;
+        padding: 18px;
+      }
+
+      .integration-art {
+        min-height: 0;
+      }
+
+      .research-sources {
+        padding-left: 16px;
+      }
+
+      .research-sources ul {
+        padding-left: 18px;
+      }
+
+      .price-before {
+        font-size: 2.2rem;
+      }
+
+      .price {
+        font-size: 2.45rem;
+      }
+
+      summary {
+        padding: 17px 18px;
+        font-size: 1rem;
+      }
+
+      .faq-copy {
+        padding: 0 18px 18px;
+      }
+
+      .footer {
+        padding: 34px 0 42px;
+      }
+
+      .footer-links {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px 14px;
+      }
+    }
+
+    @media (max-width: 400px) {
+      .shell {
+        width: min(calc(100% - 18px), var(--max));
+      }
+
+      .brand span {
+        max-width: 36vw;
+      }
+
+      .nav-cta {
+        padding: 0 10px;
+      }
+
+      .phone-shell {
+        width: min(82vw, 280px);
       }
     }
   </style>
@@ -1452,7 +1671,10 @@
           <a href="#faq">FAQ</a>
         </div>
         <a class="nav-contact" href="#contact">Contact</a>
-        <a class="nav-cta" href="https://apps.apple.com/us/app/loom-life-manager/id6759817760">Download on the App Store</a>
+        <a class="nav-cta" href="https://apps.apple.com/us/app/loom-life-manager/id6759817760">
+          <span class="nav-cta-full">Download on the App Store</span>
+          <span class="nav-cta-short">App Store</span>
+        </a>
       </div>
     </div>
   </nav>
