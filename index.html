@@ -4,13 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Loom: Life Manager | Goal, Habit & Task Planner for iPhone</title>
-  <meta name="description" content="Loom is a life management app for iPhone that connects purpose, goals, tasks, habits, capture, and reflections in one AI-assisted planner. Download on the App Store.">
+  <meta name="description" content="Loom is an iPhone life manager that connects purpose, goals, tasks, habits, capture, and reflections. Compare Loom with Todoist, TickTick, Notion, Things, Structured, Sunsama, and Streaks.">
   <meta name="robots" content="index, follow, max-image-preview:large">
   <link rel="canonical" href="https://loomlife.us/">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Loom: Life Manager">
   <meta property="og:title" content="Loom: Life Manager | Goal, Habit & Task Planner for iPhone">
-  <meta property="og:description" content="A purpose-driven life management app for iPhone that connects goals, tasks, habits, capture, and reflections in one calm planning system.">
+  <meta property="og:description" content="Compare Loom with Todoist, TickTick, Notion, Things, Structured, Sunsama, and Streaks. Loom connects purpose, goals, tasks, habits, capture, and reflection in one iPhone life manager.">
   <meta property="og:url" content="https://loomlife.us/">
   <meta property="og:image" content="https://loomlife.us/assets/landing/loom-share-preview.png">
   <meta property="og:image:width" content="1200">
@@ -19,7 +19,7 @@
   <meta property="og:image:alt" content="Loom Life Manager preview with iPhone app and connected life areas">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Loom: Life Manager | Goal, Habit & Task Planner for iPhone">
-  <meta name="twitter:description" content="Connect purpose, goals, tasks, habits, capture, and reflections in one AI-assisted life management app.">
+  <meta name="twitter:description" content="Compare Loom with Todoist, TickTick, Notion, Things, Structured, Sunsama, and Streaks. Purpose, goals, tasks, habits, capture, and reflection in one iPhone life manager.">
   <meta name="twitter:image" content="https://loomlife.us/assets/landing/loom-share-preview.png">
   <meta name="twitter:image:alt" content="Loom Life Manager preview with iPhone app and connected life areas">
   <link rel="icon" href="assets/landing/loom-icon.jpeg" type="image/jpeg">
@@ -1345,6 +1345,176 @@
       line-height: 1.45;
     }
 
+    .comparison-intro-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+
+    .comparison-card {
+      min-height: 100%;
+    }
+
+    .comparison-kicker {
+      display: inline-flex;
+      width: fit-content;
+      margin-bottom: 12px;
+      padding: 7px 10px;
+      border-radius: 999px;
+      color: var(--ink);
+      background: rgba(0, 122, 255, 0.09);
+      font-size: 0.76rem;
+      font-weight: 820;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .comparison-card p {
+      margin-bottom: 0;
+    }
+
+    .comparison-note {
+      margin: 0;
+      padding: 18px 20px 16px;
+      color: var(--muted);
+      font-size: 0.92rem;
+      line-height: 1.55;
+    }
+
+    .comparison-table-card {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      background: var(--surface-strong);
+      box-shadow: 0 14px 44px rgba(17, 17, 17, 0.055);
+    }
+
+    .comparison-table-wrap {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .comparison-table {
+      width: 100%;
+      min-width: 1240px;
+      border-collapse: separate;
+      border-spacing: 0;
+      font-size: 0.9rem;
+    }
+
+    .comparison-table th,
+    .comparison-table td {
+      min-width: 128px;
+      padding: 15px 14px;
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+      text-align: left;
+    }
+
+    .comparison-table th:last-child,
+    .comparison-table td:last-child {
+      border-right: 0;
+    }
+
+    .comparison-table tbody tr:last-child th,
+    .comparison-table tbody tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .comparison-table thead th {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      color: var(--ink);
+      background: #f7f8fb;
+      font-size: 0.84rem;
+      font-weight: 850;
+    }
+
+    .comparison-table .criteria-header,
+    .comparison-table .criteria-cell {
+      position: sticky;
+      left: 0;
+      z-index: 3;
+      width: 160px;
+      min-width: 160px;
+      color: var(--ink);
+      background: #fbfaf7;
+      font-weight: 820;
+    }
+
+    .comparison-table .criteria-header {
+      z-index: 4;
+      background: #f0f3f8;
+    }
+
+    .comparison-table .loom-column {
+      background: rgba(0, 122, 255, 0.055);
+      box-shadow: inset 3px 0 0 rgba(0, 122, 255, 0.72);
+    }
+
+    .comparison-table strong {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--ink);
+      font-size: 0.92rem;
+      line-height: 1.25;
+    }
+
+    .comparison-table span {
+      display: block;
+      color: var(--muted);
+      line-height: 1.42;
+    }
+
+    .compare-status {
+      display: inline-flex;
+      margin-bottom: 7px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      color: var(--ink);
+      background: rgba(17, 17, 17, 0.06);
+      font-size: 0.72rem;
+      font-weight: 820;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .loom-column .compare-status {
+      color: #003e83;
+      background: rgba(0, 122, 255, 0.14);
+    }
+
+    .comparison-sources {
+      display: grid;
+      gap: 10px;
+      padding: 18px 20px 20px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 0.86rem;
+      line-height: 1.5;
+    }
+
+    .comparison-sources p {
+      margin: 0;
+    }
+
+    .source-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 12px;
+    }
+
+    .source-links a {
+      color: var(--ink);
+      font-weight: 760;
+      text-decoration-thickness: 0.08em;
+      text-underline-offset: 0.18em;
+    }
+
     details {
       overflow: hidden;
     }
@@ -1433,6 +1603,7 @@
 
       .screenshots,
       .research-grid,
+      .comparison-intro-grid,
       .footer-grid {
         grid-template-columns: 1fr;
       }
@@ -1744,6 +1915,27 @@
         padding-left: 18px;
       }
 
+      .comparison-table {
+        min-width: 1120px;
+        font-size: 0.84rem;
+      }
+
+      .comparison-table th,
+      .comparison-table td {
+        min-width: 118px;
+        padding: 13px 12px;
+      }
+
+      .comparison-table .criteria-header,
+      .comparison-table .criteria-cell {
+        width: 136px;
+        min-width: 136px;
+      }
+
+      .comparison-sources {
+        padding: 16px 18px 18px;
+      }
+
       .price-before {
         font-size: 2.2rem;
       }
@@ -1803,6 +1995,7 @@
           <a href="#system">System</a>
           <a href="#features">Features</a>
           <a href="#pricing">Pricing</a>
+          <a href="#compare">Compare</a>
           <a href="#faq">FAQ</a>
         </div>
         <a class="nav-contact" href="#contact">Contact</a>
@@ -2290,6 +2483,201 @@
             <div class="price">$15 / month</div>
             <p>Auto-renewable monthly subscription for flexible access. Planned launch: July 1, 2026.</p>
           </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="compare">
+      <div class="shell">
+        <div class="section-head">
+          <div>
+            <h2>Compare Loom with Todoist, TickTick, Notion, Things, Structured, Sunsama, and Streaks.</h2>
+            <p>
+              If you are searching for a Todoist alternative, TickTick alternative, Notion alternative, Things 3 alternative, Structured alternative, Sunsama alternative, or Streaks habit tracker alternative, Loom is built for a different job: managing your life as one connected system.
+            </p>
+          </div>
+        </div>
+
+        <div class="comparison-intro-grid">
+          <article class="card comparison-card">
+            <span class="comparison-kicker">Where Loom wins</span>
+            <h3>Purpose to daily action</h3>
+            <p>Loom connects purpose, fulfillment areas, goals, Action Plans, Little Wins, reflection, capture, and LoomAI instead of making you assemble that chain across separate apps.</p>
+          </article>
+          <article class="card comparison-card">
+            <span class="comparison-kicker">Where others win</span>
+            <h3>Specialized workflows</h3>
+            <p>Todoist, TickTick, Notion, Things, Structured, Sunsama, and Streaks are strong at their own categories, from task capture and databases to time blocking and dedicated habit streaks.</p>
+          </article>
+          <article class="card comparison-card">
+            <span class="comparison-kicker">Best fit</span>
+            <h3>iPhone life planning</h3>
+            <p>Loom is the better fit when your real problem is not another task list, but keeping goals, habits, priorities, and reflection tied to the life you want to build.</p>
+          </article>
+        </div>
+
+        <div class="comparison-table-card">
+          <p class="comparison-note">
+            This comparison focuses on first-class product positioning and officially listed features. Several competitors can approximate missing workflows through templates, recurring tasks, databases, or manual setup.
+          </p>
+          <div class="comparison-table-wrap" tabindex="0" aria-label="Scrollable comparison table">
+            <table class="comparison-table">
+              <thead>
+                <tr>
+                  <th scope="col" class="criteria-header">Criterion</th>
+                  <th scope="col" class="loom-column">Loom</th>
+                  <th scope="col">Todoist</th>
+                  <th scope="col">TickTick</th>
+                  <th scope="col">Notion</th>
+                  <th scope="col">Things 3</th>
+                  <th scope="col">Structured</th>
+                  <th scope="col">Sunsama</th>
+                  <th scope="col">Streaks</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row" class="criteria-cell">Primary job</th>
+                  <td class="loom-column"><strong>Life management</strong><span>Purpose, life areas, goals, tasks, Little Wins, reflection, capture, and LoomAI.</span></td>
+                  <td><strong>Task management</strong><span>Projects, due dates, reminders, filters, and team task workflows.</span></td>
+                  <td><strong>All-in-one tasks</strong><span>Tasks, calendar views, Pomodoro, habit tracking, and countdowns.</span></td>
+                  <td><strong>Workspace system</strong><span>Docs, databases, projects, wikis, AI, and team knowledge.</span></td>
+                  <td><strong>Apple task manager</strong><span>Personal to-dos, projects, areas, and Apple ecosystem task planning.</span></td>
+                  <td><strong>Visual daily planner</strong><span>Timeline planning, calendar/reminder connection, routines, and widgets.</span></td>
+                  <td><strong>Workday planner</strong><span>Guided daily and weekly planning around tasks, calendar, and work tools.</span></td>
+                  <td><strong>Habit tracker</strong><span>Dedicated streak-based habit tracking across Apple devices.</span></td>
+                </tr>
+                <tr>
+                  <th scope="row" class="criteria-cell">Purpose and life vision</th>
+                  <td class="loom-column"><span class="compare-status">Built in</span><span>Purpose is a core layer, not a notes field or template.</span></td>
+                  <td><span class="compare-status">Not dedicated</span><span>Can organize goals as projects, but purpose is not a first-class layer.</span></td>
+                  <td><span class="compare-status">Not dedicated</span><span>Built around organizing tasks, schedules, focus, and habits.</span></td>
+                  <td><span class="compare-status">Manual</span><span>Possible with pages and databases, but requires user-designed structure.</span></td>
+                  <td><span class="compare-status">Not dedicated</span><span>Excellent task planning, not a purpose-first life system.</span></td>
+                  <td><span class="compare-status">Not dedicated</span><span>Optimized for planning the day in a visual timeline.</span></td>
+                  <td><span class="compare-status">Work-focused</span><span>Strong planning rituals, aimed mainly at sustainable workdays and weeks.</span></td>
+                  <td><span class="compare-status">Not dedicated</span><span>Designed for recurring behaviors and streaks.</span></td>
+                </tr>
+                <tr>
+                  <th scope="row" class="criteria-cell">Life areas and fulfillment</th>
+                  <td class="loom-column"><span class="compare-status">Built in</span><span>Organize areas like health, career, wealth, relationships, faith, learning, service, home, and custom areas.</span></td>
+                  <td><span class="compare-status">Manual</span><span>Can model areas as projects, labels, or filters.</span></td>
+                  <td><span class="compare-status">Manual</span><span>Can model areas with lists, folders, tags, and habits.</span></td>
+                  <td><span class="compare-status">Manual</span><span>Flexible databases can model life areas, but setup is on the user.</span></td>
+                  <td><span class="compare-status">Partial</span><span>Areas exist for grouping responsibilities, but not fulfillment scoring or balancing.</span></td>
+                  <td><span class="compare-status">Manual</span><span>Can color-code or schedule categories, but not a dedicated fulfillment layer.</span></td>
+                  <td><span class="compare-status">Partial</span><span>Channels and objectives help separate work contexts, not whole-life fulfillment areas.</span></td>
+                  <td><span class="compare-status">Manual</span><span>Habits can represent life areas, but the app is habit-first.</span></td>
+                </tr>
+                <tr>
+                  <th scope="row" class="criteria-cell">Goals tied to action</th>
+                  <td class="loom-column"><span class="compare-status">Built in</span><span>Goals connect back to life areas and forward into Action Plans and Little Wins.</span></td>
+                  <td><span class="compare-status">Partial</span><span>Projects and tasks are strong; life-area connection is manual.</span></td>
+                  <td><span class="compare-status">Partial</span><span>Tasks, habits, and statistics help execution; purpose connection is manual.</span></td>
+                  <td><span class="compare-status">Manual</span><span>Powerful if configured with databases, templates, and relations.</span></td>
+                  <td><span class="compare-status">Partial</span><span>Projects and to-dos support progress, but not a built-in life system.</span></td>
+                  <td><span class="compare-status">Partial</span><span>Good for scheduling tasks and routines; goal hierarchy is lighter.</span></td>
+                  <td><span class="compare-status">Partial</span><span>Weekly objectives and daily plans tie work priorities to execution.</span></td>
+                  <td><span class="compare-status">Habit-focused</span><span>Strong for repeated behaviors, not broad goal planning.</span></td>
+                </tr>
+                <tr>
+                  <th scope="row" class="criteria-cell">Task and action planning</th>
+                  <td class="loom-column"><span class="compare-status">Built in</span><span>Action Plans include due dates, musts, places, people, attachments, duration, and status.</span></td>
+                  <td><span class="compare-status">Strong</span><span>One of Todoist's core strengths.</span></td>
+                  <td><span class="compare-status">Strong</span><span>Task lists, calendar, reminders, filters, and collaboration are core features.</span></td>
+                  <td><span class="compare-status">Strong manual</span><span>Great when a workspace or database system is configured well.</span></td>
+                  <td><span class="compare-status">Strong</span><span>Built for personal to-dos, projects, and day planning.</span></td>
+                  <td><span class="compare-status">Strong</span><span>Visual timeline and day planning are core strengths.</span></td>
+                  <td><span class="compare-status">Strong</span><span>Guided planning, timeboxing, and work-tool imports are core strengths.</span></td>
+                  <td><span class="compare-status">Limited</span><span>Tasks are habits; it is not a full task manager.</span></td>
+                </tr>
+                <tr>
+                  <th scope="row" class="criteria-cell">Habit tracking</th>
+                  <td class="loom-column"><span class="compare-status">Built in</span><span>Little Wins are small repeatable actions tied to the larger life system.</span></td>
+                  <td><span class="compare-status">Partial</span><span>Recurring tasks can represent habits.</span></td>
+                  <td><span class="compare-status">Built in</span><span>Habit Tracker is a highlighted TickTick feature.</span></td>
+                  <td><span class="compare-status">Manual</span><span>Habit trackers can be built with databases or templates.</span></td>
+                  <td><span class="compare-status">Partial</span><span>Recurring to-dos can represent habits.</span></td>
+                  <td><span class="compare-status">Built in</span><span>Structured lists routines and habits as part of its planner.</span></td>
+                  <td><span class="compare-status">Not dedicated</span><span>Better for planning and reviewing work than tracking streak habits.</span></td>
+                  <td><span class="compare-status">Dedicated</span><span>Habit streaks are the core product.</span></td>
+                </tr>
+                <tr>
+                  <th scope="row" class="criteria-cell">Reflection and review</th>
+                  <td class="loom-column"><span class="compare-status">Built in</span><span>Reflection is part of the purpose-to-action loop.</span></td>
+                  <td><span class="compare-status">Activity data</span><span>Reporting history exists, but reflective journaling is not the core workflow.</span></td>
+                  <td><span class="compare-status">Stats</span><span>Historical statistics and task changes help review progress.</span></td>
+                  <td><span class="compare-status">Manual</span><span>Excellent for journals if you build the system.</span></td>
+                  <td><span class="compare-status">Not dedicated</span><span>Review is possible through lists and completed items.</span></td>
+                  <td><span class="compare-status">Not dedicated</span><span>Designed more for planning and rescheduling the day.</span></td>
+                  <td><span class="compare-status">Strong work review</span><span>Daily shutdown and weekly review rituals are first-class workflows.</span></td>
+                  <td><span class="compare-status">Progress stats</span><span>Stats support habit review, not broad life reflection.</span></td>
+                </tr>
+                <tr>
+                  <th scope="row" class="criteria-cell">AI planning support</th>
+                  <td class="loom-column"><span class="compare-status">Built in</span><span>LoomAI helps with planning, priorities, rewrites, Little Wins, and next steps.</span></td>
+                  <td><span class="compare-status">Available</span><span>Todoist lists Task Assist and Ramble on paid plans.</span></td>
+                  <td><span class="compare-status">Not listed</span><span>AI planning was not a highlighted core feature in the reviewed official pages.</span></td>
+                  <td><span class="compare-status">Strong</span><span>Notion positions AI, agents, meeting notes, and enterprise search as major features.</span></td>
+                  <td><span class="compare-status">Not listed</span><span>AI planning was not highlighted in the reviewed App Store listing.</span></td>
+                  <td><span class="compare-status">Available</span><span>Structured Pro lists AI day drafting and automatic replanning.</span></td>
+                  <td><span class="compare-status">Available</span><span>Sunsama Pro lists AI + MCP + Zapier.</span></td>
+                  <td><span class="compare-status">Not listed</span><span>AI planning was not highlighted in the reviewed App Store listing.</span></td>
+                </tr>
+                <tr>
+                  <th scope="row" class="criteria-cell">Apple Health support</th>
+                  <td class="loom-column"><span class="compare-status">Supported</span><span>Optional read-only health signals can support health-backed Little Wins.</span></td>
+                  <td><span class="compare-status">Not core</span><span>Not a listed core feature in the reviewed official pages.</span></td>
+                  <td><span class="compare-status">Not core</span><span>Not a listed core feature in the reviewed official pages.</span></td>
+                  <td><span class="compare-status">Not core</span><span>Not a listed core feature in the reviewed official pages.</span></td>
+                  <td><span class="compare-status">Not core</span><span>Not a listed core feature in the reviewed App Store listing.</span></td>
+                  <td><span class="compare-status">Not core</span><span>Not a listed core feature in the reviewed App Store listing.</span></td>
+                  <td><span class="compare-status">Not core</span><span>Not a listed core feature in the reviewed official pages.</span></td>
+                  <td><span class="compare-status">Supported</span><span>Streaks can read Health app data to complete supported habit tasks.</span></td>
+                </tr>
+                <tr>
+                  <th scope="row" class="criteria-cell">Current paid pricing</th>
+                  <td class="loom-column"><span class="compare-status">Launch offer</span><span>$129 lifetime before May 31, 2026; Annual planned at $79/year; Monthly planned at $15/month.</span></td>
+                  <td><span class="compare-status">Freemium</span><span>Todoist Pro is listed at $7/month or $60/year after its Dec. 10, 2025 price update.</span></td>
+                  <td><span class="compare-status">Freemium</span><span>TickTick Premium annual plan is listed at $35.99/year.</span></td>
+                  <td><span class="compare-status">Freemium</span><span>Notion lists Plus at $10/member/month and Business at $20/member/month when billed yearly.</span></td>
+                  <td><span class="compare-status">One-time</span><span>App Store lists Things 3 for iPhone at $9.99 and Things 3 for iPad at $19.99.</span></td>
+                  <td><span class="compare-status">Freemium</span><span>Structured lists monthly, yearly, and lifetime Pro options in the App Store.</span></td>
+                  <td><span class="compare-status">Paid</span><span>Sunsama Pro is listed at $20/month billed yearly or $25/month billed monthly.</span></td>
+                  <td><span class="compare-status">One-time</span><span>App Store lists Streaks at $5.99.</span></td>
+                </tr>
+                <tr>
+                  <th scope="row" class="criteria-cell">Best fit</th>
+                  <td class="loom-column"><strong>People who want a life operating system</strong><span>Best when goals, habits, tasks, and reflection need one purpose-driven structure.</span></td>
+                  <td><strong>Task-first users</strong><span>Best for fast personal and team task management.</span></td>
+                  <td><strong>Feature-rich planners</strong><span>Best for users who want tasks, calendar, Pomodoro, and habits in one productivity app.</span></td>
+                  <td><strong>Builders and teams</strong><span>Best for people who want a customizable workspace or company knowledge system.</span></td>
+                  <td><strong>Apple to-do loyalists</strong><span>Best for elegant personal task management in the Apple ecosystem.</span></td>
+                  <td><strong>Timeline planners</strong><span>Best for visual day planning, routines, and ADHD-friendly scheduling.</span></td>
+                  <td><strong>Busy professionals</strong><span>Best for guided workday planning, timeboxing, and weekly work review.</span></td>
+                  <td><strong>Habit streak users</strong><span>Best for people who primarily want a focused habit tracker.</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="comparison-sources">
+            <p><strong>Last verified:</strong> April 30, 2026. Pricing and features can change; source links point to the official or platform pages reviewed.</p>
+            <div class="source-links" aria-label="Comparison sources">
+              <a href="https://apps.apple.com/us/app/loom-life-manager/id6759817760">Loom App Store</a>
+              <a href="https://www.todoist.com/pricing">Todoist pricing</a>
+              <a href="https://www.todoist.com/help/articles/todoist-pro-pricing-update-in-2025-bxBvHZuJZ">Todoist price update</a>
+              <a href="https://ticktick.com/">TickTick features</a>
+              <a href="https://ticktick.com/upgrade">TickTick Premium</a>
+              <a href="https://www.notion.com/pricing">Notion pricing</a>
+              <a href="https://apps.apple.com/us/app/things-3/id904237743">Things 3 App Store</a>
+              <a href="https://apps.apple.com/us/app/things-3-for-ipad/id904244226">Things 3 for iPad</a>
+              <a href="https://apps.apple.com/us/app/structured-daily-planner-todo/id1499198946">Structured App Store</a>
+              <a href="https://www.sunsama.com/pricing">Sunsama pricing</a>
+              <a href="https://www.sunsama.com/features/guided-planning-and-reviews">Sunsama weekly planning</a>
+              <a href="https://apps.apple.com/us/app/streaks/id963034692">Streaks App Store</a>
+            </div>
+            <p>Loom is independent and is not affiliated with, sponsored by, or endorsed by Todoist, TickTick, Notion, Things, Structured, Sunsama, Streaks, Apple, or their owners. Competitor names are used only for comparison.</p>
+          </div>
         </div>
       </div>
     </section>
