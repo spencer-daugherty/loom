@@ -321,20 +321,24 @@
     }
 
     h1 {
-      max-width: 12.5ch;
-      margin-bottom: 20px;
-      font-size: clamp(3.4rem, 8.5vw, 7.4rem);
-      font-weight: 850;
-    }
-
-    .hero-kicker {
       max-width: 34ch;
-      margin: 0 0 12px;
+      margin: 0 0 20px;
       color: var(--muted);
       font-size: 1.02rem;
       font-weight: 820;
       letter-spacing: 0.08em;
       text-transform: uppercase;
+    }
+
+    .hero-kicker {
+      max-width: 11ch;
+      margin: 0 0 12px;
+      color: var(--ink);
+      font-size: clamp(3.4rem, 8.5vw, 7.4rem);
+      font-weight: 850;
+      letter-spacing: 0;
+      line-height: 1.03;
+      text-transform: none;
     }
 
     h2 {
@@ -1525,13 +1529,15 @@
       }
 
       .hero-kicker {
-        font-size: 0.82rem;
+        max-width: 10.5ch;
+        margin-bottom: 16px;
+        font-size: clamp(2.8rem, 14.5vw, 4.2rem);
       }
 
       h1 {
-        max-width: 11.5ch;
+        max-width: 34ch;
         margin-bottom: 16px;
-        font-size: clamp(2.8rem, 14.5vw, 4.2rem);
+        font-size: 0.82rem;
       }
 
       h2 {
