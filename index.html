@@ -1253,6 +1253,7 @@
       background: transparent;
       border-radius: 0;
       overflow: visible;
+      gap: 18px;
     }
 
     .integration-art.apple-intelligence img {
@@ -1260,6 +1261,19 @@
       height: 59px;
       max-width: 100%;
       border-radius: 0;
+    }
+
+    .integration-art.apple-intelligence .loomai-integration-logo {
+      height: 64px;
+      max-width: 46px;
+      object-fit: contain;
+    }
+
+    .integration-divider {
+      width: 1px;
+      height: 54px;
+      background: var(--line);
+      flex: 0 0 auto;
     }
 
     .integration-card p {
@@ -2373,6 +2387,15 @@
           <article class="card integration-card">
             <h3>LoomAI planning intelligence</h3>
             <div class="integration-art apple-intelligence">
+              <img
+                class="loomai-integration-logo"
+                src="assets/landing/loomai-logo.png"
+                alt="LoomAI"
+                width="1324"
+                height="1860"
+                loading="lazy"
+                decoding="async">
+              <span class="integration-divider" aria-hidden="true"></span>
               <img
                 src="assets/landing/apple-intelligence.png"
                 alt="Apple Intelligence"
