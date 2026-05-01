@@ -429,7 +429,7 @@
       flex-wrap: wrap;
       align-items: center;
       gap: 12px;
-      margin-top: 28px;
+      margin: 0 0 18px;
       color: var(--muted);
       font-weight: 680;
     }
@@ -1420,13 +1420,28 @@
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
       gap: 16px;
-      margin-bottom: 18px;
+      margin-bottom: 20px;
     }
 
     .comparison-card {
+      position: relative;
+      overflow: hidden;
       min-height: 100%;
       display: flex;
       flex-direction: column;
+      border-color: rgba(0, 122, 255, 0.12);
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(255, 255, 255, 0.82)),
+        var(--surface-strong);
+    }
+
+    .comparison-card::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 4px;
+      background: linear-gradient(180deg, var(--blue), var(--green), var(--orange));
+      opacity: 0.72;
     }
 
     .comparison-card.featured {
@@ -1437,10 +1452,35 @@
       box-shadow: 0 18px 54px rgba(0, 122, 255, 0.11);
     }
 
+    .comparison-card-top {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
+    .comparison-card-icon {
+      display: inline-grid;
+      flex: 0 0 auto;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      border-radius: 12px;
+      color: #003e83;
+      background: rgba(0, 122, 255, 0.12);
+      font-size: 0.82rem;
+      font-weight: 880;
+    }
+
+    .comparison-card.featured .comparison-card-icon {
+      color: #ffffff;
+      background: var(--blue);
+      box-shadow: 0 12px 28px rgba(0, 122, 255, 0.22);
+    }
+
     .comparison-kicker {
       display: inline-flex;
       width: fit-content;
-      margin-bottom: 12px;
       padding: 7px 10px;
       border-radius: 999px;
       color: var(--ink);
@@ -1449,6 +1489,11 @@
       font-weight: 820;
       letter-spacing: 0.06em;
       text-transform: uppercase;
+    }
+
+    .comparison-card h3 {
+      font-size: 1.32rem;
+      line-height: 1.13;
     }
 
     .comparison-card p {
@@ -1481,109 +1526,123 @@
       line-height: 1.55;
     }
 
-    .comparison-criteria-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr));
-      gap: 16px;
-    }
-
-    .criterion-card {
-      padding: 0;
+    .comparison-table-card {
       overflow: hidden;
-      border-color: rgba(0, 122, 255, 0.13);
+      border: 1px solid rgba(0, 122, 255, 0.14);
+      border-radius: var(--radius-lg);
       background: rgba(255, 255, 255, 0.9);
+      box-shadow: 0 18px 54px rgba(17, 17, 17, 0.065);
     }
 
-    .criterion-heading {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 18px 18px 12px;
+    .comparison-table-wrap {
+      overflow-x: auto;
+      overscroll-behavior-x: contain;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-color: rgba(0, 122, 255, 0.38) transparent;
+      scrollbar-width: thin;
     }
 
-    .criterion-icon {
-      display: inline-grid;
-      flex: 0 0 auto;
-      place-items: center;
-      width: 38px;
-      height: 38px;
-      border-radius: 14px;
-      color: #003e83;
-      background: rgba(0, 122, 255, 0.12);
-      font-size: 0.86rem;
-      font-weight: 850;
+    .comparison-table-wrap:focus {
+      outline: 3px solid rgba(0, 122, 255, 0.24);
+      outline-offset: -3px;
     }
 
-    .criterion-heading h3 {
-      margin: 0;
-      font-size: 1.05rem;
-      line-height: 1.22;
+    .comparison-table-wrap::-webkit-scrollbar {
+      height: 10px;
     }
 
-    .loom-verdict {
-      margin: 0 18px 14px;
-      padding: 15px;
-      border: 1px solid rgba(0, 122, 255, 0.18);
-      border-radius: var(--radius-md);
-      background:
-        linear-gradient(180deg, rgba(0, 122, 255, 0.12), rgba(0, 122, 255, 0.055)),
-        #ffffff;
+    .comparison-table-wrap::-webkit-scrollbar-track {
+      background: transparent;
     }
 
-    .verdict-label {
-      display: inline-flex;
-      width: fit-content;
-      margin-bottom: 8px;
-      padding: 5px 9px;
+    .comparison-table-wrap::-webkit-scrollbar-thumb {
+      border: 2px solid rgba(255, 255, 255, 0.86);
       border-radius: 999px;
-      color: #003e83;
-      background: rgba(0, 122, 255, 0.13);
-      font-size: 0.72rem;
-      font-weight: 850;
+      background: rgba(0, 122, 255, 0.38);
+    }
+
+    .comparison-table {
+      width: 100%;
+      min-width: 1360px;
+      border-collapse: separate;
+      border-spacing: 0;
+      color: var(--ink);
+      font-size: 0.9rem;
+    }
+
+    .comparison-table th,
+    .comparison-table td {
+      min-width: 155px;
+      padding: 15px 14px;
+      border-right: 1px solid rgba(60, 60, 67, 0.12);
+      border-bottom: 1px solid rgba(60, 60, 67, 0.12);
+      vertical-align: top;
+      text-align: left;
+    }
+
+    .comparison-table th:last-child,
+    .comparison-table td:last-child {
+      border-right: 0;
+    }
+
+    .comparison-table tbody tr:last-child th,
+    .comparison-table tbody tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .comparison-table thead th {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      background: #f5f8fc;
+      font-size: 0.82rem;
+      font-weight: 860;
       letter-spacing: 0.05em;
       text-transform: uppercase;
     }
 
-    .loom-verdict p {
-      margin: 0;
-      color: var(--ink);
-      font-weight: 720;
-      line-height: 1.42;
+    .comparison-table .loom-column {
+      position: sticky;
+      left: 0;
+      z-index: 3;
+      min-width: 230px;
+      background:
+        linear-gradient(180deg, rgba(0, 122, 255, 0.12), rgba(255, 255, 255, 0.94)),
+        #ffffff;
+      box-shadow: 5px 0 14px rgba(17, 17, 17, 0.08);
     }
 
-    .competitor-summary {
-      margin: 0;
-      padding: 0 18px 14px;
-      color: var(--muted);
+    .comparison-table thead .loom-column {
+      z-index: 4;
+      color: #003e83;
+      background:
+        linear-gradient(180deg, rgba(0, 122, 255, 0.18), rgba(0, 122, 255, 0.08)),
+        #ffffff;
+    }
+
+    .comparison-topic {
+      display: block;
+      margin-bottom: 8px;
+      color: #003e83;
+      font-size: 0.74rem;
+      font-weight: 880;
+      letter-spacing: 0.06em;
+      line-height: 1.25;
+      text-transform: uppercase;
+    }
+
+    .comparison-table strong {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--ink);
       font-size: 0.92rem;
-      line-height: 1.48;
+      line-height: 1.25;
     }
 
-    .competitor-summary strong {
-      color: var(--ink);
-    }
-
-    .competitor-chips {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      padding: 0 18px 18px;
-      margin-top: auto;
-    }
-
-    .competitor-chip {
-      display: inline-flex;
-      align-items: center;
-      min-height: 28px;
-      padding: 0 9px;
-      border: 1px solid var(--line);
-      border-radius: 999px;
+    .comparison-table span:not(.comparison-topic) {
+      display: block;
       color: var(--muted);
-      background: rgba(17, 17, 17, 0.035);
-      font-size: 0.76rem;
-      font-weight: 760;
-      line-height: 1;
-      white-space: nowrap;
+      line-height: 1.42;
     }
 
     .comparison-sources-details {
@@ -1872,7 +1931,7 @@
 
       .rating-row {
         gap: 8px;
-        margin-top: 22px;
+        margin-bottom: 18px;
         font-size: 0.92rem;
         line-height: 1.35;
       }
@@ -2103,6 +2162,10 @@
     <header class="hero">
       <div class="shell">
         <div class="hero-content">
+          <div class="rating-row" aria-label="App Store rating">
+            <span class="stars" aria-hidden="true">★★★★★</span>
+            <span><span class="rating-score">5.0 / 5.0</span> App Store rating as of Apr 29, 2026</span>
+          </div>
           <h1>Life manager for goals, habits, tasks, and purpose.</h1>
           <p class="hero-kicker">Your life is not a to-do list.</p>
           <div class="hero-actions">
@@ -2128,10 +2191,6 @@
               <a class="button" href="#pricing">Founding Member (Lifetime) Deal</a>
               <a class="button secondary" href="#system">See how it works</a>
             </div>
-          </div>
-          <div class="rating-row" aria-label="App Store rating">
-            <span class="stars" aria-hidden="true">★★★★★</span>
-            <span><span class="rating-score">5.0 / 5.0</span> App Store rating as of Apr 29, 2026</span>
           </div>
         </div>
       </div>
@@ -2601,35 +2660,54 @@
       <div class="shell">
         <div class="section-head">
           <div>
-            <h2>Compare Loom with Todoist, TickTick, Notion, Things, Structured, Sunsama, and Streaks.</h2>
+            <h2>See why Loom is the better life-management system.</h2>
             <p>
-              If you are searching for a Todoist alternative, TickTick alternative, Notion alternative, Things 3 alternative, Structured alternative, Sunsama alternative, or Streaks habit tracker alternative, Loom is the best choice when you want purpose, goals, tasks, habits, capture, AI, and reflection connected in one iPhone life manager.
+              If you are comparing productivity apps or searching for a Todoist alternative, Notion alternative, TickTick alternative, Things 3 alternative, Structured alternative, Sunsama alternative, or Streaks habit tracker alternative, Loom is built for the higher-intent problem: turning purpose, goals, habits, tasks, capture, reflection, health signals, and LoomAI into one practical iPhone system.
             </p>
           </div>
         </div>
 
         <div class="comparison-intro-grid">
           <article class="card comparison-card featured">
-            <span class="comparison-kicker">Best overall fit</span>
-            <h3>One system instead of scattered productivity apps.</h3>
-            <p>Loom connects the whole chain from purpose to daily action, so your goals, tasks, habits, capture list, reflection, and LoomAI all point in the same direction.</p>
+            <div class="comparison-card-top">
+              <span class="comparison-card-icon" aria-hidden="true">1</span>
+              <span class="comparison-kicker">Best overall fit</span>
+            </div>
+            <h3>Built for the full life loop.</h3>
+            <p>Loom connects purpose, fulfillment areas, goals, Action Plans, Little Wins, capture, reflection, health signals, and LoomAI in one repeatable structure.</p>
             <div class="comparison-pill-row" aria-label="Loom strengths">
               <span>Purpose</span>
               <span>Goals</span>
-              <span>Action Plans</span>
-              <span>Little Wins</span>
+              <span>Habits</span>
               <span>LoomAI</span>
+              <span>Reflection</span>
             </div>
           </article>
           <article class="card comparison-card">
-            <span class="comparison-kicker">Alternatives specialize</span>
-            <h3>Most competitors solve one piece well.</h3>
-            <p>Todoist, TickTick, Notion, Things, Structured, Sunsama, and Streaks can be useful for tasks, databases, schedules, work planning, or streaks, but they do not make the whole life system first-class.</p>
+            <div class="comparison-card-top">
+              <span class="comparison-card-icon" aria-hidden="true">2</span>
+              <span class="comparison-kicker">Less setup</span>
+            </div>
+            <h3>Guidance without building your own workspace.</h3>
+            <p>Instead of designing databases, filters, labels, or manual dashboards, Loom gives you a ready structure for turning intent into daily action.</p>
+            <div class="comparison-pill-row" aria-label="Setup advantages">
+              <span>No templates</span>
+              <span>No database build</span>
+              <span>Daily flow</span>
+            </div>
           </article>
           <article class="card comparison-card">
-            <span class="comparison-kicker">Decision rule</span>
-            <h3>Choose Loom when the list is not enough.</h3>
-            <p>If your real problem is not capturing another task, but staying aligned with the life you want to build, Loom is designed for that job from the first screen.</p>
+            <div class="comparison-card-top">
+              <span class="comparison-card-icon" aria-hidden="true">3</span>
+              <span class="comparison-kicker">When Loom wins</span>
+            </div>
+            <h3>Choose Loom when progress needs meaning.</h3>
+            <p>Loom is strongest when tasks, habits, and plans need to stay connected to the person you want to become, not just the next thing due.</p>
+            <div class="comparison-pill-row" aria-label="Decision advantages">
+              <span>Life areas</span>
+              <span>Little Wins</span>
+              <span>Next best move</span>
+            </div>
           </article>
         </div>
 
@@ -2637,136 +2715,165 @@
           This comparison focuses on first-class product positioning and officially listed features. Several competitors can approximate missing workflows through templates, recurring tasks, databases, or manual setup, but Loom makes the connected system the default.
         </p>
 
-        <div class="comparison-criteria-grid" aria-label="Loom comparison criteria">
-          <article class="card criterion-card">
-            <div class="criterion-heading">
-              <span class="criterion-icon">01</span>
-              <h3>Connected life system</h3>
-            </div>
-            <div class="loom-verdict">
-              <span class="verdict-label">Loom advantage</span>
-              <p>Loom connects purpose, fulfillment areas, goals, Action Plans, capture, Little Wins, reflection, and LoomAI in one system.</p>
-            </div>
-            <p class="competitor-summary"><strong>Competitors:</strong> Most alternatives optimize one layer, such as tasks, databases, calendars, workdays, or habit streaks.</p>
-            <div class="competitor-chips"><span class="competitor-chip">Todoist: tasks</span><span class="competitor-chip">Notion: workspace</span><span class="competitor-chip">Streaks: habits</span></div>
-          </article>
-
-          <article class="card criterion-card">
-            <div class="criterion-heading">
-              <span class="criterion-icon">02</span>
-              <h3>Purpose-first planning</h3>
-            </div>
-            <div class="loom-verdict">
-              <span class="verdict-label">Loom advantage</span>
-              <p>Purpose is a core Loom layer, so daily action starts with who you are and what you are building.</p>
-            </div>
-            <p class="competitor-summary"><strong>Competitors:</strong> Purpose is usually not dedicated, work-focused, or something you must build manually with notes, projects, or templates.</p>
-            <div class="competitor-chips"><span class="competitor-chip">Manual setup</span><span class="competitor-chip">Not task-native</span><span class="competitor-chip">Not habit-native</span></div>
-          </article>
-
-          <article class="card criterion-card">
-            <div class="criterion-heading">
-              <span class="criterion-icon">03</span>
-              <h3>Fulfillment areas</h3>
-            </div>
-            <div class="loom-verdict">
-              <span class="verdict-label">Loom advantage</span>
-              <p>Loom organizes life into areas like health, career, wealth, relationships, faith, learning, service, home, and custom areas.</p>
-            </div>
-            <p class="competitor-summary"><strong>Competitors:</strong> Life areas are typically projects, labels, folders, channels, colors, or habits, not a dedicated balance layer.</p>
-            <div class="competitor-chips"><span class="competitor-chip">Projects</span><span class="competitor-chip">Labels</span><span class="competitor-chip">Databases</span><span class="competitor-chip">Habits</span></div>
-          </article>
-
-          <article class="card criterion-card">
-            <div class="criterion-heading">
-              <span class="criterion-icon">04</span>
-              <h3>Goals tied to action</h3>
-            </div>
-            <div class="loom-verdict">
-              <span class="verdict-label">Loom advantage</span>
-              <p>Loom goals connect back to life areas and forward into Action Plans and Little Wins, making progress easier to see.</p>
-            </div>
-            <p class="competitor-summary"><strong>Competitors:</strong> Goals can be approximated, but the purpose-to-area-to-action chain is usually partial or manual.</p>
-            <div class="competitor-chips"><span class="competitor-chip">Partial</span><span class="competitor-chip">Manual relations</span><span class="competitor-chip">Work-focused</span></div>
-          </article>
-
-          <article class="card criterion-card">
-            <div class="criterion-heading">
-              <span class="criterion-icon">05</span>
-              <h3>Action Plans and capture</h3>
-            </div>
-            <div class="loom-verdict">
-              <span class="verdict-label">Loom advantage</span>
-              <p>Loom turns captured tasks into focused Action Plans with context like due dates, musts, people, places, attachments, duration, and status.</p>
-            </div>
-            <p class="competitor-summary"><strong>Competitors:</strong> Several are strong task managers, but Loom wins when tasks need to stay connected to purpose, areas, and goals.</p>
-            <div class="competitor-chips"><span class="competitor-chip">Todoist strong</span><span class="competitor-chip">Things strong</span><span class="competitor-chip">Loom connected</span></div>
-          </article>
-
-          <article class="card criterion-card">
-            <div class="criterion-heading">
-              <span class="criterion-icon">06</span>
-              <h3>Little Wins for habits</h3>
-            </div>
-            <div class="loom-verdict">
-              <span class="verdict-label">Loom advantage</span>
-              <p>Little Wins are small repeatable actions tied to your bigger life system, not isolated streaks.</p>
-            </div>
-            <p class="competitor-summary"><strong>Competitors:</strong> Habit apps and recurring tasks can track repetition, but Loom ties repetition to goals, areas, and daily meaning.</p>
-            <div class="competitor-chips"><span class="competitor-chip">TickTick habits</span><span class="competitor-chip">Streaks habits</span><span class="competitor-chip">Loom context</span></div>
-          </article>
-
-          <article class="card criterion-card">
-            <div class="criterion-heading">
-              <span class="criterion-icon">07</span>
-              <h3>Reflection and review</h3>
-            </div>
-            <div class="loom-verdict">
-              <span class="verdict-label">Loom advantage</span>
-              <p>Loom closes the loop by helping you review whether your actions still match what matters.</p>
-            </div>
-            <p class="competitor-summary"><strong>Competitors:</strong> Activity data, stats, completed lists, or manual journals can help, but broad life reflection is not the core workflow.</p>
-            <div class="competitor-chips"><span class="competitor-chip">Stats</span><span class="competitor-chip">Work review</span><span class="competitor-chip">Manual journal</span></div>
-          </article>
-
-          <article class="card criterion-card">
-            <div class="criterion-heading">
-              <span class="criterion-icon">08</span>
-              <h3>LoomAI inside the system</h3>
-            </div>
-            <div class="loom-verdict">
-              <span class="verdict-label">Loom advantage</span>
-              <p>LoomAI helps with planning, priorities, rewrites, Little Wins, stuck areas, and next steps using the Loom system as context.</p>
-            </div>
-            <p class="competitor-summary"><strong>Competitors:</strong> AI may be available elsewhere, but it is often task-assist, workspace-assist, or day-planning support rather than life-system guidance.</p>
-            <div class="competitor-chips"><span class="competitor-chip">Task AI</span><span class="competitor-chip">Workspace AI</span><span class="competitor-chip">LoomAI</span></div>
-          </article>
-
-          <article class="card criterion-card">
-            <div class="criterion-heading">
-              <span class="criterion-icon">09</span>
-              <h3>Apple Health-backed wins</h3>
-            </div>
-            <div class="loom-verdict">
-              <span class="verdict-label">Loom advantage</span>
-              <p>Loom can use optional Apple Health signals to support health-backed Little Wins like walking, workouts, and sleep.</p>
-            </div>
-            <p class="competitor-summary"><strong>Competitors:</strong> Health support is not a core feature for most alternatives; Streaks supports Health habit tasks but is habit-first.</p>
-            <div class="competitor-chips"><span class="competitor-chip">Optional Health</span><span class="competitor-chip">Read-only signals</span><span class="competitor-chip">Life context</span></div>
-          </article>
-
-          <article class="card criterion-card">
-            <div class="criterion-heading">
-              <span class="criterion-icon">10</span>
-              <h3>Premium access value</h3>
-            </div>
-            <div class="loom-verdict">
-              <span class="verdict-label">Loom advantage</span>
-              <p>The Founding Member deal gives lifetime access to the full connected Loom system during the launch window.</p>
-            </div>
-            <p class="competitor-summary"><strong>Competitors:</strong> Lower-cost or subscription tools can be useful, but they usually buy one specialized workflow, not Loom's full life-management system.</p>
-            <div class="competitor-chips"><span class="competitor-chip">$129 lifetime</span><span class="competitor-chip">Limited offer</span><span class="competitor-chip">Full system</span></div>
-          </article>
+        <div class="comparison-table-card">
+          <div class="comparison-table-wrap" tabindex="0" aria-label="Scrollable comparison table">
+            <table class="comparison-table">
+              <thead>
+                <tr>
+                  <th scope="col" class="loom-column">Loom</th>
+                  <th scope="col">Todoist</th>
+                  <th scope="col">Notion</th>
+                  <th scope="col">TickTick</th>
+                  <th scope="col">Things 3</th>
+                  <th scope="col">Structured</th>
+                  <th scope="col">Sunsama</th>
+                  <th scope="col">Streaks</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row" class="loom-column">
+                    <span class="comparison-topic">01 Connected life system</span>
+                    <strong>Built in.</strong>
+                    <span>Purpose, goals, tasks, habits, capture, reflection, and LoomAI stay connected.</span>
+                  </th>
+                  <td><strong>Task-first.</strong><span>Excellent projects and due dates; life layers are manual.</span></td>
+                  <td><strong>Workspace-first.</strong><span>Flexible pages and databases; the system must be built.</span></td>
+                  <td><strong>Task + habit mix.</strong><span>Strong lists and habits with lighter life context.</span></td>
+                  <td><strong>Personal tasks.</strong><span>Elegant projects and areas; habits sit outside the core.</span></td>
+                  <td><strong>Timeline planner.</strong><span>Strong daily schedule; broader life system needs support.</span></td>
+                  <td><strong>Workday planner.</strong><span>Great daily planning, more work-centered than whole-life.</span></td>
+                  <td><strong>Habit tracker.</strong><span>Focused streaks, not tasks, goals, and planning together.</span></td>
+                </tr>
+                <tr>
+                  <th scope="row" class="loom-column">
+                    <span class="comparison-topic">02 Purpose-first planning</span>
+                    <strong>Core layer.</strong>
+                    <span>Daily planning starts from who you are and what you are building.</span>
+                  </th>
+                  <td><strong>Manual.</strong><span>Purpose can be represented with projects, labels, or notes.</span></td>
+                  <td><strong>Template-based.</strong><span>Purpose pages can be built, then maintained manually.</span></td>
+                  <td><strong>Manual.</strong><span>Values can be tracked with lists, tags, or notes.</span></td>
+                  <td><strong>Area-based.</strong><span>Areas help organize work, but purpose is not the center.</span></td>
+                  <td><strong>Schedule-based.</strong><span>Best for arranging the day, not defining purpose.</span></td>
+                  <td><strong>Work mindful.</strong><span>Encourages intentional workdays, not a full purpose layer.</span></td>
+                  <td><strong>Habit intent.</strong><span>Useful for repeat actions, not purpose planning.</span></td>
+                </tr>
+                <tr>
+                  <th scope="row" class="loom-column">
+                    <span class="comparison-topic">03 Life areas and balance</span>
+                    <strong>First-class.</strong>
+                    <span>Health, career, wealth, relationships, faith, learning, service, home, and custom areas.</span>
+                  </th>
+                  <td><strong>Projects or labels.</strong><span>Life areas can be modeled, but they are not native.</span></td>
+                  <td><strong>Databases.</strong><span>Very flexible, but balance views depend on setup.</span></td>
+                  <td><strong>Lists and tags.</strong><span>Can organize areas without a dedicated balance layer.</span></td>
+                  <td><strong>Areas.</strong><span>Good broad containers, with less goal and habit context.</span></td>
+                  <td><strong>Calendars.</strong><span>Can color-code life areas in the day plan.</span></td>
+                  <td><strong>Channels.</strong><span>Strong for work streams and planned time blocks.</span></td>
+                  <td><strong>Habit groups.</strong><span>Can group routines, but not full life areas.</span></td>
+                </tr>
+                <tr>
+                  <th scope="row" class="loom-column">
+                    <span class="comparison-topic">04 Goals tied to action</span>
+                    <strong>Connected chain.</strong>
+                    <span>Goals link back to life areas and forward into Action Plans and Little Wins.</span>
+                  </th>
+                  <td><strong>Project-driven.</strong><span>Goals usually become projects, tasks, filters, or labels.</span></td>
+                  <td><strong>Custom build.</strong><span>Powerful if you create goal databases and relations.</span></td>
+                  <td><strong>List-driven.</strong><span>Goals can become lists, habits, or recurring tasks.</span></td>
+                  <td><strong>Project-driven.</strong><span>Great next actions; goal structure is lighter.</span></td>
+                  <td><strong>Schedule-driven.</strong><span>Goals need to be translated into calendar tasks.</span></td>
+                  <td><strong>Plan-driven.</strong><span>Strong for deciding what fits into the week.</span></td>
+                  <td><strong>Habit-driven.</strong><span>Goals become recurring actions and streaks.</span></td>
+                </tr>
+                <tr>
+                  <th scope="row" class="loom-column">
+                    <span class="comparison-topic">05 Tasks and capture</span>
+                    <strong>Action Plans.</strong>
+                    <span>Tasks keep context like due dates, musts, people, places, attachments, duration, and status.</span>
+                  </th>
+                  <td><strong>Excellent.</strong><span>Fast capture, projects, due dates, filters, and labels.</span></td>
+                  <td><strong>Flexible.</strong><span>Tasks work well once databases and views are configured.</span></td>
+                  <td><strong>Strong.</strong><span>Tasks, calendar, reminders, and habits in one app.</span></td>
+                  <td><strong>Strong.</strong><span>Clean personal task capture and project organization.</span></td>
+                  <td><strong>Day-focused.</strong><span>Tasks are designed around a visual daily timeline.</span></td>
+                  <td><strong>Planning-focused.</strong><span>Pulls tasks into guided daily and weekly plans.</span></td>
+                  <td><strong>Not primary.</strong><span>Built for repeat habits more than task management.</span></td>
+                </tr>
+                <tr>
+                  <th scope="row" class="loom-column">
+                    <span class="comparison-topic">06 Habits and Little Wins</span>
+                    <strong>Meaningful repetition.</strong>
+                    <span>Small repeatable wins stay tied to goals, areas, and daily purpose.</span>
+                  </th>
+                  <td><strong>Recurring tasks.</strong><span>Useful for routines, but not a dedicated habit system.</span></td>
+                  <td><strong>Custom trackers.</strong><span>Habit databases are flexible but manually maintained.</span></td>
+                  <td><strong>Built-in habits.</strong><span>Good habit tracking beside tasks and calendar.</span></td>
+                  <td><strong>Recurring to-dos.</strong><span>Reliable routines, but not habit analytics or life context.</span></td>
+                  <td><strong>Recurring tasks.</strong><span>Works for scheduled routines in the daily timeline.</span></td>
+                  <td><strong>Ritual planning.</strong><span>Can plan routines into workdays and reviews.</span></td>
+                  <td><strong>Specialized.</strong><span>Excellent focused streak tracking, with a narrower scope.</span></td>
+                </tr>
+                <tr>
+                  <th scope="row" class="loom-column">
+                    <span class="comparison-topic">07 Reflection and review</span>
+                    <strong>Closes the loop.</strong>
+                    <span>Review whether actions still match what matters across your life.</span>
+                  </th>
+                  <td><strong>Activity view.</strong><span>Great completed-task history, less personal reflection.</span></td>
+                  <td><strong>Manual journal.</strong><span>Reflection can be built with pages and templates.</span></td>
+                  <td><strong>Stats and history.</strong><span>Helpful completion data, lighter meaning layer.</span></td>
+                  <td><strong>Logbook.</strong><span>Completed items are visible for review.</span></td>
+                  <td><strong>Schedule review.</strong><span>Best for seeing what was planned and completed.</span></td>
+                  <td><strong>Strong reviews.</strong><span>Guided planning and work review are a core strength.</span></td>
+                  <td><strong>Streak stats.</strong><span>Clear habit completion, less whole-life reflection.</span></td>
+                </tr>
+                <tr>
+                  <th scope="row" class="loom-column">
+                    <span class="comparison-topic">08 Planning intelligence</span>
+                    <strong>LoomAI in context.</strong>
+                    <span>Helps with priorities, rewrites, Little Wins, stuck areas, and next steps.</span>
+                  </th>
+                  <td><strong>Task assistance.</strong><span>AI support is task-oriented where available.</span></td>
+                  <td><strong>Workspace AI.</strong><span>Strong for writing, summarizing, and database work.</span></td>
+                  <td><strong>Productivity tools.</strong><span>The core experience centers on tasks, calendar, and habits.</span></td>
+                  <td><strong>Manual planning.</strong><span>Designed around clear personal task management.</span></td>
+                  <td><strong>Schedule help.</strong><span>Centered on arranging tasks into a daily plan.</span></td>
+                  <td><strong>Guided planning.</strong><span>Strong planning workflow; life-system AI is not the core promise.</span></td>
+                  <td><strong>Habit focus.</strong><span>Designed for tracking repeat actions.</span></td>
+                </tr>
+                <tr>
+                  <th scope="row" class="loom-column">
+                    <span class="comparison-topic">09 Health-backed goals</span>
+                    <strong>Optional signals.</strong>
+                    <span>Supports health-based goals and Little Wins like weight, walking, workouts, and sleep.</span>
+                  </th>
+                  <td><strong>Not core.</strong><span>Health goals usually become tasks or recurring reminders.</span></td>
+                  <td><strong>Manual.</strong><span>Health dashboards can be built with databases.</span></td>
+                  <td><strong>Manual.</strong><span>Health routines can be tracked as habits or tasks.</span></td>
+                  <td><strong>Manual.</strong><span>Health routines can be represented as repeating tasks.</span></td>
+                  <td><strong>Manual.</strong><span>Health actions can be scheduled into the day.</span></td>
+                  <td><strong>Manual.</strong><span>Health actions can be planned as part of the week.</span></td>
+                  <td><strong>Health-aware habits.</strong><span>Strong Apple Health habit support, but habit-first.</span></td>
+                </tr>
+                <tr>
+                  <th scope="row" class="loom-column">
+                    <span class="comparison-topic">10 Premium access value</span>
+                    <strong>Lifetime launch deal.</strong>
+                    <span>Founding Members get lifetime access to the connected Loom system during launch.</span>
+                  </th>
+                  <td><strong>Subscription.</strong><span>Free and paid plans for task management.</span></td>
+                  <td><strong>Workspace plans.</strong><span>Free and paid plans, with workspace pricing considerations.</span></td>
+                  <td><strong>Subscription.</strong><span>Free app with Premium subscription options.</span></td>
+                  <td><strong>One-time apps.</strong><span>Separate purchases across Apple platforms.</span></td>
+                  <td><strong>Paid options.</strong><span>Free app with Pro subscription or lifetime options.</span></td>
+                  <td><strong>Subscription.</strong><span>Premium subscription for daily planning.</span></td>
+                  <td><strong>Paid app.</strong><span>One-time App Store purchase for habit tracking.</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
 
         <details class="comparison-sources-details">
