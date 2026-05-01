@@ -1322,6 +1322,27 @@
       color: var(--muted);
     }
 
+    .research-pill-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 16px;
+    }
+
+    .research-pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 34px;
+      padding: 7px 11px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--ink);
+      background: rgba(255, 255, 255, 0.74);
+      font-size: 0.84rem;
+      font-weight: 760;
+      line-height: 1.2;
+    }
+
     .research-sources li {
       padding-left: 2px;
     }
@@ -2427,7 +2448,10 @@
           <article class="card accent-top">
             <h3>Why Loom exists</h3>
             <p>
-              I built Loom because I wanted the best way to connect long-term direction with daily action. Not another app pretending to solve everything, but a calm command center for life.
+              As a DC-based business leader with huge responsibilities and ambition, I could never fully catch up with my never-ending to-do list. I was moving fast, but still felt the tension of trying to grow, lead, stay healthy, maintain relationships, and keep the important parts of life from slipping.
+            </p>
+            <p>
+              The books and systems around productivity, habits, goals, and purpose have great ideas. What I could not find was an app that made those ideas simple enough to use every day in the chaos of real life, so I built Loom to turn that wisdom into a practical structure you can actually repeat.
             </p>
             <p><strong>End Stress. Live Fulfilled.</strong></p>
           </article>
@@ -2446,11 +2470,13 @@
               </li>
               <li>David Allen - <cite>Getting Things Done: The Art of Stress-Free Productivity</cite>.</li>
               <li>Stephen R. Covey - <cite>The 7 Habits of Highly Effective People</cite>.</li>
-              <li>Habit formation research.</li>
-              <li>Goal-setting theory and research.</li>
-              <li>Journaling and reflection practices.</li>
-              <li>AI-assisted planning workflows.</li>
             </ul>
+            <div class="research-pill-row" aria-label="Additional research themes">
+              <span class="research-pill">Habit formation research</span>
+              <span class="research-pill">Goal-setting theory</span>
+              <span class="research-pill">Journaling and reflection</span>
+              <span class="research-pill">AI-assisted planning</span>
+            </div>
             <p class="research-disclaimer">
               Loom is not affiliated with, sponsored by, or endorsed by Tony Robbins, David Allen, Stephen Covey, or their organizations.
             </p>
