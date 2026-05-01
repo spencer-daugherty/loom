@@ -976,39 +976,25 @@
     .phone-shell {
       position: relative;
       width: min(100%, 380px);
-      aspect-ratio: 1287 / 2778;
+      aspect-ratio: 1320 / 2868;
       isolation: isolate;
     }
 
     .phone-screen {
       position: absolute;
-      inset: 8.9% 8.45% 8.1%;
+      inset: 0;
       z-index: 1;
       overflow: hidden;
-      border-radius: 12.8% / 6%;
-      clip-path: inset(0 round 12.8% / 6%);
+      border-radius: 34px;
+      border: 1px solid rgba(17, 17, 17, 0.1);
+      box-shadow: 0 18px 52px rgba(17, 17, 17, 0.16);
+      clip-path: inset(0 round 34px);
       background-color: #f0f1f6;
       background-image: var(--active-screenshot, url("assets/landing/loom-home.png"));
       background-position: top center;
       background-size: cover;
       background-repeat: no-repeat;
       transform: translateZ(0);
-    }
-
-    .phone-frame {
-      position: absolute;
-      inset: 0;
-      z-index: 10000;
-      width: 100%;
-      height: 100%;
-      display: block;
-      object-fit: contain;
-      pointer-events: none;
-      transform: translateZ(0);
-    }
-
-    .phone-frame-top {
-      z-index: 20000;
     }
 
     .phone-island {
@@ -2211,14 +2197,12 @@
 
         <div class="screenshots">
           <div class="phone-stage" data-carousel>
-            <div class="phone-shell" aria-label="Loom app screenshots in an iPhone 17 Pro frame">
+            <div class="phone-shell" aria-label="Loom app screenshots">
               <div
                 class="phone-screen"
                 data-carousel-screen
                 role="img"
                 aria-label="Loom home screen showing Purpose, Fulfillment, Goals, and Capture"></div>
-              <img class="phone-frame" src="assets/landing/iphone-17-pro-frame-front.png" alt="" width="1287" height="2778" loading="lazy" decoding="async" aria-hidden="true">
-              <img class="phone-frame phone-frame-top" src="assets/landing/iphone-17-pro-frame-front.png" alt="" width="1287" height="2778" loading="lazy" decoding="async" aria-hidden="true">
             </div>
             <div class="carousel-controls" aria-label="Screenshot carousel controls">
               <button class="carousel-arrow" type="button" data-carousel-prev aria-label="Previous screenshot">&larr;</button>
