@@ -1,0 +1,4 @@
+# Firebase configuration files contain project identifiers and API keys.
+# Keep real copies local and use loom/GoogleService-Info.plist.example as the template.
+GoogleService-Info.plist
+loom/GoogleService-Info.plist
