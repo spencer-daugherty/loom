@@ -1885,17 +1885,26 @@
       }
 
       .nav-cta {
-        min-height: 36px;
-        padding: 0 12px;
-        font-size: 0.82rem;
+        position: fixed;
+        right: 14px;
+        bottom: calc(12px + env(safe-area-inset-bottom));
+        left: 14px;
+        z-index: 1002;
+        min-height: 52px;
+        padding: 0 16px;
+        font-size: 0.92rem;
       }
 
       .nav-cta-full {
-        display: none;
+        display: inline;
       }
 
       .nav-cta-short {
-        display: inline;
+        display: none;
+      }
+
+      body {
+        padding-bottom: calc(78px + env(safe-area-inset-bottom));
       }
 
       .hero-content {
@@ -2152,8 +2161,8 @@
       }
 
       .nav-cta {
-        padding: 0 8px;
-        font-size: 0.78rem;
+        padding: 0 16px;
+        font-size: 0.92rem;
       }
 
       .phone-shell {
