@@ -28,6 +28,7 @@
 # GitHub Pages website served from docs/.
 !docs/
 !docs/**
+!docs/.nojekyll
 
 # Do not publish internal docs/data exports.
 docs/*.md

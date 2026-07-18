@@ -9,6 +9,7 @@ zero_sha=0000000000000000000000000000000000000000
 while read -r local_ref local_sha remote_ref remote_sha; do
   if [ "$local_sha" != "$zero_sha" ]; then
     set -- "$@" "$local_sha"
+    "$repo_root/.githooks/verify-public-site" --commit "$local_sha"
   fi
 done
 

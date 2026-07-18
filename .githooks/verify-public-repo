@@ -51,7 +51,8 @@ is_allowed_public_path() {
   case "$1" in
     .gitignore|.gitattributes|CNAME|index.html|privacy.html|robots.txt|\
     sitemap.xml|splash.html|support.html|\
-    .githooks/pre-commit|.githooks/pre-push|.githooks/verify-public-repo)
+    .githooks/pre-commit|.githooks/pre-push|.githooks/verify-public-repo|\
+    .githooks/verify-public-site)
       return 0
       ;;
     alternatives/*|assets/*|best/*)

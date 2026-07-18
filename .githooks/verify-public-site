@@ -1,0 +1,74 @@
+#!/bin/sh
+
+set -eu
+
+mode="${1:---commit}"
+ref="${2:-HEAD}"
+
+case "$mode" in
+  --index)
+    require_path() {
+      git cat-file -e ":$1" 2>/dev/null
+    }
+    read_path() {
+      git show ":$1"
+    }
+    list_paths() {
+      git ls-files "$1"
+    }
+    label="staged index"
+    ;;
+  --commit)
+    require_path() {
+      git cat-file -e "$ref:$1" 2>/dev/null
+    }
+    read_path() {
+      git show "$ref:$1"
+    }
+    list_paths() {
+      git ls-tree -r --name-only "$ref" -- "$1"
+    }
+    label="$ref"
+    ;;
+  *)
+    echo "Unknown website verification mode: $mode" >&2
+    exit 2
+    ;;
+esac
+
+required_paths='docs/index.html
+docs/CNAME
+docs/.nojekyll
+docs/robots.txt
+docs/sitemap.xml
+docs/assets/landing/loom-icon.jpeg
+docs/assets/landing/loom-hero-phone.png
+docs/assets/landing/loom-home.png'
+
+failed=0
+printf '%s\n' "$required_paths" | while IFS= read -r path; do
+  [ -n "$path" ] || continue
+  if ! require_path "$path"; then
+    echo "Missing required public website file: $path" >&2
+    exit 1
+  fi
+done || failed=1
+
+cname=$(read_path docs/CNAME 2>/dev/null || true)
+if [ "$cname" != "loomlife.us" ]; then
+  echo "docs/CNAME must contain exactly loomlife.us" >&2
+  failed=1
+fi
+
+asset_count=$(list_paths docs/assets/landing | awk 'NF { count++ } END { print count + 0 }')
+if [ "$asset_count" -lt 10 ]; then
+  echo "Expected at least 10 public Loom website assets; found $asset_count" >&2
+  failed=1
+fi
+
+if [ "$failed" -ne 0 ]; then
+  echo "Public website contract failed ($label)." >&2
+  exit 1
+fi
+
+echo "Public website contract passed ($label, $asset_count assets)."
