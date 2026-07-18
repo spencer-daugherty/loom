@@ -1,0 +1,56 @@
+# This repository is published to GitHub for the website only.
+# The iOS/Xcode app project is intentionally local-only on this machine.
+
+*
+
+# Git metadata/configuration for the website repo.
+!.gitignore
+!.githooks/
+!.githooks/**
+
+# Root website files.
+!CNAME
+!index.html
+!privacy.html
+!robots.txt
+!sitemap.xml
+!splash.html
+!support.html
+
+# Root website hubs/assets.
+!alternatives/
+!alternatives/**
+!assets/
+!assets/**
+!best/
+!best/**
+
+# GitHub Pages website served from docs/.
+!docs/
+!docs/**
+
+# Do not publish internal docs/data exports.
+docs/*.md
+docs/*.rtf
+docs/*.xlsx
+.DS_Store
+**/.DS_Store
+
+# Explicit local-only app/Xcode protections.
+*.swift
+*.xcodeproj/
+*.xcworkspace/
+*.xcuserdatad/
+*.xcassets/
+*.storyboard
+*.entitlements
+*.plist
+*.tmp
+build/
+video_output/
+loom/
+loomTests/
+loomUITests/
+ShareIntoLoomExtension/
+GoogleService-Info.plist
+**/GoogleService-Info.plist

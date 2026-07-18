@@ -1,0 +1,17 @@
+#!/bin/sh
+
+set -eu
+repo_root=$(git rev-parse --show-toplevel)
+"$repo_root/.githooks/verify-public-repo" --tracked
+
+set --
+zero_sha=0000000000000000000000000000000000000000
+while read -r local_ref local_sha remote_ref remote_sha; do
+  if [ "$local_sha" != "$zero_sha" ]; then
+    set -- "$@" "$local_sha"
+  fi
+done
+
+if [ "$#" -gt 0 ]; then
+  "$repo_root/.githooks/verify-public-repo" --history "$@"
+fi

@@ -1,0 +1,120 @@
+#!/bin/sh
+
+set -eu
+
+mode="${1:---tracked}"
+if [ "$#" -gt 0 ]; then
+  shift
+fi
+repo_root=$(git rev-parse --show-toplevel)
+check_dir=$(mktemp -d "${TMPDIR:-/tmp}/loom-public-repo-check.XXXXXX")
+paths_file="$check_dir/paths"
+history_objects_file="$check_dir/history-objects"
+trap 'rm -rf "$check_dir"' EXIT HUP INT TERM
+
+case "$mode" in
+  --staged)
+    git diff --cached --name-only --diff-filter=ACMR > "$paths_file"
+    ;;
+  --tracked)
+    git ls-files > "$paths_file"
+    ;;
+  --history)
+    if [ "$#" -eq 0 ]; then
+      set -- HEAD
+    fi
+    git rev-list --objects "$@" |
+      git cat-file --batch-check='%(objectname) %(objecttype) %(rest)' > "$history_objects_file"
+    awk '$2 == "blob" && NF > 2 { $1 = ""; $2 = ""; sub(/^  */, ""); print }' "$history_objects_file" |
+      sort -u > "$paths_file"
+    ;;
+  *)
+    echo "Unknown verification mode: $mode" >&2
+    exit 2
+    ;;
+esac
+
+is_forbidden_path() {
+  case "$1" in
+    *.swift|*.m|*.mm|*.h|*.c|*.cc|*.cpp|*.cxx|*.hpp|*.metal|\
+    *.plist|*.entitlements|*.xcconfig|*.p8|*.p12|*.pem|*.key|\
+    *.mobileprovision|*.xcodeproj/*|*.xcworkspace/*|\
+    .env|.env.*|*/.env|*/.env.*|*/GoogleService-Info.plist|GoogleService-Info.plist|\
+    Package.swift|*/Package.swift|Podfile|*/Podfile|*/.DS_Store|.DS_Store)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+is_allowed_public_path() {
+  case "$1" in
+    .gitignore|.gitattributes|CNAME|index.html|privacy.html|robots.txt|\
+    sitemap.xml|splash.html|support.html|\
+    .githooks/pre-commit|.githooks/pre-push|.githooks/verify-public-repo)
+      return 0
+      ;;
+    alternatives/*|assets/*|best/*)
+      return 0
+      ;;
+    docs/*)
+      case "$1" in
+        *.md|*.rtf|*.xlsx)
+          return 1
+          ;;
+      esac
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+failed=0
+while IFS= read -r path; do
+  [ -n "$path" ] || continue
+  if is_forbidden_path "$path" || ! is_allowed_public_path "$path"; then
+    echo "Blocked non-public file: $path" >&2
+    failed=1
+  fi
+done < "$paths_file"
+
+secret_pattern='-----BEGIN ([A-Z0-9 ]+ )?PRIVATE KEY-----|github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}|sk_live_[0-9A-Za-z]{16,}|xox[baprs]-[0-9A-Za-z-]{10,}'
+secret_files="$check_dir/secret-files"
+
+case "$mode" in
+  --staged)
+    while IFS= read -r path; do
+      [ -n "$path" ] || continue
+      if git show ":$path" 2>/dev/null | grep -E -q -- "$secret_pattern"; then
+        printf '%s\n' "$path" >> "$secret_files"
+      fi
+    done < "$paths_file"
+    ;;
+  --tracked)
+    while IFS= read -r path; do
+      [ -n "$path" ] || continue
+      if git show "HEAD:$path" 2>/dev/null | grep -E -q -- "$secret_pattern"; then
+        printf '%s\n' "$path" >> "$secret_files"
+      fi
+    done < "$paths_file"
+    ;;
+  --history)
+    # Historical native-source paths are blocked above. Credential signatures
+    # are scanned in staged and current tracked content to keep pushes fast.
+    : > "$secret_files"
+    ;;
+esac
+
+if [ -s "$secret_files" ]; then
+  while IFS= read -r path; do
+    echo "Blocked possible credential in: $path" >&2
+  done < "$secret_files"
+  failed=1
+fi
+
+if [ "$failed" -ne 0 ]; then
+  echo "Public repository safety check failed." >&2
+  exit 1
+fi
+
+echo "Public repository safety check passed ($mode)."

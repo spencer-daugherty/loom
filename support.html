@@ -1,0 +1,857 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Loom Support | Help for Loom Life Manager</title>
+  <meta name="description" content="Get Loom support for onboarding, sign-in, subscriptions, privacy choices, app feedback, and troubleshooting the iPhone life manager.">
+  <meta name="robots" content="index, follow, max-image-preview:large">
+  <link rel="canonical" href="https://loomlife.us/support.html">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Loom: Life Manager">
+  <meta property="og:title" content="Loom Support | Help for Loom Life Manager">
+  <meta property="og:description" content="Get help with Loom onboarding, Purpose, Fulfillment Areas, subscriptions, account access, privacy choices, and in-app feedback.">
+  <meta property="og:url" content="https://loomlife.us/support.html">
+  <meta property="og:image" content="https://loomlife.us/assets/landing/loom-share-preview-20260511.jpg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:type" content="image/jpeg">
+  <meta property="og:image:alt" content="Loom Life Manager preview with iPhone app and connected life areas">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Loom Support | Help for Loom Life Manager">
+  <meta name="twitter:description" content="Get help with Loom onboarding, Purpose, Fulfillment Areas, subscriptions, account access, privacy choices, and in-app feedback.">
+  <meta name="twitter:image" content="https://loomlife.us/assets/landing/loom-share-preview-20260511.jpg">
+  <meta name="twitter:image:alt" content="Loom Life Manager preview with iPhone app and connected life areas">
+  <link rel="icon" href="assets/landing/loom-icon.jpeg" type="image/jpeg">
+  <link rel="apple-touch-icon" href="assets/landing/loom-icon.jpeg">
+  <style>
+    :root {
+      --bg: #f5f3ef;
+      --surface: rgba(255, 255, 255, 0.78);
+      --surface-strong: rgba(255, 255, 255, 0.94);
+      --ink: #111111;
+      --muted: #5d6470;
+      --line: rgba(17, 17, 17, 0.08);
+      --shadow: 0 24px 80px rgba(17, 17, 17, 0.08);
+      --blue: #2f6bff;
+      --indigo: #5a5cff;
+      --green: #2ea76d;
+      --purple: #8754ff;
+      --red: #df4a66;
+      --orange: #ff8a3d;
+      --radius-xl: 32px;
+      --radius-lg: 24px;
+      --radius-md: 18px;
+      --max: 1120px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 10% 10%, rgba(47, 107, 255, 0.16), transparent 26%),
+        radial-gradient(circle at 88% 12%, rgba(223, 74, 102, 0.12), transparent 24%),
+        radial-gradient(circle at 78% 78%, rgba(255, 138, 61, 0.14), transparent 28%),
+        linear-gradient(180deg, #fbfaf7 0%, var(--bg) 100%);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", sans-serif;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+
+    a {
+      color: inherit;
+    }
+
+    img {
+      max-width: 100%;
+      display: block;
+    }
+
+    .shell {
+      width: min(calc(100% - 28px), var(--max));
+      margin: 0 auto;
+      padding: 20px 0 56px;
+    }
+
+    .hero,
+    .section {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-xl);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(18px);
+    }
+
+    .hero {
+      padding: 28px;
+    }
+
+    .hero::before,
+    .section::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.36), transparent 42%);
+    }
+
+    .hero-grid {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 22px;
+      align-items: end;
+    }
+
+    .brand-mark {
+      width: min(280px, 60vw);
+      filter: drop-shadow(0 10px 30px rgba(17, 17, 17, 0.08));
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 14px;
+      border-radius: 999px;
+      background: rgba(17, 17, 17, 0.04);
+      color: var(--muted);
+      font-size: 0.8rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow::before {
+      content: "";
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--blue), var(--orange));
+      box-shadow:
+        14px 0 0 var(--indigo),
+        28px 0 0 var(--green),
+        42px 0 0 var(--purple),
+        56px 0 0 var(--red);
+      margin-right: 62px;
+    }
+
+    h1,
+    h2,
+    h3 {
+      margin: 0;
+      letter-spacing: -0.04em;
+      line-height: 1.02;
+    }
+
+    h1 {
+      max-width: 10ch;
+      margin-top: 22px;
+      font-size: clamp(3rem, 7vw, 5.6rem);
+      font-weight: 800;
+    }
+
+    h2 {
+      font-size: clamp(1.9rem, 4vw, 2.8rem);
+      font-weight: 750;
+    }
+
+    h3 {
+      font-size: 1.22rem;
+      font-weight: 700;
+    }
+
+    .hero-copy,
+    .section-copy,
+    .card p,
+    .faq-copy,
+    .fine-print {
+      color: var(--muted);
+    }
+
+    .hero-copy {
+      max-width: 63ch;
+      margin: 16px 0 0;
+      font-size: 1.05rem;
+    }
+
+    .hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 24px;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      min-height: 50px;
+      padding: 0 18px;
+      border: 1px solid transparent;
+      border-radius: 999px;
+      text-decoration: none;
+      font-weight: 700;
+      transition: transform 140ms ease, border-color 140ms ease, background-color 140ms ease;
+    }
+
+    .button:hover {
+      transform: translateY(-1px);
+    }
+
+    .button.primary {
+      color: #fff;
+      background: linear-gradient(135deg, var(--blue), var(--purple), var(--red));
+      box-shadow: 0 14px 34px rgba(90, 92, 255, 0.26);
+    }
+
+    .button.secondary {
+      border-color: var(--line);
+      background: rgba(255, 255, 255, 0.72);
+    }
+
+    .hero-visual {
+      display: grid;
+      gap: 14px;
+      justify-items: end;
+    }
+
+    .visual-card {
+      width: min(100%, 360px);
+      padding: 18px;
+      border-radius: 28px;
+      border: 1px solid rgba(17, 17, 17, 0.06);
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 248, 248, 0.84));
+      box-shadow: 0 18px 50px rgba(17, 17, 17, 0.08);
+    }
+
+    .visual-label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      margin-bottom: 18px;
+      font-size: 0.92rem;
+      font-weight: 700;
+    }
+
+    .visual-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 10px;
+      border-radius: 999px;
+      background: rgba(17, 17, 17, 0.04);
+      color: var(--muted);
+      font-size: 0.76rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .radar {
+      aspect-ratio: 1;
+      width: min(100%, 220px);
+      margin: 0 auto;
+      border-radius: 50%;
+      position: relative;
+      background:
+        radial-gradient(circle at center, rgba(255, 255, 255, 0.92) 0 18%, transparent 18.5%),
+        radial-gradient(circle at center, rgba(17, 17, 17, 0.05) 0 43%, transparent 43.6%),
+        radial-gradient(circle at center, rgba(17, 17, 17, 0.05) 0 67%, transparent 67.6%),
+        radial-gradient(circle at center, rgba(17, 17, 17, 0.05) 0 92%, transparent 92.6%);
+    }
+
+    .radar::before {
+      content: "";
+      position: absolute;
+      inset: 20%;
+      clip-path: polygon(50% 0%, 87% 24%, 87% 76%, 50% 100%, 13% 76%, 13% 24%);
+      background: conic-gradient(from -90deg, var(--blue), var(--indigo), var(--green), var(--purple), var(--red), var(--orange), var(--blue));
+      opacity: 0.9;
+      filter: saturate(1.08);
+    }
+
+    .radar::after {
+      content: "";
+      position: absolute;
+      inset: 33%;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.88);
+      box-shadow: inset 0 0 0 1px rgba(17, 17, 17, 0.06);
+    }
+
+    .strands {
+      display: grid;
+      gap: 12px;
+    }
+
+    .strand {
+      height: 16px;
+      border-radius: 999px;
+      opacity: 0.96;
+    }
+
+    .strand.s1 { width: 88%; background: linear-gradient(90deg, rgba(47, 107, 255, 0.18), var(--blue)); }
+    .strand.s2 { width: 74%; background: linear-gradient(90deg, rgba(90, 92, 255, 0.18), var(--indigo)); }
+    .strand.s3 { width: 92%; background: linear-gradient(90deg, rgba(46, 167, 109, 0.18), var(--green)); }
+    .strand.s4 { width: 68%; background: linear-gradient(90deg, rgba(135, 84, 255, 0.18), var(--purple)); }
+    .strand.s5 { width: 82%; background: linear-gradient(90deg, rgba(223, 74, 102, 0.18), var(--red)); }
+    .strand.s6 { width: 77%; background: linear-gradient(90deg, rgba(255, 138, 61, 0.18), var(--orange)); }
+
+    .section {
+      margin-top: 22px;
+      padding: 24px;
+    }
+
+    .section-head {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: end;
+      margin-bottom: 18px;
+    }
+
+    .section-copy {
+      margin: 8px 0 0;
+      max-width: 60ch;
+    }
+
+    .grid {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      gap: 16px;
+    }
+
+    .grid.three {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .grid.two {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .card,
+    .contact-box,
+    details {
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      background: var(--surface-strong);
+      box-shadow: 0 12px 34px rgba(17, 17, 17, 0.04);
+    }
+
+    .card,
+    .contact-box {
+      padding: 20px;
+    }
+
+    .card-icon {
+      width: 44px;
+      height: 44px;
+      display: inline-grid;
+      place-items: center;
+      margin-bottom: 14px;
+      border-radius: 14px;
+      background: rgba(17, 17, 17, 0.04);
+    }
+
+    .card-icon svg {
+      width: 22px;
+      height: 22px;
+    }
+
+    .keyline {
+      margin: 6px 0 10px;
+      font-size: 0.94rem;
+      color: var(--muted);
+    }
+
+    ul {
+      margin: 10px 0 0;
+      padding-left: 18px;
+      color: var(--muted);
+    }
+
+    code {
+      padding: 0.2em 0.45em;
+      border-radius: 8px;
+      background: rgba(17, 17, 17, 0.06);
+      font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+      font-size: 0.92em;
+    }
+
+    details {
+      padding: 16px 18px;
+    }
+
+    details + details {
+      margin-top: 12px;
+    }
+
+    summary {
+      cursor: pointer;
+      list-style: none;
+      font-weight: 700;
+    }
+
+    summary::-webkit-details-marker {
+      display: none;
+    }
+
+    summary::after {
+      content: "+";
+      float: right;
+      color: var(--blue);
+      font-size: 1.2rem;
+      line-height: 1;
+    }
+
+    details[open] summary::after {
+      content: "−";
+    }
+
+    .faq-copy {
+      margin-top: 12px;
+    }
+
+    .contact-panel {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      gap: 16px;
+      grid-template-columns: 1.1fr 0.9fr;
+    }
+
+    .contact-box {
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(245, 243, 239, 0.94)),
+        linear-gradient(135deg, rgba(47, 107, 255, 0.08), rgba(223, 74, 102, 0.08));
+    }
+
+    .contact-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      border-radius: 999px;
+      background: rgba(17, 17, 17, 0.05);
+      font-size: 0.76rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .contact-link {
+      display: inline-block;
+      margin-top: 10px;
+      font-size: 1.08rem;
+      font-weight: 700;
+      text-decoration: none;
+    }
+
+    .contact-link.email {
+      color: var(--blue);
+    }
+
+    .footer {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      margin-top: 20px;
+      padding: 0 4px;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    .footer-logo {
+      width: 94px;
+      opacity: 0.72;
+    }
+
+    @media (max-width: 920px) {
+      .hero-grid,
+      .grid.three,
+      .grid.two,
+      .contact-panel {
+        grid-template-columns: 1fr;
+      }
+
+      .hero-visual {
+        justify-items: stretch;
+      }
+
+      h1 {
+        max-width: none;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .shell {
+        width: min(calc(100% - 18px), var(--max));
+        padding-top: 12px;
+        padding-bottom: 34px;
+      }
+
+      .hero,
+      .section {
+        padding: 20px;
+      }
+
+      .section-head {
+        display: block;
+      }
+
+      .hero-actions {
+        flex-direction: column;
+      }
+
+      .button {
+        width: 100%;
+      }
+
+      .eyebrow {
+        font-size: 0.74rem;
+      }
+    }
+  
+.site-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  margin: 0 0 16px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.site-links a {
+  color: var(--ink);
+  text-decoration: none;
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+</style>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-XTL8BKQYPW"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-XTL8BKQYPW');
+</script>
+  <script type="application/ld+json">{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebPage",
+      "@id": "https://loomlife.us/support.html#webpage",
+      "url": "https://loomlife.us/support.html",
+      "name": "Loom Support | Help for Loom Life Manager",
+      "description": "Get Loom support for onboarding, sign-in, subscriptions, privacy choices, app feedback, and troubleshooting the iPhone life manager.",
+      "isPartOf": {
+        "@id": "https://loomlife.us/#website"
+      }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "@id": "https://loomlife.us/support.html#breadcrumb",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Home",
+          "item": "https://loomlife.us/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Support",
+          "item": "https://loomlife.us/support.html"
+        }
+      ]
+    },
+    {
+      "@type": "MobileApplication",
+      "@id": "https://loomlife.us/#app",
+      "name": "Loom: Life Manager",
+      "operatingSystem": "iOS",
+      "applicationCategory": "LifestyleApplication",
+      "url": "https://loomlife.us/",
+      "downloadUrl": "https://apps.apple.com/us/app/loom-life-manager/id6759817760",
+      "image": "https://loomlife.us/assets/landing/loom-icon.jpeg",
+      "description": "Loom connects purpose, goals, tasks, habits, capture, reflection, health signals, and AI-assisted planning on iPhone."
+    }
+  ]
+}</script>
+</head>
+<body>
+  <div class="shell"><nav class="site-links" aria-label="Site navigation"><a href="index.html">Home</a><a href="best/">Best Apps</a><a href="alternatives/">Alternatives</a><a href="privacy.html">Privacy</a><a href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&ct=loom_website&mt=8&utm_source=google&utm_medium=organic&utm_campaign=support&utm_content=top-nav" data-app-store-cta data-page-type="support" data-target-keyword="Loom support" data-competitor="" data-cta-position="top-nav">App Store</a></nav>
+<section class="hero">
+  <div class="hero-grid">
+    <div>
+      <div class="eyebrow">Loom Support</div>
+      <h1>Loom Support</h1>
+      <p class="hero-copy">Get help with Loom onboarding, sign-in, subscriptions, privacy choices, app feedback, and troubleshooting the iPhone life manager.</p>
+      <div class="hero-actions"><a class="button primary" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&ct=loom_website&mt=8&utm_source=google&utm_medium=organic&utm_campaign=support&utm_content=hero" data-app-store-cta data-page-type="support" data-target-keyword="Loom support" data-competitor="" data-cta-position="hero">Download Loom on the App Store</a><a class="button secondary" href="#get-help">Get support</a></div>
+    </div>
+    <div class="hero-visual"><div class="visual-card"><div class="visual-label"><span>Loom help paths</span><span class="visual-pill">iPhone</span></div><p class="fine-print">Use in-app feedback first for product issues, or email if you cannot access Loom.</p></div></div>
+  </div>
+</section>
+
+    <section class="section" id="get-help">
+      <div class="section-head">
+        <div>
+          <h2>Get Help</h2>
+          <p class="section-copy">Use the same support path the app points users to, then fall back to email if you cannot open Loom.</p>
+        </div>
+      </div>
+      <div class="grid three">
+        <article class="card">
+          <div class="card-icon" style="color: var(--blue);">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 15a3 3 0 0 1-3 3H8l-5 3V6a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3z"/>
+            </svg>
+          </div>
+          <h3>In-App Feedback</h3>
+          <p class="keyline">Primary contact for app issues, bugs, account questions, and general support.</p>
+          <p>Open Loom and go to <code>Account &gt; Give App Feedback</code>. This is the main support route for issues happening inside the app.</p>
+        </article>
+
+        <article class="card">
+          <div class="card-icon" style="color: var(--red);">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="5" width="18" height="14" rx="3"/>
+              <path d="m4 7 8 6 8-6"/>
+            </svg>
+          </div>
+          <h3>Email</h3>
+          <p class="keyline">Best if you cannot access Loom or need an external contact path.</p>
+          <p>Email <a href="mailto:spencer@loomlife.us">spencer@loomlife.us</a>. Include device model, iOS version, and what happened.</p>
+        </article>
+
+        <article class="card">
+          <div class="card-icon" style="color: var(--green);">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 2v20"/>
+              <path d="M17 5H9a3 3 0 0 0 0 6h6a3 3 0 1 1 0 6H6"/>
+            </svg>
+          </div>
+          <h3>Subscription Help</h3>
+          <p class="keyline">Best for purchase, restore, and entitlement issues.</p>
+          <p>Open the Loom paywall and use <code>Restore Purchases</code> first if your subscription or lifetime access is not showing correctly.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" id="faq">
+      <div class="section-head">
+        <div>
+          <h2>Common Questions</h2>
+          <p class="section-copy">These cover the most common support requests for Loom.</p>
+        </div>
+      </div>
+
+      <details>
+        <summary>How does Loom onboarding work?</summary>
+        <div class="faq-copy">
+          Loom onboarding starts with identity and direction, then moves into life structure and execution. The app’s onboarding copy frames the flow as:
+          start with who you are, balance what matters most, turn plans into action, create daily momentum, and then use LoomAI for your next best move.
+          In practice, that means Purpose first, then Fulfillment Areas, then the planning and little-win systems Loom uses to keep momentum going.
+        </div>
+      </details>
+
+      <details>
+        <summary>How do I set up Purpose?</summary>
+        <div class="faq-copy">
+          In Loom, <code>Set Your Purpose</code> is for stable values, principles, and high-level direction, not just long-term goals.
+          The setup flow moves through <code>Set Your Purpose</code>, <code>Vision</code>, <code>Passions</code>, <code>Summary</code>, and insight cards.
+          Use Vision for the life direction you want to build over time, then add passions across Love, Vow, Thrill, and Hate. The app also expects at least two items in each passions bucket so Loom has enough signal to work with.
+        </div>
+      </details>
+
+      <details>
+        <summary>How do I set up Fulfillment Areas?</summary>
+        <div class="faq-copy">
+          Start by choosing the 3-7 areas of life you need to improve consistently. From there Loom walks through mission, identity, focus, daily little wins, resources, and passions for each area.
+          Loom uses those fulfillment areas as a stable map so tasks, goals, and little wins stay tied to long-term direction.
+          If your setup is not perfect yet, that is fine: the app explicitly notes that fulfillment areas can be revised anytime.
+        </div>
+      </details>
+
+      <details>
+        <summary>I cannot sign in.</summary>
+        <div class="faq-copy">
+          Loom supports Sign in with Apple and Google sign-in. Make sure you are using the same provider you originally used.
+          If the issue continues, update the app, verify your network connection, and then use <code>Account &gt; Give App Feedback</code> or email <a href="mailto:spencer@loomlife.us">spencer@loomlife.us</a> if you cannot get into the app.
+        </div>
+      </details>
+
+      <details>
+        <summary>My subscription or premium access is missing.</summary>
+        <div class="faq-copy">
+          Open the Loom paywall and use <code>Restore Purchases</code>. Purchases and renewals are handled by Apple through StoreKit and the App Store, so restoring purchases is the first thing to try.
+        </div>
+      </details>
+
+      <details>
+        <summary>Notifications, camera, photos, or Apple Health are not working.</summary>
+        <div class="faq-copy">
+          Loom uses optional iPhone permissions for local notifications, camera access, importing photos for attachments, saving images to Photos, and Apple Health integrations.
+          Check the relevant permission in iOS Settings, then reopen the app and try again.
+        </div>
+      </details>
+
+      <details>
+        <summary>What common fixes should I try first?</summary>
+        <div class="faq-copy">
+          Start with the basics: close and reopen Loom, update to the latest App Store version, check your network connection, and make sure you are using the same sign-in provider you used before.
+          If the issue is subscription-related, reopen the paywall and try <code>Restore Purchases</code> again.
+        </div>
+      </details>
+
+      <details>
+        <summary>How do I send feedback or report a bug?</summary>
+        <div class="faq-copy">
+          In Loom, open <code>Account &gt; Give App Feedback</code>. That is the primary contact path for app issues.
+          If you cannot access Loom, email <a href="mailto:spencer@loomlife.us">spencer@loomlife.us</a>.
+        </div>
+      </details>
+
+      <details>
+        <summary>Why do Purpose or Fulfillment suggestions feel generic?</summary>
+        <div class="faq-copy">
+          Loom’s setup flows use your personalization and onboarding context to make suggestions more specific. In Purpose setup, the app notes that suggestions are less personalized until you complete <code>Account &gt; Personalization</code>.
+          If suggestions are still weak, add more concrete setup detail before retrying.
+        </div>
+      </details>
+
+      <details id="privacy-legal">
+        <summary>Where can I find privacy and legal information?</summary>
+        <div class="faq-copy">
+          Loom’s Privacy Policy is available at
+          <a href="https://loomlife.us/privacy.html">https://loomlife.us/privacy.html</a>.
+          For privacy or legal questions, use in-app feedback, visit the privacy choices section below, or email <a href="mailto:spencer@loomlife.us">spencer@loomlife.us</a>.
+        </div>
+      </details>
+    </section>
+
+    <section class="section"><div class="section-head"><div><h2>Still deciding if Loom fits?</h2><p class="section-copy">Download Loom to try the life-management system for goals, habits, tasks, reflection, and LoomAI on iPhone.</p><div class="hero-actions"><a class="button primary" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&ct=loom_website&mt=8&utm_source=google&utm_medium=organic&utm_campaign=support&utm_content=mid" data-app-store-cta data-page-type="support" data-target-keyword="Loom support" data-competitor="" data-cta-position="mid-support">Download Loom on the App Store</a><a class="button secondary" href="privacy.html">Read privacy policy</a></div></div></div></section><section class="section" id="privacy-choices">
+      <div class="section-head">
+        <div>
+          <h2>Privacy Choices</h2>
+          <p class="section-copy">Use these paths to manage permissions, account deletion, subscription handling, and privacy-related support.</p>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Inside the app</h3>
+        <ul>
+          <li>Open <code>Account &gt; Delete Account</code> to delete your Loom account and remove local app data from this device.</li>
+          <li>Open <code>Account &gt; Give App Feedback</code> for privacy questions, bug reports, subscription questions, or account help.</li>
+          <li>Optional permissions such as Health, Reminders, Camera, Photos, and Notifications can be revoked anytime in iOS Settings.</li>
+        </ul>
+
+        <h3 style="margin-top: 22px;">Important notes</h3>
+        <ul>
+          <li>Deleting your Loom account does not cancel Apple subscriptions. Manage or cancel subscriptions in Apple Account Settings.</li>
+          <li>Health and Reminders data used by Loom stay on device and in Apple frameworks unless you separately share them elsewhere.</li>
+          <li>Link preview cards use Apple system preview services and locally cached preview data. Loom does not send your links to Loom-managed servers to create those previews.</li>
+        </ul>
+
+        <h3 style="margin-top: 22px;">Need help?</h3>
+        <p class="fine-print">
+          Email <a href="mailto:spencer@loomlife.us">spencer@loomlife.us</a> if you cannot access the app or need privacy-related follow-up.
+        </p>
+        <p class="fine-print">
+          Privacy Policy:
+          <a href="https://loomlife.us/privacy.html">https://loomlife.us/privacy.html</a>
+        </p>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <h2>Contact</h2>
+          <p class="section-copy">Use the in-app route first for product issues. Email remains available when Loom itself is unavailable.</p>
+        </div>
+      </div>
+      <div class="contact-panel">
+        <div class="contact-box">
+          <div class="contact-label">Primary support path</div>
+          <h3 style="margin-top: 14px;">Account &gt; Give App Feedback</h3>
+          <p class="fine-print">
+            Use this inside Loom for bugs, account issues, subscription questions, product feedback, and general troubleshooting.
+          </p>
+          <div class="contact-label" style="margin-top: 14px;">Fallback email</div>
+          <a class="contact-link email" href="mailto:spencer@loomlife.us">spencer@loomlife.us</a>
+          <p class="fine-print" style="margin-top: 14px; margin-bottom: 8px;">Helpful details to include:</p>
+          <ul>
+            <li>Your device model and iOS version</li>
+            <li>Your Loom app version</li>
+            <li>What you expected to happen</li>
+            <li>What actually happened instead</li>
+            <li>Any error message shown in the app</li>
+          </ul>
+        </div>
+
+        <div class="card"><h3>Get Loom</h3><p class="fine-print">Open Loom on the App Store if you want the connected system for purpose, goals, tasks, habits, and LoomAI.</p><p><a class="button primary" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&ct=loom_website&mt=8&utm_source=google&utm_medium=organic&utm_campaign=support&utm_content=bottom" data-app-store-cta data-page-type="support" data-target-keyword="Loom support" data-competitor="" data-cta-position="bottom-support">Download Loom on the App Store</a></p></div>
+
+        <div class="card">
+
+          <h3>Privacy Policy</h3>
+          <p class="fine-print">View Loom’s privacy policy here:</p>
+          <p class="fine-print">
+            <a href="https://loomlife.us/privacy.html">https://loomlife.us/privacy.html</a>
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <div>Loom Support Page · Last updated April 2026</div>
+      <img
+        class="footer-logo" width="94" height="94" decoding="async"
+        alt="Loom logo"
+        src="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAASABIAAD/4QCARXhpZgAATU0AKgAAAAgABQESAAMAAAABAAEAAAEaAAUAAAABAAAASgEbAAUAAAABAAAAUgEoAAMAAAABAAIAAIdpAAQAAAABAAAAWgAAAAAAAABIAAAAAQAAAEgAAAABAAKgAgAEAAAAAQAABACgAwAEAAAAAQAABAAAAAAA/+0AOFBob3Rvc2hvcCAzLjAAOEJJTQQEAAAAAAAAOEJJTQQlAAAAAAAQ1B2M2Y8AsgTpgAmY7PhCfv/AABEIBAAEAAMBIgACEQEDEQH/xAAfAAABBQEBAQEBAQAAAAAAAAAAAQIDBAUGBwgJCgv/xAC1EAACAQMDAgQDBQUEBAAAAX0BAgMABBEFEiExQQYTUWEHInEUMoGRoQgjQrHBFVLR8CQzYnKCCQoWFxgZGiUmJygpKjQ1Njc4OTpERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4eLj5OXm5+jp6vHy8/T19vf4+fr/xAAfAQADAQEBAQEBAQEBAAAAAAAAAQIDBAUGBwgJCgv/xAC1EQACAQIEBAMEBwUEBAABAncAAQIDEQQFITEGEkFRB2FxEyIygQgUQpGhscEJIzNS8BVictEKFiQ04SXxFxgZGiYnKCkqNTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqCg4SFhoeIiYqSk5SVlpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV1tfY2dri4+Tl5ufo6ery8/T19vf4+fr/2wBDAAEBAQEBAQEBAQECAQEBAgMCAgICAwQDAwMDAwQEBAQEBAQEBAQEBAQEBAQFBQUFBQUGBgYGBgcHBwcHBwcHBwf/2wBDAQEBAQICAgMCAgMHBQQFBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwf/3QAEAED/2gAMAwEAAhEDEQA/AP7+KKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooA//Z">
+    </footer>
+  </div>
+<script>
+  document.addEventListener('click', function(event) {
+    var link = event.target.closest('[data-app-store-cta]');
+    if (!link || typeof gtag !== 'function') return;
+    gtag('event', 'app_store_click', {
+      page_type: link.dataset.pageType || '',
+      target_keyword: link.dataset.targetKeyword || '',
+      competitor: link.dataset.competitor || '',
+      cta_position: link.dataset.ctaPosition || '',
+      destination: 'app_store'
+    });
+  });
+</script>
+
+</body>
+</html>
