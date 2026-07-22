@@ -912,9 +912,16 @@
     .ecosystem-little-card::after {
       content: "";
       position: absolute;
-      inset: 8px;
+      top: 50%;
+      left: 50%;
+      z-index: 5;
+      width: 15px;
+      height: 15px;
+      box-sizing: border-box;
       border: 1.3px solid rgba(255, 255, 255, 0.86);
-      clip-path: polygon(50% 0, 93% 31%, 76% 88%, 24% 88%, 7% 31%);
+      border-radius: 1px;
+      transform: translate(-50%, -50%) rotate(45deg);
+      pointer-events: none;
     }
 
     .plans {
@@ -1241,28 +1248,32 @@
 
     .little-win-mini:nth-child(1) {
       left: 0;
-      z-index: 1;
       background: var(--purple);
     }
 
     .little-win-mini:nth-child(2) {
       left: 24px;
-      z-index: 2;
       background: var(--green);
     }
 
     .little-win-mini:nth-child(3) {
       left: 48px;
-      z-index: 3;
       background: var(--blue);
     }
 
     .little-win-mini::after {
       content: "";
       position: absolute;
-      inset: 9px;
+      top: 50%;
+      left: 50%;
+      z-index: 5;
+      width: 15px;
+      height: 15px;
+      box-sizing: border-box;
       border: 1.4px solid rgba(255, 255, 255, 0.88);
-      clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+      border-radius: 1px;
+      transform: translate(-50%, -50%) rotate(45deg);
+      pointer-events: none;
     }
 
     .mini-badge {
@@ -1332,7 +1343,7 @@
 
     .integration-art.apple-intelligence img {
       width: auto;
-      height: 59px;
+      height: 30px;
       max-width: 100%;
       border-radius: 0;
     }
@@ -3455,8 +3466,8 @@
               <img
                 src="assets/landing/apple-intelligence.png"
                 alt="Apple Intelligence"
-                width="982"
-                height="230"
+                width="1280"
+                height="158"
                 loading="lazy"
                 decoding="async">
             </div>
