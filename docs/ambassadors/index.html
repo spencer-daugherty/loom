@@ -13,7 +13,7 @@
   <meta property="og:title" content="Loom Ambassador &amp; Affiliate Program | Audience Saves 10%">
   <meta property="og:description" content="Give your audience 10% off eligible annual, monthly, or lifetime Loom access and earn on qualifying referrals.">
   <meta property="og:url" content="https://loomlife.us/ambassadors/">
-  <meta property="og:updated_time" content="2026-07-17T12:00:00-04:00">
+  <meta property="og:updated_time" content="2026-07-21T12:00:00-04:00">
   <meta property="og:image" content="https://loomlife.us/assets/landing/loom-share-preview-20260511.jpg">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
@@ -42,7 +42,7 @@
         "url": "https://loomlife.us/ambassadors/",
         "name": "Loom Ambassador Program",
         "description": "The Loom ambassador and affiliate program for productivity, personal growth, coaching, wellness, and iPhone app creators.",
-        "dateModified": "2026-07-17",
+        "dateModified": "2026-07-21",
         "inLanguage": "en-US",
         "isPartOf": {"@id": "https://loomlife.us/#website"},
         "about": {"@id": "https://loomlife.us/#organization"},
@@ -63,7 +63,7 @@
           {
             "@type": "Question",
             "name": "Is the Loom Ambassador Program accepting applications?",
-            "acceptedAnswer": {"@type": "Answer", "text": "Not yet. The Loom Ambassador Program is coming soon, and the application button will become active when the program opens."}
+            "acceptedAnswer": {"@type": "Answer", "text": "Yes. Applications are open for creators, coaches, educators, community leaders, and other people with a relevant, engaged audience."}
           },
           {
             "@type": "Question",
@@ -118,7 +118,7 @@
       text-rendering: optimizeLegibility;
     }
     a { color: inherit; }
-    button, input { font: inherit; }
+    button, input, select, textarea { font: inherit; }
     img { display: block; max-width: 100%; }
     .shell { width: min(calc(100% - 28px), var(--max)); margin: 0 auto; }
 
@@ -220,8 +220,19 @@
       padding: 0 22px;
       border: 1px solid transparent;
       border-radius: 999px;
+      color: #ffffff;
+      background: var(--blue);
       text-decoration: none;
       font-weight: 820;
+      cursor: pointer;
+      box-shadow: 0 12px 28px rgba(0, 122, 255, 0.22);
+      transition: transform 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+    }
+    .button:hover:not([disabled]) { transform: translateY(-1px); background: #006ee6; box-shadow: 0 15px 34px rgba(0, 122, 255, 0.26); }
+    .button:active:not([disabled]) { transform: translateY(0); }
+    .button:focus-visible, .dialog-close:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+      outline: 3px solid #005fc7;
+      outline-offset: 2px;
     }
     .button[disabled] {
       color: #777b83;
@@ -315,6 +326,111 @@
     .footer-links { display: flex; flex-wrap: wrap; gap: 16px; font-weight: 720; }
     .footer a { color: var(--ink); }
 
+    body.application-dialog-open { overflow: hidden; }
+    .application-dialog {
+      width: min(calc(100% - 24px), 780px);
+      max-width: none;
+      max-height: min(92dvh, 900px);
+      padding: 0;
+      overflow: hidden;
+      border: 1px solid rgba(17, 17, 17, 0.14);
+      border-radius: 26px;
+      color: var(--ink);
+      background: var(--surface);
+      box-shadow: 0 32px 100px rgba(17, 17, 17, 0.24);
+    }
+    .application-dialog::backdrop { background: rgba(17, 17, 17, 0.56); backdrop-filter: blur(6px); }
+    .dialog-surface {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      max-height: min(92dvh, 900px);
+      overflow: hidden;
+    }
+    .application-dialog-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 24px;
+      padding: 28px 30px 24px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.96);
+      backdrop-filter: blur(16px);
+    }
+    .application-dialog-header > div { min-width: 0; }
+    .application-dialog-header h2 { margin-bottom: 8px; font-size: 2rem; line-height: 1.08; }
+    .application-dialog-header p { max-width: 56ch; margin-bottom: 0; color: var(--muted); font-size: 0.96rem; }
+    .dialog-close {
+      flex: 0 0 auto;
+      display: grid;
+      width: 42px;
+      height: 42px;
+      place-items: center;
+      padding: 0;
+      border: 1px solid var(--line);
+      border-radius: 50%;
+      color: var(--ink);
+      background: var(--paper);
+      cursor: pointer;
+    }
+    .dialog-close:hover { background: var(--bg); }
+    .dialog-close svg { width: 18px; height: 18px; }
+    .application-form { min-height: 0; padding: 28px 30px 32px; overflow-y: auto; overscroll-behavior: contain; }
+    .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 16px; }
+    .field { display: grid; min-width: 0; gap: 7px; }
+    .field.full { grid-column: 1 / -1; }
+    .field-label { color: var(--ink); font-size: 0.9rem; font-weight: 790; line-height: 1.35; }
+    .required-mark { color: #c64545; }
+    .field input, .field select, .field textarea {
+      width: 100%;
+      min-height: 50px;
+      padding: 12px 14px;
+      border: 1px solid rgba(17, 17, 17, 0.16);
+      border-radius: 13px;
+      color: var(--ink);
+      background: #ffffff;
+      font-size: 1rem;
+      line-height: 1.4;
+      scroll-margin-top: 38px;
+      transition: border-color 150ms ease, box-shadow 150ms ease;
+    }
+    .field input:hover, .field select:hover, .field textarea:hover { border-color: rgba(17, 17, 17, 0.28); }
+    .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--blue); box-shadow: 0 0 0 4px rgba(0, 122, 255, 0.1); }
+    .field textarea { min-height: 112px; resize: vertical; }
+    .field input::placeholder, .field textarea::placeholder { color: var(--muted); opacity: 1; }
+    .field-hint { margin: -1px 0 0; color: var(--muted); font-size: 0.79rem; line-height: 1.45; }
+    .honeypot { position: absolute !important; left: -10000px !important; width: 1px !important; height: 1px !important; overflow: hidden !important; }
+    .form-consent {
+      display: grid;
+      grid-template-columns: 22px minmax(0, 1fr);
+      gap: 10px;
+      margin-top: 22px;
+      color: var(--muted);
+      font-size: 0.86rem;
+      line-height: 1.5;
+    }
+    .form-consent input { width: 19px; height: 19px; margin: 2px 0 0; accent-color: var(--blue); }
+    .form-consent a { color: var(--ink); text-underline-offset: 3px; }
+    .form-actions { display: flex; align-items: center; gap: 14px; margin-top: 24px; }
+    .form-actions .button { flex: 0 0 auto; min-width: 180px; }
+    .form-status { min-height: 1.5em; margin: 0; color: var(--muted); font-size: 0.88rem; }
+    .form-status[data-state="error"] { color: #a72d2d; }
+    .submit-button[aria-busy="true"] { cursor: wait; opacity: 0.76; }
+    .application-success { min-height: 0; padding: 54px 30px 58px; overflow-y: auto; overscroll-behavior: contain; text-align: center; }
+    .application-success:focus { outline: 0; }
+    .application-success[hidden], .application-form[hidden] { display: none; }
+    .success-mark { display: grid; width: 62px; height: 62px; margin: 0 auto 20px; place-items: center; border-radius: 50%; color: #ffffff; background: var(--green); }
+    .success-mark svg { width: 30px; height: 30px; }
+    .application-success h2 { margin-bottom: 12px; font-size: 2.45rem; }
+    .application-success p { max-width: 52ch; margin: 0 auto 24px; color: var(--muted); }
+    .application-success .button { min-width: 150px; }
+    .application-dialog.is-success .application-dialog-header { justify-content: flex-end; padding-top: 18px; padding-bottom: 14px; }
+    .application-dialog.is-success .application-dialog-header > div { display: none; }
+
+    @media (prefers-reduced-motion: no-preference) {
+      .application-dialog[open] { animation: dialog-in 180ms ease-out; }
+      @keyframes dialog-in { from { opacity: 0; transform: translateY(12px) scale(0.985); } }
+    }
+
     @media (max-width: 900px) {
       .site-nav { display: none; }
       .hero { min-height: auto; background-position: right -90px center; background-size: 620px auto; }
@@ -353,25 +469,65 @@
       .plan-row > div:first-child { padding-top: 18px; }
       .plan-row > div:last-child { padding-bottom: 18px; }
       .footer-grid { display: grid; }
+      .application-dialog { width: min(calc(100% - 14px), 780px); max-height: calc(100dvh - 14px); border-radius: 20px; }
+      .dialog-surface { max-height: calc(100dvh - 14px); }
+      .application-dialog-header { padding: 22px 20px 19px; }
+      .application-dialog-header h2 { padding-right: 4px; font-size: 1.7rem; }
+      .application-dialog-header p { font-size: 0.9rem; }
+      .dialog-close { width: 38px; height: 38px; }
+      .application-form { padding: 22px 20px 26px; }
+      .form-grid { grid-template-columns: 1fr; gap: 17px; }
+      .field.full { grid-column: auto; }
+      .form-actions { align-items: stretch; flex-direction: column; }
+      .form-actions .button { width: 100%; }
+      .application-success { padding: 46px 20px 50px; }
+      .application-success h2 { font-size: 2rem; }
+    }
+
+    @media (max-width: 360px) {
+      .application-dialog-header { gap: 12px; padding: 17px 16px 15px; }
+      .application-dialog-header h2 { font-size: 1.45rem; }
+      .application-dialog-header p { display: none; }
+      .application-form { padding: 19px 16px 24px; }
     }
   </style>
+  <link rel="stylesheet" href="/assets/site-navigation.css">
 </head>
 <body>
-  <header class="site-header">
-    <div class="shell site-header-shell">
-      <a class="site-brand" href="../" aria-label="Loom Life Manager home">
-        <img src="../assets/landing/loom-icon.jpeg" alt="Loom app icon" width="34" height="34" decoding="async">
-        <span>Loom: Life Manager</span>
+  <header class="site-header" data-site-header>
+    <div class="site-header-shell">
+      <a class="site-brand" href="/" aria-label="Loom Life Manager home">
+        <img src="/assets/landing/loom-icon.jpeg" alt="Loom app icon" width="34" height="34" decoding="async">
+        <span class="site-brand-name"><span class="site-brand-name-full">Loom: Life Manager</span><span class="site-brand-name-short">Loom</span></span>
       </a>
-      <nav class="site-nav" aria-label="Primary navigation">
-        <a href="../">Home</a>
-        <a href="../#system">How Loom works</a>
-        <a href="../#pricing">Pricing</a>
-        <a href="./" aria-current="page">Ambassadors</a>
-        <a href="../support.html">Support</a>
-      </nav>
-      <a class="site-header-cta" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&ct=loom_website&mt=8" data-app-store-cta data-cta-position="header">App Store</a>
+      <div class="site-nav-actions">
+        <nav class="site-primary-links" aria-label="Primary navigation">
+          <a href="/#system">How it works</a>
+          <a href="/#pricing" data-nav-link="pricing">Pricing</a>
+          <a href="/best/" data-nav-link="articles">Articles</a>
+          <a href="/ambassadors/" data-nav-link="ambassadors">Ambassadors</a>
+          <a href="/support.html" data-nav-link="support">Support</a>
+        </nav>
+        <a class="site-header-cta" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&ct=loom_website&mt=8" data-app-store-cta data-page-type="site" data-target-keyword="Loom Life Manager" data-competitor="" data-cta-position="header">Get Loom</a>
+        <button class="site-menu-toggle" type="button" aria-expanded="false" aria-controls="site-mobile-menu" aria-label="Open navigation menu" data-site-menu-toggle>
+          <span class="site-menu-icon" aria-hidden="true"></span>
+          <span data-site-menu-label>Menu</span>
+        </button>
+      </div>
     </div>
+    <div class="site-menu-backdrop" data-site-menu-dismiss aria-hidden="true"></div>
+    <nav class="site-mobile-panel" id="site-mobile-menu" aria-label="Mobile navigation" aria-hidden="true">
+      <div class="site-mobile-links">
+        <a href="/">Home</a>
+        <a href="/#system">How it works</a>
+        <a href="/#pricing" data-nav-link="pricing">Pricing</a>
+        <a href="/best/" data-nav-link="articles">Articles</a>
+        <a href="/ambassadors/" data-nav-link="ambassadors">Ambassadors</a>
+        <a href="/support.html" data-nav-link="support">Support</a>
+      </div>
+      <a class="site-mobile-cta" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&ct=loom_website&mt=8" data-app-store-cta data-page-type="site" data-target-keyword="Loom Life Manager" data-competitor="" data-cta-position="mobile-menu">Download on the App Store</a>
+      <div class="site-mobile-meta"><a href="/privacy.html">Privacy</a></div>
+    </nav>
   </header>
 
   <main>
@@ -382,10 +538,10 @@
           <h1>Loom Ambassador Program</h1>
           <p class="lead">Share a calmer way to plan life with an audience that trusts you. Your plan-specific code gives them 10% off eligible annual, monthly, or lifetime access. You earn 30% of eligible first-year net subscription revenue or $30 for a qualifying lifetime purchase.</p>
           <div class="button-row">
-            <button class="button" type="button" disabled aria-disabled="true">Coming soon</button>
+            <button class="button" type="button" data-open-application data-cta-position="hero" aria-haspopup="dialog" aria-controls="ambassador-application">Apply now</button>
             <a class="text-link" href="#criteria">See who qualifies</a>
           </div>
-          <p class="hero-note">Applications are not open yet. Program terms shown below are the planned launch terms and may be refined before enrollment begins.</p>
+          <p class="hero-note">Applications are open. We review every submission and email selected applicants with next steps.</p>
         </div>
       </div>
     </header>
@@ -442,7 +598,7 @@
             <p class="muted">Earn 30% of eligible net subscription revenue during each referred customer's first 12 months, or a one-time $30 payment for a qualifying lifetime purchase.</p>
           </article>
         </div>
-        <p class="fine" style="margin-top:18px">Net revenue means customer payments after Apple platform fees, taxes collected on Loom's behalf, refunds, and chargebacks. Planned payouts are monthly after a 30-day validation period with a $50 minimum balance.</p>
+        <p class="fine" style="margin-top:18px">Net revenue means customer payments after Apple platform fees, taxes collected on Loom's behalf, refunds, and chargebacks. Payouts are monthly after a 30-day validation period with a $50 minimum balance.</p>
       </div>
     </section>
 
@@ -528,11 +684,11 @@
         <div class="faq-list">
           <details>
             <summary>Is the Loom Ambassador Program open?</summary>
-            <div class="faq-copy">Not yet. The application CTA will become active when applications open. The page is live now so prospective partners can understand the planned offer and qualification standards.</div>
+            <div class="faq-copy">Yes. Applications are open for creators, coaches, educators, community leaders, and other people with a relevant, engaged audience. Use either Apply now button on this page to submit your application.</div>
           </details>
           <details>
             <summary>How does the 10% audience discount work?</summary>
-            <div class="faq-copy">Each ambassador receives plan-specific codes and tracked links. The planned offer gives eligible customers 10% off annual or monthly payments during their first 12 months, plus 10% off a qualifying one-time lifetime purchase through a unique lifetime code.</div>
+            <div class="faq-copy">Each ambassador receives plan-specific codes and tracked links. The offer gives eligible customers 10% off annual or monthly payments during their first 12 months, plus 10% off a qualifying one-time lifetime purchase through a unique lifetime code.</div>
           </details>
           <details>
             <summary>How is the 30% commission calculated?</summary>
@@ -562,13 +718,178 @@
       <div class="shell">
         <div class="section-intro">
           <h2>Help people connect what matters to what they do.</h2>
-          <p>The Loom Ambassador Program is being prepared now. Applications and tracking-code creation will open together.</p>
-          <div class="button-row"><button class="button" type="button" disabled aria-disabled="true">Coming soon</button></div>
-          <p class="fine" style="margin-top:16px">Questions before launch? <a href="mailto:spencer@loomlife.us">spencer@loomlife.us</a></p>
+          <p>Tell us about your audience, your work, and why Loom would be a useful fit for the people who trust you.</p>
+          <div class="button-row"><button class="button" type="button" data-open-application data-cta-position="final" aria-haspopup="dialog" aria-controls="ambassador-application">Apply now</button></div>
+          <p class="fine" style="margin-top:16px">Questions about applying? <a href="mailto:spencer@loomlife.us">spencer@loomlife.us</a></p>
         </div>
       </div>
     </section>
   </main>
+
+  <dialog class="application-dialog" id="ambassador-application" aria-labelledby="application-title">
+    <div class="dialog-surface">
+      <div class="application-dialog-header">
+        <div>
+          <h2 id="application-title">Apply to become a Loom ambassador</h2>
+          <p>Tell us about the audience you serve and how you would introduce Loom. Most applications take about five minutes.</p>
+        </div>
+        <button class="dialog-close" type="button" data-close-application aria-label="Close application form">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+
+      <form class="application-form" action="https://formsubmit.co/spencer@loomlife.us" method="POST" accept-charset="UTF-8" data-application-form data-submit-endpoint="https://formsubmit.co/ajax/spencer@loomlife.us">
+        <input type="hidden" name="_subject" value="New Loom ambassador application">
+        <input type="hidden" name="_template" value="table">
+        <input type="hidden" name="_next" value="https://loomlife.us/ambassadors/?submitted=1">
+        <input type="hidden" name="_url" value="https://loomlife.us/ambassadors/" data-form-page-url>
+        <input type="hidden" name="Application source" value="Loom ambassador page">
+        <div class="honeypot" aria-hidden="true">
+          <label for="company-fax">Leave this field empty</label>
+          <input id="company-fax" type="text" name="_honey" tabindex="-1" autocomplete="off">
+        </div>
+
+        <div class="form-grid">
+          <div class="field">
+            <label class="field-label" for="applicant-name">Full name <span class="required-mark" aria-hidden="true">*</span></label>
+            <input id="applicant-name" name="Full name" type="text" autocomplete="name" maxlength="120" required>
+          </div>
+          <div class="field">
+            <label class="field-label" for="applicant-email">Email address <span class="required-mark" aria-hidden="true">*</span></label>
+            <input id="applicant-email" name="email" type="email" autocomplete="email" inputmode="email" maxlength="254" required>
+          </div>
+          <div class="field">
+            <label class="field-label" for="applicant-country">Country or region <span class="required-mark" aria-hidden="true">*</span></label>
+            <input id="applicant-country" name="Country or region" type="text" autocomplete="country-name" maxlength="100" required>
+          </div>
+          <div class="field">
+            <label class="field-label" for="applicant-website">Website or portfolio</label>
+            <input id="applicant-website" name="Website or portfolio" type="url" autocomplete="url" inputmode="url" maxlength="300" placeholder="https://">
+          </div>
+          <div class="field">
+            <label class="field-label" for="audience-type">Audience type <span class="required-mark" aria-hidden="true">*</span></label>
+            <select id="audience-type" name="Audience type" required>
+              <option value="">Select one</option>
+              <option>Content creator or influencer</option>
+              <option>Coach or consultant</option>
+              <option>Educator or course creator</option>
+              <option>Newsletter writer or blogger</option>
+              <option>Podcaster or video host</option>
+              <option>Community leader</option>
+              <option>Product or app reviewer</option>
+              <option>Other</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="field-label" for="primary-platform">Primary platform <span class="required-mark" aria-hidden="true">*</span></label>
+            <select id="primary-platform" name="Primary platform" required>
+              <option value="">Select one</option>
+              <option>Instagram</option>
+              <option>TikTok</option>
+              <option>YouTube</option>
+              <option>Newsletter or blog</option>
+              <option>Podcast</option>
+              <option>X</option>
+              <option>LinkedIn</option>
+              <option>Facebook</option>
+              <option>Private community</option>
+              <option>Client or in-person network</option>
+              <option>Other</option>
+            </select>
+          </div>
+          <div class="field full">
+            <label class="field-label" for="social-profiles">Social profiles or audience links</label>
+            <textarea id="social-profiles" name="Social profiles or audience links" maxlength="1200" aria-describedby="social-profiles-hint" placeholder="Add each platform and handle or profile URL on a new line."></textarea>
+            <p class="field-hint" id="social-profiles-hint">If your audience is private or primarily in person, describe how we can verify it.</p>
+          </div>
+          <div class="field">
+            <label class="field-label" for="audience-size">Total audience size <span class="required-mark" aria-hidden="true">*</span></label>
+            <select id="audience-size" name="Total audience size" required>
+              <option value="">Select a range</option>
+              <option>Under 1,000</option>
+              <option>1,000–2,499</option>
+              <option>2,500–9,999</option>
+              <option>10,000–24,999</option>
+              <option>25,000–99,999</option>
+              <option>100,000–499,999</option>
+              <option>500,000+</option>
+              <option>High-trust client or member audience</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="field-label" for="loom-experience">Experience using Loom <span class="required-mark" aria-hidden="true">*</span></label>
+            <select id="loom-experience" name="Experience using Loom" required>
+              <option value="">Select one</option>
+              <option>I have not used Loom yet</option>
+              <option>Less than 14 days</option>
+              <option>14–30 days</option>
+              <option>1–3 months</option>
+              <option>More than 3 months</option>
+            </select>
+          </div>
+          <div class="field full">
+            <label class="field-label" for="audience-description">Who is your audience? <span class="required-mark" aria-hidden="true">*</span></label>
+            <textarea id="audience-description" name="Audience description" maxlength="1200" placeholder="Describe who they are, what they care about, and how they engage with you." required></textarea>
+          </div>
+          <div class="field full">
+            <label class="field-label" for="content-focus">What topics do you cover? <span class="required-mark" aria-hidden="true">*</span></label>
+            <textarea id="content-focus" name="Content focus" maxlength="700" placeholder="For example: productivity, goal setting, coaching, wellness, intentional living, or iPhone apps." required></textarea>
+          </div>
+          <div class="field">
+            <label class="field-label" for="affiliate-experience">Ambassador or affiliate experience</label>
+            <select id="affiliate-experience" name="Ambassador or affiliate experience">
+              <option value="">Select one</option>
+              <option>None yet</option>
+              <option>One prior program</option>
+              <option>Two to five programs</option>
+              <option>More than five programs</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="field-label" for="referral-source">How did you hear about Loom?</label>
+            <select id="referral-source" name="How they heard about Loom">
+              <option value="">Select one</option>
+              <option>App Store</option>
+              <option>Search</option>
+              <option>Social media</option>
+              <option>Friend or colleague</option>
+              <option>Existing Loom customer</option>
+              <option>Loom website</option>
+              <option>Other</option>
+            </select>
+          </div>
+          <div class="field full">
+            <label class="field-label" for="why-loom">Why is Loom a fit for you and your audience? <span class="required-mark" aria-hidden="true">*</span></label>
+            <textarea id="why-loom" name="Why Loom is a fit" maxlength="1500" required></textarea>
+          </div>
+          <div class="field full">
+            <label class="field-label" for="promotion-plan">How would you introduce Loom? <span class="required-mark" aria-hidden="true">*</span></label>
+            <textarea id="promotion-plan" name="Promotion plan" maxlength="1500" placeholder="Share the formats, channels, or ideas you would use." required></textarea>
+          </div>
+        </div>
+
+        <div class="form-consent">
+          <input id="application-consent" name="Eligibility confirmation" type="checkbox" value="Confirmed" required>
+          <div><label for="application-consent">I confirm that I am at least 18, the information above is accurate, and Loom may contact me about this application.</label> I have read the <a href="../privacy.html" target="_blank" rel="noopener">Privacy Policy</a>. <span class="required-mark" aria-hidden="true">*</span></div>
+        </div>
+        <p class="fine" style="margin:16px 0 0">Form submissions are delivered by FormSubmit to <a href="mailto:spencer@loomlife.us">spencer@loomlife.us</a> for application review and program administration.</p>
+
+        <div class="form-actions">
+          <button class="button submit-button" type="submit" data-submit-application>Send application</button>
+          <p class="form-status" role="status" aria-live="polite" data-form-status></p>
+        </div>
+      </form>
+
+      <div class="application-success" data-application-success hidden tabindex="-1">
+        <div class="success-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M5 12.5l4.2 4.2L19 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <h2 id="application-success-title">Thanks for applying.</h2>
+        <p>Your application has been submitted for review. We will review your audience and proposed fit, then email you if there is a strong match.</p>
+        <button class="button" type="button" data-close-application>Done</button>
+      </div>
+    </div>
+  </dialog>
 
   <footer class="footer">
     <div class="shell footer-grid">
@@ -578,6 +899,146 @@
   </footer>
 
   <script>
+    var applicationDialog = document.getElementById('ambassador-application');
+    var applicationForm = document.querySelector('[data-application-form]');
+    var applicationSuccess = document.querySelector('[data-application-success]');
+    var applicationStatus = document.querySelector('[data-form-status]');
+    var applicationSubmit = document.querySelector('[data-submit-application]');
+    var lastApplicationTrigger = null;
+
+    function trackApplicationEvent(name, details) {
+      if (typeof gtag !== 'function') return;
+      gtag('event', name, Object.assign({page_type: 'ambassadors'}, details || {}));
+    }
+
+    function prepareApplicationForm() {
+      if (!applicationForm || !applicationSuccess || !applicationStatus) return;
+      if (!applicationSuccess.hidden) applicationForm.reset();
+      applicationForm.hidden = false;
+      applicationSuccess.hidden = true;
+      applicationDialog.classList.remove('is-success');
+      applicationDialog.setAttribute('aria-labelledby', 'application-title');
+      applicationStatus.textContent = '';
+      applicationStatus.removeAttribute('data-state');
+      var pageUrl = applicationForm.querySelector('[data-form-page-url]');
+      if (pageUrl) pageUrl.value = window.location.href.split('?')[0];
+    }
+
+    function openApplication(trigger, showSuccess) {
+      if (!applicationDialog) return;
+      lastApplicationTrigger = trigger || document.activeElement;
+      if (showSuccess) {
+        applicationForm.hidden = true;
+        applicationSuccess.hidden = false;
+        applicationDialog.classList.add('is-success');
+        applicationDialog.setAttribute('aria-labelledby', 'application-success-title');
+      } else {
+        prepareApplicationForm();
+      }
+      if (!applicationDialog.open) applicationDialog.showModal();
+      document.body.classList.add('application-dialog-open');
+      if (applicationForm) applicationForm.scrollTop = 0;
+      if (applicationSuccess) applicationSuccess.scrollTop = 0;
+      window.requestAnimationFrame(function() {
+        if (showSuccess) {
+          applicationSuccess.focus({preventScroll: true});
+        } else {
+          var firstField = document.getElementById('applicant-name');
+          if (firstField) firstField.focus();
+        }
+      });
+    }
+
+    function closeApplication() {
+      if (applicationDialog && applicationDialog.open) applicationDialog.close();
+    }
+
+    document.querySelectorAll('[data-open-application]').forEach(function(button) {
+      button.addEventListener('click', function() {
+        openApplication(button, false);
+        trackApplicationEvent('ambassador_application_open', {cta_position: button.dataset.ctaPosition || ''});
+      });
+    });
+
+    document.querySelectorAll('[data-close-application]').forEach(function(button) {
+      button.addEventListener('click', closeApplication);
+    });
+
+    if (applicationDialog) {
+      applicationDialog.addEventListener('click', function(event) {
+        if (event.target === applicationDialog) closeApplication();
+      });
+      applicationDialog.addEventListener('close', function() {
+        document.body.classList.remove('application-dialog-open');
+        if (lastApplicationTrigger && typeof lastApplicationTrigger.focus === 'function') lastApplicationTrigger.focus();
+      });
+      applicationDialog.addEventListener('cancel', function() {
+        document.body.classList.remove('application-dialog-open');
+      });
+    }
+
+    document.addEventListener('keydown', function(event) {
+      if (event.key === 'Escape' && applicationDialog && applicationDialog.open) closeApplication();
+    });
+
+    if (applicationForm) {
+      applicationForm.addEventListener('submit', async function(event) {
+        event.preventDefault();
+        if (applicationSubmit.disabled) return;
+
+        var originalLabel = applicationSubmit.textContent;
+        applicationSubmit.disabled = true;
+        applicationSubmit.setAttribute('aria-busy', 'true');
+        applicationSubmit.textContent = 'Sending…';
+        applicationStatus.textContent = 'Sending your application…';
+        applicationStatus.removeAttribute('data-state');
+        trackApplicationEvent('ambassador_application_submit');
+
+        try {
+          var formData = new FormData(applicationForm);
+          var payload = {};
+          formData.forEach(function(value, key) {
+            if (key === '_next') return;
+            if (typeof value !== 'string' || value === '') return;
+            payload[key] = payload[key] ? payload[key] + ', ' + value : value;
+          });
+          payload['Submitted at'] = new Date().toISOString();
+
+          var response = await fetch(applicationForm.dataset.submitEndpoint, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+            body: JSON.stringify(payload)
+          });
+          var result = await response.json().catch(function() { return {}; });
+          if (!response.ok || (result.success !== true && result.success !== 'true')) {
+            throw new Error(result.message || 'Submission failed');
+          }
+
+          applicationForm.hidden = true;
+          applicationSuccess.hidden = false;
+          applicationDialog.classList.add('is-success');
+          applicationDialog.setAttribute('aria-labelledby', 'application-success-title');
+          applicationStatus.textContent = '';
+          applicationSuccess.scrollTop = 0;
+          applicationSuccess.focus({preventScroll: true});
+          trackApplicationEvent('ambassador_application_success');
+        } catch (error) {
+          applicationStatus.textContent = 'We could not send your application. Please try again or email spencer@loomlife.us.';
+          applicationStatus.setAttribute('data-state', 'error');
+          trackApplicationEvent('ambassador_application_error');
+        } finally {
+          applicationSubmit.disabled = false;
+          applicationSubmit.removeAttribute('aria-busy');
+          applicationSubmit.textContent = originalLabel;
+        }
+      });
+    }
+
+    if (new URLSearchParams(window.location.search).get('submitted') === '1') {
+      openApplication(null, true);
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+
     document.addEventListener('click', function(event) {
       var app = event.target.closest('[data-app-store-cta]');
       if (app && typeof gtag === 'function') {
@@ -592,5 +1053,6 @@
       });
     });
   </script>
+  <script src="/assets/site-navigation.js" defer></script>
 </body>
 </html>
